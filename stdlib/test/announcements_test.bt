@@ -26,7 +26,7 @@ TestCase subclass: AnnouncementsTest
     received := AtomicCounter new: #announcementsTestReceived
     self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
     self.announcer announce: (TestEvent payload: 42)
-    Timer sleep: 50
+    50 timesRepeat: [received value < 42 ifTrue: [Timer sleep: 10]]
     self assert: received value equals: 42
     received delete
 
@@ -35,7 +35,7 @@ TestCase subclass: AnnouncementsTest
     received := AtomicCounter new: #announcementsTestUnsub
     sub := self.announcer when: TestEvent do: [:e | received increment]
     self.announcer announce: (TestEvent payload: 1)
-    Timer sleep: 50
+    50 timesRepeat: [received value < 1 ifTrue: [Timer sleep: 10]]
     sub unsubscribe
     self.announcer announce: (TestEvent payload: 2)
     Timer sleep: 50
@@ -64,7 +64,7 @@ TestCase subclass: AnnouncementsTest
     received := AtomicCounter new: #announcementsTestDoOnce
     self.announcer when: TestEvent doOnce: [:e | received increment]
     self.announcer announce: (TestEvent payload: 1)
-    Timer sleep: 50
+    50 timesRepeat: [received value < 1 ifTrue: [Timer sleep: 10]]
     self.announcer announce: (TestEvent payload: 2)
     Timer sleep: 50
     self assert: received value equals: 1
@@ -99,7 +99,7 @@ TestCase subclass: AnnouncementsTest
     received := AtomicCounter new: #announcementsTestMRO
     self.announcer when: ParentEvent do: [:e | received increment]
     self.announcer announce: (ChildEvent detail: "test")
-    Timer sleep: 50
+    50 timesRepeat: [received value < 1 ifTrue: [Timer sleep: 10]]
     self assert: received value equals: 1
     received delete
 
@@ -114,7 +114,7 @@ TestCase subclass: AnnouncementsTest
     self assert: received value equals: 0
     // ...but an event on the same announcer still does (sanity).
     self.announcer announce: (TestEvent payload: 1)
-    Timer sleep: 50
+    50 timesRepeat: [received value < 1 ifTrue: [Timer sleep: 10]]
     self assert: received value equals: 1
     received delete
 
@@ -123,7 +123,7 @@ TestCase subclass: AnnouncementsTest
     sys := SystemAnnouncer current
     sub := sys when: TestEvent do: [:e | received increment]
     sys announce: (TestEvent payload: 1)
-    Timer sleep: 50
+    50 timesRepeat: [received value < 1 ifTrue: [Timer sleep: 10]]
     self assert: received value equals: 1
     // A per-instance announcer is isolated from the system bus.
     self.announcer announce: (TestEvent payload: 2)
