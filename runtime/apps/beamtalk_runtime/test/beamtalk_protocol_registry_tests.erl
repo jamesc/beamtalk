@@ -27,7 +27,7 @@ setup() ->
         undefined -> ok;
         _ -> ets:delete_all_objects(beamtalk_protocol_registry)
     end,
-    %% BT-3222: Also clear the conforms_to/2 cache so a result cached by one
+    %% Also clear the conforms_to/2 cache so a result cached by one
     %% test can never leak into the next.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     ok.
@@ -103,7 +103,7 @@ register_simple_protocol_test() ->
     ?assertEqual(Proto, beamtalk_protocol_registry:protocol_info('Printable')).
 
 register_protocol_with_module_test() ->
-    %% BT-2615: the `module` key (the protocol's defining BEAM module) round-trips
+    %% The `module` key (the protocol's defining BEAM module) round-trips
     %% through registration so the System Browser can resolve a protocol class
     %% object's origin (the dispatch module beamtalk_protocol_object carries none).
     setup(),
@@ -287,7 +287,7 @@ conforming_classes_unknown_protocol_test() ->
     ?assertEqual([], beamtalk_protocol_registry:conforming_classes('Unknown')).
 
 %%% ============================================================================
-%%% Class Method Extension Conformance Tests (BT-1617)
+%%% Class Method Extension Conformance Tests
 %%% ============================================================================
 
 -doc """
@@ -337,7 +337,7 @@ class_method_no_extension_does_not_conform_test() ->
     ?assertNot(beamtalk_protocol_registry:conforms_to('NoExtClass', 'Parseable2')).
 
 %%% ============================================================================
-%%% required_methods with class methods tests (BT-1972)
+%%% required_methods with class methods tests
 %%% ============================================================================
 
 required_methods_includes_class_methods_test() ->
@@ -367,7 +367,7 @@ required_methods_class_methods_only_test() ->
     ?assertEqual(['class create'], Methods).
 
 %%% ============================================================================
-%%% Extending protocol inheritance tests (BT-1972)
+%%% Extending protocol inheritance tests
 %%% ============================================================================
 
 extending_protocol_inherits_class_methods_test() ->
@@ -437,7 +437,7 @@ extending_unknown_parent_test() ->
     ?assertEqual(['orphan'], Methods).
 
 %%% ============================================================================
-%%% protocol_info / is_protocol before table exists (BT-1972)
+%%% protocol_info / is_protocol before table exists
 %%% ============================================================================
 
 protocol_info_before_init_test() ->
@@ -458,7 +458,7 @@ protocol_info_before_init_test() ->
     end.
 
 %%% ============================================================================
-%%% all_protocol_names empty test (BT-1972)
+%%% all_protocol_names empty test
 %%% ============================================================================
 
 all_protocol_names_empty_test() ->

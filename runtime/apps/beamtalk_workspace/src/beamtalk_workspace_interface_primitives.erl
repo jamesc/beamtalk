@@ -53,14 +53,14 @@ into REPL session state. Workspace readiness is detected via
 -export([dispatch/3]).
 %% Stable external API (called by repl_eval and repl_shell)
 -export([get_user_bindings/0, get_session_bindings/0]).
-%% BT-2365 (ADR 0081 Phase 1): shared lazy name resolver. Single source of truth
+%% ADR 0081 Phase 1: shared lazy name resolver. Single source of truth
 %% for bare-name resolution (REPL codegen fallthrough) and Session resolve:.
 -export([resolve_name/2]).
-%% BT-2365: capitalised class-reference resolution (REPL codegen). Shares the
+%% Capitalised class-reference resolution (REPL codegen). Shares the
 %% singleton + class-registry tiers with resolve_name/2 but keeps the
 %% class_not_found terminal so the "Class 'X' not found" error is preserved.
 -export([resolve_class_reference/2]).
-%% BT-2365: singleton-instance lookup for the binding-aware class-send fallback
+%% Singleton-instance lookup for the binding-aware class-send fallback
 %% (a message sent to a singleton receiver, e.g. `Workspace bind:as:`). Returns
 %% the live instance so dispatch goes to it rather than a non-existent class.
 -export([resolve_singleton_instance/1]).
@@ -71,26 +71,25 @@ into REPL session state. Workspace readiness is detected via
 -export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
 
 -export([currentSession/0, sessions/0]).
-%% Supervisor lifecycle management (BT-1341)
+%% Supervisor lifecycle management
 -export([startSupervisor/1, stopSupervisor/1, supervisors/0]).
 %% Package reflection (ADR 0070 Phase 5)
 -export([dependencies/0]).
-%% Project sync (BT-1723)
+%% Project sync
 -export([sync/0]).
-%% New-class creation (ADR 0082 Phase 1, BT-2285)
+%% New-class creation (ADR 0082 Phase 1)
 -export([newClass/2]).
-%% Class file move — pure path change, no identity change (ADR 0114 Phase 2,
-%% BT-3272).
+%% Class file move — pure path change, no identity change (ADR 0114 Phase 2).
 -export([moveClass/2]).
-%% Workspace flush (ADR 0082 Phase 2, BT-2286; destructive tiering ADR 0113
-%% Phase 2, BT-3207).
+%% Workspace flush (ADR 0082 Phase 2; destructive tiering ADR 0113
+%% Phase 2).
 -export([flush/0, flush/1, flush/2, flushIncludingDestructive/0]).
-%% Whole-image re-check (ADR 0105 Phase 3, BT-2782)
+%% Whole-image re-check (ADR 0105 Phase 3)
 -export([recheckImage/0]).
-%% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
+%% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4)
 -export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1, changeLogFlushKinds/2]).
 %% Clean-returning revert for non-FFI callers (the LiveView Attach client, ADR
-%% 0082 Phase 5, BT-2293). `revert_method/3` (ADR 0112, BT-3187) is the
+%% 0082 Phase 5). `revert_method/3` (ADR 0112) is the
 %% side-aware surface the LiveView `Workspace changes` row now calls with its
 %% own `side`; `revert_method/2` stays side-agnostic (highest-seq selection)
 %% for callers with no side information.
@@ -574,7 +573,7 @@ extract_revert_target(_Other) ->
 -spec extract_revert_target_from_map(map()) ->
     {ok, binary(), atom(), instance | class | undefined} | {error, #beamtalk_error{}}.
 extract_revert_target_from_map(M) ->
-    %% ADR 0112 (BT-3187) required fix: a same-selector instance-side entry and
+    %% ADR 0112 required fix: a same-selector instance-side entry and
     %% class-side entry are otherwise indistinguishable to `find_revert_target/2`
     %% (which is keyed on `(class, selector)` only) — it would pick whichever has
     %% the higher `seq`, silently reverting the wrong side. `side` rides the same
@@ -594,7 +593,7 @@ extract_revert_target_from_map(M) ->
         {ClassAtom, nil} when is_atom(ClassAtom), ClassAtom =/= nil, ClassAtom =/= undefined ->
             %% A new-class entry carries `selector = nil` (it has no selector). Map
             %% it to the `'new-class'` placeholder so `do_revert`/`find_revert_target`
-            %% resolve the class's new-class entry and remove the class (BT-2664).
+            %% resolve the class's new-class entry and remove the class.
             %% A new-class entry is always sideless, so `Side` is `undefined` here
             %% regardless of what the map carried.
             {ok, atom_to_binary(ClassAtom, utf8), 'new-class', undefined};
@@ -609,7 +608,7 @@ extract_revert_target_from_map(M) ->
     end.
 
 %% Normalise a caller-supplied side value to `find_revert_target/3`'s expected
-%% shape. Shared by both revert entry points (ADR 0112, BT-3187): a
+%% shape. Shared by both revert entry points (ADR 0112): a
 %% ChangeEntry map's `side` field arrives as the atom `instance`/`class`/`nil`
 %% (`extract_revert_target_from_map/1`), while a LiveView `phx-value-side`
 %% attribute (`revert_method/3`) arrives as the binary `<<"instance">>`/

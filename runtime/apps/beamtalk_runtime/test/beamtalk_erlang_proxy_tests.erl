@@ -1075,8 +1075,8 @@ native_call_throw_passes_through_test() ->
         throw:oops -> ok
     end.
 
-%%% BT-2730 review follow-up: exit/throw raised on the charlist-coercion RETRY
-%%% (the inner try in maybe_retry_badarg/6, not the first apply) must still
+%%% exit/throw raised on the charlist-coercion RETRY (the inner try in
+%%% maybe_retry_badarg/6, not the first apply) must still
 %%% propagate unchanged. The retry routes through the same classify_ffi_exception/9
 %%% catch-all as the first pass, so these guard the shared classifier's retry arm.
 native_call_retry_exit_propagates_test() ->

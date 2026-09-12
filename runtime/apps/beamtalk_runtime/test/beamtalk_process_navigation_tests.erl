@@ -59,7 +59,7 @@ start_actor_worker(ParentPid, ClassName) ->
     {ok, Pid}.
 
 %% Start a nested (foreign OTP) supervisor with one plain worker child, so a
-%% parent supervisor can carry a supervisor child for the BT-2634 nested test.
+%% parent supervisor can carry a supervisor child for the nested test.
 start_child_sup(_ParentPid) ->
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     %% Signal readiness to THIS process (the supervisor's start fun), not the
@@ -269,7 +269,7 @@ deny_listed_process_excluded_from_default_test() ->
     end.
 
 %%====================================================================
-%% Tests: deny-list parity (BT-2433) — default ⊆ system, infra filtered
+%% Tests: deny-list parity — default ⊆ system, infra filtered
 %%====================================================================
 
 %% This is the ownership mechanism (ADR 0092 Implementation §4): a new runtime
@@ -314,7 +314,7 @@ deny_list_parity_test() ->
     ).
 
 %%====================================================================
-%% Tests: partial tree under mid-walk mutation (BT-2433)
+%% Tests: partial tree under mid-walk mutation
 %%====================================================================
 
 %% A supervisor whose child died (the snapshot's non-atomic construction races
@@ -377,7 +377,7 @@ worker_root_does_not_crash_test() ->
     end.
 
 %%====================================================================
-%% Tests: foreign classification (BT-2428)
+%% Tests: foreign classification
 %%====================================================================
 
 foreign_supervisor_and_worker_classified_test() ->
@@ -402,7 +402,7 @@ foreign_supervisor_and_worker_classified_test() ->
     end.
 
 %%====================================================================
-%% Tests: dynamic-supervisor child cap (BT-2428)
+%% Tests: dynamic-supervisor child cap
 %%====================================================================
 
 child_cap_truncates_test() ->
@@ -430,7 +430,7 @@ child_cap_truncates_test() ->
     end.
 
 %%====================================================================
-%% Tests: from/1,2 (BT-2428)
+%% Tests: from/1,2
 %%====================================================================
 
 from_accepts_pid_test() ->
@@ -517,7 +517,7 @@ wait_until_supervisor(Pid, N) ->
     end.
 
 %%====================================================================
-%% Tests: lazy guarded status (BT-2428)
+%% Tests: lazy guarded status
 %%====================================================================
 
 status_nil_for_dead_pid_test() ->
@@ -541,7 +541,7 @@ status_map_for_live_sys_process_test() ->
     end.
 
 %%====================================================================
-%% Tests: node / tree accessors (BT-2429)
+%% Tests: node / tree accessors
 %%====================================================================
 
 %% A hand-built lite node map (the shape the shim mints), for testing the
@@ -649,7 +649,7 @@ node_field_accessors_test() ->
     ?assertEqual(true, beamtalk_process_navigation:truncated(Node)).
 
 %%====================================================================
-%% Tests: child_handles/1 — Inspector supervisor-aware inspection (BT-2634)
+%% Tests: child_handles/1 — Inspector supervisor-aware inspection
 %%====================================================================
 
 %% A live supervisor's direct children come back as drillable rows: a Beamtalk
@@ -755,7 +755,7 @@ child_handles_restarting_child_row_test() ->
 
 %% A DynamicSupervisor (simple_one_for_one) lists its live children uniformly:
 %% `which_children` returns running pids, so each becomes a child row exactly like
-%% a static supervisor's child (BT-2634 — treat static and dynamic alike).
+%% a static supervisor's child (treat static and dynamic alike).
 child_handles_dynamic_supervisor_children_test() ->
     application:ensure_all_started(beamtalk_runtime),
     Self = self(),
@@ -806,7 +806,7 @@ child_handles_no_children_is_empty_test() ->
     end.
 
 %% A dead/unreachable supervisor degrades to a structured `stale_handle` error —
-%% never a crash (BT-2634 graceful handling).
+%% never a crash (graceful handling).
 child_handles_dead_supervisor_is_error_test() ->
     Dead = spawn(fun() -> ok end),
     _ = sys_wait_dead(Dead),
@@ -814,7 +814,7 @@ child_handles_dead_supervisor_is_error_test() ->
     ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result).
 
 %% A malformed pid string is a structured `type_error`, guarded against the
-%% `list_to_pid/1` `badarg` (BT-2634).
+%% `list_to_pid/1` `badarg`.
 child_handles_bad_pid_is_type_error_test() ->
     Result = beamtalk_process_navigation:child_handles("not-a-pid"),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).

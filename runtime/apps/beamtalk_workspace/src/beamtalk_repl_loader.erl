@@ -3359,7 +3359,7 @@ load_recompiled_method(
 ) ->
     #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
     Side = patch_side(maps:get(is_class_method, MethodInfo, false)),
-    %% ADR 0105 Phase 1 (BT-2777): capture the freshly-compiled signature into
+    %% ADR 0105 Phase 1: capture the freshly-compiled signature into
     %% the signature-generation store BEFORE the patch installs. Must run here
     %% (not after code:load_binary below) — install reloads the class's
     %% compiled module under its *existing* atom, so a first-ever capture made
@@ -3372,7 +3372,7 @@ load_recompiled_method(
     CaptureOutcome = capture_signature_generation(MethodInfo),
     %% Pass the class's on-disk source path (when known) so `code:which/1`
     %% reports a real path — keeping a patched project class classified as a
-    %% project class, not "stdlib"/"dynamic" (BT-2553 follow-up).
+    %% project class, not "stdlib"/"dynamic".
     case code:load_binary(ModName, SourcePath, Binary) of
         {module, ModName} ->
             %% (2) Install in memory. The memory install is the visible effect;
@@ -3402,14 +3402,14 @@ load_recompiled_method(
             %% reconciliation. Ephemeral patches are not autoflushed because
             %% only durable+flushable entries are written by `flush/0'.
             maybe_autoflush(maps:get(intent, MethodInfo, durable)),
-            %% (5) ADR 0105 Phase 1 (BT-2778): re-check known dependents of a
+            %% (5) ADR 0105 Phase 1: re-check known dependents of a
             %% signature_change/removal now that the new generation is live.
             %% Best-effort, never affects this reply's *content* — see the
             %% function doc — but it IS synchronous here, so it does delay
             %% this reply by the re-check's wall time (bounded by the caller
             %% cap; ~18.5ms/candidate warm per the Phase 0 spike, so normally
             %% sub-second even at the default cap of 20). Moving this off the
-            %% install's critical path is BT-2779's concern once findings
+            %% install's critical path is deferred until findings
             %% have somewhere to go (publish/clearing across surfaces).
             %%
             %% Ordering invariant this relies on: beamtalk_recheck's re-check
@@ -3429,7 +3429,7 @@ load_recompiled_method(
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
-            %% ADR 0105 Phase 1 (BT-2777): the install this capture described
+            %% ADR 0105 Phase 1: the install this capture described
             %% never happened — undo it so the store still reflects the actually
             %% live generation.
             rollback_signature_generation(ClassNameBin, SelectorBin, Side, CaptureOutcome),
@@ -3443,7 +3443,7 @@ load_recompiled_method(
     end.
 
 %%% ----------------------------------------------------------------------------
-%%% New-class creation (ADR 0082 Phase 1, BT-2285)
+%%% New-class creation (ADR 0082 Phase 1)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -3599,14 +3599,14 @@ new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, 
 %% activation path, but stateless). In `log` mode (ordinary `newClass:at:`,
 %% ADR 0082) also emits the durable new-class ChangeEntry and autoflushes; a
 %% ChangeLog failure does not undo the install — the class is already live.
-%% In `no_log` mode (a `'remove-class'` revert, ADR 0113 BT-3208 — see
+%% In `no_log` mode (a `'remove-class'` revert, ADR 0113 — see
 %% `revert_remove_class/2`'s doc) does neither: the file being reinstalled was
 %% never deleted, so there is nothing new to log or flush.
 -spec new_class_install(
     string(), string(), string(), binary(), [map()], atom(), binary(), log | no_log
 ) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName, Mode) ->
-    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    %% ADR 0107 Phase A: see load_class_binary/4's doc.
     case load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
             activate_module(ModuleName, ClassNames, AbsPath, NewlyNonLeafSuperclasses),
@@ -3800,7 +3800,7 @@ loaded_class_objects(ClassNames) ->
     beamtalk_workspace_interface_primitives:loaded_class_objects(ClassNames).
 
 %% Trigger `Workspace flush' when `autoflush: true' is set on the workspace
-%% (ADR 0082 Phase 4, BT-2290). Best-effort and synchronous:
+%% (ADR 0082 Phase 4). Best-effort and synchronous:
 %%
 %%   - Ephemeral patches are never autoflushed (they are not flushable by
 %%     definition — only `durable AND flushable' entries are written).

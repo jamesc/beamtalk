@@ -1168,7 +1168,7 @@ browse_setup() ->
             %% (ADR 0091 no-user-code guarantee).
             'increment' => #{block => fun(_, _) -> erlang:error(must_not_run) end, arity => 0},
             'value' => #{block => fun(_, _) -> erlang:error(must_not_run) end, arity => 0},
-            %% BT-2735: a synthetic accessor that IS resolvable (registered with a
+            %% A synthetic accessor that IS resolvable (registered with a
             %% signature + doc), so browse-protocols can enrich its hover row via
             %% `method_doc_signature_resolved/3`. Its xref row below is `synthetic`.
             'total' => #{block => fun(_, _) -> erlang:error(must_not_run) end, arity => 0}
@@ -1177,7 +1177,7 @@ browse_setup() ->
             'increment' => <<"increment =>\n  self.value := self.value + self.step">>,
             'value' => <<"value =>\n  ^ self.value">>
         },
-        %% BT-2558: a signature for both methods and a `///` doc-comment on
+        %% A signature for both methods and a `///` doc-comment on
         %% `increment` only — so browse-method-source can carry the rendered
         %% signature + doc, and `value` exercises the no-doc (null) path.
         method_signatures => #{
@@ -1193,7 +1193,7 @@ browse_setup() ->
         class_methods => #{
             'startingAt:' => #{block => fun(_, _, _) -> erlang:error(must_not_run) end, arity => 1}
         },
-        %% BT-3337: an INDEXED (not synthetic) class-side selector with real
+        %% An INDEXED (not synthetic) class-side selector with real
         %% stored source, so browse-method-source's class-side `Call =
         %% {class_method, Selector}` branch reaches a genuine source read
         %% rather than the null-source synthetic/unindexed degrade paths the
@@ -1215,8 +1215,8 @@ browse_setup() ->
 
 browse_cleanup(#{class := {Name, Pid, Owned}}) ->
     %% Purge only this fixture's class from the xref index — never a global
-    %% `ets:delete_all_objects` that would wipe a concurrently-populated index
-    %% (CodeRabbit BT-2506). `purge_class/1` is idempotent.
+    %% `ets:delete_all_objects` that would wipe a concurrently-populated index.
+    %% `purge_class/1` is idempotent.
     catch beamtalk_xref:purge_class(Name),
     case Owned of
         true ->
@@ -1233,7 +1233,7 @@ start_browse_class(Name, Spec) ->
     end.
 
 %% Instance-side xref rows. The first two are the source-backed selectors the
-%% original browse tests assert on; the rest exercise the BT-2506 protocol
+%% original browse tests assert on; the rest exercise the protocol
 %% categorization decision (name heuristic, extension source fact, synthetic
 %% accessor). Listing selectors as atom literals here interns them so the op's
 %% `binary_to_existing_atom` resolution succeeds.
@@ -1250,7 +1250,7 @@ browse_xref() ->
         method_row('describe', 98, indexed, extension),
         %% Synthetic compiler-generated accessor → "accessing" by construction.
         method_row('step', 100, synthetic, class_body),
-        %% BT-2735: a synthetic accessor registered as a real method (signature +
+        %% A synthetic accessor registered as a real method (signature +
         %% doc) so browse-protocols resolves its hover signature/doc.
         method_row('total', 110, synthetic, class_body),
         %% camelCase word-boundary guard: `address` must NOT match the `add`
@@ -1263,7 +1263,7 @@ browse_xref() ->
         %% print* prefix path (distinct from the exact-name `printString` match):
         %% `printDetails` must reach the prefix heuristic and land in "printing".
         method_row('printDetails', 106, indexed, class_body),
-        %% BT-2622: a synthetic *instance-side* slot whose name collides with a
+        %% A synthetic *instance-side* slot whose name collides with a
         %% class-side-constructor-shaped selector (`state: new :: Integer = 0`
         %% → synthetic accessor `new`). It must bucket "accessing" by
         %% `class_side`, NOT "instance creation" — the old selector-name
@@ -1277,11 +1277,10 @@ browse_xref() ->
         %% Fabricated class-side synthetic rows exercising the generic
         %% `class_side => true` → "instance creation" bucketing rule in
         %% `protocol_from_source/4`. No real codegen path emits these today:
-        %% BT-2614 originally had actor codegen inject exactly this shape for
-        %% `new`/`new:`/`spawn`/`spawn:`, but BT-3073 retired those rows once
-        %% BT-3071/BT-3072 lifted the bodies onto `Actor` as real,
-        %% source-backed (`indexed`) class methods that subclasses inherit
-        %% rather than locally define. Kept here, with fabricated xref data,
+        %% actor codegen defines `new`/`new:`/`spawn`/`spawn:` as real,
+        %% source-backed (`indexed`) class methods on `Actor` that subclasses
+        %% inherit rather than locally define. Kept here, with fabricated
+        %% xref data,
         %% purely to cover the classification rule for any future class-side
         %% synthetic entry point. Listed as class-side (`class_side => true`)
         %% so they appear under `side = class`, not instance.
@@ -1289,7 +1288,7 @@ browse_xref() ->
         class_method_row('new:', 1, synthetic, class_body),
         class_method_row('spawn', 1, synthetic, class_body),
         class_method_row('spawn:', 1, synthetic, class_body),
-        %% BT-3337: a real, indexed (not synthetic) class-side method, paired
+        %% A real, indexed (not synthetic) class-side method, paired
         %% with the `class_method_source` entry above.
         class_method_row('startingAt:', 120, indexed, class_body)
     ].
@@ -1297,7 +1296,7 @@ browse_xref() ->
 method_row(Selector, Line, SourceStatus, Provenance) ->
     method_xref_entry(false, Selector, Line, SourceStatus, Provenance).
 
-%% BT-2614: class-side variant of `method_row/4` for synthetic constructors.
+%% class-side variant of `method_row/4` for synthetic constructors.
 class_method_row(Selector, Line, SourceStatus, Provenance) ->
     method_xref_entry(true, Selector, Line, SourceStatus, Provenance).
 

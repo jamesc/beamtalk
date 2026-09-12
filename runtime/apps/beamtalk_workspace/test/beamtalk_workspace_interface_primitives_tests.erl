@@ -774,7 +774,7 @@ dependencies_returns_empty_when_no_package_test() ->
     end.
 
 %%====================================================================
-%% ADR 0082 Phase 4 (BT-2290): ChangeLog operations and autoflush
+%% ADR 0082 Phase 4: ChangeLog operations and autoflush
 %%====================================================================
 %% These tests exercise the FFI-shaped surface directly without booting a
 %% workspace. The underlying flush/changelog gen_servers are tested in their
@@ -792,7 +792,7 @@ revert_rejects_non_changeentry_test() ->
 
 revert_new_class_entry_with_no_loaded_class_raises_test() ->
     %% A new-class ChangeEntry (selector = nil) now routes to the new-class revert
-    %% path (BT-2664), which removes the class. When no such class is loaded the
+    %% path, which removes the class. When no such class is loaded the
     %% removal fails loudly with a structured error rather than silently
     %% succeeding — the entry extraction maps `nil` to the `'new-class'`
     %% placeholder and `do_revert` reaches `remove_class/1`.
@@ -809,7 +809,7 @@ revert_new_class_entry_with_no_loaded_class_raises_test() ->
     ).
 
 revert_method_returns_structured_error_test() ->
-    %% The clean-returning wrapper (BT-2293) catches the wrapped error that
+    %% The clean-returning wrapper catches the wrapped error that
     %% `changeLogRevert/1` would raise and returns it as a structured
     %% `{error, #beamtalk_error{}}` — the contract the LiveView Attach client
     %% relies on. The selector here already exists as an atom (we mint it first),
@@ -899,7 +899,7 @@ autoflush_default_is_false_test() ->
     end.
 
 %%====================================================================
-%% resolve_name/2 Tests (BT-2365, ADR 0081 Phase 1)
+%% resolve_name/2 Tests (ADR 0081 Phase 1)
 %%
 %% Resolution order: locals -> bind:as: ETS -> singleton registry ->
 %% class registry -> undefined_variable. Tiers 1, 2, 5 and ordering are
@@ -961,7 +961,7 @@ resolve_name_nil_local_is_a_hit_test() ->
     ?assertEqual(nil, beamtalk_workspace_interface_primitives:resolve_name(#{n => nil}, n)).
 
 %%====================================================================
-%% resolve_class_reference/2 Tests (BT-2365)
+%% resolve_class_reference/2 Tests
 %%====================================================================
 
 %% A genuinely unknown class raises class_not_found (NOT undefined_variable),
@@ -978,7 +978,7 @@ resolve_class_reference_unknown_raises_class_not_found_test() ->
     end.
 
 %%====================================================================
-%% currentSession / sessions Tests (ADR 0081 Phases 5 & 7, BT-2368)
+%% currentSession / sessions Tests (ADR 0081 Phases 5 & 7)
 %%====================================================================
 
 %% Outside an eval (no seeded session context) currentSession returns nil,
@@ -1075,7 +1075,7 @@ dispatch_stop_supervisor_type_error_test() ->
     end.
 
 %%====================================================================
-%% newClass/2 validation coverage (ADR 0082 Phase 1, BT-2285)
+%% newClass/2 validation coverage (ADR 0082 Phase 1)
 %%
 %% validate_new_class_args/2 rejects non-String source/path before the
 %% loader is reached. These exercise both error clauses and the
@@ -1207,7 +1207,7 @@ flush_filter_via_dispatch(_Ctx) ->
     ].
 
 %% dispatch('flush:confirmDestructive:', [Filter, Bool]) routes to flush/2.
-%% Over an empty log the summary has flushed=0 (BT-3456: routing arm coverage).
+%% Over an empty log the summary has flushed=0.
 flush_confirm_destructive_via_dispatch(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
         'flush:confirmDestructive:', ['new-class', false], fake_self(self())
@@ -1218,7 +1218,7 @@ flush_confirm_destructive_via_dispatch(_Ctx) ->
     ].
 
 %% dispatch(flushIncludingDestructive, []) routes to flushIncludingDestructive/0.
-%% Over an empty log the summary has flushed=0 (BT-3456: routing arm coverage).
+%% Over an empty log the summary has flushed=0.
 flush_including_destructive_via_dispatch(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
         flushIncludingDestructive, [], fake_self(self())
@@ -1229,7 +1229,7 @@ flush_including_destructive_via_dispatch(_Ctx) ->
     ].
 
 %% dispatch(recheckImage, []) routes to recheckImage/0 → beamtalk_recheck:trigger_image/0.
-%% With no live class sources the result is the empty-findings map (BT-3456).
+%% With no live class sources the result is the empty-findings map.
 recheck_image_via_dispatch(_Ctx) ->
     Result = beamtalk_workspace_interface_primitives:dispatch(
         recheckImage, [], fake_self(self())
