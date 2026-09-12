@@ -4,11 +4,11 @@
 -module(beamtalk_repl_alias_change_recheck_tests).
 
 -moduledoc """
-End-to-end wiring tests for ADR 0108's hot-reload re-check trigger (BT-2899):
+End-to-end wiring tests for ADR 0108's hot-reload re-check trigger:
 a real live alias redefinition (`beamtalk_repl_eval:handle_type_alias_definition/3`,
 the one production call site) through `beamtalk_alias_xref`'s dependent
 lookup, `beamtalk_recheck:trigger_alias_change/1`'s re-check, and the same
-publish path BT-2779/BT-2780/BT-2856 established
+publish path other reload-triggered re-checks established
 (`beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'`
 announcement).
 

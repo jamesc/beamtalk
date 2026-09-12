@@ -4,12 +4,13 @@
 -module(beamtalk_repl_loader_shape_recheck_tests).
 
 -moduledoc """
-End-to-end wiring tests for ADR 0105 Phase 2 (BT-2780): a real class-body
+End-to-end wiring tests for ADR 0105 Phase 2: a real class-body
 reload (`beamtalk_repl_loader:handle_load/2`, twice against the same file
 path) through `beamtalk_workspace_shape_store`'s two-phase capture,
 `beamtalk_recheck:trigger_shape/2`'s dependent lookup, and the same
-publish/clearing path BT-2779 built (`beamtalk_workspace_findings_store` +
-the `'ReloadCheckCompleted'` announcement).
+publish/clearing path other reload-triggered re-checks built
+(`beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'`
+announcement).
 
 Unlike `beamtalk_recheck_tests.erl`'s `trigger_shape/2` integration tests
 (which supply a hand-built ambient `class_hierarchy` and call `trigger_shape/2`
@@ -17,7 +18,7 @@ directly), this module compiles and installs *real* `.bt` source twice,
 so the ambient class-hierarchy cache the dependent's re-check reads is
 populated by an actual `register_class/0` call — the same path production
 takes. This is the layer `beamtalk_repl_loader_recheck_tests.erl` covers for
-the method-signature path (BT-2777/2778/2779); this module is its shape
+the method-signature path; this module is its shape
 counterpart.
 """.
 

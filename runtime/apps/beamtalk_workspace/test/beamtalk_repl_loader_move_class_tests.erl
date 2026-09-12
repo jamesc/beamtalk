@@ -4,8 +4,8 @@
 -module(beamtalk_repl_loader_move_class_tests).
 
 -moduledoc """
-Integration tests for `beamtalk_repl_loader:move_class/2` (ADR 0114 Phase 2,
-BT-3272; `Workspace moveClass:to:`) against a real, in-project fixture.
+Integration tests for `beamtalk_repl_loader:move_class/2` (ADR 0114 Phase 2;
+`Workspace moveClass:to:`) against a real, in-project fixture.
 
 `Workspace` (the singleton) is not available in the BUnit test context
 (`workspace_mode: false` — see `stdlib/test/workspace_interface_test.bt`'s
@@ -14,12 +14,12 @@ at all — BUnit only verifies the selector is present on the facade
 (`testIncludesSelectorMoveClassTo`). This module is where `moveClass:to:`'s
 actual behavior — the byte-identical declaration-site rewrite, the
 `'rename-class'` ChangeLog entry it produces, and the real file move once
-`Workspace flushIncludingDestructive` replays that entry (BT-3271) — is
+`Workspace flushIncludingDestructive` replays that entry — is
 exercised end-to-end, mirroring `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s
 identical fixture pattern (real `.bt` files on disk, `project_path` set so
 `classify_source_file/1` classifies them as flushable).
 
-BT-3335 adds the dependency-class refusal case (the fixture pattern above
+Also adds the dependency-class refusal case (the fixture pattern above
 covers stdlib/dynamic already) and `revert_rename_sites/1` coverage for a
 pending move entry — including the fix `move_class_revert_round_trip_test_`
 guards: reverting a pure move (`old_class == class`, no identity change) used

@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context (System Browser bridge)
 
 -moduledoc """
-EUnit tests for `beamtalk_repl_ops_browse` (ADR 0096, BT-2488).
+EUnit tests for `beamtalk_repl_ops_browse` (ADR 0096).
 
 Covers:
 

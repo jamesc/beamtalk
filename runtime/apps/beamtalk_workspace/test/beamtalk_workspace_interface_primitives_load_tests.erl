@@ -4,10 +4,9 @@
 -module(beamtalk_workspace_interface_primitives_load_tests).
 
 -moduledoc """
-EUnit coverage (BT-3336) for the `beamtalk_workspace_interface_primitives.erl`
+EUnit coverage for the `beamtalk_workspace_interface_primitives.erl`
 branches that need a live compiler + a registered class to exercise — the
-`load:`/supervisor/singleton paths BT-2393 originally flagged and BT-3334's
-epic picks back up:
+`load:`/supervisor/singleton paths this module fills in:
 
   - `load/1` / `handle_load/1`: the SUCCESS path (a real `.bt` file compiled
     and registered, its source recorded via `workspace_meta:set_class_source/2`,

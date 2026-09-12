@@ -4,7 +4,7 @@
 -module(beamtalk_repl_shell_tests).
 
 -moduledoc """
-Unit tests for beamtalk_repl_shell module (BT-343).
+Unit tests for beamtalk_repl_shell module.
 
 Tests session lifecycle, eval, bindings, and gen_server callbacks.
 """.

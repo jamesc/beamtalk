@@ -6,18 +6,18 @@
 -moduledoc """
 End-to-end tests for the ChangeLog revert completeness set (ADR 0082):
 
-  - BT-2663: reverting a newly-added *method* removes it from the live image.
-  - BT-2664: reverting a newly-added *class* removes the class from the live image.
-  - BT-2665: reverting a *class-side* method works symmetrically with instance
+  - Reverting a newly-added *method* removes it from the live image.
+  - Reverting a newly-added *class* removes the class from the live image.
+  - Reverting a *class-side* method works symmetrically with instance
     side — a modify re-installs the prior class-side body; an add removes it.
 
 Also covers the stdlib policy `beamtalk_repl_eval:remove_method/3,4` gates on
-(ADR 0112 Phase 1, BT-3184): `remove_method/3` (the revert-of-an-add path
+(ADR 0112 Phase 1): `remove_method/3` (the revert-of-an-add path
 above) keeps refusing stdlib classes, while `remove_method/4` with
 `allow_stdlib` reaches them — the mechanism `removeSelector:` (ADR 0112 Phase
-2, BT-3186) drives.
+2) drives.
 
-BT-3206 (ADR 0113 Phase 1): also covers `"remove-class"` ChangeLog entries
+ADR 0113 Phase 1: also covers `"remove-class"` ChangeLog entries
 appended by `beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1` —
 an ordinary in-project class's removal (flushable, sourceFile + prev_source
 recovered) and a ClassBuilder (dynamic) class's removal
@@ -26,7 +26,7 @@ for the same reason the `removeSelector:` coverage above does: the append
 routes through `beamtalk_repl_eval`/`beamtalk_workspace_changelog`, both of
 which are no-ops without a running workspace.
 
-BT-3186: also covers `beamtalk_behaviour_intrinsics:classRemoveSelector/2` /
+Also covers `beamtalk_behaviour_intrinsics:classRemoveSelector/2` /
 `classRemoveSelectorIfAbsent/3` themselves for every scenario that needs this
 module's live-workspace scaffolding — the local-method-table removal branch
 routes through `beamtalk_repl_eval:remove_method/4` exactly like the revert
@@ -41,10 +41,10 @@ Beamtalk-syntax surface are covered by
 are the structural/error-path checks that are more naturally expressed
 against the Erlang primitives directly (mirroring `remove_method_*` above),
 plus the stdlib-class scenario that needs `define_stdlib_class/3`'s
-`stdlib/src/`-pathed scaffolding — the same reason BT-3184's stdlib coverage
+`stdlib/src/`-pathed scaffolding — the same reason similar stdlib coverage
 lives here rather than in a `.bt`/`.btscript` file.
 
-BT-3208 (ADR 0113 Phase 3): also covers `revert:` itself for `"remove-class"`
+ADR 0113 Phase 3: also covers `revert:` itself for `"remove-class"`
 entries — recompile+reinstall the whole class from `prev_source_ref`, reusing
 the `newClass:at:` install path (`find_revert_target/3`'s `reinstall_class`
 outcome, `beamtalk_workspace_interface_primitives:reinstall_reverted_class/3`,
@@ -53,19 +53,19 @@ revert" degrade for both `"remove-method"` and `"remove-class"` entries (an
 entry drops out of the active ChangeLog view once flushed, matching ADR
 0082/0113's documented "best-effort, pre-flush semantics only" contract).
 
-BT-3213 (Claude review follow-up on BT-3208): also covers
+Also covers
 `check_no_external_drift/3` — the drift check `reinstall_reverted_class/3`
 runs before reinstalling a pending `"remove-class"` entry's snapshot, so a
 concurrent out-of-band edit landing on the recorded `sourceFile` while the
 removal sat pending is detected (and refused) instead of silently discarded.
 
-BT-3231: also covers the method-level `no_prev_source` revert path for an
+Also covers the method-level `no_prev_source` revert path for an
 EVAL-defined class (no on-disk `sources/` file at all — the LiveView
 Workspace eval-form scenario), asserting on `do_revert/3`'s error message
-text. BT-3208 generalized that message's wording (it used to name "method
+text. A later change generalized that message's wording (it used to name "method
 body" specifically; the shared arm now also serves a `'remove-class'`
 whole-file revert) without any EUnit coverage of the literal text, so a
-LiveView e2e test (`workspace_live_test.exs`, BT-3194) that asserted on the
+LiveView e2e test (`workspace_live_test.exs`) that asserted on the
 old wording broke silently — `liveview-e2e.yml`'s path-scoping never re-ran
 it for runtime-only PRs. This test closes that gap at the fast Erlang layer.
 

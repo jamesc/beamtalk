@@ -5,7 +5,7 @@
 
 -moduledoc """
 Integration tests for `beamtalk_behaviour_intrinsics:classRenameSelector/3`
-and `classRenameSelectorIfAbsent/4` (ADR 0114 Phase 3, BT-3279) against real,
+and `classRenameSelectorIfAbsent/4` (ADR 0114 Phase 3) against real,
 in-project fixture graphs.
 
 Mirrors `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s fixture

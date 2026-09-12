@@ -496,7 +496,7 @@ validate_selector_undefined_returns_ok_test() ->
     ?assertEqual(ok, Result).
 
 -doc """
-Unit test for compile_file_for_codegen/2 success path (BT-1236).
+Unit test for compile_file_for_codegen/2 success path.
 
 Tests that the compiler can take a Beamtalk class source binary and
 return Core Erlang text without loading a module into the runtime.

@@ -3,7 +3,7 @@
 
 -module(beamtalk_ws_log_handler_tests).
 
--moduledoc "Tests for WebSocket log handler (BT-1433)".
+-moduledoc "Tests for WebSocket log handler".
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/logger.hrl").
 

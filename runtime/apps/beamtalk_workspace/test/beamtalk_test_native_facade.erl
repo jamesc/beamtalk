@@ -4,7 +4,7 @@
 -module(beamtalk_test_native_facade).
 
 -moduledoc """
-Test double for an ADR 0056 `native:` class facade (BT-2732).
+Test double for an ADR 0056 `native:` class facade.
 
 Mirrors the shape the compiler's `native_facade.rs` emits for a class declared
 `native: <module>`: a `__beamtalk_meta/0` reflection function reporting the

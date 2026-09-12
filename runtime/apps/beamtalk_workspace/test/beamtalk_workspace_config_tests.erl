@@ -6,7 +6,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Unit tests for beamtalk_workspace_config (BT-2173).
+Unit tests for beamtalk_workspace_config.
 
 Covers all 4 exported pure functions: singletons/0, value_singletons/0,
 binding_names/0, and binding_name_for_class/1.

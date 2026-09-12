@@ -10,14 +10,14 @@ Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
 - actors selector
 - actorAt: selector
 - classes selector
-- load: selector (including value_type_name/1 coverage — BT-2295)
+- load: selector (including value_type_name/1 coverage)
 - globals selector
-- bind:as: selector (including to_atom_name/1 error paths — BT-2295)
+- bind:as: selector (including to_atom_name/1 error paths)
 - unbind: selector
 - get_user_bindings/0 external API
 - get_session_bindings/0 external API
-- create_bindings_table/0 and ensure_bindings_table/0 idempotency (BT-2295)
-- dependencies/0 no-package branch (BT-2295)
+- create_bindings_table/0 and ensure_bindings_table/0 idempotency
+- dependencies/0 no-package branch
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

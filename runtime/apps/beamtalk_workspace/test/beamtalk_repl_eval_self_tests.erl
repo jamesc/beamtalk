@@ -6,8 +6,8 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-EUnit tests for the stateless `evaluate:` path (`beamtalk_repl_eval:eval_with_self/2`,
-BT-2503) — the Inspector's value `evaluate:`.
+EUnit tests for the stateless `evaluate:` path (`beamtalk_repl_eval:eval_with_self/2`)
+— the Inspector's value `evaluate:`.
 
 Focus: the per-process transient-module lifecycle. A hot `evaluate:` loop must not
 leak a never-reclaimed atom per call, and each evaluation's compiled module must be

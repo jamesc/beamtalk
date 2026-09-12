@@ -4,8 +4,8 @@
 -module(beamtalk_workspace_flush_tests).
 
 -moduledoc """
-Unit tests for `beamtalk_workspace_flush` (ADR 0082 Phase 2, BT-2286;
-destructive tiering ADR 0113 Phase 2, BT-3207).
+Unit tests for `beamtalk_workspace_flush` (ADR 0082 Phase 2;
+destructive tiering ADR 0113 Phase 2).
 
 Covers:
 - single-method splice writes via `<file>.tmp` + atomic rename

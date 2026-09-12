@@ -4,7 +4,7 @@
 -module(beamtalk_repl_compiler_rename_freshness_tests).
 
 -moduledoc """
-Regression test for BT-3443 (ADR 0119 Open Questions, on ADR 0114's live
+Regression test (ADR 0119 Open Questions, on ADR 0114's live
 `renameTo:`): pins the "the very next request already sees a live rename"
 invariant that `beamtalk_repl_compiler:build_class_module_index/0` relies
 on having, with no invalidation hook of its own.
@@ -13,7 +13,7 @@ on having, with no invalidation hook of its own.
 fresh from `beamtalk_runtime_api:all_classes/0` (the live class registry)
 on every call — there is no cross-request cache for a rename to go stale
 in. This test renames a live class via
-`beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR 0114, BT-3278) and
+`beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR 0114) and
 asserts the map `build_class_module_index/0` returns immediately afterward
 already reflects the rename: the OLD name is gone, the NEW name is
 present. See `crates/beamtalk-core/src/semantic_analysis/
@@ -23,7 +23,7 @@ registry to poll at all, so its own regression test is a from-scratch
 per-instance independence check instead of this rename-freshness check.
 
 Uses a freestanding dynamic class (`beamtalk_test_dynamic_class:register/1`,
-BT-3443's own extraction of `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s
+an extraction of `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s
 originally-copied `register_dynamic_class/1` helper) rather than a real
 `.bt` file: this test only cares whether `build_class_module_index/0`'s
 snapshot is fresh, not about `classRenameTo/2`'s reference-site-rewrite

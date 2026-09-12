@@ -4,7 +4,7 @@
 -module(beamtalk_repl_loader_precheck_tests).
 
 -moduledoc """
-Tests for the pre-save advisory precheck (ADR 0105 Phase 3, BT-2782):
+Tests for the pre-save advisory precheck (ADR 0105 Phase 3):
 `beamtalk_repl_loader:precheck_method/4`, the read-only sibling of
 `install_method_with_source/10` that backs `Behaviour>>precheckCompile:
 source:`.
