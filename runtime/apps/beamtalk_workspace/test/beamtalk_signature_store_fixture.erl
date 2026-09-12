@@ -5,7 +5,7 @@
 
 -moduledoc """
 Static `__beamtalk_meta/0` fixture for `beamtalk_workspace_signature_store_tests`
-(ADR 0105 Phase 1, BT-2777).
+(ADR 0105 Phase 1).
 
 Hand-written to match the exact shape the Rust codegen emits for
 `method_info`/`class_method_info` entries (`meta_method_info_map` in

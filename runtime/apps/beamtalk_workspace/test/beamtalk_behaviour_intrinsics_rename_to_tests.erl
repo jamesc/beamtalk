@@ -5,10 +5,10 @@
 
 -moduledoc """
 Integration tests for `beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR
-0114 Phase 2, BT-3278) against a real, in-project fixture graph.
+0114 Phase 2) against a real, in-project fixture graph.
 
 Mirrors `beamtalk_repl_loader_rewrite_sites_tests.erl`'s fixture pattern
-exactly (BT-3270's own test module for the shared rewrite mechanism this
+exactly (its own test module for the shared rewrite mechanism this
 primitive calls): real `.bt` files on disk, loaded through the real
 file-compile path (`beamtalk_repl_loader:handle_load/2`), with
 `beamtalk_workspace_meta`'s `project_path` set to the fixture directory so

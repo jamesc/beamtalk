@@ -4,7 +4,7 @@
 -module(beamtalk_workspace_changelog_tests).
 
 -moduledoc """
-Unit tests for beamtalk_workspace_changelog (ADR 0082 Phase 1, BT-2282).
+Unit tests for beamtalk_workspace_changelog (ADR 0082 Phase 1).
 
 Covers:
 - append + sequence assignment + ETS state

@@ -6,7 +6,7 @@
 -moduledoc """
 Integration tests for REPL sessions
 
-Tests the session-per-connection architecture implemented in BT-262.
+Tests the session-per-connection architecture.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

@@ -5,7 +5,7 @@
 
 -moduledoc """
 Static `__beamtalk_meta/0` fixture for `beamtalk_workspace_shape_store_tests`
-(ADR 0105 Phase 2, BT-2780).
+(ADR 0105 Phase 2).
 
 Hand-written to match the exact shape the Rust codegen emits for `fields`/
 `field_types` (`meta_field_types_map` in

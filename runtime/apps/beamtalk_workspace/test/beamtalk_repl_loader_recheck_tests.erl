@@ -4,21 +4,21 @@
 -module(beamtalk_repl_loader_recheck_tests).
 
 -moduledoc """
-Tests for the publish/clearing half of ADR 0105 Phase 1 (BT-2779):
+Tests for the publish/clearing half of ADR 0105 Phase 1:
 `beamtalk_repl_loader:maybe_trigger_recheck/4`'s wiring of
 `beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'` system
 announcement.
 
 Integration tests against the real compiler port + a real `beamtalk_xref` +
 `beamtalk_workspace_meta` + `beamtalk_workspace_findings_store`, mirroring
-`beamtalk_recheck_tests.erl`'s fixture pattern (BT-2778) — this module tests
+`beamtalk_recheck_tests.erl`'s fixture pattern — this module tests
 one layer up: not "does `beamtalk_recheck:trigger/4` produce the right
 findings" (that module's job), but "does `maybe_trigger_recheck/4` correctly
 store, replace, and announce them". `CaptureOutcome` (the signature-store's
 classification) is supplied directly rather than routed through a full
 `beamtalk_workspace_signature_store:capture/4` round-trip — it is just this
 function's fourth argument, so constructing it directly keeps these tests
-focused on the publish/clearing behaviour BT-2779 adds.
+focused on the publish/clearing behaviour this layer adds.
 """.
 
 -include_lib("eunit/include/eunit.hrl").

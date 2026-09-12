@@ -4,7 +4,7 @@
 -module(beamtalk_workspace_binding_tests).
 
 -moduledoc """
-Integration tests for workspace singleton registration (BT-491).
+Integration tests for workspace singleton registration.
 
 Tests that TranscriptStream and BeamtalkInterface singletons
 register themselves via gen_server name registration when

@@ -4,9 +4,9 @@
 -module(beamtalk_repl_loader_rewrite_sites_tests).
 
 -moduledoc """
-Tests for the shared multi-site rewrite mechanism (ADR 0114, BT-3270):
+Tests for the shared multi-site rewrite mechanism (ADR 0114):
 `beamtalk_repl_loader:rewrite_sites/2`, its validate-only counterpart
-`validate_sites/2` (BT-3278 review follow-up), and `emit_rewrite_change_entry/2`.
+`validate_sites/2`, and `emit_rewrite_change_entry/2`.
 
 Integration tests against the real compiler port + a real
 `beamtalk_workspace_meta`, mirroring `beamtalk_repl_loader_precheck_tests.erl`'s
@@ -41,7 +41,7 @@ and one `super increment` send (`sub_counter.bt` — a different class in a
 different file). That is one definition site plus three reference sites
 across two files.
 
-## `meck` (BT-3280)
+## `meck`
 
 The `partial_install_failure` and `stale_snapshot` cases below are the first
 use of `meck` anywhere in this codebase's test suite. Both need to inject a

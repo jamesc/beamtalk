@@ -1652,7 +1652,7 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
     code:delete(ModuleName).
 
 -doc """
-BT-3337: `register_class/0` RETURNING `{error, Reason}` (rather than
+`register_class/0` RETURNING `{error, Reason}` (rather than
 throwing) is a distinct branch from the exception path above — same
 structured-error contract, no exception ever raised.
 """.
@@ -1816,7 +1816,7 @@ format_alias_help_with_doc_comment_test() ->
         Result
     ).
 
--doc "format_alias_help/2 renders the stdlib provenance line (BT-2938).".
+-doc "format_alias_help/2 renders the stdlib provenance line.".
 format_alias_help_stdlib_declared_in_test() ->
     Entry = #{
         expansion => <<"#oneForOne | #oneForAll | #restForOne">>,

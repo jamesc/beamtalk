@@ -4,11 +4,11 @@
 -module(beamtalk_repl_loader_leaf_change_recheck_tests).
 
 -moduledoc """
-End-to-end wiring tests for ADR 0107 Phase A (BT-2856): a real class-body
+End-to-end wiring tests for ADR 0107 Phase A: a real class-body
 load (`beamtalk_repl_loader:handle_load/2`) that gives a previously-leaf
 class its first subclass, through `superclasses_losing_leaf_status/1`'s
 detection, `beamtalk_recheck:trigger_leaf_change/1`'s re-check, and the same
-publish path BT-2779/BT-2780 established
+publish path other reload-triggered re-checks established
 (`beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'`
 announcement).
 

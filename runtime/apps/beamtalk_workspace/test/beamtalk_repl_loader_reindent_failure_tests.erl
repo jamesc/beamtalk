@@ -4,7 +4,7 @@
 -module(beamtalk_repl_loader_reindent_failure_tests).
 
 -moduledoc """
-Fault-injection coverage (BT-3335) for the `reindent_failed` flushability
+Fault-injection coverage for the `reindent_failed` flushability
 downgrade shared by `new_method_entry/3` (a brand-new method, no prior
 on-disk span) and `store_disk_shaped_entry/4` (a patch to a method that
 already has one) in `beamtalk_repl_loader.erl`: when the store-time
@@ -12,10 +12,10 @@ compiler-port reshape (`beamtalk_compiler:reindent_method_source/2`) fails
 on an otherwise-successful method install/patch, the ChangeLog entry must
 downgrade to memory-only (`not_flushable_reason = "reindent_failed"`) rather
 than store a column-0 body flush would splice into an indented region and
-corrupt the file (BT-2594's own reasoning for keeping this fallback at all).
+corrupt the file (the reasoning for keeping this fallback at all).
 
 Reuses `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `meck` precedent
-(BT-3280) — see that module's moduledoc for the general reasoning against
+— see that module's moduledoc for the general reasoning against
 mocking a shared system module. This case is simpler: `reindent_method_
 source/2` is called on `beamtalk_compiler` — a DIFFERENT module from the one
 under test — so an ordinary `meck:new(beamtalk_compiler, [passthrough])`

@@ -4,7 +4,7 @@
 -module(beamtalk_recheck_tests).
 
 -moduledoc """
-Tests for beamtalk_recheck (ADR 0105 Phase 1, BT-2778).
+Tests for beamtalk_recheck (ADR 0105 Phase 1).
 
 Two tiers:
 

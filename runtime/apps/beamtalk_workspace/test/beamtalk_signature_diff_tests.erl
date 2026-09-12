@@ -3,7 +3,7 @@
 
 -module(beamtalk_signature_diff_tests).
 
--moduledoc "Unit tests for beamtalk_signature_diff (ADR 0105 Phase 1, BT-2777).".
+-moduledoc "Unit tests for beamtalk_signature_diff (ADR 0105 Phase 1).".
 
 -include_lib("eunit/include/eunit.hrl").
 

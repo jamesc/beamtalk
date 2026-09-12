@@ -6,7 +6,7 @@
 %%% **DDD Context:** Runtime Context (spike / validation harness)
 
 -moduledoc """
-BT-3268 — ADR 0114 Phase 1 validation spike.
+ADR 0114 Phase 1 validation spike.
 
 `renameTo:`'s planned site-discovery mechanism (not yet implemented — see ADR
 0114 § Decision) is the union of `SystemNavigation default referencesTo:
@@ -56,7 +56,7 @@ real surface instead. See the findings doc for the full account.
 
 Findings are written up in `docs/development/adr-0114-site-discovery-spike-findings.md`.
 
-No production code changes — this module is test-only, per the issue's scope.
+No production code changes — this module is test-only, per this spike's scope.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
