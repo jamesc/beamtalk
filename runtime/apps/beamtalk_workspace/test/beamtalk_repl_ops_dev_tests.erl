@@ -84,7 +84,7 @@ parse_keyword_selector_as_prefix_test() ->
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"x ifTrue:">>)
     ).
 
-%% BT-1070: parenthesised subexpressions as receivers
+%% Parenthesised subexpressions as receivers
 parse_paren_binary_send_returns_expression_test() ->
     %% ("foo" ++ "bar") cla<TAB> — paren expression is multi-token, must use expression path
     ?assertMatch(
@@ -243,7 +243,7 @@ handle_describe_contains_eval_op_test() ->
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"eval">>, Ops)).
 
-%% BT-2557: the load-tests op is advertised so clients can discover the
+%% The load-tests op is advertised so clients can discover the
 %% test-runner pane's "Load tests" affordance.
 handle_describe_contains_load_tests_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-2b">>, undefined),
@@ -260,7 +260,7 @@ handle_describe_contains_versions_test() ->
     ?assert(maps:is_key(<<"protocol">>, Versions)),
     ?assert(maps:is_key(<<"beamtalk">>, Versions)).
 
-%% BT-2991 / BT-3090: `beamtalk_version:get/0` (the desktop-attach readiness
+%% `beamtalk_version:get/0` (the desktop-attach readiness
 %% RPC target) and the "protocol" value describe reports here now both read
 %% the single `?PROTOCOL_VERSION` macro (`beamtalk.hrl`) instead of two
 %% independent "2.0" literals — a bump can no longer drift the two apart, but
@@ -295,7 +295,7 @@ handle_show_codegen_missing_code_error_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 %%====================================================================
-%% handle_term/4 + handle/4 -- diagnostics (BT-2556)
+%% handle_term/4 + handle/4 -- diagnostics
 %%
 %% Only the empty-buffer + encoding paths are exercised here: they short-circuit
 %% before the Rust compiler port (which a bare EUnit run does not start), so the
@@ -322,7 +322,7 @@ diagnostics_missing_code_returns_empty_term_test() ->
     ).
 
 diagnostics_non_binary_mode_returns_empty_term_test() ->
-    %% BT-2569: a non-binary `mode` (a raw TCP/MCP client could send a JSON
+    %% A non-binary `mode` (a raw TCP/MCP client could send a JSON
     %% number) degrades to [] at the Erlang boundary via the diagnostics_for/2
     %% catch-all, rather than crashing the session. No compiler/port call is made,
     %% so this is covered without a running workspace.
@@ -343,17 +343,17 @@ diagnostics_empty_code_encodes_done_status_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 %%====================================================================
-%% normalize_diagnostics_mode/1 -- diagnostics mode normalisation (BT-2572)
+%% normalize_diagnostics_mode/1 -- diagnostics mode normalisation
 %%
 %% The Erlang op boundary normalises an unknown-binary `mode` to
 %% <<"expression">>, mirroring the Elixir BtAttach.Facade (anything but
 %% "method" -> "expression"). A non-binary `mode` is passed through unchanged so
-%% diagnostics_for/2's catch-all still degrades it to [] (BT-2569). These are
+%% diagnostics_for/2's catch-all still degrades it to []. These are
 %% white-box checks of the pure normaliser, so no compiler/port is needed.
 %%====================================================================
 
 diagnostics_unknown_binary_mode_normalised_to_expression_test() ->
-    %% BT-2572: an unknown binary mode (e.g. <<"foo">>) is normalised to the safe
+    %% An unknown binary mode (e.g. <<"foo">>) is normalised to the safe
     %% default at the Erlang layer, not just in the Rust port.
     ?assertEqual(
         <<"expression">>,
@@ -383,7 +383,7 @@ diagnostics_empty_binary_mode_normalised_to_expression_test() ->
 
 diagnostics_non_binary_mode_passed_through_unchanged_test() ->
     %% A non-binary mode is NOT normalised — it is passed through so the
-    %% diagnostics_for/2 catch-all degrades it to [] (BT-2569), rather than being
+    %% diagnostics_for/2 catch-all degrades it to [], rather than being
     %% silently coerced into expression mode.
     ?assertEqual(
         42,
@@ -395,7 +395,7 @@ diagnostics_non_binary_mode_passed_through_unchanged_test() ->
     ).
 
 %%====================================================================
-%% BT-3337 — diagnostics_for/2's `{ok, Diagnostics}` success branch: the
+%% diagnostics_for/2's `{ok, Diagnostics}` success branch: the
 %% compiler port has to be running to answer at all (the `{error, _}`
 %% degrade-to-`[]` branch above already covers the port-down case).
 %%====================================================================
@@ -416,7 +416,7 @@ diagnostics_for_success_returns_diagnostics_list_test() ->
     ?assert(is_list(Result)).
 
 %%====================================================================
-%% handle/4 -- show-codegen class+selector (BT-1236)
+%% handle/4 -- show-codegen class+selector
 %%====================================================================
 
 handle_show_codegen_class_not_found_error_test() ->
@@ -521,7 +521,7 @@ compile_file_for_codegen_success_test() ->
     end.
 
 %%====================================================================
-%% handle/4 -- hover (BT-2555)
+%% handle/4 -- hover
 %%====================================================================
 
 handle_hover_empty_code_test() ->
@@ -537,7 +537,7 @@ handle_hover_empty_code_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 %%====================================================================
-%% BT-3337 — hover_docs/2 (BT-2555): every parse_receiver_and_prefix/1 shape
+%% hover_docs/2: every parse_receiver_and_prefix/1 shape
 %% it dispatches on.
 %%====================================================================
 
@@ -588,7 +588,7 @@ hover_docs_unclassifiable_receiver_method_is_empty_test() ->
     ).
 
 %%====================================================================
-%% BT-3337 — classify_receiver/2's remaining branches: the empty receiver, an
+%% classify_receiver/2's remaining branches: the empty receiver, an
 %% uppercase token that names neither a class nor a binding, a lowercase
 %% token that is not yet an interned atom, a digit-leading token that is not
 %% a bare integer literal, and an unresolvable package-qualified name.
@@ -694,7 +694,7 @@ walk_chain_class_unknown_selector_test() ->
     ?assertEqual(undefined, Result).
 
 %%====================================================================
-%% tokenise_binary_chain/1 (BT-1071)
+%% tokenise_binary_chain/1
 %%====================================================================
 
 tokenise_binary_chain_empty_returns_error_test() ->
@@ -766,7 +766,7 @@ tokenise_binary_chain_equality_selector_test() ->
     ?assertMatch({ok, <<"42">>, [{binary, '=:='}]}, Result).
 
 %%====================================================================
-%% walk_mixed_chain/2 (BT-1071)
+%% walk_mixed_chain/2
 %%====================================================================
 
 walk_mixed_chain_empty_hops_test() ->
@@ -784,7 +784,7 @@ walk_mixed_chain_unknown_binary_selector_test() ->
     ?assertEqual(undefined, Result).
 
 %%====================================================================
-%% walk_mixed_chain_class/2 (BT-1071)
+%% walk_mixed_chain_class/2
 %%====================================================================
 
 walk_mixed_chain_class_empty_hops_test() ->
@@ -804,7 +804,7 @@ walk_mixed_chain_class_unknown_selector_test() ->
     ?assertEqual(undefined, Result).
 
 %%====================================================================
-%% resolve_chain_type/2 with binary chains (BT-1071)
+%% resolve_chain_type/2 with binary chains
 %%====================================================================
 
 resolve_chain_type_binary_chain_no_registry_test() ->
@@ -812,7 +812,7 @@ resolve_chain_type_binary_chain_no_registry_test() ->
     Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"counter value + 1">>, #{}),
     ?assertEqual(undefined, Result).
 
-%% BT-2091: the `docs` op was hard-removed from `beamtalk_repl_ops_dev:handle/4`.
+%% The `docs` op was hard-removed from `beamtalk_repl_ops_dev:handle/4`.
 %% Migration target: `Beamtalk help: ClassName` (or `selector: #sel`).
 %% See `beamtalk_repl_server_tests:handle_op_docs_unknown_op_test/0` for the
 %% surface-level confirmation that sending `op: "docs"` returns `unknown_op`.
@@ -843,7 +843,7 @@ parse_multi_keyword_selector_test() ->
     ).
 
 %%====================================================================
-%% parse_receiver_and_prefix/1 -- keyword sends mid-chain (BT-1072)
+%% parse_receiver_and_prefix/1 -- keyword sends mid-chain
 %%====================================================================
 
 parse_keyword_send_mid_chain_returns_expression_test() ->
@@ -871,11 +871,11 @@ parse_keyword_send_inject_into_returns_expression_test() ->
     ?assertEqual(<<"pr">>, Prefix).
 
 %%====================================================================
-%% handle/4 -- describe omits hard-removed ops (BT-2091)
+%% handle/4 -- describe omits hard-removed ops
 %%====================================================================
 
 handle_describe_omits_removed_ops_test() ->
-    %% BT-2091: the deprecated ops `docs`, `load-file`, `reload`, and `modules`
+    %% The deprecated ops `docs`, `load-file`, `reload`, and `modules`
     %% were removed; describe must no longer advertise them.
     Msg = make_msg(<<"describe">>, <<"d-dep">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
@@ -886,7 +886,7 @@ handle_describe_omits_removed_ops_test() ->
     ?assertEqual(false, maps:is_key(<<"reload">>, Ops)),
     ?assertEqual(false, maps:is_key(<<"modules">>, Ops)),
     %% Protocol version was bumped to 2.0 to mark the breaking change.
-    %% BT-3090: asserted through the shared ?PROTOCOL_VERSION macro so a
+    %% Asserted through the shared ?PROTOCOL_VERSION macro so a
     %% future bump only requires editing beamtalk.hrl.
     Versions = maps:get(<<"versions">>, Decoded),
     ?assertEqual(?PROTOCOL_VERSION, maps:get(<<"protocol">>, Versions)).
@@ -996,7 +996,7 @@ walk_mixed_chain_binary_lt_returns_boolean() ->
     ?assertEqual({ok, 'TestChainBoolean', instance}, Result).
 
 %%====================================================================
-%% resolve_qualified_class_name/1 (BT-1659)
+%% resolve_qualified_class_name/1
 %%====================================================================
 
 resolve_plain_class_name_test() ->
@@ -1042,7 +1042,7 @@ resolve_qualified_class_empty_package_test() ->
     ).
 
 %%====================================================================
-%% parse_receiver_and_prefix with @ (BT-1659)
+%% parse_receiver_and_prefix with @
 %%====================================================================
 
 parse_qualified_name_as_receiver_test() ->
@@ -1068,10 +1068,11 @@ parse_bare_qualified_name_test() ->
     ).
 
 %% dedupe_keyword_aliases and format_beamtalk_signature tests moved to
-%% beamtalk_erlang_help_tests.erl (these functions were extracted in BT-1903).
+%% beamtalk_erlang_help_tests.erl (these functions were extracted into their
+%% own module).
 
 %%====================================================================
-%% handle/4 -- erlang-help op (BT-1852)
+%% handle/4 -- erlang-help op
 %%====================================================================
 
 erlang_help_missing_module_returns_error_test() ->

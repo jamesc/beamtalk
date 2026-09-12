@@ -130,7 +130,7 @@ case_teardown(#{clog_pid := ClogPid, meta_pid := MetaPid, tmp := Tmp, old_home :
     ok.
 
 %%====================================================================
-%% load/1 — handle_load/1 (BT-2091) success + error-shape paths
+%% load/1 — handle_load/1 success + error-shape paths
 %%====================================================================
 
 %% A real `.bt` file compiles, registers, records its source (so a later
@@ -167,7 +167,7 @@ load_semantic_compile_error_is_structured(#{tmp := Tmp, unique := U}) ->
 
 %% A `.bt` file referencing a native module whose `.erl` fails to compile is
 %% rejected with a `native_compile_failed` structured error, before the `.bt`
-%% file itself is even handed to the compiler (BT-2091's native pre-step).
+%% file itself is even handed to the compiler (the native pre-step).
 load_native_compile_failure_is_structured(#{tmp := Tmp, unique := U}) ->
     ok = file:write_file(
         filename:join(Tmp, "beamtalk.toml"), <<"[package]\nname = \"wiloadnative\"\n">>
@@ -203,7 +203,7 @@ load_native_compile_failure_is_structured(#{tmp := Tmp, unique := U}) ->
     end.
 
 %%====================================================================
-%% moveClass/2 (ADR 0114 Phase 2, BT-3272) — success path
+%% moveClass/2 (ADR 0114 Phase 2) — success path
 %%====================================================================
 
 move_class_success_updates_source_path(#{tmp := Tmp, unique := U}) ->
@@ -253,7 +253,7 @@ move_class_via_dispatch_success(#{tmp := Tmp, unique := U}) ->
     [?_assertEqual(ClassObj, Result)].
 
 %%====================================================================
-%% newClass/2 (ADR 0082 Phase 1, BT-2285) — success path
+%% newClass/2 (ADR 0082 Phase 1) — success path
 %%====================================================================
 
 new_class_success_installs_and_returns_class(#{tmp := Tmp, unique := U}) ->
@@ -340,7 +340,7 @@ with_reloaded_meta(WorkspaceId, Tmp, Fun) ->
     end.
 
 %%====================================================================
-%% startSupervisor:/stopSupervisor: (BT-1341) — full lifecycle against a
+%% startSupervisor:/stopSupervisor: — full lifecycle against a
 %% real `Supervisor subclass:` and a bare, locally-registered
 %% beamtalk_workspace_sup.
 %%====================================================================
@@ -420,7 +420,7 @@ stop_supervisor_not_attached_raises_runtime_error(#{tmp := Tmp, unique := U}) ->
 
 %%====================================================================
 %% resolve_name/2, resolve_class_reference/2, resolve_singleton_instance/1 —
-%% Tier 3 (singleton) and Tier 4 (class registry) hits (BT-2365, ADR 0081
+%% Tier 3 (singleton) and Tier 4 (class registry) hits (ADR 0081
 %% Phase 1). The existing suite only reaches Tier 1/2/5.
 %%====================================================================
 

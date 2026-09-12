@@ -2814,13 +2814,13 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
 %% one `#{file => Path, kind => Kind}` map per entry in `Files`, where `Kind`
 %% is `beamtalk_workspace_changelog:entry_kind/1`'s own enum value verbatim
 %% (`'new-class'`, `'remove-class'`, `instance`, `class`, `'remove-method'`,
-%% `'rename-class'`, `'rename-method'` (ADR 0114, BT-3275), `unknown`) —
+%% `'rename-class'`, `'rename-method'` (ADR 0114), `unknown`) —
 %% forwarded as-is rather than collapsed into a new taxonomy, so a consumer
 %% buckets it itself (the LSP: `'new-class'` -> `CreateFile`, `'remove-class'`
 %% -> `DeleteFile`, `'rename-class'` with an `oldFile` -> `RenameFile`,
 %% `'rename-method'` -> a `TextDocumentEdit` per confirmed site, anything
 %% else -> an ordinary patch). `file_kind_map/1` builds each entry from the
-%% Phase B `#prepared{}` record, adding `oldFile` (BT-3275) for the one
+%% Phase B `#prepared{}` record, adding `oldFile` for the one
 %% `op = move` record a `'rename-class'` flush produces.
 %%
 %% Skipped for an empty file list (parity with `on_files_flushed/1`). Guarded
@@ -2847,7 +2847,7 @@ announce_flush_completed(Files, FileKinds) ->
     ok.
 
 %% The `#{file => Path, kind => Kind}` wire entry for one committed
-%% `#prepared{}` record (BT-3212). A `'new-class'`/`'remove-class'` file
+%% `#prepared{}` record. A `'new-class'`/`'remove-class'` file
 %% group is always single-entry (`prepare_file/2`'s mixing guards forbid
 %% combining either with sibling patches); a splice group may hold several
 %% entries but they are always `instance`/`class`/`'remove-method'` — never
@@ -2856,7 +2856,7 @@ announce_flush_completed(Files, FileKinds) ->
 %% first entry's `entry_kind/1` is therefore always representative, not just
 %% a convenient default.
 %%
-%% ADR 0114 LSP follow-up (BT-3275): `op = move`'s `old_file` is also
+%% ADR 0114 LSP follow-up: `op = move`'s `old_file` is also
 %% forwarded as `oldFile` — the ONLY signal on the wire that distinguishes
 %% "this `'rename-class'`-kind file IS the moved declaration file" (needs a
 %% `RenameFile` resource operation) from "this `'rename-class'`-kind file is
@@ -2919,7 +2919,7 @@ cleanup_one(#prepared{op = delete, pre_existing = false}) ->
 %% `noop` (already-gone soft success): no I/O happened, nothing to undo.
 cleanup_one(#prepared{op = noop}) ->
     ok;
-%% `move` (class rename, ADR 0114 BT-3271): delete the freshly-written
+%% `move` (class rename, ADR 0114): delete the freshly-written
 %% `<new_path>.tmp` — Phase A never touches `old_path` for a move (only
 %% reads it), so, exactly like `write`, there is nothing else to undo.
 cleanup_one(#prepared{op = move, tmp = Tmp}) ->

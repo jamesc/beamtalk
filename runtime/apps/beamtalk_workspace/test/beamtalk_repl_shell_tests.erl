@@ -410,7 +410,7 @@ class_removed_event_updates_tracker_test_() ->
         ]
     end}.
 
-%% BT-1242: pending removals are drained on interrupt (worker killed by user).
+%% Pending removals are drained on interrupt (worker killed by user).
 class_removed_drained_on_interrupt_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -446,7 +446,7 @@ class_removed_drained_on_interrupt_test_() ->
         ]
     end}.
 
-%% BT-1242: pending removals are drained when the worker crashes (DOWN message).
+%% Pending removals are drained when the worker crashes (DOWN message).
 class_removed_drained_on_worker_crash_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -487,11 +487,11 @@ class_removed_drained_on_worker_crash_test_() ->
     end}.
 
 %%====================================================================
-%% BT-2366: pending session-local mutations (ADR 0081 Phase 2)
+%% Pending session-local mutations (ADR 0081 Phase 2)
 %%====================================================================
 
 %% Inject a fake worker + a queued list of pending mutations + seed locals,
-%% then return the shell pid.  Mirrors the BT-1242 worker-injection pattern.
+%% then return the shell pid.  Mirrors the worker-injection pattern above.
 setup_shell_with_mutations(SessionId, Locals, Mutations) ->
     {ok, Pid} = beamtalk_repl_shell:start_link(SessionId),
     FakeWorkerPid = spawn(fun() ->
@@ -675,12 +675,12 @@ worker_state_with_bindings(Bindings) ->
     beamtalk_repl_state:set_bindings(Bindings, State).
 
 %%====================================================================
-%% BT-2688: connected-session Program exit: (ADR 0099 §3 / Phase 5)
+%% Connected-session Program exit: (ADR 0099 §3 / Phase 5)
 %%====================================================================
 
 %% A {script_exit, Code, Output, Warnings} eval result surfaces the exit status to
 %% the caller and then terminates the session shell (normal stop), leaving the
-%% shared node up. Mirrors the BT-2366 worker-injection pattern: a fake worker +
+%% shared node up. Mirrors the worker-injection pattern above: a fake worker +
 %% an {async, self()} From so reply_eval sends us a message we can match.
 script_exit_replies_and_terminates_session_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->

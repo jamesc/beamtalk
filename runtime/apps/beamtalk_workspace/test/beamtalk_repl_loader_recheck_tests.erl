@@ -469,7 +469,7 @@ no_op_install_with_nothing_to_clear_announces_nothing_test_() ->
         end}}.
 
 %%====================================================================
-%% Caller-cap staleness marking (ADR 0105, BT-2802)
+%% Caller-cap staleness marking (ADR 0105)
 %%====================================================================
 
 %% Second dependent, alphabetically AFTER Dashboard — with `recheck_caller_cap`
@@ -511,14 +511,14 @@ with_capped_fixture(ReturnType, Fun) ->
         application:set_env(beamtalk_workspace, recheck_caller_cap, PrevCap)
     end.
 
-%% BT-2802 core bug scenario: ListView was flagged by an earlier reload of
+%% Core scenario: ListView was flagged by an earlier reload of
 %% Counter (when it was still inside the cap, or the cap was higher then).
 %% This reload's candidate set is capped to 1, so ListView is dropped —
-%% never re-checked. Without the fix, ListView's stale, generation-A
-%% finding would sit in the store unchanged forever, indistinguishable from
-%% a freshly-verified one. With the fix, `maybe_trigger_recheck/4` marks it
-%% in place (same message/severity/classification, `note` now says it was
-%% not re-verified this reload).
+%% never re-checked. `maybe_trigger_recheck/4` must mark ListView's stale,
+%% generation-A finding in place (same message/severity/classification,
+%% `note` now says it was not re-verified this reload) rather than leave it
+%% sitting in the store unchanged, indistinguishable from a
+%% freshly-verified one.
 capped_out_candidate_with_existing_finding_gets_marked_stale_test_() ->
     {timeout, 30,
         {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
@@ -663,7 +663,7 @@ capped_out_stale_note_is_idempotent_across_reloads_test_() ->
         end}}.
 
 %%====================================================================
-%% Skipped-candidate staleness marking (ADR 0105, BT-2828)
+%% Skipped-candidate staleness marking (ADR 0105)
 %%
 %% A candidate that stays INSIDE the (default, un-capped) `Kept` set but has
 %% no live source recorded (`recheck_owner/5` returns `{skipped, []}`) never
@@ -822,7 +822,7 @@ skipped_stale_note_is_idempotent_across_reloads_test_() ->
         end}}.
 
 %%====================================================================
-%% Failed-candidate staleness marking (ADR 0105, BT-2828 / BT-2832)
+%% Failed-candidate staleness marking (ADR 0105)
 %%
 %% A candidate that stays INSIDE the (default, un-capped) `Kept` set, HAS a
 %% live source recorded, but whose diagnostics round-trip itself errors out
@@ -836,7 +836,7 @@ skipped_stale_note_is_idempotent_across_reloads_test_() ->
 %% port-level `{error, _}`) — see `crates/beamtalk-compiler-port/src/main.rs`.
 %% With no mocking library in this codebase and no existing fault-injection
 %% precedent, these tests use `beamtalk_compiler_server:inject_diagnostics_failure/1`
-%% (BT-2832, TEST-only) to deterministically force the *next* `diagnostics/3`
+%% (TEST-only) to deterministically force the *next* `diagnostics/3`
 %% call to return `{error, _}` without touching the real compiler port.
 %%
 %% One instance-path test is sufficient coverage for both re-check triggers:

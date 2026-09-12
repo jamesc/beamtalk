@@ -30,28 +30,28 @@ format_diagnostics_three_binary_test() ->
     ?assert(binary:match(Result, <<"C">>) =/= nomatch).
 
 format_diagnostics_map_message_only_test() ->
-    %% BT-1235: structured diagnostic map with line but no hint
+    %% Structured diagnostic map with line but no hint
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([
         #{message => <<"Unused variable `x`">>, line => 3}
     ]),
     ?assertEqual(<<"Line 3: Unused variable `x`">>, Result).
 
 format_diagnostics_map_no_line_test() ->
-    %% BT-1235: structured diagnostic map without line or hint
+    %% Structured diagnostic map without line or hint
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([
         #{message => <<"Unused variable `x`">>}
     ]),
     ?assertEqual(<<"Unused variable `x`">>, Result).
 
 format_diagnostics_map_with_hint_test() ->
-    %% BT-1235: structured diagnostic map with line and hint
+    %% Structured diagnostic map with line and hint
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([
         #{message => <<"Unused variable `x`">>, line => 3, hint => <<"prefix with _x">>}
     ]),
     ?assertEqual(<<"Line 3: Unused variable `x`\nHint: prefix with _x">>, Result).
 
 format_diagnostics_map_multiple_test() ->
-    %% BT-1235: multiple structured diagnostics joined with double newline
+    %% Multiple structured diagnostics joined with double newline
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([
         #{message => <<"Error 1">>, line => 1},
         #{message => <<"Error 2">>, line => 2}
@@ -59,7 +59,7 @@ format_diagnostics_map_multiple_test() ->
     ?assertEqual(<<"Line 1: Error 1\n\nLine 2: Error 2">>, Result).
 
 format_diagnostics_unexpected_type_test() ->
-    %% BT-1235: unexpected diagnostic types are formatted via ~p fallback
+    %% Unexpected diagnostic types are formatted via ~p fallback
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([some_atom]),
     ?assert(is_binary(Result)),
     ?assert(byte_size(Result) > 0).

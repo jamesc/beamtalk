@@ -103,7 +103,7 @@ setup() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(temp_dir(), "bt-rewrite-sites-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
@@ -139,7 +139,7 @@ temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
 %%====================================================================
 %% Word-boundary span helper (test-only — mirrors what a real site-discovery
-%% step, out of scope for BT-3270, would eventually compute).
+%% step would eventually compute; no such mechanism exists yet).
 %%====================================================================
 
 %% Every byte-offset span of the exact word `Word` in `Source` — bounded by
@@ -260,8 +260,8 @@ rewrite_sites_success(#{counter_path := CounterPath, sub_counter_path := SubCoun
 
 %%====================================================================
 %% Same-start tie: a zero-length insertion sharing a `start` with a
-%% same-position replacement, in both caller-supplied orders (ADR 0114,
-%% BT-3270 — review feedback on PR #3522). `validate_no_overlaps/3`
+%% same-position replacement, in both caller-supplied orders (ADR 0114).
+%% `validate_no_overlaps/3`
 %% deterministically accepts this pair; `apply_site_splices/2` must
 %% therefore apply them in a well-defined order (the larger-`end` span
 %% first) regardless of which order the caller lists them in, or one of
@@ -335,7 +335,7 @@ rewrite_sites_same_start_tie_replacement_first(_Fixture) ->
 
 %%====================================================================
 %% ChangeLog entry construction (`emit_rewrite_change_entry/2`) — produces a
-%% `sites`-shaped entry using the `rename-method` schema (ADR 0114, BT-3269).
+%% `sites`-shaped entry using the `rename-method` schema (ADR 0114).
 %%====================================================================
 
 emit_rewrite_change_entry_test_() ->
@@ -354,7 +354,7 @@ setup_with_changelog() ->
     %% pattern (a unique id + a temp HOME) so `store_site_body/1` actually
     %% persists a ref file instead of degrading to `undefined` (run mode).
     %%
-    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rewrite-sites-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-rewrite-sites-changelog-home-" ++ Unique),
@@ -533,7 +533,7 @@ rewrite_sites_validation_failure(#{counter_path := CounterPath, sub_counter_path
     ].
 
 %%====================================================================
-%% validate_sites/2 (BT-3278 review follow-up): rewrite_sites/2's own
+%% validate_sites/2: rewrite_sites/2's own
 %% validate-only prefix, exposed standalone. Same fixture and same forced
 %% failure as rewrite_sites_validation_failure_test_ above, but asserting
 %% NOTHING is ever installed even on success — that's the whole point of a
@@ -666,7 +666,7 @@ validate_sites_validation_failure(#{counter_path := CounterPath, sub_counter_pat
 
 %%====================================================================
 %% Shared site-builder for "rename increment -> incrementBy across all 4
-%% sites" (BT-3280) — the exact rename `rewrite_sites_success_test_` above
+%% sites" — the exact rename `rewrite_sites_success_test_` above
 %% also builds inline; extracted here rather than copied a further time
 %% (CLAUDE.md's no-duplicate-implementations rule) since both new test cases
 %% below need it.
@@ -714,7 +714,7 @@ teardown_with_meck(Fixture) ->
     teardown(Fixture).
 
 %%====================================================================
-%% partial_install_failure path (BT-3280): validation passes for EVERY
+%% partial_install_failure path: validation passes for EVERY
 %% group, but the later install_reload_result/2 call for one specific group
 %% fails — see this moduledoc's "meck" section for why meck is used here at
 %% all, and why it is scoped to this one module and function.
@@ -777,7 +777,7 @@ rewrite_sites_partial_install_failure(Fixture) ->
     ].
 
 %%====================================================================
-%% Stale-snapshot detection (BT-3280): a concurrent writer's edit to a
+%% Stale-snapshot detection: a concurrent writer's edit to a
 %% class's tracked source lands in the window between `build_class_group/2`'s
 %% own snapshot of that class (taken up front, before ANY group in this
 %% batch validates) and that SAME class's own turn to install, later in this
@@ -848,16 +848,13 @@ rewrite_sites_stale_snapshot(Fixture) ->
         ?_assertEqual(3, length(word_spans(NewCounterSource, <<"incrementBy">>))),
         %% SubCounter's tracked source is EXACTLY the concurrent session's own
         %% edit — this batch's own precomputed (now-stale) new_source for
-        %% SubCounter was never written over it. This is the "no silent
-        %% overwrite / no lost update" guarantee BT-3280 exists to add: a
-        %% pre-fix implementation would have clobbered this with
-        %% "...bump -> Integer => super incrementBy" instead, silently
-        %% discarding the concurrent session's own edit.
+        %% SubCounter was never written over it: no silent overwrite, no
+        %% lost update.
         ?_assertEqual(concurrent_sub_counter_source(), SubCounterSourceAfter)
     ].
 
 %%====================================================================
-%% Stale-snapshot detection, class-removed variant (BT-3280): the OTHER way
+%% Stale-snapshot detection, class-removed variant: the OTHER way
 %% a class's tracked source can stop matching its snapshot — not edited but
 %% REMOVED entirely (e.g. a concurrent `removeFromSystem`), which
 %% `beamtalk_workspace_meta:get_class_source/1` reports as `undefined`

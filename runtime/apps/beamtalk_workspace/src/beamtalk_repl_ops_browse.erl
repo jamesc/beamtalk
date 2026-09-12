@@ -211,20 +211,20 @@ describe_ops() ->
             <<"params">> => [<<"class">>, <<"side">>, <<"selector">>]
         },
         <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]},
-        %% BT-3238: the divider-grouped ("// === Name ===") method view.
+        %% The divider-grouped ("// === Name ===") method view.
         <<"browse-categories">> => #{<<"params">> => [<<"class">>]},
         %% `selector` is optional: present → also resolve the matching
-        %% `handle_call` clause; absent → whole-module view (BT-2578). BT-2648:
-        %% `module` is an alternative key (a standalone native module with no
+        %% `handle_call` clause; absent → whole-module view. `module` is an
+        %% alternative key (a standalone native module with no
         %% backing class); one of `class` / `module` is required.
         <<"browse-native-source">> => #{<<"params">> => [<<"class">>, <<"module">>]},
-        %% BT-2648: enumerate a loaded package's hand-written native Erlang
+        %% Enumerate a loaded package's hand-written native Erlang
         %% modules (no params).
         <<"browse-native-modules">> => #{<<"params">> => []},
-        %% BT-2903 (ADR 0108 Phase 8): enumerate every loaded package's
+        %% ADR 0108 Phase 8: enumerate every loaded package's
         %% declared `type` aliases (no params).
         <<"browse-type-aliases">> => #{<<"params">> => []},
-        %% BT-3314: read-only source view for a declared type alias. `package`
+        %% Read-only source view for a declared type alias. `package`
         %% disambiguates a same-named alias declared by more than one package
         %% (`browse-type-aliases` does not dedupe by name — see its doc).
         <<"browse-alias-source">> => #{<<"params">> => [<<"name">>, <<"package">>]}
@@ -247,7 +247,7 @@ browse_classes() ->
         catch
             _:_ -> []
         end,
-    %% BT-2557: the set of loaded TestCase subclasses, computed once, so each row
+    %% The set of loaded TestCase subclasses, computed once, so each row
     %% can carry an `is_test` flag. The browser groups these under a synthetic
     %% "Tests" category — pure reflection over the class hierarchy, no user code.
     TestClasses = sets:from_list(safe_test_classes()),
@@ -286,7 +286,7 @@ class_row(Pid, TestClasses) ->
             <<"source_origin">> => SourceOrigin,
             <<"package">> => package_of(ModName, SourceOrigin),
             <<"is_test">> => sets:is_element(Name, TestClasses),
-            %% BT-2615: protocol class objects (ADR 0068) are sealed abstract
+            %% Protocol class objects (ADR 0068) are sealed abstract
             %% subclasses of Protocol with no declared package, so they would
             %% otherwise fall into the "(uncategorized)" bucket. Flag them so the
             %% browser groups them under a dedicated "Protocols" category — pure
@@ -318,12 +318,12 @@ class_row(Pid, TestClasses) ->
 -spec browse_protocols(atom(), boolean()) -> beamtalk_repl_ops:op_result().
 browse_protocols(ClassName, ClassSide) ->
     Selectors = beamtalk_xref:defined_selectors(ClassName, ClassSide),
-    %% BT-2615: resolve the protocol's defining module (else the shared
+    %% Resolve the protocol's defining module (else the shared
     %% `beamtalk_protocol_object` dispatch module) so the method rows' source
     %% badges match where the protocol actually lives (stdlib vs project).
     ModName = origin_module(ClassName, mod_name_for_class(ClassName)),
     SourceFile = source_file_of(ModName),
-    %% BT-2735: resolve the class pid once here (not per selector) so
+    %% Resolve the class pid once here (not per selector) so
     %% `selector_row` can enrich each `synthetic` row with its resolved
     %% signature + doc for a VS Code-style method-list hover. `undefined` when
     %% the class is not live — rows then carry null signature/doc and the hover
@@ -333,7 +333,7 @@ browse_protocols(ClassName, ClassSide) ->
         selector_row(ClassName, ClassSide, Sel, SourceFile, ModName, ClassPid)
      || Sel <- Selectors
     ],
-    %% BT-2615: a protocol class object (ADR 0068) carries no instance methods of
+    %% A protocol class object (ADR 0068) carries no instance methods of
     %% its own — its xref rows are just the class-side reflection methods
     %% (`requiredMethods` / `conformingClasses`), so the instance side comes back
     %% empty and the browser shows "no methods". Surface the protocol's *required
@@ -350,7 +350,7 @@ browse_protocols(ClassName, ClassSide) ->
 
 %% The required-member rows for a protocol class object, or [] for a non-protocol
 %% class. Instance side surfaces `required_methods`; class side surfaces
-%% `required_class_methods` (BT-2615). The members are signatures, not implemented
+%% `required_class_methods`. The members are signatures, not implemented
 %% methods — they have no openable source — so each row is `unindexed_runtime_fun`
 %% / `runtime` origin, the same shape the browser already renders for a sourceless
 %% selector. Reflection over the protocol registry only; no user code is run.
@@ -382,7 +382,7 @@ requirement_row(Selector, SourceFile, ModName) ->
         <<"origin">> => <<"runtime">>,
         <<"source_origin">> => SourceOrigin,
         <<"package">> => package_of(ModName, SourceOrigin),
-        %% BT-2735: a required member has no implemented method to resolve, so
+        %% A required member has no implemented method to resolve, so
         %% its hover carries null signature/doc — the same shape as an
         %% unenriched selector row (keeps the row shape uniform for the client).
         <<"signature">> => null,
@@ -405,7 +405,7 @@ selector_row(ClassName, ClassSide, Selector, SourceFile, ModName, ClassPid) ->
         <<"origin">> => origin_for_provenance(Provenance, SourceFile),
         <<"source_origin">> => SourceOrigin,
         <<"package">> => package_of(ModName, SourceOrigin),
-        %% BT-2735: signature + first-line-of-doc feed the method-row hover so a
+        %% Signature + first-line-of-doc feed the method-row hover so a
         %% hover conveys what the method is without a click. Resolved only for
         %% `synthetic` rows (see `row_doc_signature/4`) — the client renders the
         %% full doc's first line and falls back to the selector when both null.
@@ -415,9 +415,9 @@ selector_row(ClassName, ClassSide, Selector, SourceFile, ModName, ClassPid) ->
         '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide)
     }.
 
-%% BT-2735: a selector row's hover signature + doc, resolved via the same
-%% hierarchy walk `:help` uses (`beamtalk_repl_docs:method_doc_signature_resolved/3`,
-%% shipped in BT-2714) — so a compiler-derived `spawn` inherits `Actor`'s curated
+%% A selector row's hover signature + doc, resolved via the same
+%% hierarchy walk `:help` uses (`beamtalk_repl_docs:method_doc_signature_resolved/3`)
+%% — so a compiler-derived `spawn` inherits `Actor`'s curated
 %% doc and a value accessor shows its generated signature. Bounded to `synthetic`
 %% rows: a small, known set of compiler-injected methods, the ones whose intent a
 %% bare selector conveys least. Non-synthetic rows (and a missing class pid) stay
@@ -477,9 +477,9 @@ take_protocol(Row) ->
 
 %% Fetches one method's source, image-accurate. Source comes from the live class
 %% object's stored method source (`{method, Sel}` / `{class_method, Sel}` →
-%% `__source__`) — the patch-aware per-method text (BT-2196). source_status from
+%% `__source__`) — the patch-aware per-method text. source_status from
 %% xref. `disk_differs` compares the image body against a live re-read of the
-%% on-disk class source (BT-2567; `current_disk_source/2`).
+%% on-disk class source (`current_disk_source/2`).
 -spec browse_method_source(atom(), boolean(), atom()) -> beamtalk_repl_ops:op_result().
 browse_method_source(ClassName, ClassSide, Selector) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
@@ -499,7 +499,7 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 <<"side">> => side_to_binary(ClassSide),
                 <<"selector">> => atom_to_binary(Selector, utf8),
                 <<"source">> => Source,
-                %% BT-2578: true when this is a `self delegate` method (ADR 0056)
+                %% True when this is a `self delegate` method (ADR 0056)
                 %% on a native-backed class — the real implementation lives in a
                 %% `handle_call` clause of the backing module, reachable via
                 %% `browse-native-source`. The signal is the compiler's own
@@ -508,7 +508,7 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 %% `self delegate` method (native_facade.rs), so its export is a
                 %% precise marker — no body-text heuristic.
                 <<"native_delegate">> => is_native_delegate(ModName, ClassSide, Selector),
-                %% BT-2558: the method's `///` doc-comment and rendered
+                %% The method's `///` doc-comment and rendered
                 %% signature, carried alongside the editable source so the
                 %% System Browser can present a read-only documentation block.
                 %% Pulled from the same CompiledMethod map (`__doc__` /
@@ -536,16 +536,14 @@ browse_method_source(ClassName, ClassSide, Selector) ->
     {binary() | null, binary() | null, binary() | null}.
 method_text_fields(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
     {null, null, null};
-%% BT-2304/BT-2714: synthetic methods (compiler-injected value-type
+%% Synthetic methods (compiler-injected value-type
 %% auto-accessors) carry no editable user source. `source` stays null so the
-%% browser badges them read-only with no `[source]` jump. (BT-2614 originally
-%% also injected synthetic per-subclass rows for the actor `new`/`new:`/
-%% `spawn`/`spawn:` constructors; BT-3073 retired those once BT-3071/BT-3072
-%% lifted the bodies into real, source-backed class methods on `Actor` — a
-%% subclass now simply has no row of its own for them, so `Actor`'s indexed
-%% row is reached the ordinary way, no special-casing needed here.)
+%% browser badges them read-only with no `[source]` jump. (The actor
+%% `new`/`new:`/`spawn`/`spawn:` constructors are real, source-backed class
+%% methods on `Actor`, not synthetic rows — so `Actor`'s indexed row is
+%% reached the ordinary way, no special-casing needed here.)
 %%
-%% BT-2714: but doc/signature DO resolve — via the same hierarchy walk `Beamtalk
+%% Doc/signature DO resolve — via the same hierarchy walk `Beamtalk
 %% help:` uses (`method_doc_signature_resolved/3`) — so the read-only pane shows
 %% the method's real curated docs (a value accessor shows its generated
 %% signature) instead of a blank pane. Reusing the `help:` resolver guarantees
@@ -598,17 +596,17 @@ browse_class_definition(ClassName) ->
             not_found_error(<<"browse-class-definition">>, ClassName);
         ClassPid ->
             Super = beamtalk_runtime_api:superclass(ClassPid),
-            %% BT-2615: a protocol class object's dispatch module is the shared
+            %% A protocol class object's dispatch module is the shared
             %% `beamtalk_protocol_object`; resolve its defining module so the
             %% definition pane's category/origin/source_origin are accurate.
             ModName = origin_module(ClassName, beamtalk_runtime_api:module_name(ClassPid)),
             SourceFile = source_file_of(ModName),
             SourceOrigin = source_origin_of(ModName, SourceFile),
-            %% BT-2578: native-backed classes (ADR 0056) carry their backing
+            %% Native-backed classes (ADR 0056) carry their backing
             %% Erlang module name so the System Browser can badge them and offer
             %% `browse-native-source`. Read from the facade module's
             %% `__beamtalk_meta/0` (`native => true, backing_module => atom()`).
-            %% BT-3255: the same map also carries `kind` (object|value|actor,
+            %% The same map also carries `kind` (object|value|actor,
             %% ADR 0070) and `field_types` (ADR 0067) — reused below to pick the
             %% `field:`/`state:` keyword and per-field `:: Type` annotations, so
             %% the skeleton is built from one `__beamtalk_meta/0` read.
@@ -617,11 +615,11 @@ browse_class_definition(ClassName) ->
             IsSealed = safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
             IsAbstract = safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
             State = state_slots(ClassPid, Meta),
-            %% BT-3254: `IsSealed`/`IsAbstract` are now threaded into the skeleton
+            %% `IsSealed`/`IsAbstract` are threaded into the skeleton
             %% itself (see `class_definition_text/7`), not just the sibling
-            %% `sealed`/`abstract` reflection fields below — closing the last
-            %% round-trip gap BT-3255 left open (that one covered `typed`,
-            %% `field:`/`state:`, and `::` type annotations only).
+            %% `sealed`/`abstract` reflection fields below — closing the round-trip
+            %% gap left by covering only `typed`, `field:`/`state:`, and `::` type
+            %% annotations previously.
             Definition = class_definition_text(
                 ClassName, Super, State, IsTyped, IsSealed, IsAbstract, Meta
             ),
@@ -635,16 +633,16 @@ browse_class_definition(ClassName) ->
                 <<"native">> => meta_is_native(Meta),
                 <<"backing_module">> =>
                     atom_or_null(beamtalk_class_registry:meta_backing_module(Meta)),
-                %% BT-2605: reflected class modifiers for the IDE's editor-header
-                %% modifier badges. BT-3254: the synthesized `definition` skeleton
-                %% above now also carries these as leading modifier keywords (round-
+                %% Reflected class modifiers for the IDE's editor-header
+                %% modifier badges. The synthesized `definition` skeleton
+                %% above also carries these as leading modifier keywords (round-
                 %% trip safety for the `:def` tab's resubmit path), but these fields
                 %% remain the badge source of truth — same runtime reflection op 1
                 %% (`browse-classes`) uses, not a string parse of `definition`.
                 <<"sealed">> => IsSealed,
                 <<"typed">> => IsTyped,
                 <<"abstract">> => IsAbstract,
-                %% BT-2639: a structural reflection boolean (not a header
+                %% A structural reflection boolean (not a header
                 %% string-sniff) so the System Browser can reliably render the
                 %% protocol-definition action row (Required methods / Conforming
                 %% classes). Mirrors the `is_protocol` field op 1
@@ -676,7 +674,7 @@ class_definition_disk_differs(_SourceFile) ->
 
 %% State slots: field names (ADR 0035 reflection) paired with their default
 %% expression text where the live class object carries one, and their declared
-%% type (BT-3255) read from the class module's `__beamtalk_meta/0` `field_types`
+%% type read from the class module's `__beamtalk_meta/0` `field_types`
 %% map (`Meta`, already resolved by the caller — the same source
 %% `beamtalk_workspace_shape_store:read_shape_from_meta/1` reads for hot-reload
 %% shape diffing). Field reflection only — no user code run.
@@ -731,7 +729,7 @@ default_text(Value) ->
 %% the skeleton: a class that is loaded always has a representable shape, and
 %% returning null here only stranded stdlib classes on an empty editor.
 %%
-%% BT-3255: matches the real `.bt` source syntax post-ADR-0067 — `typed ` is
+%% Matches the real `.bt` source syntax post-ADR-0067 — `typed ` is
 %% prepended when `IsTyped`, the state-declaration keyword is `field:` for a
 %% Value class and `state:` for everything else (Actor, and the Object/unknown
 %% fallback, which under the ADR carries no data anyway), and each field's
@@ -739,7 +737,7 @@ default_text(Value) ->
 %% was declared with a type — independent of `IsTyped`, which only gates the
 %% header prefix).
 %%
-%% BT-3254: `abstract `/`sealed ` are prepended the same way when `IsAbstract`/
+%% `abstract `/`sealed ` are prepended the same way when `IsAbstract`/
 %% `IsSealed`, closing the round-trip gap `add_class_def_flushability/2`'s doc
 %% used to describe — the cockpit `:def` tab's resubmitted skeleton no longer
 %% silently drops these modifiers on a redefine + flush. The parser
@@ -782,7 +780,7 @@ modifier_prefix(false, _Keyword) -> [].
 %% no instance data under the ADR. `Meta`'s `kind` (ADR 0070, `object | value |
 %% actor`) is the class-kind authority; anything other than `value` (including
 %% a missing/empty `Meta` — a file-less ClassBuilder class, or a module with no
-%% `__beamtalk_meta/0`) falls back to `state:`, matching the pre-BT-3255
+%% `__beamtalk_meta/0`) falls back to `state:`, matching the previous
 %% behaviour for those classes.
 -spec state_keyword(map()) -> binary().
 state_keyword(#{kind := value}) -> <<"field">>;
@@ -797,10 +795,10 @@ default_suffix(null) -> [];
 default_suffix(Default) -> [<<" = ">>, Default].
 
 %%% ====================================================================
-%%% Op 4b — browse-categories (BT-3238)
+%%% Op 4b — browse-categories
 %%% ====================================================================
 
-%% Groups a class's methods by `// === Name ===` section divider (BT-2601's
+%% Groups a class's methods by `// === Name ===` section divider (the
 %% shared, canonical recognizer — `beamtalk_compiler:categorize_methods/2',
 %% bridged from `beamtalk_core::source_analysis::categorize_methods_in_source'
 %% via the compiler port) for the System Browser's grouped method view.
@@ -810,7 +808,7 @@ default_suffix(Default) -> [<<" = ">>, Default].
 %% invisible to a loaded class object (see `method_category.rs''s module doc:
 %% "a class object built from a running system carries no category; that is
 %% intentional, not a gap"). `current_disk_source/2' (already used by op 3's
-%% `disk_differs' diff, BT-2567) supplies that text via a live re-read of the
+%% `disk_differs' diff) supplies that text via a live re-read of the
 %% recorded source file.
 %%
 %% `has_dividers` is `false' whenever `categorize_methods' would return a
@@ -825,7 +823,7 @@ browse_categories(ClassName) ->
         undefined ->
             not_found_error(<<"browse-categories">>, ClassName);
         _ClassPid ->
-            %% Review finding (BT-3238): resolve the source file the SAME way
+            %% Resolve the source file the SAME way
             %% `save-section` does (`beamtalk_repl_loader:class_source_file/1`
             %% — the ADR 0082 install-hook resolver, not this module's
             %% `origin_module/2` + `source_file_of/1` reflection pair used by
@@ -894,7 +892,7 @@ method_row(#{selector := Selector, side := Side}) ->
     }.
 
 %%% ====================================================================
-%%% Op 5 — browse-native-source (BT-2578)
+%%% Op 5 — browse-native-source
 %%% ====================================================================
 
 %% The backing Erlang source for a `native:` class (ADR 0056). A native class
@@ -935,7 +933,7 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
     {BackingFile, Content} = backing_source(Backing),
     %% `source_origin` keys editability off where the .erl lives: stdlib and
     %% dependency native are read-only; project-owned native is the seam where a
-    %% future R/W phase enables editing (BT-2578 out-of-scope follow-up). Also
+    %% future R/W phase enables editing (out of scope here). Also
     %% require the source content to be present: a project class whose `.erl` was
     %% stripped from the release (or is unreadable) has nothing to edit even
     %% though its build-time path is known, so it must not advertise `editable`.
@@ -952,7 +950,7 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
         <<"selected_clause">> => selected_clause(Clauses, Selector)
     }}.
 
-%% BT-2648: the read-only native pane keyed directly by a standalone native
+%% The read-only native pane keyed directly by a standalone native
 %% module (not a `native:` class's backing module). Reuses the exact same
 %% reader/clause machinery `native_source_value/4` uses — the only difference is
 %% the key (a module the `browse-native-modules` enumeration surfaced) and that
@@ -970,7 +968,7 @@ browse_native_module_source(Module, Selector) ->
         <<"backing_module">> => atom_to_binary(Module, utf8),
         <<"source_file">> => SourceFile,
         <<"source_origin">> => SourceOrigin,
-        %% BT-2670: project-owned native modules are editable (edit → compile →
+        %% Project-owned native modules are editable (edit → compile →
         %% reload → write-back, gated to the Owner via the `save-native-source`
         %% op's `:execute` capability). Deps/stdlib natives stay strictly
         %% read-only. Require readable on-disk content too: a `.beam`-only
@@ -1020,7 +1018,7 @@ native_module_editable_target(Module) when is_atom(Module) ->
     end.
 
 %%% ====================================================================
-%%% Op 6 — browse-native-modules (BT-2648)
+%%% Op 6 — browse-native-modules
 %%% ====================================================================
 
 %% Enumerate the loaded packages' *hand-written* native Erlang modules so the
