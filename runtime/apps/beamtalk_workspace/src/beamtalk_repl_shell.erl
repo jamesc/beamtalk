@@ -398,12 +398,12 @@ handle_call(get_session_meta, _From, {SessionId, State, Worker}) ->
     Meta = beamtalk_repl_state:get_client_meta(State),
     {reply, {ok, SessionId, Meta}, {SessionId, State, Worker}};
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
-    %% BT-2365 (ADR 0081 Phase 1): clear only the session locals. Workspace globals
+    %% ADR 0081 Phase 1: clear only the session locals. Workspace globals
     %% (singletons + bind:as: names) are no longer copied into the session map, so
     %% there is nothing to re-inject — they remain available via lazy resolution.
     ClearedKeys = maps:keys(beamtalk_repl_state:get_bindings(State)),
     NewState = beamtalk_repl_state:clear_bindings(State),
-    %% BT-2531: the retired `beamtalk_bindings_events` channel pushed a refresh on
+    %% The retired `beamtalk_bindings_events` channel pushed a refresh on
     %% clear; restore it as a typed, session-scoped `BindingChanged` per cleared
     %% local so the live bindings pane refreshes (each event is well-formed and the
     %% LiveView's session filter routes it to the right pane).
@@ -468,7 +468,7 @@ handle_call(
     %% overwrite any tracker edit we make here once eval_result arrives.
     {reply, ok, FullState};
 handle_call({remove_from_tracker, Module}, _From, {SessionId, State, undefined}) ->
-    %% BT-1239: Remove module from tracker only (BEAM purge already done by caller).
+    %% Remove module from tracker only (BEAM purge already done by caller).
     Tracker = beamtalk_repl_state:get_module_tracker(State),
     NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
     NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
@@ -497,7 +497,7 @@ handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined})
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
-        %% BT-2365 (ADR 0081): seed worker process context on the streaming path too
+        %% ADR 0081: seed worker process context on the streaming path too
         %% so Session current behaves identically to the synchronous eval path.
         seed_session_context(Self, SessionId, SessionMeta),
         Result = beamtalk_repl_eval:do_eval(Expression, State, Subscriber),
@@ -519,7 +519,7 @@ handle_cast(
 handle_cast(
     {dispatch_async, ClassNameBin, SelectorBin, Argv, Subscriber}, {SessionId, State, undefined}
 ) ->
-    %% BT-2691: connected-mode `beamtalk run` entry dispatch. Spawns a worker
+    %% Connected-mode `beamtalk run` entry dispatch. Spawns a worker
     %% exactly like {eval_async, …} but runs `do_dispatch/5` (class entry) instead
     %% of compiling an expression, returning the same `eval_result()` shape so the
     %% existing {eval_result, …} handling (including the connected `Program exit:`
@@ -563,11 +563,11 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
     case Result of
         {ok, Value, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_done, Value, Output, Warnings}),
-            %% BT-2365 (ADR 0081 Phase 1): no refresh_ws_bindings — workspace globals
+            %% ADR 0081 Phase 1: no refresh_ws_bindings — workspace globals
             %% are resolved live, not injected into the session map, so there is no
             %% injected copy to reconcile after an eval. The session map holds only
             %% locals (the worker's returned WorkerState).
-            %% BT-2366 (ADR 0081 Phase 2): apply removals first, then session-local
+            %% ADR 0081 Phase 2: apply removals first, then session-local
             %% mutations on top of the worker's returned locals (so the worker's
             %% own `x := …` is visible and a same-line `bindings at:put:` overrides
             %% it).  Success path applies all queued ops, including `clear`.
@@ -576,7 +576,7 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             {noreply, {SessionId, FinalState, undefined}};
         {error, Reason, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_error, Reason, Output, Warnings}),
-            %% BT-2366 (ADR 0081 Phase 2): on the error path apply put/remove only
+            %% ADR 0081 Phase 2: on the error path apply put/remove only
             %% (explicit per-key edits the user issued, independent of the failed
             %% expression) and DROP a queued `clear` — `Session current clear. typo`
             %% must not wipe every local because the line after `clear` failed.
@@ -584,7 +584,7 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             MergedState = apply_pending_mutations_no_clear(ShellState, MergedState0, SessionId),
             {noreply, {SessionId, MergedState, undefined}};
         {script_exit, Code, Output, Warnings, _WorkerState} ->
-            %% BT-2688 (ADR 0099 §3 / Phase 5): `Program exit: Code` in this
+            %% ADR 0099 §3 / Phase 5: `Program exit: Code` in this
             %% connected session. Reply with the exit status, then stop this
             %% session's shell so the job ends while the shared node stays up. The
             %% shell is a `temporary` child of `beamtalk_session_sup`, so it is not
@@ -593,7 +593,7 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             reply_eval(From, {eval_script_exit, Code, Output, Warnings}),
             {stop, normal, {SessionId, ShellState, undefined}}
     end;
-%% Worker process crashed (BT-666)
+%% Worker process crashed
 handle_info(
     {'DOWN', MonRef, process, WorkerPid, Reason},
     {SessionId, State, {WorkerPid, MonRef, From}}
@@ -604,14 +604,14 @@ handle_info(
         iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))
     ),
     reply_eval(From, {eval_error, Err1, <<>>, []}),
-    %% BT-1242: Apply any pending module removals that arrived while the
+    %% Apply any pending module removals that arrived while the
     %% worker was running.  No WorkerState is returned on crash.
     CleanState0 = drain_pending_removals(State),
-    %% BT-2366 (ADR 0081 Phase 2): DISCARD session-local mutations — a crashed
+    %% ADR 0081 Phase 2: DISCARD session-local mutations — a crashed
     %% worker's partial mutations are not trustworthy.  Reset the queue to [].
     CleanState = beamtalk_repl_state:clear_pending_mutations(CleanState0),
     {noreply, {SessionId, CleanState, undefined}};
-%% BT-1242: Class removed via Beamtalk code path — clean up session tracker.
+%% Class removed via Beamtalk code path — clean up session tracker.
 %% Only updates tracker when no eval worker is active: if a worker is running it
 %% holds a snapshot of State that would overwrite our edit on eval_result arrival.
 %% The code:is_loaded filter in the modules op covers the stale-entry window.
@@ -631,7 +631,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(Reason, {SessionId, _State, {WorkerPid, MonRef, _From}}) ->
-    %% BT-666: Kill any running worker to avoid zombie evaluations
+    %% Kill any running worker to avoid zombie evaluations
     erlang:demonitor(MonRef, [flush]),
     exit(WorkerPid, kill),
     ?LOG_INFO("REPL session terminated", #{
@@ -840,7 +840,7 @@ reply_eval(From, {eval_done, Value, Output, Warnings}) ->
     gen_server:reply(From, {ok, Value, Output, Warnings});
 reply_eval(From, {eval_error, Reason, Output, Warnings}) ->
     gen_server:reply(From, {error, Reason, Output, Warnings});
-%% BT-2688: connected-session `Program exit:` — surface the status to the caller,
+%% Connected-session `Program exit:` — surface the status to the caller,
 %% which encodes it for the connecting client before the session shell stops.
 reply_eval(From, {eval_script_exit, Code, Output, Warnings}) ->
     gen_server:reply(From, {script_exit, Code, Output, Warnings}).
