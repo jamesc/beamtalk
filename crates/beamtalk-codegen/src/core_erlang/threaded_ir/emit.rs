@@ -374,11 +374,10 @@ struct ConditionalLoopHeader<'a> {
 /// bare shape's "reset version to 0" trick cannot be reused the other
 /// direction for a `Gensym` prefix). The body itself also renders
 /// differently for `ConditionalLoop`: real loop bodies are `BodyKind::Letrec`
-/// (`generate_threaded_loop_body_inner`, `control_flow/mod.rs`), which
-/// inserts a literal `" "` between statements — [`render_loop_body_statements`]
-/// reproduces that; the bare shape's body is a synthetic, condition-free
-/// fixture with no such production twin, so it keeps rendering via plain
-/// [`render`].
+/// (lowered by `lower_letrec_body`, `control_flow/body.rs`), rendered with a
+/// literal `" "` between statements by [`render_loop_body_statements`]; the
+/// bare shape's body is a synthetic, condition-free fixture with no such
+/// production twin, so it keeps rendering via plain [`render`].
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)] // shared param_list/outer_args/body/final_args plumbing for both bare Threaded loops and real ConditionalLoop nodes
 fn render_loop_skeleton(
@@ -535,9 +534,9 @@ fn render_loop_skeleton(
     }
 }
 
-/// Renders a real (`ConditionalLoop`) loop body's statements with the
-/// literal `" "` separator `generate_threaded_loop_body_inner` inserts
-/// between statements for `BodyKind::Letrec` (`control_flow/mod.rs`) —
+/// Renders a real (`ConditionalLoop`) loop body's statements, inserting the
+/// literal `" "` separator `BodyKind::Letrec` bodies (lowered by
+/// `lower_letrec_body`, `control_flow/body.rs`) need between statements —
 /// confirmed against real compiled output (two consecutive threaded-local
 /// rebinds emit `"... in  let ..."`, a double space: the statement's own
 /// trailing `" in "` plus this separator). Each statement renders through

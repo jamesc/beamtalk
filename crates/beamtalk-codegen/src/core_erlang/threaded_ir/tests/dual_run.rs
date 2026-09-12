@@ -312,7 +312,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         ", ",
         leaf::int_lit(1),
         ") in ",
-        " ", // BodyKind::Letrec's inter-statement separator (generate_threaded_loop_body_inner)
+        " ", // BodyKind::Letrec's inter-statement separator (render_loop_body_statements)
         "let ",
         leaf::var(state_target_name),
         " = ",

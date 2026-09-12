@@ -495,7 +495,7 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::with_capacity(filtered.len());
         for expr in rest {
             if CoreErlangGenerator::is_local_var_assignment(expr) {
-                // Mirrors `generate_threaded_loop_body_inner`'s own dispatch
+                // Mirrors `lower_letrec_body`/`lower_foldl_body`'s own dispatch
                 // for this exact statement shape: in base `StateAcc` mode
                 // (the only mode a state-effecting condition ever runs
                 // under — `condition_has_state_effects`'s two call sites

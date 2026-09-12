@@ -36,7 +36,7 @@ pub(in crate::core_erlang) struct LoopMode {
     /// `generate_field_assignment_open`'s class-var branch threads the write
     /// via a real, `current_branch_frame()`-tagged `Bind` instead of calling
     /// `reject_class_var_field_assignment`, and the `BodyKind::Letrec`
-    /// same-class self-send branch in `generate_threaded_loop_body_inner`
+    /// same-class self-send branch in `lower_letrec_body`
     /// emits the self-send (via its own `emit_class_var_result_unwrap` open
     /// chain) instead of raising `ClassMethodSelfSendInThreadedLoopBody`.
     /// Reset to `false` on every `enter_branch_context` entry (mirroring
@@ -64,7 +64,7 @@ pub(in crate::core_erlang) struct LoopMode {
     /// here so the caller can append `let AssignedVar = <result_var> in` separately.
     /// `None` when no list op result is pending.
     pub(in crate::core_erlang) direct_params_list_op_result: Option<String>,
-    /// side channel from `generate_threaded_loop_body_inner`'s
+    /// side channel from `lower_foldl_body`'s
     /// `ClassVars`-threading wrap to `ThreadingPlan::foldl_call_doc` — the
     /// peak `class_var_version` reached *inside* a `Foldl*` body's own
     /// `with_branch_context` scope (captured just before that scope's guard

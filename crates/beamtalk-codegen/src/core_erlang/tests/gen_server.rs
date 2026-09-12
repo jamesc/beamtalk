@@ -2989,7 +2989,7 @@ fn test_class_method_self_send_after_loop_still_compiles() {
 fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_vars_threading() {
     // A class-method self-send inside a `do:` block with a co-occurring
     // local mutation (which is what actually routes it through
-    // `generate_threaded_loop_body_inner` in the first place) must not lose
+    // `lower_foldl_body` in the first place) must not lose
     // its class-var mutation the way the analogous `Letrec`
     // (whileTrue:/timesRepeat:) shape would if `ThreadingPlan` threaded only
     // `threaded_locals` (user `:=` locals) through a fold's accumulator and
@@ -3108,7 +3108,7 @@ fn test_class_method_self_send_as_collect_transform_still_compiles() {
     // over-broad version of this fix accidentally broke in CI — a pure
     // (non-mutating) self-send used as `collect:`'s per-item transform,
     // alongside a co-occurring local mutation that routes the body through
-    // `generate_threaded_loop_body_inner`. Must keep compiling.
+    // `lower_foldl_body`. Must keep compiling.
     let src = "Object subclass: ClassMethodBlockLike\n  class double: x => x * 2\n  class doubleAllCounting: items =>\n    seen := 0\n    items collect: [:item | seen := seen + 1. self double: item]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -7516,7 +7516,7 @@ fn bt3416_self_send_nested_in_a_cast_sends_receiver_still_threads() {
 fn bt3418_field_assign_rhs_in_loop_body_threads_nested_self_send() {
     // ADR 0118 phase 2b: `self.count := self.count + (self
     // bump)` as a `do:` loop-body statement — the field-assignment RHS
-    // path inside `generate_threaded_loop_body_inner`. Before this phase
+    // path inside `lower_foldl_body`. Before this phase
     // the nested self-send's mutation was silently dropped (no hoist ran
     // for this position at all); `thread_ahead` now sequences it ahead of
     // `generate_field_assignment_open`'s own compile of the RHS. Per
@@ -7940,7 +7940,7 @@ fn bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier() {
     // end up producing a Bind for the same version: `NonLinearVersion`.
     // Confirmed still panicking after ADR 0118 phase 2b (loop-body
     // consumers): this statement routes through
-    // `generate_threaded_loop_body_inner`'s separate `control_flow_has_mutations`
+    // `lower_foldl_body`'s separate `control_flow_has_mutations`
     // branch (an inline conditional with mutations, not any of phase 2b's
     // three consumers), so neither phase touches it. Left open for a later
     // phase.

@@ -324,8 +324,8 @@ impl CoreErlangGenerator {
     /// class-var write or self-send NESTED inside a conditional, a binary
     /// op, or any other sub-expression position, which is exactly right
     /// for THEIR job (deciding whether the body needs `StateAcc` fallback
-    /// at all) but wrong for this one: `generate_threaded_loop_body_inner`
-    /// only ever threads `ClassVars` through the loop's tail call for a
+    /// at all) but wrong for this one: `lower_letrec_body`/`lower_foldl_body`
+    /// only ever thread `ClassVars` through the loop's tail call for a
     /// BARE, top-level class-var-assignment or class-method-self-send
     /// STATEMENT (the two shapes it has real Bind-construction branches
     /// for) — never for one buried inside a larger expression, whose own
