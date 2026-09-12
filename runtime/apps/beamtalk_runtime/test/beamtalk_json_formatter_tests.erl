@@ -513,7 +513,7 @@ format_handles_format_args_with_binary_test() ->
     ?assertEqual(<<"http server started">>, maps:get(<<"msg">>, Decoded)).
 
 %%====================================================================
-%% Error-path Tests (BT-2273)
+%% Error-path Tests
 %%====================================================================
 
 %% Exercises format_reason_with_bt_error/2 BtError branch: when the crash

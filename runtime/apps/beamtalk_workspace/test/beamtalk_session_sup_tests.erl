@@ -130,7 +130,7 @@ stop_session_unknown_pid_returns_not_found_test() ->
         %% (`supervisor:find_child/2` → `is_process_alive/1` → `false` branch). The
         %% previous `spawn(fun() -> ok end)` raced that exit: under scheduler load
         %% the process was usually dead by the time `stop_session/1` ran, so the
-        %% call returned `ok` and this assertion flaked (BT-2523). Keep `Other`
+        %% call returned `ok` and this assertion flaked. Keep `Other`
         %% blocked until the assertion has run, then release it.
         Other = spawn(fun() ->
             receive
@@ -177,7 +177,7 @@ stop_session_terminates_live_session_test() ->
 %% supervisor could survive into the next test, so a fresh `start_link/0` (or the
 %% workspace supervisor starting it as a registered child) would see
 %% `{already_started, <pid>}` and the "no supervisor" / "unknown pid" expectations
-%% would break. This is the teardown-race half of BT-2523. `unlink/1` first so the
+%% would break. `unlink/1` first so the
 %% shutdown exit signal does not also fell this (non-trapping) test process; the
 %% registered name is cleared atomically as part of termination, so by the time the
 %% `DOWN` arrives `whereis(beamtalk_session_sup)` is already `undefined`.

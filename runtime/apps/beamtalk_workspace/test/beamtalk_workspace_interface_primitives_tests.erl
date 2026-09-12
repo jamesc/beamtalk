@@ -530,7 +530,7 @@ root_supervisor_returns_registered_value_test() ->
     end).
 
 %%====================================================================
-%% sync Tests (BT-1723)
+%% sync Tests
 %%====================================================================
 
 sync_dispatch_raises_when_no_manifest_test() ->
@@ -602,7 +602,7 @@ sync_returns_map_with_expected_keys_test() ->
     end.
 
 %%====================================================================
-%% value_type_name/1 coverage via load/1 — BT-2295
+%% value_type_name/1 coverage via load/1
 %%
 %% load/1 raises a type_error for non-binary, non-list arguments. The
 %% error message is built from value_type_name/1, so each of these tests
@@ -676,7 +676,7 @@ load_type_error_for_object_test() ->
     end.
 
 %%====================================================================
-%% to_atom_name/1 error-path coverage via bind/2 — BT-2295
+%% to_atom_name/1 error-path coverage via bind/2
 %%
 %% bind/2 calls to_atom_name/1 on the name argument. Non-atom names
 %% produce a type_error with a message built from value_type_name/1.
@@ -731,7 +731,7 @@ bind_type_error_for_map_name_test() ->
     end.
 
 %%====================================================================
-%% create_bindings_table/0 and ensure_bindings_table/0 — BT-2295
+%% create_bindings_table/0 and ensure_bindings_table/0
 %%
 %% Both functions are idempotent: calling them twice in sequence must
 %% succeed and return ok without crashing or duplicating the ETS table.
@@ -748,7 +748,7 @@ create_bindings_table_is_idempotent_test() ->
 %% and the many bind/unbind tests that call bind/2 repeatedly.
 
 %%====================================================================
-%% dependencies/0 — BT-2295
+%% dependencies/0
 %%
 %% When beamtalk_workspace_meta is not running, get_package_name/0
 %% returns undefined and dependencies/0 must return an empty map.
@@ -757,8 +757,8 @@ create_bindings_table_is_idempotent_test() ->
 dependencies_returns_empty_when_no_package_test() ->
     %% Snapshot whereis/1 BEFORE calling dependencies/0 so the assertion is
     %% based on the same state that get_package_name/0 observed internally.
-    %% (Copilot BT-2295: capturing after the call is a TOCTOU race — the
-    %% gen_server could stop between the two calls.)
+    %% (Capturing after the call is a TOCTOU race — the gen_server could
+    %% stop between the two calls.)
     WasMissing = whereis(beamtalk_workspace_meta) =:= undefined,
     Result = beamtalk_workspace_interface_primitives:dependencies(),
     ?assert(is_map(Result)),
@@ -774,7 +774,7 @@ dependencies_returns_empty_when_no_package_test() ->
     end.
 
 %%====================================================================
-%% ADR 0082 Phase 4 (BT-2290): ChangeLog operations and autoflush
+%% ADR 0082 Phase 4: ChangeLog operations and autoflush
 %%====================================================================
 %% These tests exercise the FFI-shaped surface directly without booting a
 %% workspace. The underlying flush/changelog gen_servers are tested in their
@@ -792,7 +792,7 @@ revert_rejects_non_changeentry_test() ->
 
 revert_new_class_entry_with_no_loaded_class_raises_test() ->
     %% A new-class ChangeEntry (selector = nil) now routes to the new-class revert
-    %% path (BT-2664), which removes the class. When no such class is loaded the
+    %% path, which removes the class. When no such class is loaded the
     %% removal fails loudly with a structured error rather than silently
     %% succeeding — the entry extraction maps `nil` to the `'new-class'`
     %% placeholder and `do_revert` reaches `remove_class/1`.
@@ -809,7 +809,7 @@ revert_new_class_entry_with_no_loaded_class_raises_test() ->
     ).
 
 revert_method_returns_structured_error_test() ->
-    %% The clean-returning wrapper (BT-2293) catches the wrapped error that
+    %% The clean-returning wrapper catches the wrapped error that
     %% `changeLogRevert/1` would raise and returns it as a structured
     %% `{error, #beamtalk_error{}}` — the contract the LiveView Attach client
     %% relies on. The selector here already exists as an atom (we mint it first),
@@ -899,7 +899,7 @@ autoflush_default_is_false_test() ->
     end.
 
 %%====================================================================
-%% resolve_name/2 Tests (BT-2365, ADR 0081 Phase 1)
+%% resolve_name/2 Tests (ADR 0081 Phase 1)
 %%
 %% Resolution order: locals -> bind:as: ETS -> singleton registry ->
 %% class registry -> undefined_variable. Tiers 1, 2, 5 and ordering are
@@ -961,7 +961,7 @@ resolve_name_nil_local_is_a_hit_test() ->
     ?assertEqual(nil, beamtalk_workspace_interface_primitives:resolve_name(#{n => nil}, n)).
 
 %%====================================================================
-%% resolve_class_reference/2 Tests (BT-2365)
+%% resolve_class_reference/2 Tests
 %%====================================================================
 
 %% A genuinely unknown class raises class_not_found (NOT undefined_variable),
@@ -978,7 +978,7 @@ resolve_class_reference_unknown_raises_class_not_found_test() ->
     end.
 
 %%====================================================================
-%% currentSession / sessions Tests (ADR 0081 Phases 5 & 7, BT-2368)
+%% currentSession / sessions Tests (ADR 0081 Phases 5 & 7)
 %%====================================================================
 
 %% Outside an eval (no seeded session context) currentSession returns nil,
@@ -1075,7 +1075,7 @@ dispatch_stop_supervisor_type_error_test() ->
     end.
 
 %%====================================================================
-%% newClass/2 validation coverage (ADR 0082 Phase 1, BT-2285)
+%% newClass/2 validation coverage (ADR 0082 Phase 1)
 %%
 %% validate_new_class_args/2 rejects non-String source/path before the
 %% loader is reached. These exercise both error clauses and the
@@ -1207,7 +1207,7 @@ flush_filter_via_dispatch(_Ctx) ->
     ].
 
 %% dispatch('flush:confirmDestructive:', [Filter, Bool]) routes to flush/2.
-%% Over an empty log the summary has flushed=0 (BT-3456: routing arm coverage).
+%% Over an empty log the summary has flushed=0.
 flush_confirm_destructive_via_dispatch(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
         'flush:confirmDestructive:', ['new-class', false], fake_self(self())
@@ -1218,7 +1218,7 @@ flush_confirm_destructive_via_dispatch(_Ctx) ->
     ].
 
 %% dispatch(flushIncludingDestructive, []) routes to flushIncludingDestructive/0.
-%% Over an empty log the summary has flushed=0 (BT-3456: routing arm coverage).
+%% Over an empty log the summary has flushed=0.
 flush_including_destructive_via_dispatch(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
         flushIncludingDestructive, [], fake_self(self())
@@ -1229,7 +1229,7 @@ flush_including_destructive_via_dispatch(_Ctx) ->
     ].
 
 %% dispatch(recheckImage, []) routes to recheckImage/0 → beamtalk_recheck:trigger_image/0.
-%% With no live class sources the result is the empty-findings map (BT-3456).
+%% With no live class sources the result is the empty-findings map.
 recheck_image_via_dispatch(_Ctx) ->
     Result = beamtalk_workspace_interface_primitives:dispatch(
         recheckImage, [], fake_self(self())
@@ -1286,7 +1286,7 @@ revert_via_object_keyed_map(_Ctx) ->
 %% Boot an isolated workspace: a temp HOME plus the changelog and meta
 %% gen_servers so the delegation paths run for real. Returns a context map.
 %%
-%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: the
+%% Cross-invocation-unique — see `beamtalk_test_unique:id/0`: the
 %% changelog's own `load_from_disk` would otherwise restore a prior run's
 %% leftover `changes.jsonl` entries into this run's ETS table.
 setup_changelog_ws() ->
@@ -1473,7 +1473,7 @@ init(bare_sup) ->
     {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.
 
 %%====================================================================
-%% dispatch(supervisors, []) routing arm (BT-3456)
+%% dispatch(supervisors, []) routing arm
 %%
 %% supervisors/0 calls supervisor:which_children/1 on beamtalk_workspace_sup,
 %% so this test starts a bare workspace_sup when none is already running —
@@ -1503,10 +1503,10 @@ supervisors_via_dispatch_test() ->
     end.
 
 %%====================================================================
-%% revert_side_field/1 binary-argument branches (BT-3456)
+%% revert_side_field/1 binary-argument branches
 %%
 %% revert_side_field/1 is private. The binary <<"instance">> / <<"class">>
-%% arms (LiveView phx-value-side, ADR 0112 BT-3187) are exercised via
+%% arms (LiveView phx-value-side, ADR 0112) are exercised via
 %% revert_method/3, which calls revert_side_field(SideArg) before the
 %% selector-atom lookup. A never-compiled selector makes existing_selector_atom/1
 %% return `error` (pure — no changelog needed), so the test reaches

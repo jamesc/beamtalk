@@ -144,9 +144,9 @@ dispatch_print_string_test() ->
     ?assert(is_binary(Result)),
     ?assertNotEqual(<<>>, Result).
 
-%% BT-1761: dispatch/3 no longer has a catch-all clause.
-%% Unknown selectors are now handled by the compiled bt@stdlib@stack_frame
-%% module via Object inheritance (dispatched through value_type_send).
+%% dispatch/3 has no catch-all clause. Unknown selectors are handled by the
+%% compiled bt@stdlib@stack_frame module via Object inheritance (dispatched
+%% through value_type_send).
 dispatch_unknown_selector_raises_test() ->
     Frame = make_test_frame(),
     ?assertError(function_clause, beamtalk_stack_frame:dispatch('nonExistent', [], Frame)).
@@ -253,7 +253,7 @@ module_to_class_non_atom_test() ->
     ?assertEqual(nil, beamtalk_stack_frame:module_to_class(<<"counter">>)).
 
 %%% ===================================================================
-%%% module_to_class/1 — class registry resolution (BT-3081 regression)
+%%% module_to_class/1 — class registry resolution (regression)
 %%%
 %%% The string heuristic (bt@/beamtalk_ prefix parsing + snake_to_class) is
 %%% provably lossy for acronym-cased classes: 'bt@stdlib@beamerror' can only
@@ -272,7 +272,7 @@ module_to_class_resolves_acronym_class_via_registry_test_() ->
                 methods => #{},
                 class_methods => #{},
                 %% Same shape as the real BEAMError/bt@stdlib@beamerror
-                %% collision (BT-3081), namespaced so it can't collide with
+                %% collision, namespaced so it can't collide with
                 %% the real stdlib class if this suite runs against a live
                 %% stdlib-loaded node.
                 module => 'bt@stdlib@beamerror_bt3081_test'

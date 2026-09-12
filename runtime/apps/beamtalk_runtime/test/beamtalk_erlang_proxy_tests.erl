@@ -242,7 +242,7 @@ erlang_proxy_with_args_raises_arity_mismatch_test() ->
 
 %%% ===================================================================
 %%% ===================================================================
-%%% Exception mapping — BT-678 / ADR 0101 Part 2
+%%% Exception mapping — ADR 0101 Part 2
 %%%
 %%% ADR 0101 unifies both apply paths: `exit:*` propagates and `throw:*`
 %%% passes through (rolling back the former erlang_exit / erlang_throw
@@ -359,8 +359,7 @@ dispatch_function_clause_preserves_details_test() ->
     end.
 
 dispatch_missing_function_details_test() ->
-    %% BT-679: Missing function should include details about module/function/arity
-    %% (Previously tested undef, but BT-679 export validation catches this first)
+    %% Missing function should include details about module/function/arity
     Proxy = beamtalk_erlang_proxy:new(math),
     try
         beamtalk_erlang_proxy:dispatch('init', [], Proxy),
@@ -410,7 +409,7 @@ dispatch_generic_error_maps_to_runtime_error_test() ->
             ?assert(is_binary(Inner#beamtalk_error.message)),
             Details = Inner#beamtalk_error.details,
             ?assertEqual({custom_reason, 42}, maps:get(reason, Details)),
-            %% BT-2730: the generic path also carries the FFI `erlang_error`
+            %% The generic path also carries the FFI `erlang_error`
             %% contract key (+ stacktrace), matching the specific clauses, so
             %% `details at: #erlang_error` resolves uniformly.
             ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details)),
@@ -418,7 +417,7 @@ dispatch_generic_error_maps_to_runtime_error_test() ->
     end.
 
 dispatch_badkey_is_readable_key_error_test() ->
-    %% ADR 0101 / BT-932: a {badkey, K} BEAM error from FFI is wrapped by default
+    %% ADR 0101: a {badkey, K} BEAM error from FFI is wrapped by default
     %% via ensure_wrapped into a readable key_error (not a raw leak).
     Proxy = beamtalk_erlang_proxy:new(maps),
     try
@@ -433,7 +432,7 @@ dispatch_badkey_is_readable_key_error_test() ->
     end.
 
 %%% ===================================================================
-%%% BT-679: Export introspection — wrong arity
+%%% Export introspection — wrong arity
 %%% ===================================================================
 
 dispatch_wrong_arity_raises_test() ->
@@ -469,7 +468,7 @@ dispatch_wrong_arity_keyword_raises_test() ->
     end.
 
 %%% ===================================================================
-%%% BT-679: Export introspection — missing function
+%%% Export introspection — missing function
 %%% ===================================================================
 
 dispatch_missing_function_raises_test() ->
@@ -493,7 +492,7 @@ dispatch_missing_function_raises_test() ->
     end.
 
 %%% ===================================================================
-%%% BT-679: Export introspection — unloaded module
+%%% Export introspection — unloaded module
 %%% ===================================================================
 
 dispatch_unloaded_module_raises_test() ->
@@ -515,7 +514,7 @@ dispatch_unloaded_module_raises_test() ->
     end.
 
 %%% ===================================================================
-%%% BT-679: methods — REPL discoverability
+%%% methods — REPL discoverability
 %%% ===================================================================
 
 dispatch_methods_returns_exports_test() ->
@@ -561,7 +560,7 @@ dispatch_methods_unloaded_module_raises_test() ->
     end.
 
 %%% ===================================================================
-%%% BT-679: call:args: escape hatch
+%%% call:args: escape hatch
 %%% ===================================================================
 
 dispatch_call_args_basic_test() ->
@@ -627,7 +626,7 @@ dispatch_call_args_non_tuple_args_test() ->
     end.
 
 %%% ===================================================================
-%%% BT-1127: direct_call/3 — charlist coercion
+%%% direct_call/3 — charlist coercion
 %%% ===================================================================
 
 direct_call_basic_test() ->
@@ -714,7 +713,7 @@ direct_call_coercion_retry_still_fails_test() ->
     end.
 
 direct_call_charlist_result_without_badarg_test() ->
-    %% BT-1398: Functions that accept non-binary args but return charlists
+    %% Functions that accept non-binary args but return charlists
     %% should still have their results coerced to binaries.
     %% calendar:system_time_to_rfc3339/1 accepts an integer and returns a charlist.
     Now = erlang:system_time(second),
@@ -728,12 +727,12 @@ direct_call_integer_list_not_coerced_test() ->
     ?assertEqual([1, 2, 3, 4, 5], Result).
 
 direct_call_empty_list_not_coerced_test() ->
-    %% BT-1398: Empty list must stay as [], not be coerced to <<>> (empty binary).
+    %% Empty list must stay as [], not be coerced to <<>> (empty binary).
     Result = beamtalk_erlang_proxy:direct_call(maps, keys, [#{}]),
     ?assertEqual([], Result).
 
 %%% ===================================================================
-%%% BT-1127: dispatch/3 charlist coercion via validate_and_apply
+%%% dispatch/3 charlist coercion via validate_and_apply
 %%% ===================================================================
 
 dispatch_os_cmd_coerces_binary_test() ->
@@ -745,7 +744,7 @@ dispatch_os_cmd_coerces_binary_test() ->
     ?assertEqual(<<"hello">>, string:trim(Result, trailing)).
 
 %%% ===================================================================
-%%% BT-679: Beamtalk error passthrough
+%%% Beamtalk error passthrough
 %%% ===================================================================
 
 dispatch_preserves_beamtalk_errors_test() ->
@@ -766,7 +765,7 @@ dispatch_preserves_beamtalk_errors_test() ->
     end.
 
 %%% ===================================================================
-%%% BT-1442: Actor proxy → Pid coercion for Erlang FFI
+%%% Actor proxy → Pid coercion for Erlang FFI
 %%% ===================================================================
 
 direct_call_actor_to_pid_coercion_test() ->
@@ -850,14 +849,14 @@ coerce_result_non_tuple_passthrough_test() ->
     ?assertEqual(foo, beamtalk_erlang_proxy:coerce_result(foo)).
 
 coerce_result_ok_charlist_normalized_to_binary_test() ->
-    %% BT-1879: {ok, Charlist} should normalize charlist to binary inside Result
+    %% {ok, Charlist} should normalize charlist to binary inside Result
     Result = beamtalk_erlang_proxy:coerce_result({ok, "hello"}),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
     ?assertEqual(<<"hello">>, maps:get('okValue', Result)).
 
 coerce_result_error_charlist_normalized_to_binary_test() ->
-    %% BT-1879: {error, Charlist} should normalize charlist to binary inside Result
+    %% {error, Charlist} should normalize charlist to binary inside Result
     Result = beamtalk_erlang_proxy:coerce_result({error, "not found"}),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(false, maps:get('isOk', Result)),
@@ -866,7 +865,7 @@ coerce_result_error_charlist_normalized_to_binary_test() ->
     ?assert(is_map(ErrReason)).
 
 coerce_result_ok_non_charlist_unchanged_test() ->
-    %% BT-1879: {ok, NonCharlist} should not be affected by normalization
+    %% {ok, NonCharlist} should not be affected by normalization
     Result = beamtalk_erlang_proxy:coerce_result({ok, 42}),
     ?assertEqual(42, maps:get('okValue', Result)),
     Result2 = beamtalk_erlang_proxy:coerce_result({ok, <<"binary">>}),
@@ -877,7 +876,7 @@ direct_call_ok_tuple_coerced_to_result_test() ->
     Result = beamtalk_erlang_proxy:direct_call(file, get_cwd, []),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
-    %% BT-1879: okValue should be a binary string (charlist coerced inside Result)
+    %% okValue should be a binary string (charlist coerced inside Result)
     OkValue = maps:get('okValue', Result),
     ?assertNotEqual(nil, OkValue),
     ?assert(is_binary(OkValue)).
@@ -894,7 +893,7 @@ dispatch_ok_tuple_coerced_to_result_test() ->
     Result = beamtalk_erlang_proxy:dispatch('get_cwd', [], Proxy),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
-    %% BT-1879: charlist inside Result should be coerced to binary
+    %% charlist inside Result should be coerced to binary
     ?assert(is_binary(maps:get('okValue', Result))).
 
 %%% ===================================================================
@@ -930,7 +929,7 @@ direct_call_generic_error_wraps_as_runtime_error_test() ->
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             Details = Inner#beamtalk_error.details,
             ?assertEqual({custom_reason, 42}, maps:get(reason, Details)),
-            %% BT-2730: generic path carries the FFI `erlang_error` key too.
+            %% Generic path carries the FFI `erlang_error` key too.
             ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details)),
             ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
@@ -969,7 +968,7 @@ direct_call_bare_beamtalk_error_record_passthrough_test() ->
     end.
 
 %%% ===================================================================
-%%% ADR 0101 Part 1/2 — native_call/4 boundary (consumed by BT-2720)
+%%% ADR 0101 Part 1/2 — native_call/4 boundary
 %%%
 %%% native_call skips the export pre-check but routes through the same
 %%% apply_with_coercion/5 — same error:* wrapping + 0076 Result coercion as
@@ -1052,7 +1051,7 @@ native_call_generic_error_wraps_with_context_test() ->
             ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
             ?assertEqual('Stream', Inner#beamtalk_error.class),
             ?assertEqual('collect:', Inner#beamtalk_error.selector),
-            %% BT-2730: generic path carries the FFI `erlang_error` key too.
+            %% Generic path carries the FFI `erlang_error` key too.
             Details = Inner#beamtalk_error.details,
             ?assertEqual({custom_reason, 7}, maps:get(erlang_error, Details)),
             ?assert(is_list(maps:get(erlang_stacktrace, Details)))
@@ -1076,8 +1075,8 @@ native_call_throw_passes_through_test() ->
         throw:oops -> ok
     end.
 
-%%% BT-2730 review follow-up: exit/throw raised on the charlist-coercion RETRY
-%%% (the inner try in maybe_retry_badarg/6, not the first apply) must still
+%%% exit/throw raised on the charlist-coercion RETRY (the inner try in
+%%% maybe_retry_badarg/6, not the first apply) must still
 %%% propagate unchanged. The retry routes through the same classify_ffi_exception/9
 %%% catch-all as the first pass, so these guard the shared classifier's retry arm.
 native_call_retry_exit_propagates_test() ->
@@ -1119,7 +1118,7 @@ native_call_beamtalk_error_passthrough_test() ->
     end.
 
 native_call_charlist_coercion_retry_test() ->
-    %% BT-1127: native: path also retries binary→charlist on badarg.
+    %% native: path also retries binary→charlist on badarg.
     %% os:cmd/1 expects a charlist; a binary self/arg must be coerced.
     Result = beamtalk_erlang_proxy:native_call(os, cmd, [<<"echo hello">>], {'Os', 'cmd:'}),
     ?assert(is_binary(Result)),

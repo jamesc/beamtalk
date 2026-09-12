@@ -90,7 +90,7 @@ test_inst_var_at_put() ->
 test_inst_var_at_put_missing() ->
     State = counter_state(),
     Result = beamtalk_object_ops:dispatch('fieldAt:put:', [nonexistent, 42], self_ref(), State),
-    %% BT-427: Smalltalk semantics — creates the field, returns value
+    %% Smalltalk semantics — creates the field, returns value
     ?assertMatch({reply, 42, _}, Result),
     {reply, _, NewState} = Result,
     ?assertEqual(42, maps:get(nonexistent, NewState)).
@@ -121,7 +121,7 @@ test_print_string() ->
 
 test_inspect() ->
     State = counter_state(),
-    %% ADR 0095 Phase 3 (BT-2504): `inspect` is repurposed from `-> String` to
+    %% ADR 0095 Phase 3: `inspect` is repurposed from `-> String` to
     %% the verb that opens an `Inspector` cursor over the receiver.
     {reply, Insp, _} = beamtalk_object_ops:dispatch(inspect, [], self_ref(), State),
     ?assert(is_map(Insp)),
@@ -255,7 +255,7 @@ inspect_class_object_test_() ->
     ]}.
 
 test_inspect_empty_state() ->
-    %% BT-753 / ADR 0095 Phase 3 (BT-2504): a class object (empty state map)
+    %% ADR 0095 Phase 3: a class object (empty state map)
     %% inspects to an `Inspector` cursor rather than a String.
     Self = #beamtalk_object{class = 'Counter', pid = self(), class_mod = counter},
     State = #{},

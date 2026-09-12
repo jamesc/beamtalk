@@ -220,7 +220,7 @@ idempotent_reregistration() ->
     ?assertEqual(Pid1, Pid2).
 
 %%% ============================================================================
-%%% protocol_name_from_class_self error cases (BT-1972)
+%%% protocol_name_from_class_self error cases
 %%% ============================================================================
 
 protocol_name_from_class_self_test_() ->

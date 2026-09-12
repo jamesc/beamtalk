@@ -158,7 +158,7 @@ lookup_with_examples_test() ->
     end.
 
 %%% ============================================================================
-%%% Non-v1 Docs Format Tests (BT-1876)
+%%% Non-v1 Docs Format Tests
 %%% ============================================================================
 
 non_v1_docs_format_lookup_test() ->
@@ -184,7 +184,7 @@ non_v1_docs_format_module_doc_test() ->
     end.
 
 %%% ============================================================================
-%%% Corrupt Docs Chunk Tests (BT-1876)
+%%% Corrupt Docs Chunk Tests
 %%% ============================================================================
 
 corrupt_docs_chunk_lookup_test() ->
@@ -210,7 +210,7 @@ corrupt_docs_chunk_module_doc_test() ->
     end.
 
 %%% ============================================================================
-%%% EEP-48 Doc Chunk Generation Tests (BT-1900)
+%%% EEP-48 Doc Chunk Generation Tests
 %%% ============================================================================
 
 compile_with_doc_attributes_has_docs_chunk_test() ->

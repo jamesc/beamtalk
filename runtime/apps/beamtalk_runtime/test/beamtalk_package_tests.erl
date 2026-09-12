@@ -272,7 +272,7 @@ dependencies_excludes_unpackaged_dep_test() ->
 %% but the dependency has no class entries to extract a `#{package := ...}`
 %% key from, so its binary name must come from `package_name_for_app/1`'s
 %% type_aliases fallback (the OTP application's own atom name via
-%% `atom_to_binary/2`), not a classes-derived package key (BT-2934).
+%% `atom_to_binary/2`), not a classes-derived package key.
 dependencies_includes_types_only_dep_test() ->
     setup(),
     Dep = bt_fake_types_only_dep,
@@ -326,7 +326,7 @@ package_name_for_delegates_to_package_name_test() ->
     ).
 
 %%% ============================================================================
-%%% Types-only package tests (BT-2915) — a package with zero classes and a
+%%% Types-only package tests — a package with zero classes and a
 %%% non-empty `type_aliases` env key must still be discoverable.
 %%% ============================================================================
 

@@ -1556,7 +1556,7 @@ fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
          %%\n\
          %% Mirrors `is_generated_builtin_class` in\n\
          %% crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs\n\
-         %% (BT-3085) — both are generated from the same stdlib class-metadata pass\n\
+         %% — both are generated from the same stdlib class-metadata pass\n\
          %% in build_stdlib.rs, so they cannot drift out of sync with each other.\n\
          \n\
          -ifndef(BEAMTALK_GENERATED_BUILTINS_HRL).\n\

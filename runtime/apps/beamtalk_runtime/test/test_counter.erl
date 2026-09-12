@@ -87,7 +87,7 @@ handle_test_make_self([], State) ->
     Self = beamtalk_actor:make_self(State),
     {reply, Self, State}.
 
-%% BT-1190: Slow method that sleeps for the given milliseconds before returning.
+%% Slow method that sleeps for the given milliseconds before returning.
 %% Used to test timeout behavior.
 'handle_slowGet:'([SleepMs], State) ->
     timer:sleep(SleepMs),

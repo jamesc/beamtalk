@@ -45,7 +45,7 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
-    %% BT-1633: Clean up causal trace context from process dictionary
+    %% Clean up causal trace context from process dictionary
     erase('$beamtalk_trace_id'),
     erase('$beamtalk_span_id'),
     erase('$beamtalk_parent_span_id'),
@@ -570,7 +570,7 @@ multiple_modes_aggregate_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle start event emitted on actor init (BT-1629)
+%% Test: Lifecycle start event emitted on actor init.
 %%====================================================================
 
 lifecycle_start_event_test_() ->
@@ -601,7 +601,7 @@ lifecycle_start_event_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle stop event emitted on actor terminate (BT-1629)
+%% Test: Lifecycle stop event emitted on actor terminate.
 %%====================================================================
 
 lifecycle_terminate_event_test_() ->
@@ -633,7 +633,7 @@ lifecycle_terminate_event_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle stop event via sync_send stop (BT-1629)
+%% Test: Lifecycle stop event via sync_send stop.
 %%====================================================================
 
 lifecycle_sync_stop_event_test_() ->
@@ -663,7 +663,7 @@ lifecycle_sync_stop_event_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle kill event via sync_send kill (BT-1629)
+%% Test: Lifecycle kill event via sync_send kill.
 %%====================================================================
 
 lifecycle_sync_kill_event_test_() ->
@@ -699,7 +699,7 @@ lifecycle_sync_kill_event_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle events recorded in trace store (BT-1629)
+%% Test: Lifecycle events recorded in trace store.
 %%====================================================================
 
 lifecycle_events_in_traces_test_() ->
@@ -743,7 +743,7 @@ lifecycle_events_in_traces_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle events in aggregate stats (BT-1629)
+%% Test: Lifecycle events in aggregate stats.
 %%====================================================================
 
 lifecycle_aggregate_stats_test_() ->
@@ -771,7 +771,7 @@ lifecycle_aggregate_stats_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Lifecycle terminate reason propagation (BT-1629)
+%% Test: Lifecycle terminate reason propagation.
 %%====================================================================
 
 lifecycle_terminate_reason_test_() ->
@@ -812,7 +812,7 @@ lifecycle_terminate_reason_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Async stop emits lifecycle event (BT-1629)
+%% Test: Async stop emits lifecycle event.
 %%====================================================================
 
 lifecycle_async_stop_event_test_() ->
@@ -842,7 +842,7 @@ lifecycle_async_stop_event_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Async kill emits lifecycle event (BT-1629)
+%% Test: Async kill emits lifecycle event.
 %%====================================================================
 
 lifecycle_async_kill_event_test_() ->
@@ -878,7 +878,7 @@ lifecycle_async_kill_event_test_() ->
     end}.
 
 %%====================================================================
-%% Test: set_trace_context stores and retrieves context (BT-1625)
+%% Test: set_trace_context stores and retrieves context.
 %%====================================================================
 
 set_trace_context_test_() ->
@@ -906,7 +906,7 @@ set_trace_context_test_() ->
     end}.
 
 %%====================================================================
-%% Test: set_trace_context updates OTP logger metadata (BT-1625)
+%% Test: set_trace_context updates OTP logger metadata.
 %%====================================================================
 
 set_trace_context_updates_logger_test_() ->
@@ -928,7 +928,7 @@ set_trace_context_updates_logger_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Trace context appears in trace events (BT-1625)
+%% Test: Trace context appears in trace events.
 %%====================================================================
 
 trace_context_in_traces_test_() ->
@@ -967,7 +967,7 @@ trace_context_in_traces_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Empty trace context produces no overhead (BT-1625)
+%% Test: Empty trace context produces no overhead.
 %%====================================================================
 
 empty_trace_context_no_overhead_test_() ->
@@ -1003,7 +1003,7 @@ empty_trace_context_no_overhead_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Trace context propagates across actor boundaries (BT-1625)
+%% Test: Trace context propagates across actor boundaries.
 %%====================================================================
 
 trace_context_propagation_test_() ->
@@ -1044,7 +1044,7 @@ trace_context_propagation_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Propagation with no trace context is a no-op (BT-1625)
+%% Test: Propagation with no trace context is a no-op.
 %%====================================================================
 
 propagation_no_context_noop_test_() ->
@@ -1066,7 +1066,7 @@ propagation_no_context_noop_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Root span generates trace_id = span_id (BT-1633)
+%% Test: Root span generates trace_id = span_id.
 %%====================================================================
 
 causal_root_span_test_() ->
@@ -1115,7 +1115,7 @@ causal_root_span_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Parent-child causal linking across actor calls (BT-1633)
+%% Test: Parent-child causal linking across actor calls.
 %%====================================================================
 
 causal_parent_child_linking_test_() ->
@@ -1159,7 +1159,7 @@ causal_parent_child_linking_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Trace ID filter retrieves full causal chain (BT-1633)
+%% Test: Trace ID filter retrieves full causal chain.
 %%====================================================================
 
 causal_trace_id_filter_test_() ->
@@ -1219,7 +1219,7 @@ causal_trace_id_filter_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Multi-hop causal chain A->B->C (BT-1633)
+%% Test: Multi-hop causal chain A->B->C.
 %%====================================================================
 
 causal_multi_hop_chain_test_() ->
@@ -1301,7 +1301,7 @@ causal_multi_hop_chain_test_() ->
     end}.
 
 %%====================================================================
-%% Test: No causal overhead when tracing disabled (BT-1633)
+%% Test: No causal overhead when tracing disabled.
 %%====================================================================
 
 causal_no_overhead_when_disabled_test_() ->
@@ -1336,7 +1336,7 @@ causal_no_overhead_when_disabled_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Span IDs are monotonically increasing (BT-1633)
+%% Test: Span IDs are monotonically increasing.
 %%====================================================================
 
 causal_span_ids_monotonic_test_() ->
@@ -1355,7 +1355,7 @@ causal_span_ids_monotonic_test_() ->
     end}.
 
 %%====================================================================
-%% Test: get_causal_ctx returns empty map when no context (BT-1633)
+%% Test: get_causal_ctx returns empty map when no context.
 %%====================================================================
 
 causal_ctx_empty_when_none_test_() ->

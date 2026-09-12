@@ -238,7 +238,7 @@ covering all three "never actually re-verified" cases.
 }.
 
 %% For `signature_change`/`removal`, `selector` is the changed method's own
-%% selector. For `shape_change` (BT-2780, `to_finding_shape/5`) there is no
+%% selector. For `shape_change` (`to_finding_shape/5`) there is no
 %% single changed selector — `selector` instead names the specific `state:`/
 %% `field:` slot the finding is attributed to (`beamtalk_shape_diff:field_name/1`
 %% of the matched `field_change()`), which is what a caller broken by e.g. a
@@ -304,7 +304,7 @@ reload's own success/reply on this.
 -spec trigger(binary(), binary(), instance | class, classification()) -> result().
 trigger(ClassNameBin, SelectorBin, Side, Classification) ->
     try
-        %% ADR 0115 Phase 4 (BT-3219): `Side` now threads all the way to
+        %% ADR 0115 Phase 4: `Side` now threads all the way to
         %% `beamtalk_xref:senders_of/2`'s `ChangedClass` argument via
         %% `changed_class_tag/2` — it is the "which side changed" axis
         %% Amendment 3's relatedness test needs (a class-object receiver only
@@ -764,7 +764,7 @@ do_trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSigna
             PendingMeta = override_method_signature(
                 AmbientMeta, Side, SelectorAtom, PendingSignature
             ),
-            %% BT-3109: the overlay is a plain local map, never written to
+            %% The overlay is a plain local map, never written to
             %% `beamtalk_compiler_server` state — every other ambient class
             %% stays exactly as installed; only this one request's view of
             %% `ClassAtom` is hypothetical. Threaded through do_trigger/5 as
@@ -917,7 +917,7 @@ image_finding(
 do_trigger(ClassNameBin, SelectorBin, Side, Classification) ->
     %% `trigger/4`'s path: no pending overlay, so each candidate's
     %% `diagnostics/3` call opts into the *ambient* class-hierarchy cache
-    %% (`class_hierarchy => true`), exactly as before BT-3109.
+    %% (`class_hierarchy => true`).
     do_trigger(ClassNameBin, SelectorBin, Side, Classification, true).
 
 -doc """
@@ -972,7 +972,7 @@ do_trigger(ClassNameBin, SelectorBin, Side, Classification, ClassHierarchy) ->
     %% stdlib/dependency class) or a compiler-port failure never ran a check,
     %% so it must not inflate the "N callers checked" figure the ADR 0105 demo
     %% reports ("2 callers re-checked, 1 stale"). `checked_owners` is the same
-    %% set, named rather than counted — BT-2779's findings-store consumer
+    %% set, named rather than counted — the findings-store consumer
     %% needs to know exactly *which* owners a check completed for (including
     %% ones that came back clean), not just how many.
     CheckedOwners = [
@@ -1284,7 +1284,7 @@ recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification, Clas
             %% `class_hierarchy => ClassHierarchy` opts into class context
             %% (beamtalk_compiler_server:diagnostics/3) — this re-check is
             %% the one caller that needs it; the keystroke-driven cockpit
-            %% editor path (BT-2556) stays on the class-context-free default.
+            %% editor path stays on the class-context-free default.
             case
                 beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{
                     class_hierarchy => ClassHierarchy
@@ -1374,7 +1374,7 @@ base_finding(
     }.
 
 %%====================================================================
-%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%% Shape-change re-check (ADR 0105 Phase 2)
 %%====================================================================
 
 -doc """
@@ -1581,7 +1581,7 @@ retyped_names_bin(FieldChanges) ->
     iolist_to_binary(lists:join(<<", ">>, Names)).
 
 %%====================================================================
-%% Leaf-change re-check (ADR 0107 Phase A, BT-2856)
+%% Leaf-change re-check (ADR 0107 Phase A)
 %%====================================================================
 
 -doc """
@@ -1783,7 +1783,7 @@ to_finding_leaf_change(
     }.
 
 %%====================================================================
-%% Alias-change re-check (ADR 0108 hot-reload re-check trigger, BT-2899)
+%% Alias-change re-check (ADR 0108 hot-reload re-check trigger)
 %%====================================================================
 
 -doc """

@@ -60,11 +60,11 @@ cap_note_nonzero_test() ->
     ?assertEqual(<<"3 more not checked">>, beamtalk_recheck:cap_note(3)).
 
 %%====================================================================
-%% Pure helper — not_verified_owners/2 (BT-2828)
+%% Pure helper — not_verified_owners/2
 %%
 %% `not_checked_owners/2` (cap-dropped candidates) already has coverage via
-%% `trigger/4`'s integration tests. `not_verified_owners/2` is the new
-%% BT-2828 merge on top of it: cap-dropped owners unioned with any `Kept`
+%% `trigger/4`'s integration tests. `not_verified_owners/2` merges on top of
+%% it: cap-dropped owners unioned with any `Kept`
 %% candidate whose outcome status was not `ok` — `skipped` (no live source)
 %% or `failed` (compile/compiler-port error). Both statuses collapse to the
 %% same "never actually re-verified" bucket, so one pure test covers both
@@ -198,7 +198,7 @@ relevant_diagnostic_ignores_undefined_category_test() ->
     ).
 
 %%====================================================================
-%% Pure helper — override_method_signature/4 (ADR 0105 Phase 3, BT-2782)
+%% Pure helper — override_method_signature/4 (ADR 0105 Phase 3)
 %%====================================================================
 
 override_method_signature_splices_pending_type_test() ->
@@ -269,7 +269,7 @@ override_method_signature_brand_new_selector_gets_bare_entry_test() ->
     ?assertEqual(error, maps:find(arity, Entry)).
 
 %%====================================================================
-%% Pure helper — relevant_image_diagnostic/1 (ADR 0105 Phase 3, BT-2782)
+%% Pure helper — relevant_image_diagnostic/1 (ADR 0105 Phase 3)
 %%====================================================================
 
 relevant_image_diagnostic_keeps_dnu_test() ->
@@ -301,7 +301,7 @@ relevant_image_diagnostic_drops_unrelated_category_test() ->
     ).
 
 %%====================================================================
-%% Pure helper — relevant_diagnostic_leaf_change/2 (ADR 0107 Phase A, BT-2856)
+%% Pure helper — relevant_diagnostic_leaf_change/2 (ADR 0107 Phase A)
 %%====================================================================
 
 %% A `Type`-category diagnostic naming the class is kept — regardless of
@@ -360,7 +360,7 @@ relevant_diagnostic_leaf_change_drops_unrelated_class_name_test() ->
     ).
 
 %%====================================================================
-%% Pure helper — class_name_mentioned/2 (ADR 0107 Phase A, BT-2856)
+%% Pure helper — class_name_mentioned/2 (ADR 0107 Phase A)
 %%====================================================================
 
 %% Regression pin (adversarial review finding): a bare substring match would
@@ -782,7 +782,7 @@ no_live_source_is_skipped_not_checked_test_() ->
                     ?assertEqual(0, NotChecked),
                     ?assertEqual([], Findings),
 
-                    %% BT-2828: a `skipped` outcome (no live source) is not
+                    %% A `skipped` outcome (no live source) is not
                     %% cap-dropped, so `not_checked_owners` stays empty — but
                     %% it must still show up in `not_verified_owners`, or
                     %% `beamtalk_repl_loader` would neither replace nor mark
@@ -827,7 +827,7 @@ trigger_never_raises_on_unknown_selector_test_() ->
         end}}.
 
 %%====================================================================
-%% Receiver-type-aware dependent lookup (ADR 0115 Phase 4, BT-3219)
+%% Receiver-type-aware dependent lookup (ADR 0115 Phase 4)
 %%====================================================================
 
 %% Pure helpers — changed_class_tag/2, selector_side/1.
@@ -850,7 +850,7 @@ selector_side_accessor_is_instance_side_test() ->
     ?assertEqual(instance, beamtalk_recheck:selector_side('withCount:')).
 
 %% xref payload for the fan-out fixture below: one send of `Selector`, typed
-%% (`recv_type`) at `RecvType` — mirrors the compile-time write path BT-3217
+%% (`recv_type`) at `RecvType` — mirrors the shape the compile-time write path
 %% populates for real code (unlike `dashboard_xref/0`/`listview_xref/0`
 %% above, which deliberately omit `recv_type` to exercise the pre-Phase-2
 %% legacy-row default elsewhere in this file).
@@ -890,7 +890,7 @@ register_fanout_candidate(Name, Selector, RecvType) ->
         NameBin, fanout_candidate_source(NameBin, ReceiverBin, SelectorBin)
     ).
 
-%% BT-3219 AC4: a synthetic fan-out fixture mirroring BT-2781's benchmark
+%% A synthetic fan-out fixture mirroring the benchmark
 %% shape (real dependents interleaved with same-selector, unrelated-type
 %% false positives) for one selector, all comfortably under the default
 %% caller cap (20) so the cap plays no part in this result — proving the
@@ -909,7 +909,7 @@ receiver_type_filter_narrows_pool_before_cap_test_() ->
                     SelectorBin = <<"fanoutSel">>,
                     %% A small synthetic hierarchy, written directly into
                     %% `beamtalk_class_metadata` (mirrors
-                    %% `beamtalk_xref_tests.erl`'s BT-3218
+                    %% `beamtalk_xref_tests.erl`'s
                     %% `bt3218_hierarchy_setup/0` pattern) — both classes must
                     %% be *known* to `beamtalk_class_metadata` for
                     %% `senders_of/2`'s relatedness check to actually run the
@@ -986,7 +986,7 @@ receiver_type_filter_narrows_pool_before_cap_test_() ->
         end}}.
 
 %%====================================================================
-%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%% Shape-change re-check (ADR 0105 Phase 2)
 %%====================================================================
 
 %% Pure helper — shape_dependent_selectors/1.
@@ -1033,10 +1033,10 @@ with_star_selector_test_() ->
     ].
 
 %%====================================================================
-%% with_star_selector/1 — shared Rust<->Erlang conformance corpus (BT-3090)
+%% with_star_selector/1 — shared Rust<->Erlang conformance corpus
 %%====================================================================
 
-%% BT-3090 conformance: `with_star_selector/1` must capitalise a field name's
+%% Conformance: `with_star_selector/1` must capitalise a field name's
 %% first character identically to the Rust naming authority
 %% (`crate::synthetic_selectors::with_star_selector`,
 %% `crates/beamtalk-core/src/synthetic_selectors.rs`) — including non-ASCII
@@ -1062,7 +1062,7 @@ with_star_selector_matches_shared_corpus_test() ->
     ).
 
 %% Load the shared with-star-selector conformance corpus from the repo tree.
-%% `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% `beamtalk_test_corpus` walks up from the test CWD to the
 %% project root (the dir holding `Cargo.toml`), then reads the fixture both
 %% surfaces share.
 load_with_star_selector_corpus() ->
@@ -1146,9 +1146,9 @@ relevant_diagnostic_shape_retyped_fallback_matches_unrelated_dnu_test() ->
 %% Two retyped slots in the same reload — the Dnu carries no field-name
 %% signal (see relevant_diagnostic_shape/3's doc), so retyped_fallback/1
 %% cannot tell which slot actually caused it. Rather than silently blaming
-%% the first by list order (BT-2780 adversarial review; fixed in BT-2805),
-%% the other candidate(s) come back as the triple's third element so the
-%% caller can render the attribution as ambiguous. See
+%% the first by list order, the other candidate(s) come back as the
+%% triple's third element so the caller can render the attribution as
+%% ambiguous. See
 %% field_change_note_retyped_with_ambiguous_candidates_renders_all_names_test/0
 %% for how the finding's `note` surfaces this.
 relevant_diagnostic_shape_retyped_fallback_notes_ambiguity_when_multiple_test() ->
@@ -1372,7 +1372,7 @@ removed_field_flags_spawn_with_site_test_() ->
 %% Added field clears a previously-invalid spawnWith: key — the same class
 %% hierarchy as above but with `name` back in the ambient shape, exercising
 %% the "reload-fixes-reload" clearing story: a clean re-check produces no
-%% findings for this origin, which is what BT-2779's findings-store consumer
+%% findings for this origin, which is what the findings-store consumer
 %% needs to replace a stale entry with an empty one.
 added_field_clears_previously_invalid_spawn_with_key_test_() ->
     {timeout, 30,
@@ -1402,7 +1402,7 @@ added_field_clears_previously_invalid_spawn_with_key_test_() ->
         end}}.
 
 %%====================================================================
-%% Integration — trigger_pending/5 (ADR 0105 Phase 3, BT-2782, pre-save advisory)
+%% Integration — trigger_pending/5 (ADR 0105 Phase 3, pre-save advisory)
 %%====================================================================
 
 trigger_pending_finds_stale_dependent_without_installing_test_() ->
@@ -1439,7 +1439,7 @@ trigger_pending_finds_stale_dependent_without_installing_test_() ->
                     ?assertEqual(signature_change, maps:get(classification, Finding)),
 
                     %% Never installed: the pending signature travels only as
-                    %% a per-request overlay (BT-3109) — the ambient class
+                    %% a per-request overlay — the ambient class
                     %% cache in `beamtalk_compiler_server` is never written to
                     %% by a pre-save advisory, so it still holds exactly the
                     %% real, still-live signature untouched.
@@ -1481,18 +1481,13 @@ trigger_pending_no_ambient_meta_is_empty_result_test_() ->
             ]
         end}}.
 
-%% BT-3109 / BT-2806: a pre-save advisory must never clobber a genuinely
-%% concurrent `register_class/2` commit (e.g. a real save from another
-%% session) that lands while the advisory is in flight. Under the previous
-%% ambient-cache-swap mechanism, `do_trigger_pending/5` snapshotted the
-%% pre-advisory generation and unconditionally restored that stale snapshot
-%% in an `after` block once its (possibly slow, port-round-tripping)
-%% diagnostics calls finished — reverting any real commit that happened to
-%% land in that window. The fix (a per-request `class_hierarchy` overlay,
-%% never written to `beamtalk_compiler_server` state) makes this impossible
-%% by construction: there is no snapshot and no restore, so a concurrent
-%% commit is never at risk regardless of exactly when it lands relative to
-%% the advisory's diagnostics calls.
+%% A pre-save advisory must never clobber a genuinely concurrent
+%% `register_class/2` commit (e.g. a real save from another session) that
+%% lands while the advisory is in flight. `do_trigger_pending/5` uses a
+%% per-request `class_hierarchy` overlay that is never written to
+%% `beamtalk_compiler_server` state: there is no snapshot and no restore, so
+%% a concurrent commit is never at risk regardless of exactly when it lands
+%% relative to the advisory's diagnostics calls.
 trigger_pending_does_not_clobber_concurrent_register_class_test_() ->
     {timeout, 30,
         {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
@@ -1545,7 +1540,7 @@ trigger_pending_does_not_clobber_concurrent_register_class_test_() ->
         end}}.
 
 %%====================================================================
-%% Integration — trigger_image/0 (ADR 0105 Phase 3, BT-2782, :recheck image)
+%% Integration — trigger_image/0 (ADR 0105 Phase 3, :recheck image)
 %%====================================================================
 
 recheck_image_clean_source() ->
@@ -1597,19 +1592,18 @@ trigger_image_empty_when_no_classes_test_() ->
         end}}.
 
 %%====================================================================
-%% Compiler-port exit-catch coverage (BT-2806, trigger_image/0 and
+%% Compiler-port exit-catch coverage (trigger_image/0 and
 %% trigger_leaf_change/1)
 %%
 %% Both `recheck_image_class/2` and `recheck_owner_for_leaf_change/3` wrap
 %% their `diagnostics/3` round trip in `try ... catch Class:Reason:Stack ->
 %% {failed, []} end` — not just the `{error, Reason}` case every other
 %% `recheck_owner*` function already handles, but the compiler port's
-%% `gen_server:call` itself exiting (`noproc`/`timeout` in production). Prior
-%% to BT-2806 that `catch` clause had no regression test: BT-2832's
+%% `gen_server:call` itself exiting (`noproc`/`timeout` in production).
 %% `inject_diagnostics_failure/1` only forces an ordinary `{error, _}`
 %% *return* from a live call, never an actual exit.
 %%
-%% `beamtalk_compiler_server:inject_diagnostics_exit/0` (BT-2806) instead
+%% `beamtalk_compiler_server:inject_diagnostics_exit/0` instead
 %% stops the compiler server without replying, so the pending
 %% `gen_server:call` raises — deterministically exercising the `catch`
 %% clause. Each test below is split into two sequential top-level calls
@@ -1667,7 +1661,7 @@ trigger_leaf_change_degrades_on_compiler_port_exit_without_aborting_test_() ->
                     %% (recheck_owner_for_leaf_change/3's catch clause) —
                     %% trigger_leaf_change/1 itself must not crash or
                     %% propagate the exit. Never checked, so it lands in
-                    %% not_verified_owners (BT-2828's widened bucket) rather
+                    %% not_verified_owners rather
                     %% than being silently dropped.
                     Result = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
                     ?assertEqual([], maps:get(findings, Result)),

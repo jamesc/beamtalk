@@ -48,7 +48,7 @@ flush_test_() ->
         fun filter_by_class/1,
         fun filter_by_file/1,
         fun filter_by_new_class_selector/1,
-        %% ADR 0082 Phase 4 (BT-2290): flushKinds: surface
+        %% ADR 0082 Phase 4: flushKinds: surface
         fun flush_kinds_by_entry_kind/1,
         fun flush_kinds_by_author_kind/1,
         fun flush_kinds_combined_dimensions_intersect/1,
@@ -62,7 +62,7 @@ flush_test_() ->
         fun filter_by_class_object_non_class_is_error/1,
         fun filter_by_selector_symbol/1,
         fun flush_kinds_by_class_entry_kind/1,
-        %% BT-3248: classify_kind('class-def') -> entry, plus the generic
+        %% classify_kind('class-def') -> entry, plus the generic
         %% splice path handling a whole-class (no-selector) entry correctly.
         fun flush_kinds_by_class_def_entry_kind/1,
         fun flush_kinds_by_human_author_kind/1,
@@ -77,10 +77,10 @@ flush_test_() ->
         fun mixed_span_and_appended_method_in_one_file/1,
         fun missing_source_body_is_hard_error/1,
         fun missing_prev_source_body_is_hard_error/1,
-        %% ADR 0112 (BT-3187) required fix: flush must not resurrect a method
+        %% ADR 0112 required fix: flush must not resurrect a method
         %% already removed from the live image.
         fun flush_does_not_resurrect_removed_method_with_stale_patch/1,
-        %% ADR 0113 Phase 2 (BT-3207): destructive-tier flush
+        %% ADR 0113 Phase 2: destructive-tier flush
         fun remove_method_flushes_under_ordinary_flush_with_no_gate/1,
         fun remove_class_flush_without_confirm_is_skipped_destructive/1,
         fun remove_class_flush_including_destructive_deletes_file/1,
@@ -94,7 +94,7 @@ flush_test_() ->
         fun remove_class_mixed_with_patch_is_conflict/1,
         fun remove_class_abort_restores_staged_file_on_other_file_conflict/1,
         fun remove_class_staged_delete_crash_recovery/1,
-        %% ADR 0114 Phase 2 (BT-3271): rename-class multi-file destructive flush
+        %% ADR 0114 Phase 2: rename-class multi-file destructive flush
         fun rename_class_flush_without_confirm_is_skipped_destructive/1,
         fun rename_class_moves_file_rewrites_declaration_and_reference/1,
         fun rename_class_new_path_exists_as_unrelated_file_is_conflict/1,
@@ -109,7 +109,7 @@ flush_test_() ->
         fun rename_class_three_hop_chain_before_flush_all_report_distinct_conflict/1,
         fun rename_class_reused_freed_name_is_generic_conflict_not_chain/1,
         fun rename_class_resumes_after_simulated_partial_phase_b/1,
-        %% ADR 0114 Phase 3 (BT-3273): rename-method multi-file destructive flush
+        %% ADR 0114 Phase 3: rename-method multi-file destructive flush
         fun rename_method_flush_without_confirm_is_skipped_destructive/1,
         fun rename_method_rewrites_definition_and_confirmed_senders/1,
         fun rename_method_candidate_sites_are_never_written/1,
@@ -117,7 +117,7 @@ flush_test_() ->
         fun rename_method_mixed_with_ordinary_patch_is_conflict/1,
         fun rename_method_mixed_with_rename_class_is_conflict/1,
         fun rename_method_two_entries_merge_in_same_file/1,
-        %% BT-3284 (Gap 1): flushKinds:/flush: surface for rename-class/
+        %% flushKinds:/flush: surface for rename-class/
         %% rename-method — classify_kind/1 and filter_entries/2's
         %% selector-marker clause must recognise both kinds, same as
         %% remove-class/remove-method already do.
@@ -129,10 +129,10 @@ flush_test_() ->
         fun flush_kinds_rename_method_with_confirm_rewrites/1,
         fun flush_two_rejects_non_boolean_confirm/1,
         fun flush_kinds_two_rejects_non_boolean_confirm/1,
-        %% BT-3212 (ADR 0113 LSP follow-up): per-file operation kind on the
+        %% ADR 0113 LSP follow-up: per-file operation kind on the
         %% `FlushCompleted` wire payload
         fun flush_announces_file_kinds_for_mixed_entries/1,
-        %% BT-3275 (ADR 0114 LSP follow-up): `oldFile` on a `'rename-class'`
+        %% ADR 0114 LSP follow-up: `oldFile` on a `'rename-class'`
         %% move, and per-site `'rename-method'` kinds, on the same payload
         fun flush_announces_old_file_for_rename_class_move/1,
         fun flush_announces_rename_method_kind_for_confirmed_sites/1
@@ -148,14 +148,14 @@ unit_test_() ->
         fun filter_shadowed_drops_unrenamed_survivors/0,
         fun entry_tier_classifies_remove_class_as_tier2/0,
         fun entry_tier_classifies_other_kinds_as_tier1/0,
-        %% ADR 0114 Phase 2 (BT-3271)
+        %% ADR 0114 Phase 2
         fun entry_tier_classifies_rename_class_as_tier2/0,
-        %% ADR 0114 Phase 3 (BT-3273)
+        %% ADR 0114 Phase 3
         fun entry_tier_classifies_rename_method_as_tier2/0,
         fun resolve_new_path_prefers_recorded_value/0,
         fun resolve_new_path_derives_exact_style_from_old_path/0,
         fun resolve_new_path_derives_snake_case_style_from_old_path/0,
-        %% BT-3526 Windows regression (filename:join/2 drive-letter case bug)
+        %% Windows regression (filename:join/2 drive-letter case bug)
         fun resolve_new_path_preserves_drive_letter_case/0,
         %% Nightly Windows regression: filename:dirname/1 normalizes `\` to `/`
         fun resolve_new_path_preserves_backslash_separators/0,
@@ -169,7 +169,7 @@ new_class_directory_target_test_() ->
 mark_flushed_failure_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun mark_flushed_failure_is_reported/1}.
 
-%% BT-3526 review Blocker regression coverage: a REAL compiled class (not a
+%% Regression coverage: a REAL compiled class (not a
 %% ChangeLog-entry fixture) is required here, unlike every other test in this
 %% module — the bug is specifically that a rename-class flush commit never
 %% recompiled the renamed class, leaving its compiled module's `beamtalk_source`
@@ -244,7 +244,7 @@ reload_suite_teardown(_) ->
     ok.
 
 reload_case_setup() ->
-    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-flush-reload-" ++ Unique),
     Tmp = filename:join(temp_dir(), "bt-flush-reload-" ++ Unique),
@@ -322,7 +322,7 @@ rename_class_move_commit_refreshes_stale_source_attribute(#{proj_dir := ProjDir}
         ?_assertEqual(list_to_binary(NewPath), PostSourceFile)
     ].
 
-%% The full sequential-rename scenario (BT-3526 Blocker) at the flush level:
+%% The full sequential-rename scenario at the flush level:
 %% `OldPath2` is read from the class's REAL, current `class_source_file/1`
 %% attribute — exactly what `beamtalk_behaviour_intrinsics:classRenameTo/2`'s
 %% `capture_class_removal_snapshot/1` reads in production — rather than a
@@ -332,8 +332,8 @@ rename_class_move_commit_refreshes_stale_source_attribute(#{proj_dir := ProjDir}
 %% Blocker describes; after the fix it correctly reads `NewPath1` (still
 %% present) and the second flush completes cleanly. This is what makes the
 %% test a genuine regression test for the ROOT CAUSE rather than one that
-%% tests around it (see BT-3526's own note on this distinction) — it
-%% exercises the same read path the bug is about, even though it does not
+%% tests around it — it exercises the same read path the bug is about,
+%% even though it does not
 %% go through `classRenameTo/2` itself.
 rename_class_sequential_rename_after_flush_succeeds(#{proj_dir := ProjDir}) ->
     OldPath1 = filename:join([ProjDir, "src", "foo.bt"]),
@@ -441,9 +441,9 @@ single_method_splice_writes_atomically(#{proj_dir := ProjDir}) ->
         ?_assertEqual(false, filelib:is_regular(File ++ ".tmp"))
     ].
 
-%% BT-2577 regression: editing a doc-commented, indented method and flushing must
+%% Regression: editing a doc-commented, indented method and flushing must
 %% preserve the file indentation and the single doc comment — not duplicate the
-%% doc or dedent the method. BT-2584: the stored ChangeLog body is now the on-disk
+%% doc or dedent the method. The stored ChangeLog body is the on-disk
 %% byte-span shape (`source_ref == disk[span]` by construction — the install hook
 %% reshaped the compiler's canonical body via `reindent_method_source`), so flush
 %% splices it verbatim with no reshaping.
@@ -462,7 +462,7 @@ doc_commented_method_flush_preserves_indent_and_doc(#{proj_dir := ProjDir}) ->
     %% The span covers the verbatim doc-inclusive, indented slice.
     Slice = <<"  /// Decrease by one.\n  decrement -> Integer => self.value := self.value - 1\n">>,
     {Start, End, OldBody} = locate(Original, Slice),
-    %% BT-2584: the stored ChangeLog body is already in the on-disk byte-span
+    %% The stored ChangeLog body is already in the on-disk byte-span
     %% shape (file-indented), a drop-in for `disk[span]`.
     NewBody =
         <<"  /// Decrease by one.\n  decrement -> Integer => self.value := self.value - 2\n">>,
@@ -491,10 +491,10 @@ doc_commented_method_flush_preserves_indent_and_doc(#{proj_dir := ProjDir}) ->
     ].
 
 %%====================================================================
-%% Verbatim splice (BT-2584)
+%% Verbatim splice
 %%====================================================================
 
-%% BT-2584: the stored body is already disk-shaped, so the splice is a verbatim
+%% The stored body is already disk-shaped, so the splice is a verbatim
 %% byte replacement. A doc-inclusive, file-indented body splices in unchanged.
 verbatim_splice_replaces_span_exactly_test() ->
     Body = <<
@@ -896,12 +896,12 @@ filter_by_new_class_selector(#{proj_dir := ProjDir}) ->
     ].
 
 %%====================================================================
-%% Tests — substantive Copilot fixes (PR #2325, BT-2286)
+%% Tests — additional conflict-detection edge cases
 %%====================================================================
 
 %% Fix #2: target path that already exists *as a directory* must surface as
 %% a `target_exists` conflict during Phase A, not as a `rename_failed` later
-%% on. Mirrors the BT-2285 fix in beamtalk_repl_loader:validate_target_path/1.
+%% on. Mirrors the equivalent fix in beamtalk_repl_loader:validate_target_path/1.
 new_class_target_is_directory_is_conflict(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "greeter.bt"]),
     %% Create a directory *at the target path*. filelib:is_regular/1 would
@@ -1085,7 +1085,7 @@ filter_shadowed_drops_unrenamed_survivors() ->
     end.
 
 %%====================================================================
-%% ADR 0082 Phase 4 (BT-2290): flushKinds: filter
+%% ADR 0082 Phase 4: flushKinds: filter
 %%====================================================================
 %% Each test sets up multiple ChangeEntries with mixed kinds and author_kinds,
 %% calls `flush_kinds/1` with a Symbol set, and asserts that exactly the
@@ -1400,7 +1400,7 @@ flush_kinds_by_class_entry_kind(#{proj_dir := ProjDir}) ->
         )
     ].
 
-%% classify_kind('class-def') -> entry (BT-3248): exercise the `#'class-def'`
+%% classify_kind('class-def') -> entry: exercise the `#'class-def'`
 %% entry-kind branch and confirm the generic splice path (prepare_splice/
 %% apply_splices/replacement_for) handles a no-selector, class-level entry
 %% exactly like a method patch, purely at the flush layer.
@@ -1409,7 +1409,7 @@ flush_kinds_by_class_entry_kind(#{proj_dir := ProjDir}) ->
 %% loader) so the flush layer's own `'class-def'` handling has focused
 %% coverage independent of `beamtalk_repl_loader`'s classification logic.
 %% `beamtalk_repl_loader:add_class_def_flushability/2` now also produces a
-%% real `flushable: true` `'class-def'` entry end-to-end (BT-3254, once the
+%% real `flushable: true` `'class-def'` entry end-to-end (once the
 %% `:def` tab's resubmitted skeleton became round-trip-safe — see that
 %% function's doc) — exercised through the loader in
 %% `beamtalk_repl_loader_tests.erl`'s
@@ -1642,7 +1642,7 @@ missing_prev_source_body_is_hard_error(#{workspace_id := WsId, proj_dir := ProjD
     ].
 
 %%====================================================================
-%% BT-3187 (ADR 0112) / BT-3207 (ADR 0113 Phase 2) — flush must not
+%% ADR 0112 / ADR 0113 Phase 2 — flush must not
 %% resurrect a removed method, and 'remove-method' is Tier 1
 %%====================================================================
 
@@ -1700,7 +1700,7 @@ flush_does_not_resurrect_removed_method_with_stale_patch(#{proj_dir := ProjDir})
     ].
 
 %%====================================================================
-%% ADR 0113 Phase 2 (BT-3207) — destructive-tier flush
+%% ADR 0113 Phase 2 — destructive-tier flush
 %%====================================================================
 
 %% Tier 1: a bare `remove-method` entry now excises its recorded span under
@@ -1841,7 +1841,7 @@ filter_by_remove_method_selector(#{proj_dir := ProjDir}) ->
         ?_assert(entry_flushed(Seq))
     ].
 
-%% BT-3284 (Gap 1): `flush: #'rename-class' confirmDestructive: true` — the
+%% `flush: #'rename-class' confirmDestructive: true` — the
 %% bare-symbol form — filters on kind, not selector, mirroring
 %% `filter_by_remove_class_selector/1`. A `'rename-class'` entry's selector is
 %% always null, so matching on `entry_selector/1` would silently match zero
@@ -1871,7 +1871,7 @@ filter_by_rename_class_selector(#{proj_dir := ProjDir}) ->
         ?_assert(entry_flushed(Seq))
     ].
 
-%% BT-3284 (Gap 1): `flush: #'rename-method' confirmDestructive: true` filters
+%% `flush: #'rename-method' confirmDestructive: true` filters
 %% on kind, not selector — unlike `'rename-class'`, a `'rename-method'` entry
 %% carries the real new selector (here `#incrementBy`, not
 %% `#'rename-method'`), guarding against re-introducing an `entry_selector/1`
@@ -1929,10 +1929,10 @@ flush_kinds_remove_class_with_confirm_deletes_file(#{proj_dir := ProjDir}) ->
         ?_assertEqual(false, filelib:is_regular(File))
     ].
 
-%% BT-3284 (Gap 1): `flushKinds: #{#'rename-class'}` (no confirm) leaves the
-%% destructive rename entry pending, exactly like `#'remove-class'` above —
-%% before this fix, `classify_kind('rename-class')` fell through to
-%% `unknown`, so the call raised `unknown_kind_error` instead of scoping.
+%% `flushKinds: #{#'rename-class'}` (no confirm) leaves the destructive
+%% rename entry pending, exactly like `#'remove-class'` above.
+%% `classify_kind('rename-class')` must not fall through to `unknown`
+%% (which would raise `unknown_kind_error` instead of scoping).
 flush_kinds_rename_class_requires_confirm(#{proj_dir := ProjDir}) ->
     OldPath = filename:join([ProjDir, "src", "counter.bt"]),
     NewPath = filename:join([ProjDir, "src", "accumulator.bt"]),
@@ -2156,7 +2156,7 @@ remove_class_staged_delete_crash_recovery(#{proj_dir := ProjDir}) ->
     ].
 
 %%====================================================================
-%% Tests — rename-class multi-file destructive flush (ADR 0114, BT-3271)
+%% Tests — rename-class multi-file destructive flush (ADR 0114)
 %%====================================================================
 
 %% Tier 2 gating, mirroring `remove_class_flush_without_confirm_is_skipped_
@@ -2245,7 +2245,7 @@ rename_class_moves_file_rewrites_declaration_and_reference(#{proj_dir := ProjDir
         ?_assertEqual(false, filelib:is_regular(RefPath ++ ".tmp"))
     ].
 
-%% BT-3526 review round 4 Blocker: `new_path` already existing as an
+%% Regression: `new_path` already existing as an
 %% UNRELATED file (never touched by any pending rename entry — a plain
 %% pre-existing scratch file, not a resumed prior attempt) must refuse the
 %% flush rather than silently overwriting it once Phase B's bare
@@ -2327,7 +2327,7 @@ rename_class_self_reference_folds_into_move(#{proj_dir := ProjDir}) ->
         ?_assert(entry_flushed(Seq))
     ].
 
-%% BT-3526 review round 5 Blocker: `all_units_already_applied/2` (the
+%% `all_units_already_applied/2` (the
 %% "old_path already gone" recovery check) must account for the cumulative
 %% byte-length shift a same-file self-reference site picks up from an
 %% EARLIER (lower-offset) site's own splice — checking each unit's raw
@@ -2533,7 +2533,7 @@ rename_class_mixed_with_ordinary_patch_is_conflict(#{proj_dir := ProjDir}) ->
         ?_assertNot(entry_flushed(PatchSeq))
     ].
 
-%% BT-3526 review Suggestion: two INDEPENDENT rename-class entries (different
+%% Two INDEPENDENT rename-class entries (different
 %% classes, different `old_path`s) whose `new_path`s happen to coincide must
 %% conflict the same way a rename-vs-ordinary-patch collision does — a `.tmp`
 %% write from one would otherwise silently clobber the other's. Unreachable
@@ -2589,7 +2589,7 @@ rename_class_two_renames_colliding_on_new_path_is_conflict(#{proj_dir := ProjDir
         ?_assertNot(entry_flushed(Seq2))
     ].
 
-%% BT-3526 review round 2 Blocker: the write-vs-write guard above does not
+%% The write-vs-write guard above does not
 %% catch the more dangerous shape — entry A's `new_path` equal to entry B's
 %% `old_path`. Phase B's `move` commit unlinks `old_path` only AFTER its own
 %% `new_path.tmp` rename succeeds, so committing A (writes `bar.bt`) then B
@@ -2637,7 +2637,7 @@ rename_class_new_path_collides_with_other_rename_old_path_is_conflict(#{proj_dir
         ?_assertNot(entry_flushed(Seq2))
     ].
 
-%% BT-3283: renaming the SAME class TWICE before any intervening flush
+%% Renaming the SAME class TWICE before any intervening flush
 %% (`Foo renameTo: #Bar` then, with no flush, `Bar renameTo: #Baz`) produces
 %% two `'rename-class'` entries that both compute `old_path = foo.bt` —
 %% `classRenameTo/2` reads `old_path` from the class's compiled
@@ -2700,7 +2700,7 @@ rename_class_same_class_chain_before_flush_is_distinct_conflict(#{proj_dir := Pr
         ?_assertNot(entry_flushed(Seq2))
     ].
 
-%% BT-3283 review self-check: the SAME class renamed THREE times before any
+%% The SAME class renamed THREE times before any
 %% flush (`Foo renameTo: #Bar`, `Bar renameTo: #Baz`, `Baz renameTo: #Qux`)
 %% — every entry's stale `old_path` computation means all three entries
 %% share `old_path = foo.bt`, so the pairwise collision walk finds a
@@ -2760,7 +2760,7 @@ rename_class_three_hop_chain_before_flush_all_report_distinct_conflict(#{proj_di
         ?_assertNot(entry_flushed(Seq3))
     ].
 
-%% BT-3283 review self-check: a class that RENAMES AWAY frees its old name,
+%% A class that RENAMES AWAY frees its old name,
 %% and a later, wholly UNRELATED class can legitimately reuse that freed
 %% name (`Foo renameTo: #Bar` frees `Foo`; some independent `X renameTo:
 %% #Foo` may then reclaim it — `ensure_rename_collision_free/2` allows this,
@@ -2889,7 +2889,7 @@ rename_class_resumes_after_simulated_partial_phase_b(#{proj_dir := ProjDir}) ->
     ].
 
 %%====================================================================
-%% Tests — rename-method multi-file destructive flush (ADR 0114, BT-3273)
+%% Tests — rename-method multi-file destructive flush (ADR 0114)
 %%====================================================================
 
 %% Tier 2 gating, mirroring `rename_class_flush_without_confirm_is_skipped_
@@ -2919,7 +2919,7 @@ rename_method_flush_without_confirm_is_skipped_destructive(#{proj_dir := ProjDir
         ?_assertNot(entry_flushed(Seq))
     ].
 
-%% BUnit/BT-3273 acceptance-criteria coverage (this module's own EUnit-level
+%% BUnit acceptance-criteria coverage (this module's own EUnit-level
 %% slice — the real `Counter renameSelector: #increment to: #incrementBy` +
 %% `flush: Counter confirmDestructive: true` round trip against a real,
 %% in-project-classified compiled class lives in `tests/repl-protocol/cases/`,
@@ -3312,7 +3312,7 @@ entry_tier_classifies_other_kinds_as_tier1() ->
         del_tree(TmpHome)
     end.
 
-%% ADR 0114 Phase 2 (BT-3271): `'rename-class'` joins `'remove-class'` in
+%% ADR 0114 Phase 2: `'rename-class'` joins `'remove-class'` in
 %% Tier 2 — a destructive flush gate, since it moves (and unlinks) a file.
 entry_tier_classifies_rename_class_as_tier2() ->
     {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
@@ -3335,7 +3335,7 @@ entry_tier_classifies_rename_class_as_tier2() ->
         del_tree(TmpHome)
     end.
 
-%% ADR 0114 Phase 3 (BT-3273): `'rename-method'` joins `'remove-class'`/
+%% ADR 0114 Phase 3: `'rename-method'` joins `'remove-class'`/
 %% `'rename-class'` in Tier 2 — a destructive flush gate, since it rewrites
 %% every confirmed sender site across the project, not just the definition.
 entry_tier_classifies_rename_method_as_tier2() ->
@@ -3436,7 +3436,7 @@ resolve_new_path_derives_snake_case_style_from_old_path() ->
         del_tree(TmpHome)
     end.
 
-%% BT-3526 Windows regression: a derived new path must preserve the exact
+%% Windows regression: a derived new path must preserve the exact
 %% drive-letter case of `old_path` (e.g. `C:` stays `C:`, never lower-cased
 %% to `c:`) — `filename:join/2` mangles this on win32, which is why
 %% `derive_new_path/3` deliberately no longer uses it. This assertion holds
@@ -3609,11 +3609,11 @@ method_input(Class, Selector, NewBody, OldBody, File, Start, End) ->
         span => #{start => Start, 'end' => End}
     }.
 
-%% A flushable `'remove-method'` entry (ADR 0112, BT-3187), shaped like
+%% A flushable `'remove-method'` entry (ADR 0112), shaped like
 %% `beamtalk_repl_loader:do_emit_remove_change_entry/5` +
 %% `resolve_removal_span_entry/6` actually build: `side` explicit, a resolved
-%% `span`/`prev_source` against the on-disk body it would excise (BT-2192's
-%% job, not flush's), and no `source` (a removal has no new body to splice in).
+%% `span`/`prev_source` against the on-disk body it would excise (the
+%% loader's job, not flush's), and no `source` (a removal has no new body to splice in).
 remove_method_input(Class, Selector, Side, File, Start, End, PrevBody) ->
     #{
         class => Class,
@@ -3657,13 +3657,13 @@ new_class_input(ClassName, Source, File) ->
         source_file => File
     }.
 
-%% A synthetic *flushable* `'class-def'` entry (ADR 0082 extension, BT-3248) —
+%% A synthetic *flushable* `'class-def'` entry (ADR 0082 extension) —
 %% no `selector`/`side` (a class-level redefinition, not a single method), a
 %% `span`/`prev_source` against the on-disk region it replaces. Exercises the
 %% flush layer's `'class-def'` handling directly, independent of
 %% `beamtalk_repl_loader`'s own classification logic (`add_class_def_
 %% flushability/2`, covered end-to-end via the loader in
-%% `beamtalk_repl_loader_tests.erl`, BT-3254).
+%% `beamtalk_repl_loader_tests.erl`).
 class_def_input(Class, NewSource, OldSource, File, Start, End) ->
     #{
         class => Class,
@@ -3678,7 +3678,7 @@ class_def_input(Class, NewSource, OldSource, File, Start, End) ->
         span => #{start => Start, 'end' => End}
     }.
 
-%% A flushable `'remove-class'` entry (ADR 0113, BT-3206/BT-3207), shaped like
+%% A flushable `'remove-class'` entry (ADR 0113), shaped like
 %% `beamtalk_repl_loader:do_emit_remove_class_change_entry/4` actually builds:
 %% no `selector`/`side`/`span`/`source` (a whole-file removal, nothing
 %% replaces the deleted text), `prev_source` carries the class's full prior
@@ -3696,7 +3696,7 @@ remove_class_input(ClassName, PrevSource, File) ->
         prev_source => PrevSource
     }.
 
-%% A flushable `'rename-class'` append_input (ADR 0114, BT-3269/BT-3271):
+%% A flushable `'rename-class'` append_input (ADR 0114):
 %% `sites[0]` is always the class's own declaration site, whose `sourceFile`
 %% is `OldPath` — matching what `beamtalk_behaviour_intrinsics:classRenameTo/2`
 %% actually records (`capture_class_removal_snapshot/1` captures the OLD
@@ -3735,7 +3735,7 @@ rename_site(SourceFile, Start, End, NewText, PrevText) ->
         prev_source_ref => PrevRef
     }.
 
-%% A flushable `'rename-method'` append_input (ADR 0114, BT-3269/BT-3273):
+%% A flushable `'rename-method'` append_input (ADR 0114):
 %% `sites[0]` is always the definition site, `sites[1..]` are every
 %% *confirmed* self/super sender site; `CandidateSites` are reported-only —
 %% flush must never stage, write, or otherwise touch them.
@@ -3754,7 +3754,7 @@ rename_method_input(Class, NewSelector, OldSelector, Side, Sites, CandidateSites
         author_kind => human
     }.
 
-%% One `candidate_site()` map (ADR 0114, BT-3269): reported for human/agent
+%% One `candidate_site()` map (ADR 0114): reported for human/agent
 %% review, never spliced — no `source_ref`/`prev_source_ref`.
 candidate_site(SourceFile, Start, End) ->
     #{
@@ -3783,7 +3783,7 @@ entry_flushed(Seq) ->
     beamtalk_workspace_changelog:entry_flushed(Entry).
 
 fresh_workspace() ->
-    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`:
+    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`:
     %% `beamtalk_workspace_changelog`'s own `load_from_disk` would otherwise
     %% restore a prior run's leftover ChangeLog entries into this run's ETS
     %% table.
@@ -3823,13 +3823,13 @@ del_tree(Path) ->
     ok.
 
 %%====================================================================
-%% FlushCompleted announcement (ADR 0093 §2, BT-2530)
+%% FlushCompleted announcement (ADR 0093 §2)
 %%====================================================================
 
 %% `announce_flush_completed/2` publishes the typed FlushCompleted event on the
-%% SystemAnnouncer bus with the flushed files and their per-file kinds
-%% (BT-3212) — the sole flush-completion push source since BT-2531 retired the
-%% legacy `beamtalk_flush_events` broadcast. Subscribed with a fun handler so
+%% SystemAnnouncer bus with the flushed files and their per-file kinds — the
+%% sole flush-completion push source; the legacy `beamtalk_flush_events`
+%% broadcast no longer exists. Subscribed with a fun handler so
 %% the veneer async dispatch invokes it and we can assert on the typed event
 %% map.
 announce_flush_completed_emits_typed_event_test() ->
@@ -3861,7 +3861,7 @@ announce_flush_completed_emits_typed_event_test() ->
         beamtalk_announcements:unsubscribe(SubRef)
     end.
 
-%% End-to-end (BT-3212, ADR 0113 LSP follow-up): a real `flush_including_
+%% End-to-end (ADR 0113 LSP follow-up): a real `flush_including_
 %% destructive/0` round trip covering all three LSP-relevant buckets in one
 %% pass — a `new-class` creation, an ordinary `instance` patch, and a
 %% (confirmed) `remove-class` deletion — announces a `fileKinds` entry per
@@ -3925,7 +3925,7 @@ flush_announces_file_kinds_for_mixed_entries(#{proj_dir := ProjDir}) ->
         beamtalk_announcements:unsubscribe(SubRef)
     end.
 
-%% ADR 0114 LSP follow-up (BT-3275): a real `'rename-class'` flush's
+%% ADR 0114 LSP follow-up: a real `'rename-class'` flush's
 %% `fileKinds` entries distinguish the moved declaration file (kind
 %% `'rename-class'` PLUS `oldFile`, the file `file_kind_map/1` builds from the
 %% one `op = move` `#prepared{}` record) from the ordinary same-batch
@@ -3988,7 +3988,7 @@ flush_announces_old_file_for_rename_class_move(#{proj_dir := ProjDir}) ->
         beamtalk_announcements:unsubscribe(SubRef)
     end.
 
-%% ADR 0114 LSP follow-up (BT-3275): a real `'rename-method'` flush's
+%% ADR 0114 LSP follow-up: a real `'rename-method'` flush's
 %% `fileKinds` carries a `'rename-method'` entry for the definition site and
 %% every CONFIRMED sender site — never for a `candidate_sites` entry, which
 %% is never staged/written at all and so can never appear in `Files`/

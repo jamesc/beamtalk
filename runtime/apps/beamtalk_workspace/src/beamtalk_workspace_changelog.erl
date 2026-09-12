@@ -101,12 +101,12 @@ release nodes do not start a workspace, so this code is a no-op there.
     clear/0,
     find_revert_target/2,
     find_revert_target/3,
-    %% ADR 0114 (BT-3270): per-site body persistence for the shared
+    %% ADR 0114: per-site body persistence for the shared
     %% multi-site rewrite mechanism — see this function's doc.
     store_site_body/1
 ]).
 
-%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
+%% Beamtalk FFI surface (ADR 0082 Phase 1). These build the data the
 %% `change_log.bt` / `change_entry.bt` value objects wrap: each entry becomes a
 %% `$beamtalk_class`-tagged map and `dirtyMethods/0` returns the per-class set
 %% of dirty selectors. The FFI dispatches on the Beamtalk selector verbatim, so
@@ -141,12 +141,12 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_prev_source_ref/1,
     read_source_body/1,
     read_prev_source_body/1,
-    %% ADR 0114 (BT-3271): reads a `site()`'s own ref directly, for
+    %% ADR 0114: reads a `site()`'s own ref directly, for
     %% `beamtalk_workspace_flush`'s multi-site rename-class splice — see this
     %% function's own doc for why it cannot reuse `read_source_body/1`/
     %% `read_prev_source_body/1` verbatim.
     read_site_body/1,
-    %% ADR 0114 (BT-3269).
+    %% ADR 0114.
     entry_old_class/1,
     entry_old_selector/1,
     entry_old_path/1,
@@ -155,7 +155,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_candidate_sites/1
 ]).
 
-%% ADR 0114 (BT-3269): shadow-detection and flushability helpers for the
+%% ADR 0114: shadow-detection and flushability helpers for the
 %% multi-site `'rename-class'`/`'rename-method'` kinds.
 -export([
     target_key/1,
@@ -187,12 +187,12 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% `kind` is an open enum (ADR 0082): newer writers may add values this beam does
 %% not know. Decoding maps any unrecognised value to `unknown` so history is
 %% preserved across versions rather than dropped. `'remove-method'` is ADR
-%% 0112's method-removal kind (BT-3187). `'class-def'` is ADR 0082's
-%% extension for redefining an *existing* class's whole definition (BT-3248) —
+%% 0112's method-removal kind. `'class-def'` is ADR 0082's
+%% extension for redefining an *existing* class's whole definition —
 %% the cockpit `:def` tab's "Compile" action, as opposed to `'new-class'`
 %% (a brand-new class created via `newClass:at:`). `'rename-class'`/
 %% `'rename-method'` are ADR 0114's `renameTo:`/`renameSelector:to:` kinds
-%% (BT-3269) — the first two kinds whose rewrite spans a *set* of files
+%% — the first two kinds whose rewrite spans a *set* of files
 %% (`sites`/`candidate_sites`) rather than one, see those fields' docs below.
 -type kind() ::
     instance
@@ -208,7 +208,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% explicitly only for that kind — legacy `instance`/`class`-kind patch
 %% entries derive their side from `kind` itself (`entry_side/1`), so the field
 %% is additive, not a breaking schema change (ADR 0112 § ChangeLog interaction).
-%% ADR 0114 (BT-3269): `'rename-method'` stores `side` the same explicit way;
+%% ADR 0114: `'rename-method'` stores `side` the same explicit way;
 %% `'rename-class'` always has `side = undefined` (null) — a class identity
 %% change has no method-table side.
 -type side() :: instance | class.
@@ -216,11 +216,11 @@ release nodes do not start a workspace, so this code is a no-op there.
 -type author_kind() :: human | agent | unknown.
 -type span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
 
-%% ADR 0114 (BT-3269): one rewritten reference location in a `'rename-class'`/
+%% ADR 0114: one rewritten reference location in a `'rename-class'`/
 %% `'rename-method'` entry's `sites` list. `source_ref`/`prev_source_ref` name
 %% the recorded pre/post rewrite bodies exactly like the top-level fields do
 %% for a single-file kind (undefined for a site not yet populated with a
-%% recorded body — the site-discovery/rewrite mechanism itself is BT-3270,
+%% recorded body — the site-discovery/rewrite mechanism itself is
 %% out of scope here). A bare `undefined` in place of a `site()` map (rather
 %% than a map with `source_file = undefined`) is the ADR's documented
 %% `sites[0] = null` case: a dynamic (ClassBuilder) class being renamed has no
@@ -232,7 +232,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     prev_source_ref := binary() | undefined
 }.
 
-%% ADR 0114 (BT-3269): one reported-but-never-rewritten sender in a
+%% ADR 0114: one reported-but-never-rewritten sender in a
 %% `'rename-method'` entry's `candidate_sites` list. No `source_ref`/
 %% `prev_source_ref` — nothing here is ever spliced, so there is no prior/new
 %% body to record (ADR 0114 § ChangeLog schema).
@@ -260,28 +260,28 @@ release nodes do not start a workspace, so this code is a no-op there.
     prev_source_ref :: binary() | undefined,
     source_file :: binary() | undefined,
     span :: span() | undefined,
-    %% ADR 0114 (BT-3269): `'rename-class'`-only — the pre-rename class name.
+    %% ADR 0114: `'rename-class'`-only — the pre-rename class name.
     %% `undefined` for every other kind.
     old_class :: binary() | undefined,
-    %% ADR 0114 (BT-3269): `'rename-method'`-only — the pre-rename selector
+    %% ADR 0114: `'rename-method'`-only — the pre-rename selector
     %% (`selector` itself holds the *new* selector, mirroring how `class`
     %% holds the *new* name for `'rename-class'`). `undefined` for every
     %% other kind.
     old_selector :: binary() | undefined,
-    %% ADR 0114 (BT-3269): `'rename-class'`-only — the file path before/after
+    %% ADR 0114: `'rename-class'`-only — the file path before/after
     %% a rename that also moves the backing file (or a pure `Workspace
     %% moveClass:to:` move). `undefined` for a dynamic class (no backing
     %% file) and for every other kind.
     old_path :: binary() | undefined,
     new_path :: binary() | undefined,
-    %% ADR 0114 (BT-3269): `'rename-class'`/`'rename-method'`-only — the
+    %% ADR 0114: `'rename-class'`/`'rename-method'`-only — the
     %% multi-site shape neither field above can express: `sites[0]` is always
     %% the definition/declaration site, `sites[1..]` are every other rewritten
     %% reference. `undefined` (not `[]`) for every other kind, matching the
     %% "undefined means not applicable" convention every other optional field
     %% here already follows.
     sites :: [site() | undefined] | undefined,
-    %% ADR 0114 (BT-3269): `'rename-method'`-only — the reported, never
+    %% ADR 0114: `'rename-method'`-only — the reported, never
     %% auto-rewritten candidate sender list. `undefined` for every other kind
     %% (including `'rename-class'`, which has no candidate tier).
     candidate_sites :: [candidate_site()] | undefined,
@@ -292,9 +292,9 @@ release nodes do not start a workspace, so this code is a no-op there.
     author_kind :: author_kind(),
     %% True once a `Workspace flush` has written this entry's patch to disk
     %% (ADR 0082 Phase 2) — OR, for a `'remove-class'` entry specifically,
-    %% once `Workspace changes revert:` has undone it (ADR 0113, BT-3208), OR,
+    %% once `Workspace changes revert:` has undone it (ADR 0113), OR,
     %% the same way, for a `'rename-class'`/`'rename-method'` entry once its
-    %% own `revert:` has undone it (ADR 0114, BT-3274): no disk write
+    %% own `revert:` has undone it (ADR 0114): no disk write
     %% happened, but the entry's effect is equally resolved and must equally
     %% drop out of the active/pending view. Persisted so the
     %% entry stays excluded from the active view across workspace restarts:
@@ -329,7 +329,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     source_file => binary() | undefined,
     span => span() | undefined,
     not_flushable_reason => binary() | undefined,
-    %% ADR 0114 (BT-3269): see the matching `#entry{}` fields' docs above.
+    %% ADR 0114: see the matching `#entry{}` fields' docs above.
     old_class => binary() | undefined,
     old_selector => binary() | undefined,
     old_path => binary() | undefined,
@@ -603,11 +603,11 @@ find_revert_target(Class, Selector, Side) when is_binary(Class) ->
         [] ->
             {error, no_entry};
         [#entry{kind = 'new-class'} = Entry | _] ->
-            %% Reverting a new-class creation removes the class (BT-2664).
+            %% Reverting a new-class creation removes the class.
             {remove, Entry};
         [#entry{kind = 'remove-class'} = Entry | _] ->
             %% Reverting a class removal recompiles and reinstalls the whole
-            %% class from its recorded prior source (ADR 0113, BT-3208). If
+            %% class from its recorded prior source (ADR 0113). If
             %% the recorded `prev_source_ref` body is unreadable (ChangeLog
             %% rotation pruned `sources/`, or a rare fs race), fall back to
             %% the class's own on-disk file — mirroring the modify path's
@@ -623,7 +623,7 @@ find_revert_target(Class, Selector, Side) when is_binary(Class) ->
         [#entry{kind = Kind} = Entry | _] when
             Kind =:= 'rename-class'; Kind =:= 'rename-method'
         ->
-            %% ADR 0114 (BT-3274): a multi-site target — the caller rewrites
+            %% ADR 0114: a multi-site target — the caller rewrites
             %% every one of `Entry`'s own `sites` back to its own recorded
             %% `prev_source_ref`, so there is no single `PrevBody` for this
             %% function to resolve the way the modify/reinstall-class arms
@@ -634,7 +634,7 @@ find_revert_target(Class, Selector, Side) when is_binary(Class) ->
             %% the patch (a modify, whose unflushed disk body IS its pre-patch
             %% body — resilience for entries predating source attribution), or it
             %% is a brand-new method (an *add*, whose pre-patch state is "absent"
-            %% → revert = removal, BT-2663). recover_prev_from_disk/1 tells them
+            %% → revert = removal). recover_prev_from_disk/1 tells them
             %% apart.
             recover_prev_from_disk(Entry);
         [Entry | _] ->
@@ -658,7 +658,7 @@ match_selector(SelectorBin) -> SelectorBin.
 %% removal). Returns:
 %%
 %%   - `{ok, Body, Entry}'  — modify: re-install the recovered prior body.
-%%   - `{remove, Entry}'    — add: remove the just-added method (BT-2663).
+%%   - `{remove, Entry}'    — add: remove the just-added method.
 %%   - `{error, no_prev_source}' — modify whose prior body is genuinely
 %%     unrecoverable: the file can't be read, the span no longer resolves, or
 %%     the selector is absent but the entry recorded a `prev_source_ref' (so it
@@ -667,7 +667,7 @@ match_selector(SelectorBin) -> SelectorBin.
 %% Invariant + limit: the on-disk body returned for a modify is the true
 %% pre-patch body only while the entry is unflushed AND the file has not been
 %% edited externally (VSCode/git) since the patch. The normal-flow entries that
-%% *do* record `prev_source' (BT-2553 follow-up) don't reach here; this is a
+%% *do* record `prev_source' don't reach here; this is a
 %% best-effort fallback. A later flush still runs its own byte-span/prev_source
 %% conflict check before writing.
 -spec recover_prev_from_disk(entry()) ->
@@ -678,7 +678,7 @@ recover_prev_from_disk(
     is_binary(File), is_binary(Selector)
 ->
     %% `resolve_method_span/4` only accepts `instance` | `class` for `Side`; the
-    %% entry's raw `kind` can be `'remove-method'` (ADR 0112, BT-3187), which
+    %% entry's raw `kind` can be `'remove-method'` (ADR 0112), which
     %% would always fail with `bad_argument` here. `entry_side/1` normalises
     %% both the legacy `instance`/`class`-kind shape and the explicit `side`
     %% field a `'remove-method'` entry carries.
@@ -696,16 +696,16 @@ recover_prev_from_disk(
                         undefined ->
                             %% No recorded prior body AND absent on disk → a
                             %% brand-new method added live; its pre-patch state
-                            %% is "absent", so revert removes it (BT-2663).
+                            %% is "absent", so revert removes it.
                             %%
-                            %% Residual ambiguity (accepted, unavoidable): a
-                            %% pre-BT-2553 *modify* entry also carries no
-                            %% prev_source_ref, so if its method was externally
-                            %% removed from the file (git restore / editor
-                            %% revert) AFTER the live patch, we cannot tell it
-                            %% apart from an add and will treat revert as a
-                            %% removal. Normal-flow entries record prev_source_ref
-                            %% (BT-2553) and never reach this branch.
+                            %% Residual ambiguity (accepted, unavoidable): an
+                            %% older *modify* entry recorded before prev_source_ref
+                            %% tracking also carries no prev_source_ref, so if its
+                            %% method was externally removed from the file (git
+                            %% restore / editor revert) AFTER the live patch, we
+                            %% cannot tell it apart from an add and will treat
+                            %% revert as a removal. Normal-flow entries record
+                            %% prev_source_ref and never reach this branch.
                             {remove, Entry};
                         _Ref ->
                             %% The entry DID record a prev_source_ref — it is
@@ -725,7 +725,7 @@ recover_prev_from_disk(
         {error, _} ->
             %% The recorded source file can no longer be read (deleted, moved,
             %% permissions). A modify whose prior body cannot be recovered must
-            %% NOT be silently deleted — surface a loud error (BT-2663 AC).
+            %% NOT be silently deleted — surface a loud error.
             {error, no_prev_source}
     end;
 recover_prev_from_disk(_Entry) ->
@@ -733,7 +733,7 @@ recover_prev_from_disk(_Entry) ->
     %% shape we cannot resolve against disk. We cannot positively distinguish an
     %% *add* from a *modify* here — there is no `prev_source` and no file to probe
     %% for the selector — so refuse loudly rather than risk deleting a method that
-    %% existed before the patch (BT-2663 AC: "never a silent delete"). Positive
+    %% existed before the patch (never a silent delete). Positive
     %% add evidence only comes from `selector_not_found` against a readable source
     %% file (handled above), which is the new-method-on-a-project-class case the
     %% LiveView add-revert flow produces.
@@ -770,7 +770,7 @@ revert_selector_binary(Sel) when is_binary(Sel) -> Sel;
 revert_selector_binary(Sel) when is_atom(Sel) -> atom_to_binary(Sel, utf8).
 
 %%% ----------------------------------------------------------------------------
-%%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284)
+%%% Beamtalk FFI surface (ADR 0082 Phase 1)
 %%% ----------------------------------------------------------------------------
 %%% These functions translate the opaque `#entry{}` records into the
 %%% `$beamtalk_class`-tagged maps that the `change_log.bt` / `change_entry.bt`
@@ -859,7 +859,7 @@ survivor_seqs(Entries) ->
 %% Whole-class-level entries (`'new-class'`, `'class-def'`, `'remove-class'`)
 %% carry no `selector`, so without a tie-breaker they would all collide on
 %% the same `(class, undefined, undefined)` key. Concretely: a `'class-def'`
-%% redefinition (BT-3248, always `flushable: false`) of a class whose
+%% redefinition (always `flushable: false`) of a class whose
 %% `'new-class'` creation (flushable, still pending) has not yet been
 %% flushed would win the shadow slot by seq and mark the `'new-class'` entry
 %% `shadowed`, hiding the entry `Workspace flush` actually acts on from the
@@ -877,7 +877,7 @@ shadow_key(E) ->
     {E#entry.class, E#entry.selector, entry_side(E)}.
 
 %%% ----------------------------------------------------------------------------
-%%% Per-site shadow-detection key (ADR 0114, BT-3269)
+%%% Per-site shadow-detection key (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -1008,10 +1008,10 @@ dirtyMethods() ->
 %% The selector recorded for the dirty-methods view. Method patches use their
 %% own selector; new-class entries (selector = undefined) use the `#new-class`
 %% placeholder so the per-class entry is still visible. A `'class-def'` entry
-%% (redefinition of an *existing* class's whole definition, BT-3248) also
+%% (redefinition of an *existing* class's whole definition) also
 %% carries no selector — it gets its own `#'class-def'` placeholder rather
 %% than reusing `#new-class`, so the dirty view does not misreport a
-%% redefinition as a brand-new class. `'rename-class'` (ADR 0114, BT-3269)
+%% redefinition as a brand-new class. `'rename-class'` (ADR 0114)
 %% gets the same treatment for the same reason — it must not be confused
 %% with either a brand-new class or a whole-definition redefinition.
 -spec dirty_selector(#entry{}) -> atom().
@@ -1061,7 +1061,7 @@ entry_to_value(#entry{} = E, Survivors) ->
         shadowed => Shadowed,
         clean => Clean,
         diff => diff_value(Diff),
-        %% ADR 0114 (BT-3269/BT-3284): `undefined` for every kind except
+        %% ADR 0114: `undefined` for every kind except
         %% `'rename-class'` (`oldClass`) / `'rename-method'` (`oldSelector`)
         %% — `selector_symbol/1` is a generic binary()|undefined -> atom()|nil
         %% converter, reused here rather than duplicated for the class-name
@@ -1077,7 +1077,7 @@ diff_value(undefined) -> nil;
 diff_value(Diff) when is_binary(Diff) -> Diff.
 
 %% Compute the net delta of a pending entry against the current on-disk body
-%% (ADR 0082 Phase 5+, BT-2575): `{Clean, Diff}` where `Clean` is true iff the
+%% (ADR 0082 Phase 5+): `{Clean, Diff}` where `Clean` is true iff the
 %% installed in-memory body matches disk (so the entry has been reverted back to
 %% its on-disk state and should drop out of the pending view), and `Diff` is the
 %% on-disk → in-memory unified diff (or `undefined` when clean or not
@@ -1106,7 +1106,7 @@ method_delta(#entry{kind = Kind, selector = Selector, source_file = File} = E) w
         _:_ -> {false, undefined}
     end;
 method_delta(#entry{kind = 'class-def', source_file = File} = E) when is_binary(File) ->
-    %% BT-3248: same disk-vs-memory delta as an instance/class-kind method
+    %% Same disk-vs-memory delta as an instance/class-kind method
     %% patch above, just resolved at whole-class granularity
     %% (`resolve_class_span/2` instead of `resolve_method_span/4`) — a
     %% redefinition of an *existing* class always has a prior on-disk body to
@@ -1136,7 +1136,7 @@ disk_method_body(DiskSource, Class, Selector, Kind) ->
         {error, _Reason, _Msg} -> throw(span_unresolved)
     end.
 
-%% The class's current whole-definition body on disk (BT-3248). Unlike a
+%% The class's current whole-definition body on disk. Unlike a
 %% method's `selector_not_found` case, a `'class-def'` entry only ever exists
 %% for a class this ChangeLog already knows had a prior tracked source (see
 %% `beamtalk_repl_loader:emit_class_def_entries/3`'s doc), so the class is
@@ -2064,7 +2064,7 @@ entry_to_json(#entry{} = E) ->
         <<"prev_source_ref">> => null_or(E#entry.prev_source_ref),
         <<"sourceFile">> => null_or(E#entry.source_file),
         <<"span">> => span_to_json(E#entry.span),
-        %% ADR 0114 (BT-3269).
+        %% ADR 0114.
         <<"old_class">> => null_or(E#entry.old_class),
         <<"old_selector">> => null_or(E#entry.old_selector),
         <<"old_path">> => null_or(E#entry.old_path),
@@ -2100,7 +2100,7 @@ entry_from_json(Line) ->
         prev_source_ref = from_null(maps:get(<<"prev_source_ref">>, Map, null)),
         source_file = from_null(maps:get(<<"sourceFile">>, Map, null)),
         span = span_from_json(maps:get(<<"span">>, Map, null)),
-        %% ADR 0114 (BT-3269): absent in every metadata line written before
+        %% ADR 0114: absent in every metadata line written before
         %% this ADR — `maps:get/3`'s `null` default decodes to `undefined`
         %% via the same helpers used for every other pre-existing optional
         %% field, so legacy lines round-trip unchanged.
@@ -2210,7 +2210,7 @@ span_to_json(#{start := Start, 'end' := End}) -> #{<<"start">> => Start, <<"end"
 span_from_json(null) -> undefined;
 span_from_json(#{<<"start">> := Start, <<"end">> := End}) -> #{start => Start, 'end' => End}.
 
-%% ADR 0114 (BT-3269): `sites`/`candidate_sites` (de)serialisation. A whole
+%% ADR 0114: `sites`/`candidate_sites` (de)serialisation. A whole
 %% `sites` list of `null` (rather than an empty array) matches every other
 %% optional field's "absent means not applicable" convention — only
 %% `'rename-class'`/`'rename-method'` entries ever populate it. An individual

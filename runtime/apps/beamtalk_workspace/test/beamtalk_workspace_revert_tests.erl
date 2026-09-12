@@ -105,13 +105,13 @@ revert_e2e_test_() ->
             fun remove_selector_if_absent_returns_receiver_on_success/1,
             fun remove_selector_allow_stdlib_removes_from_a_stdlib_class/1,
             fun remove_selector_contested_extension_re_exposes_local_method/1,
-            %% ADR 0112 Phase 3 (BT-3187): "remove-method" ChangeLog entries +
+            %% ADR 0112 Phase 3: "remove-method" ChangeLog entries +
             %% the (class, selector, side) flush-shadow-key / revert-side-
             %% resolution required fix.
             fun remove_selector_instance_side_logs_remove_method_changelog_entry/1,
             fun remove_selector_class_side_logs_remove_method_changelog_entry/1,
             fun remove_selector_extension_logs_remove_method_changelog_entry/1,
-            %% BT-3206 (ADR 0113 Phase 1): "remove-class" ChangeLog entries
+            %% ADR 0113 Phase 1: "remove-class" ChangeLog entries
             %% for `removeFromSystem`.
             fun remove_from_system_logs_remove_class_changelog_entry/1,
             fun remove_from_system_dynamic_class_logs_not_flushable_dynamic/1,
@@ -122,14 +122,14 @@ revert_e2e_test_() ->
             fun revert_method_selects_correct_side_entry_when_both_sides_have_entries/1,
             fun revert_method_side_agnostic_fallback_still_picks_highest_seq/1,
             fun recover_prev_from_disk_resolves_remove_method_entry_via_entry_side/1,
-            %% BT-3208 (ADR 0113 Phase 3): `revert:` extended to `"remove-class"`
+            %% ADR 0113 Phase 3: `revert:` extended to `"remove-class"`
             %% entries, and the post-flush "nothing to revert" degrade for both
             %% `"remove-method"` and `"remove-class"`.
             fun revert_remove_class_entry_reinstalls_the_class/1,
             fun revert_remove_class_entry_leaves_no_phantom_pending_entry/1,
             fun revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1,
             fun revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_missing/1,
-            %% BT-3213 (Claude review follow-up on BT-3208): drift detection
+            %% Drift detection
             %% between the recorded `prev_source_ref` snapshot and the current
             %% on-disk file before a pending "remove-class" entry is treated
             %% as cleanly reverted.
@@ -139,7 +139,7 @@ revert_e2e_test_() ->
             fun revert_remove_class_entry_detects_file_deleted_externally/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
             fun revert_remove_class_entry_after_flush_is_unsupported/1,
-            %% BT-3231: `"remove-method"` revert on an eval-defined class (no
+            %% `"remove-method"` revert on an eval-defined class (no
             %% on-disk `sources/` file at all) — the `do_revert/3`
             %% `no_prev_source` message-wording regression the LiveView e2e
             %% test caught, uncovered by any EUnit test until now.
@@ -167,7 +167,7 @@ suite_teardown(_) ->
 %% changelog and meta gen_servers, with `project_path` pointing at the temp tree
 %% so files written there classify as in-project (flushable + revertable).
 %%
-%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: the
+%% Cross-invocation-unique — see `beamtalk_test_unique:id/0`: the
 %% changelog's own `load_from_disk` would otherwise restore a prior run's
 %% leftover `changes.jsonl` entries into this run's ETS table.
 case_setup() ->
@@ -204,7 +204,7 @@ case_teardown(#{clog_pid := ClogPid, meta_pid := MetaPid, tmp := Tmp, old_home :
     ok.
 
 %%====================================================================
-%% BT-2663 — added instance method reverts as a removal
+%% Added instance method reverts as a removal
 %%====================================================================
 
 revert_added_instance_method_removes_it(#{tmp := Tmp, unique := U}) ->
@@ -229,7 +229,7 @@ revert_added_instance_method_removes_it(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
-%% BT-2290 regression — modified instance method reverts to prior body
+%% Regression — modified instance method reverts to prior body
 %%====================================================================
 
 revert_modified_instance_method_restores_prior_body(#{tmp := Tmp, unique := U}) ->
@@ -251,7 +251,7 @@ revert_modified_instance_method_restores_prior_body(#{tmp := Tmp, unique := U}) 
     ].
 
 %%====================================================================
-%% BT-2665 — class-side add reverts as a removal
+%% Class-side add reverts as a removal
 %%====================================================================
 
 revert_added_class_side_method_removes_it(#{tmp := Tmp, unique := U}) ->
@@ -274,7 +274,7 @@ revert_added_class_side_method_removes_it(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
-%% BT-2665 — class-side modify reverts to the prior class-side body
+%% Class-side modify reverts to the prior class-side body
 %%====================================================================
 
 revert_modified_class_side_method_restores_prior_body(#{tmp := Tmp, unique := U}) ->
@@ -298,7 +298,7 @@ revert_modified_class_side_method_restores_prior_body(#{tmp := Tmp, unique := U}
     ].
 
 %%====================================================================
-%% BT-2664 — new-class reverts as a class removal
+%% New-class reverts as a class removal
 %%====================================================================
 
 revert_new_class_removes_the_class(#{tmp := Tmp, unique := U}) ->
@@ -325,7 +325,7 @@ revert_new_class_removes_the_class(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
-%% BT-3184 — remove_method/3,4 stdlib policy (ADR 0112 Phase 1)
+%% remove_method/3,4 stdlib policy (ADR 0112 Phase 1)
 %%====================================================================
 
 %% remove_method/3 (the arity the revert-of-an-add path above uses) must keep
@@ -384,7 +384,7 @@ remove_method_unknown_policy_fails_closed(_) ->
     ].
 
 %%====================================================================
-%% BT-3186 — classRemoveSelector/2, classRemoveSelectorIfAbsent/3
+%% classRemoveSelector/2, classRemoveSelectorIfAbsent/3
 %% (ADR 0112 Phase 2)
 %%====================================================================
 
@@ -525,7 +525,7 @@ remove_selector_contested_extension_re_exposes_local_method(#{tmp := Tmp, unique
     ].
 
 %%====================================================================
-%% BT-3187 (ADR 0112 Phase 3) — "remove-method" ChangeLog entries; the
+%% ADR 0112 Phase 3 — "remove-method" ChangeLog entries; the
 %% (class, selector, side) flush-shadow-key and revert-side-resolution
 %% required fix to ADR 0082's shipped flush/revert logic.
 %%====================================================================
@@ -602,7 +602,7 @@ remove_selector_extension_logs_remove_method_changelog_entry(#{tmp := Tmp, uniqu
     ].
 
 %%====================================================================
-%% BT-3206 (ADR 0113 Phase 1) — "remove-class" ChangeLog entries for
+%% ADR 0113 Phase 1 — "remove-class" ChangeLog entries for
 %% `removeFromSystem`.
 %%====================================================================
 
@@ -776,7 +776,7 @@ revert_selects_correct_side_entry_when_both_sides_have_entries(#{tmp := Tmp, uni
         ?_assert(lists:member(foo, AfterRevertInstanceMethods))
     ].
 
-%% ADR 0112 (BT-3187) required fix: `revert_method/2` — the LiveView "Workspace
+%% ADR 0112 required fix: `revert_method/2` — the LiveView "Workspace
 %% changes" ChangeLog viewer's *only* revert entry point
 %% (`BtAttach.Workspace.revert/2,3` calls `revert_method/3`) — must resolve the
 %% same way the ChangeEntry-based `changeLogRevert/1` surface above does when
@@ -853,7 +853,7 @@ revert_method_side_agnostic_fallback_still_picks_highest_seq(#{tmp := Tmp, uniqu
         ?_assert(lists:member(foo, AfterRevertClassMethods))
     ].
 
-%% ADR 0112 (BT-3187) required fix: `recover_prev_from_disk/1` — the fallback
+%% ADR 0112 required fix: `recover_prev_from_disk/1` — the fallback
 %% `find_revert_target/3` reaches when an entry's recorded `prev_source_ref`
 %% body file cannot be read (a rotation/cleanup race; here simulated by
 %% deleting it out from under a genuine `'remove-method'` entry) — must resolve
@@ -898,7 +898,7 @@ recover_prev_from_disk_resolves_remove_method_entry_via_entry_side(#{
     ].
 
 %%====================================================================
-%% BT-3208 (ADR 0113 Phase 3) — `revert:` extended to `"remove-class"`
+%% ADR 0113 Phase 3 — `revert:` extended to `"remove-class"`
 %% entries, and both `"remove-method"`/`"remove-class"` revert degrading to
 %% "nothing to revert" once flushed.
 %%====================================================================
@@ -936,15 +936,15 @@ revert_remove_class_entry_reinstalls_the_class(#{tmp := Tmp, unique := U}) ->
         ?_assert(lists:member(greet, AfterRevertMethods))
     ].
 
-%% Review fix (ADR 0113, BT-3208): reverting a "remove-class" entry must not
-%% leave the class permanently stuck as a phantom pending "new-class" — the
-%% reverted file was never deleted, so its content already matches disk. Before
-%% the fix, `new_class_install/7` unconditionally emitted a fresh 'new-class'
-%% ChangeEntry on every revert, which `method_delta/1` hardcodes as
-%% always-pending and `beamtalk_workspace_flush:prepare_new_class/3` treats any
-%% existing file as an unresolvable `target_exists` conflict — so the class
-%% could never again flush cleanly. Verifies both: no active entry remains for
-%% the class, and an ordinary flush reports nothing pending/no conflicts.
+%% ADR 0113: reverting a "remove-class" entry must not leave the class
+%% permanently stuck as a phantom pending "new-class" — the reverted file was
+%% never deleted, so its content already matches disk. `new_class_install/7`
+%% must not unconditionally emit a fresh 'new-class' ChangeEntry on every
+%% revert: `method_delta/1` hardcodes that as always-pending and
+%% `beamtalk_workspace_flush:prepare_new_class/3` treats any existing file as
+%% an unresolvable `target_exists` conflict, so the class could never flush
+%% cleanly again. Verifies both: no active entry remains for the class, and
+%% an ordinary flush reports nothing pending/no conflicts.
 revert_remove_class_entry_leaves_no_phantom_pending_entry(#{tmp := Tmp, unique := U}) ->
     ClassName = list_to_binary("Bt3208RevertNoPhantom" ++ U),
     {ok, _Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
@@ -977,7 +977,7 @@ revert_remove_class_entry_leaves_no_phantom_pending_entry(#{tmp := Tmp, unique :
     ].
 
 %% A dynamically-created class's `"remove-class"` entry has no recorded
-%% `sourceFile` (BT-3206: `flushable: false, not_flushable_reason: "dynamic"`)
+%% `sourceFile` (`flushable: false, not_flushable_reason: "dynamic"`)
 %% — there is nothing on disk to recompile+reinstall from, so revert fails
 %% loudly with a structured error rather than silently no-op'ing.
 revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from(_Ctx) ->
@@ -990,7 +990,7 @@ revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from(_Ctx) ->
         ?_assertMatch({error, #beamtalk_error{}}, RevertResult)
     ].
 
-%% BT-3231: the method-level counterpart of
+%% The method-level counterpart of
 %% `revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1`
 %% above — a `"remove-method"` entry on an EVAL-defined class (no on-disk
 %% `sources/` file at all, exactly the LiveView Workspace eval-form scenario:
@@ -1002,16 +1002,13 @@ revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from(_Ctx) ->
 %% no_prev_source}` arm and raises loudly rather than silently no-op'ing or
 %% restoring the wrong thing.
 %%
-%% This is a regression guard for the exact break BT-3231 diagnosed: fca7c19f
-%% (BT-3208, ADR 0113 Phase 3) generalized this arm's message wording from
-%% "this entry has no recorded prior body ... method body" to "this entry's
-%% prior body could not be recovered ... pre-patch state" (so the same message
-%% reads correctly for a `'remove-class'` whole-file revert too) — a
-%% deliberate, correct change, but the LiveView e2e test asserting on the old
-%% literal substring broke silently because `liveview-e2e.yml`'s path-scoping
-%% never re-ran it for a runtime-only PR. Asserting on the message text here
-%% means the next wording change is caught by the fast Erlang suite instead of
-%% only a path-scoped e2e lane.
+%% Regression guard: this arm's message wording ("this entry's prior body
+%% could not be recovered ... pre-patch state", covering both a
+%% `'remove-method'` and a `'remove-class'` whole-file revert) must stay
+%% stable — a LiveView e2e test asserts on it too, and path-scoped CI does
+%% not always re-run for a runtime-only change. Asserting on the message
+%% text here means a wording change is caught by the fast Erlang suite
+%% instead of only a path-scoped e2e lane.
 revert_remove_method_entry_on_eval_defined_class_has_no_source_to_recover_from(#{unique := U}) ->
     ClassName = list_to_binary("Bt3231EvalRm" ++ U),
     ClassSrc = binary_to_list(
@@ -1081,15 +1078,15 @@ revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_mis
     ].
 
 %%====================================================================
-%% BT-3213 (Claude review follow-up on BT-3208) — `reinstall_reverted_class/3`
+%% `reinstall_reverted_class/3`
 %% must detect drift between the recorded `prev_source_ref` snapshot and the
 %% current on-disk file before treating a pending "remove-class" entry as
 %% cleanly reverted (`check_no_external_drift/3`).
 %%====================================================================
 
-%% Regression: with no out-of-band edit, revert behaves exactly as it did
-%% before BT-3213 — the class comes back live and the original "remove-class"
-%% entry is retired (no phantom pending entry left behind). Same shape as
+%% Regression: with no out-of-band edit, revert behaves exactly as expected
+%% — the class comes back live and the original "remove-class" entry is
+%% retired (no phantom pending entry left behind). Same shape as
 %% `revert_remove_class_entry_reinstalls_the_class/1` /
 %% `revert_remove_class_entry_leaves_no_phantom_pending_entry/1` above, but
 %% named explicitly for this issue's acceptance criteria: "no drift -> revert
@@ -1315,14 +1312,14 @@ define_project_class(Tmp, ClassNameBin, Methods) ->
     Pid = wait_for_class(ClassAtom, 50),
     {ok, Pid}.
 
-%% BT-3206/BT-3208: a dynamically-created class with no backing `.bt` file — a
+%% A dynamically-created class with no backing `.bt` file — a
 %% freshly-compiled, freshly-loaded module registered directly via
 %% `beamtalk_object_class:start/2` rather than compiled from a `.bt` file, so
 %% `code:delete/1` succeeds during teardown but no `beamtalk_source` module
 %% attribute — and therefore no sourceFile — ever exists (same shape
 %% `beamtalk_behaviour_intrinsics_tests:
 %% bt1982_class_remove_success_when_registry_absent_test_/0` uses). Shared by
-%% the BT-3206 "logs not_flushable: dynamic" test and the BT-3208 "nothing to
+%% the "logs not_flushable: dynamic" test and the "nothing to
 %% reinstall from" revert test below. Returns `{ClassName, ClassNameBin}`.
 define_dynamic_class(NamePrefix) ->
     Unique = erlang:unique_integer([positive]),
@@ -1349,7 +1346,7 @@ define_dynamic_class(NamePrefix) ->
     {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
     {ClassName, ClassNameBin}.
 
-%% BT-3186: the instance-side #beamtalk_object{} for a class object built by
+%% The instance-side #beamtalk_object{} for a class object built by
 %% define_project_class/3 / define_stdlib_class/3 — the receiver shape
 %% `classRemoveSelector/2` expects for `Counter removeSelector: #foo`. Mirrors
 %% `beamtalk_class_registry:atom_to_class_object/1`'s construction.
@@ -1359,20 +1356,20 @@ instance_self(ClassNameBin, Pid) ->
     Module = beamtalk_object_class:module_name_safe(Pid),
     #beamtalk_object{class = Tag, class_mod = Module, pid = Pid}.
 
-%% BT-3186: the metaclass-tagged #beamtalk_object{} for a class built by
+%% The metaclass-tagged #beamtalk_object{} for a class built by
 %% define_project_class/3 / define_stdlib_class/3 — the receiver shape
 %% `classRemoveSelector/2` expects for `Counter class removeSelector: #foo`.
 %% Mirrors `beamtalk_behaviour_intrinsics:classClass/1`'s construction.
 metaclass_self(Pid) ->
     #beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid}.
 
-%% BT-3187: the absolute `.bt` path `define_project_class/3` wrote
+%% The absolute `.bt` path `define_project_class/3` wrote
 %% `ClassNameBin` to, as the binary a ChangeEntry's `entry_source_file/1`
 %% is expected to record.
 project_class_path(Tmp, ClassNameBin) ->
     list_to_binary(filename:join(Tmp, binary_to_list(ClassNameBin) ++ ".bt")).
 
-%% BT-3187: the sole `"remove-method"` ChangeLog entry logged for
+%% The sole `"remove-method"` ChangeLog entry logged for
 %% `(ClassNameBin, SelectorBin)` in the current (fresh, per-test) workspace.
 %% Pattern-matches to exactly one — a test scenario that produces more (or
 %% zero) indicates a bug in the scenario itself, not a case to degrade
@@ -1387,7 +1384,7 @@ only_remove_method_entry(ClassNameBin, SelectorBin) ->
     ],
     Entry.
 
-%% BT-3206: the sole "remove-class" ChangeLog entry logged for ClassNameBin in
+%% The sole "remove-class" ChangeLog entry logged for ClassNameBin in
 %% the current (fresh, per-test) workspace.
 only_remove_class_entry(ClassNameBin) ->
     [Entry] = [
@@ -1402,7 +1399,7 @@ only_remove_class_entry(ClassNameBin) ->
 %% subdirectory of the temp tree instead of directly in it. `is_stdlib_path/1`
 %% (`beamtalk_repl_loader`) matches on the `/stdlib/src/` path substring alone,
 %% so this drives the real compiler through its stdlib-mode branch and yields
-%% a genuine `bt@stdlib@...` module name (BT-3184) — without writing anything
+%% a genuine `bt@stdlib@...` module name — without writing anything
 %% into the real `stdlib/src/` tree or touching a real stdlib class.
 define_stdlib_class(Tmp, ClassNameBin, Methods) ->
     Dir = filename:join([Tmp, "stdlib", "src"]),

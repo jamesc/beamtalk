@@ -17,7 +17,7 @@ Tests all future behaviors:
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%% Logger handler callback for BT-1822 stacktrace tests
+%% Logger handler callback for stacktrace tests
 -export([log/2]).
 
 log(LogEvent, #{config := #{parent := Parent}}) ->
@@ -718,7 +718,7 @@ reject_without_await_no_crash_test() ->
     ?assertThrow({future_rejected, unhandled_error}, beamtalk_future:await(Future, 100)).
 
 %%% ============================================================================
-%%% BT-1822: Stacktrace preservation tests
+%%% Stacktrace preservation tests
 %%% ============================================================================
 
 callback_crash_log_includes_stacktrace_test() ->
@@ -817,11 +817,11 @@ when_rejected_with_raw_pid_test() ->
     end.
 
 %%% ============================================================================
-%%% Await on non-future values (BT-918 compatibility)
+%%% Await on non-future values (compatibility)
 %%% ============================================================================
 
 await_non_future_value_passthrough_test() ->
-    %% BT-918: sync-by-default means await may receive non-future values
+    %% sync-by-default means await may receive non-future values
     ?assertEqual(42, beamtalk_future:await(42, 1000)),
     ?assertEqual(hello, beamtalk_future:await(hello, 500)),
     ?assertEqual([1, 2], beamtalk_future:await([1, 2], 100)),
@@ -1037,7 +1037,7 @@ pid_extraction_test() ->
     ?assert(is_process_alive(Pid)).
 
 %%% ============================================================================
-%%% BT-1822: Stacktrace preservation tests
+%%% Stacktrace preservation tests
 %%% ============================================================================
 
 -doc """

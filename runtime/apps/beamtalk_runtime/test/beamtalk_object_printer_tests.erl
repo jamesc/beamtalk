@@ -177,8 +177,8 @@ cycle_guard_self_referencing_map_test() ->
 %%% ============================================================================
 
 actor_reference_in_field_test() ->
-    %% Actor references render via printString. BT-2462 makes a live actor ref
-    %% render kind-headed and positional as `Actor(ClassName, pid)`, so a Value
+    %% Actor references render via printString. A live actor ref renders
+    %% kind-headed and positional as `Actor(ClassName, pid)`, so a Value
     %% holding one recurses to that form. The pid is dynamic, so assert the
     %% stable prefix and closing parens around it.
     Obj = #beamtalk_object{class = 'Counter', class_mod = counter, pid = self()},

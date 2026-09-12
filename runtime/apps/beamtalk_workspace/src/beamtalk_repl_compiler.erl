@@ -208,7 +208,7 @@ compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
                     {error,
                         {compile_error,
                             <<"show-codegen does not support standalone method definitions">>}};
-                %% BT-1612: Protocol definitions have no Core Erlang to show.
+                %% Protocol definitions have no Core Erlang to show.
                 {ok, protocol_definition, _ProtocolInfo} ->
                     {error,
                         {compile_error, <<"show-codegen does not support protocol definitions">>}};
@@ -440,8 +440,8 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
                             Classes = maps:get(classes, CR, []),
-                            %% ADR 0108 hot-reload re-check trigger (BT-2899).
-                            %% `additive` (BT-2955 follow-up): `ClassSource`
+                            %% ADR 0108 hot-reload re-check trigger.
+                            %% `additive`: `ClassSource`
                             %% here is the class's own reconstructed source —
                             %% `beamtalk_workspace_meta:get_class_source/1` is
                             %% keyed by class name and stores only that
@@ -450,7 +450,7 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                             %% declarations. A `type Name = ...` alias
                             %% declared as a *sibling* of this class in the
                             %% same source file (the exact `stdlib/src/ets.bt`
-                            %% shape BT-2955 fixed for the other REPL-inline
+                            %% shape also seen in the other REPL-inline
                             %% paths) is therefore just as invisible to this
                             %% compile as it is to `compile_class_definition_result/2`
                             %% — `replace` here would silently clobber a real
@@ -465,7 +465,7 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                                 is_class_method => maps:get(is_class_method, CR, false),
                                 method_source => maps:get(method_source, CR),
                                 merged_class_source => maps:get(merged_class_source, CR),
-                                %% ADR 0105 Phase 1 (BT-2777): declared signature,
+                                %% ADR 0105 Phase 1: declared signature,
                                 %% forwarded so the signature-generation store can
                                 %% capture it before the patch installs.
                                 return_type => maps:get(return_type, CR, <<"Dynamic">>),
@@ -489,7 +489,7 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings, []).
 
 %% Compile expression via beamtalk_compiler OTP app (port backend), forwarding
-%% earlier-turn type aliases (ADR 0108 Phase 8, BT-2902).
+%% earlier-turn type aliases (ADR 0108 Phase 8).
 compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSources) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
@@ -509,7 +509,7 @@ compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSour
                     compile_class_definition_result(ClassInfo, ModuleName);
                 {ok, method_definition, MethodInfo} ->
                     Warnings = maps:get(warnings, MethodInfo, []),
-                    %% ADR 0105 Phase 1 (BT-2777): return_type/param_types ride
+                    %% ADR 0105 Phase 1: return_type/param_types ride
                     %% along so the signature-generation store can capture the
                     %% declared signature before the patch installs.
                     {ok, method_definition,
@@ -525,12 +525,12 @@ compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSour
                             MethodInfo
                         ),
                         Warnings};
-                %% BT-1612: Protocol definition — compile Core Erlang to BEAM.
-                %% `additive` (BT-2955): this is the REPL-inline path, which
+                %% Protocol definition — compile Core Erlang to BEAM.
+                %% `additive`: this is the REPL-inline path, which
                 %% may be missing file-local alias context.
                 {ok, protocol_definition, ProtocolInfo} ->
                     compile_protocol_definition_result(ProtocolInfo, additive);
-                %% ADR 0108 Phase 8 (BT-2902): type alias definition — no
+                %% ADR 0108 Phase 8: type alias definition — no
                 %% Core Erlang/bytecode step (aliases erase entirely).
                 {ok, type_alias_definition, AliasInfo} ->
                     Warnings = maps:get(warnings, AliasInfo, []),
@@ -539,7 +539,7 @@ compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSour
                 {ok, CoreErlang, Warnings} ->
                     compile_standard_expression(CoreErlang, Warnings);
                 {error, Diagnostics} ->
-                    %% BT-1235: Return structured diagnostics (maps with message/line/hint)
+                    %% Return structured diagnostics (maps with message/line/hint)
                     %% so callers can surface line numbers and hints to MCP clients.
                     {error, Diagnostics}
             end
@@ -665,7 +665,7 @@ compile_class_definition_result(ClassInfo, ModuleName) ->
             {error, format_core_error(Reason)}
     end.
 
-%% Compile trailing expressions attached to a class definition (BT-885).
+%% Compile trailing expressions attached to a class definition.
 -spec compile_trailing_expressions(map(), atom()) ->
     {ok, binary(), atom()} | {error, binary()} | none.
 compile_trailing_expressions(ClassInfo, ModuleName) ->
@@ -716,7 +716,7 @@ compile_standard_expression(CoreErlang, Warnings) ->
 compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, use_runtime_indexes).
 
-%% Compile file via beamtalk_compiler with pre-built class indexes (BT-1543).
+%% Compile file via beamtalk_compiler with pre-built class indexes.
 %% Pass `use_runtime_indexes` to derive indexes from the runtime registry.
 compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes) ->
     SourceBin = list_to_binary(Source),
@@ -741,14 +741,14 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
                     ModuleName = binary_to_atom(ModNameBin, utf8),
                     ReferencedAliases = maps:get(referenced_aliases, CR, []),
                     compile_file_core(CoreErlang, ModuleName, Classes, ReferencedAliases);
-                %% BT-1950: Protocol definitions from the compile path — compile
+                %% Protocol definitions from the compile path — compile
                 %% Core Erlang to BEAM and return a protocol_definition result.
-                %% BT-2917/BT-2952: `compile_protocol_definition_result/2`
+                %% `compile_protocol_definition_result/2`
                 %% itself registers `beamtalk_alias_xref` edges from
                 %% `ProtocolInfo`'s `referenced_aliases` — see that
                 %% function's doc. `replace`: this is the file-compile path,
                 %% which always has the complete alias picture for its own
-                %% file (BT-2955).
+                %% file.
                 {ok, protocol_definition, ProtocolInfo} ->
                     compile_protocol_definition_result(ProtocolInfo, replace);
                 {error, Diagnostics} ->
@@ -760,7 +760,7 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
 
 %% Compile the Core Erlang generated for a file and extract class metadata.
 %%
-%% ADR 0108 hot-reload re-check trigger (BT-2899): also registers
+%% ADR 0108 hot-reload re-check trigger: also registers
 %% `ReferencedAliases` into `beamtalk_alias_xref` for every class this
 %% compile installs — see `register_alias_xref_for_classes/3`'s doc for why
 %% the same flat set is registered against every class in a multi-class
@@ -768,7 +768,7 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
 %% installs the class is an accepted, harmless imprecision (this index is
 %% advisory-only, matching every other ADR 0105/0108 store's risk
 %% tolerance). `replace`: this is the file-compile path, which always has
-%% the complete alias picture for its own file (BT-2955) — it remains the
+%% the complete alias picture for its own file — it remains the
 %% sole authority that can retire a stale edge.
 -spec compile_file_core(binary(), atom(), list(), [binary()]) ->
     {ok, binary(), list(), atom()} | {error, term()}.
@@ -867,7 +867,7 @@ alias_xref_register_fun(additive) -> fun beamtalk_alias_xref:register_class_addi
 %% Build and merge class superclass and module indexes into a compile options map.
 %%
 %% Both indexes are conditionally included only when non-empty, keeping the
-%% protocol backward-compatible with older port binaries (BT-905, BT-907).
+%% protocol backward-compatible with older port binaries.
 -spec add_class_indexes(map()) -> map().
 add_class_indexes(Opts) ->
     SuperclassIndex = build_class_superclass_index(),
@@ -882,14 +882,14 @@ add_class_indexes(Opts) ->
         _ -> Opts1#{class_module_index => ModuleIndex}
     end.
 
-%% Apply module name override to options (BT-775).
+%% Apply module name override to options.
 -spec apply_module_name_override(map(), binary() | undefined) -> map().
 apply_module_name_override(Options, undefined) ->
     Options;
 apply_module_name_override(Options, ModuleNameOverride) ->
     Options#{module_name => ModuleNameOverride}.
 
-%% Apply source path to options when available (BT-845/BT-860).
+%% Apply source path to options when available.
 -spec apply_source_path(map(), string() | undefined) -> map().
 apply_source_path(Options, undefined) ->
     Options;

@@ -234,7 +234,7 @@ shape_source() ->
     <<"Object subclass: LeafRecheckShape\n">>.
 
 %% Uses a plain `Type` pattern (not `matchExhaustive:`) — the "has
-%% subclasses" compile error (BT-2854) fires on *any* `match:` with a
+%% subclasses" compile error fires on *any* `match:` with a
 %% `Type` pattern on a non-leaf class, independent of exhaustiveness
 %% assertions, so this is the simplest possible dependent.
 user_source() ->

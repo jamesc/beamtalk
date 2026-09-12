@@ -60,7 +60,7 @@ bindings_initially_empty_test_() ->
         ]
     end}.
 
-%% BT-2368 (ADR 0081 Phase 7): the shell answers its own protocol session id so
+%% ADR 0081 Phase 7: the shell answers its own protocol session id so
 %% liveSessions/0 can mint Session values with the id withId/1 would resolve.
 get_session_id_returns_started_id_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
@@ -111,7 +111,7 @@ eval_empty_expression_test_() ->
     end}.
 
 %%====================================================================
-%% Show Codegen Tests (BT-700)
+%% Show Codegen Tests
 %%====================================================================
 
 show_codegen_returns_core_erlang_test_() ->
@@ -247,7 +247,7 @@ multiple_sessions_independent_test_() ->
     end}.
 
 %%====================================================================
-%% Unload Module Tests (BT-519)
+%% Unload Module Tests
 %%====================================================================
 
 unload_module_removes_from_tracker_test_() ->
@@ -338,7 +338,7 @@ unload_module_not_in_tracker_test_() ->
         ]
     end}.
 
-%% BT-1242: {class_removed, ClassName, Module} info message removes module from tracker.
+%% {class_removed, ClassName, Module} info message removes module from tracker.
 class_removed_event_updates_tracker_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -370,7 +370,7 @@ class_removed_event_updates_tracker_test_() ->
                 ?assert(is_process_alive(Pid)),
                 beamtalk_repl_shell:stop(Pid)
             end),
-            %% BT-1242: class_removed while worker active — pending removal is
+            %% class_removed while worker active — pending removal is
             %% stored (not dropped) so eval_result can apply it.
             ?_test(begin
                 {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-class-removed-3">>),
@@ -410,7 +410,7 @@ class_removed_event_updates_tracker_test_() ->
         ]
     end}.
 
-%% BT-1242: pending removals are drained on interrupt (worker killed by user).
+%% Pending removals are drained on interrupt (worker killed by user).
 class_removed_drained_on_interrupt_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -446,7 +446,7 @@ class_removed_drained_on_interrupt_test_() ->
         ]
     end}.
 
-%% BT-1242: pending removals are drained when the worker crashes (DOWN message).
+%% Pending removals are drained when the worker crashes (DOWN message).
 class_removed_drained_on_worker_crash_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -487,11 +487,11 @@ class_removed_drained_on_worker_crash_test_() ->
     end}.
 
 %%====================================================================
-%% BT-2366: pending session-local mutations (ADR 0081 Phase 2)
+%% Pending session-local mutations (ADR 0081 Phase 2)
 %%====================================================================
 
 %% Inject a fake worker + a queued list of pending mutations + seed locals,
-%% then return the shell pid.  Mirrors the BT-1242 worker-injection pattern.
+%% then return the shell pid.  Mirrors the worker-injection pattern above.
 setup_shell_with_mutations(SessionId, Locals, Mutations) ->
     {ok, Pid} = beamtalk_repl_shell:start_link(SessionId),
     FakeWorkerPid = spawn(fun() ->
@@ -675,12 +675,12 @@ worker_state_with_bindings(Bindings) ->
     beamtalk_repl_state:set_bindings(Bindings, State).
 
 %%====================================================================
-%% BT-2688: connected-session Program exit: (ADR 0099 §3 / Phase 5)
+%% Connected-session Program exit: (ADR 0099 §3 / Phase 5)
 %%====================================================================
 
 %% A {script_exit, Code, Output, Warnings} eval result surfaces the exit status to
 %% the caller and then terminates the session shell (normal stop), leaving the
-%% shared node up. Mirrors the BT-2366 worker-injection pattern: a fake worker +
+%% shared node up. Mirrors the worker-injection pattern above: a fake worker +
 %% an {async, self()} From so reply_eval sends us a message we can match.
 script_exit_replies_and_terminates_session_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->

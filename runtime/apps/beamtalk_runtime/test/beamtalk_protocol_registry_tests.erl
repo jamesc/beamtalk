@@ -27,7 +27,7 @@ setup() ->
         undefined -> ok;
         _ -> ets:delete_all_objects(beamtalk_protocol_registry)
     end,
-    %% BT-3222: Also clear the conforms_to/2 cache so a result cached by one
+    %% Also clear the conforms_to/2 cache so a result cached by one
     %% test can never leak into the next.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     ok.
@@ -103,7 +103,7 @@ register_simple_protocol_test() ->
     ?assertEqual(Proto, beamtalk_protocol_registry:protocol_info('Printable')).
 
 register_protocol_with_module_test() ->
-    %% BT-2615: the `module` key (the protocol's defining BEAM module) round-trips
+    %% The `module` key (the protocol's defining BEAM module) round-trips
     %% through registration so the System Browser can resolve a protocol class
     %% object's origin (the dispatch module beamtalk_protocol_object carries none).
     setup(),
@@ -287,7 +287,7 @@ conforming_classes_unknown_protocol_test() ->
     ?assertEqual([], beamtalk_protocol_registry:conforming_classes('Unknown')).
 
 %%% ============================================================================
-%%% Class Method Extension Conformance Tests (BT-1617)
+%%% Class Method Extension Conformance Tests
 %%% ============================================================================
 
 -doc """
@@ -337,7 +337,7 @@ class_method_no_extension_does_not_conform_test() ->
     ?assertNot(beamtalk_protocol_registry:conforms_to('NoExtClass', 'Parseable2')).
 
 %%% ============================================================================
-%%% required_methods with class methods tests (BT-1972)
+%%% required_methods with class methods tests
 %%% ============================================================================
 
 required_methods_includes_class_methods_test() ->
@@ -367,7 +367,7 @@ required_methods_class_methods_only_test() ->
     ?assertEqual(['class create'], Methods).
 
 %%% ============================================================================
-%%% Extending protocol inheritance tests (BT-1972)
+%%% Extending protocol inheritance tests
 %%% ============================================================================
 
 extending_protocol_inherits_class_methods_test() ->
@@ -437,7 +437,7 @@ extending_unknown_parent_test() ->
     ?assertEqual(['orphan'], Methods).
 
 %%% ============================================================================
-%%% protocol_info / is_protocol before table exists (BT-1972)
+%%% protocol_info / is_protocol before table exists
 %%% ============================================================================
 
 protocol_info_before_init_test() ->
@@ -458,7 +458,7 @@ protocol_info_before_init_test() ->
     end.
 
 %%% ============================================================================
-%%% all_protocol_names empty test (BT-1972)
+%%% all_protocol_names empty test
 %%% ============================================================================
 
 all_protocol_names_empty_test() ->
@@ -466,7 +466,7 @@ all_protocol_names_empty_test() ->
     ?assertEqual([], beamtalk_protocol_registry:all_protocol_names()).
 
 %%% ============================================================================
-%%% BT-3105: unregister_protocol/1 — purge on defining-module removal
+%%% unregister_protocol/1 — purge on defining-module removal
 %%% ============================================================================
 
 unregister_protocol_removes_matching_module_test() ->
@@ -509,8 +509,8 @@ unregister_protocol_leaves_other_modules_protocols_test() ->
     ?assertNot(beamtalk_protocol_registry:is_protocol('BT3105ProtoA')),
     ?assert(beamtalk_protocol_registry:is_protocol('BT3105ProtoB')).
 
-%% A protocol registered without a `module` field (pre-BT-2615 shape) is
-%% never matched — unregistering by module name is a harmless no-op.
+%% A protocol registered without a `module` field is never matched —
+%% unregistering by module name is a harmless no-op.
 unregister_protocol_skips_protocol_without_module_field_test() ->
     setup(),
     beamtalk_protocol_registry:register_protocol(#{
@@ -538,7 +538,7 @@ unregister_protocol_before_init_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-3222: conforms_to/2 result cache + invalidation
+%%% conforms_to/2 result cache + invalidation
 %%% ============================================================================
 
 %% ADR 0112 note: classRemoveSelector/2's local-method-removal branch (the
@@ -739,10 +739,8 @@ conforms_to_invalidated_by_class_removal_test() ->
     ?assertNot(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')).
 
 -doc """
-Regression test for the lost-invalidation race flagged in review (BT-3222,
-round 2): a `compute_conforms_to/2` result that finishes *after* a
-concurrent `invalidate_conforms_cache/0` bump must never be treated as a
-cache hit.
+A `compute_conforms_to/2` result that finishes *after* a concurrent
+`invalidate_conforms_cache/0` bump must never be treated as a cache hit.
 
 Simulated directly on the cache's public ETS table rather than with real
 concurrency (this repo has no mocking library, and reliably interleaving a

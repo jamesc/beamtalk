@@ -493,7 +493,7 @@ store_class_sources_with_classes_list_name_test() ->
     ?assertEqual(State, NewState).
 
 %%====================================================================
-%% is_path_inside/2 (ADR 0082 Phase 1, BT-2283)
+%% is_path_inside/2 (ADR 0082 Phase 1)
 %%====================================================================
 
 is_path_inside_direct_child_test() ->
@@ -511,7 +511,7 @@ is_path_inside_outside_tree_test() ->
     ?assertNot(beamtalk_repl_loader:is_path_inside("/proj", "/elsewhere/X.bt")).
 
 %%====================================================================
-%% method_source_binary/1 (ADR 0082 Phase 1, BT-2283)
+%% method_source_binary/1 (ADR 0082 Phase 1)
 %%====================================================================
 
 method_source_binary_prefers_method_source_test() ->
@@ -532,7 +532,7 @@ method_source_binary_empty_when_absent_test() ->
     ?assertEqual(<<>>, beamtalk_repl_loader:method_source_binary(#{})).
 
 %%====================================================================
-%% patch_side/1 (ADR 0082 Phase 1, BT-2283)
+%% patch_side/1 (ADR 0082 Phase 1)
 %%====================================================================
 
 patch_side_instance_test() ->
@@ -542,20 +542,20 @@ patch_side_class_test() ->
     ?assertEqual(class, beamtalk_repl_loader:patch_side(true)).
 
 %%====================================================================
-%% span_error_entry/3 (ADR 0082 Phase 1, BT-2283)
+%% span_error_entry/3 (ADR 0082 Phase 1)
 %%====================================================================
 
 span_error_entry_other_error_downgrades_test() ->
     %% A genuine resolution failure (ambiguous, port down) downgrades to
     %% memory-only with a reason. The brand-new-method (`selector_not_found')
-    %% case no longer routes here — it is handled by new_method_entry/3 (BT-2583).
+    %% case no longer routes here — it is handled by new_method_entry/3.
     Base = #{class => <<"Counter">>},
     Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, ambiguous),
     ?assertEqual(false, maps:get(flushable, Entry)),
     ?assertEqual(<<"span_unresolved:ambiguous">>, maps:get(not_flushable_reason, Entry)).
 
 %%====================================================================
-%% sibling_method_indent/1 (BT-2583)
+%% sibling_method_indent/1
 %%
 %% Pure base-indent derivation: the leading whitespace of the first indented,
 %% non-comment, non-blank line of the class body — the sibling-method step a
@@ -597,7 +597,7 @@ sibling_method_indent_skips_unindented_comment_test() ->
     ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
 
 %%====================================================================
-%% declared_class_name/1 (ADR 0082 Phase 1, BT-2285)
+%% declared_class_name/1 (ADR 0082 Phase 1)
 %%====================================================================
 
 declared_class_name_single_class_test() ->
@@ -623,7 +623,7 @@ declared_class_name_multiple_classes_is_error_test() ->
     ?assertNotEqual(nomatch, binary:match(Msg, <<"Bar">>)).
 
 %%====================================================================
-%% validate_new_class/3 (ADR 0082 Phase 1, BT-2285)
+%% validate_new_class/3 (ADR 0082 Phase 1)
 %%====================================================================
 
 validate_new_class_matching_name_not_loaded_ok_test() ->
@@ -744,7 +744,7 @@ loader_setup() ->
         _ ->
             ok
     end,
-    %% ADR 0105 Phase 1 (BT-2777): a live signature-generation store lets
+    %% ADR 0105 Phase 1: a live signature-generation store lets
     %% capture_signature_generation/1 actually record into the store instead
     %% of taking only its best-effort catch path (`noproc`).
     case whereis(beamtalk_workspace_signature_store) of
@@ -824,7 +824,7 @@ stored_method_source(ClassName, Selector) ->
 
 t_install_method_keeps_package_and_source(_Proj) ->
     Proj = live_project_dir(),
-    %% BT-2553 follow-up (bug 2): patching a method must NOT drop the class's
+    %% Patching a method must NOT drop the class's
     %% package-qualified module name or its on-disk source attribution — that
     %% degradation is what broke flush/revert (a project class became a
     %% stem-named, source-less `bt@<mod>').
@@ -862,7 +862,7 @@ t_install_method_preserves_comments(_Proj) ->
     %% A method's multi-line `///' doc block must survive the save AND repeated
     %% saves (idempotent). A leading `// --- … ---' section banner is *dropped*:
     %% it is inter-method file structure, not part of the method's byte span, so
-    %% the per-method stored source excludes it (BT-2594). The banner stays in the
+    %% the per-method stored source excludes it. The banner stays in the
     %% file because flush splices only the method's span, never the lines above it.
     Path = write_bt_under(
         Proj,
@@ -884,7 +884,7 @@ t_install_method_preserves_comments(_Proj) ->
         )
     ),
     Src1 = stored_method_source('InstallDoc', bumped),
-    %% The leading `//' banner is dropped from the per-method source (BT-2594)...
+    %% The leading `//' banner is dropped from the per-method source...
     ?assertEqual(nomatch, binary:match(Src1, <<"// --- Section ---">>)),
     %% ...while the `///' doc block is preserved.
     ?assert(binary:match(Src1, <<"/// First doc line.">>) =/= nomatch),
@@ -900,7 +900,7 @@ t_install_method_preserves_comments(_Proj) ->
     Src2 = stored_method_source('InstallDoc', bumped),
     ?assertEqual(Src1, Src2).
 
-%% ADR 0105 Phase 1 (BT-2777): a save through the real structured install path
+%% ADR 0105 Phase 1: a save through the real structured install path
 %% (compile_method -> load_recompiled_method -> capture_signature_generation)
 %% must land a correctly-typed signature in the store — not just the direct
 %% beamtalk_workspace_signature_store:capture/4 API tested in isolation in
@@ -990,10 +990,10 @@ t_install_method_chains_signature_generations(_Proj) ->
     ?assertEqual(#{return_type => <<"String">>, param_types => []}, Gen2),
     ?assertNotEqual(Gen1, Gen2).
 
-%% BT-2567: `browse-method-source`'s `disk_differs` re-reads the on-disk class
+%% `browse-method-source`'s `disk_differs` re-reads the on-disk class
 %% file *live* each browse, so an out-of-band rewrite (an external editor, or
 %% another session flushing) is detected even though the image body is
-%% unchanged. A pre-BT-2567 diff against the load-time `workspace_meta` snapshot
+%% unchanged. A diff against only the load-time `workspace_meta` snapshot
 %% would stay `false` here — the snapshot still matches the image body.
 t_disk_differs_reflects_live_disk(_Proj) ->
     Proj = live_project_dir(),
@@ -1090,7 +1090,7 @@ t_install_method_accumulation_preserves_siblings(_Proj) ->
     ),
     %% After patching methodTwo, methodOne (its edited `///' doc + body) must still
     %% be intact — accumulation did not drop or erode the sibling method. The
-    %% leading `//' banner is dropped from the per-method source (BT-2594).
+    %% leading `//' banner is dropped from the per-method source.
     One = stored_method_source('InstallAccum', methodOne),
     ?assertEqual(nomatch, binary:match(One, <<"// --- one ---">>)),
     ?assert(binary:match(One, <<"Doc for one (edited).">>) =/= nomatch),
@@ -1233,7 +1233,7 @@ loader_integration_test_() ->
             {"new method flushes at class body indentation (BT-2583)", fun() ->
                 t_new_method_appends_indented(Proj)
             end},
-            %% ADR 0105 Phase 1 (BT-2777): the signature-generation store, exercised
+            %% ADR 0105 Phase 1: the signature-generation store, exercised
             %% through the real install path (not just direct store API calls).
             {"install_method records the declared signature in the store", fun() ->
                 t_install_method_records_signature(Proj)
@@ -1241,9 +1241,9 @@ loader_integration_test_() ->
             {"repeated install_method chains store generations", fun() ->
                 t_install_method_chains_signature_generations(Proj)
             end},
-            %% BT-3248: redefining an existing class (the cockpit `:def` tab)
-            %% records a pending 'class-def' ChangeLog entry. BT-3254: now
-            %% flushable once the resubmitted skeleton is round-trip-safe.
+            %% Redefining an existing class (the cockpit `:def` tab)
+            %% records a pending 'class-def' ChangeLog entry, flushable once
+            %% the resubmitted skeleton is round-trip-safe.
             {"load_class_module/3 redefinition emits class-def entry", fun() ->
                 t_load_class_module_redefinition_emits_class_def_entry(Proj)
             end},
@@ -1273,7 +1273,7 @@ loader_integration_test_() ->
             {"load_class_module/3 brand-new inline class has no class-def entry", fun() ->
                 t_load_class_module_brand_new_inline_no_class_def_entry(Proj)
             end},
-            %% BT-3335: a 'class-def' redefinition whose sourceFile has gone
+            %% A 'class-def' redefinition whose sourceFile has gone
             %% missing from disk between the original handle_load and this
             %% redefinition downgrades to memory-only (`disk_read_failed`)
             %% rather than crashing — `add_class_def_span_or_downgrade/4`'s
@@ -1590,7 +1590,7 @@ t_reload_method_definition_autoflush(Proj) ->
         beamtalk_workspace_meta:set_setting(autoflush, false)
     end.
 
-%% BT-2583: a brand-new method (no prior on-disk span) flushed to a 2-space
+%% A brand-new method (no prior on-disk span) flushed to a 2-space
 %% indented class body is written at that indentation, NOT at column 0. The
 %% install hook reshapes the compiler's canonical column-0 body to the class's
 %% sibling-method indentation at store time (new_method_entry/3), so flush's
@@ -1647,18 +1647,17 @@ contains(Haystack, Needle) ->
     binary:match(Haystack, Needle) =/= nomatch.
 
 %%====================================================================
-%% BT-3248: 'class-def' ChangeLog entry for redefining an existing class
+%% 'class-def' ChangeLog entry for redefining an existing class
 %%====================================================================
 
 %% Compiling a changed class definition for an *existing* class (the cockpit
 %% `:def` tab's "Compile" action — a plain eval that classifies as a class
 %% definition and routes through load_class_module/3) must record a pending
-%% `'class-def'` ChangeLog entry — previously this path installed the new
-%% class body with NO ChangeLog entry at all (the bug BT-3248 fixed). BT-3254
-%% made the `:def` tab's resubmitted skeleton round-trip-safe (modifier
-%% keywords, `field:`/`state:` keyword choice, `::` type annotations), so —
-%% for a class with no methods to worry about clamping around — the entry is
-%% now `flushable: true` with a resolved on-disk span.
+%% `'class-def'` ChangeLog entry. The `:def` tab's resubmitted skeleton is
+%% round-trip-safe (modifier keywords, `field:`/`state:` keyword choice, `::`
+%% type annotations), so — for a class with no methods to worry about
+%% clamping around — the entry is `flushable: true` with a resolved on-disk
+%% span.
 t_load_class_module_redefinition_emits_class_def_entry(_Proj) ->
     %% Use the live workspace project_path so the redefined class's sourceFile
     %% is populated (robust against any workspace_meta restart between setup
@@ -1696,19 +1695,17 @@ t_load_class_module_redefinition_emits_class_def_entry(_Proj) ->
         {ok, <<"Actor subclass: DefRedefine\n  state: x = 1\n">>}, file:read_file(Path)
     ).
 
-%% BT-3248 regression guard (adversarial review finding), now proven the
-%% other way by BT-3254: a `'class-def'` redefinition must never splice over
-%% an already-installed method's source — an earlier version of this feature
-%% resolved a whole-class span (header through the last *method*) and marked
-%% such entries flushable, which would have spliced the `:def` tab's
-%% header+state-only skeleton over the header+state+methods region on flush,
-%% permanently deleting every method's source from disk.
-%% `beamtalk_compiler:resolve_class_span/2` (`class_span.rs`) fixes that at
-%% the resolver level — its span deliberately clamps to end before the first
-%% method — so now that BT-3254 wires it up for flush, the entry legitimately
-%% BECOMES flushable while still never touching the method: the resolved span
-%% covers only the header + state region ahead of `double`, so splicing the
-%% redefined skeleton in leaves the method's source byte-identical.
+%% Regression guard: a `'class-def'` redefinition must never splice over an
+%% already-installed method's source — naively resolving a whole-class span
+%% (header through the last *method*) and marking such entries flushable
+%% would splice the `:def` tab's header+state-only skeleton over the
+%% header+state+methods region on flush, permanently deleting every
+%% method's source from disk. `beamtalk_compiler:resolve_class_span/2`
+%% (`class_span.rs`) avoids this: its span deliberately clamps to end
+%% before the first method, so the entry becomes flushable while still
+%% never touching the method — the resolved span covers only the header +
+%% state region ahead of `double`, so splicing the redefined skeleton in
+%% leaves the method's source byte-identical.
 t_load_class_module_redefinition_preserves_existing_methods(_Proj) ->
     Proj = live_project_dir(),
     ok = beamtalk_workspace_changelog:clear(),
@@ -1754,7 +1751,7 @@ t_load_class_module_redefinition_preserves_existing_methods(_Proj) ->
         Final
     ).
 
-%% BT-3254 acceptance criterion: a class with `sealed`/`typed` modifiers and a
+%% Acceptance criterion: a class with `sealed`/`typed` modifiers and a
 %% typed instance var survives a `:def` tab edit + flush cycle unchanged apart
 %% from the intended edit. `NewSource` is built via
 %% `beamtalk_repl_ops_browse:class_definition_text/7` — the exact function the
@@ -1809,7 +1806,7 @@ t_load_class_module_redefinition_sealed_typed_round_trips(_Proj) ->
         Final
     ).
 
-%% BT-3254 regression guard: `add_class_def_flushability/2` is reached from
+%% Regression guard: `add_class_def_flushability/2` is reached from
 %% ANY successful redefinition through `load_class_module/3`, not only the
 %% cockpit `:def` tab's own header+state-only skeleton — a raw REPL eval that
 %% redefines an existing class with a FULL body (header + state + a method)
@@ -1865,7 +1862,7 @@ t_load_class_module_redefinition_with_methods_in_source_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% BT-3254 adversarial-review finding (the mirror image of the "methods in
+%% (The mirror image of the "methods in
 %% source" guard above, on the LEADING side instead of the trailing side): a
 %% raw REPL-typed redefinition that includes a NEW leading `///` doc comment
 %% — unlike the `:def` tab's own skeleton, which never carries one — must
@@ -1913,12 +1910,12 @@ t_load_class_module_redefinition_with_leading_comment_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% BT-3254 adversarial-review finding (the field-defaults gap, distinct from
+%% (The field-defaults gap, distinct from
 %% the modifier/method-safety findings above): a COMPILED class's field
 %% default-value TEXT is not recoverable from live reflection at all — only
 %% `beamtalk_class_builder`-created (file-less) classes populate
 %% `field_defaults`; `__beamtalk_meta/0` for a real `.bt` class carries only
-%% the `field_has_default` boolean (BT-1976). So the `:def` tab's OWN
+%% the `field_has_default` boolean. So the `:def` tab's OWN
 %% skeleton generator (`class_definition_text/7`, fed by
 %% `beamtalk_repl_ops_browse:browse_class_definition/1`'s LIVE reflection —
 %% not a hand-fed `State` list like
@@ -1974,7 +1971,7 @@ t_load_class_module_redefinition_drops_default_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% Claude BeamTalk Review finding on this PR (BT-3254): a `state:`/`field:`
+%% A `state:`/`field:`
 %% declaration positioned AT OR AFTER a method (legal Beamtalk — see
 %% `class_span.rs`'s `excludes_a_method_that_precedes_a_later_state_
 %% declaration` test) is excluded from `resolve_class_span/2`'s clamped span
@@ -2036,7 +2033,7 @@ t_load_class_module_redefinition_state_after_method_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% BT-3335: `add_class_def_span_or_downgrade/4`'s `file:read_file/1` branch —
+%% `add_class_def_span_or_downgrade/4`'s `file:read_file/1` branch —
 %% the class's `sourceFile` classifies flushable (still resolves to a path
 %% inside the project tree) and the resubmitted skeleton IS header+state-only,
 %% but the file itself is gone from disk by the time this redefinition is

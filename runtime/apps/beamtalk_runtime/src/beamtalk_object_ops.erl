@@ -98,7 +98,7 @@ BT-753: When dispatched on class objects via chain fallthrough, State is
 %% --- Reflection methods ---
 
 dispatch(class, [], Self, State) ->
-    %% BT-412: Return class as first-class object (not just an atom)
+    %% Returns class as first-class object (not just an atom).
     ClassName = class_name(Self, State),
     ClassObj = beamtalk_primitive:class_of_object_by_name(ClassName),
     {reply, ClassObj, State};
@@ -117,14 +117,14 @@ dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
 dispatch('printString', [], Self, State) ->
     %% ADR 0094: class objects render as a bare class name; value instances
     %% render structurally via the canonical renderer (Critical Risk #4); live
-    %% actor/supervisor references render kind-headed (`Actor(ClassName, pid)`,
-    %% BT-2462). See print_string_label/2.
+    %% actor/supervisor references render kind-headed (`Actor(ClassName, pid)`).
+    %% See print_string_label/2.
     {reply, print_string_label(Self, State), State};
 dispatch('displayString', [], Self, State) ->
     %% ADR 0094: displayString delegates to printString — same result.
     {reply, print_string_label(Self, State), State};
 dispatch(inspect, [], Self, State) ->
-    %% ADR 0095 Phase 3 (BT-2504): `inspect` is repurposed from `-> String` to
+    %% ADR 0095 Phase 3: `inspect` is repurposed from `-> String` to
     %% `-> Inspector` — it mints an immutable Inspector cursor over the receiver
     %% via the inspector shim. We pass BOTH `Self` (the #beamtalk_object{} handle,
     %% which carries the kind-classifying pid) and `State` (the receiver's own
@@ -149,7 +149,7 @@ dispatch(isNil, [], _Self, State) ->
     {reply, false, State};
 dispatch(notNil, [], _Self, State) ->
     {reply, true, State};
-%% --- Dynamic dispatch methods (BT-427) ---
+%% --- Dynamic dispatch methods ---
 
 dispatch('perform:', [TargetSelector], Self, State) when is_atom(TargetSelector) ->
     %% Dynamic message send with no arguments
@@ -174,7 +174,7 @@ dispatch('perform:withArguments:', [_TargetSelector, _ArgList], Self, State) ->
         <<"Expected atom selector and list of arguments">>
     ),
     {error, Error, State};
-%% BT-1190: Dynamic message send with explicit timeout.
+%% Dynamic message send with explicit timeout.
 %% For value types, timeout is irrelevant — dispatch locally like perform:withArguments:.
 %% Cross-actor sends are intercepted in beamtalk_message_dispatch:send/3.
 dispatch('perform:withArguments:timeout:', [TargetSelector, ArgList, Timeout], Self, State) when
@@ -194,7 +194,7 @@ dispatch('perform:withArguments:timeout:', [_TargetSelector, _ArgList, _Timeout]
         <<"Expected atom selector, list of arguments, and non-negative integer or #infinity timeout">>
     ),
     {error, Error, State};
-%% BT-405: Abstract method contract — mirrors object.bt pure method body
+%% Abstract method contract — mirrors object.bt pure method body.
 %% Runtime clause needed until compiled stdlib dispatch is wired up
 dispatch(subclassResponsibility, [], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
@@ -255,11 +255,11 @@ print_string_label(#beamtalk_object{} = Self, State) ->
         true ->
             class_display_name(Self, State);
         false ->
-            %% Live actor instance — kind-headed positional label (BT-2462).
+            %% Live actor instance — kind-headed positional label.
             beamtalk_primitive:process_label(Self)
     end;
 print_string_label({beamtalk_supervisor, _, _, _} = Self, _State) ->
-    %% BT-3082: supervisors aren't #beamtalk_object{} but still get the
+    %% Supervisors aren't #beamtalk_object{} but still get the
     %% ADR 0094 kind-headed positional label — derived directly from the
     %% tuple (no message round-trip), matching the REPL's canonical
     %% rendering instead of the compiled Object>>printString bare class name.

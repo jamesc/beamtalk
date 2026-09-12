@@ -22,28 +22,28 @@ Extracted from beamtalk_repl_eval (BT-863).
     install_method/8,
     install_method/9,
     remove_method/3,
-    %% ADR 0112 Phase 3 (BT-3187): best-effort ChangeLog append after a
+    %% ADR 0112 Phase 3: best-effort ChangeLog append after a
     %% successful `removeSelector:` call — see remove_method/3's doc for why
     %% this is a separate call rather than folded into remove_method/3 itself.
     emit_remove_change_entry/5,
     emit_extension_remove_change_entry/7,
-    %% ADR 0114 (BT-3270): the shared multi-site rewrite mechanism —
+    %% ADR 0114: the shared multi-site rewrite mechanism —
     %% generalizes remove_method/3 for `renameTo:`/`renameSelector:to:`
     %% (future issues) to call with different site lists. See
     %% rewrite_sites/2's doc for the in-memory atomicity protocol.
     rewrite_sites/2,
     validate_sites/2,
     emit_rewrite_change_entry/2,
-    %% ADR 0114 Phase 2 (BT-3272): `Workspace moveClass:to:` — a pure file
+    %% ADR 0114 Phase 2: `Workspace moveClass:to:` — a pure file
     %% move, reusing rewrite_sites/2 + emit_rewrite_change_entry/2 above with
     %% a single byte-identical definition site. See move_class/2's own doc.
     move_class/2,
-    %% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` for a pending
+    %% ADR 0114 Phase 4: `Workspace changes revert:` for a pending
     %% `'rename-class'`/`'rename-method'` entry — rewrites every recorded
     %% `sites` entry back to its own `prev_source_ref`, reusing rewrite_sites/2
-    %% (BT-3270) in reverse. See revert_rename_sites/1's own doc.
+    %% in reverse. See revert_rename_sites/1's own doc.
     revert_rename_sites/1,
-    %% BT-3206: best-effort snapshot + ChangeLog append for a successful
+    %% Best-effort snapshot + ChangeLog append for a successful
     %% `removeFromSystem` (class removal) — see
     %% capture_class_removal_snapshot/1's doc for why the snapshot is a
     %% separate call taken before teardown, not folded into the append itself.
@@ -61,27 +61,27 @@ Extracted from beamtalk_repl_eval (BT-863).
     verify_class_present/3,
     compute_package_module_name/1,
     new_class/2,
-    %% ADR 0113 (BT-3208) — `Workspace changes revert:` extension for a pending
+    %% ADR 0113 — `Workspace changes revert:` extension for a pending
     %% `'remove-class'` entry: reinstalls the class from its recorded prior
     %% source, reusing new_class/2's own compile+install chokepoint minus its
     %% target-must-not-exist check (see revert_remove_class/2's doc for why).
     revert_remove_class/2,
-    %% ADR 0105 Phase 2 (BT-2780): called cross-module by
+    %% ADR 0105 Phase 2: called cross-module by
     %% beamtalk_workspace_shape_recheck_worker — see activate_module/3's doc.
     maybe_trigger_shape_recheck/1,
-    %% BT-2856 / ADR 0107 Phase A: same cross-module reason as
+    %% ADR 0107 Phase A: same cross-module reason as
     %% maybe_trigger_shape_recheck/1 above — see activate_module/3's doc.
     maybe_trigger_leaf_change_recheck/1,
-    %% ADR 0108 hot-reload re-check trigger (BT-2899): same cross-module
+    %% ADR 0108 hot-reload re-check trigger: same cross-module
     %% reason as maybe_trigger_leaf_change_recheck/1 above — called from
     %% beamtalk_workspace_shape_recheck_worker via enqueue_alias_change/1.
     maybe_trigger_alias_change_recheck/1,
-    %% ADR 0108 hot-reload re-check trigger (BT-2899): the enqueue half —
+    %% ADR 0108 hot-reload re-check trigger: the enqueue half —
     %% called from beamtalk_repl_eval:handle_type_alias_definition/3, the
     %% one production site that commits a live alias (re)definition.
     spawn_alias_change_recheck/1,
     precheck_method/4,
-    %% BT-3238: the Cockpit section-authoring write path
+    %% The Cockpit section-authoring write path
     %% (`beamtalk_repl_ops_load:save_section/5`) needs the same "which `.bt`
     %% file backs this class, and is it inside the project (safe to write)"
     %% resolution the ADR 0082 install hook already relies on — reused here
@@ -89,7 +89,7 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% rule.
     class_source_file/1,
     classify_source_file/1,
-    %% BT-3280: exported (not merely -ifdef(TEST)) so `install_rewrite_group/5`
+    %% Exported (not merely -ifdef(TEST)) so `install_rewrite_group/5`
     %% can call it as `?MODULE:install_reload_result/2` — a genuine external
     %% call, needed so `beamtalk_repl_loader_rewrite_sites_tests.erl` can
     %% `meck:new(?MODULE, [passthrough])` + `meck:expect/3` it to exercise
@@ -119,30 +119,30 @@ Extracted from beamtalk_repl_eval (BT-863).
     maybe_add_loaded_module/2,
     store_file_class_sources/3,
     store_class_sources/4,
-    %% ADR 0082 Phase 1 (BT-2283): pure helpers behind the install hook.
+    %% ADR 0082 Phase 1: pure helpers behind the install hook.
     is_path_inside/2,
     method_source_binary/1,
     patch_side/1,
     span_error_entry/3,
     new_method_entry/3,
     sibling_method_indent/1,
-    %% ADR 0082 Phase 1 (BT-2285): pure validation helpers for new_class/2.
+    %% ADR 0082 Phase 1: pure validation helpers for new_class/2.
     declared_class_name/1,
     validate_new_class/3,
     validate_target_path/1,
-    %% ADR 0105 Phase 1 (BT-2779): the reload-check publish/clear hook.
+    %% ADR 0105 Phase 1: the reload-check publish/clear hook.
     maybe_trigger_recheck/4,
-    %% BT-2856 / ADR 0107 Phase A: leaf-change detection/publish helpers.
+    %% ADR 0107 Phase A: leaf-change detection/publish helpers.
     superclasses_losing_leaf_status/1,
     was_leaf_class/1,
     publish_leaf_change_recheck_outcome/2,
-    %% ADR 0108 hot-reload re-check trigger (BT-2899): publish helper.
+    %% ADR 0108 hot-reload re-check trigger: publish helper.
     publish_alias_change_recheck_outcome/2,
-    %% ADR 0082 extension (BT-3248): class-redefinition ChangeLog entry helpers.
+    %% ADR 0082 extension: class-redefinition ChangeLog entry helpers.
     snapshot_class_def_prev_sources/1,
     emit_class_def_entries/3,
     add_class_def_flushability/2,
-    %% ADR 0114 Phase 4 (BT-3274): multi-site rewrite revert helpers.
+    %% ADR 0114 Phase 4: multi-site rewrite revert helpers.
     class_names_by_source_file/0,
     current_spans_for_group/1,
     build_revert_sites/1
@@ -153,7 +153,7 @@ Extracted from beamtalk_repl_eval (BT-863).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ----------------------------------------------------------------------------
-%%% Multi-site rewrite types (ADR 0114, BT-3270) — see rewrite_sites/2's doc.
+%%% Multi-site rewrite types (ADR 0114) — see rewrite_sites/2's doc.
 %%% ----------------------------------------------------------------------------
 
 -type rewrite_span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
@@ -164,7 +164,7 @@ Extracted from beamtalk_repl_eval (BT-863).
 %% `remove_method/3` already uses for its own single-site span — NOT
 %% necessarily the on-disk byte offsets; resolving a site's span against
 %% whatever source a caller's site-discovery step used is that step's own
-%% responsibility, out of scope here per BT-3270's issue text).
+%% responsibility, out of scope here).
 %% `SourceFile` is carried through only for ChangeLog attribution
 %% (`beamtalk_workspace_changelog`'s `site()` shape) — it plays no role in
 %% the splice/compile/install mechanism itself.
@@ -229,7 +229,7 @@ handle_load(Path, State) ->
                             Source, Path, StdlibMode, ModuleNameOverride
                         )
                     of
-                        %% BT-1950: Protocol definition from file compilation.
+                        %% Protocol definition from file compilation.
                         %% Must be matched before the generic 4-tuple to avoid
                         %% {ok, protocol_definition, Info, Warnings} binding to
                         %% {ok, Binary, ClassNames, ModuleName}.
@@ -270,7 +270,7 @@ handle_load(Path, State, PrebuiltIndexes) ->
                             Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
                         )
                     of
-                        %% BT-1950: Protocol definition — must match before generic 4-tuple.
+                        %% Protocol definition — must match before generic 4-tuple.
                         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
                             load_protocol_module(ProtocolInfo, Path, State);
                         {ok, Binary, ClassNames, ModuleName} ->
@@ -289,7 +289,7 @@ handle_load(Path, State, PrebuiltIndexes) ->
 handle_load_source(SourceBin, Label, State) ->
     Source = binary_to_list(SourceBin),
     case beamtalk_repl_compiler:compile_file(Source, Label, false, undefined) of
-        %% BT-1950: Protocol definition — must match before generic 4-tuple.
+        %% Protocol definition — must match before generic 4-tuple.
         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
             load_protocol_module(ProtocolInfo, undefined, State);
         {ok, Binary, ClassNames, ModuleName} ->
@@ -311,18 +311,18 @@ Returns:
     | {error, term(), beamtalk_repl_state:state()}.
 load_class_module(ClassInfo, Expression, State) ->
     #{binary := Binary, module_name := ClassModName, classes := Classes} = ClassInfo,
-    %% ADR 0105 Phase 2 (BT-2780): seed the shape-generation store from the
+    %% ADR 0105 Phase 2: seed the shape-generation store from the
     %% about-to-be-replaced module's CURRENT __beamtalk_meta/0 before this
     %% class-body reload installs — see
     %% beamtalk_workspace_shape_store's moduledoc "Two-phase capture" for why
     %% this must run before code:load_binary, not after.
     prime_shape_capture(Classes),
-    %% BT-3248: snapshot each class's currently-tracked source BEFORE
+    %% Snapshot each class's currently-tracked source BEFORE
     %% store_class_sources below overwrites it — see emit_class_def_entries/3's
     %% doc for why a redefinition of an already-loaded class needs the OLD
     %% source captured ahead of the install, not after.
     PrevSources = snapshot_class_def_prev_sources(Classes),
-    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: load_class_binary/4
+    %% ADR 0107 Phase A: load_class_binary/4
     %% bakes the "superclasses_losing_leaf_status/1 before code:load_binary/3"
     %% ordering requirement into one call — see its own doc and
     %% activate_module/4's doc for why.
@@ -333,7 +333,7 @@ load_class_module(ClassInfo, Expression, State) ->
             {ClassName, NewState2} = store_class_sources(
                 Classes, ClassModName, Expression, NewState1
             ),
-            %% BT-3248: log a pending 'class-def' ChangeLog entry for each
+            %% Log a pending 'class-def' ChangeLog entry for each
             %% class in this eval that redefined an already-loaded class (the
             %% cockpit `:def` tab's "Compile" action against an *existing*
             %% class). Best-effort: a ChangeLog write must never fail or undo
@@ -547,7 +547,7 @@ to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
 reload_class_file(Path) ->
     reload_class_file_impl(Path, undefined).
 
-%% BT-868: ExpectedClassName (atom) is verified against the compiled class list.
+%% ExpectedClassName (atom) is verified against the compiled class list.
 -spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
     reload_class_file_impl(Path, ExpectedClassName).
@@ -597,7 +597,7 @@ verify_class_present(ExpectedClassName, ClassNames, Path) ->
 
 %% Load a compiled module into BEAM, register its classes, and update REPL state.
 %%
-%% BT-3248: deliberately does NOT emit a `'class-def'` ChangeLog entry, unlike
+%% Deliberately does NOT emit a `'class-def'` ChangeLog entry, unlike
 %% `load_class_module/3`. Every caller of this function (`handle_load/2,3`,
 %% `handle_load_source/3`) compiles `Source` from `SourcePath` itself — a
 %% `:load <file>` (or the initial project load) installs a class from the
@@ -621,9 +621,9 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
             undefined -> "";
             _ -> SourcePath
         end,
-    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's identical comment.
+    %% ADR 0105 Phase 2: see load_class_module/3's identical comment.
     prime_shape_capture(ClassNames),
-    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    %% ADR 0107 Phase A: see load_class_binary/4's doc.
     case load_class_binary(ModuleName, LoadPath, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
             activate_module(ModuleName, ClassNames, SourcePath, NewlyNonLeafSuperclasses),
@@ -641,7 +641,7 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
             end
     end.
 
-%% BT-1950: Load a protocol module into BEAM, register it, and update REPL state.
+%% Load a protocol module into BEAM, register it, and update REPL state.
 %% Used by handle_load/2, handle_load/3, and handle_load_source.
 -spec load_protocol_module(map(), string() | undefined, beamtalk_repl_state:state()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
@@ -673,7 +673,7 @@ load_protocol_module(ProtocolInfo, Path, State) ->
             end
     end.
 
-%% BT-1950: Load a protocol module without session state (stateless path).
+%% Load a protocol module without session state (stateless path).
 %% Used by reload_compile_and_load for load_files_stateless.
 -spec load_protocol_module_stateless(map(), string()) -> {ok, [map()]} | {error, term()}.
 load_protocol_module_stateless(ProtocolInfo, Path) ->
@@ -752,7 +752,7 @@ normalize_class_source_key(Name) when is_atom(Name) -> atom_to_binary(Name, utf8
 normalize_class_source_key(Name) when is_list(Name) -> list_to_binary(Name).
 
 %%% ----------------------------------------------------------------------------
-%%% Class-redefinition ChangeLog entry (ADR 0082 extension, BT-3248)
+%%% Class-redefinition ChangeLog entry (ADR 0082 extension)
 %%% ----------------------------------------------------------------------------
 
 %% Snapshot each class's currently-tracked source (workspace_meta's
@@ -951,7 +951,7 @@ add_class_def_flushability(Base, ClassNameBin) ->
 %% method" guarantee, stops before the *first* method — would jam the new
 %% text's methods into the header/state region while leaving the file's
 %% actual (now stale/duplicated) methods untouched right after it: exactly
-%% the class of bug BT-3248's adversarial review caught, just triggered from
+%% the same class of bug this guard exists to catch, just triggered from
 %% the resubmitted text's shape instead of the disk span's. Mirrors
 %% `add_span_or_downgrade/6`'s disk-read-failure handling exactly for the
 %% read itself (an unreadable file downgrades to memory-only rather than
@@ -1060,9 +1060,8 @@ resolve_class_def_span_entry(#{source := Canonical} = Base, ClassNameBin, Source
 %% into) — i.e. the disk class has no field declared at or after its first
 %% method.
 %%
-%% Why this exists (Claude BeamTalk Review finding on this PR, BT-3254):
-%% `resolve_class_span/2` deliberately clamps its span to end BEFORE the
-%% class's first method (its own "never reaches a method" guarantee — see
+%% Why this exists: `resolve_class_span/2` deliberately clamps its span to
+%% end BEFORE the class's first method (its own "never reaches a method" guarantee — see
 %% `class_span.rs`'s module doc) — legal Beamtalk allows a `state:`/`field:`
 %% declaration positioned at/after a method, and such a field is EXCLUDED
 %% from the clamped span/`PrevSource`. But the `:def` tab's skeleton is built
@@ -1108,14 +1107,14 @@ class_def_span_contains_all_state_fields(DiskSource, SpanText, ClassNameBin) ->
 %% by `class_def_source_is_skeleton_shaped/2`) would NOT silently drop any
 %% field's default value.
 %%
-%% Why this exists (BT-3254 adversarial-review finding): `class_definition_
+%% Why this exists: `class_definition_
 %% text/7`'s `default` field is read from LIVE class reflection
 %% (`beamtalk_repl_ops_browse:state_slots/2`'s `field_defaults`), and that
 %% reflection is populated ONLY for a `beamtalk_class_builder`-created class
 %% (file-less, so it never reaches this function at all — `class_source_
 %% file/1` already gates on a real `sourceFile`). A COMPILED `.bt` class's
-%% `__beamtalk_meta/0` carries `field_has_default` (a boolean per field,
-%% BT-1976) but never the default-value TEXT, so `field_defaults` reflection
+%% `__beamtalk_meta/0` carries `field_has_default` (a boolean per field)
+%% but never the default-value TEXT, so `field_defaults` reflection
 %% is always empty and the skeleton always renders `default => null` — even
 %% for a field the on-disk source declares with one. Splicing that skeleton
 %% into a byte-accurate disk span (the span/method-safety guarantee
@@ -1181,7 +1180,7 @@ store_class_def_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Spa
         prev_source => PrevSource
     }.
 
-%% Extract trailing expression info from a class definition result (BT-885).
+%% Extract trailing expression info from a class definition result.
 -spec extract_trailing_info(map()) ->
     no_trailing | {trailing, atom(), binary()}.
 extract_trailing_info(ClassInfo) ->
@@ -1280,14 +1279,14 @@ reload_class_file_impl(Path, ExpectedClassName) ->
 
 %% Compile and load a file for stateless reload.
 %%
-%% BT-3248: deliberately does NOT emit a `'class-def'` ChangeLog entry, same
+%% Deliberately does NOT emit a `'class-def'` ChangeLog entry, same
 %% reasoning as `load_compiled_module/6`. Both of this function's callers
 %% compile `Source` straight from `Path` — `reload_class_file_impl/2` backs
 %% `Counter reload` / `:reload Counter` (an explicit reload FROM the on-disk
 %% file after an external edit) and `remove_method/3`'s "reload the class
 %% WITHOUT the removed method" (which recompiles a spliced *in-memory* source
 %% but is followed by its own `emit_remove_change_entry/5` call at the
-%% `removeSelector:` call site, ADR 0112 Phase 3 BT-3187 — already logged via
+%% `removeSelector:` call site, ADR 0112 Phase 3 — already logged via
 %% a different, more specific kind). Neither case has a class-definition edit
 %% pending relative to disk that a `'class-def'` entry would newly capture.
 -spec reload_compile_and_load(
@@ -1325,7 +1324,7 @@ source is installable", so a compile failure here is reported, never raised.
 compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     StdlibMode = is_stdlib_path(Path),
     case beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride) of
-        %% BT-1950: Protocol definition — must match before generic 4-tuple.
+        %% Protocol definition — must match before generic 4-tuple.
         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
             {ok, protocol_definition, ProtocolInfo};
         {ok, Binary, ClassNames, ModuleName} ->
@@ -1359,15 +1358,15 @@ other caller (`reload_class_file_impl/2`, `remove_method/3`,
 install_reload_result({ok, protocol_definition, ProtocolInfo}, Path) ->
     load_protocol_module_stateless(ProtocolInfo, Path);
 install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) ->
-    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's identical
+    %% ADR 0105 Phase 2: see load_class_module/3's identical
     %% comment. Covers every caller of this helper: reload_class_file_impl/2
     %% (file reload after an on-disk edit), remove_method/3's "reload the
     %% class WITHOUT the removed method", and rewrite_sites/2's per-site
-    %% install (BT-3270) — none of these change `state:`/`field:` slots, so
+    %% install — none of these change `state:`/`field:` slots, so
     %% priming it is harmless (the subsequent capture/1 always diffs an
     %% unchanged shape to itself, `no_op`).
     prime_shape_capture(ClassNames),
-    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    %% ADR 0107 Phase A: see load_class_binary/4's doc.
     case load_class_binary(ModuleName, Path, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
             activate_module(ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses),
@@ -1378,7 +1377,7 @@ install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) ->
 
 %% Recompile a class with a new method definition.
 %%
-%% BT-911: Delegates to beamtalk_repl_compiler:compile_for_method_reload/2 which
+%% Delegates to beamtalk_repl_compiler:compile_for_method_reload/2 which
 %% wraps all compiler calls in wrap_compiler_errors, preventing compiler crashes
 %% from propagating as exits that would kill the REPL process.
 -spec recompile_with_method(
@@ -1395,7 +1394,7 @@ recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
     %% source and a just-compiled expression), so the conversion always yields a
     %% binary here — never the `{error,_,_}' tuple of malformed input.
     SourceBin = unicode:characters_to_binary(CombinedSource),
-    %% BT-907: Include superclass index so cross-file inheritance resolves correctly.
+    %% Include superclass index so cross-file inheritance resolves correctly.
     SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
     Options0 = #{stdlib_mode => false, workspace_mode => true},
     Options1 =
@@ -1410,7 +1409,7 @@ recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
             0 -> Options1;
             _ -> Options1#{class_module_index => ModuleIndex}
         end,
-    %% BT-2553 follow-up: preserve the class's package-qualified module name and
+    %% Preserve the class's package-qualified module name and
     %% on-disk source path across the patch so a project class stays
     %% `bt@pkg@mod' (flushable, revertable) instead of degrading to a stem-named,
     %% source-less `bt@mod'.
@@ -1464,7 +1463,7 @@ install_method(
 ) ->
     %% Default to instance-side for existing callers (`compile:source:` / MCP
     %% `save_method` / IDE save). The side-aware `install_method/9` backs
-    %% class-side revert re-installs (BT-2665).
+    %% class-side revert re-installs.
     install_method(
         ClassNameBin, SelectorBin, MethodSource, Intent, Author, AuthorKind, Warnings, State, false
     ).
@@ -1558,7 +1557,7 @@ install_method_with_source(
         class_name => ClassNameBin,
         %% Side comes from the caller: `false` for the instance-side
         %% `compile:source:` / MCP `save_method` / IDE-save chokepoint; `true`
-        %% for a class-side revert re-install (BT-2665). The REPL `Class class >>
+        %% for a class-side revert re-install. The REPL `Class class >>
         %% sel` path still flows through `reload_method_definition`, which carries
         %% the side in its `MethodInfo`.
         is_class_method => IsClassMethod,
@@ -1588,7 +1587,7 @@ install_method_with_source(
                 merged_class_source := MergedClassSource,
                 warnings := RecompileWarnings
             } = Result,
-            %% ADR 0105 Phase 1 (BT-2777): declared signature, carried through to
+            %% ADR 0105 Phase 1: declared signature, carried through to
             %% load_recompiled_method's capture-before-install hook.
             ReturnType = maps:get(return_type, Result, <<"Dynamic">>),
             ParamTypes = maps:get(param_types, Result, []),
@@ -1757,7 +1756,7 @@ remove_method(ClassNameBin, Selector, Side) ->
                 )
             of
                 {ok, Span, _Body} ->
-                    %% ADR 0105 Phase 1 (BT-2777): record the removal in the
+                    %% ADR 0105 Phase 1: record the removal in the
                     %% signature-generation store BEFORE the recompile-without-
                     %% the-method installs (mirrors capture_signature_generation/1
                     %% in load_recompiled_method/8 — this IS the install for a
@@ -1771,7 +1770,7 @@ remove_method(ClassNameBin, Selector, Side) ->
                     NewSourceBin = splice_out_span(ClassSourceBin, Span),
                     case reload_class_without_method(ClassNameBin, NewSourceBin) of
                         {ok, _} = Ok ->
-                            %% ADR 0105 Phase 1 (BT-2778): the removal is
+                            %% ADR 0105 Phase 1: the removal is
                             %% live — re-check known dependents (mirrors the
                             %% install success path in load_recompiled_method/8,
                             %% including that function's ordering-invariant
@@ -1799,7 +1798,7 @@ remove_method(ClassNameBin, Selector, Side) ->
     end.
 
 %% Record a method removal into the signature-generation store (ADR 0105 Phase
-%% 1, BT-2777). Best-effort and self-swallowing, mirroring
+%% 1). Best-effort and self-swallowing, mirroring
 %% capture_signature_generation/1 — a store failure must never block the
 %% removal itself. Returns the same capture_outcome() so
 %% the caller can roll back on a subsequent recompile failure.
@@ -1851,7 +1850,7 @@ reload_class_without_method(ClassNameBin, NewSourceBin) ->
     end.
 
 %% Cut the bytes `[start, end)' out of `Source', joining the surrounding text.
-%% A thin wrapper over `splice_replace/3` (BT-3270) — removal is replacement
+%% A thin wrapper over `splice_replace/3` — removal is replacement
 %% with the empty binary.
 -spec splice_out_span(binary(), rewrite_span()) -> binary().
 splice_out_span(Source, Span) ->
@@ -1860,7 +1859,7 @@ splice_out_span(Source, Span) ->
 %% Replace the bytes `[start, end)' in `Source' with `NewText', joining the
 %% surrounding text. Shared leaf primitive (CLAUDE.md's no-duplicate-
 %% implementations rule) behind both `splice_out_span/2` (removal — ADR 0112)
-%% and `rewrite_sites/2`'s per-site splice (ADR 0114, BT-3270).
+%% and `rewrite_sites/2`'s per-site splice (ADR 0114).
 -spec splice_replace(binary(), rewrite_span(), binary()) -> binary().
 splice_replace(Source, #{start := Start, 'end' := End}, NewText) ->
     <<Before:Start/binary, _Old:(End - Start)/binary, After/binary>> = Source,
@@ -1898,7 +1897,7 @@ source_path_or_empty(undefined) -> "";
 source_path_or_empty(Path) -> Path.
 
 %%% ----------------------------------------------------------------------------
-%%% Shared multi-site rewrite mechanism (ADR 0114, BT-3270)
+%%% Shared multi-site rewrite mechanism (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -2315,7 +2314,7 @@ compile_rewrite_group(#rewrite_class_group{
     NewSourceStr = unicode:characters_to_list(NewSourceBin),
     compile_reload_source(NewSourceStr, LoadPath, ModuleNameOverride, undefined).
 
-%% BT-3280: is `Group`'s class's CURRENT `beamtalk_workspace_meta` source
+%% Is `Group`'s class's CURRENT `beamtalk_workspace_meta` source
 %% still byte-identical to what `build_class_group/2` snapshotted into
 %% `original_source` before this batch's validation pass ran? `false` for a
 %% class whose source is no longer trackable at all (e.g. removed by a
@@ -2334,7 +2333,7 @@ class_source_unchanged(#rewrite_class_group{class = Class, original_source = Ori
 %% Phase 2 of the atomicity protocol: install every already-validated group,
 %% in class-group order, updating `beamtalk_workspace_meta`'s tracked source
 %% to match each newly-installed class. See `rewrite_sites/2`'s doc for the
-%% pathological partial-install-failure case and the BT-3280 stale-snapshot
+%% pathological partial-install-failure case and the stale-snapshot
 %% case this handles defensively.
 -spec install_rewrite_groups([{#rewrite_class_group{}, term()}], rewrite_site() | undefined) ->
     {ok, rewrite_result()}
@@ -2353,7 +2352,7 @@ install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev)
     #rewrite_class_group{class = Class} = Group,
     case class_source_unchanged(Group) of
         false ->
-            %% BT-3280: a concurrent writer landed on this class's tracked
+            %% A concurrent writer landed on this class's tracked
             %% source between this batch's own validation pass and this
             %% group's own install turn. Fail cleanly and stop the batch here
             %% — never install `NewSource` over it, which would silently
@@ -2387,7 +2386,7 @@ install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev)
 install_rewrite_group(Group, Compiled, Rest, DefinitionSite, InstalledRev) ->
     #rewrite_class_group{class = Class, source_path = SourcePath, new_source = NewSource} = Group,
     LoadPath = source_path_or_empty(SourcePath),
-    %% BT-3280: qualified as `?MODULE:` (rather than a local call) purely so
+    %% Qualified as `?MODULE:` (rather than a local call) purely so
     %% `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
     %% coverage can intercept it via `meck:new(?MODULE, [passthrough])` — see
     %% that test module's own moduledoc for why. Behaviourally identical to a
@@ -2586,7 +2585,7 @@ store_rewrite_site_ref(Body) ->
     end.
 
 %%% ----------------------------------------------------------------------------
-%%% Class move (ADR 0114 Phase 2, BT-3272)
+%%% Class move (ADR 0114 Phase 2)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -2828,7 +2827,7 @@ move_class_rewrite_failed_error(ClassName, Reason) ->
     ).
 
 %%% ----------------------------------------------------------------------------
-%%% Multi-site rewrite revert (ADR 0114, BT-3274)
+%%% Multi-site rewrite revert (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -3018,7 +3017,7 @@ finish_rename_class_revert(Entry) ->
     OldNameBin = beamtalk_workspace_changelog:entry_old_class(Entry),
     case CurrentNameBin =:= OldNameBin of
         true ->
-            %% BT-3335: a pure `Workspace moveClass:to:` (BT-3272) entry — a
+            %% A pure `Workspace moveClass:to:` entry — a
             %% file-location-only move never changes a class's name, so its
             %% `'rename-class'` entry records `old_class == class` by
             %% construction (`move_class/2`'s own doc). `do_revert_rewrite/2`
@@ -3124,7 +3123,7 @@ class_names_by_source_file() ->
 resolve_revert_sites(Sites, ClassMap) ->
     %% `undefined` (never actually produced today — `entry_sites/1` is always
     %% a list, possibly `[undefined]` for a sourceless dynamic-class
-    %% definition — BT-3269 § ChangeLog schema) degrades to "no sites",
+    %% definition) degrades to "no sites",
     %% defensively, rather than crashing on a future producer that omits it.
     IndexedSites = lists:zip(
         lists:seq(0, length(sites_or_undefined(Sites)) - 1), sites_or_undefined(Sites)
@@ -3360,7 +3359,7 @@ load_recompiled_method(
 ) ->
     #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
     Side = patch_side(maps:get(is_class_method, MethodInfo, false)),
-    %% ADR 0105 Phase 1 (BT-2777): capture the freshly-compiled signature into
+    %% ADR 0105 Phase 1: capture the freshly-compiled signature into
     %% the signature-generation store BEFORE the patch installs. Must run here
     %% (not after code:load_binary below) — install reloads the class's
     %% compiled module under its *existing* atom, so a first-ever capture made
@@ -3373,7 +3372,7 @@ load_recompiled_method(
     CaptureOutcome = capture_signature_generation(MethodInfo),
     %% Pass the class's on-disk source path (when known) so `code:which/1`
     %% reports a real path — keeping a patched project class classified as a
-    %% project class, not "stdlib"/"dynamic" (BT-2553 follow-up).
+    %% project class, not "stdlib"/"dynamic".
     case code:load_binary(ModName, SourcePath, Binary) of
         {module, ModName} ->
             %% (2) Install in memory. The memory install is the visible effect;
@@ -3403,14 +3402,14 @@ load_recompiled_method(
             %% reconciliation. Ephemeral patches are not autoflushed because
             %% only durable+flushable entries are written by `flush/0'.
             maybe_autoflush(maps:get(intent, MethodInfo, durable)),
-            %% (5) ADR 0105 Phase 1 (BT-2778): re-check known dependents of a
+            %% (5) ADR 0105 Phase 1: re-check known dependents of a
             %% signature_change/removal now that the new generation is live.
             %% Best-effort, never affects this reply's *content* — see the
             %% function doc — but it IS synchronous here, so it does delay
             %% this reply by the re-check's wall time (bounded by the caller
             %% cap; ~18.5ms/candidate warm per the Phase 0 spike, so normally
             %% sub-second even at the default cap of 20). Moving this off the
-            %% install's critical path is BT-2779's concern once findings
+            %% install's critical path is deferred until findings
             %% have somewhere to go (publish/clearing across surfaces).
             %%
             %% Ordering invariant this relies on: beamtalk_recheck's re-check
@@ -3430,7 +3429,7 @@ load_recompiled_method(
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
-            %% ADR 0105 Phase 1 (BT-2777): the install this capture described
+            %% ADR 0105 Phase 1: the install this capture described
             %% never happened — undo it so the store still reflects the actually
             %% live generation.
             rollback_signature_generation(ClassNameBin, SelectorBin, Side, CaptureOutcome),
@@ -3444,7 +3443,7 @@ load_recompiled_method(
     end.
 
 %%% ----------------------------------------------------------------------------
-%%% New-class creation (ADR 0082 Phase 1, BT-2285)
+%%% New-class creation (ADR 0082 Phase 1)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -3600,14 +3599,14 @@ new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, 
 %% activation path, but stateless). In `log` mode (ordinary `newClass:at:`,
 %% ADR 0082) also emits the durable new-class ChangeEntry and autoflushes; a
 %% ChangeLog failure does not undo the install — the class is already live.
-%% In `no_log` mode (a `'remove-class'` revert, ADR 0113 BT-3208 — see
+%% In `no_log` mode (a `'remove-class'` revert, ADR 0113 — see
 %% `revert_remove_class/2`'s doc) does neither: the file being reinstalled was
 %% never deleted, so there is nothing new to log or flush.
 -spec new_class_install(
     string(), string(), string(), binary(), [map()], atom(), binary(), log | no_log
 ) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName, Mode) ->
-    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    %% ADR 0107 Phase A: see load_class_binary/4's doc.
     case load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
             activate_module(ModuleName, ClassNames, AbsPath, NewlyNonLeafSuperclasses),
@@ -3801,7 +3800,7 @@ loaded_class_objects(ClassNames) ->
     beamtalk_workspace_interface_primitives:loaded_class_objects(ClassNames).
 
 %% Trigger `Workspace flush' when `autoflush: true' is set on the workspace
-%% (ADR 0082 Phase 4, BT-2290). Best-effort and synchronous:
+%% (ADR 0082 Phase 4). Best-effort and synchronous:
 %%
 %%   - Ephemeral patches are never autoflushed (they are not flushable by
 %%     definition — only `durable AND flushable' entries are written).
@@ -3999,12 +3998,12 @@ do_emit_change_entry(MethodInfo) ->
     _ = beamtalk_workspace_changelog:append(Entry),
     ok.
 
-%% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1,
-%% BT-2777): `{captured, Prev, Classification}` when the store call succeeded
+%% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1):
+%% `{captured, Prev, Classification}` when the store call succeeded
 %% (`Prev` is whatever it reported as the pre-capture generation — feed this
 %% straight back to rollback_signature_generation/4 on a subsequent install
 %% failure; `Classification` is `beamtalk_signature_diff:classification/0`,
-%% consumed by BT-2778's re-check trigger below), or `not_captured` when the
+%% consumed by the re-check trigger below), or `not_captured` when the
 %% capture itself failed (nothing to roll back, nothing to re-check).
 -type capture_outcome() ::
     {captured, beamtalk_workspace_signature_store:maybe_signature(),
@@ -4012,10 +4011,10 @@ do_emit_change_entry(MethodInfo) ->
     | not_captured.
 
 %% Capture the freshly-compiled signature into the signature-generation store
-%% (ADR 0105 Phase 1, BT-2777). Called from load_recompiled_method/8 *before*
+%% (ADR 0105 Phase 1). Called from load_recompiled_method/8 *before*
 %% the patch installs — see the call site for why ordering matters. Best-effort
 %% and self-swallowing, mirroring emit_change_entry/1: the store is diagnostic
-%% plumbing for a later re-check (BT-2778), never a gate on the install itself.
+%% plumbing for a later re-check, never a gate on the install itself.
 %% Returns the capture_outcome() so the caller can roll back on install failure.
 -spec capture_signature_generation(map()) -> capture_outcome().
 capture_signature_generation(MethodInfo) ->
@@ -4052,7 +4051,7 @@ do_capture_signature_generation(MethodInfo) ->
     {captured, Prev, Classification}.
 
 %% Undo a capture_signature_generation/1 (or capture_signature_removal/3) call
-%% whose install/removal subsequently failed (ADR 0105 Phase 1, BT-2777).
+%% whose install/removal subsequently failed (ADR 0105 Phase 1).
 %% `not_captured` is a no-op (the capture itself never wrote anything). Best-
 %% effort and self-swallowing — a rollback failure must never surface as the
 %% install/removal error the caller is already propagating.
@@ -4079,9 +4078,9 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
             ok
     end.
 
-%% Fire the re-check orchestration (ADR 0105 Phase 1, BT-2778) for a
+%% Fire the re-check orchestration (ADR 0105 Phase 1) for a
 %% successfully-installed patch/removal, then publish the outcome (ADR 0105
-%% Phase 1, BT-2779): update `beamtalk_workspace_findings_store` and, when
+%% Phase 1): update `beamtalk_workspace_findings_store` and, when
 %% there is something for a live surface (LSP / REPL / workspace UI) to act
 %% on, broadcast a `'ReloadCheckCompleted'` system announcement.
 %%
@@ -4097,7 +4096,7 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
 %% explicit revert bullet with no bespoke revert-specific code, and also
 %% closes the same gap for a plain hand-edit that fixes what a reload broke).
 %%
-%% Accepted tradeoff (flagged on BT-2777's review, recorded on BT-2778):
+%% Accepted tradeoff:
 %% `Classification` is only as correct as the signature-generation store's
 %% chain. Two concurrent sessions patching the same `{Class, Selector, Side}`
 %% key can race `capture/4`/`rollback/4` such that a losing session's
@@ -4106,8 +4105,8 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
 %% unconditional put, not a conditional "restore only if I'm still current"
 %% write) — the *next* capture then diffs against the wrong baseline and this
 %% function can fire on a false `signature_change`/`no_op`. Not fixed here:
-%% the store is BT-2777's merged surface, and a full fix (per-key conditional
-%% rollback) is out of this issue's scope. Advisory-only mitigates the
+%% the store is a merged surface, and a full fix (per-key conditional
+%% rollback) is out of scope here. Advisory-only mitigates the
 %% blast radius (a wrong finding is noise, not a build/runtime failure).
 -spec maybe_trigger_recheck(binary(), binary(), instance | class, capture_outcome()) -> ok.
 maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome) ->
@@ -4120,7 +4119,7 @@ maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome) ->
     ).
 
 %% Best-effort wrapper around `beamtalk_workspace_findings_store:clear_owner/1`
-%% (ADR 0105 Phase 1, BT-2779) — the store is REPL-mode-only (see
+%% (ADR 0105 Phase 1) — the store is REPL-mode-only (see
 %% `beamtalk_workspace_sup`'s `repl_child_specs/6`), so it is legitimately
 %% absent under `beamtalk_repl_loader:install_method/9`'s non-REPL callers
 %% (e.g. `beamtalk_repl_loader_tests.erl`'s unit fixtures, and — per the same
@@ -4233,7 +4232,7 @@ maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classificat
     mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners),
     {Classification, Result}.
 
-%% BT-2802/BT-2828: a candidate whose diagnostics round-trip never completed
+%% A candidate whose diagnostics round-trip never completed
 %% this reload (`NotVerifiedOwners` — `beamtalk_recheck:result()`'s
 %% `not_verified_owners`, covering the caller-cap-dropped candidates AND any
 %% `Kept` candidate that came back `skipped` (no live source recorded) or
@@ -4242,8 +4241,7 @@ maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classificat
 %% changed class* is left exactly as a previous, possibly-now-stale reload
 %% wrote it — nothing here re-verified whether the caller's problem still
 %% holds. Rather than let that finding keep asserting itself as current
-%% forever (the BT-2802 bug, and its BT-2828 skipped/failed-outcome sibling)
-%% or silently drop it (could hide a real, still-live problem), overwrite its
+%% forever or silently drop it (could hide a real, still-live problem), overwrite its
 %% `note` in place, still through `put_owner_origin/3`'s ordinary replace
 %% semantics, to say so. A candidate with no existing finding for this origin
 %% has nothing to mark — most unverified candidates, every reload — so this
@@ -4291,7 +4289,7 @@ findings_store_get_origin(OwnerBin, ChangedClassBin) ->
 
 %% The marker substring `stale_note/2` looks for to avoid re-wrapping a note
 %% that is already marked — a candidate parked outside the cap (or
-%% repeatedly skipped/failed, BT-2828) for many consecutive reloads must not
+%% repeatedly skipped/failed) for many consecutive reloads must not
 %% accumulate one "not re-checked" suffix per reload.
 -define(RECHECK_STALE_MARKER, <<"not re-checked against the latest reload">>).
 
@@ -4307,7 +4305,7 @@ mark_stale_finding(ClassNameBin, Finding = #{note := Note}) when is_binary(Note)
 mark_stale_finding(ClassNameBin, Finding) ->
     Finding#{note => stale_note(ClassNameBin, undefined)}.
 
-%% BT-2828: the reason a candidate went unverified is deliberately not named
+%% The reason a candidate went unverified is deliberately not named
 %% here (caller-cap limit vs. no live source vs. a compiler-port failure) —
 %% `mark_unverified_findings_stale/2` is fed one merged
 %% `not_verified_owners` set with no per-owner reason attached, and inventing
@@ -4394,7 +4392,7 @@ publish_recheck_outcome(
     end.
 
 %%====================================================================
-%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%% Shape-change re-check (ADR 0105 Phase 2)
 %%====================================================================
 
 -doc """
@@ -4532,7 +4530,7 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
         end,
         CheckedOwners
     ),
-    %% BT-2802/BT-2828: same not-verified staleness marking as
+    %% Same not-verified staleness marking as
     %% `maybe_run_recheck/4` (see `mark_unverified_findings_stale/2`'s doc) —
     %% a shape change's candidates go through the same `apply_cap/2` limit
     %% and the same `recheck_owner_for_shape/4` skipped/failed outcomes.
@@ -4570,7 +4568,7 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
             ok
     end.
 
-%% ── BT-2856 / ADR 0107 Phase A: leaf-change re-check ────────────────────
+%% ── ADR 0107 Phase A: leaf-change re-check ────────────────────
 
 -doc """
 Which superclass names declared by `Classes` are, at this exact moment,
@@ -4859,7 +4857,7 @@ publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
             ok
     end.
 
-%% ── ADR 0108 hot-reload re-check trigger (BT-2899): alias-change re-check ──
+%% ── ADR 0108 hot-reload re-check trigger: alias-change re-check ──
 
 -doc """
 Hand `AliasNameBins` off to the shape-recheck worker's queue and return
@@ -5117,7 +5115,7 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
             %% record a flushable entry with no prev span — a later flush appends
             %% the method. The compiler's canonical body is column-0, but the
             %% class body on disk is indented, so reshape the body to the class's
-            %% sibling-method indentation at store time (BT-2583) — mirroring
+            %% sibling-method indentation at store time — mirroring
             %% `store_disk_shaped_entry`'s reshape — so flush's `append_method`
             %% stays a verbatim append into an indented body.
             new_method_entry(Base, SourceFile, DiskSource);
@@ -5127,8 +5125,8 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
     end.
 
 %% Reshape a brand-new method (no prior on-disk span) to the target class body's
-%% indentation at store time, so flush's `append_method' stays a verbatim append
-%% (BT-2583). The compiler's canonical `unparse_method' body is column-0, but the
+%% indentation at store time, so flush's `append_method' stays a verbatim append.
+%% The compiler's canonical `unparse_method' body is column-0, but the
 %% class body on disk is indented; an un-reshaped append would write the method
 %% at column 0 into an indented class. The base indentation is derived from a
 %% sibling method already on disk (falling back to the project's 2-space step),
@@ -5140,7 +5138,7 @@ new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
     BaseIndent = sibling_method_indent(DiskSource),
     %% Reshape via the compiler port: it re-lays-out the canonical body at the
     %% target indent (re-breaking width-sensitive lines, which a pure whitespace
-    %% shift cannot — BT-2594), so the stored body is byte-identical to what
+    %% shift cannot), so the stored body is byte-identical to what
     %% `bt fmt' produces on disk. The port is already up here (the method was just
     %% compiled through it); a transient failure downgrades to memory-only rather
     %% than store a column-0 body flush would append un-indented.
@@ -5157,10 +5155,10 @@ new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
                     domain => [beamtalk, runtime]
                 }
             ),
-            %% BT-2594 deliberately re-introduces this memory-only path that
-            %% BT-2592 removed: the pure-Erlang shift was total but reshaped
-            %% width-sensitive methods wrongly; port re-layout is correct, at the
-            %% cost of a rare transient-failure downgrade.
+            %% This memory-only path is deliberate: the pure-Erlang shift was
+            %% total but reshaped width-sensitive methods wrongly; port
+            %% re-layout is correct, at the cost of a rare transient-failure
+            %% downgrade.
             Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
     end.
 
@@ -5208,7 +5206,7 @@ strip_leading_ws(Bin) ->
 %% Reshape the stored `source' (the compiler's canonical column-0
 %% `unparse_method' body) to the on-disk byte-span shape so the ChangeEntry's
 %% `source_ref' is a drop-in for `disk[span]' — `source_ref == disk[span]' by
-%% construction (BT-2584). A later `Workspace flush' then splices it verbatim
+%% construction. A later `Workspace flush' then splices it verbatim
 %% with no reindent. The base indentation is the leading whitespace of the disk
 %% slice (`PrevSource') the patch replaces. If the reshape FFI is unavailable,
 %% downgrade to memory-only rather than store a column-0 body that flush would
@@ -5218,7 +5216,7 @@ strip_leading_ws(Bin) ->
 ) -> map().
 store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
     BaseIndent = beamtalk_workspace_reshape:leading_ws(PrevSource),
-    %% Reshape via the compiler port (re-layout at the span's indent — BT-2594),
+    %% Reshape via the compiler port (re-layout at the span's indent),
     %% so `source_ref == disk[span]' even for width-sensitive methods a pure shift
     %% would reformat. The port is already up (the patch was just compiled through
     %% it); a transient failure downgrades to memory-only rather than store a
@@ -5229,7 +5227,7 @@ store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSou
             %% the last line of the file with no terminator (ADR 0082). Match that
             %% trailing-newline state on the reshaped body — regardless of whether
             %% the canonical body carries its own — so the splice is a true drop-in
-            %% and never glues the next line or leaves a stray blank one (BT-2584).
+            %% and never glues the next line or leaves a stray blank one.
             DiskShaped = match_trailing_newline(Reindented, PrevSource),
             Base#{
                 source => DiskShaped,
@@ -5248,9 +5246,9 @@ store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSou
                     domain => [beamtalk, runtime]
                 }
             ),
-            %% BT-2594 deliberately re-introduces this memory-only path that
-            %% BT-2592 removed (see new_method_entry/3): port re-layout is correct
-            %% where the pure-Erlang shift reshaped width-sensitive methods wrongly.
+            %% This memory-only path is deliberate (see new_method_entry/3):
+            %% port re-layout is correct where the pure-Erlang shift reshaped
+            %% width-sensitive methods wrongly.
             Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
     end.
 
@@ -5272,7 +5270,7 @@ ends_with_newline(Bin) -> binary:last(Bin) =:= $\n.
 %% A genuine span-resolution failure (`ambiguous', a port/transport error, ...)
 %% downgrades the entry to memory-only with a reason. The brand-new-method case
 %% (`selector_not_found') does NOT come here — it is reshaped and recorded
-%% flushable by `new_method_entry/3' (BT-2583).
+%% flushable by `new_method_entry/3'.
 -spec span_error_entry(map(), binary(), atom()) -> map().
 span_error_entry(Base, _SourceFile, Reason) ->
     Base#{
@@ -5282,7 +5280,7 @@ span_error_entry(Base, _SourceFile, Reason) ->
     }.
 
 %%% ----------------------------------------------------------------------------
-%%% Method-removal ChangeLog entry (ADR 0112 Phase 3, BT-3187)
+%%% Method-removal ChangeLog entry (ADR 0112 Phase 3)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -5411,7 +5409,7 @@ resolve_removal_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, Di
             };
         {error, selector_not_found, _Message} ->
             %% Nothing on disk to excise (the method was a live, never-flushed
-            %% addition) — nothing for BT-2192's future flush-excise step to
+            %% addition) — nothing for a future flush-excise step to
             %% act on either.
             Base#{flushable => false, not_flushable_reason => <<"not_on_disk">>};
         {error, Reason, _Message} ->
@@ -5536,7 +5534,7 @@ maybe_put_extension_source_file(Base, Owner) when is_atom(Owner) ->
     end.
 
 %%% ----------------------------------------------------------------------------
-%%% Class-removal ChangeLog entry (BT-3206)
+%%% Class-removal ChangeLog entry
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -5694,7 +5692,7 @@ is_path_inside(Root, Path) ->
     PathParts = filename:split(Path),
     lists:prefix(RootParts, PathParts).
 
-%% Convert a list of class info maps to a list of existing atoms (BT-738).
+%% Convert a list of class info maps to a list of existing atoms.
 -spec class_name_atoms([map()]) -> [atom()].
 class_name_atoms(Classes) ->
     lists:filtermap(
@@ -5713,7 +5711,7 @@ class_name_atoms(Classes) ->
 safe_atom_result({ok, Atom}) -> {true, Atom};
 safe_atom_result({error, badarg}) -> false.
 
-%% Compute a package-qualified module name for a file (BT-775 / BT-1670).
+%% Compute a package-qualified module name for a file.
 %%
 %% With package context: derives `bt@{package}@{relative_path_segments}`
 %% for files under src/ or test/.  Files outside those directories (e.g.

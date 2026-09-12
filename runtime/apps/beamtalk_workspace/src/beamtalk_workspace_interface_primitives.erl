@@ -53,14 +53,14 @@ into REPL session state. Workspace readiness is detected via
 -export([dispatch/3]).
 %% Stable external API (called by repl_eval and repl_shell)
 -export([get_user_bindings/0, get_session_bindings/0]).
-%% BT-2365 (ADR 0081 Phase 1): shared lazy name resolver. Single source of truth
+%% ADR 0081 Phase 1: shared lazy name resolver. Single source of truth
 %% for bare-name resolution (REPL codegen fallthrough) and Session resolve:.
 -export([resolve_name/2]).
-%% BT-2365: capitalised class-reference resolution (REPL codegen). Shares the
+%% Capitalised class-reference resolution (REPL codegen). Shares the
 %% singleton + class-registry tiers with resolve_name/2 but keeps the
 %% class_not_found terminal so the "Class 'X' not found" error is preserved.
 -export([resolve_class_reference/2]).
-%% BT-2365: singleton-instance lookup for the binding-aware class-send fallback
+%% Singleton-instance lookup for the binding-aware class-send fallback
 %% (a message sent to a singleton receiver, e.g. `Workspace bind:as:`). Returns
 %% the live instance so dispatch goes to it rather than a non-existent class.
 -export([resolve_singleton_instance/1]).
@@ -71,26 +71,25 @@ into REPL session state. Workspace readiness is detected via
 -export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
 
 -export([currentSession/0, sessions/0]).
-%% Supervisor lifecycle management (BT-1341)
+%% Supervisor lifecycle management
 -export([startSupervisor/1, stopSupervisor/1, supervisors/0]).
 %% Package reflection (ADR 0070 Phase 5)
 -export([dependencies/0]).
-%% Project sync (BT-1723)
+%% Project sync
 -export([sync/0]).
-%% New-class creation (ADR 0082 Phase 1, BT-2285)
+%% New-class creation (ADR 0082 Phase 1)
 -export([newClass/2]).
-%% Class file move — pure path change, no identity change (ADR 0114 Phase 2,
-%% BT-3272).
+%% Class file move — pure path change, no identity change (ADR 0114 Phase 2).
 -export([moveClass/2]).
-%% Workspace flush (ADR 0082 Phase 2, BT-2286; destructive tiering ADR 0113
-%% Phase 2, BT-3207).
+%% Workspace flush (ADR 0082 Phase 2; destructive tiering ADR 0113
+%% Phase 2).
 -export([flush/0, flush/1, flush/2, flushIncludingDestructive/0]).
-%% Whole-image re-check (ADR 0105 Phase 3, BT-2782)
+%% Whole-image re-check (ADR 0105 Phase 3)
 -export([recheckImage/0]).
-%% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
+%% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4)
 -export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1, changeLogFlushKinds/2]).
 %% Clean-returning revert for non-FFI callers (the LiveView Attach client, ADR
-%% 0082 Phase 5, BT-2293). `revert_method/3` (ADR 0112, BT-3187) is the
+%% 0082 Phase 5). `revert_method/3` (ADR 0112) is the
 %% side-aware surface the LiveView `Workspace changes` row now calls with its
 %% own `side`; `revert_method/2` stays side-agnostic (highest-seq selection)
 %% for callers with no side information.
@@ -574,7 +573,7 @@ extract_revert_target(_Other) ->
 -spec extract_revert_target_from_map(map()) ->
     {ok, binary(), atom(), instance | class | undefined} | {error, #beamtalk_error{}}.
 extract_revert_target_from_map(M) ->
-    %% ADR 0112 (BT-3187) required fix: a same-selector instance-side entry and
+    %% ADR 0112 required fix: a same-selector instance-side entry and
     %% class-side entry are otherwise indistinguishable to `find_revert_target/2`
     %% (which is keyed on `(class, selector)` only) — it would pick whichever has
     %% the higher `seq`, silently reverting the wrong side. `side` rides the same
@@ -594,7 +593,7 @@ extract_revert_target_from_map(M) ->
         {ClassAtom, nil} when is_atom(ClassAtom), ClassAtom =/= nil, ClassAtom =/= undefined ->
             %% A new-class entry carries `selector = nil` (it has no selector). Map
             %% it to the `'new-class'` placeholder so `do_revert`/`find_revert_target`
-            %% resolve the class's new-class entry and remove the class (BT-2664).
+            %% resolve the class's new-class entry and remove the class.
             %% A new-class entry is always sideless, so `Side` is `undefined` here
             %% regardless of what the map carried.
             {ok, atom_to_binary(ClassAtom, utf8), 'new-class', undefined};
@@ -609,7 +608,7 @@ extract_revert_target_from_map(M) ->
     end.
 
 %% Normalise a caller-supplied side value to `find_revert_target/3`'s expected
-%% shape. Shared by both revert entry points (ADR 0112, BT-3187): a
+%% shape. Shared by both revert entry points (ADR 0112): a
 %% ChangeEntry map's `side` field arrives as the atom `instance`/`class`/`nil`
 %% (`extract_revert_target_from_map/1`), while a LiveView `phx-value-side`
 %% attribute (`revert_method/3`) arrives as the binary `<<"instance">>`/
@@ -623,7 +622,7 @@ revert_side_field(<<"instance">>) -> instance;
 revert_side_field(<<"class">>) -> class;
 revert_side_field(_Other) -> undefined.
 
-%% `TargetSide` (ADR 0112, BT-3187) narrows `find_revert_target/3`'s candidate
+%% `TargetSide` (ADR 0112) narrows `find_revert_target/3`'s candidate
 %% search to entries on that side, so a same-selector instance-side entry and
 %% class-side entry are not ambiguous by `(class, selector)` alone — see
 %% `extract_revert_target_from_map/1`'s doc. Pass `undefined` (from a caller
@@ -634,9 +633,9 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
     case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom, TargetSide) of
         {ok, PrevBody, Entry} ->
             %% A *modify* revert: re-install the recorded prior body on the
-            %% entry's side. Instance and class side are both supported
-            %% (BT-2665). This also covers reverting a `'remove-method'` entry
-            %% (ADR 0112, BT-3187) — when its `prev_source_ref` is set (the
+            %% entry's side. Instance and class side are both supported.
+            %% This also covers reverting a `'remove-method'` entry
+            %% (ADR 0112) — when its `prev_source_ref` is set (the
             %% removed method's prior body), it reaches this branch exactly
             %% like an ordinary modify, and re-installing that body IS what
             %% undoes the removal. `prev_source_ref` is NOT always set, though:
@@ -655,18 +654,17 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             install_revert_patch(ClassNameBin, SelectorAtom, PrevBody, Side);
         {remove, Entry} ->
             %% An *add* revert: the pre-patch state was "absent", so undo the add
-            %% by removing the method (BT-2663/BT-2665) or the new class
-            %% (BT-2664). The kind tells us which.
+            %% by removing the method or the new class. The kind tells us which.
             revert_removal(ClassNameBin, SelectorAtom, Entry);
         {reinstall_class, PrevBody, Entry} ->
-            %% A `'remove-class'` revert (ADR 0113, BT-3208): the pre-removal
+            %% A `'remove-class'` revert (ADR 0113): the pre-removal
             %% state was "this class existed", so undo the removal by
             %% recompiling and reinstalling the whole class from its recorded
             %% prior source — a class-level target, not a single-method patch.
             reinstall_reverted_class(ClassNameBin, PrevBody, Entry);
         {revert_rename, Entry} ->
-            %% A `'rename-class'`/`'rename-method'` revert (ADR 0114,
-            %% BT-3274): a multi-site target, not a single prior body — undo
+            %% A `'rename-class'`/`'rename-method'` revert (ADR 0114): a
+            %% multi-site target, not a single prior body — undo
             %% by rewriting every one of `Entry`'s own `sites` back to its own
             %% recorded `prev_source_ref`.
             revert_rename_entry(ClassNameBin, Entry);
@@ -702,7 +700,7 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             )
     end.
 
-%% Resolve a ChangeEntry's revert install/remove side (ADR 0112, BT-3187's
+%% Resolve a ChangeEntry's revert install/remove side (ADR 0112's
 %% required fix to ADR 0082's shipped revert logic — see
 %% `beamtalk_workspace_changelog:entry_side/1`'s doc). Delegates the actual
 %% instance/class resolution to that single accessor rather than pattern-
@@ -730,8 +728,8 @@ revert_side(Entry) ->
     end.
 
 %% Perform an *add* revert by removing what was added. A `new-class` entry removes
-%% the class (BT-2664); a method entry removes that method on its side
-%% (BT-2663/BT-2665). The original add entry stays in the audit log; the removal
+%% the class; a method entry removes that method on its side.
+%% The original add entry stays in the audit log; the removal
 %% itself does not emit a ChangeEntry (it is the inverse of the add, not a new
 %% patch — symmetrical with how a modify-revert's re-install is the only entry).
 -spec revert_removal(binary(), atom(), beamtalk_workspace_changelog:entry()) -> term().
@@ -825,7 +823,7 @@ reinstall_reverted_class_body(ClassNameBin, PrevBody, SourceFile, Entry) ->
             %% either (`new_class_install/8`'s `no_log` mode), so the
             %% original `'remove-class'` entry must be retired here —
             %% otherwise it stays active/pending forever even though
-            %% its effect has been undone (ADR 0113, BT-3208 review
+            %% its effect has been undone (ADR 0113 review
             %% fix: a stale `'remove-class'` entry would misreport
             %% `skipped: destructive`/block a real future removal).
             retire_reverted_remove_class_entry(ClassNameBin, Entry);
@@ -1321,7 +1319,7 @@ rootSupervisor() ->
     beamtalk_supervisor:get_root().
 
 %%% ============================================================================
-%%% Session navigation (ADR 0081 Phases 5 & 7, BT-2368)
+%%% Session navigation (ADR 0081 Phases 5 & 7)
 %%% ============================================================================
 
 -doc """
@@ -1353,7 +1351,7 @@ sessions() ->
     beamtalk_session_primitives:liveSessions().
 
 %%% ============================================================================
-%%% Supervisor lifecycle management (BT-1341)
+%%% Supervisor lifecycle management
 %%% ============================================================================
 
 -doc """
@@ -1598,7 +1596,7 @@ dependencies() ->
     end.
 
 %%% ============================================================================
-%%% Project sync (BT-1723)
+%%% Project sync
 %%% ============================================================================
 
 -doc """
@@ -1956,7 +1954,7 @@ On success, returns the loaded class object(s) so the REPL displays what was loa
 handle_load(Path) when is_binary(Path) ->
     handle_load(binary_to_list(Path));
 handle_load(Path) when is_list(Path) ->
-    %% BT-2091: BT-1719 demand-driven native .erl recompilation. Previously
+    %% Demand-driven native .erl recompilation. Previously
     %% wired into the deprecated `load-file` op handler; mirror the same
     %% pre-step here so `Workspace load: "path"` keeps native FFI working
     %% for package projects with `native/*.erl` sources.
@@ -1999,13 +1997,13 @@ handle_load(Other) ->
             iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
         )}.
 
-%% BT-2091: Path post-step extracted so the native-compile error path
+%% Path post-step extracted so the native-compile error path
 %% short-circuits without falling through to reload_class_file/1.
 -spec handle_load_after_native(string()) -> term() | {error, #beamtalk_error{}}.
 handle_load_after_native(Path) ->
     case beamtalk_repl_eval:reload_class_file(Path) of
         {ok, ClassNames} ->
-            %% BT-2091: record class source so subsequent `Class >> selector => body`
+            %% Record class source so subsequent `Class >> selector => body`
             %% method-patch syntax (which depends on workspace_meta:get_class_source/1)
             %% keeps working. The deprecated `load-file` op's session-aware path
             %% recorded sources via store_file_class_sources/3; the stateless
@@ -2049,7 +2047,7 @@ handle_load_after_native(Path) ->
                     iolist_to_binary([<<"File not found: ">>, Path])
                 )};
         {error, Reason} ->
-            %% BT-2091: surface structured compile/semantic errors through `Workspace load:`
+            %% Surface structured compile/semantic errors through `Workspace load:`
             %% so e2e callers see specific error reasons (cannot subclass sealed class,
             %% cannot assign to field, etc.) rather than a generic "Failed to load".
             %% The migration target for the deprecated `load-file` op was already running

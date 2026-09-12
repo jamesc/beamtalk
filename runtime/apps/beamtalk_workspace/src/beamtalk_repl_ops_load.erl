@@ -19,10 +19,10 @@ respectively.
 
 -export([handle/4, handle_term/4, resolve_class_to_module/1, resolve_module_atoms/2]).
 
-%% BT-1723: Shared sync logic callable from both protocol handler and primitives.
+%% Shared sync logic callable from both protocol handler and primitives.
 -export([sync_project/2]).
 
-%% BT-1719: Exported for demand-driven native .erl compilation from classReload.
+%% Exported for demand-driven native .erl compilation from classReload.
 -export([find_project_root/1, maybe_recompile_native_deps/2]).
 
 %% Export internals for white-box testing of load-project helpers.
@@ -54,7 +54,7 @@ respectively.
     finish_section_write/4,
     atomic_write_file/2,
     atomic_write_file/3,
-    %% BT-3336: white-box coverage for the pure load-result-shape helpers
+    %% White-box coverage for the pure load-result-shape helpers
     %% behind sync_project/2 and handle_term/4's `load-source` clause.
     collect_load_warnings/1,
     build_incremental_summary/4
@@ -62,7 +62,7 @@ respectively.
 -endif.
 
 %%% ============================================================================
-%%% sync_project/2 — shared incremental sync logic (BT-1723)
+%%% sync_project/2 — shared incremental sync logic
 %%% ============================================================================
 
 -doc """
@@ -118,7 +118,7 @@ do_sync_project(AbsPath, IncludeTests, Force0, SessionPid) ->
     %% to roll back, per ADR §4).
     %%
     %% Project scope: a stamp produced by a different toolchain forces a full
-    %% in-memory recompile from source (generalizing BT-2653's header-content
+    %% in-memory recompile from source (generalizing the header-content
     %% force-rebuild). Dependency scope: the workspace recompiles project sources
     %% only, so a stale dep cannot self-heal here — per ADR §4 we FAIL the attach
     %% with a directed message rather than activating stale dep `.beam`, which
@@ -165,7 +165,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
         end,
     AllBtFiles = SrcFiles ++ TestFiles,
     NativeDir = filename:join(AbsPath, "native"),
-    %% BT-2653: On the test-load path (include_tests=true), also discover
+    %% On the test-load path (include_tests=true), also discover
     %% native/test/ helper modules (e.g. a test server that a `.bt` test drives
     %% via `(Erlang <helper>) <msg>`). Under normal load-project they stay
     %% skipped — they are EUnit helpers, not runtime modules — mirroring how the
@@ -177,13 +177,13 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
             {ok, Mtimes} -> Mtimes;
             {error, _} -> #{}
         end,
-    %% BT-2089: Scope previous-mtime tracking to the project being synced.
+    %% Scope previous-mtime tracking to the project being synced.
     %% The workspace meta table accumulates mtimes for every project ever
     %% loaded into this workspace, so unfiltered classification would treat
     %% every other project's files as "deleted" and unload their classes.
     %% Only files whose path lies under AbsPath belong to this project sync.
     ProjectMtimes = filter_mtimes_under_project(PreviousMtimes, AbsPath),
-    %% BT-2089: When include_tests=false, also drop previously-tracked test
+    %% When include_tests=false, also drop previously-tracked test
     %% files from the baseline. Otherwise an `Op::Load` (which defaults to
     %% include_tests=false) classifies the test files loaded by an earlier
     %% `:test`/include_tests=true sync as "deleted" and unregisters them.
@@ -248,7 +248,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
                     code:delete(ModName),
                     code:purge(ModName)
             end,
-            %% BT-3110: erase the compile-time mtime persistent_term entry along
+            %% Erase the compile-time mtime persistent_term entry along
             %% with the module — otherwise it outlives the module forever (one
             %% entry per ever-deleted native module, each `put` also scanning
             %% every scheduler for global GC).
@@ -258,7 +258,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
         DeletedErl
     ),
     DeletedCount = DeletedBtCount + length(DeletedErl),
-    %% BT-2653: Before compiling any native .erl, regenerate the
+    %% Before compiling any native .erl, regenerate the
     %% beamtalk_classes.hrl header from the live class→module index so native
     %% modules that `-include("beamtalk_classes.hrl")` build against the current
     %% class set. A stale header (or a stale .beam compiled against one) causes a
@@ -267,7 +267,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
     %% on every build (build.rs generate_class_header/2); the workspace
     %% incremental path must do the same to stay in sync.
     HeaderChanged = regenerate_native_class_header(AbsPath),
-    %% BT-2653: decide which native .erl to (re)compile. The mtime check only
+    %% Decide which native .erl to (re)compile. The mtime check only
     %% catches .erl edits; it misses the case where the *header* changed (a class
     %% added/moved/renamed) while the .erl is byte-identical — the already-loaded
     %% .beam would stay compiled against the old macro values (stale cascade,
@@ -323,7 +323,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
             end
          || C <- AllClasses
         ],
-    %% BT-2089: Drain class collision warnings so cross-project class
+    %% Drain class collision warnings so cross-project class
     %% redefinitions produce a clear diagnostic instead of silent eviction.
     CollisionWarnings = collect_load_warnings(AllClasses),
     TotalFiles = length(AllFiles) + DeletedCount,
@@ -375,7 +375,7 @@ handle_term(<<"load-project">>, Params, _Msg, SessionPid) ->
             {error, Err};
         {ok, Result} ->
             DepErrors = maps:get(dep_errors, Result, []),
-            %% BT-2089: Surface collision warnings to the load-project caller
+            %% Surface collision warnings to the load-project caller
             %% so that cross-project class collisions produce a clear
             %% diagnostic instead of silent eviction.
             Warnings = maps:get(warnings, Result, []),
@@ -403,7 +403,7 @@ handle_term(<<"load-source">>, Params, _Msg, SessionPid) ->
             end
     end;
 handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
-    %% BT-1239: Restore unload op — fully removes class from system (actors, gen_server,
+    %% Restore unload op — fully removes class from system (actors, gen_server,
     %% BEAM module, workspace_meta, session tracker).
     ClassNameBin = maps:get(<<"module">>, Params, <<>>),
     case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
@@ -429,7 +429,7 @@ handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
             end
     end;
 handle_term(<<"save-native-source">>, Params, _Msg, _SessionPid) ->
-    %% BT-2670: edit → compile → reload → write-back for a *project-owned* native
+    %% Edit → compile → reload → write-back for a *project-owned* native
     %% (`.erl`) module. The write target is re-derived server-side from the
     %% module's own compile info (never a client path), and only a project-origin
     %% native is writable — deps/stdlib are rejected read-only.
@@ -437,7 +437,7 @@ handle_term(<<"save-native-source">>, Params, _Msg, _SessionPid) ->
     Source = maps:get(<<"source">>, Params, <<>>),
     save_native_source(ModuleBin, Source);
 handle_term(<<"save-section">>, Params, _Msg, _SessionPid) ->
-    %% BT-3238: add/rename a `// === Name ===` section-divider comment at the
+    %% Add/rename a `// === Name ===` section-divider comment at the
     %% file/class level. Exactly one of `old_name` (rename) / `before_selector`
     %% (insert) selects the mode — see save_section/5's doc.
     ClassBin = maps:get(<<"class">>, Params, <<>>),
@@ -541,7 +541,7 @@ the compile-mtime. The project root for the erlc include path is derived from th
 compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
     SourceFileBin = list_to_binary(ErlPath),
     ProjectRoot = find_project_root(ErlPath),
-    %% BT-2653: refresh the generated beamtalk_classes.hrl before compiling so a
+    %% Refresh the generated beamtalk_classes.hrl before compiling so a
     %% module that `-include("beamtalk_classes.hrl")` resolves against a fresh
     %% header (the same invariant the incremental native build relies on). A
     %% missing project root (no beamtalk.toml — should not happen for a resolved
@@ -626,7 +626,7 @@ finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileR
     case atomic_write_file(ErlPath, Source) of
         ok ->
             %% Recompile + reload from the REAL `.erl` (not the validation temp)
-            %% so compile-info `source` = ErlPath and the BT-2653 compile-mtime is
+            %% so compile-info `source` = ErlPath and the compile-mtime is
             %% stamped against the real file (image == disk).
             {ReErrors, _Count} = compile_native_erl_files([ErlPath], CompileRoot),
             case ReErrors of
@@ -885,8 +885,8 @@ save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide) when
             end
     end.
 
-%% Review finding (BT-3238): `new_name` used to be spliced verbatim into the
-%% divider line with only an empty-binary check — a name containing `\n`/`\r`
+%% Without this check, `new_name` could be spliced verbatim into the
+%% divider line — a name containing `\n`/`\r`
 %% would inject arbitrary extra source lines (corrupting the file, defeating
 %% the whole "comment-only edit" premise this op's direct-write bypass of
 %% ADR 0082 rests on), and a whitespace-only name composes into a line
@@ -1094,7 +1094,7 @@ leading_indent(Bin, N) when N < byte_size(Bin) ->
 leading_indent(Bin, N) ->
     binary:part(Bin, 0, N).
 
-%% Review finding (BT-3238): re-read `Path` immediately before writing and
+%% Re-read `Path` immediately before writing and
 %% require it to still byte-match `Source` (the content this write's
 %% `NewSource` was spliced from, read at the start of the op) — mirrors the
 %% ADR 0082 flush pipeline's `prev_source` check
@@ -1110,7 +1110,7 @@ leading_indent(Bin, N) ->
 finish_section_write(Path, ClassBin, Source, NewSource) ->
     case file:read_file(Path) of
         {ok, Source} ->
-            %% BT-3259: pass `Source` through as the expected-current content
+            %% Pass `Source` through as the expected-current content
             %% so atomic_write_file/3 repeats this same byte-match check
             %% immediately before its rename, closing the gap between this
             %% read and that rename that a check made only here cannot.
@@ -1268,7 +1268,7 @@ compile_native_erl_files([], _ProjectRoot) ->
 compile_native_erl_files(ErlFiles, ProjectRoot) ->
     NativeDir = filename:join(ProjectRoot, "native"),
     IncludeDir = filename:join(NativeDir, "include"),
-    %% BT-2653: Native modules may `-include("beamtalk_classes.hrl")`, the
+    %% Native modules may `-include("beamtalk_classes.hrl")`, the
     %% generated class→module header. The CLI writes it to
     %% _build/dev/native/include/ and adds that dir to the erlc include path;
     %% the workspace path must do the same (regenerate_native_class_header/1
@@ -1299,7 +1299,7 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                 [ErlPath],
                 #{domain => [beamtalk, runtime]}
             ),
-            %% BT-1719: Snapshot the .erl file's mtime before compiling so
+            %% Snapshot the .erl file's mtime before compiling so
             %% is_native_erl_stale/2 can compare against it later.
             ErlMtimeSnapshot = get_file_mtime(ErlPath),
             case compile:file(ErlPath, IncludeOpts) of
@@ -1467,7 +1467,7 @@ header. The header is written to `_build/dev/native/include/beamtalk_classes.hrl
 """.
 -spec regenerate_native_class_header(string()) -> boolean().
 regenerate_native_class_header(ProjectRoot) ->
-    %% BT-2671: Union the source-AST-derived index (complete on a cold load)
+    %% Union the source-AST-derived index (complete on a cold load)
     %% with the live registry (canonical module atoms on the warm path). The
     %% registry wins on conflict via the second arg to maps:merge/2.
     SourceIndex = build_source_class_module_index(ProjectRoot),
@@ -1579,7 +1579,7 @@ build_source_class_module_index(ProjectRoot) ->
     end.
 
 %% Index one `src/**/*.bt` file's classes into `Acc` via the compiler port
-%% (BT-3441). Best-effort: an unreadable file, an indexing failure, or a
+%% Best-effort: an unreadable file, an indexing failure, or a
 %% compiler-port transport failure is logged and skipped rather than failing
 %% the whole cold-load index.
 -spec index_bt_file(string(), string(), binary(), #{binary() => binary()}) ->
@@ -1717,7 +1717,7 @@ render_class_header(Index) ->
         "%% Copyright 2026 James Casey\n",
         "%% SPDX-License-Identifier: Apache-2.0\n\n",
         "%% Generated by the Beamtalk workspace test-load - do not edit.\n",
-        "%% BT-1730/BT-2653: Maps Beamtalk class names to compiled BEAM module atoms.\n\n",
+        "%% Maps Beamtalk class names to compiled BEAM module atoms.\n\n",
         "-ifndef(BEAMTALK_CLASSES_HRL).\n",
         "-define(BEAMTALK_CLASSES_HRL, true).\n\n",
         Defines,
@@ -1951,7 +1951,7 @@ format_collision_warning(ClassName, OldModule, NewModule) ->
     ClassBin = atom_to_binary(ClassName, utf8),
     OldPkg = extract_package_from_module(OldModule),
     NewPkg = extract_package_from_module(NewModule),
-    %% BT-1659: When both modules come from packages, add a qualified-name hint.
+    %% When both modules come from packages, add a qualified-name hint.
     QualifiedHint =
         case {OldPkg, NewPkg} of
             {OldP, NewP} when OldP =/= undefined, NewP =/= undefined ->
@@ -2074,7 +2074,7 @@ module_to_class_name_map() ->
     ).
 
 %%% ===================================================================
-%%% BT-1717: Demand-driven native .erl recompilation on single-file reload
+%%% Demand-driven native .erl recompilation on single-file reload
 %%% ===================================================================
 
 -doc """
@@ -2208,7 +2208,7 @@ is_native_erl_stale(ErlFile, ModBin) ->
             BeamMtime =
                 case is_list(BeamPath) of
                     true ->
-                        %% BT-1719: When loaded via code:load_binary/3 the stored
+                        %% When loaded via code:load_binary/3 the stored
                         %% path is the .erl source, not a .beam file. Comparing
                         %% its mtime against itself always yields "not stale".
                         %% Use the mtime snapshot taken at compile time instead.
@@ -2264,7 +2264,7 @@ erase_native_compile_mtime(ModAtom) ->
     ok.
 
 %%% ===================================================================
-%%% BT-1685: Incremental load-project helpers
+%%% Incremental load-project helpers
 %%% ===================================================================
 
 -doc """
@@ -2469,7 +2469,7 @@ build_incremental_summary(ChangedCount, TotalFiles, UnchangedCount, DeletedCount
 %%% same toolchain now running the workspace. mtime cannot detect a toolchain
 %%% change — the build stamp (`beamtalk_version` + compound OTP version, ADR 0098
 %%% Phase 1) is the authoritative signal. A miss forces a full recompile so the
-%%% workspace never serves stale modules (the BT-2653 cascade generalized).
+%%% workspace never serves stale modules (generalizing that same cascade).
 
 %% Provenance-stamp schema understood by this reader. A newer stamp (or anything
 %% unrecognised) is treated as a miss, never an error.

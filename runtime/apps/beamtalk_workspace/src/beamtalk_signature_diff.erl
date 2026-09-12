@@ -34,8 +34,8 @@ scope — ADR 0105 Phase 2.
 %% omitted, so two signatures are always directly comparable.
 -type signature() :: #{return_type := binary(), param_types := [binary()]}.
 
-%% `removed` marks that the selector no longer exists on the class (BT-2777
-%% acceptance criteria's "removal" case — the method-delete path records this
+%% `removed` marks that the selector no longer exists on the class (the
+%% "removal" case — the method-delete path records this
 %% instead of a signature() map). `undefined` marks "no generation recorded
 %% yet" — the seed state before any patch, or an unresolvable original
 %% (nothing to compare against, so classification degrades to `no_op` rather

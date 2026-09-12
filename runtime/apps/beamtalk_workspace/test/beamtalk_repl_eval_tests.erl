@@ -147,7 +147,7 @@ do_eval_preserves_bindings_on_error_test() ->
     %% New binding should NOT be there (eval failed)
     ?assertEqual(false, maps:is_key(z, FinalBindings)).
 
-%%% BT-2688: connected-session Program exit: result plumbing
+%%% Connected-session Program exit: result plumbing
 
 inject_output_script_exit_test() ->
     %% inject_output/3 threads captured output + warnings into the script_exit
@@ -156,7 +156,7 @@ inject_output_script_exit_test() ->
     Result = beamtalk_repl_eval:inject_output({script_exit, 7, State}, <<"out">>, [<<"w">>]),
     ?assertEqual({script_exit, 7, <<"out">>, [<<"w">>], State}, Result).
 
-%%% rebuild_bindings_from_steps tests (BT-1261)
+%%% rebuild_bindings_from_steps tests
 
 rebuild_bindings_from_steps_simple_assignment_test() ->
     %% A single assignment step stores the awaited value under the variable name.
@@ -241,7 +241,7 @@ handle_load_compile_error_test() ->
         Other -> error({unexpected_result, Other})
     end.
 
-%%% IO Capture tests (BT-355)
+%%% IO Capture tests
 
 io_capture_basic_put_chars_test() ->
     %% Test direct put_chars capture
@@ -289,7 +289,7 @@ io_capture_dead_process_test() ->
     Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
-%% === BT-358: Group leader reset for spawned processes ===
+%% === Group leader reset for spawned processes ===
 
 io_capture_resets_spawned_process_group_leader_test() ->
     %% Verify that processes spawned during IO capture get their
@@ -618,7 +618,7 @@ handle_load_empty_file_test() ->
     end.
 
 %%% ===========================================================================
-%%% BT-627: Coverage tests for internal functions and edge cases
+%%% Coverage tests for internal functions and edge cases
 %%% ===========================================================================
 
 %%% is_internal_key/1 tests
@@ -746,7 +746,7 @@ extract_assignment_multiline_test() ->
 extract_assignment_no_space_v2_test() ->
     ?assertEqual({ok, abc}, beamtalk_repl_eval:extract_assignment("abc:=123")).
 
-%% BT-3368: a second top-level statement on its own line (no `.` at all)
+%% A second top-level statement on its own line (no `.` at all)
 %% must bail to `none`, exactly like the existing period-separated case —
 %% otherwise the first statement's variable gets clobbered with the whole
 %% call's `Result` (the last statement's value) in process_eval_result/4.
@@ -760,7 +760,7 @@ extract_assignment_trailing_newline_test() ->
     ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n")),
     ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n  \n")).
 
-%% BT-3368 regression guard: a SINGLE assignment whose right-hand side
+%% Regression guard: a SINGLE assignment whose right-hand side
 %% merely continues onto later lines (a multi-line block/collection
 %% literal, or the value on a continuation line) must NOT be mistaken for
 %% multiple statements — none of the continuation lines themselves open
@@ -772,7 +772,7 @@ extract_assignment_multiline_rhs_is_still_one_statement_test() ->
         beamtalk_repl_eval:extract_assignment("doubler := [\n  :x |\n  x * 2\n]")
     ).
 
-%% BT-3368 regression guard (review follow-up): a period *nested* inside a
+%% Regression guard: a period *nested* inside a
 %% block/collection literal — itself part of the single outer assignment's
 %% right-hand side — must not be mistaken for the pre-existing
 %% period-separates-statements signal. `docs/beamtalk-language-features.md`'s
@@ -792,7 +792,7 @@ extract_assignment_nested_period_in_cascade_is_still_one_statement_test() ->
         "  register",
     ?assertEqual({ok, account}, beamtalk_repl_eval:extract_assignment(Src)).
 
-%% BT-3368 regression guard (review follow-up): a backslash-escaped quote
+%% Regression guard: a backslash-escaped quote
 %% inside a string literal (`"a\"b"`, per `lex_string/0`'s handling of `\`
 %% in `source_analysis/lexer.rs`) must not be mistaken for the string's
 %% closing delimiter — otherwise a `.` or newline that's still genuinely
@@ -812,7 +812,7 @@ extract_assignment_escaped_quote_in_string_is_still_one_statement_test() ->
     Src3 = "s := \"a\\\\\". y := 2",
     ?assertEqual(none, beamtalk_repl_eval:extract_assignment(Src3)).
 
-%% BT-3368 regression guard (review follow-up): a `$`-prefixed character
+%% Regression guard: a `$`-prefixed character
 %% literal (`$(`, `$"`, `$\n`, ... — see `lex_character/0`,
 %% `source_analysis/lexer.rs`) must be consumed atomically, never letting
 %% its payload character be read as a real bracket/quote — otherwise a
@@ -831,7 +831,7 @@ extract_assignment_character_literal_payload_is_not_a_bracket_test() ->
     %% Escaped-payload form (`$\c`) consumes all three characters together.
     ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\\( class")).
 
-%% BT-3368 regression guard (review follow-up): a string containing
+%% Regression guard: a string containing
 %% interpolation (`"...{expr}..."`) may itself contain a *nested* string
 %% literal inside the interpolated expression (`lex_interpolation_body`/
 %% `skip_nested_string`, `source_analysis/lexer.rs`) — a single BT string
@@ -860,8 +860,8 @@ extract_assignment_interpolated_string_is_not_mis_parsed_test() ->
         {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"no interpolation here\"")
     ).
 
-%% BT-3368 review follow-up (CLAUDE.md Essential Rules: a "mirrors" claim
-%% across the Rust/Erlang boundary needs a shared conformance fixture, not
+%% (Per CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% Rust/Erlang boundary needs a shared conformance fixture, not
 %% just a comment): `skip_string_literal/1`/`skip_character_literal/1` are
 %% hand-rolled Erlang mirrors of the Rust lexer's `lex_string/0`/
 %% `lex_character/0` span computation. Both sides run the exact same cases
@@ -902,7 +902,7 @@ assert_literal_span_case(#{
         lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
     ).
 
-%% BT-3372: a `//` line comment containing an unbalanced bracket, followed
+%% A `//` line comment containing an unbalanced bracket, followed
 %% by a genuine second top-level statement, must still be detected as two
 %% statements — the bracket inside the comment must not permanently bump
 %% `Depth` and mask the real statement boundary that follows. Exact repro
@@ -915,7 +915,7 @@ extract_assignment_line_comment_unbalanced_bracket_test() ->
         none, beamtalk_repl_eval:extract_assignment("alpha := 1 // (see below\nbeta := 2")
     ).
 
-%% BT-3372: a `"` inside a `//` comment must not be misread as the start of
+%% A `"` inside a `//` comment must not be misread as the start of
 %% a real string literal — otherwise it could swallow real code that
 %% follows and mask a second statement through a different path.
 extract_assignment_line_comment_with_quote_test() ->
@@ -932,7 +932,7 @@ extract_assignment_line_comment_with_quote_test() ->
         beamtalk_repl_eval:extract_assignment("alpha := 1 // says \"hi\" here")
     ).
 
-%% BT-3372: same shape, but with a `/* ... */` block comment instead of a
+%% Same shape, but with a `/* ... */` block comment instead of a
 %% `//` line comment — an unbalanced brace inside the block comment must
 %% not be read as real code either.
 extract_assignment_block_comment_unbalanced_brace_test() ->
@@ -947,7 +947,7 @@ extract_assignment_block_comment_unbalanced_brace_test() ->
         beamtalk_repl_eval:extract_assignment("alpha := 1 /* note */")
     ).
 
-%% BT-3372 (CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% (Per CLAUDE.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not just a
 %% comment): `skip_line_comment/1`/`skip_block_comment/1` are hand-rolled
 %% Erlang mirrors of the Rust lexer's `lex_line_comment/0`/
@@ -989,7 +989,7 @@ assert_comment_span_case(#{
     ).
 
 %% ===================================================================
-%% compile_expression_via_port catch clauses (BT-627)
+%% compile_expression_via_port catch clauses
 %% ===================================================================
 
 compile_expr_noproc_test() ->
@@ -1005,7 +1005,7 @@ compile_expr_noproc_with_env_test() ->
     ?assertMatch({error, _}, Result).
 
 %% ===================================================================
-%% compile_file_via_port catch clauses (BT-627)
+%% compile_file_via_port catch clauses
 %% ===================================================================
 
 compile_file_noproc_test() ->
@@ -1021,7 +1021,7 @@ compile_file_noproc_stdlib_test() ->
     ?assertMatch({error, _}, Result).
 
 %% ===================================================================
-%% to_snake_case (BT-775)
+%% to_snake_case
 %% ===================================================================
 
 to_snake_case_simple_test() ->
@@ -1050,7 +1050,7 @@ to_snake_case_with_digits_test() ->
     ?assertEqual("app2", beamtalk_repl_loader:to_snake_case("App2")).
 
 %% ===================================================================
-%% handle_class_definition (BT-627)
+%% handle_class_definition
 %% ===================================================================
 
 handle_class_definition_load_error_test() ->
@@ -1083,7 +1083,7 @@ handle_class_definition_empty_classes_test() ->
     ?assertMatch({error, #beamtalk_error{}, <<>>, [<<"warn">>], _}, Result).
 
 %% ===================================================================
-%% handle_method_definition (BT-627)
+%% handle_method_definition
 %% ===================================================================
 
 handle_method_definition_no_source_test() ->
@@ -1102,9 +1102,9 @@ handle_method_definition_no_source_with_warnings_test() ->
 
 handle_method_definition_with_source_compile_fail_test() ->
     %% Test the path where class source exists but recompilation fails.
-    %% BT-911: compile_for_method_reload wraps compiler exits — must return {error, ...},
+    %% compile_for_method_reload wraps compiler exits — must return {error, ...},
     %% never propagate as an exit that would kill the REPL process.
-    %% BT-1174: class source is now stored in workspace_meta.
+    %% Class source is stored in workspace_meta.
     case whereis(beamtalk_workspace_meta) of
         undefined ->
             ok;
@@ -1127,7 +1127,7 @@ handle_method_definition_with_source_compile_fail_test() ->
     ?assertMatch({error, {compile_error, _}, <<>>, [], _}, Result).
 
 %% ===================================================================
-%% maybe_await_future timeout and flush paths (BT-627)
+%% maybe_await_future timeout and flush paths
 %% ===================================================================
 
 maybe_await_future_non_future_pid_v2_test() ->
@@ -1191,7 +1191,7 @@ maybe_await_future_beamtalk_object_v2_test() ->
     ?assertEqual(Obj, beamtalk_repl_eval:maybe_await_future(Obj)).
 
 %% ===================================================================
-%% IO handling edge cases (BT-627)
+%% IO handling edge cases
 %% ===================================================================
 
 handle_io_request_put_chars_legacy_v2_test() ->
@@ -1241,7 +1241,7 @@ handle_io_request_put_chars_bad_encoding_test() ->
     ?assertEqual(<<"prev">>, Buffer).
 
 %% ===================================================================
-%% reset_captured_group_leaders (BT-627)
+%% reset_captured_group_leaders
 %% ===================================================================
 
 reset_captured_group_leaders_no_matches_test() ->
@@ -1257,7 +1257,7 @@ reset_captured_group_leaders_no_matches_test() ->
     FakePid ! stop.
 
 %% ===================================================================
-%% IO capture full lifecycle (BT-627)
+%% IO capture full lifecycle
 %% ===================================================================
 
 io_capture_with_output_test() ->
@@ -1278,7 +1278,7 @@ io_capture_dead_capture_pid_test() ->
     ?assertEqual(<<>>, Output).
 
 %% ===================================================================
-%% trigger_hot_reload with instances (BT-627)
+%% trigger_hot_reload with instances
 %% ===================================================================
 
 trigger_hot_reload_with_list_name_test() ->
@@ -1304,7 +1304,7 @@ trigger_hot_reload_atom_name_v2_test() ->
     ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_mod, Classes)).
 
 %% ===================================================================
-%% is_stdlib_path edge cases (BT-627)
+%% is_stdlib_path edge cases
 %% ===================================================================
 
 is_stdlib_path_abs_v2_test() ->
@@ -1319,7 +1319,7 @@ is_stdlib_path_rel_lib_v2_test() ->
     ?assertEqual(true, beamtalk_repl_loader:is_stdlib_path("stdlib/src/string.bt")).
 
 %% ===================================================================
-%% should_purge_module edge cases (BT-627)
+%% should_purge_module edge cases
 %% ===================================================================
 
 should_purge_module_with_registry_no_actors_test() ->
@@ -1329,7 +1329,7 @@ should_purge_module_with_registry_no_actors_test() ->
     gen_server:stop(Pid).
 
 %% ===================================================================
-%% Stdin request detection tests (BT-698)
+%% Stdin request detection tests
 %% ===================================================================
 
 is_stdin_request_get_line_with_encoding_test() ->
@@ -1371,7 +1371,7 @@ is_stdin_request_other_test() ->
     ?assertEqual(false, beamtalk_io_capture:is_stdin_request({some_other_request})).
 
 %% ===================================================================
-%% Stdin request handling tests (BT-698)
+%% Stdin request handling tests
 %% ===================================================================
 
 handle_stdin_request_no_subscriber_test() ->
@@ -1413,7 +1413,7 @@ handle_stdin_request_eof_test() ->
     end.
 
 %% ===================================================================
-%% Prompt conversion tests (BT-698)
+%% Prompt conversion tests
 %% ===================================================================
 
 prompt_to_binary_binary_test() ->
@@ -1429,7 +1429,7 @@ prompt_to_binary_other_test() ->
     ?assertEqual(<<"? ">>, beamtalk_io_capture:prompt_to_binary(42)).
 
 %% ===================================================================
-%% IO capture loop stdin integration tests (BT-698)
+%% IO capture loop stdin integration tests
 %% ===================================================================
 
 io_capture_stdin_with_subscriber_test() ->
@@ -1495,7 +1495,7 @@ io_capture_stdin_no_subscriber_test() ->
     _Output = beamtalk_io_capture:stop({CapturePid, OldGL}).
 
 %% ===================================================================
-%% reload_class_file (BT-897, BT-868)
+%% reload_class_file
 %% ===================================================================
 
 reload_class_file_not_found_test() ->
@@ -1504,7 +1504,7 @@ reload_class_file_not_found_test() ->
     ?assertEqual({error, {file_not_found, "/nonexistent/file.bt"}}, Result).
 
 reload_class_file_no_compiler_test() ->
-    %% BT-897: reload_class_file with a real file but no compiler available.
+    %% reload_class_file with a real file but no compiler available.
     %% This exercises the code path that now includes compute_package_module_name.
     UniqueId = erlang:unique_integer([positive]),
     TempFile = filename:join(
@@ -1521,7 +1521,7 @@ reload_class_file_no_compiler_test() ->
     end.
 
 %% ===================================================================
-%% verify_class_present (BT-868)
+%% verify_class_present
 %% ===================================================================
 
 verify_class_present_undefined_skips_check_test() ->
@@ -1561,7 +1561,7 @@ verify_class_present_empty_classes_test() ->
         Result
     ).
 
-%%% do_eval_trace tests (BT-1238)
+%%% do_eval_trace tests
 
 do_eval_trace_increments_counter_test() ->
     %% do_eval_trace should increment the eval counter even on compile error
@@ -1602,7 +1602,7 @@ do_eval_trace_preserves_existing_bindings_on_error_test() ->
     ?assertEqual(false, maps:is_key(z, FinalBindings)).
 
 %%====================================================================
-%% Protocol definition error handling tests (BT-1616)
+%% Protocol definition error handling tests
 %%====================================================================
 
 -doc "Test that code:load_binary failure returns a structured #beamtalk_error{}.".
@@ -1739,7 +1739,7 @@ handle_protocol_definition_no_register_class_test() ->
     code:delete(ModuleName).
 
 %%====================================================================
-%% Type alias definition tests (ADR 0108 Phase 8, BT-2902)
+%% Type alias definition tests (ADR 0108 Phase 8)
 %%====================================================================
 
 -doc "handle_type_alias_definition/3 registers the alias and echoes its name.".
@@ -1888,7 +1888,7 @@ eval_setup() ->
     end,
     %% Allow the runtime to register its bootstrap classes before compiling.
     timer:sleep(300),
-    %% BT-3337: a live beamtalk_workspace_meta is needed by reload_file/1,
+    %% A live beamtalk_workspace_meta is needed by reload_file/1,
     %% precheck_method/4, remove_method/3,4 (non-stdlib), and a standalone
     %% method definition reached through do_eval/2 — all recompile from the
     %% class source workspace_meta records, same fixture pattern as
@@ -1906,7 +1906,7 @@ eval_setup() ->
         repl => false
     }),
     %% precheck_method/4's signature-diff baseline (previous/3) needs a live
-    %% store — without it every diff exits `noproc` (BT-3337).
+    %% store — without it every diff exits `noproc`.
     case whereis(beamtalk_workspace_signature_store) of
         undefined -> {ok, _} = beamtalk_workspace_signature_store:start_link();
         _ -> ok
@@ -1928,7 +1928,7 @@ eval_teardown(_) ->
     end,
     ok.
 
-%% BT-3337: seed workspace_meta with `ClassSource` under `ClassNameBin` so a
+%% Seed workspace_meta with `ClassSource` under `ClassNameBin` so a
 %% recompile-from-recorded-source path (reload_method_definition,
 %% precheck_method, remove_method) has real source to work from — mirrors
 %% what `Workspace load:` does for a file-backed class.
@@ -1966,15 +1966,15 @@ eval_success_test_() ->
         {"handle_load/3 missing file delegates", fun handle_load3_missing/0},
         {"handle_load_source/3 invalid delegates", fun handle_load_source3_invalid/0},
         {"new_class/2 invalid delegates", fun new_class_invalid/0},
-        %% BT-3337 — `:help <Alias>` short-circuit reached through do_eval/2.
+        %% `:help <Alias>` short-circuit reached through do_eval/2.
         {"do_eval routes :help through the session alias table", fun do_eval_help_for_alias/0},
-        %% BT-3337 — standalone `Class >> selector => body` method definition.
+        %% Standalone `Class >> selector => body` method definition.
         {"do_eval standalone method definition reloads the target class",
             fun do_eval_standalone_method_definition/0},
-        %% BT-3337 — a live actor registry pid threaded into eval bindings.
+        %% A live actor registry pid threaded into eval bindings.
         {"do_eval threads a live actor registry pid into bindings",
             fun do_eval_with_actor_registry/0},
-        %% BT-3337 — do_dispatch/5 (BT-2691 connected-mode entry dispatch).
+        %% do_dispatch/5 (connected-mode entry dispatch).
         {"do_dispatch unary success sends to the class object", fun do_dispatch_unary_success/0},
         {"do_dispatch keyword success passes argv", fun do_dispatch_keyword_success/0},
         {"do_dispatch surfaces Program exit: as script_exit", fun do_dispatch_script_exit/0},
@@ -1983,7 +1983,7 @@ eval_success_test_() ->
             fun do_dispatch_class_not_loaded/0},
         {"do_dispatch: unknown selector is a does_not_understand error",
             fun do_dispatch_unknown_selector/0},
-        %% BT-3337 — eval_with_self/2 (ADR 0095 Inspector `evaluate:`).
+        %% eval_with_self/2 (ADR 0095 Inspector `evaluate:`).
         {"eval_with_self rejects a class definition",
             fun eval_with_self_rejects_class_definition/0},
         {"eval_with_self rejects a method definition",
@@ -1995,25 +1995,25 @@ eval_success_test_() ->
         {"eval_with_self evaluates an expression with self bound", fun eval_with_self_success/0},
         {"eval_with_self wraps a compile error", fun eval_with_self_compile_error/0},
         {"eval_with_self wraps a runtime exception", fun eval_with_self_runtime_exception/0},
-        %% BT-3337 — precheck_method/4 (ADR 0105 Phase 3 precheck).
+        %% precheck_method/4 (ADR 0105 Phase 3 precheck).
         {"precheck_method refuses a stdlib class", fun precheck_method_stdlib_refused/0},
         {"precheck_method delegates for a non-stdlib class", fun precheck_method_delegates/0},
-        %% BT-3337 — remove_method/3,4 stdlib-policy branches.
+        %% remove_method/3,4 stdlib-policy branches.
         {"remove_method/3 refuses a stdlib class", fun remove_method3_stdlib_refused/0},
         {"remove_method/4 allow_stdlib reaches the loader", fun remove_method4_allow_stdlib/0},
         {"remove_method/4 refuse_stdlib with a non-stdlib class reaches the loader",
             fun remove_method4_refuse_stdlib_non_stdlib/0},
-        %% BT-3337 — remove_class/1 both branches.
+        %% remove_class/1 both branches.
         {"remove_class/1 removes a live user class", fun remove_class_success/0},
         {"remove_class/1 unknown name is a structured error", fun remove_class_unknown/0},
-        %% BT-3337 — thin forwarding wrappers over beamtalk_repl_loader.
+        %% Thin forwarding wrappers over beamtalk_repl_loader.
         {"move_class/2 delegates to the loader", fun move_class_delegates/0},
         {"revert_remove_class/2 delegates to the loader", fun revert_remove_class_delegates/0},
         {"rewrite_sites/2 delegates to the loader", fun rewrite_sites_delegates/0},
         {"validate_sites/2 delegates to the loader", fun validate_sites_delegates/0},
         {"emit_remove_change_entry/5 delegates to the loader",
             fun emit_remove_change_entry_delegates/0},
-        %% BT-3337 — reload_file/1 (BT-2598 disk-revert reload).
+        %% reload_file/1 (disk-revert reload).
         {"reload_file/1 reloads a class and repopulates its source cache",
             fun reload_file_success/0}
     ]}.
@@ -2051,7 +2051,7 @@ do_eval_multi_statement() ->
         beamtalk_repl_eval:do_eval("1 + 1. 2 + 2. 10 * 5", state0()),
     ?assertEqual(50, Value).
 
-%% BT-3368: a multi-statement `eval` call (statements on separate lines, no
+%% A multi-statement `eval` call (statements on separate lines, no
 %% `.` separators) binds every variable to its OWN value — the first
 %% variable must not be silently overwritten with the call's final value.
 do_eval_multi_statement_newline_separated_bindings() ->
@@ -2095,18 +2095,17 @@ do_eval_protocol_definition() ->
     ?assert(is_binary(Display)),
     ?assert(binary:match(Display, <<"EvalSuccessProto">>) =/= nomatch).
 
-%% ADR 0108 Semantics / BT-2899 (consolidated BT-2912): the concrete repro,
-%% exercised through the real `do_eval/2` REPL path end to end — turn 1
-%% declares `type EvalCollisionPoint = Integer` (a session-local alias, via
-%% the SAME `type_alias_definition` handling `do_eval_type_alias_definition`
+%% ADR 0108 Semantics: the concrete repro, exercised through the real
+%% `do_eval/2` REPL path end to end — turn 1 declares `type
+%% EvalCollisionPoint = Integer` (a session-local alias, via the SAME
+%% `type_alias_definition` handling `do_eval_type_alias_definition`
 %% exercises); turn 2 (threading turn 1's resulting `State`, exactly how a
 %% real multi-turn session chains) sends `Object subclass:
-%% EvalCollisionPoint` — before BT-2899, `compile`/`compile_method` never
-%% threaded `known_type_aliases` at all (only `compile_expression` did), so
-%% `AliasRegistry::add_pre_loaded`'s existing collision check never got a
-%% chance to run and the class compiled clean, silently shadowing the alias.
-%% This is the un-diagnosed-collision bug this issue closes — the class
-%% define must now fail with a namespace-collision error.
+%% EvalCollisionPoint` — `compile`/`compile_method` must thread
+%% `known_type_aliases` (not just `compile_expression`), so
+%% `AliasRegistry::add_pre_loaded`'s collision check runs and the class
+%% define fails with a namespace-collision error instead of silently
+%% shadowing the alias.
 do_eval_class_definition_over_earlier_turn_alias_is_a_collision_error() ->
     AliasSource = "type EvalCollisionPoint = Integer",
     {ok, <<"EvalCollisionPoint">>, _Output0, _Warnings0, State1} =
@@ -2225,7 +2224,7 @@ normalize_method_source_commented_full_definition_unchanged_test() ->
     ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
 
 %%====================================================================
-%% BT-3337 — normalize_method_source/2's private helpers: header_separator/1
+%% normalize_method_source/2's private helpers: header_separator/1
 %% (all five last-char branches), skip_leading_comments/1's no-trailing-
 %% newline clause, has_method_header/2's `class ` recursion + trim_leading_ws/1,
 %% header_after_token/1's identifier-continuation guard,
@@ -2349,7 +2348,7 @@ new_class_invalid() ->
     ?assertMatch({error, _}, Result).
 
 %%====================================================================
-%% BT-3337 — do_eval/2 branches not reached by the tests above:
+%% do_eval/2 branches not reached by the tests above:
 %% the `:help <Alias>` short-circuit, a standalone method definition, and a
 %% live actor-registry pid threaded into bindings.
 %%====================================================================
@@ -2391,7 +2390,7 @@ do_eval_with_actor_registry() ->
     ?assertMatch({ok, 10, _, _, _}, Result).
 
 %%====================================================================
-%% BT-3337 — do_dispatch/5 (BT-2691 connected-mode `beamtalk run` entry
+%% do_dispatch/5 (connected-mode `beamtalk run` entry
 %% dispatch): success (unary + keyword), Program exit:, a wrapped runtime
 %% exception, and resolve_entry/2's remaining error branches.
 %%====================================================================
@@ -2465,7 +2464,7 @@ do_dispatch_unknown_selector() ->
     ?assert(binary:match(Msg, <<"EvalDispatchDnuCls">>) =/= nomatch).
 
 %%====================================================================
-%% BT-3337 — eval_with_self/2 (ADR 0095 §1, BT-2503): every
+%% eval_with_self/2 (ADR 0095 §1): every
 %% definition-shaped rejection, a successful evaluate-in-context, a compile
 %% error, and a wrapped runtime exception.
 %%====================================================================
@@ -2499,7 +2498,7 @@ eval_with_self_runtime_exception() ->
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 %%====================================================================
-%% BT-3337 — precheck_method/4 (ADR 0105 Phase 3, BT-2782): the stdlib
+%% precheck_method/4 (ADR 0105 Phase 3): the stdlib
 %% refusal and the non-stdlib delegate-to-loader branch.
 %%====================================================================
 
@@ -2518,7 +2517,7 @@ precheck_method_delegates() ->
     ?assertMatch({ok, _}, Result).
 
 %%====================================================================
-%% BT-3337 — remove_method/3,4 (ADR 0112 Phase 1, BT-3184): the stdlib-policy
+%% remove_method/3,4 (ADR 0112 Phase 1): the stdlib-policy
 %% branches.
 %%====================================================================
 
@@ -2544,7 +2543,7 @@ remove_method4_refuse_stdlib_non_stdlib() ->
     ?assertMatch({ok, <<"EvalRemoveMethodCls">>}, Result).
 
 %%====================================================================
-%% BT-3337 — remove_class/1 (BT-2664 new-class revert case).
+%% remove_class/1 (new-class revert case).
 %%====================================================================
 
 remove_class_success() ->
@@ -2558,8 +2557,8 @@ remove_class_unknown() ->
     ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result).
 
 %%====================================================================
-%% BT-3337 — thin forwarding wrappers over beamtalk_repl_loader: only the
-%% delegating call site itself needs to be reached (BT-3335 owns the
+%% Thin forwarding wrappers over beamtalk_repl_loader: only the
+%% delegating call site itself needs to be reached (the loader owns the
 %% loader's own branch coverage).
 %%====================================================================
 
@@ -2596,7 +2595,7 @@ emit_remove_change_entry_delegates() ->
     ?assertEqual(ok, Result).
 
 %%====================================================================
-%% BT-3337 — reload_file/1 (BT-2598 disk-revert reload): the success path,
+%% reload_file/1 (disk-revert reload): the success path,
 %% which also exercises repopulate_class_sources/2 and class_name_binaries/1.
 %%====================================================================
 
@@ -2613,7 +2612,7 @@ reload_file_success() ->
     ).
 
 %%====================================================================
-%% BT-3337 — class_name_binary/1 and class_name_binaries/1 pure-mapping
+%% class_name_binary/1 and class_name_binaries/1 pure-mapping
 %% branches (atom / binary / string name key, unrecognised shape).
 %%====================================================================
 
@@ -2639,7 +2638,7 @@ class_name_binaries_filters_unrecognised_test() ->
     ).
 
 %%====================================================================
-%% BT-3337 — repopulate_class_sources/2 (BT-2598): a read failure is
+%% repopulate_class_sources/2: a read failure is
 %% non-fatal, and a successful read seeds the workspace_meta source cache
 %% for each named class, skipping entries with no recognisable name.
 %%====================================================================
@@ -2678,7 +2677,7 @@ repopulate_class_sources_success_test() ->
     ?assertNotEqual(nomatch, string:find(Src, "RepopulatedCls")).
 
 %%====================================================================
-%% announce_binding_changed payload (ADR 0093 §2, BT-2530)
+%% announce_binding_changed payload (ADR 0093 §2)
 %%====================================================================
 
 %% The BindingChanged payload carries the evaluating session's protocol id,
@@ -2749,7 +2748,7 @@ stdlib_gate_test_() ->
     ]}.
 
 %%====================================================================
-%% BT-2691: connected-mode `beamtalk run` entry dispatch (do_dispatch/5)
+%% Connected-mode `beamtalk run` entry dispatch (do_dispatch/5)
 %%====================================================================
 
 %% The arity-1 keyword form (`main:`) carries argv; the unary form (`run`) does
@@ -2760,7 +2759,7 @@ is_keyword_selector_test() ->
     ?assertNot(beamtalk_repl_eval:is_keyword_selector(<<"run">>)),
     ?assertNot(beamtalk_repl_eval:is_keyword_selector(<<>>)).
 
-%% BT-3090: `is_keyword_selector/1` now delegates to the canonical
+%% `is_keyword_selector/1` delegates to the canonical
 %% `beamtalk_class_builder:is_keyword_selector/1` (via `beamtalk_runtime_api`).
 %% A malformed selector with an interior colon but no trailing colon (e.g.
 %% `at:put`) is NOT a keyword selector — only the last character matters.

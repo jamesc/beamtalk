@@ -126,7 +126,7 @@ concurrently (e.g. during test teardown).
 
 -define(PROTOCOL_TABLE, beamtalk_protocol_registry).
 -define(CONFORMS_CACHE_TABLE, beamtalk_protocol_conforms_cache).
-%% Generation-counter row inside ?CONFORMS_CACHE_TABLE (BT-3222). Not a valid
+%% Generation-counter row inside ?CONFORMS_CACHE_TABLE. Not a valid
 %% `{atom(), atom()}` cache key shape, so it can never collide with a real
 %% `{ClassName, ProtocolName}` entry in the same `set` table.
 -define(CONFORMS_CACHE_GEN_KEY, '$conforms_cache_generation').
@@ -219,7 +219,7 @@ Duplicate registrations overwrite the previous entry (idempotent for hot reload)
 -spec register_protocol(map()) -> ok.
 register_protocol(#{name := Name} = Info) ->
     ets:insert(?PROTOCOL_TABLE, {Name, Info}),
-    %% BT-3222: A (re-)registered protocol can change required_methods /
+    %% A (re-)registered protocol can change required_methods /
     %% extending for Name, so every cached conforms_to/2 result naming it —
     %% for any class — is potentially stale.
     invalidate_conforms_cache(),
@@ -262,13 +262,13 @@ unregister_protocol(Module) when is_atom(Module) ->
         undefined ->
             ok;
         _ ->
-            %% BT-3473: Capture the names being purged via the *same* match
+            %% Capture the names being purged via the *same* match
             %% condition `select_delete` below uses, immediately before
             %% deleting them, so the compiler server's ambient `protocols`
             %% cache (mirroring `classes`' own register/remove pair) is told
             %% about exactly the rows actually removed — otherwise a purged
             %% protocol's stale entry would linger there forever, the same
-            %% gap BT-3105 closed for `classes` via `remove_class/1`.
+            %% gap already closed for `classes` via `remove_class/1`.
             %%
             %% Code-review finding: an earlier version computed `Purged` from
             %% an independent `ets:tab2list/1` scan, then ran `select_delete`
@@ -305,7 +305,7 @@ unregister_protocol(Module) when is_atom(Module) ->
             lists:foreach(fun notify_compiler_server_removed/1, Purged),
             ok
     end,
-    %% BT-3222: Unconditional, not just on an actual match — this is also the
+    %% Unconditional, not just on an actual match — this is also the
     %% single call `beamtalk_class_lifecycle:class_removed/2` makes for every
     %% class removal, and a removed class's conformance results (as well as
     %% every descendant re-walked through it) must not survive as stale
@@ -404,8 +404,8 @@ conforms_to(ClassName, ProtocolName) ->
             Result
     end.
 
-%% The uncached structural check — exactly what conforms_to/2 did before
-%% BT-3222; the caching wrapper above is the only change to its call sites.
+%% The uncached structural check — the caching wrapper above is the only
+%% change to its call sites.
 -spec compute_conforms_to(atom(), atom()) -> boolean().
 compute_conforms_to(ClassName, ProtocolName) ->
     case protocol_info(ProtocolName) of
@@ -444,7 +444,7 @@ compute_conforms_to(ClassName, ProtocolName) ->
     end.
 
 %%% ============================================================================
-%%% Conformance Cache (BT-3222)
+%%% Conformance Cache
 %%% ============================================================================
 
 -doc """
@@ -706,7 +706,7 @@ class_has_class_method(ClassName, Selector) ->
         true ->
             true;
         false ->
-            %% BT-1617: Check extensions ETS table for class-side extensions.
+            %% Check extensions ETS table for class-side extensions.
             %% Class-side extensions use the metaclass tag atom (e.g. 'Integer class')
             %% as the class key in the extensions registry.
             MetaclassTag = beamtalk_class_registry:class_object_tag(ClassName),
@@ -815,7 +815,7 @@ create_protocol_class(Name, Info) ->
             requiredMethods => <<"Return the required method selectors for this protocol.">>,
             conformingClasses => <<"Return the classes conforming to this protocol.">>
         },
-        %% ADR 0087 Phase 2 (BT-2298) / BT-2385: protocol class objects expose two
+        %% ADR 0087 Phase 2: protocol class objects expose two
         %% class-side methods (`requiredMethods`, `conformingClasses`) dispatched
         %% by the shared Erlang module `beamtalk_protocol_object` — they have no
         %% analysable Beamtalk body, so codegen never bakes a method_xref for
