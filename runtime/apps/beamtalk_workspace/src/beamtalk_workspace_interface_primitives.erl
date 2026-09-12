@@ -622,7 +622,7 @@ revert_side_field(<<"instance">>) -> instance;
 revert_side_field(<<"class">>) -> class;
 revert_side_field(_Other) -> undefined.
 
-%% `TargetSide` (ADR 0112, BT-3187) narrows `find_revert_target/3`'s candidate
+%% `TargetSide` (ADR 0112) narrows `find_revert_target/3`'s candidate
 %% search to entries on that side, so a same-selector instance-side entry and
 %% class-side entry are not ambiguous by `(class, selector)` alone — see
 %% `extract_revert_target_from_map/1`'s doc. Pass `undefined` (from a caller
@@ -633,9 +633,9 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
     case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom, TargetSide) of
         {ok, PrevBody, Entry} ->
             %% A *modify* revert: re-install the recorded prior body on the
-            %% entry's side. Instance and class side are both supported
-            %% (BT-2665). This also covers reverting a `'remove-method'` entry
-            %% (ADR 0112, BT-3187) — when its `prev_source_ref` is set (the
+            %% entry's side. Instance and class side are both supported.
+            %% This also covers reverting a `'remove-method'` entry
+            %% (ADR 0112) — when its `prev_source_ref` is set (the
             %% removed method's prior body), it reaches this branch exactly
             %% like an ordinary modify, and re-installing that body IS what
             %% undoes the removal. `prev_source_ref` is NOT always set, though:
@@ -654,11 +654,10 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             install_revert_patch(ClassNameBin, SelectorAtom, PrevBody, Side);
         {remove, Entry} ->
             %% An *add* revert: the pre-patch state was "absent", so undo the add
-            %% by removing the method (BT-2663/BT-2665) or the new class
-            %% (BT-2664). The kind tells us which.
+            %% by removing the method or the new class. The kind tells us which.
             revert_removal(ClassNameBin, SelectorAtom, Entry);
         {reinstall_class, PrevBody, Entry} ->
-            %% A `'remove-class'` revert (ADR 0113, BT-3208): the pre-removal
+            %% A `'remove-class'` revert (ADR 0113): the pre-removal
             %% state was "this class existed", so undo the removal by
             %% recompiling and reinstalling the whole class from its recorded
             %% prior source — a class-level target, not a single-method patch.

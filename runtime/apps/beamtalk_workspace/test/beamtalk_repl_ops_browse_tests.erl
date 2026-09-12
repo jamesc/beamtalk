@@ -1342,7 +1342,7 @@ browse_tests(#{class_name := Class}) ->
             )
         end},
         {"browse-classes is_protocol is false for an ordinary class", fun() ->
-            %% BT-2615: only protocol class objects (ADR 0068) carry is_protocol
+            %% Only protocol class objects (ADR 0068) carry is_protocol
             %% true — the browser groups those under a "Protocols" category.
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
@@ -1351,7 +1351,7 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(false, maps:get(<<"is_protocol">>, Row))
         end},
         {"browse-classes is_test is false for a non-TestCase class", fun() ->
-            %% BT-2557: is_test flags loaded TestCase subclasses so the browser
+            %% is_test flags loaded TestCase subclasses so the browser
             %% can group them under a "Tests" category. The fixture class does not
             %% descend from TestCase, so the flag is a plain boolean false.
             Value = decode_value(
@@ -1378,7 +1378,7 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(<<"runtime">>, maps:get(<<"origin">>, Row))
         end},
         {"browse-classes source_origin is a bare classification for all rows", fun() ->
-            %% BT-2552/BT-2643: source_origin is the bare classification
+            %% source_origin is the bare classification
             %% (project|dependency|stdlib) — the package name is NOT packed in.
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
@@ -1390,7 +1390,7 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(nomatch, binary:match(SourceOrigin, <<"dependency:">>))
         end},
         {"browse-classes carries a separate package field on every row", fun() ->
-            %% BT-2643: package is orthogonal to source_origin and present
+            %% package is orthogonal to source_origin and present
             %% (binary or null) on every class row.
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
@@ -1401,7 +1401,7 @@ browse_tests(#{class_name := Class}) ->
             ?assert(is_binary(Package) orelse Package =:= null)
         end},
         {"browse-class-definition reports native=false for a plain class", fun() ->
-            %% BT-2578: a fixture class with no native facade meta is not
+            %% A fixture class with no native facade meta is not
             %% native-backed; backing_module is null.
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
@@ -1415,7 +1415,7 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(null, maps:get(<<"backing_module">>, Value))
         end},
         {"browse-class-definition carries reflected sealed/abstract modifiers", fun() ->
-            %% BT-2605: op 4 surfaces the same sealed/abstract reflection op 1
+            %% op 4 surfaces the same sealed/abstract reflection op 1
             %% (browse-classes) carries, so the IDE editor header can badge them
             %% without parsing the synthesized definition skeleton. A plain fixture
             %% class is neither sealed nor abstract.
@@ -1429,11 +1429,11 @@ browse_tests(#{class_name := Class}) ->
             ),
             ?assertEqual(false, maps:get(<<"sealed">>, Value)),
             ?assertEqual(false, maps:get(<<"abstract">>, Value)),
-            %% BT-2629: a plain fixture class is not typed.
+            %% A plain fixture class is not typed.
             ?assertEqual(false, maps:get(<<"typed">>, Value))
         end},
         {"browse-class-definition reports typed=true for a typed-declared class", fun() ->
-            %% BT-2629: op 4 surfaces the already-emitted is_typed meta flag as a
+            %% op 4 surfaces the already-emitted is_typed meta flag as a
             %% runtime-reflected boolean (mirroring sealed/abstract), so the IDE
             %% editor header can render the Typed badge without parsing the
             %% synthesized definition skeleton.
@@ -1465,7 +1465,7 @@ browse_tests(#{class_name := Class}) ->
             end
         end},
         {"browse-class-definition reports is_protocol=false for an ordinary class", fun() ->
-            %% BT-2639: op 4 surfaces is_protocol (runtime reflection, not a header
+            %% op 4 surfaces is_protocol (runtime reflection, not a header
             %% string-sniff) so the def tab can gate the protocol action row. A
             %% plain fixture class is not a protocol.
             Value = decode_value(
@@ -1479,7 +1479,7 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(false, maps:get(<<"is_protocol">>, Value))
         end},
         {"browse-native-source errors for a non-native class", fun() ->
-            %% BT-2578: the op only applies to native: classes (ADR 0056).
+            %% The op only applies to native: classes (ADR 0056).
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-native-source">>,
                 #{<<"class">> => Class},
@@ -1532,7 +1532,7 @@ browse_tests(#{class_name := Class}) ->
             Doc = maps:get(<<"doc">>, TotalRow),
             ?assert(is_binary(Doc)),
             ?assertNotEqual(nomatch, binary:match(Doc, <<"The running total">>)),
-            %% Bounded cost (BT-2735): a hand-written `indexed` row is NOT resolved
+            %% Bounded cost: a hand-written `indexed` row is NOT resolved
             %% — no per-method CompiledMethod read on the browse hot path — so its
             %% signature/doc stay null and the hover falls back to the selector.
             IncRow = find_selector_row(Selectors, <<"increment">>),

@@ -3998,12 +3998,12 @@ do_emit_change_entry(MethodInfo) ->
     _ = beamtalk_workspace_changelog:append(Entry),
     ok.
 
-%% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1,
-%% BT-2777): `{captured, Prev, Classification}` when the store call succeeded
+%% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1):
+%% `{captured, Prev, Classification}` when the store call succeeded
 %% (`Prev` is whatever it reported as the pre-capture generation — feed this
 %% straight back to rollback_signature_generation/4 on a subsequent install
 %% failure; `Classification` is `beamtalk_signature_diff:classification/0`,
-%% consumed by BT-2778's re-check trigger below), or `not_captured` when the
+%% consumed by the re-check trigger below), or `not_captured` when the
 %% capture itself failed (nothing to roll back, nothing to re-check).
 -type capture_outcome() ::
     {captured, beamtalk_workspace_signature_store:maybe_signature(),
@@ -4011,10 +4011,10 @@ do_emit_change_entry(MethodInfo) ->
     | not_captured.
 
 %% Capture the freshly-compiled signature into the signature-generation store
-%% (ADR 0105 Phase 1, BT-2777). Called from load_recompiled_method/8 *before*
+%% (ADR 0105 Phase 1). Called from load_recompiled_method/8 *before*
 %% the patch installs — see the call site for why ordering matters. Best-effort
 %% and self-swallowing, mirroring emit_change_entry/1: the store is diagnostic
-%% plumbing for a later re-check (BT-2778), never a gate on the install itself.
+%% plumbing for a later re-check, never a gate on the install itself.
 %% Returns the capture_outcome() so the caller can roll back on install failure.
 -spec capture_signature_generation(map()) -> capture_outcome().
 capture_signature_generation(MethodInfo) ->

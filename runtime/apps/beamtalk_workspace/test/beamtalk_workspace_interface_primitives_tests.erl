@@ -1286,7 +1286,7 @@ revert_via_object_keyed_map(_Ctx) ->
 %% Boot an isolated workspace: a temp HOME plus the changelog and meta
 %% gen_servers so the delegation paths run for real. Returns a context map.
 %%
-%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: the
+%% Cross-invocation-unique — see `beamtalk_test_unique:id/0`: the
 %% changelog's own `load_from_disk` would otherwise restore a prior run's
 %% leftover `changes.jsonl` entries into this run's ETS table.
 setup_changelog_ws() ->
@@ -1473,7 +1473,7 @@ init(bare_sup) ->
     {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.
 
 %%====================================================================
-%% dispatch(supervisors, []) routing arm (BT-3456)
+%% dispatch(supervisors, []) routing arm
 %%
 %% supervisors/0 calls supervisor:which_children/1 on beamtalk_workspace_sup,
 %% so this test starts a bare workspace_sup when none is already running —
@@ -1503,10 +1503,10 @@ supervisors_via_dispatch_test() ->
     end.
 
 %%====================================================================
-%% revert_side_field/1 binary-argument branches (BT-3456)
+%% revert_side_field/1 binary-argument branches
 %%
 %% revert_side_field/1 is private. The binary <<"instance">> / <<"class">>
-%% arms (LiveView phx-value-side, ADR 0112 BT-3187) are exercised via
+%% arms (LiveView phx-value-side, ADR 0112) are exercised via
 %% revert_method/3, which calls revert_side_field(SideArg) before the
 %% selector-atom lookup. A never-compiled selector makes existing_selector_atom/1
 %% return `error` (pure — no changelog needed), so the test reaches

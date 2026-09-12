@@ -466,7 +466,7 @@ all_protocol_names_empty_test() ->
     ?assertEqual([], beamtalk_protocol_registry:all_protocol_names()).
 
 %%% ============================================================================
-%%% BT-3105: unregister_protocol/1 — purge on defining-module removal
+%%% unregister_protocol/1 — purge on defining-module removal
 %%% ============================================================================
 
 unregister_protocol_removes_matching_module_test() ->
@@ -509,8 +509,8 @@ unregister_protocol_leaves_other_modules_protocols_test() ->
     ?assertNot(beamtalk_protocol_registry:is_protocol('BT3105ProtoA')),
     ?assert(beamtalk_protocol_registry:is_protocol('BT3105ProtoB')).
 
-%% A protocol registered without a `module` field (pre-BT-2615 shape) is
-%% never matched — unregistering by module name is a harmless no-op.
+%% A protocol registered without a `module` field is never matched —
+%% unregistering by module name is a harmless no-op.
 unregister_protocol_skips_protocol_without_module_field_test() ->
     setup(),
     beamtalk_protocol_registry:register_protocol(#{
@@ -538,7 +538,7 @@ unregister_protocol_before_init_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-3222: conforms_to/2 result cache + invalidation
+%%% conforms_to/2 result cache + invalidation
 %%% ============================================================================
 
 %% ADR 0112 note: classRemoveSelector/2's local-method-removal branch (the
