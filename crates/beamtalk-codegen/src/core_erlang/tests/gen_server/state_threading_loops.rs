@@ -326,7 +326,7 @@ fn test_class_method_self_send_after_loop_still_compiles() {
 fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_vars_threading() {
     // A class-method self-send inside a `do:` block with a co-occurring
     // local mutation (which is what actually routes it through
-    // `generate_threaded_loop_body_inner` in the first place) must not lose
+    // `lower_foldl_body` in the first place) must not lose
     // its class-var mutation the way the analogous `Letrec`
     // (whileTrue:/timesRepeat:) shape would if `ThreadingPlan` threaded only
     // `threaded_locals` (user `:=` locals) through a fold's accumulator and
@@ -445,7 +445,7 @@ fn test_class_method_self_send_as_collect_transform_still_compiles() {
     // over-broad version of this fix accidentally broke in CI — a pure
     // (non-mutating) self-send used as `collect:`'s per-item transform,
     // alongside a co-occurring local mutation that routes the body through
-    // `generate_threaded_loop_body_inner`. Must keep compiling.
+    // `lower_foldl_body`. Must keep compiling.
     let src = "Object subclass: ClassMethodBlockLike\n  class double: x => x * 2\n  class doubleAllCounting: items =>\n    seen := 0\n    items collect: [:item | seen := seen + 1. self double: item]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);

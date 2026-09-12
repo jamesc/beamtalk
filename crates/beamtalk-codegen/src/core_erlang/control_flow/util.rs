@@ -34,9 +34,9 @@ impl CoreErlangGenerator {
     /// result, differing only in how they wrap the returned `Document`s:
     /// `conditionals.rs`'s `push_control_flow_threaded_var_rereads` (the
     /// `ThreadedIr`-rendered conditional-arm path, wraps as one
-    /// `ThreadedStmt::Statement`) and this module's
-    /// `generate_threaded_loop_body_inner` (the foldl loop-body path,
-    /// pushes directly onto its `docs` vec).
+    /// `ThreadedStmt::Statement`) and `body.rs`'s
+    /// `lower_foldl_body` (the foldl loop-body path,
+    /// pushes directly onto its `stmts` vec).
     pub(super) fn rebind_threaded_vars_from_state(
         &mut self,
         vars: &[String],

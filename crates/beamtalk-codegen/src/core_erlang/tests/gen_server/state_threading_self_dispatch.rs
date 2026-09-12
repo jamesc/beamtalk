@@ -551,7 +551,7 @@ fn bt3416_self_send_nested_in_a_cast_sends_receiver_still_threads() {
 fn bt3418_field_assign_rhs_in_loop_body_threads_nested_self_send() {
     // ADR 0118 phase 2b: `self.count := self.count + (self
     // bump)` as a `do:` loop-body statement — the field-assignment RHS
-    // path inside `generate_threaded_loop_body_inner`. Before this phase
+    // path inside `lower_foldl_body`. Before this phase
     // the nested self-send's mutation was silently dropped (no hoist ran
     // for this position at all); `thread_ahead` now sequences it ahead of
     // `generate_field_assignment_open`'s own compile of the RHS. Per
@@ -975,7 +975,7 @@ fn bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier() {
     // end up producing a Bind for the same version: `NonLinearVersion`.
     // Confirmed still panicking after ADR 0118 phase 2b (loop-body
     // consumers): this statement routes through
-    // `generate_threaded_loop_body_inner`'s separate `control_flow_has_mutations`
+    // `lower_foldl_body`'s separate `control_flow_has_mutations`
     // branch (an inline conditional with mutations, not any of phase 2b's
     // three consumers), so neither phase touches it. Left open for a later
     // phase.

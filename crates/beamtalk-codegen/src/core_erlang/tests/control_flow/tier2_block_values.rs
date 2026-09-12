@@ -617,8 +617,8 @@ fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
     // `do:` loop body. The outer loop is correctly routed
     // into the state-threading (StateAcc) path by `block_needs_mutation_threading`'s
     // `has_field_value_call` fact, but the loop body's own
-    // statement codegen (`generate_threaded_loop_body_inner`) needs its own case for
-    // a bare Tier2ValueCall — falling through to `emit_non_assign_expr`
+    // statement codegen (`lower_foldl_body`) needs its own case for
+    // a bare Tier2ValueCall — falling through to `lower_non_assign_expr`
     // would emit a plain (Tier-1-only) apply and crash with badarity for
     // a genuinely Tier 2 (2-arity) field-stored block. Structural check only
     // (see stdlib/test/tier2stored_block_matrix_test.bt for the runtime

@@ -310,7 +310,7 @@ impl BodyEffects {
         });
 
         // DestructureAssignment as the last expr is not supported in tuple-acc mode:
-        // `emit_destructure_last_expr` always emits the map-shaped StateAcc path.
+        // `lower_destructure_last_expr` always emits the map-shaped StateAcc path.
         let last_is_destructure = body
             .body
             .last()
@@ -509,7 +509,7 @@ impl ThreadingPlan {
         // `Foldl*` body containing a self-send needs to thread `ClassVars`
         // through the fold's own accumulator. Excluded for `Actor` context:
         // `is_actor_self_send` (checked before any class-method-self-send
-        // path in `generate_threaded_loop_body_inner`) unconditionally wins
+        // path in `lower_letrec_body`) unconditionally wins
         // for a `self <msg>` send whenever `context == Actor`, regardless of
         // `in_class_method()` — an Actor subclass's class-method self-send
         // never reaches the `emit_class_var_result_unwrap`/`class_bump` path
@@ -525,7 +525,7 @@ impl ThreadingPlan {
         // so a `whileTrue:`/`timesRepeat:`/`to:do:` (`BodyKind::Letrec`) plan
         // never sets this field, regardless of self-sends. This is a hard
         // safety boundary, not merely an optimization: the
-        // `generate_threaded_loop_body_inner` wrap (below, guarded on this
+        // `lower_foldl_body` wrap (below, guarded on this
         // same field) is Foldl-only by design (Question 6's `{ClassVars,
         // StateAcc}` accumulator shape has no Letrec analogue — Letrec's own
         // `ClassVars` threading is a parallel, independent migration,
