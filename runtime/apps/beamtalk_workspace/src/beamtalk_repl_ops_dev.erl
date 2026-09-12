@@ -1261,7 +1261,7 @@ is_identifier_char(C) ->
         %% single token for completions and receiver parsing.
         C =:= $@.
 
-%%% Chain resolution (BT-1006)
+%%% Chain resolution
 
 -doc """
 Parse a binary expression into a receiver token and a list of unary selectors.
@@ -1535,7 +1535,7 @@ resolve_chain_type(Expr, Bindings) ->
                 undefined -> undefined
             end;
         error ->
-            %% BT-1071: try binary/mixed chain tokenizer before the compiler port.
+            %% Try binary/mixed chain tokenizer before the compiler port.
             case tokenise_binary_chain(Expr) of
                 {ok, ReceiverToken, Hops} ->
                     case classify_receiver(ReceiverToken, Bindings) of
@@ -1548,7 +1548,7 @@ resolve_chain_type(Expr, Bindings) ->
                             resolve_type_via_compiler(Expr)
                     end;
                 error ->
-                    %% BT-1068: tokeniser can't parse the expression — try the compiler port.
+                    %% Tokeniser can't parse the expression — try the compiler port.
                     resolve_type_via_compiler(Expr)
             end
     end.
@@ -2087,7 +2087,7 @@ read_class_meta(Module) ->
             #{}
     end.
 
-%% BT-3083: this list and the LSP's static `add_keyword_completions`
+%% This list and the LSP's static `add_keyword_completions`
 %% (`crates/beamtalk-core/src/queries/completion_provider.rs`) are two
 %% engines that cannot literally share code (Erlang vs. Rust) but should
 %% offer the same control-flow vocabulary — a keyword missing from one and
@@ -2130,13 +2130,13 @@ in BT-2091 (protocol 2.0). See the module doc for migration guidance.
 -spec describe_ops() -> map().
 describe_ops() ->
     BaseOps = base_ops(),
-    %% Merge ops from other modules (dynamic discovery, BT-1622)
+    %% Merge ops from other modules (dynamic discovery)
     PerfOps = beamtalk_repl_ops_perf:describe_ops(),
-    %% BT-2239: structured navigation queries.
+    %% Structured navigation queries.
     NavOps = beamtalk_repl_ops_nav:describe_ops(),
-    %% BT-2244: bulk class+method outline (`nav-symbols`).
+    %% Bulk class+method outline (`nav-symbols`).
     NavSymbolsOps = beamtalk_repl_ops_nav_symbols:describe_ops(),
-    %% ADR 0095 / BT-2488: System Browser browse facade (four browse-* ops).
+    %% ADR 0095: System Browser browse facade (four browse-* ops).
     BrowseOps = beamtalk_repl_ops_browse:describe_ops(),
     %% maps:merge(A, B) gives B's value when keys collide — we want the
     %% per-module op descriptors to win over BaseOps (the keysets are
@@ -2154,20 +2154,20 @@ base_ops() ->
         <<"eval">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"trace">>]},
         <<"stdin">> => #{<<"params">> => [<<"value">>]},
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
-        %% BT-2555: live-image hover docs for the cockpit editors.
+        %% Live-image hover docs for the cockpit editors.
         <<"hover">> => #{<<"params">> => [<<"code">>]},
-        %% BT-2556: parse-only diagnostics for the cockpit editors. BT-2569:
+        %% Parse-only diagnostics for the cockpit editors.
         %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar.
         <<"diagnostics">> => #{
             <<"params">> => [<<"code">>], <<"optional">> => [<<"mode">>]
         },
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
-        %% BT-2557: discover TestCase subclasses for the cockpit test-runner pane.
+        %% Discover TestCase subclasses for the cockpit test-runner pane.
         <<"list-tests">> => #{<<"params">> => []},
-        %% BT-2557: load the project's test/ files so the runner/browser see them.
+        %% Load the project's test/ files so the runner/browser see them.
         <<"load-tests">> => #{<<"params">> => []},
-        %% BT-2801: request/response snapshot of live reload-induced findings
+        %% Request/response snapshot of live reload-induced findings
         %% (ADR 0105 surface-parity gap).
         <<"reload-findings">> => #{<<"params">> => []},
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
@@ -2374,7 +2374,7 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
                     [
                         #{
                             <<"name">> => atom_to_binary(V, utf8),
-                            %% BT-3439: real declaration line when the class
+                            %% Real declaration line when the class
                             %% was compiled with this feature (via
                             %% beamtalk_xref:register_state_vars/2); `null`
                             %% for a ClassBuilder-built class with no
@@ -2414,7 +2414,7 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
             PkgBin = binary:part(ClassBin, 0, Pos),
             ClassNameBin = binary:part(ClassBin, Pos + 1, byte_size(ClassBin) - Pos - 1),
             %% Convert class name to snake_case module name: bt@{pkg}@{snake_case}
-            %% BT-3081 / BT-3108: delegates to beamtalk_module_name, the single
+            %% Delegates to beamtalk_module_name, the single
             %% Erlang-side authority for the ClassName ⇄ bt@[pkg@]snake_case
             %% convention. Never creates an atom for the untrusted ClassBin —
             %% to_qualified_module_atom/2 only checks list_to_existing_atom.
@@ -2528,7 +2528,7 @@ should_include_class(Name, _Super, _ModName, {superclass, FilterAtom}) ->
     beamtalk_runtime_api:inherits_from(Name, FilterAtom).
 
 %%% ============================================================================
-%%% Erlang FFI Help (BT-1852)
+%%% Erlang FFI Help
 %%% ============================================================================
 
 -doc "Build a \"not found\" error term for Erlang help lookups (BT-2402).".

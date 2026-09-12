@@ -493,7 +493,7 @@ store_class_sources_with_classes_list_name_test() ->
     ?assertEqual(State, NewState).
 
 %%====================================================================
-%% is_path_inside/2 (ADR 0082 Phase 1, BT-2283)
+%% is_path_inside/2 (ADR 0082 Phase 1)
 %%====================================================================
 
 is_path_inside_direct_child_test() ->
@@ -511,7 +511,7 @@ is_path_inside_outside_tree_test() ->
     ?assertNot(beamtalk_repl_loader:is_path_inside("/proj", "/elsewhere/X.bt")).
 
 %%====================================================================
-%% method_source_binary/1 (ADR 0082 Phase 1, BT-2283)
+%% method_source_binary/1 (ADR 0082 Phase 1)
 %%====================================================================
 
 method_source_binary_prefers_method_source_test() ->
@@ -532,7 +532,7 @@ method_source_binary_empty_when_absent_test() ->
     ?assertEqual(<<>>, beamtalk_repl_loader:method_source_binary(#{})).
 
 %%====================================================================
-%% patch_side/1 (ADR 0082 Phase 1, BT-2283)
+%% patch_side/1 (ADR 0082 Phase 1)
 %%====================================================================
 
 patch_side_instance_test() ->
@@ -542,20 +542,20 @@ patch_side_class_test() ->
     ?assertEqual(class, beamtalk_repl_loader:patch_side(true)).
 
 %%====================================================================
-%% span_error_entry/3 (ADR 0082 Phase 1, BT-2283)
+%% span_error_entry/3 (ADR 0082 Phase 1)
 %%====================================================================
 
 span_error_entry_other_error_downgrades_test() ->
     %% A genuine resolution failure (ambiguous, port down) downgrades to
     %% memory-only with a reason. The brand-new-method (`selector_not_found')
-    %% case no longer routes here — it is handled by new_method_entry/3 (BT-2583).
+    %% case no longer routes here — it is handled by new_method_entry/3.
     Base = #{class => <<"Counter">>},
     Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, ambiguous),
     ?assertEqual(false, maps:get(flushable, Entry)),
     ?assertEqual(<<"span_unresolved:ambiguous">>, maps:get(not_flushable_reason, Entry)).
 
 %%====================================================================
-%% sibling_method_indent/1 (BT-2583)
+%% sibling_method_indent/1
 %%
 %% Pure base-indent derivation: the leading whitespace of the first indented,
 %% non-comment, non-blank line of the class body — the sibling-method step a
@@ -597,7 +597,7 @@ sibling_method_indent_skips_unindented_comment_test() ->
     ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
 
 %%====================================================================
-%% declared_class_name/1 (ADR 0082 Phase 1, BT-2285)
+%% declared_class_name/1 (ADR 0082 Phase 1)
 %%====================================================================
 
 declared_class_name_single_class_test() ->
@@ -623,7 +623,7 @@ declared_class_name_multiple_classes_is_error_test() ->
     ?assertNotEqual(nomatch, binary:match(Msg, <<"Bar">>)).
 
 %%====================================================================
-%% validate_new_class/3 (ADR 0082 Phase 1, BT-2285)
+%% validate_new_class/3 (ADR 0082 Phase 1)
 %%====================================================================
 
 validate_new_class_matching_name_not_loaded_ok_test() ->
@@ -744,7 +744,7 @@ loader_setup() ->
         _ ->
             ok
     end,
-    %% ADR 0105 Phase 1 (BT-2777): a live signature-generation store lets
+    %% ADR 0105 Phase 1: a live signature-generation store lets
     %% capture_signature_generation/1 actually record into the store instead
     %% of taking only its best-effort catch path (`noproc`).
     case whereis(beamtalk_workspace_signature_store) of
@@ -824,7 +824,7 @@ stored_method_source(ClassName, Selector) ->
 
 t_install_method_keeps_package_and_source(_Proj) ->
     Proj = live_project_dir(),
-    %% BT-2553 follow-up (bug 2): patching a method must NOT drop the class's
+    %% Patching a method must NOT drop the class's
     %% package-qualified module name or its on-disk source attribution — that
     %% degradation is what broke flush/revert (a project class became a
     %% stem-named, source-less `bt@<mod>').
@@ -862,7 +862,7 @@ t_install_method_preserves_comments(_Proj) ->
     %% A method's multi-line `///' doc block must survive the save AND repeated
     %% saves (idempotent). A leading `// --- … ---' section banner is *dropped*:
     %% it is inter-method file structure, not part of the method's byte span, so
-    %% the per-method stored source excludes it (BT-2594). The banner stays in the
+    %% the per-method stored source excludes it. The banner stays in the
     %% file because flush splices only the method's span, never the lines above it.
     Path = write_bt_under(
         Proj,
@@ -884,7 +884,7 @@ t_install_method_preserves_comments(_Proj) ->
         )
     ),
     Src1 = stored_method_source('InstallDoc', bumped),
-    %% The leading `//' banner is dropped from the per-method source (BT-2594)...
+    %% The leading `//' banner is dropped from the per-method source...
     ?assertEqual(nomatch, binary:match(Src1, <<"// --- Section ---">>)),
     %% ...while the `///' doc block is preserved.
     ?assert(binary:match(Src1, <<"/// First doc line.">>) =/= nomatch),
