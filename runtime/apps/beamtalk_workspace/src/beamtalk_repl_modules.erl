@@ -143,7 +143,7 @@ format_module_info(
 
 -doc """
 Resolve source path for a loaded module when workspace_meta has none.
-Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+Reads the beamtalk_source module attribute embedded by the compiler.
 """.
 -spec resolve_source_path(atom()) -> string().
 resolve_source_path(ModName) ->

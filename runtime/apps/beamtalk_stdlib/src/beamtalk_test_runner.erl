@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-TestRunner and TestResult primitive implementations (BT-762).
+TestRunner and TestResult primitive implementations.
 
 TestRunner provides programmatic test execution returning structured
 TestResult objects. TestResult wraps the structured maps from
@@ -51,7 +51,7 @@ TestResult is a tagged map:
 -export([runAll/0, runAll/1, run/1, run/2]).
 %% Exported for testing
 -export([path_suffix_match/2]).
-%% BT-1732: Module loading with on_load failure reporting
+%% Module loading with on_load failure reporting
 -export([ensure_loaded_or_warn/1]).
 %% TestResult instance-side
 -export([
@@ -135,7 +135,7 @@ run_all_impl(MaxJobs) ->
     end.
 
 -doc """
-Discover all loaded TestCase subclasses and their test selectors (BT-2557).
+Discover all loaded TestCase subclasses and their test selectors.
 
 Pure reflection over the class registry — runs **no** test code, mutates
 nothing — so it is safe to call from a `:read` op (the cockpit's test-runner
@@ -429,7 +429,7 @@ Serialize a TestResult to JSON for CLI consumption.
 Returns a JSON binary that can be parsed by the CLI to reconstruct the result.
 Includes all test details (pass/fail/skip per test, durations, errors).
 
-BT-2999: building *and* encoding the document is guarded. `json:encode/1`
+Building *and* encoding the document is guarded. `json:encode/1`
 throws on any value it can't represent (notably a binary that isn't valid
 UTF-8), and this runs in the one-shot test escript's boot process — an
 uncaught throw there takes down the whole VM and loses *every* test's result.
@@ -530,7 +530,7 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
 -doc """
 Coerce a message binary to valid UTF-8 so `json:encode/1` can never reject it.
 
-BT-2999: error messages are assembled from arbitrary runtime values, some of
+Error messages are assembled from arbitrary runtime values, some of
 which are raw non-UTF-8 binaries (crypto output, file reads, hashes). Such a
 message is rendered as `Binary printString` hex instead of being embedded raw.
 """.
@@ -813,7 +813,7 @@ aggregate_results(ClassResults) ->
     ).
 
 %%====================================================================
-%% Internal: concurrent test execution (BT-1624)
+%% Internal: concurrent test execution
 %%====================================================================
 
 -doc """
@@ -1001,7 +1001,7 @@ summary(Self) -> result_summary(Self).
 printString(Self) -> result_print_string(Self).
 
 %%====================================================================
-%% BT-1732: Module loading with on_load failure reporting
+%% Module loading with on_load failure reporting
 %%====================================================================
 
 -doc """

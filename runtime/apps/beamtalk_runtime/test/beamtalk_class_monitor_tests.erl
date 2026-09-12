@@ -5,7 +5,7 @@
 -module(beamtalk_class_monitor_tests).
 
 -moduledoc """
-Direct EUnit tests for `beamtalk_class_monitor` (BT-3236) against plain
+Direct EUnit tests for `beamtalk_class_monitor` against plain
 dummy processes — no class gen_server involved.
 
 `beamtalk_class_sup_tests` already exercises this module's happy-path
@@ -35,8 +35,8 @@ the branches that suite's real-class setup never reaches:
 Fault injection uses `meck` on `beamtalk_class_registry:restart_class/1`
 (scoped to one function per test, unloaded immediately after, following the
 same narrow-scope convention as
-`beamtalk_repl_loader_rewrite_sites_tests:setup_with_install_fault/0`,
-BT-3280) — a plain spawned dummy process can be watched and killed, but it
+`beamtalk_repl_loader_rewrite_sites_tests:setup_with_install_fault/0`) —
+a plain spawned dummy process can be watched and killed, but it
 cannot stand in for a real class gen_server that `restart_class/1` itself
 would rebuild from ETS metadata.
 """.

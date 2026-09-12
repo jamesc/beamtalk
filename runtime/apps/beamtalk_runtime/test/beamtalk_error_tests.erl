@@ -221,7 +221,7 @@ does_not_understand_with_hint_test() ->
         <<"Integer does not understand 'foo'\nHint: Check spelling or use 'respondsTo:' to verify method exists">>,
     ?assertEqual(Expected, Formatted).
 
-%%% Tests for new error kinds added in BT-455
+%%% Tests for new error kinds
 
 class_not_found_message_test() ->
     Error = beamtalk_error:new(class_not_found, 'Counter'),
@@ -284,7 +284,7 @@ raise_wraps_and_throws_test() ->
             ?assertEqual('foo', Inner#beamtalk_error.selector)
     end.
 
-%%% Test: raise/1 produces correct exception class based on error kind (BT-452)
+%%% Test: raise/1 produces correct exception class based on error kind
 raise_produces_exception_class_test() ->
     Error = beamtalk_error:new(type_error, 'String'),
     try

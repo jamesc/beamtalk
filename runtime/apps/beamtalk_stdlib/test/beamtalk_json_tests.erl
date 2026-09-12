@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_json module (BT-1142).
+EUnit tests for beamtalk_json module.
 
 Tests cover parse:/1, generate:/1, prettyPrint:/1, and the FFI no-colon
 aliases (parse/1, generate/1, prettyPrint/1).
@@ -182,7 +182,7 @@ generate_unsupported_type_test() ->
     ).
 
 %%% ============================================================================
-%%% generate:/1 — asJson hook (BT-2818)
+%%% generate:/1 — asJson hook
 %%%
 %%% 'bt@json_hook_fixture' stands in for a compiled Value class named
 %%% 'JsonHookFixture' whose instances implement asJson.
@@ -340,7 +340,7 @@ pretty_print_alias_test() ->
     ?assert(is_binary(Result)).
 
 %%% ============================================================================
-%%% Additional coverage — prettify/4 edge cases (BT-1983)
+%%% Additional coverage — prettify/4 edge cases
 %%% ============================================================================
 
 pretty_print_empty_object_test() ->
@@ -379,7 +379,7 @@ prettify_term_empty_object_test() ->
     ?assertEqual(<<"{\n}">>, beamtalk_json:prettify_term(#{})).
 
 %%% ============================================================================
-%%% Additional coverage — parse error catch-all (BT-1983)
+%%% Additional coverage — parse error catch-all
 %%% ============================================================================
 
 parse_unexpected_sequence_test() ->
@@ -406,7 +406,7 @@ parse_trailing_garbage_test() ->
     ).
 
 %%% ============================================================================
-%%% Additional coverage — generate/prettyPrint error paths (BT-1983)
+%%% Additional coverage — generate/prettyPrint error paths
 %%% ============================================================================
 
 generate_nested_unsupported_type_test() ->
@@ -432,7 +432,7 @@ pretty_print_nested_unsupported_type_test() ->
     ).
 
 %%% ============================================================================
-%%% Additional coverage — large / deeply nested structures (BT-1983)
+%%% Additional coverage — large / deeply nested structures
 %%% ============================================================================
 
 parse_deeply_nested_array_test() ->

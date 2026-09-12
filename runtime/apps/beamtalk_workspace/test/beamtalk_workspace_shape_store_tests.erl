@@ -4,7 +4,7 @@
 -module(beamtalk_workspace_shape_store_tests).
 
 -moduledoc """
-Unit tests for beamtalk_workspace_shape_store (ADR 0105 Phase 2, BT-2780).
+Unit tests for beamtalk_workspace_shape_store (ADR 0105 Phase 2).
 
 Covers:
 - prime/1's "seed once" laziness (does not overwrite an existing entry)

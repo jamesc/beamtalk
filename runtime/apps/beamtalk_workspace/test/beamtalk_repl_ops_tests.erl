@@ -7,7 +7,7 @@
 
 -moduledoc """
 EUnit tests for the term-returning op seam (`beamtalk_repl_ops`) and the live
-push-stream subscription facade (`beamtalk_repl_subscriptions`), BT-2399.
+push-stream subscription facade (`beamtalk_repl_subscriptions`).
 
 These assert the *term* contract (`op_result()`) that dist-attached clients
 consume — distinct from the JSON wire format covered by the per-op handle/4
@@ -72,7 +72,7 @@ dispatch_unknown_op_returns_error_term_test() ->
     ?assertEqual(unknown_op, Err#beamtalk_error.kind).
 
 dispatch_close_returns_status_term_test() ->
-    %% BT-2402: `close` is now ported to a native term shape — the {json, Binary}
+    %% `close` is now ported to a native term shape — the {json, Binary}
     %% escape tag was removed once every op returned a native op_result().
     Msg = make_msg(<<"close">>),
     Result = beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, self()),
@@ -124,7 +124,7 @@ dispatch_show_codegen_no_params_returns_error_term_test() ->
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 dispatch_tracing_invalid_arg_returns_error_term_test() ->
-    %% BT-2402: the tracing ops normalise invalid filter args into an {error, _}
+    %% the tracing ops normalise invalid filter args into an {error, _}
     %% term so dist clients always get an op_result(). An invalid actor PID is
     %% rejected during filter parsing before the trace store is touched, so this
     %% runs without a running store.
@@ -142,7 +142,7 @@ dispatch_nav_symbols_returns_value_term_test() ->
     Result = beamtalk_repl_ops:dispatch(<<"nav-symbols">>, #{}, Msg, self()),
     ?assertMatch({value, #{<<"classes">> := Classes}} when is_list(Classes), Result).
 
-%% BT-2402: round-trip — encoding a dispatched term reproduces the handle_op JSON.
+%% round-trip — encoding a dispatched term reproduces the handle_op JSON.
 encode_completions_term_matches_handle_op_json_test() ->
     Msg = make_msg(<<"complete">>),
     Params = #{<<"code">> => <<>>},
@@ -178,7 +178,7 @@ encode_error_term_produces_error_json_test() ->
     ?assert(binary:match(maps:get(<<"error">>, Decoded), <<"Invalid actor PID">>) =/= nomatch).
 
 encode_value_term_is_identity_encoded_test() ->
-    %% BT-2402: the `value` tag carries an already-wire-shaped JSON value, encoded
+    %% the `value` tag carries an already-wire-shaped JSON value, encoded
     %% with identity (no term_to_json). A map of binaries/lists survives intact.
     Msg = make_msg(<<"nav-query">>),
     Value = #{<<"sites">> => []},
@@ -234,7 +234,7 @@ streams_lists_all_six_push_streams_test() ->
     ).
 
 subscribe_all_returns_ok_test() ->
-    %% BT-2531: the bus-backed streams register on the SystemAnnouncer bus, so it
+    %% the bus-backed streams register on the SystemAnnouncer bus, so it
     %% must be running; the transcript stream is a tolerant cast. The facade
     %% returns ok across every stream.
     ensure_announcements_bus(),

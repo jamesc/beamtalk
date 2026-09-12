@@ -189,7 +189,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
     end.
 
 -doc """
-Value-context `super` send (BT-2252).
+Value-context `super` send.
 
 Walks the superclass chain exactly like `super/5`, but for value/primitive
 types whose methods and foreign extensions lower to state-less funs
@@ -239,10 +239,10 @@ Look up method in class chain via direct hierarchy walk.
 ADR 0032 Phase 1: Replaces the flattened table fast path with a direct
 chain walk via has_method/2 + superclass/1. At max hierarchy depth of 6
 (typical 4), this means at most ~12 gen_server calls — microseconds on a
-local node. The flattened table cache was removed to eliminate BT-510's
-race window and O(N) rebuild broadcast cascade.
+local node. The flattened table cache was removed to eliminate its race
+window and O(N) rebuild broadcast cascade.
 
-BT-2786: The walk itself (depth guard, cycle warning, advance-to-superclass)
+The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; `class_chain_step/6` supplies only
 the per-class `has_method/2` + `superclass/1` probe and method invocation.
 """.
@@ -292,14 +292,14 @@ this module never lets the generic walker's bare `not_found` escape, since
 every "not found here" branch already knows how to build a structured
 `#beamtalk_error{}`.
 
-BT-3482: probes via `beamtalk_object_class:has_method_local/2`, not
+Probes via `beamtalk_object_class:has_method_local/2`, not
 `has_method/2` — this walk supplies its own node-by-node hierarchy traversal,
 so the per-node answer must mean "does *this exact class* define `Selector`
 locally", never "does this class or any ancestor". `has_method/2` (through a
-compiled actor class's `has_method/1`, which delegates dynamically per
-BT-3467) answers the latter, which made this walk stop at the wrong node and
+compiled actor class's `has_method/1`, which delegates dynamically)
+answers the latter, which would make this walk stop at the wrong node and
 `invoke_method` dispatch to the wrong owner — see `invoke_method/6`'s
-`IsUnoverriddenActorMethod` doc for the mechanism this fixes.
+`IsUnoverriddenActorMethod` doc for the mechanism this guards against.
 """.
 -spec class_chain_step(selector(), args(), bt_self(), state(), class_name(), non_neg_integer()) ->
     beamtalk_hierarchy:step_result(dispatch_result()).
@@ -322,7 +322,7 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
                                 root => ClassName,
                                 domain => [beamtalk, runtime]
                             }),
-                            %% BT-753: Derive class from Self when State is empty (class objects).
+                            %% Derive class from Self when State is empty (class objects).
                             ErrorClass = class_name_from(Self, State, ClassName),
                             Error = beamtalk_error:new(
                                 does_not_understand,
@@ -340,15 +340,15 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
 -doc """
 Invoke a method found in the hierarchy, adapting `invoke_method/6`'s
 `{continue, SuperclassName}` escape hatch (module-less / dispatch-less
-classes, BT-427) to the walker's step protocol.
+classes) to the walker's step protocol.
 """.
 -spec invoke_step(class_name(), pid(), selector(), args(), bt_self(), state()) ->
     beamtalk_hierarchy:step_result(dispatch_result()).
 invoke_step(ClassName, ClassPid, Selector, Args, Self, State) ->
     case invoke_method(ClassName, ClassPid, Selector, Args, Self, State) of
         {continue, none} ->
-            %% Reached root without finding a dispatchable method (BT-427).
-            %% BT-753: Derive class from Self when State is empty (class objects).
+            %% Reached root without finding a dispatchable method.
+            %% Derive class from Self when State is empty (class objects).
             ErrorClass = class_name_from(Self, State, unknown),
             Error = beamtalk_error:new(
                 does_not_understand,
@@ -373,7 +373,7 @@ This function handles invocation for both compiled and dynamic classes:
 The class process knows the module name, so we can determine which strategy to use.
 ClassPid is passed from the caller to avoid a redundant whereis_class lookup.
 Returns `{continue, SuperclassName | none}` when this class has no
-dispatchable module (BT-427) — the caller (`invoke_step/6`) advances the
+dispatchable module — the caller (`invoke_step/6`) advances the
 walk or raises `does_not_understand` accordingly.
 """.
 -spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) ->
@@ -382,7 +382,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
     %% Get the module name for this class
     case beamtalk_object_class:module_name_safe(ClassPid) of
         undefined ->
-            %% Dynamic class or no module — continue to superclass (BT-427)
+            %% Dynamic class or no module — continue to superclass
             {continue, beamtalk_object_class:superclass(ClassPid)};
         ModuleName ->
             %% Ensure the module is loaded before checking exports.
@@ -394,7 +394,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
             %% bugs inside the dispatch function itself.
             case erlang:function_exported(ModuleName, dispatch, 4) of
                 false ->
-                    %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
+                    %% Module exists but lacks dispatch/4 — continue to superclass
                     {continue, beamtalk_object_class:superclass(ClassPid)};
                 true ->
                     %% Intercept printString/displayString/inspect for actor and
@@ -414,21 +414,18 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %%
                     %% For actors, an unoverridden printString/displayString/inspect
                     %% resolves with MethodOwner = 'Object': class_chain_step/6 probes
-                    %% each level with beamtalk_object_class:has_method_local/2
-                    %% (BT-3482), which for a compiled actor class answers via
+                    %% each level with beamtalk_object_class:has_method_local/2,
+                    %% which for a compiled actor class answers via
                     %% `has_method_local/1` — a strictly local own-methods-or-extension
                     %% check that never delegates to a superclass, unlike `has_method/1`
-                    %% itself ([`SuperclassDelegation::Dynamic`], BT-3467). So the
-                    %% hierarchy walk keeps advancing one class at a time until it
-                    %% reaches Object itself, same outcome BT-3467 briefly regressed
-                    %% (see class_chain_step/6's own doc for the O(depth²) it caused
-                    %% in between).
+                    %% itself. So the hierarchy walk keeps advancing one class at a time
+                    %% until it reaches Object itself (see class_chain_step/6's own doc
+                    %% for the O(depth²) this costs).
                     %%
-                    %% For supervisors it's different (BT-3082): `Supervisor`/
+                    %% For supervisors it's different: `Supervisor`/
                     %% `DynamicSupervisor` are plain "Value" classes (`Object
                     %% subclass: Supervisor`), whose codegen never sets
-                    %% `DispatchSpec.emit_local_probe` (BT-3482 scoped the local-probe
-                    %% fix to the actor regression BT-3467 introduced) — they export no
+                    %% `DispatchSpec.emit_local_probe` — they export no
                     %% `has_method_local/1`, so `has_method_local/2` falls back to their
                     %% `has_method/1`, which *delegates* to its superclass for any
                     %% selector it doesn't locally list (see `value_type_codegen.rs`
@@ -438,8 +435,8 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %% actually visits a node named `'Object'` for an unoverridden
                     %% supervisor, it stops one level short. So an unoverridden
                     %% supervisor's MethodOwner is `'Supervisor'` or
-                    %% `'DynamicSupervisor'`, never `'Object'` — before this fix, that
-                    %% meant `aSupervisor printString` fell through to the compiled
+                    %% `'DynamicSupervisor'`, never `'Object'` — without this branch,
+                    %% `aSupervisor printString` would fall through to the compiled
                     %% Object method's bare class name instead of matching the REPL's
                     %% kind-headed label.
                     %%
@@ -452,7 +449,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %% so they're not deadlock-prone the same way, but routing them
                     %% through the same renderer keeps one label authority.)
                     %%
-                    %% ADR 0095 Phase 3 (BT-2504): `inspect` on a default actor is
+                    %% ADR 0095 Phase 3: `inspect` on a default actor is
                     %% also routed here. Although it returns an `Inspector` cursor
                     %% (not a self-rendered string), the compiled `Object>>inspect`
                     %% is `Inspector on: self`, i.e. `on/1` — which, when it runs
@@ -465,8 +462,8 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %% `inspect` is deliberately *not* extended to supervisors here
                     %% (unlike printString/displayString above): supervisors dispatch
                     %% in-process, so `Object>>inspect`'s self-send isn't deadlock-prone
-                    %% for them, and BT-3082 only reported the printString/displayString
-                    %% divergence — widening `inspect`'s behaviour is out of scope.
+                    %% for them, and only the printString/displayString divergence was
+                    %% reported — widening `inspect`'s behaviour is out of scope.
                     IsDisplaySelector =
                         Selector =:= 'printString' orelse Selector =:= 'displayString',
                     IsUnoverriddenSupervisorMethod =
@@ -532,7 +529,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
             end
     end.
 
-%% Build the dispatch breadcrumb (BT-2705) handed to the error-wrap boundary so
+%% Build the dispatch breadcrumb handed to the error-wrap boundary so
 %% raw Erlang errors escaping a compiled method are classified *and* located.
 %% Computed only on the error path; the receiver's actual class is preferred
 %% over the method owner so the breadcrumb names what the user sent to.
@@ -551,29 +548,29 @@ Supports two signatures based on the target class type:
 - Value-type extensions: fun(Args, Self) -> Result
   No state threading (value types have no mutable state).
 
-BT-1512: The arity is checked at call time to support both signatures
+The arity is checked at call time to support both signatures
 from a single dispatch path.
 
-BT-3199: A crashing extension body is caught and converted to a structured
+A crashing extension body is caught and converted to a structured
 `#beamtalk_error{}` via `beamtalk_exception_handler:ensure_wrapped/4` +
 `dispatch_context/4` — the exact same pattern `invoke_method/6` already uses
 for a crash inside a compiled/runtime-installed method reached via this same
-hierarchy walk. Before this, a crashing extension was the one dispatch path
-in this module that instead re-raised the bare Erlang exception. For a
-value-type receiver (evaluated inline in the caller's process) that was
-mostly harmless, but for an actor instance — whose `lookup/5` call runs
-inside its own gen_server's `handle_call` (`beamtalk_actor:dispatch_via_hierarchy/4`,
-which only catches `exit:`, not `error:`) — the re-raise escaped uncaught and
-crashed the actor process, unlike an equivalent crash in a regular method
-body (already crash-safe via `dispatch_user_method/4`'s own catch). This
-closes that asymmetry and mirrors the class-side crash-safety guarantee
-BT-3192 already established for class-side extensions (`ClassName` is the
-class the extension was registered under — `CurrentClass` from `lookup/5`
-or `SuperclassName` from `super/5` — used for the error's breadcrumb
-context, same role `MethodOwner` plays for `invoke_method/6`).
+hierarchy walk. Without this catch, a crashing extension would be the one
+dispatch path in this module that instead re-raises the bare Erlang
+exception. For a value-type receiver (evaluated inline in the caller's
+process) that would be mostly harmless, but for an actor instance — whose
+`lookup/5` call runs inside its own gen_server's `handle_call`
+(`beamtalk_actor:dispatch_via_hierarchy/4`, which only catches `exit:`, not
+`error:`) — the re-raise would escape uncaught and crash the actor process,
+unlike an equivalent crash in a regular method body (already crash-safe via
+`dispatch_user_method/4`'s own catch). This mirrors the class-side
+crash-safety guarantee established for class-side extensions (`ClassName` is
+the class the extension was registered under — `CurrentClass` from
+`lookup/5` or `SuperclassName` from `super/5` — used for the error's
+breadcrumb context, same role `MethodOwner` plays for `invoke_method/6`).
 
 A connected `Program exit: N` (ADR 0099 §3) and a `^` non-local return in
-flight (ADR 0041/BT-3022, thrown as `{'$bt_nlr', ...}` — see
+flight (ADR 0041, thrown as `{'$bt_nlr', ...}` — see
 `beamtalk_result:'tryDo:'/1` for the same two tuple shapes) must pass through
 this frame untouched rather than be caught by the generic clause below: for a
 value-type extension (arity-2), `apply_extension_by_arity/4` runs the fun
@@ -584,7 +581,7 @@ catching and wrapping it here would turn a non-local return into a spurious
 `beamtalk_class_dispatch:apply_class_extension_fun/6` already has for the
 class-side extension path (that sibling also relays the NLR outward via a
 tagged `{nlr_relay, ...}` return, since a class method crosses its
-gen_server's `handle_call` boundary and BT-3198's shadow-relay machinery
+gen_server's `handle_call` boundary and the shadow-relay machinery
 needs the tag; plain instance dispatch has no such boundary to relay across
 here, so re-raising is enough).
 """.
@@ -620,11 +617,11 @@ Apply an extension fun given its registered arity, unifying both signatures
 to a plain `{Result, NewState}` pair — the shared "how do I call this fun"
 core behind `invoke_extension/6`.
 
-BT-3192: exported so `beamtalk_class_dispatch:invoke_class_extension/7` can
+Exported so `beamtalk_class_dispatch:invoke_class_extension/7` can
 reuse this exact arity convention for class-side extensions instead of
 duplicating it. Deliberately does NOT decide how to handle an error — that is
 context-dependent: `invoke_extension/6` (instance-side dispatch, below) uses
-the module's shared `ensure_wrapped/4` classification (BT-3199), matching
+the module's shared `ensure_wrapped/4` classification, matching
 every other crash-safe dispatch path in this file; class-side dispatch
 instead needs its own finer-grained classification (`undef_in_body` vs.
 generic, plus NLR-relay / script-exit passthrough for self-sends inside class
@@ -661,7 +658,7 @@ Safe extension registry lookup.
 Guards against the ETS table not existing (e.g., during early bootstrap).
 Returns {ok, Fun} if found, not_found otherwise.
 
-BT-3192: exported so `beamtalk_class_dispatch:handle_class_method_call/6` can
+Exported so `beamtalk_class_dispatch:handle_class_method_call/6` can
 share this exact bootstrap guard when checking the extension registry for a
 class-side extension (keyed under the metaclass tag), instead of duplicating
 the `error:badarg` catch.
@@ -692,7 +689,7 @@ is_actor_instance(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> true;
 is_actor_instance(_) -> false.
 
 -doc """
-Return true if Self is a live supervisor reference (BT-3082).
+Return true if Self is a live supervisor reference.
 
 Used alongside `is_actor_instance/1` to route a default (unoverridden)
 `printString`/`displayString` to `beamtalk_object_ops`, which renders the

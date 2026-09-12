@@ -64,23 +64,6 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Strips any number of `Parenthesized` wrappers to expose the syntactic
-/// shape underneath — `(expr)`, `((expr))`, etc. all see through to `expr`.
-///
-/// Parentheses carry no runtime meaning (they only affect parse-time
-/// precedence), so any codegen specialization that pattern-matches on the
-/// *syntactic shape* of an expression (as [`is_character_typed_receiver`]
-/// does) must look past them or a receiver as simple as `(Character value:
-/// 10) asString` — parenthesized only to disambiguate the keyword send from
-/// the trailing unary `asString` — would silently miss the fast path.
-fn unwrap_parens(expr: &Expression) -> &Expression {
-    let mut current = expr;
-    while let Expression::Parenthesized { expression, .. } = current {
-        current = expression;
-    }
-    current
-}
-
 /// True if `expr`'s static type is Character,
 /// determined purely from its syntactic shape — no general static type
 /// inference exists in codegen, so this recognizes exactly the syntactic
@@ -106,7 +89,7 @@ fn unwrap_parens(expr: &Expression) -> &Expression {
 /// these additional shapes closes that gap without requiring general
 /// static type inference in codegen.
 pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
-    match unwrap_parens(expr) {
+    match expr.unwrap_parens() {
         Expression::Literal(Literal::Character(_), _) => true,
         Expression::MessageSend {
             receiver,
@@ -121,7 +104,7 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
                         if parts.len() == 1 && parts[0].keyword == "value:"
                 )
                 && matches!(
-                    unwrap_parens(receiver),
+                    receiver.unwrap_parens(),
                     Expression::ClassReference { name, package: None, .. }
                         if name.name == "Character"
                 );

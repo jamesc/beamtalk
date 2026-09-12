@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_regex module (BT-1088).
+EUnit tests for beamtalk_regex module.
 
 Tests constructors, instance methods, string helper functions,
 and error paths.
@@ -84,7 +84,7 @@ from_options_type_error_test() ->
     ).
 
 %%% ============================================================================
-%%% FFI no-colon aliases (BT-1142)
+%%% FFI no-colon aliases
 %%% ============================================================================
 
 from_alias_test() ->

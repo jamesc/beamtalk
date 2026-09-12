@@ -7,7 +7,7 @@
 
 -moduledoc """
 EUnit tests for `beamtalk_repl_ops_watch` — the live-Inspector `pid-stats` read
-op (ADR 0095 §5, BT-2489 / Cockpit Phase 3).
+op (ADR 0095 §5 / Cockpit Phase 3).
 
 Covers:
 * invalid / missing pid string → `{error, #beamtalk_error{}}` (JSON error at the

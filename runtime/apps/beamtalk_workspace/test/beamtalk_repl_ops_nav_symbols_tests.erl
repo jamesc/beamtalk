@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context (Navigation bridge)
 
 -moduledoc """
-EUnit tests for beamtalk_repl_ops_nav_symbols (BT-2244).
+EUnit tests for beamtalk_repl_ops_nav_symbols.
 
 Covers: describe_ops/0 map shape, validate_scope/1 error and success
 branches, and the happy path of handle/4 against a minimal seed of

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_stdlib_test module (BT-2236).
+Unit tests for beamtalk_stdlib_test module.
 
 Covers format_result/1, matches_pattern/2, and run_and_assert/2 — the
 core functions of the stdlib expression test runner that had no direct
@@ -43,7 +43,7 @@ format_result_float_test() ->
 format_result_float_whole_test() ->
     ?assertEqual(<<"1.0">>, beamtalk_stdlib_test:format_result(1.0)).
 
-%% BT-3082: format_result/1 delegates float rendering to
+%% format_result/1 delegates float rendering to
 %% beamtalk_primitive:print_string/1 — the same function the REPL wire
 %% encoder now delegates to via beamtalk_runtime_api — so all three paths
 %% render identically. Covers the values called out in the acceptance
@@ -128,8 +128,7 @@ format_result_pid_inner_matches_pid_to_list_test() ->
     Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
     ?assertEqual(<<"#Actor<", Inner/binary, ">">>, Result).
 
-%% BT-3082: format_result/1 used to render every pid — dead or alive — as
-%% `#Actor<...>`. It now delegates to beamtalk_primitive:pid_label/1 (the
+%% format_result/1 delegates to beamtalk_primitive:pid_label/1 (the
 %% same liveness-probed renderer the REPL wire encoder uses), so a dead pid
 %% must render `#Dead<...>`, never `#Actor<...>`.
 format_result_dead_pid_renders_as_dead_test() ->
@@ -589,3 +588,71 @@ run_and_assert_multiple_failures_counted_test() ->
             end)
         )
     end).
+
+%%% ============================================================================
+%%% format_result/1 — Non-empty list (lines 239-240)
+%%% ============================================================================
+
+%% A non-empty integer list renders the same whether beamtalk_repl_json is
+%% available (JSON encode path) or not (io_lib:format fallback) — both
+%% produce "[1,2,3]" — so the assertion is unconditional.
+format_result_nonempty_list_test() ->
+    ?assertEqual(<<"[1,2,3]">>, beamtalk_stdlib_test:format_result([1, 2, 3])).
+
+%%% ============================================================================
+%%% format_result/1 — Supervisor (line 248)
+%%% ============================================================================
+
+%% Without a live class registry, process_label/1 falls back to "Supervisor("
+%% in its try-catch.  The pid portion varies, so only prefix and suffix are checked.
+format_result_supervisor_test() ->
+    Pid = self(),
+    Result = beamtalk_stdlib_test:format_result({beamtalk_supervisor, 'Foo', foo_mod, Pid}),
+    ?assertMatch(<<"Supervisor(Foo, ", _/binary>>, Result),
+    ?assertEqual($), binary:last(Result)).
+
+%%% ============================================================================
+%%% format_result/1 — Generic catch-all (line 254)
+%%% ============================================================================
+
+%% {ok, hello} matches none of the specific clauses and falls through to the
+%% catch-all io_lib:format("~p") clause.
+format_result_generic_tuple_test() ->
+    ?assertEqual(<<"{ok,hello}">>, beamtalk_stdlib_test:format_result({ok, hello})).
+
+%%% ============================================================================
+%%% matches_pattern/2 — Digit-flanked underscore (line 289 in is_alnum/1)
+%%% ============================================================================
+
+%% When _ is flanked on both sides by digit characters, is_alnum/1 returns
+%% true for both neighbours (digit clause, line 289) and the underscore is kept
+%% as a literal segment character rather than a wildcard.
+matches_pattern_digit_flanked_underscore_literal_test() ->
+    ?assert(beamtalk_stdlib_test:matches_pattern(<<"1_2">>, <<"1_2">>)).
+
+matches_pattern_digit_flanked_underscore_no_wildcard_test() ->
+    ?assertNot(beamtalk_stdlib_test:matches_pattern(<<"1_2">>, <<"1x2">>)).
+
+%%% ============================================================================
+%%% matches_pattern/2 — Uppercase-flanked underscore (line 290 in is_alnum/1)
+%%% ============================================================================
+
+%% When _ is flanked on both sides by uppercase letters, is_alnum/1 returns
+%% true for both neighbours (uppercase clause, line 290) and the underscore is
+%% kept as a literal character rather than a wildcard.
+matches_pattern_uppercase_flanked_underscore_literal_test() ->
+    ?assert(beamtalk_stdlib_test:matches_pattern(<<"A_B">>, <<"A_B">>)).
+
+matches_pattern_uppercase_flanked_underscore_no_wildcard_test() ->
+    ?assertNot(beamtalk_stdlib_test:matches_pattern(<<"A_B">>, <<"AxB">>)).
+
+%%% ============================================================================
+%%% matches_pattern/2 — Interior segment nomatch (line 313)
+%%% ============================================================================
+
+%% Pattern "a _ c _ e" splits into three segments: <<"a ">>, <<" c ">>, <<" e">>.
+%% In actual "a b x e", the first segment "a " matches at position 0, but the
+%% interior segment " c " is absent from the remaining "b x e" — binary:match
+%% returns nomatch, which falls to the nomatch -> false branch (line 313).
+matches_pattern_interior_segment_nomatch_test() ->
+    ?assertNot(beamtalk_stdlib_test:matches_pattern(<<"a _ c _ e">>, <<"a b x e">>)).

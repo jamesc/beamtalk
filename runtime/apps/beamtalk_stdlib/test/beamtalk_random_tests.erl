@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_random module (BT-1165).
+EUnit tests for beamtalk_random module.
 
 Tests class-side methods (next, nextInteger:, new, seed:),
 instance methods (next/1, nextInteger/2),
@@ -214,7 +214,7 @@ at_random_empty_tuple_test() ->
     ).
 
 %%% ============================================================================
-%%% FFI shims (BT-1165)
+%%% FFI shims
 %%% ============================================================================
 
 ffi_shim_next_integer_returns_integer_test() ->

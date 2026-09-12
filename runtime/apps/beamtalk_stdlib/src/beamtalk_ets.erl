@@ -44,7 +44,6 @@ Ets objects are represented as tagged maps:
 
 ## References
 
-- BT-1189: ETS — shared in-memory table class for actor state sharing
 - ADR 0042: Actor-Only Mutable State
 - ADR 0055: Erlang-Backed Class Protocol
 """.

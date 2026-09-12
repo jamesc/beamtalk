@@ -100,7 +100,7 @@ set_domain(SubDomain) ->
     logger:set_process_metadata(#{domain => [beamtalk, SubDomain]}).
 
 -doc "Return the current OTP primary log level as an atom.".
-%% Narrow return (BT-2632): the primary log level is one of the eight standard
+%% Narrow return: the primary log level is one of the eight standard
 %% OTP levels, or the special `all`/`none` sentinels that disable filtering.
 %% Naming this union (rather than bare `atom()`) documents the real return set
 %% for Dialyzer and readers.
@@ -116,7 +116,7 @@ set_domain(SubDomain) ->
 %% consumer of the getter sees; it is a subtype of the inferred
 %% `... | Symbol`, so the getter still type-checks. Tightening the
 %% direct-FFI-call inference for `ok`/`error`-bearing atom unions is deferred to
-%% BT-2647 (it touches ADR-0076 Result semantics). `map_type_singleton_union_*`
+%% pending ADR-0076 Result semantics work. `map_type_singleton_union_*`
 %% tests lock in both behaviours.
 -spec logLevel() ->
     emergency | alert | critical | error | warning | notice | info | debug | all | none.

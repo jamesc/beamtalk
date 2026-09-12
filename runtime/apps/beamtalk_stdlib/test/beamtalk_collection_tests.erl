@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_collection module (BT-1088).
+EUnit tests for beamtalk_collection module.
 
 Tests inject_into/3 and to_list/1 for list inputs.
 """.
@@ -14,14 +14,14 @@ Tests inject_into/3 and to_list/1 for list inputs.
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
-%%% Test Fixtures (BT-1983)
+%%% Test Fixtures
 %%% ============================================================================
 
 %% Load stdlib so non-list Collection classes (e.g. Interval) can dispatch do:.
 %%
-%% BT-3400: boot through the shared beamtalk_test_boot helper rather than an
+%% Boot through the shared beamtalk_test_boot helper rather than an
 %% ad hoc pg/bootstrap/init sequence — see beamtalk_test_runner_tests's
-%% live_setup/0 for why the old sequence here was the flake's root cause.
+%% live_setup/0 for the ordering this must preserve.
 stdlib_setup() ->
     beamtalk_test_boot:boot_real_stdlib('Interval'),
     ok.
@@ -101,7 +101,7 @@ inject_into_count_test() ->
     ?assertEqual(3, Result).
 
 %%% ============================================================================
-%%% to_list/1 — non-list collection path (BT-1983)
+%%% to_list/1 — non-list collection path
 %%% ============================================================================
 %%%
 %%% These tests exercise the non-list branch of to_list/1, which dispatches
@@ -139,7 +139,7 @@ inject_into_interval_test() ->
     Sum = beamtalk_collection:inject_into(Interval, 0, fun(Acc, E) -> Acc + E end),
     ?assertEqual(55, Sum).
 
-%% BT-3022: to_list/1 accumulates through the caller's mailbox so the iteration
+%% to_list/1 accumulates through the caller's mailbox so the iteration
 %% block works across a process boundary. That makes mailbox hygiene part of its
 %% contract: unrelated messages must be left in place and in order, because
 %% to_list may run inside an actor's callback.
@@ -182,7 +182,7 @@ to_list_drains_mailbox_test() ->
     ).
 
 %%% ============================================================================
-%%% from_list_like/2 — result reconstruction (BT-2342)
+%%% from_list_like/2 — result reconstruction
 %%% ============================================================================
 %%%
 %%% Reconstructs a collect:/select:/reject: fold result so its type matches the

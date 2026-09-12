@@ -4,6 +4,7 @@
 use super::{
     DispatchSpec, SuperclassDelegation, class_has_catch_all_dnu, generate_has_method_from_spec,
 };
+use crate::core_erlang::tests::bare;
 use crate::core_erlang::value_accessors::AutoSlotMethods;
 use beamtalk_core::ast::{
     ClassDefinition, ClassKind, CommentAttachment, Expression, ExpressionStatement, Identifier,
@@ -13,10 +14,6 @@ use beamtalk_core::source_analysis::Span;
 
 fn s() -> Span {
     Span::new(0, 0)
-}
-
-fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
 }
 
 /// A minimal `ClassDefinition` — only the fields `class_has_catch_all_dnu`

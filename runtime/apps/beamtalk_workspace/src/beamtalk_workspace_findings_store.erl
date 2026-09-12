@@ -8,9 +8,9 @@
 
 -moduledoc """
 Live store of reload-induced findings, keyed by `{caller class, changed
-class}` (ADR 0105 Phase 1, BT-2779).
+class}` (ADR 0105 Phase 1).
 
-`beamtalk_recheck:trigger/4` (BT-2778) produces findings but does not keep
+`beamtalk_recheck:trigger/4` produces findings but does not keep
 them anywhere — this module is where they live between reloads, and it is
 the sole source of truth every surface (LSP, REPL, workspace/cockpit UI)
 publishes from.
@@ -44,7 +44,7 @@ now correctly scoped:
   second call's replacement is unconditional, so generation-A findings can
   never survive alongside generation-B ones for that origin.
 
-## Caller-cap staleness marking (ADR 0105, BT-2802, widened by BT-2828)
+## Caller-cap staleness marking (ADR 0105)
 
 `beamtalk_recheck:apply_cap/2` keeps only the alphabetically-first N
 candidates per reload; a candidate the cap drops is never re-checked that
@@ -55,7 +55,7 @@ flagged is fixed upstream — the cap is a re-check *capacity* limit, not a
 statement that the dropped candidates are fine. The same "never actually
 re-verified" gap also reaches a candidate that stayed *inside* the cap but
 whose individual re-check came back `skipped` (no live source recorded) or
-`failed` (a compile/compiler-port error) — BT-2828. `get_origin/2` exists so
+`failed` (a compile/compiler-port error). `get_origin/2` exists so
 `beamtalk_repl_loader:maybe_run_recheck/4` can check, for each such
 not-verified candidate (`beamtalk_recheck:result()`'s `not_verified_owners`
 — the cap-dropped set unioned with the skipped/failed one), whether this
@@ -85,7 +85,7 @@ that fixes what a reload broke.
 ## Session-only, never persisted
 
 State lives in this gen_server's `#state{}` map — plain in-memory, no ETS,
-no disk — mirroring `beamtalk_workspace_signature_store` (BT-2777). It is
+no disk — mirroring `beamtalk_workspace_signature_store`. It is
 supervised under `beamtalk_workspace_sup` alongside the signature store, so a
 workspace restart (a fresh BEAM node) starts a fresh, empty store — exactly
 the ADR's "workspace restart... session state, never persisted" clearing
@@ -95,7 +95,7 @@ re-installs a method through the normal install path, which already calls
 `clear/0` is test-only: it gives tests an explicit full reset without a
 restart.
 
-## Known, accepted concurrency gaps (adversarial review, BT-2779)
+## Known, accepted concurrency gaps (adversarial review)
 
 Two narrower races survive the per-origin scoping above — both accepted
 rather than fixed, matching the risk tolerance
@@ -208,7 +208,7 @@ for_owner(OwnerBin) when is_binary(OwnerBin) ->
 
 -doc """
 Read-only lookup of the single `{OwnerBin, ChangedClassBin}` origin bucket
-(BT-2802) — `[]` when nothing is stored for that exact pair. Unlike
+— `[]` when nothing is stored for that exact pair. Unlike
 `for_owner/1`, this does not flatten across origins: a caller
 (`beamtalk_repl_loader:maybe_run_recheck/4`) needs to know whether *this
 specific* changed class already left a finding on `OwnerBin` before deciding

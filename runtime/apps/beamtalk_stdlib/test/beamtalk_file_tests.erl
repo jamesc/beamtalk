@@ -2032,7 +2032,7 @@ open_do_handle_lines_success_test() ->
     end).
 
 %%% ============================================================================
-%%% BT-1983 — additional error path coverage
+%%% Additional error path coverage
 %%% ============================================================================
 
 %% Attempting to read/write a directory (as if it were a file) exercises
@@ -2422,7 +2422,7 @@ temp_directory_platform_default_test() ->
     end.
 
 %%% ============================================================================
-%%% open:mode: / open:mode:do: (BT-2975)
+%%% open:mode: / open:mode:do:
 %%%
 %%% These exercise do_open/3, mode_options/1, ensure_parent_dir/2 and
 %%% open_error/3 — the open path the FileHandle tests skip by constructing
@@ -2624,7 +2624,7 @@ open_shim_routes_mode_atoms_test() ->
     end).
 
 %%% ============================================================================
-%%% open:mode: rejects non-regular paths (BT-3019)
+%%% open:mode: rejects non-regular paths
 %%% ============================================================================
 
 open_mode_rejects_directory_test() ->
@@ -2692,11 +2692,11 @@ open_mode_still_creates_missing_regular_file_test() ->
     end.
 
 ffi_boundary_preserves_wrapped_error_test() ->
-    %% BT-3018: an error raised *inside* an FFI call — here by the user block
+    %% An error raised *inside* an FFI call — here by the user block
     %% `open:do:` invokes — must cross the boundary with its kind and selector
     %% intact rather than being reclassified. classify_ffi_exception/9 already
     %% handles this via its wrapped-map clause; this pins the behaviour, which
-    %% the BT-3018 diagnostic depends on to reach a caller at all.
+    %% callers depend on to diagnose the error at all.
     Raiser = fun(_H) ->
         beamtalk_error:raise(beamtalk_error:new(dispatch_error, 'File', 'exists:'))
     end,
@@ -2720,7 +2720,7 @@ ffi_boundary_preserves_wrapped_error_test() ->
 %%% open:mode:do: type guard arms — path and mode type checks
 %%%
 %%% open_mode_non_atom_mode_raises_test and open_mode_non_binary_path_raises_test
-%%% (BT-2975) cover the 2-arg open:mode: guards. The 3-arg open:mode:do: has
+%%% cover the 2-arg open:mode: guards. The 3-arg open:mode:do: has
 %%% its own separate function clauses (source lines 570-573) that are exercised
 %%% here for the first time.
 %%% ============================================================================

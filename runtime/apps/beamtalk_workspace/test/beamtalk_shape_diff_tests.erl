@@ -3,7 +3,7 @@
 
 -module(beamtalk_shape_diff_tests).
 
--moduledoc "Unit tests for beamtalk_shape_diff (ADR 0105 Phase 2, BT-2780).".
+-moduledoc "Unit tests for beamtalk_shape_diff (ADR 0105 Phase 2).".
 
 -include_lib("eunit/include/eunit.hrl").
 

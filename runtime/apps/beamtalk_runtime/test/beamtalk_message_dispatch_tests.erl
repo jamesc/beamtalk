@@ -4,7 +4,7 @@
 -module(beamtalk_message_dispatch_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_message_dispatch module (BT-430).
+EUnit tests for beamtalk_message_dispatch module.
 
 Tests unified dispatch routing for actors, class objects, and primitives.
 Note: Compiled stdlib modules (bt@stdlib@integer etc.) require `just build-stdlib`.
@@ -25,7 +25,7 @@ actor_setup() ->
     end,
     beamtalk_extensions:init(),
     {ok, _} = beamtalk_bootstrap:start_link(),
-    %% BT-446: Bootstrap only starts pg. Classes registered by compiled stdlib.
+    %% Bootstrap only starts pg; classes are registered by the compiled stdlib.
     beamtalk_stdlib:init(),
     ok.
 
@@ -34,14 +34,14 @@ actor_teardown(_) ->
 
 actor_test_() ->
     {setup, fun actor_setup/0, fun actor_teardown/1, [
-        %% BT-918 / ADR 0043: sync-by-default — actor dispatch returns value directly, not future
+        %% ADR 0043: sync-by-default — actor dispatch returns value directly, not a future
         {"actor dispatch returns value directly (sync)", fun actor_returns_value_directly/0},
         {"actor dispatch dead actor raises error", fun actor_dead_raises_error/0},
         {"class object dispatch returns value", fun class_object_returns_value/0}
     ]}.
 
 actor_returns_value_directly() ->
-    %% BT-918: Actor sends now use gen_server:call and return values directly.
+    %% Actor sends use gen_server:call and return values directly.
     %% Use a real gen_server (test_counter) since dummy procs don't handle gen_server calls.
     {ok, Counter} = test_counter:start_link(0),
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
@@ -51,7 +51,7 @@ actor_returns_value_directly() ->
     gen_server:stop(Counter).
 
 actor_dead_raises_error() ->
-    %% BT-918: Sending to a dead actor raises an actor_dead exception.
+    %% Sending to a dead actor raises an actor_dead exception.
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
     timer:sleep(10),
@@ -71,7 +71,7 @@ class_object_returns_value() ->
     ?assertEqual('Object', Result).
 
 %% ============================================================================
-%% BT-1190: send/4 (explicit timeout) dispatch tests
+%% send/4 (explicit timeout) dispatch tests
 %% ============================================================================
 
 send4_actor_succeeds_with_timeout() ->
@@ -199,7 +199,7 @@ supervisor_stop_stale_handle_test() ->
     ).
 
 %% ============================================================================
-%% BT-1970: cast/3 dispatch tests
+%% cast/3 dispatch tests
 %% ============================================================================
 
 cast_test_() ->
@@ -245,7 +245,7 @@ cast_primitive_returns_ok() ->
     ?assertEqual(ok, beamtalk_message_dispatch:cast([1, 2], size, [])).
 
 %% ============================================================================
-%% BT-1970: is_actor/1 edge cases (tested indirectly via send/cast routing)
+%% is_actor/1 edge cases (tested indirectly via send/cast routing)
 %% ============================================================================
 
 is_actor_edge_cases_test_() ->
@@ -272,7 +272,7 @@ wrong_tag_tuple_as_primitive() ->
     ?assertEqual(4, Result).
 
 %% ============================================================================
-%% BT-1970: send/3 actor with invalid PID
+%% send/3 actor with invalid PID
 %% ============================================================================
 
 invalid_pid_test_() ->
@@ -289,7 +289,7 @@ actor_undefined_pid_raises_error() ->
     ).
 
 %% ============================================================================
-%% BT-1970: send/4 supervisor timeout delegation
+%% send/4 supervisor timeout delegation
 %% ============================================================================
 
 send4_supervisor_test_() ->
@@ -308,7 +308,7 @@ send4_supervisor_delegates() ->
     gen_server:stop(SupPid).
 
 %% ============================================================================
-%% BT-1970: Metaclass dispatch path
+%% Metaclass dispatch path
 %% ============================================================================
 
 metaclass_dispatch_test_() ->
@@ -325,7 +325,7 @@ metaclass_dispatch_via_primitive() ->
     ?assert(is_pid(ClassPid)),
     MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = ClassPid},
     %% Sending 'name' to a Metaclass-tagged object goes through primitive dispatch
-    %% which calls metaclass_send_dispatch and returns the metaclass name. BT-2232:
+    %% which calls metaclass_send_dispatch and returns the metaclass name.
     %% name is a Symbol across the whole tower, so the metaclass name is the atom
     %% 'Object class' (printString carries the "Object class" String).
     Result = beamtalk_message_dispatch:send(MetaObj, name, []),
@@ -340,7 +340,7 @@ send4_metaclass_ignores_timeout() ->
     ?assertEqual('Object class', Result).
 
 %% ============================================================================
-%% BT-1981: Future auto-await dispatch paths
+%% Future auto-await dispatch paths
 %% ============================================================================
 
 future_autoawait_test_() ->
@@ -351,7 +351,7 @@ future_autoawait_test_() ->
     ]}.
 
 send3_future_autoawait() ->
-    %% BT-840: A {beamtalk_future, Pid} tagged future is auto-awaited before
+    %% A {beamtalk_future, Pid} tagged future is auto-awaited before
     %% redispatching. Resolve the future to an integer and verify that the
     %% redispatch routes through primitive dispatch to produce the sum.
     Future = beamtalk_future:new(),
@@ -372,7 +372,7 @@ cast_future_autoawait() ->
     ?assertEqual(ok, beamtalk_message_dispatch:cast(Future, anySelector, [])).
 
 %% ============================================================================
-%% BT-1981: send/4 class object dispatch path
+%% send/4 class object dispatch path
 %% ============================================================================
 
 send4_class_object_test_() ->
@@ -402,7 +402,7 @@ send4_invalid_pid_raises() ->
     ).
 
 %% ============================================================================
-%% BT-1981: Supervisor generic method dispatch (not isAlive/stop)
+%% Supervisor generic method dispatch (not isAlive/stop)
 %% ============================================================================
 
 supervisor_generic_dispatch_test() ->
@@ -421,7 +421,7 @@ supervisor_generic_dispatch_test() ->
     end.
 
 %% ============================================================================
-%% BT-3262 (ADR 0116): send_number_coercion/4 — DNU hint on missing reflected
+%% ADR 0116: send_number_coercion/4 — DNU hint on missing reflected
 %% method for number-on-the-left arithmetic coercion.
 %% ============================================================================
 

@@ -18,7 +18,7 @@ It delegates to beamtalk_workspace_meta for workspace metadata.
 -doc """
 Resolve a bare name against session locals + live workspace sources (ADR 0081).
 
-BT-2365: the public entry point the REPL compiler's free-identifier fallthrough
+The public entry point the REPL compiler's free-identifier fallthrough
 targets. Delegates to `beamtalk_workspace_interface_primitives:resolve_name/2`,
 which holds the single shared resolution order (locals → bind:as: → singletons →
 classes → undefined_variable) shared with `Session resolve:`.
@@ -29,7 +29,7 @@ resolve_name(Locals, Name) ->
 
 -doc """
 Raise the `undefined_variable` error for `Name` directly, bypassing the workspace
-resolution tiers (BT-2509).
+resolution tiers.
 
 The REPL `self` codegen uses this on a bindings-map miss: a top-level `self` has
 no receiver and must be `undefined_variable`, NOT resolved through
@@ -43,7 +43,7 @@ raise_undefined_variable(Name) ->
 -doc """
 Resolve a capitalised class reference not found in the session locals (ADR 0081).
 
-BT-2365: the REPL compiler emits this for a `ClassReference` after a locals miss.
+The REPL compiler emits this for a `ClassReference` after a locals miss.
 Delegates to `beamtalk_workspace_interface_primitives:resolve_class_reference/2`,
 which reuses resolve_name/2's singleton + class tiers but raises class_not_found
 (not undefined_variable) for a genuinely unknown class.
@@ -55,7 +55,7 @@ resolve_class_reference(Locals, Name) ->
 -doc """
 Resolve a singleton binding name to its live instance, or `error` (ADR 0081).
 
-BT-2365: the REPL compiler emits this on the miss branch of a binding-aware
+The REPL compiler emits this on the miss branch of a binding-aware
 class-send so a message to a singleton receiver (`Workspace bind:as:`) reaches
 the live instance. Delegates to
 `beamtalk_workspace_interface_primitives:resolve_singleton_instance/1`.

@@ -7,7 +7,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Single-worker queue for ADR 0105 Phase 2's shape re-check (BT-2780).
+Single-worker queue for ADR 0105 Phase 2's shape re-check.
 
 `beamtalk_repl_loader:activate_module/3` fires on *every* ordinary
 class-body install — far more often than the method-signature path's
@@ -41,7 +41,7 @@ Reloads simply queue and drain in order; nothing here needs to know about
 backpressure or cancellation because there is no unbounded fan-out left to
 bound.
 
-**BT-2856 / ADR 0107 Phase A** reuses this same queue for the leaf-change
+**ADR 0107 Phase A** reuses this same queue for the leaf-change
 re-check (`beamtalk_repl_loader:maybe_trigger_leaf_change_recheck/1`,
 enqueued via `enqueue_leaf_change/1`) instead of a second dedicated worker:
 `trigger_leaf_change/1` is at least as expensive a compiler-port sweep as a
@@ -104,7 +104,7 @@ enqueue(Classes) ->
     gen_server:cast(?MODULE, {recheck, Classes}).
 
 -doc """
-BT-2856 / ADR 0107 Phase A: queue a leaf-change re-check for
+ADR 0107 Phase A: queue a leaf-change re-check for
 `NewlyNonLeafSuperclasses` (the same list
 `beamtalk_repl_loader:superclasses_losing_leaf_status/1` produces) and
 return immediately — see the moduledoc's "reuses this same queue" note for
@@ -115,7 +115,7 @@ enqueue_leaf_change(NewlyNonLeafSuperclasses) ->
     gen_server:cast(?MODULE, {leaf_change, NewlyNonLeafSuperclasses}).
 
 -doc """
-ADR 0108 hot-reload re-check trigger (BT-2899): queue an alias-change
+ADR 0108 hot-reload re-check trigger: queue an alias-change
 re-check for `AliasNameBins` (the redefined alias name, primary first — see
 `beamtalk_repl_loader:maybe_trigger_alias_change_recheck/1`) and return
 immediately — reuses this worker's queue for the same reason

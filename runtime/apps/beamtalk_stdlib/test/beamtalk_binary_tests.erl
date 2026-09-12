@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_binary module (BT-1554, BT-1591).
+EUnit tests for beamtalk_binary module.
 
 Tests cover class methods (serialize:/1, deserialize:/1, size:/1, fromIolist:/1),
 FFI no-colon aliases, and instance methods (do/2, at/2, byte_at/2, byte_size/1,
@@ -244,7 +244,7 @@ at_type_error_not_integer_test() ->
         beamtalk_binary:at(<<"hello">>, <<"1">>)
     ).
 
-%% BT-3021: indexing an empty Binary is `empty_collection`, matching the other
+%% Indexing an empty Binary is `empty_collection`, matching the other
 %% collection `at:` implementations.
 at_empty_binary_error_test() ->
     ?assertError(

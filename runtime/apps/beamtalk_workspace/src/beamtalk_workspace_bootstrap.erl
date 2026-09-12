@@ -13,7 +13,7 @@ Sets class variables on singleton stdlib classes after workspace supervisor
 starts the singleton actors. Monitors singleton PIDs and re-sets class
 variables when children restart.
 
-Also activates compiled project modules at startup (BT-739). When a project
+Also activates compiled project modules at startup. When a project
 path is provided, first activates dependency classes from `_build/deps/*/ebin/`
 and native code paths, then scans `_build/dev/ebin/` for `bt@*.beam` modules
 (excluding `bt@stdlib@*`) and calls `register_class/0` on each, making them
@@ -238,11 +238,11 @@ set_class_variable(ClassName, Obj) ->
     end.
 
 -doc """
-Activate compiled project modules from _build/dev/ebin/ (BT-739).
+Activate compiled project modules from _build/dev/ebin/.
 
 Delegates to `beamtalk_module_activation:activate_ebin/2` with a callback
 that registers modules in workspace_meta and stores source text for
-`ClassName >> method => body` support (BT-1174).
+`ClassName >> method => body` support.
 """.
 -spec activate_project_modules(binary() | undefined) -> ok.
 activate_project_modules(undefined) ->
@@ -314,7 +314,7 @@ on_project_module_activated({Module, SourcePath}) ->
 
 -doc """
 Read source file content and store per-class in workspace_meta so
-that `ClassName >> method => body` works for bootstrap-loaded classes (BT-1174).
+that `ClassName >> method => body` works for bootstrap-loaded classes.
 """.
 -spec store_bootstrap_class_source(module(), string() | undefined) -> ok.
 store_bootstrap_class_source(_ModuleName, undefined) ->

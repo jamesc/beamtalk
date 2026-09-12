@@ -8,7 +8,7 @@
 -moduledoc """
 Runtime helper operations for Stream (closure-based lazy sequences).
 
-BT-511: Stream is Beamtalk's universal interface for sequential data.
+Stream is Beamtalk's universal interface for sequential data.
 Lazy operations wrap the generator in a new closure; terminal operations
 pull elements through the chain.
 
@@ -117,7 +117,7 @@ from_by(_, _) ->
 -doc """
 Create a Stream from a collection (list, set, or string).
 `Stream on: #(1, 2, 3)` => 1, 2, 3
-BT-514: Extended to support Set and String.
+Supports List, Set and String receivers.
 """.
 -spec on(term()) -> t().
 on(List) when is_list(List) ->
@@ -238,9 +238,9 @@ inject_into(_, _, _) ->
 -doc """
 Return first element matching predicate, raising `not_found` if none does.
 
-BT-3028: used to answer `nil`, which made `detect:` mean different things on a
-Stream and on a List. An exhausted stream is the degenerate no-match case and
-reports the same kind. `detect_if_none/3` is the non-raising form.
+An exhausted stream is the degenerate no-match case, so it raises the same
+`not_found` kind `List>>detect:` does rather than answering `nil`.
+`detect_if_none/3` is the non-raising form.
 """.
 -spec detect(t(), fun((term()) -> boolean())) -> term().
 detect(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when

@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_test_runner module.
 
 Covers path_suffix_match/2 which is the core logic for the `file`
-parameter of the `test` MCP tool (BT-1234).
+parameter of the `test` MCP tool.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -112,7 +112,7 @@ path_suffix_windows_boundary_no_partial_match_test() ->
     ).
 
 %%% ============================================================================
-%%% result_print_string/1 tests (BT-1669)
+%%% result_print_string/1 tests
 %%% ============================================================================
 
 print_string_all_pass_test() ->
@@ -158,7 +158,7 @@ print_string_failure_without_class_test() ->
     ?assertNotEqual(nomatch, binary:match(Str, <<"boom">>)).
 
 %%% ============================================================================
-%%% run_class/1 and run_method/2 input validation tests (BT-1927)
+%%% run_class/1 and run_method/2 input validation tests
 %%% ============================================================================
 
 run_class_rejects_atom_test() ->
@@ -359,7 +359,7 @@ result_to_json_skip_has_no_error_key_test() ->
     ?assertNot(maps:is_key(<<"error">>, Test)).
 
 result_to_json_non_utf8_error_binary_test() ->
-    %% BT-2999: a raw non-UTF-8 error message used to throw {invalid_byte, N}
+    %% A raw non-UTF-8 error message would otherwise throw {invalid_byte, N}
     %% out of json:encode/1 and take the whole test VM down with it.
     Result = make_result(1, 0, 1, 0, 0.5, [
         #{name => testBad, class => 'T', status => fail, error => <<"boom ", 255, 254, 253>>}
@@ -503,7 +503,7 @@ shim_print_string_test() ->
     ).
 
 %%% ============================================================================
-%%% Non-binary error formatting (BT-2384)
+%%% Non-binary error formatting
 %%%
 %%% format_single_failure / serialize_test_result both have a branch for an
 %%% error term that is not a binary (it is printed via beamtalk_primitive),
@@ -549,7 +549,7 @@ to_json_test_without_class_key_test() ->
     ?assertEqual(<<"testW">>, maps:get(<<"name">>, Test)).
 
 %%% ============================================================================
-%%% Live execution tests (BT-2384)
+%%% Live execution tests
 %%%
 %%% These tests drive the real test-execution paths (run_class_by_name,
 %%% discover_methods_via_registry, run_all, concurrent execution, run_file,
@@ -564,15 +564,14 @@ to_json_test_without_class_key_test() ->
 -define(SYNTH_MODULE, bt_test_runner_synth_mod).
 
 live_setup() ->
-    %% BT-3400: boot through the shared beamtalk_test_boot helper rather than
-    %% an ad hoc pg/bootstrap/init sequence. This test file's own copy of
-    %% that sequence never called application:ensure_all_started(beamtalk_runtime),
-    %% so beamtalk_runtime_app:start/2 (and beamtalk_protocol_registry:init/0,
+    %% Boot through the shared beamtalk_test_boot helper rather than an ad hoc
+    %% pg/bootstrap/init sequence: an ad hoc sequence that skips
+    %% application:ensure_all_started(beamtalk_runtime) can leave
+    %% beamtalk_runtime_app:start/2 (and beamtalk_protocol_registry:init/0,
     %% which creates the ETS table Printable/JsonRepresentable's on_load
-    %% register into) could be skipped entirely whenever this fixture's
-    %% setup happened to run before any fixture in the same EUnit VM that did
-    %% call it — the root cause of the bif_fallback_bif_path_test_ flake
-    %% (BT-3400). boot_real_stdlib/1 always calls
+    %% register into) unrun whenever this fixture's setup happens to run
+    %% before any fixture in the same EUnit VM that does call it.
+    %% boot_real_stdlib/1 always calls
     %% application:ensure_all_started(beamtalk_runtime) first, so the
     %% protocol/class-registry ETS tables exist before any stdlib module's
     %% on_load can race them, regardless of EUnit run order.

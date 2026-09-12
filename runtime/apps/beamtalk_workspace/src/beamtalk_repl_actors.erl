@@ -217,7 +217,7 @@ handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
     NewMonitors = Monitors#{MonitorRef => ActorPid},
 
     NewState = State#state{actors = NewActors, monitors = NewMonitors},
-    %% BT-2531: actor lifecycle is published as an `ActorSpawned` system
+    %% Actor lifecycle is published as an `ActorSpawned` system
     %% announcement from `beamtalk_actor`'s telemetry mirror, consumed via the
     %% SystemAnnouncer bus — the registry no longer broadcasts to subscribers.
     {reply, ok, NewState};
@@ -307,7 +307,7 @@ handle_info({'DOWN', MonitorRef, process, _Pid, _Reason}, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
     case maps:find(MonitorRef, Monitors) of
         {ok, ActorPid} ->
-            %% Actor terminated — unregister. BT-2531: actor stop is published as
+            %% Actor terminated — unregister. Actor stop is published as
             %% an `ActorStopped` system announcement from `beamtalk_actor`'s
             %% telemetry mirror (consumed via the SystemAnnouncer bus); the
             %% registry no longer broadcasts to subscribers.

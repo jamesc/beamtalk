@@ -10,10 +10,10 @@ IO capture for Beamtalk REPL evaluation.
 
 Captures stdout during eval by temporarily replacing the group_leader
 with a custom IO server process.
-BT-696: Optionally forwards IO chunks to a subscriber for streaming.
-BT-698: Handles stdin requests by forwarding to subscriber.
+Optionally forwards IO chunks to a subscriber for streaming.
+Handles stdin requests by forwarding to subscriber.
 
-Extracted from beamtalk_repl_eval.erl (BT-706).
+Extracted from beamtalk_repl_eval.erl.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -34,7 +34,7 @@ Extracted from beamtalk_repl_eval.erl (BT-706).
 -endif.
 
 -define(IO_CAPTURE_TIMEOUT, 5000).
-%% BT-698: Timeout for stdin input during eval (30 seconds)
+%% Timeout for stdin input during eval (30 seconds)
 -define(STDIN_TIMEOUT, 30000).
 
 -doc """
@@ -48,7 +48,7 @@ start() ->
     start(undefined).
 
 -doc """
-Start capturing IO output with optional streaming subscriber (BT-696).
+Start capturing IO output with optional streaming subscriber.
 When Subscriber is a pid, each IO chunk is forwarded as {eval_out, Chunk}.
 """.
 -spec start(pid() | undefined) -> {pid(), pid()}.
@@ -63,14 +63,14 @@ Stop capturing IO and return all captured output as a binary.
 Restores the original group_leader. Returns <<>> on timeout or if
 the capture process has already exited.
 
-BT-358: After restoring the eval process's group_leader, also resets
+After restoring the eval process's group_leader, also resets
 the group_leader of any processes that inherited the capture process
 as their group_leader during eval (e.g., spawned actors).
 """.
 -spec stop({pid(), pid()}) -> binary().
 stop({CapturePid, OldGL}) ->
     group_leader(OldGL, self()),
-    %% BT-358: Reset group_leader for any processes spawned during eval
+    %% Reset group_leader for any processes spawned during eval
     %% that inherited the capture process as their group_leader.
     reset_captured_group_leaders(CapturePid, OldGL),
     case is_process_alive(CapturePid) of
@@ -92,8 +92,8 @@ stop({CapturePid, OldGL}) ->
 IO server loop that captures put_chars output.
 Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
 (the latter is used by io:format).
-BT-696: When Subscriber is a pid, forwards each chunk as {eval_out, Chunk}.
-BT-698: When Subscriber is a pid, handles get_line/get_chars/get_until by
+When Subscriber is a pid, forwards each chunk as {eval_out, Chunk}.
+When Subscriber is a pid, handles get_line/get_chars/get_until by
 sending {need_input, CapturePid, Prompt} to Subscriber and waiting for
 {stdin_input, Data} response.
 After capture stops, proxies IO to the original group_leader so that
@@ -105,14 +105,14 @@ io_capture_loop(Buffer, Subscriber) ->
         {io_request, From, ReplyAs, Request} ->
             case is_stdin_request(Request) of
                 {true, Prompt} ->
-                    %% BT-698: Handle stdin request
+                    %% Handle stdin request
                     Reply = handle_stdin_request(Subscriber, Prompt),
                     From ! {io_reply, ReplyAs, Reply},
                     io_capture_loop(Buffer, Subscriber);
                 false ->
                     {Reply, NewBuffer} = handle_io_request(Request, Buffer),
                     From ! {io_reply, ReplyAs, Reply},
-                    %% BT-696: Forward new chunk to subscriber if present
+                    %% Forward new chunk to subscriber if present
                     case is_pid(Subscriber) andalso byte_size(NewBuffer) > byte_size(Buffer) of
                         true ->
                             Chunk = binary:part(
@@ -149,7 +149,7 @@ io_passthrough_loop(OldGL) ->
 -doc """
 Reset group_leader for processes that inherited the capture process.
 Scans all processes to find those whose group_leader is the capture
-process and resets them to the original group_leader (BT-358).
+process and resets them to the original group_leader.
 """.
 -spec reset_captured_group_leaders(pid(), pid()) -> ok.
 reset_captured_group_leaders(CapturePid, OldGL) ->
@@ -159,7 +159,7 @@ reset_captured_group_leaders(CapturePid, OldGL) ->
                 true ->
                     case erlang:process_info(Pid, group_leader) of
                         {group_leader, CapturePid} ->
-                            %% BT-1172: Guard against TOCTOU race — Pid may die
+                            %% Guard against TOCTOU race — Pid may die
                             %% between is_process_alive/1 and group_leader/2.
                             try
                                 group_leader(OldGL, Pid)
@@ -183,7 +183,7 @@ reset_captured_group_leaders(CapturePid, OldGL) ->
 -doc """
 Check if an IO request is a stdin (input) request.
 Returns {true, Prompt} for get_line/get_chars/get_until, false otherwise.
-BT-698: Supports the Erlang IO protocol input requests.
+Supports the Erlang IO protocol input requests.
 """.
 -spec is_stdin_request(term()) -> {true, binary()} | false.
 is_stdin_request({get_line, _Encoding, Prompt}) ->
@@ -219,7 +219,7 @@ prompt_to_binary(_) ->
 -doc """
 Handle a stdin IO request by notifying the subscriber and waiting for input.
 When no subscriber is present (sync eval), returns {error, enotsup}.
-BT-698: Sends {need_input, CapturePid, Ref, Prompt} to subscriber, waits for
+Sends {need_input, CapturePid, Ref, Prompt} to subscriber, waits for
 {stdin_input, Ref, Data} response with timeout. The Ref prevents late replies
 from a timed-out prompt being consumed by a subsequent prompt.
 """.

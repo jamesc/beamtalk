@@ -38,7 +38,7 @@ safe_to_existing_atom_plus_operator_test() ->
 
 safe_to_existing_atom_non_binary_test() ->
     %% Mirrors beamtalk_repl_server_tests:safe_to_existing_atom_non_binary_test/0
-    %% (BT-865): beamtalk_repl_errors:safe_to_existing_atom/1 widens the
+    %% beamtalk_repl_errors:safe_to_existing_atom/1 widens the
     %% accepted domain to any term, not just binaries.
     ?assertEqual({error, badarg}, beamtalk_repl_docs:safe_to_existing_atom(123)).
 
@@ -154,7 +154,7 @@ format_method_line_internal_and_sealed_test() ->
     ?assertEqual(<<"  foo [internal] [sealed]">>, Result).
 
 %%====================================================================
-%% format_package_provenance tests (BT-1658)
+%% format_package_provenance tests
 %%====================================================================
 
 format_package_provenance_unknown_class_test() ->
@@ -247,7 +247,7 @@ format_see_also_single_no_desc_test() ->
 format_see_also_with_desc_test() ->
     Result = beamtalk_repl_docs:format_see_also([{'Value', <<"immutable data">>}]),
     ?assert(binary:match(Result, <<"See also:">>) =/= nomatch),
-    %% Should contain the ASCII separator (BT-3026: no non-ASCII in binary literals)
+    %% Should contain the ASCII separator (no non-ASCII in binary literals)
     ?assert(binary:match(Result, <<" - ">>) =/= nomatch),
     ?assert(binary:match(Result, <<"immutable data">>) =/= nomatch).
 
@@ -510,7 +510,7 @@ format_method_output_unary_with_return_type_test() ->
     ?assert(binary:match(Result, <<"size -> Integer">>) =/= nomatch).
 
 %%====================================================================
-%% BT-990: Class method signature in format_method_output
+%% Class method signature in format_method_output
 %%====================================================================
 
 format_method_output_class_method_with_signature_test() ->
@@ -525,7 +525,7 @@ format_method_output_class_method_with_signature_test() ->
     ?assert(binary:match(Result, <<"create: name: String -> MyWidget">>) =/= nomatch).
 
 %%====================================================================
-%% Metaclass documentation tests (BT-618)
+%% Metaclass documentation tests
 %%====================================================================
 
 format_metaclass_docs_test() ->
@@ -574,9 +574,9 @@ format_method_doc_metaclass_unknown_test() ->
 %%====================================================================
 
 %% Boots the real runtime + stdlib via the shared `beamtalk_test_boot`
-%% fixture (BT-3242: extracted so `beamtalk_repl_ops_browse_tests`'s real-stdlib
+%% fixture (extracted so `beamtalk_repl_ops_browse_tests`'s real-stdlib
 %% delegate-callers regression test doesn't carry a second copy of this same
-%% boot/wait sequence; BT-3251: moved into `beamtalk_test_support` once
+%% boot/wait sequence; moved into `beamtalk_test_support` once
 %% `beamtalk_stdlib`'s EUnit suite needed the same boot sequence too),
 %% blocking until `Integer` is registered.
 integration_setup() ->
@@ -641,7 +641,7 @@ format_method_doc_known_test_() ->
         end}
     ]}.
 
-%% BT-2714: `method_doc_signature_resolved/3` is the reusable extraction the
+%% `method_doc_signature_resolved/3` is the reusable extraction the
 %% System Browser's `browse-method-source` calls for a synthetic method — it must
 %% return the SAME curated `{Doc, Signature}` that `:help` renders (so the browser
 %% and `:help` never disagree), and `{null, null}` when the method cannot be
@@ -677,7 +677,7 @@ method_doc_signature_resolved_test_() ->
 
 format_method_doc_class_side_test_() ->
     {setup, fun integration_setup/0, fun(_) -> ok end, [
-        %% BT-1634: Class method doc comments should be displayed by :help
+        %% Class method doc comments should be displayed by :help
         {"format_method_doc_class_side shows doc text for System getEnv:", fun() ->
             {ok, Result} = beamtalk_repl_docs:format_method_doc_class_side(
                 'System', <<"getEnv:">>
@@ -742,7 +742,7 @@ format_class_docs_class_side_test_() ->
         end}
     ]}.
 
-%% BT-2734: Value-type synthetic accessors (auto slot getters, `with*:` copy-
+%% Value-type synthetic accessors (auto slot getters, `with*:` copy-
 %% setters, keyword constructor) are emitted by codegen with no AST
 %% MethodDefinition, so their CompiledMethod `__doc__` / `__signature__` used to
 %% be nil and `:help` / the System Browser showed only the bare selector. Codegen

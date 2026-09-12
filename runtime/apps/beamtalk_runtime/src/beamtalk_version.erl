@@ -48,7 +48,7 @@ Fields:
   loaded, which should not happen on a running workspace node.
 - `protocol_version` — the RPC/protocol surface version that
   `beamtalk_repl_ops`/`beamtalk_repl_protocol` implement. Shares the
-  `?PROTOCOL_VERSION` macro (`beamtalk.hrl`, BT-3090) with the `<<"protocol">>`
+  `?PROTOCOL_VERSION` macro (`beamtalk.hrl`) with the `<<"protocol">>`
   value reported by the `describe` op (`beamtalk_repl_ops_dev:handle_term/4`)
   — bump the macro once and both surfaces move together.
 - `otp_release` / `erts_version` — the hosting OTP release and ERTS
@@ -60,7 +60,7 @@ Fields:
 get() ->
     #{
         runtime_version => app_vsn(beamtalk_runtime),
-        %% BT-3090: shared with beamtalk_repl_ops_dev's "describe" op via the
+        %% Shared with beamtalk_repl_ops_dev's "describe" op via the
         %% ?PROTOCOL_VERSION macro (beamtalk.hrl) — no more hand-synced literals.
         protocol_version => ?PROTOCOL_VERSION,
         otp_release => iolist_to_binary(erlang:system_info(otp_release)),

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_array module (BT-1088).
+EUnit tests for beamtalk_array module.
 
 Tests from_list, size, is_empty, at, first, last, at_put, do, includes,
 collect, select, inject_into, print_string, and error paths.
@@ -87,7 +87,7 @@ at_zero_index_test() ->
         beamtalk_array:at(A, 0)
     ).
 
-%% BT-3021: indexing an empty Array is `empty_collection`, matching
+%% Indexing an empty Array is `empty_collection`, matching
 %% `beamtalk_list:at/2` and `beamtalk_string:at/2`.
 at_empty_array_test() ->
     A = make_array([]),
@@ -115,9 +115,9 @@ at_non_integer_index_test() ->
     ).
 
 %%% ============================================================================
-%%% first/1, last/1 (BT-3027)
+%%% first/1, last/1
 %%%
-%%% Mirrors `beamtalk_string:first/1`/`last/1` (BT-3021) — both raise
+%%% Mirrors `beamtalk_string:first/1`/`last/1` — both raise
 %%% `empty_collection` on an empty Array.
 %%% ============================================================================
 
@@ -187,7 +187,7 @@ at_put_non_integer_index_test() ->
         beamtalk_array:at_put(A, <<"1">>, 99)
     ).
 
-%% BT-2362: at_put must return an Array whose internal representation is
+%% at_put must return an Array whose internal representation is
 %% structurally identical (=:=) to a literal-equivalent Array, so that
 %% `#[1,2,3] at: 2 put: 99` compares equal to `#[1,99,3]`. array:set/3 alone
 %% leaves a stale copy-on-write cache node and breaks this invariant.
@@ -197,14 +197,14 @@ at_put_equals_literal_equivalent_test() ->
     ?assert(Updated =:= Literal),
     ?assertEqual(Literal, Updated).
 
-%% BT-2362: equality must be reflected by hashing — two arrays that compare
+%% Equality must be reflected by hashing — two arrays that compare
 %% equal must produce the same phash2, otherwise dictionary/set keys break.
 at_put_hash_matches_literal_equivalent_test() ->
     Updated = beamtalk_array:at_put(make_array([1, 2, 3]), 2, 99),
     Literal = make_array([1, 99, 3]),
     ?assertEqual(erlang:phash2(Literal), erlang:phash2(Updated)).
 
-%% BT-2362: chained at_put calls must also stay canonical.
+%% Chained at_put calls must also stay canonical.
 at_put_chained_equals_literal_equivalent_test() ->
     Updated = beamtalk_array:at_put(
         beamtalk_array:at_put(make_array([1, 2, 3]), 1, 7), 3, 9
@@ -213,7 +213,7 @@ at_put_chained_equals_literal_equivalent_test() ->
     ?assert(Updated =:= Literal).
 
 %%% ============================================================================
-%%% Canonicality (ADR 0090 / BT-2682)
+%%% Canonicality (ADR 0090)
 %%%
 %%% Every construction path yielding the same element sequence must produce
 %%% terms that are mutually =:= and erlang:phash2-equal, regardless of edit
@@ -304,7 +304,7 @@ canonical_as_map_key_test() ->
     ?assertEqual("hit", maps:get(KeyLit, D, miss)).
 
 %%% ============================================================================
-%%% Performance guard (ADR 0090 / BT-2682)
+%%% Performance guard (ADR 0090)
 %%%
 %%% Repeated at_put over a large array must be O(log n) per update, not the
 %%% O(n) re-canonicalisation that made the interim path O(n^2) (5000 updates on

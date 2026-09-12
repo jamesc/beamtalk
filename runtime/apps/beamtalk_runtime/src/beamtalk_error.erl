@@ -278,7 +278,7 @@ raise_type_error(Class, Selector, Hint) ->
 Predicate: does this error represent a genuine "selector not found anywhere
 in the hierarchy" (`does_not_understand`)?
 
-BT-2842: `beamtalk_dispatch:super/5` (and the `lookup/5` path it shares via
+`beamtalk_dispatch:super/5` (and the `lookup/5` path it shares via
 `lookup_in_class_chain/5`) returns `{error, #beamtalk_error{}}` for two
 semantically different situations — the selector was never found, or the
 selector was found and invoked but the method itself raised. Generated
@@ -300,7 +300,7 @@ Generate a human-readable error message from kind, class, and optional selector.
 Selector is normally an atom, but callers that only have an unregistered
 method name as a binary (e.g. `binary_to_existing_atom/2` failed, so there is
 no atom to attach to the record's `selector` field) may pass a binary
-instead — both format identically via `~s`. BT-3084: this keeps the
+instead — both format identically via `~s`. This keeps the
 canonical `does_not_understand` wording (quoted selector) reachable from
 call sites that can't safely mint a new atom.
 """.
@@ -318,7 +318,7 @@ generate_message(stateful_block_dispatch, Class, undefined) ->
         io_lib:format("~s cannot be invoked via perform: with these arguments", [Class])
     );
 generate_message(stateful_block_dispatch, Class, Selector) ->
-    %% BT-2812 code review: the underlying check (erlang:is_function/2 arity
+    %% The underlying check (erlang:is_function/2 arity
     %% comparison) cannot distinguish "this block captures mutable state and
     %% needs StateAcc threading" from "this block was simply called with the
     %% wrong argument count" — both shapes present as the same raw fun arity.
@@ -337,7 +337,7 @@ generate_message(type_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("Type error in ~s", [Class]));
 generate_message(type_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("Type error in '~s' on ~s", [Selector, Class]));
-%% BT-3021: empty-collection access is a distinct condition from a dispatch
+%% Empty-collection access is a distinct condition from a dispatch
 %% failure — the receiver understands the selector, it just has no element to
 %% answer. Naming it lets `on:do:` discriminate it from a genuine typo.
 generate_message(empty_collection, Class, undefined) ->
@@ -350,15 +350,15 @@ generate_message(index_out_of_bounds, Class, undefined) ->
     iolist_to_binary(io_lib:format("Index out of bounds for ~s", [Class]));
 generate_message(index_out_of_bounds, Class, Selector) ->
     iolist_to_binary(io_lib:format("'~s': index out of bounds for ~s", [Selector, Class]));
-%% BT-3025: a lookup that ran to completion without finding anything.
+%% A lookup that ran to completion without finding anything.
 %% `key_error` was the closest existing kind for `List detect:` but names a key
 %% the receiver was asked for, which a predicate search has none of; and
 %% `empty_collection` says the wrong thing when the collection is full of
 %% non-matches.
 %%
-%% Deliberately generic wording: `not_found` predates BT-3025 on non-collection
+%% Deliberately generic wording: `not_found` also covers non-collection
 %% receivers (`AtomicCounter named:`, `Ets named:`, `BeamtalkInterface`), which
-%% until now fell through to the `~s error in ...` fallback. A collection-
+%% otherwise fall through to the `~s error in ...` fallback. A collection-
 %% flavoured "no matching element" would read as nonsense on those. The
 %% specifics belong in the hint, which every call site already sets.
 generate_message(not_found, Class, undefined) ->

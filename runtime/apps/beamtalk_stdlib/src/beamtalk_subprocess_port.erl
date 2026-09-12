@@ -6,7 +6,7 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-Shared low-level port utilities for subprocess gen_servers (BT-1187).
+Shared low-level port utilities for subprocess gen_servers.
 
 Provides line-splitting, binary validation, and exec port wrappers shared
 by `beamtalk_subprocess` (pull) and `beamtalk_reactive_subprocess` (push).

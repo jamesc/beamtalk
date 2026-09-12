@@ -6,15 +6,15 @@
 %%% **DDD Context:** Runtime Context
 
 -moduledoc """
-Parallel class implementation — block-based fan-out/join combinators (BT-2974).
+Parallel class implementation — block-based fan-out/join combinators.
 
 Beamtalk sends are synchronous by default (ADR 0104): a `.` send blocks the
 caller and types as the method's return value. This module gives that same
 blocking contract to *fan-out* work, instead of exposing an awaitable
 future/promise handle to Beamtalk code (the `Future` stub was deliberately
-removed for exactly this reason — BT-1057, superseding the exploration in
-BT-507). `all/1`, `all/2`, and `any/1` spawn one process per block, block the
-calling process until the combinator is done, and return plain `Result`
+removed for exactly this reason). `all/1`, `all/2`, and `any/1` spawn one
+process per block, block the calling process until the combinator is done,
+and return plain `Result`
 values (`beamtalk_result:t()`) built with `beamtalk_result:from_tagged_tuple/1`
 — no future handle ever escapes to Beamtalk code.
 
@@ -25,7 +25,7 @@ Each block is spawned with `erlang:spawn_opt/2` using **both** `link` and
 
 - `link` means a worker dies automatically if the calling process dies —
   no orphaned worker processes are left running after the caller crashes,
-  even mid-block (BT-2974 acceptance criteria: "no orphans").
+  even mid-block — no orphaned workers, even on a mid-fan-out crash.
 - `monitor` lets the caller observe each worker's completion (or an
   unexpected crash that bypassed the worker's own `try`/`catch`) as an
   ordinary message, without a worker's exit signal being able to kill the

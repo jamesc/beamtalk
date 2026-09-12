@@ -187,7 +187,7 @@ complex_state_test() ->
     ?assertEqual(2, beamtalk_repl_state:get_eval_counter(State6)),
     ?assertEqual([point, counter], beamtalk_repl_state:get_loaded_modules(State6)).
 
-%%% BT-2366: pending session-local mutations (ADR 0081 Phase 2)
+%%% Pending session-local mutations (ADR 0081 Phase 2)
 
 pending_mutations_starts_empty_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
@@ -236,7 +236,7 @@ state_independence_test() ->
     ?assertEqual(#{}, beamtalk_repl_state:get_bindings(State3)),
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(State3)).
 
-%%% BT-2938: fresh-session seeding from stdlib's own compiled aliases
+%%% Fresh-session seeding from stdlib's own compiled aliases
 
 %% Temporarily set `beamtalk_stdlib`'s `type_aliases` env to `Aliases`, run
 %% `Fun`, then restore the original env (`undefined` → unset). Mirrors

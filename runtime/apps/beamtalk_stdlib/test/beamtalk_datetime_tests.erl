@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_datetime module (BT-1088).
+EUnit tests for beamtalk_datetime module.
 
 Tests constructors, accessors, conversion, arithmetic, comparison,
 FFI shims, and error paths.

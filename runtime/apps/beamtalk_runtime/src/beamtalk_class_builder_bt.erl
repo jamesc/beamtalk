@@ -12,7 +12,7 @@ This module acts as the implementation module for the 'ClassBuilder' class,
 enabling ADR 0038 Phase 1: pre-wiring ClassBuilder in the bootstrap sequence
 so that compiled class `on_load` hooks can find it before user modules load.
 
-## Phase 1 (BT-835): Bootstrap Stub
+## Phase 1: Bootstrap Stub
 
 Registers 'ClassBuilder' during bootstrap (after Metaclass, before Actor)
 using the same mechanism as `beamtalk_class_bt.erl` and
@@ -59,7 +59,7 @@ Phase 1 stub: all selectors return `does_not_understand`. The full
 ClassBuilder protocol (name:, superclass:, fields:, methods:, register) is
 implemented in Phase 2 (class_builder.bt stdlib module).
 
-ADR 0038 Phase 1 (BT-835): Stub only. Phase 2 replaces this with compiled
+ADR 0038 Phase 1: Stub only. Phase 2 replaces this with compiled
 class_builder.bt exports.
 """.
 -spec dispatch(atom(), list(), term(), map()) ->

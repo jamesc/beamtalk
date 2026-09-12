@@ -150,7 +150,7 @@ init(Config) ->
 -doc "Dispatch sync calls.".
 -spec handle_call(term(), term(), map()) ->
     {reply, term(), map()} | {noreply, map()}.
-%% BT-1604: Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
+%% Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     beamtalk_actor:restore_propagated_ctx(PropCtx),
     handle_call({Selector, Args}, From, State);
@@ -196,7 +196,7 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
         {exit, _ChildId, Code} ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code, domain => [beamtalk, stdlib]}),
             %% The beamtalk-exec binary joins its reader threads before sending
-            %% this exit event (BT-1148), so all stdout/stderr data is guaranteed
+            %% this exit event, so all stdout/stderr data is guaranteed
             %% to have arrived.  Flush any partial line and close the port now.
             S0 = flush_pending(stdout, State),
             S1 = flush_pending(stderr, S0),
@@ -253,7 +253,7 @@ terminate(_Reason, State) ->
     ok.
 
 %%% ============================================================================
-%%% Config validation (moved from dispatch/3, BT-1211)
+%%% Config validation (moved from dispatch/3)
 %%% ============================================================================
 
 -doc """

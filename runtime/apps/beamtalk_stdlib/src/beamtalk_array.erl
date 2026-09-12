@@ -8,13 +8,11 @@
 -moduledoc """
 Runtime helper operations for Array (canonical map-backed representation).
 
-BT-822 introduced Array backed by Erlang's `array` module for O(log n) random
-access. ADR 0090 (BT-2680) replaced that backing store with a canonical
-index→value map after the `array` module's copy-on-write cache slot was found to
-break `=:=`/`phash2` consistency (BT-2362): `array:set/3` leaves a stale cache
-node, so an array updated via `at:put:` did not compare equal to a literal with
-the same elements, and the interim O(n) re-canonicalisation made repeated
-`at:put:` O(n²).
+Backed by a canonical index→value map rather than Erlang's `array` module:
+`array`'s copy-on-write cache slot breaks `=:=`/`phash2` consistency —
+`array:set/3` leaves a stale cache node, so an array updated via `at:put:`
+would not compare equal to a literal with the same elements. See ADR 0090
+for the full rationale.
 
 Representation:
   #{'$beamtalk_class' => 'Array', 'data' => #{0 => V0, 1 => V1, ..., N-1 => Vn-1}}
@@ -103,7 +101,7 @@ Return the element at the given 1-based index.
 
 Raises index_out_of_bounds if the index is out of range.
 
-BT-3021: indexing an *empty* Array raises `empty_collection` instead, matching
+Indexing an *empty* Array raises `empty_collection` instead, matching
 `beamtalk_list:at/2` and `beamtalk_string:at/2`. An index below 1 is malformed
 whether or not the Array is empty, so it stays `index_out_of_bounds`.
 """.
@@ -139,7 +137,7 @@ at(#{'$beamtalk_class' := 'Array'}, _Index) ->
 -doc """
 Return the first element of the Array.
 
-BT-3027: mirrors `beamtalk_string:first/1` and `beamtalk_list:first/1` —
+Mirrors `beamtalk_string:first/1` and `beamtalk_list:first/1` —
 raises `empty_collection` on an empty Array so `on:do:` can handle all three
 element accessors with the same clause.
 """.
@@ -235,7 +233,7 @@ includes(#{'$beamtalk_class' := 'Array', 'data' := Data}, Element) ->
     RawHit = maps:fold(
         fun(_Index, Value, Found) -> Found orelse Value =:= Element end, false, Data
     ),
-    %% BT-2997: a raw miss may still be an `equals:` hit on an element class
+    %% A raw miss may still be an `equals:` hit on an element class
     %% that overrides it, so fall back to the dispatching scan — and only then
     %% pay for materialising the values. `Array` is a linear sequence like
     %% `List`, so the two must agree about membership.

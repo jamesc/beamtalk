@@ -44,7 +44,7 @@ init([]) ->
             type => worker,
             modules => [beamtalk_xref]
         },
-        %% Supervisor for class gen_servers (BT-3236). MUST come before
+        %% Supervisor for class gen_servers. MUST come before
         %% beamtalk_bootstrap so the stub classes (Class/Metaclass/
         %% ClassBuilder) already register through the supervision tree.
         #{
@@ -55,7 +55,7 @@ init([]) ->
             type => supervisor,
             modules => [beamtalk_class_sup]
         },
-        %% Eager crash recovery for class processes (BT-3236). Same ordering
+        %% Eager crash recovery for class processes. Same ordering
         %% constraint as beamtalk_class_sup: up before any class registers.
         #{
             id => beamtalk_class_monitor,
@@ -131,7 +131,7 @@ init([]) ->
             modules => [beamtalk_trace_store]
         },
         %% Per-object change subscriptions — live Inspector push substrate
-        %% (ADR 0095 §5, BT-2489, Cockpit Phase 3). Owns the public
+        %% (ADR 0095 §5, Cockpit Phase 3). Owns the public
         %% `beamtalk_object_watch_pids` table the actor dispatch path reads.
         #{
             id => beamtalk_object_watch,
@@ -141,7 +141,7 @@ init([]) ->
             type => worker,
             modules => [beamtalk_object_watch]
         },
-        %% `File open:mode:` handle-registry (BT-3020): tracks outstanding
+        %% `File open:mode:` handle-registry: tracks outstanding
         %% caller-owned FileHandles and closes an owner's handles on its
         %% 'DOWN'. Same monitor-owner/react-to-'DOWN' shape as
         %% beamtalk_object_watch above; unlike it, this module's source lives

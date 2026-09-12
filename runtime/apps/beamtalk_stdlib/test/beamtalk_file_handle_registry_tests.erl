@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for `beamtalk_file_handle_registry` (BT-3020).
+EUnit tests for `beamtalk_file_handle_registry`.
 
 Covers the acceptance criteria:
 
@@ -18,7 +18,7 @@ Covers the acceptance criteria:
   linger in `open_handles/0` and a later owner `'DOWN'` cannot double-close it;
 * handles sharing an owner share a single monitor, torn down only once the
   last of them is gone;
-* owner-death reclamation does not block the registry's mailbox (BT-3050) —
+* owner-death reclamation does not block the registry's mailbox —
   an unrelated `register`/`open_handles` is still answered while one owner's
   `file:close/1` is stuck.
 """.
@@ -97,8 +97,8 @@ sync(_) ->
     ok.
 
 %% Poll `Pred` until it holds, then return ok; assert (and so fail the test) if
-%% it never does. Owner-death reclamation is only half-synchronous since
-%% BT-3050: `sync/1` proves the registry has dropped its own bookkeeping, but
+%% it never does. Owner-death reclamation is only half-synchronous:
+%% `sync/1` proves the registry has dropped its own bookkeeping, but
 %% the descriptor is closed by a transient process shortly afterwards, so
 %% "is the handle shut?" has to be polled rather than assumed.
 wait_until(Pred) ->
@@ -142,7 +142,7 @@ owned_handle_closed_and_removed_on_owner_death_test_() ->
             ok = sync(ok),
 
             %% Bookkeeping is dropped synchronously with the 'DOWN'; the close
-            %% itself lands a moment later, off the registry process (BT-3050).
+            %% itself lands a moment later, off the registry process.
             ?assertNot(has_entry(PathBin, beamtalk_file_handle_registry:open_handles())),
             ok = wait_until(closed(Handle)),
             delete_temp(TmpPath)
@@ -150,7 +150,7 @@ owned_handle_closed_and_removed_on_owner_death_test_() ->
     end}.
 
 registry_stays_responsive_while_owner_close_is_in_flight_test_() ->
-    %% BT-3050: owner-death reclamation must not run `file:close/1` inside the
+    %% Owner-death reclamation must not run `file:close/1` inside the
     %% registry's own handle_info. One owner's handle wraps a descriptor
     %% stand-in that never answers a close, so its reclamation is stuck for as
     %% long as the test wants it to be; meanwhile an unrelated register/

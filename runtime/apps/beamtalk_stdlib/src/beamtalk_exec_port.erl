@@ -180,7 +180,7 @@ Returns `{ok, Path}` if a dev or release build is found under the project
 root, or `error` if no Cargo.toml ancestor exists or neither build exists.
 Catching the project-root error lets `find_exec_binary_dev/0` fall through
 to a PATH lookup, enabling Beamtalk programs to run arbitrary OS executables
-outside the dev tree (BT-1221).
+outside the dev tree.
 """.
 -spec find_in_project(string()) -> {ok, string()} | error.
 find_in_project(ExeName) ->

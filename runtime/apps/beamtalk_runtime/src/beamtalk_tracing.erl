@@ -37,7 +37,7 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     disable/0,
     isEnabled/0,
     clear/0,
-    %% Trace context (BT-1639)
+    %% Trace context
     setContext/1,
     context/0,
     clearContext/0,
@@ -111,7 +111,7 @@ clear() ->
     nil.
 
 %%====================================================================
-%% Trace context (BT-1639)
+%% Trace context
 %%====================================================================
 
 -doc """

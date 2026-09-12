@@ -10,7 +10,7 @@ two-tier exit (ADR 0099 §3).
 The node-owning branch of `exit:` calls `erlang:halt/1` and so cannot be
 exercised under EUnit (it would kill the test VM); these tests pin the
 **connected-mode** branch — `Program exit: Code` raising the tagged `script_exit`
-signal the session evaluator catches (BT-2688) — and the value/type validation,
+signal the session evaluator catches — and the value/type validation,
 which runs before the node-owning gate.
 """.
 
@@ -33,7 +33,7 @@ connected_teardown(Prev) ->
     end,
     ok.
 
-%% BT-2688: in a connected/shared context, `Program exit: Code` raises the tagged
+%% In a connected/shared context, `Program exit: Code` raises the tagged
 %% `{beamtalk_script_exit, Code}` signal (caught by the session evaluator) instead
 %% of halting the node or raising the old `#unsupported` error.
 connected_exit_with_code_raises_script_exit_test_() ->

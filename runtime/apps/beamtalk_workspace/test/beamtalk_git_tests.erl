@@ -4,7 +4,7 @@
 -module(beamtalk_git_tests).
 
 -moduledoc """
-Unit tests for beamtalk_git porcelain/log parsing (ADR 0082, BT-2586).
+Unit tests for beamtalk_git porcelain/log parsing (ADR 0082).
 
 These exercise the pure parsing seam (fixture porcelain → typed maps) without
 spawning git. The fixtures mirror real `git status --porcelain=v2 -b -z` and
@@ -165,7 +165,7 @@ status_copy_skips_orig_path_test() ->
 
 %% An ordinary (`1`) entry whose path contains a literal tab must NOT be
 %% truncated (regression: tab-splitting once corrupted the path, feeding the
-%% wrong path to stage/revert/diff — BT-2586 review C1).
+%% wrong path to stage/revert/diff).
 status_path_with_tab_test() ->
     Bin = nul_join([
         <<"# branch.head main">>,
@@ -178,7 +178,7 @@ status_path_with_tab_test() ->
     ).
 
 %% A merge-conflict entry (`u UU ...`) must surface as an unmerged file, not be
-%% silently dropped (BT-2586 review M2). The `u` layout has 9 metadata fields
+%% silently dropped. The `u` layout has 9 metadata fields
 %% before the path.
 status_unmerged_conflict_test() ->
     Bin = nul_join([
@@ -283,8 +283,7 @@ log_subject_with_punctuation_test() ->
     ?assertEqual(<<"fix: handle a, b; c (edge: case)">>, maps:get(subject, Commit)).
 
 %% A subject containing the field-separator byte (US, 0x1F) must not drop the
-%% commit: because subject is the last field, trailing parts rejoin into it
-%% (BT-2586 review M3).
+%% commit: because subject is the last field, trailing parts rejoin into it.
 log_subject_with_field_separator_test() ->
     FS = 16#1f,
     Subject = <<"weird", FS, "subject">>,
@@ -472,7 +471,7 @@ git_log_on_empty_repo_returns_structured_error_test() ->
     end.
 
 %%% ============================================================================
-%%% Subdirectory-project cwd/pathspec consistency (BT-2608)
+%%% Subdirectory-project cwd/pathspec consistency
 %%%
 %%% These spawn a real `git` against a throwaway repo whose project root is a
 %%% *subdirectory* of the repo toplevel. They prove that the path `git status`
@@ -562,8 +561,7 @@ revert_when_project_is_repo_root_succeeds_test() ->
 
 %% `git_diff/1` shared the same cwd contract as the mutating ops and had the
 %% same latent subdir bug: diffing a repo-root-relative path from the subdir
-%% silently returned empty. At the toplevel it now produces a real diff
-%% (BT-2608 review: lock the diff path-base in too).
+%% silently returned empty. At the toplevel it now produces a real diff.
 diff_in_subdir_project_returns_nonempty_test() ->
     with_subdir_repo(fun(_Top, ProjectDir, RelFile) ->
         {ok, Top} = beamtalk_git:repo_toplevel(git_diff, ProjectDir),
@@ -590,11 +588,11 @@ repo_toplevel_outside_repo_errors_test() ->
     end.
 
 %%% ============================================================================
-%%% Repo toplevel caching through beamtalk_workspace_meta (BT-2621)
+%%% Repo toplevel caching through beamtalk_workspace_meta
 %%%
 %%% These route real git ops through run_git/2 (which reads project_path from the
 %%% workspace_meta gen_server) to prove the toplevel is resolved once and cached,
-%%% with no behavioural regression vs BT-2608 (subdir status still correct).
+%%% with no behavioural regression (subdir status still correct).
 %%% ============================================================================
 
 %% A git op populates the per-project-path toplevel cache and subsequent ops
@@ -614,7 +612,7 @@ git_status_populates_toplevel_cache_test() ->
             ?assertEqual(miss, beamtalk_workspace_meta:get_git_toplevel(ProjectDir)),
 
             %% First status resolves + caches the toplevel and still lists the
-            %% modified file under its repo-root-relative path (BT-2608 contract).
+            %% modified file under its repo-root-relative path.
             {ok, Status1} = beamtalk_git:git_status(),
             Paths1 = [maps:get(path, F) || F <- maps:get(files, Status1)],
             ?assert(lists:member(RelFile, Paths1)),

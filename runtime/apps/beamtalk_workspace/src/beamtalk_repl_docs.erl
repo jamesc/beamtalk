@@ -341,7 +341,7 @@ format_metaclass_docs() ->
 -doc "Return documentation for a Metaclass method.".
 -spec format_metaclass_method_doc(binary()) -> {ok, binary()} | {error, term()}.
 format_metaclass_method_doc(SelectorBin) ->
-    %% BT-3087: metaclass_method_doc/1 is shared with beamtalk_interface via
+    %% metaclass_method_doc/1 is shared with beamtalk_interface via
     %% beamtalk_hierarchy_docs (both apps depend on beamtalk_runtime).
     case beamtalk_hierarchy_docs:metaclass_method_doc(SelectorBin) of
         {ok, Doc} ->
@@ -361,7 +361,7 @@ format_metaclass_method_doc(SelectorBin) ->
 
 -doc """
 Safe atom conversion — returns error instead of creating new atoms.
-Implementation lives in beamtalk_repl_errors (extracted BT-865).
+Implementation lives in beamtalk_repl_errors.
 """.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(Bin) -> beamtalk_repl_errors:safe_to_existing_atom(Bin).
@@ -379,7 +379,7 @@ method_doc_info(MethodObj, SelectorAtom) ->
             nil -> none;
             DocBin when is_binary(DocBin) -> DocBin
         end,
-    %% BT-988: Use __signature__ if present, fall back to selector atom
+    %% Use __signature__ if present, fall back to selector atom
     Signature =
         case maps:get('__signature__', MethodObj, nil) of
             nil -> atom_to_binary(SelectorAtom, utf8);
@@ -402,7 +402,7 @@ method_doc_info(MethodObj, SelectorAtom) ->
 Resolve a method's `{Doc, Signature}` exactly the way `:help ClassName selector`
 does — walking the class hierarchy (`resolve_method_obj` for the instance side,
 `resolve_class_side_method_obj` for the class side) and reading the resolved
-`CompiledMethod`'s `__doc__` / `__signature__` (BT-2714).
+`CompiledMethod`'s `__doc__` / `__signature__`.
 
 Used by the System Browser's `browse-method-source` / `browse-protocols` to
 surface the *real* documentation of a compiler-synthesized method — e.g. a
@@ -470,7 +470,7 @@ get_method_doc_from_class(ClassPid, Selector) ->
 Find which class in the hierarchy defines a selector.
 Returns the class name atom.
 
-BT-3087: Delegates to `beamtalk_hierarchy_docs:find_defining_class/2`, the
+Delegates to `beamtalk_hierarchy_docs:find_defining_class/2`, the
 implementation shared with `beamtalk_interface`'s programmatic reflection
 path (both apps depend on `beamtalk_runtime`).
 """.
@@ -484,7 +484,7 @@ Uses {class_method, Selector} which walks the chain internally;
 we query each class locally via get_local_class_methods to find
 exactly where the method is defined.
 
-BT-3087: Delegates to `beamtalk_hierarchy_docs:find_defining_class_method/2`.
+Delegates to `beamtalk_hierarchy_docs:find_defining_class_method/2`.
 """.
 -spec find_defining_class_method(pid(), atom()) -> atom().
 find_defining_class_method(ClassPid, Selector) ->
@@ -557,7 +557,7 @@ format_class_output(
         %% Class modifiers
         format_modifiers(Modifiers),
 
-        %% Package provenance (ADR 0070 Phase 5, BT-1658)
+        %% Package provenance (ADR 0070 Phase 5)
         format_package_provenance(ClassName),
 
         %% Module doc
@@ -666,7 +666,7 @@ format_method_line({_Sel, Sig, _Doc, IsSealed, IsInternal}) ->
     end.
 
 -doc """
-Format package provenance for a class (ADR 0070 Phase 5, BT-1658).
+Format package provenance for a class (ADR 0070 Phase 5).
 
 Shows which package a class belongs to using `beamtalk_package:package_name/1`.
 Returns an empty binary if the class has no package or the lookup fails.
@@ -816,7 +816,7 @@ ADR 0032 Phase 1: Replaces get_flattened_methods gen_server call.
 Returns #{Selector => {DefiningClass, MethodInfo}} where local methods
 shadow inherited ones, walking from ClassName upward.
 
-BT-3087: Delegates to `beamtalk_hierarchy_docs:collect_flattened_methods/2`,
+Delegates to `beamtalk_hierarchy_docs:collect_flattened_methods/2`,
 the implementation shared with `beamtalk_interface`.
 """.
 -spec collect_flattened_methods(atom(), pid()) -> map().
@@ -962,9 +962,9 @@ format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped
 Walk the class hierarchy collecting class-side methods.
 Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
 
-BT-3478: Delegates to `beamtalk_hierarchy_docs:collect_flattened_class_methods/2`,
+Delegates to `beamtalk_hierarchy_docs:collect_flattened_class_methods/2`,
 moved there so `beamtalk_repl_ops_dev`'s "inherited-methods" ws op can reuse it —
-mirrors the instance-side `collect_flattened_methods/2` delegate below (BT-3087).
+mirrors the instance-side `collect_flattened_methods/2` delegate below.
 """.
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->

@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context (Navigation bridge)
 
 -moduledoc """
-Op handler for the structured `nav-query` operation (BT-2239).
+Op handler for the structured `nav-query` operation.
 
 `nav-query` is the runtime-attached navigation channel that the LSP uses to
 delegate `textDocument/{references,implementation,callHierarchy}` (and the
@@ -31,8 +31,8 @@ Request shape:
   "selector": "increment"            // for senders/implementors (Beamtalk selector)
   "class":    "Counter"              // for references            (Beamtalk class name)
                                      //  and required_methods/conforming_classes
-                                     //  (the *protocol* name, BT-2639)
-  "module":   "lists"                // for callers_of_native_module (BT-2669)
+                                     //  (the *protocol* name)
+  "module":   "lists"                // for callers_of_native_module
                                      //  (the native Erlang module name)
 }
 ```
@@ -40,10 +40,10 @@ Request shape:
 The `callers_of_native_module` kind is the reverse of "go to native source": given
 a native (Erlang) module, it returns the Beamtalk `class>>method` sites that call
 into it via `(Erlang <module>) …`, in the same site-row shape as senders so the IDE
-reuses the senders/implementors popover (BT-2495). Empty when the module has no
+reuses the senders/implementors popover. Empty when the module has no
 Beamtalk callers.
 
-The protocol kinds (BT-2639) are the protocol equivalent of senders/implementors
+The protocol kinds are the protocol equivalent of senders/implementors
 — `required_methods` lists a protocol's contract selectors, `conforming_classes`
 lists the classes that structurally conform to it. Both take `class` (the
 protocol name) and back the System Browser's protocol-definition action row,
@@ -69,7 +69,7 @@ The LSP layer canonicalises against its workspace roots before lookup.
 
 `implementors_of` returns one row per class — `method` and `line` are
 populated when the class has its own definition of the selector, otherwise
-`null`. The LSP `textDocument/implementation` consumer (BT-2241) reads
+`null`. The LSP `textDocument/implementation` consumer reads
 `{class, source_file, line}` and ignores `method`.
 """.
 
@@ -79,14 +79,14 @@ populated when the class has its own definition of the selector, otherwise
 
 -doc """
 Handle the `nav-query` op for the WebSocket transport — encodes the term result
-to JSON at the edge (BT-2402).
+to JSON at the edge.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for `nav-query` (BT-2402, ADR 0085 read-surface).
+Term-returning handler for `nav-query` (ADR 0085 read-surface).
 
 Returns `{value, #{<<"sites">> => Rows}}` — the site rows are already a
 wire-shaped JSON value (the whole point of `nav-query` is to skip the
@@ -113,7 +113,7 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
             Classes = beamtalk_protocol_registry:conforming_classes(ProtocolName),
             {value, conforming_classes_value(Classes, ProtocolName)};
         {ok, {callers_of_native_module, Module}} ->
-            %% BT-2669 explicit `(Erlang <module>) …` FFI callers, plus BT-2732
+            %% Explicit `(Erlang <module>) …` FFI callers, plus
             %% ADR 0056 `self delegate` callers (a `native:` class's delegating
             %% methods route into its backing module via generated dispatch, not
             %% `erlang_ffi` sends, so the xref index alone misses them). Both sets
@@ -213,7 +213,7 @@ with_class(Params, Kind) ->
     case maps:get(<<"class">>, Params, undefined) of
         Cls when is_binary(Cls), byte_size(Cls) > 0 ->
             %% binary_to_existing_atom: see comment in with_selector/2. For the
-            %% protocol kinds (BT-2639) an unknown protocol name likewise yields
+            %% protocol kinds an unknown protocol name likewise yields
             %% the shared sentinel — `required_methods`/`conforming_classes`
             %% return [] for an unregistered protocol, not a validation error.
             try
@@ -253,14 +253,14 @@ with_module(Params) ->
 
 %% The site rows are already a JSON-shaped map of lists / binaries / integers /
 %% booleans / null; the `{value, _}` op_result tag encodes them with identity so
-%% term_to_json never sees them (BT-2402).
+%% term_to_json never sees them.
 -spec sites_value([beamtalk_xref:site()]) -> map().
 sites_value(Sites) ->
     Rows = [site_to_row(S) || S <- Sites],
     #{<<"sites">> => Rows}.
 
-%% BT-2669: native-caller rows reuse the senders/implementors site-row shape so
-%% the IDE's existing popover/list renderer (BT-2495) handles them unchanged —
+%% Native-caller rows reuse the senders/implementors site-row shape so
+%% the IDE's existing popover/list renderer handles them unchanged —
 %% clicking a row opens the calling `class>>method`. The `native_caller_row()`
 %% already carries `owner`/`class_side`/`method`/`line`; we just attach the
 %% source file + origin the renderer needs to open the method.
@@ -269,7 +269,7 @@ native_callers_value(Rows) ->
     SiteRows = [native_caller_to_row(R) || R <- Rows],
     #{<<"sites">> => SiteRows}.
 
-%% BT-2732: fold the FFI callers (BT-2669) and the `self delegate` callers into a
+%% Fold the FFI callers and the `self delegate` callers into a
 %% single caller list. Both are already de-duplicated within their own producer;
 %% here we de-dup across the two by `{owner, class_side, method}` — a `self
 %% delegate` method has no explicit FFI send, so a key collision is only
@@ -328,7 +328,7 @@ implementors_value(Pairs, Selector) ->
     Rows = [implementor_to_row(Cls, ClassSide, Selector) || {Cls, ClassSide} <- Pairs],
     #{<<"sites">> => Rows}.
 
-%% BT-2639: required-method rows mirror the implementor row shape so the IDE
+%% Required-method rows mirror the implementor row shape so the IDE
 %% reuses the same popover. The `method` is the required selector; `class` is the
 %% owning protocol. `beamtalk_protocol_registry:required_methods/1` prefixes
 %% class-side requirements with the literal `class ` (e.g. `'class fromString:'`),
@@ -354,7 +354,7 @@ required_method_to_row(Selector, ProtocolName) ->
     }.
 
 %% Split a required-method selector atom into `{ClassSide, BareSelectorBin}`.
-%% Class-side requirements carry the `class ` prefix (BT-1611); everything else
+%% Class-side requirements carry the `class ` prefix; everything else
 %% is an instance-side selector.
 -spec split_class_side_selector(atom()) -> {boolean(), binary()}.
 split_class_side_selector(Selector) ->
@@ -363,7 +363,7 @@ split_class_side_selector(Selector) ->
         Bin -> {false, Bin}
     end.
 
-%% BT-2639: conforming-class rows carry only a class name — clicking opens that
+%% Conforming-class rows carry only a class name — clicking opens that
 %% class in the System Browser / definition pane (not a method tab), so `method`
 %% is `null` and `class_side` is `false`. The shape stays compatible with the
 %% senders/implementors popover rows so the IDE's popover renderer is reused.
@@ -404,7 +404,7 @@ site_to_row(Site) ->
 implementor_to_row(Cls, ClassSide, Selector) ->
     %% For implementors we also surface the line of the method definition
     %% within `Cls` — `beamtalk_xref:method_info/{3,2}` is not exposed today;
-    %% the LSP consumer (BT-2241) treats `method`/`line` as best-effort and
+    %% the LSP consumer treats `method`/`line` as best-effort and
     %% falls back to "first line of the class file" when null.
     #{
         <<"class">> => atom_to_binary(Cls, utf8),
@@ -446,7 +446,7 @@ source_origin_of(ClassName) ->
 -spec method_line_of(atom(), boolean(), atom()) -> pos_integer() | null.
 method_line_of(ClassName, ClassSide, Selector) ->
     %% The xref `method_info()` map carries the method-header line — exactly
-    %% what `textDocument/implementation` (BT-2241) needs to anchor the goto.
+    %% what `textDocument/implementation` needs to anchor the goto.
     case beamtalk_xref:method_info(ClassName, ClassSide, Selector) of
         #{line := Line} when is_integer(Line), Line > 0 -> Line;
         _ -> null

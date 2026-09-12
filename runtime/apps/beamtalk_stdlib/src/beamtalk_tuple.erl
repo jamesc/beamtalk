@@ -10,7 +10,7 @@ Tuple runtime helper functions.
 
 This module provides runtime support for Tuple methods that require
 complex pattern matching or error handling logic. The Tuple class
-is now compiled from lib/tuple.bt (BT-417), but delegates complex
+is now compiled from lib/tuple.bt, but delegates complex
 methods to this runtime operations module.
 
 ## Supported Functions
@@ -20,7 +20,7 @@ methods to this runtime operations module.
 | `at/2` | Tuple, Index | Element at index (1-based) with bounds checking |
 | `as_string/1` | Tuple | Convert to string |
 
-See: BT-417, ADR 0007
+See: ADR 0007
 """.
 -export([at/2, as_string/1, do/2]).
 
@@ -71,7 +71,7 @@ do(Tuple, Block) when is_function(Block, 1) ->
 
 -doc """
 Format a single tuple element for string representation.
-BT-536: Delegates to beamtalk_primitive:print_string/1 for consistent
+Delegates to beamtalk_primitive:print_string/1 for consistent
 formatting (atoms as #symbol, nested tuples as {el1, el2}, etc.)
 """.
 -spec format_element(term()) -> binary().

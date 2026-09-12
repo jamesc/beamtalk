@@ -217,7 +217,7 @@ exports_test() ->
     ?assert(lists:member({start_link, 1}, Exports)),
     ?assert(lists:member({spawn, 0}, Exports)),
     ?assert(lists:member({spawn, 1}, Exports)),
-    %% FFI shims removed after native: migration (BT-1212)
+    %% No FFI shims — the native: migration handles these directly
     ?assertNot(lists:member({show, 2}, Exports)),
     ?assertNot(lists:member({cr, 1}, Exports)),
     ?assertNot(lists:member({recent, 1}, Exports)),
@@ -436,7 +436,7 @@ sync_show_then_clear_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% Async FuturePid path tests — handle_cast/2 actor-protocol clauses (BT-2306)
+%%% Async FuturePid path tests — handle_cast/2 actor-protocol clauses
 %%%
 %%% These cover the {Selector, Args, FuturePid} 3-tuple form that compiled
 %%% Beamtalk actors use when sending async messages to TranscriptStream.
@@ -555,7 +555,7 @@ async_unsubscribe_resolves_future_test() ->
 
 %%% ============================================================================
 %%% Context-propagation strip — 4-tuple {Selector, Args, FuturePid, PropCtx}
-%%% (ADR 0069 Phase 2b) BT-2306
+%%% (ADR 0069 Phase 2b)
 %%% ============================================================================
 
 async_context_strip_delegates_test() ->
@@ -573,7 +573,7 @@ async_context_strip_delegates_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% Catch-all paths — BT-2306
+%%% Catch-all paths
 %%% ============================================================================
 
 %% --- handle_cast(_Msg, State) — unknown cast is a silent no-op ---
@@ -596,7 +596,7 @@ sync_dnu_bare_request_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% start_link/2 — named variant — BT-2306
+%%% start_link/2 — named variant
 %%% ============================================================================
 
 start_link_named_variant_test() ->

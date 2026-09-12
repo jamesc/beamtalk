@@ -43,7 +43,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 
 -doc """
 True if `X` is a Beamtalk object whose comparison must route through message
-dispatch rather than a bare Erlang term-order BIF (BT-2710).
+dispatch rather than a bare Erlang term-order BIF.
 
 Erlang's `<`/`=<`/`>`/`>=` define a *total order over every term* and never
 raise, so a user value-type compared with a bare BIF would silently compare by
@@ -83,7 +83,7 @@ is_object(_) ->
 -doc """
 Determine the Beamtalk class of any value.
 
-Bare binaries (BT-2999): `String` is a subclass of `Binary` and both share the
+Bare binaries: `String` is a subclass of `Binary` and both share the
 single BEAM `binary()` representation, so a raw binary carries no runtime tag
 saying which one it is. Valid UTF-8 answers `String` (the ambiguous but
 overwhelmingly common case); a binary that is *not* valid UTF-8 cannot be a
@@ -109,7 +109,7 @@ class_of(X) when is_list(X) -> 'List';
 class_of(X) when is_map(X) ->
     beamtalk_tagged_map:class_of(X, 'Dictionary');
 class_of({beamtalk_future, _} = Future) ->
-    %% BT-840: Auto-await tagged futures before type inspection.
+    %% Auto-await tagged futures before type inspection.
     class_of(beamtalk_future:await(Future));
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     % Extract class field from #beamtalk_object{}
@@ -125,7 +125,7 @@ class_of(_) ->
     'Object'.
 
 -doc """
-Return the class of any value as a first-class class object (BT-412).
+Return the class of any value as a first-class class object.
 
 ADR 0036: For class objects (tagged with " class" suffix) returns a real
 metaclass object instead of the sentinel atom 'Metaclass'. For metaclass
@@ -134,7 +134,7 @@ enable the self-grounding invariant: `Metaclass class class == Metaclass class`.
 """.
 -spec class_of_object(term()) -> #beamtalk_object{} | atom().
 class_of_object({beamtalk_future, _} = Future) ->
-    %% BT-840: Auto-await tagged futures before class object inspection.
+    %% Auto-await tagged futures before class object inspection.
     class_of_object(beamtalk_future:await(Future));
 class_of_object(#beamtalk_object{class = 'Metaclass', class_mod = ClassMod, pid = Pid}) ->
     %% ADR 0036 self-grounding: class of a metaclass object is itself (idempotent).
@@ -158,12 +158,12 @@ class_of_object_inner(ClassName) ->
     class_of_object_by_name(ClassName).
 
 -doc """
-Return a class object given a class name atom (BT-412).
+Return a class object given a class name atom.
 
-BT-3052: resolves the module via the `beamtalk_class_metadata` ETS table
+Resolves the module via the `beamtalk_class_metadata` ETS table
 (populated unconditionally alongside the class's own identity at
-init/reload, same precedent as BT-3047's `resolve_module_or_raise/2`)
-rather than `beamtalk_object_class:module_name/1`'s `gen_server:call(Pid,
+init/reload) rather than `beamtalk_object_class:module_name/1`'s
+`gen_server:call(Pid,
 module_name)`. `class_of_object`/`class` is reachable from *any* value —
 including one constructed via `self new` inside a block that ADR 0109
 runs in a different class's process. If that different class was itself
@@ -171,8 +171,8 @@ synchronously invoked by `ClassName`'s own process (e.g. `ClassName`
 called `otherClass someBlockTakingMethod: [...]` and the block does `self
 new class`), a `gen_server:call` back to `ClassName`'s pid here deadlocks:
 `ClassName`'s process is blocked waiting on the very process now trying to
-call it back. This is a different shape from BT-893's guarded case
-(`ClassPid =:= self()`, a *direct* self-call) — here the two pids differ,
+call it back. This is a different shape from the guarded direct-self-call
+case (`ClassPid =:= self()`) — here the two pids differ,
 so no existing check catches it. The metadata-table read sidesteps the
 problem entirely: no message send, so no cycle to deadlock on. Falls back
 to the gen_server call only for the practically-unreachable case where a
@@ -209,7 +209,7 @@ print_string(X) when is_binary(X) ->
             Escaped = binary:replace(X, <<"\"">>, <<"\"\"">>, [global]),
             iolist_to_binary([$", Escaped, $"]);
         false ->
-            %% BT-2999: bytes that aren't valid UTF-8 can't be a String, and
+            %% Bytes that aren't valid UTF-8 can't be a String, and
             %% embedding them raw produces an invalid-UTF-8 result that later
             %% blows up anything expecting text (json:encode/1, logger, …).
             %% Render them the way `Binary printString` does instead.
@@ -226,7 +226,7 @@ print_string(X) when is_atom(X) ->
 print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
 print_string({beamtalk_future, _} = Future) ->
-    %% BT-840: Auto-await tagged futures before string conversion.
+    %% Auto-await tagged futures before string conversion.
     print_string(beamtalk_future:await(Future));
 print_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
     %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
@@ -246,7 +246,7 @@ print_string(X) when is_map(X) -> print_string_map(X);
 print_string(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
 print_string({beamtalk_supervisor, _, _, _} = Sup) ->
-    %% BT-3082: supervisors have no #beamtalk_object{} wrapper, so without this
+    %% Supervisors have no #beamtalk_object{} wrapper, so without this
     %% clause they fell into the generic is_tuple/1 clause below and printed as
     %% a raw Erlang tuple instead of the ADR 0094 kind-headed label — e.g. when
     %% a supervisor appears nested inside a collection being printed (printString
@@ -254,7 +254,7 @@ print_string({beamtalk_supervisor, _, _, _} = Sup) ->
     %% beamtalk_dispatch:invoke_method/6).
     process_label(Sup);
 print_string(X) when is_function(X) ->
-    %% BT-3082: without this clause, a Block nested inside a collection (whose
+    %% Without this clause, a Block nested inside a collection (whose
     %% elements are printed via direct recursion, not message dispatch — see
     %% print_string/1's is_list/1 and print_string_map/1's 'Array' clauses)
     %% fell into the ~p catch-all and rendered as a raw `#Fun<...>`, diverging
@@ -350,20 +350,20 @@ display_string(#beamtalk_object{class = ClassName} = Obj) ->
 display_string(X) when is_map(X) ->
     beamtalk_tagged_map:format_for_display(X);
 display_string({beamtalk_supervisor, _, _, _} = Sup) ->
-    %% BT-3082: see the matching print_string/1 clause.
+    %% See the matching print_string/1 clause.
     process_label(Sup);
 display_string(X) when is_function(X) ->
-    %% BT-3082: see the matching print_string/1 clause.
+    %% See the matching print_string/1 clause.
     block_label(X);
 display_string(X) when is_tuple(X) ->
-    %% BT-3082: this clause was missing entirely (unlike print_string/1's),
+    %% This clause was missing entirely (unlike print_string/1's),
     %% so a plain tuple fell into the ~p catch-all below instead of recursing
     %% with display_string/1 (no quotes on nested strings, matching the rest
     %% of this function's contract).
     Elements = tuple_to_list(X),
     iolist_to_binary([<<"{">>, lists:join(<<", ">>, [display_string(E) || E <- Elements]), <<"}">>]);
 display_string(X) when is_pid(X) ->
-    %% BT-3082: this clause was missing entirely (unlike print_string/1's),
+    %% This clause was missing entirely (unlike print_string/1's),
     %% so a raw pid fell into the ~p catch-all below and rendered as the bare
     %% Erlang `<0.123.0>` instead of `#Pid<0.123.0>`.
     beamtalk_opaque_ops:pid_to_string(X);
@@ -418,7 +418,7 @@ identity_inner(Other) ->
     iolist_to_binary(io_lib:format("~tp", [Other])).
 
 -doc """
-`Block/N` label for a bare fun, `N` being its arity (BT-3082).
+`Block/N` label for a bare fun, `N` being its arity.
 
 The single canonical algorithm shared by `print_string/1`/`display_string/1`
 (for a Block nested inside a collection, printed via direct recursion
@@ -435,7 +435,7 @@ block_label(Fun) when is_function(Fun) ->
 -doc """
 Liveness-probed label for a bare pid: `#Actor<X.Y.Z>` for a live process,
 `#Dead<X.Y.Z>` for a dead/unreachable one, or the matching `#Future<...>`
-tag when the pid is (or was) executing `beamtalk_future` code (BT-3082).
+tag when the pid is (or was) executing `beamtalk_future` code.
 
 This is the single canonical algorithm shared by the REPL wire encoder
 (`beamtalk_repl_json:term_to_json/1`, via the `beamtalk_runtime_api` facade)
@@ -487,7 +487,7 @@ is_pid_alive_safe(Pid) ->
 -doc "Send a message to any value (actor or primitive).".
 -spec send(term(), atom(), list()) -> term().
 send({beamtalk_future, _} = Future, Selector, Args) ->
-    %% BT-840: Auto-await tagged futures before dispatching.
+    %% Auto-await tagged futures before dispatching.
     send(beamtalk_future:await(Future), Selector, Args);
 send(#beamtalk_object{class = 'Metaclass', pid = Pid} = Self, Selector, Args) ->
     %% ADR 0036: Route metaclass objects through the Metaclass dispatch chain.
@@ -529,7 +529,7 @@ send_map(X, Selector, Args) ->
 -doc """
 Dispatch messages to a pid value.
 
-Routes Future-specific selectors (BT-813) directly to beamtalk_future.
+Routes Future-specific selectors directly to beamtalk_future.
 All other selectors fall through to the Pid stdlib module.
 """.
 -spec send_pid(pid(), atom(), list()) -> term().
@@ -538,7 +538,7 @@ send_pid(X, await, _Args) ->
 send_pid(X, awaitForever, _Args) ->
     beamtalk_future:await_forever(X);
 send_pid(X, 'await:', [#{'$beamtalk_class' := 'Duration', millis := Ms}]) ->
-    %% BT-2969: `Future await:` accepts a Duration as well as Integer ms.
+    %% `Future await:` accepts a Duration as well as Integer ms.
     %% Matched structurally — beamtalk_runtime cannot call into
     %% beamtalk_stdlib (beamtalk_duration), dependencies flow down only.
     beamtalk_future:await(X, Ms);
@@ -585,15 +585,15 @@ causing inherited methods (e.g. 'class' from ProtoObject) to return false.
 """.
 -spec responds_to(term(), atom()) -> boolean().
 responds_to({beamtalk_future, _} = Future, Selector) ->
-    %% BT-840: Auto-await tagged futures before protocol checking.
+    %% Auto-await tagged futures before protocol checking.
     responds_to(beamtalk_future:await(Future), Selector);
 responds_to(#beamtalk_object{class = Tag} = Obj, Selector) ->
-    %% BT-776/BT-3200: Class objects (e.g., Counter as a value) are instances
+    %% Class objects (e.g., Counter as a value) are instances
     %% of 'Class', so fall back to the Class -> Behaviour -> Object hierarchy
     %% for generic protocol — but first check the class's OWN class-side
     %% methods/extensions (class_understands_class_selector/2), since those
     %% are not reachable via the generic 'Class' walk (the metaclass tag is
-    %% virtual, per BT-776's own doc comment on class_object_tag/1).
+    %% virtual, per class_object_tag/1's own doc comment).
     case beamtalk_class_registry:is_class_object(Obj) of
         true ->
             class_responds_to(class_name_from_tag(Tag), Selector);
@@ -605,7 +605,7 @@ responds_to(X, Selector) when is_tuple(X) ->
     %% Handle tuples that might be beamtalk_objects not matching the record pattern
     case tuple_size(X) >= 4 andalso element(1, X) =:= beamtalk_object of
         true ->
-            %% BT-776/BT-3200: Class objects — see the record-pattern clause above.
+            %% Class objects — see the record-pattern clause above.
             case beamtalk_class_registry:is_class_object(X) of
                 true ->
                     Tag = element(2, X),
@@ -621,22 +621,22 @@ responds_to(X, Selector) when is_tuple(X) ->
 responds_to(X, Selector) when is_map(X) ->
     responds_to_map(X, Selector);
 responds_to(X, Selector) when is_pid(X) ->
-    %% BT-813: Future-specific selectors are handled by send_pid/3.
+    %% Future-specific selectors are handled by send_pid/3.
     is_future_selector(Selector) orelse responds_via_module(X, Selector);
 responds_to(X, Selector) ->
     %% All other primitives: route through module_for_value/1
     responds_via_module(X, Selector).
 
 -doc """
-BT-3200: `respondsTo:` on a class-object receiver — checks `ClassName`'s own
+`respondsTo:` on a class-object receiver — checks `ClassName`'s own
 class-side methods/extensions before falling back to the generic
 `Class`/`Behaviour`/`Object` protocol.
 
 `respondsTo:` is a sealed compiler intrinsic (`object.bt`), so every call
 site compiles directly to `beamtalk_primitive:responds_to/2` — it never
 reaches `beamtalk_dispatch:lookup/5` or a compiled class's own `dispatch/4`.
-Before this, a class object's `respondsTo:` always answered against the
-generic `'Class'` hierarchy only (BT-776), so `SomeClass respondsTo: #foo`
+Without this, a class object's `respondsTo:` would answer against the
+generic `'Class'` hierarchy only, so `SomeClass respondsTo: #foo`
 for a class method or class-side extension `SomeClass` itself defines
 answered `false` even though `SomeClass foo` (or `self foo` from another of
 its class methods) would actually work.
@@ -691,7 +691,7 @@ responds_via_module(X, Selector) ->
     end.
 
 -doc """
-Map a runtime value to its stdlib dispatch module, selector-aware (BT-3033).
+Map a runtime value to its stdlib dispatch module, selector-aware.
 
 Overload of `module_for_value/1` for the dynamic-dispatch call sites that
 already have the selector in hand (`dispatch_via_module/3`,
@@ -706,8 +706,8 @@ overridden — an unconditional fast path would let a String-only extension
 fire on a genuinely non-UTF-8 receiver that `class_of/1` still reports as
 `Binary` (caught in review).
 
-Routes straight to `'bt@stdlib@binary'` rather than `'bt@stdlib@string'`
-(BT-3049): all 9 shared selectors are locally defined on `Binary`, and ADR
+Routes straight to `'bt@stdlib@binary'` rather than `'bt@stdlib@string'`:
+all 9 shared selectors are locally defined on `Binary`, and ADR
 0066 extensions cannot override a class-body-defined method, so `Binary`
 itself can never have a competing extension for one of them — only
 `String`'s extension registry needs checking (done above), and going
@@ -728,7 +728,7 @@ module_for_value(X, _Selector) ->
     module_for_value(X).
 
 -doc """
-True for selectors where `String` and `Binary` behave identically (BT-3033).
+True for selectors where `String` and `Binary` behave identically.
 
 Derived from `binary.bt`'s own instance methods that `string.bt` does *not*
 redefine — per ADR 0086's method override table, these are the byte-level
@@ -750,7 +750,7 @@ Soundness depends on a codegen invariant, not just name-matching: a selector
 as a runtime delegation to `'bt@stdlib@binary'`'s implementation instead. So
 routing one of these selectors through `'bt@stdlib@string'` would call the
 exact same code as routing it through `'bt@stdlib@binary'` directly — which
-is what `module_for_value/2` does (BT-3049), skipping that redundant
+is what `module_for_value/2` does, skipping that redundant
 delegation hop — for any binary, valid UTF-8 or not. The sync test only
 needs to track selector *names* because the two modules already share the
 method *body*. If that delegation model ever changes (e.g. inherited
@@ -783,9 +783,9 @@ is_string_binary_shared_selector(_) -> false.
 -spec module_for_value(term()) -> atom() | undefined.
 module_for_value(X) when is_integer(X) -> 'bt@stdlib@integer';
 module_for_value(X) when is_binary(X) ->
-    %% BT-2999: keep dynamic dispatch consistent with class_of/1 — a binary
+    %% Keep dynamic dispatch consistent with class_of/1 — a binary
     %% that isn't valid UTF-8 is a Binary, so grapheme-aware String methods
-    %% (`size`, `at:`, `do:`, …) would only fail on it. BT-3033: callers that
+    %% (`size`, `at:`, `do:`, …) would only fail on it. Callers that
     %% already know the selector should prefer module_for_value/2, which
     %% skips this scan for selectors where String and Binary agree.
     case is_utf8(X) of
@@ -807,12 +807,12 @@ module_for_value(X) when is_pid(X) -> 'bt@stdlib@pid';
 module_for_value(X) when is_port(X) -> 'bt@stdlib@port';
 module_for_value(X) when is_reference(X) -> 'bt@stdlib@reference';
 module_for_value(X) when is_map(X) ->
-    %% BT-3081: only the two genuine exceptions are hardcoded — 'ErlangModule'
+    %% Only the two genuine exceptions are hardcoded — 'ErlangModule'
     %% dispatches to a hand-written native proxy module, not a compiled `.bt`
     %% class, and an untagged map (no '$beamtalk_class') is Dictionary by
     %% convention, not by class name. Every other tagged-map class name is
     %% derivable from the `ClassName ⇄ bt@stdlib@snake_case` convention
-    %% (BT-2999 comment on the old hand-written ~35-entry table this replaced).
+    %% (see the old hand-written ~35-entry table this replaced).
     case beamtalk_tagged_map:class_of(X) of
         'ErlangModule' ->
             beamtalk_erlang_proxy;
@@ -828,8 +828,8 @@ module_for_value(_) ->
     undefined.
 
 -doc """
-Derive a tagged-map class's stdlib dispatch module from its class name
-(BT-3081), verifying the module actually exists rather than trusting the
+Derive a tagged-map class's stdlib dispatch module from its class name,
+verifying the module actually exists rather than trusting the
 naming convention blindly — a class name that doesn't correspond to a
 loaded `bt@stdlib@…` module (e.g. a typo, or a class removed from stdlib)
 falls back to `undefined`, matching `module_for_value/1`'s prior behaviour
@@ -843,7 +843,7 @@ stdlib_module_for_tagged_class(ClassName) ->
         {error, _} -> undefined
     end.
 
--doc "Send a message to a value type instance (BT-354).".
+-doc "Send a message to a value type instance.".
 -spec value_type_send(map(), atom(), atom(), list()) -> term().
 value_type_send(Self, Class, Selector, Args) ->
     case is_ivar_method(Selector) of
@@ -863,7 +863,7 @@ value_type_send(Self, Class, Selector, Args) ->
                 true ->
                     erlang:apply(Module, Selector, [Self | Args]);
                 false ->
-                    %% BT-2275: module-less (builder-built) class — dispatch
+                    %% Module-less (builder-built) class — dispatch
                     %% fun-backed instance methods stored in the class gen_server.
                     %% These follow the value-type calling convention
                     %% `fun(Self, Arg1..ArgN) -> Result`, identical to the
@@ -891,7 +891,7 @@ value_type_send(Self, Class, Selector, Args) ->
     end.
 
 -doc """
-Look up a fun-backed instance method on a module-less class (BT-2275).
+Look up a fun-backed instance method on a module-less class.
 
 Builder-built classes register instance methods as funs in the class
 gen_server's `instance_methods` map rather than as compiled module functions.
@@ -906,7 +906,7 @@ gen_server itself — e.g. a fun-backed class method does `Inst := self new`
 followed by `Inst someMethod`, all while the class process is mid-`handle_call`.
 Calling `self()` there would deadlock.
 
-BT-2277: rather than reporting `none` in that case (which made self-dispatch
+Rather than reporting `none` in that case (which would make self-dispatch
 silently diverge from external dispatch, a pre/post-flush hazard), the
 `Pid =:= self()` branch resolves deadlock-free. It consults the local
 instance-method cache kept in the process dictionary by
@@ -929,7 +929,7 @@ runtime_instance_method(Class, Selector) ->
 
 -doc """
 Deadlock-free resolution of a fun-backed instance method from inside the class
-gen_server (BT-2277).
+gen_server.
 
 Reads the local class's instance methods from the process-dictionary cache
 seeded by `beamtalk_object_class:init/1` (and kept current by `put_method` and
@@ -950,7 +950,7 @@ runtime_instance_method_self(Selector) ->
             runtime_instance_method_in_super(Selector)
     end.
 
--doc "Resolve a fun-backed instance method on the superclass chain (BT-2277).".
+-doc "Resolve a fun-backed instance method on the superclass chain.".
 -spec runtime_instance_method_in_super(atom()) -> {ok, fun()} | none.
 runtime_instance_method_in_super(Selector) ->
     case get(beamtalk_class_superclass) of
@@ -975,13 +975,13 @@ method_fun_from_resolved(_) ->
     none.
 
 -doc """
-Check if a selector is a mutation method on a value type (BT-359, BT-924).
+Check if a selector is a mutation method on a value type.
 
 `fieldAt:put:` is blocked — value types are immutable, and the `with*:` methods
 return new instances rather than mutating in place.
 
 `fieldAt:` is intentionally NOT blocked here: user-defined value objects store
-their slots in the underlying map and support read-only reflection (BT-924).
+their slots in the underlying map and support read-only reflection.
 """.
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
 is_ivar_method('fieldAt:put:') ->
@@ -989,7 +989,7 @@ is_ivar_method('fieldAt:put:') ->
 is_ivar_method(_) ->
     false.
 
--doc "Check if a value type responds to a selector (BT-354).".
+-doc "Check if a value type responds to a selector.".
 -spec value_type_responds_to(atom(), atom()) -> boolean().
 value_type_responds_to(Class, Selector) ->
     Module = class_name_to_module(Class),
@@ -1004,7 +1004,7 @@ value_type_responds_to(Class, Selector) ->
                     false -> []
                 end,
             lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports) orelse
-                %% BT-2275: module-less classes report their fun-backed instance
+                %% Module-less classes report their fun-backed instance
                 %% methods (and inherited ones) as understood.
                 runtime_instance_method(Class, Selector) =/= none orelse
                 beamtalk_object_ops:has_method(Selector)
@@ -1016,7 +1016,7 @@ Convert a CamelCase class name atom to a module name atom (ADR 0016).
 First tries the static naming convention (bt@{snake_case}).
 If that module is not loaded, falls back to the class registry to
 resolve package-qualified module names (e.g. bt@{package}@{snake_case}).
-BT-760: This fallback enables `beamtalk test` to dispatch on package classes.
+This fallback enables `beamtalk test` to dispatch on package classes.
 """.
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
@@ -1030,7 +1030,7 @@ class_name_to_module(Class) when is_atom(Class) ->
                 {module, _} ->
                     StaticModule;
                 {error, _} ->
-                    %% BT-760: Fall back to class registry for package-qualified modules
+                    %% Fall back to class registry for package-qualified modules
                     case beamtalk_class_registry:whereis_class(Class) of
                         undefined -> StaticModule;
                         ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
@@ -1041,7 +1041,7 @@ class_name_to_module(Class) when is_atom(Class) ->
 -doc """
 Static module name from class name (bt@{snake_case}).
 
-BT-3081: delegates the CamelCase→snake_case conversion to
+Delegates the CamelCase→snake_case conversion to
 `beamtalk_module_name:to_module_atom/1`, the single Erlang-side authority
 for the `ClassName ⇄ bt@[pkg@]snake_case` convention (ADR 0016).
 """.
@@ -1050,7 +1050,7 @@ static_class_module_name(Class) ->
     beamtalk_module_name:to_module_atom(Class).
 
 -doc """
-Whether a binary holds valid UTF-8 text (BT-2999).
+Whether a binary holds valid UTF-8 text.
 
 `String` and `Binary` share the single BEAM `binary()` representation, so this
 is the only signal available at runtime: invalid UTF-8 definitively rules out
@@ -1070,7 +1070,7 @@ Annotate such a receiver `:: Binary` or `:: String` to compile the sends
 statically and skip this entirely. Note the grapheme-aware String selectors
 (`size`, `at:`, `do:`) were already O(size) per call before this check existed.
 
-BT-3033: for the O(1) byte-level selectors that gain a per-send scan
+For the O(1) byte-level selectors that gain a per-send scan
 (`byteSize`, `byteAt:`, `part:size:`, `concat:`, `toBytes`,
 `asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`), `send/3` and
 `responds_to/2` skip this scan entirely via
@@ -1101,7 +1101,7 @@ Extract the class name atom from a class tag or class object tag.
 Handles both plain instance tags (e.g. 'Counter') and class object tags
 (e.g. 'Counter class') — in both cases returns the class name atom 'Counter'.
 Used by responds_to/2 to delegate to beamtalk_dispatch:responds_to/2, and
-(BT-3047 / ADR 0109 amendment) called directly from generated Core Erlang to
+(ADR 0109 amendment) called directly from generated Core Erlang to
 untag `element(2, ClassSelf)` at the inherited-self-dispatch and instantiation-
 intrinsic sites in `dispatch_codegen.rs`/`mod.rs` — hence the export.
 """.

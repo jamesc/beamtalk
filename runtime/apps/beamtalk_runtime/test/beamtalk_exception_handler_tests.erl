@@ -29,7 +29,7 @@ ensure_wrapped_wraps_raw_error_test() ->
     #{error := Inner} = Result,
     ?assertEqual(type_error, Inner#beamtalk_error.kind).
 
-%% Raw Erlang terms get wrapped and classified (BT-2707): a bare badarg with no
+%% Raw Erlang terms get wrapped and classified: a bare badarg with no
 %% dispatch context becomes its own argument_error kind, not generic runtime_error.
 ensure_wrapped_wraps_raw_erlang_test() ->
     Result = beamtalk_exception_handler:ensure_wrapped(badarg),
@@ -44,7 +44,7 @@ ensure_wrapped_no_double_wrap_test() ->
     Wrapped2 = beamtalk_exception_handler:ensure_wrapped(Wrapped1),
     ?assertEqual(Wrapped1, Wrapped2).
 
-%%% Tests for kind_to_class/1 (BT-452) — pure, no class system needed
+%%% Tests for kind_to_class/1 — pure, no class system needed
 
 kind_to_class_does_not_understand_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(does_not_understand)).
@@ -102,7 +102,7 @@ kind_to_class_signal_maps_to_error_test() ->
 kind_to_class_unknown_falls_back_to_error_test() ->
     ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(some_unknown_kind)).
 
-%%% Tests for wrap/1 class hierarchy (BT-452) — pure, no class system needed
+%%% Tests for wrap/1 class hierarchy — pure, no class system needed
 
 wrap_sets_runtime_error_class_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
@@ -133,12 +133,12 @@ wrap_runtime_error_kind_becomes_runtime_error_test() ->
     #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap(Error),
     ?assertEqual('RuntimeError', Class).
 
-%%% Tests requiring class system (BT-475)
+%%% Tests requiring class system
 %%% is_exception_class/1, matches_class/2 now delegate to class hierarchy
 
 hierarchy_test_() ->
     {setup, fun setup_class_system/0, fun teardown_class_system/1, [
-        %% is_exception_class/1 tests (BT-475 — derived from class system)
+        %% is_exception_class/1 tests (derived from class system)
         {"Exception is an exception class", fun() ->
             ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Exception'))
         end},
@@ -187,7 +187,7 @@ hierarchy_test_() ->
             )
         end},
 
-        %% Hierarchy-aware matches_class/2 (BT-452/BT-475)
+        %% Hierarchy-aware matches_class/2
         {"RuntimeError catches does_not_understand", fun() ->
             Error = beamtalk_error:new(does_not_understand, 'Integer'),
             Wrapped = beamtalk_exception_handler:wrap(Error),
@@ -246,7 +246,7 @@ hierarchy_test_() ->
             ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception class', Wrapped))
         end},
 
-        %% BT-480: User-defined error subclasses
+        %% User-defined error subclasses
         {"wrap uses exception class from error record", fun() ->
             %% When error.class is an exception class, wrap should use it
             Error = #beamtalk_error{
@@ -307,7 +307,7 @@ hierarchy_test_() ->
         end}
     ]}.
 
-%% BT-480: signal_from_class/1 unit test
+%% signal_from_class/1 unit test
 signal_from_class_test_() ->
     {"signal_from_class preserves class and uses class name as message", fun() ->
         try
@@ -432,7 +432,7 @@ dispatch_signal_colon_raises_test() ->
 
 dispatch_unknown_selector_raises_test() ->
     Ex = make_test_exception(),
-    %% After removing the does_not_understand catch-all (BT-1764),
+    %% After removing the does_not_understand catch-all,
     %% unknown selectors cause a function_clause error — the compiled
     %% bt@stdlib@exception module handles Object-inherited methods.
     ?assertError(
@@ -457,7 +457,7 @@ has_method_signal_colon_test() -> ?assert(beamtalk_exception_handler:has_method(
 has_method_unknown_test() -> ?assertNot(beamtalk_exception_handler:has_method('nonExistent')).
 
 %%% ===================================================================
-%%% ensure_wrapped/2 tests (BT-107 stacktrace capture)
+%%% ensure_wrapped/2 tests (stacktrace capture)
 %%% ===================================================================
 
 ensure_wrapped_2_wraps_with_stacktrace_test() ->
@@ -485,7 +485,7 @@ ensure_wrapped_2_empty_stacktrace_test() ->
     ?assertMatch(#{stacktrace := []}, Result).
 
 %%% ===================================================================
-%%% ensure_wrapped/3 tests (BT-728 Erlang exception type)
+%%% ensure_wrapped/3 tests (Erlang exception type)
 %%% ===================================================================
 
 ensure_wrapped_3_exit_wraps_as_exit_error_test() ->
@@ -562,7 +562,7 @@ class_to_kind_runtime_error_falls_back_to_signal_test() ->
     ?assertEqual(signal, beamtalk_exception_handler:class_to_kind('RuntimeError')).
 
 %%% ===================================================================
-%%% ensure_wrapped/3 — future_rejected unwrapping (BT-869)
+%%% ensure_wrapped/3 — future_rejected unwrapping
 %%% ===================================================================
 
 ensure_wrapped_3_throw_future_rejected_beamtalk_error_test() ->
@@ -620,7 +620,7 @@ wrap_raw_badarity_test() ->
     #{expected_args := 1, actual_args := 3} = Inner#beamtalk_error.details.
 
 %%% ===================================================================
-%%% wrap_raw/2 — raw-error classification into buckets A/B/C (BT-2707)
+%%% wrap_raw/2 — raw-error classification into buckets A/B/C
 %%% ===================================================================
 
 %% Helper: classify a raw reason (no context) and return the inner error.
@@ -704,7 +704,7 @@ wrap_raw_unknown_stays_runtime_error_test() ->
     Inner = classify({some_unknown_reason, 1, 2}),
     ?assertEqual(runtime_error, Inner#beamtalk_error.kind).
 
-%%% --- classify_kind/1 — canonical raw-reason -> kind map (BT-2704 follow-up) ---
+%%% --- classify_kind/1 — canonical raw-reason -> kind map ---
 
 classify_kind_buckets_test() ->
     C = fun beamtalk_exception_handler:classify_kind/1,
@@ -762,7 +762,7 @@ classify_kind_agrees_with_wrap_raw_test() ->
         Reasons
     ).
 
-%%% --- BT-2705: breadcrumb produces located messages ---
+%%% --- breadcrumb produces located messages ---
 
 wrap_raw_badarith_with_breadcrumb_is_located_test() ->
     Inner = classify(badarith, #{selector => sum, class => 'Tuple'}),
@@ -783,7 +783,7 @@ wrap_raw_badarg_with_selector_only_is_located_test() ->
         re:run(Inner#beamtalk_error.message, "'at:'", [{capture, none}])
     ).
 
-%%% --- ensure_wrapped/4: context-aware idempotent wrapper (BT-2705) ---
+%%% --- ensure_wrapped/4: context-aware idempotent wrapper ---
 
 ensure_wrapped_4_classifies_with_context_test() ->
     Result = beamtalk_exception_handler:ensure_wrapped(
@@ -828,7 +828,7 @@ ensure_wrapped_4_empty_context_delegates_test() ->
 kind_to_class_of(#beamtalk_error{kind = Kind}) ->
     beamtalk_exception_handler:kind_to_class(Kind).
 
-%%% kind_to_class/1 — new classified kinds (BT-2707)
+%%% kind_to_class/1 — new classified kinds
 
 kind_to_class_key_error_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(key_error)).
@@ -892,7 +892,7 @@ signal_atom_kind_test() ->
     end.
 
 %%% ===================================================================
-%%% class_signal_message/2 and class_signal/1 tests (BT-1524)
+%%% class_signal_message/2 and class_signal/1 tests
 %%% ===================================================================
 
 class_signal_message_with_beamtalk_object_test() ->
@@ -965,7 +965,7 @@ class_signal_fallback_test() ->
     end.
 
 %%% ===================================================================
-%%% class_signal_kind/4 tests (BT-3042)
+%%% class_signal_kind/4 tests
 %%% ===================================================================
 
 class_signal_kind_sets_kind_class_selector_hint_test() ->

@@ -14,9 +14,9 @@ consistent state migration strategy across all gen_server behaviors in the
 runtime.
 
 **Current Migrations:**
-- BT-399: Rewrites `__class__` → `$beamtalk_class` tag key for actors
-  with pre-BT-324 state maps.
-- BT-572: Field migration — adds new fields with defaults, drops removed
+- Rewrites `__class__` → `$beamtalk_class` tag key for actors
+  with legacy state maps.
+- Field migration — adds new fields with defaults, drops removed
   fields (with log warning) when Extra contains `{NewInstanceVars, Module}`.
 
 **References:**
@@ -41,9 +41,9 @@ Called by all gen_server behaviors in the runtime when BEAM loads a new
 version of a module.
 
 **Current Migrations:**
-- Rewrites `__class__` → `$beamtalk_class` for pre-BT-324 actor state maps.
+- Rewrites `__class__` → `$beamtalk_class` for legacy actor state maps.
   Idempotent: already-migrated state is returned unchanged.
-- BT-572: When Extra is `{NewInstanceVars, Module}`, migrates actor state
+- When Extra is `{NewInstanceVars, Module}`, migrates actor state
   by calling the module's init to get new defaults, then merging.
 """.
 %% @param OldVsn The old version (either {down, Vsn} or Vsn atom/term)
@@ -55,7 +55,7 @@ version of a module.
 code_change(_OldVsn, State, {NewInstanceVars, Module}) when
     is_map(State), is_list(NewInstanceVars), is_atom(Module)
 ->
-    %% BT-572: Field migration during hot reload
+    %% Field migration during hot reload
     ?LOG_DEBUG("code_change: field migration", #{
         module => Module,
         new_instance_vars => NewInstanceVars,
@@ -87,7 +87,7 @@ trigger_code_change(Module, Pids) ->
 -doc """
 Trigger code_change for a list of actor PIDs with Extra data.
 
-BT-572: Extra can be `{NewInstanceVars, Module}` to enable field migration.
+Extra can be `{NewInstanceVars, Module}` to enable field migration.
 Calls sys:change_code/4 for each actor PID. Failures are collected
 but do not prevent other actors from being upgraded.
 """.
@@ -133,7 +133,7 @@ trigger_code_change(Module, Pids, Extra) ->
 %%====================================================================
 
 -doc """
-Migrate old `__class__` tag key to `$beamtalk_class` (BT-399).
+Migrate old `__class__` tag key to `$beamtalk_class`.
 
 Idempotent: migration may add the new key and/or remove the old key,
 but will not change an existing `$beamtalk_class` value.
@@ -155,7 +155,7 @@ maybe_migrate_class_key(State) ->
     end.
 
 -doc """
-Migrate actor state fields during hot reload (BT-572).
+Migrate actor state fields during hot reload.
 
 Calls the module's init(#{}) to get default state, then:
 - Preserves all existing field values from old state

@@ -7,7 +7,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Per-selector signature-generation store (ADR 0105 Phase 1, BT-2777).
+Per-selector signature-generation store (ADR 0105 Phase 1).
 
 Hot-patching clears a method's type metadata on install (`put_method/4`
 deliberately wipes `method_signatures`/`method_return_types` per ADR 0050 —
@@ -91,7 +91,7 @@ install means a load/reload failure would otherwise leave the store holding a
 generation that was never actually live — pair every `capture/4` call with a
 `rollback/4` call on that failure path (see `rollback/4`).
 
-Returns `{PreviousSignature, Classification}` — the caller (BT-2778's
+Returns `{PreviousSignature, Classification}` — the caller (the
 re-check orchestration) uses `Classification` to decide whether a re-check is
 warranted at all (`no_op` short-circuits it).
 """.
@@ -106,7 +106,7 @@ capture(ClassName, Selector, Side, NewSignature) when
 Read-only lookup of the signature that `capture/4` would currently treat as
 "previous" for `{ClassName, Selector, Side}` — from the store if this
 selector has been patched this session, else seeded from `__beamtalk_meta/0`.
-Does not mutate the store. Exposed for the re-check orchestration (BT-2778)
+Does not mutate the store. Exposed for the re-check orchestration
 and for tests.
 """.
 -spec previous(binary(), binary(), side()) -> maybe_signature().

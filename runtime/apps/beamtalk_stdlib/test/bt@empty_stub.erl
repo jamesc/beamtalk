@@ -3,7 +3,7 @@
 
 %% Minimal stub with NO test methods.
 %% Named 'bt@empty_stub' so resolve_module('EmptyStub') finds it.
-%% Used by BT-2404 to exercise the no-test-methods branch of run_all/1
+%% Used to exercise the no-test-methods branch of run_all/1
 %% (lines 221–226 of beamtalk_test_case.erl).
 -module('bt@empty_stub').
 

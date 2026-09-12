@@ -5,7 +5,7 @@
 -module(beamtalk_class_sup_tests).
 
 -moduledoc """
-EUnit tests for BT-3236: class gen_servers under `beamtalk_class_sup` with
+EUnit tests for class gen_servers under `beamtalk_class_sup` with
 eager crash recovery via `beamtalk_class_monitor`.
 """.
 -include_lib("eunit/include/eunit.hrl").

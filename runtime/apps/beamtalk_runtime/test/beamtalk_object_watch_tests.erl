@@ -5,7 +5,7 @@
 
 -moduledoc """
 EUnit tests for `beamtalk_object_watch` — the per-object change subscription
-substrate for the live Inspector (ADR 0095 §5, BT-2489 / Cockpit Phase 3).
+substrate for the live Inspector (ADR 0095 §5 / Cockpit Phase 3).
 
 Covers the acceptance criteria:
 

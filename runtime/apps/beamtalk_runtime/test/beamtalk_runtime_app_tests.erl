@@ -84,7 +84,7 @@ exports_required_callbacks_test() ->
     ?assert(lists:member({start, 2}, Exports)),
     ?assert(lists:member({stop, 1}, Exports)).
 
-%%% SASL configuration tests (BT-1424)
+%%% SASL configuration tests
 
 sasl_error_logger_configured_after_start_test() ->
     %% After runtime start, sasl_error_logger should be set to false

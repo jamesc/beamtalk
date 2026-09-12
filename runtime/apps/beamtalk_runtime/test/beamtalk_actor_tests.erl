@@ -19,7 +19,7 @@ Tests all actor behaviors:
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%% Logger handler callback for BT-1822 stacktrace tests
+%% Logger handler callback for the stacktrace-capture tests below
 -export([log/2]).
 
 log(LogEvent, #{config := #{parent := Parent}}) ->
@@ -379,8 +379,8 @@ invalid_method_not_function_async_test() ->
 
     gen_server:stop(Actor).
 
-%%% Backward-compat error path tests (BT-1889)
-%% Verify that the {error, {ErlType, ErrorValue}} 2-tuple path (pre-BT-1822
+%%% Backward-compat error path tests
+%% Verify that the {error, {ErlType, ErrorValue}} 2-tuple path (older
 %% compiled actors without stacktrace) preserves the exception class.
 
 compat_sync_send_exit_preserves_class_test() ->
@@ -563,7 +563,7 @@ actor_crash_during_processing_test() ->
 
     gen_server:stop(Actor).
 
-%% BT-3199: instance-side extension crash safety at the actor/gen_server level.
+%% instance-side extension crash safety at the actor/gen_server level.
 %%
 %% Mirrors beamtalk_class_dispatch_tests:test_class_extension_crash_does_not_kill_class_process/0
 %% and actor_crash_during_processing_test/0 above, but for a crashing
@@ -572,7 +572,7 @@ actor_crash_during_processing_test() ->
 %% the same crash one layer down, via a direct beamtalk_dispatch:lookup/5
 %% call with no live actor process involved).
 %%
-%% Before BT-3199, beamtalk_dispatch:invoke_extension/4 re-raised a crashing
+%% Previously, beamtalk_dispatch:invoke_extension/4 re-raised a crashing
 %% extension's bare Erlang exception instead of catching it, and
 %% beamtalk_actor:dispatch_via_hierarchy/4's try/catch only matched `exit:`
 %% patterns from the class-registry lookup itself (noproc/normal/timeout),
@@ -583,7 +583,7 @@ actor_crash_during_processing_test() ->
 %% invoke_extension/6 now catches and converts via the same
 %% ensure_wrapped/4 classification invoke_method/6 already uses for a
 %% compiled-method crash reached via the same hierarchy walk, so the
-%% guarantee below matches the class-side one BT-3192 established.
+%% guarantee below matches the class-side one established elsewhere.
 instance_side_extension_crash_test() ->
     ok = beamtalk_extensions:init(),
     {ok, Counter} = test_counter:start_link(0),
@@ -807,7 +807,7 @@ concurrent_doesNotUnderstand_test() ->
     gen_server:stop(Proxy),
     gen_server:stop(Target).
 
-%%% BT-159: Self-as-object tests
+%%% Self-as-object tests
 
 make_self_test() ->
     %% Test that make_self/1 constructs a proper #beamtalk_object{} record
@@ -911,8 +911,8 @@ dispatch4_async_with_self_test() ->
 
     gen_server:stop(Actor).
 
-%%% BT-177: Object reflection API tests
-%%% BT-427: Reflection methods now delegate to hierarchy walk, which requires bootstrap
+%%% Object reflection API tests
+%%% Reflection methods now delegate to hierarchy walk, which requires bootstrap
 
 respondsTo_existing_method_test() ->
     %% Test respondsTo: with an existing method
@@ -978,7 +978,7 @@ fieldAt_nonexistent_variable_test() ->
     gen_server:stop(Counter).
 
 fieldAt_put_test() ->
-    %% Test fieldAt:put: to write instance variable (BT-164)
+    %% Test fieldAt:put: to write instance variable
     application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
 
@@ -1034,7 +1034,7 @@ reflection_combined_test() ->
 
     gen_server:stop(Counter).
 
-%%% BT-165: perform: dynamic message send tests
+%%% perform: dynamic message send tests
 
 perform_unary_message_test() ->
     %% Test perform: with no arguments (unary message)
@@ -1146,7 +1146,7 @@ perform_recursive_dispatch_test() ->
 
     gen_server:stop(Counter).
 
-%%% BT-427: Object method delegation tests
+%%% Object method delegation tests
 %%% Actors inherit Object base methods via hierarchy walk
 
 %% Tests that only need the actor's initial value (0) share one process.
@@ -1185,7 +1185,7 @@ object_delegation_zero_state_test_() ->
                     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [hash]})),
                     %% Actor-specific built-in should also be reported
                     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isAlive]})),
-                    %% BT-1442: pid, monitor, onExit: should be reported
+                    %% pid, monitor, onExit: should be reported
                     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [pid]})),
                     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [monitor]})),
                     ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['onExit:']}))
@@ -1208,7 +1208,7 @@ object_delegation_nonzero_state_test_() ->
                     ?assert(is_binary(Result))
                 end},
                 {"inspect returns an Inspector cursor seeded from actor state",
-                    %% ADR 0095 Phase 3 (BT-2504): inspect on an actor (inherited from Object
+                    %% ADR 0095 Phase 3: inspect on an actor (inherited from Object
                     %% via the hierarchy walk) now returns an Inspector cursor, not a binary
                     %% string. A live Beamtalk actor classifies as kind = actor.
                     %%
@@ -1229,7 +1229,7 @@ object_delegation_nonzero_state_test_() ->
             ]
         end}.
 
-%%% Actor lifecycle tests (BT-170)
+%%% Actor lifecycle tests
 
 isAlive_returns_true_for_running_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1310,7 +1310,7 @@ monitor_delivers_down_on_actor_death_test() ->
         ?assert(false)
     end.
 
-%%% BT-1442: pid tests
+%%% pid tests
 
 pid_async_returns_pid_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1328,7 +1328,7 @@ pid_sync_returns_pid_test() ->
     ?assertEqual(Counter, Result),
     gen_server:stop(Counter).
 
-%%% BT-1442: onExit: tests
+%%% onExit: tests
 
 on_exit_sync_calls_block_on_death_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1375,7 +1375,7 @@ async_message_to_dead_actor_rejects_future_test() ->
     ).
 
 sync_message_to_dead_actor_returns_error_test() ->
-    %% BT-918: sync_send to a dead actor now raises an actor_dead exception (not returns error tuple).
+    %% sync_send to a dead actor now raises an actor_dead exception (not returns error tuple).
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter, normal, 1000),
     timer:sleep(10),
@@ -1386,7 +1386,7 @@ sync_message_to_dead_actor_returns_error_test() ->
     ).
 
 %%% ===========================================================================
-%%% register_spawned callback tests (BT-391)
+%%% register_spawned callback tests
 %%% ===========================================================================
 
 register_spawned_returns_ok_when_no_callback_configured_test() ->
@@ -1525,7 +1525,7 @@ register_spawned_returns_error_on_undef_callback_test() ->
         end
     end),
     try
-        %% Returns {error, _} since BT-391 surfaces callback failures
+        %% Returns {error, _} since register_spawned surfaces callback failures
         ?assertMatch(
             {error, {callback_undef, beamtalk_actor_tests}},
             beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)
@@ -1545,7 +1545,7 @@ register_spawned_returns_error_on_beamtalk_error_test() ->
         end
     end),
     try
-        %% Returns {error, _} since BT-391 surfaces callback failures
+        %% Returns {error, _} since register_spawned surfaces callback failures
         ?assertMatch(
             {error, {beamtalk_error, _}},
             beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)
@@ -1565,7 +1565,7 @@ register_spawned_returns_error_on_generic_error_test() ->
         end
     end),
     try
-        %% Returns {error, _} since BT-391 surfaces callback failures
+        %% Returns {error, _} since register_spawned surfaces callback failures
         ?assertMatch(
             {error, _},
             beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)
@@ -1576,7 +1576,7 @@ register_spawned_returns_error_on_generic_error_test() ->
     end.
 
 %%% ===========================================================================
-%%% Test helpers for BT-391
+%%% Test helpers for the register_spawned callback tests above
 %%% ===========================================================================
 
 -doc "Create a callback module that crashes".
@@ -1717,7 +1717,7 @@ sync_send_monitor_test() ->
     gen_server:stop(Counter).
 
 sync_send_to_dead_actor_test() ->
-    %% BT-918: sync_send to a dead actor raises an actor_dead exception (not returns error tuple).
+    %% sync_send to a dead actor raises an actor_dead exception (not returns error tuple).
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
     timer:sleep(10),
@@ -1727,7 +1727,7 @@ sync_send_to_dead_actor_test() ->
     ).
 
 %%% ============================================================================
-%%% BT-1190: sync_send/4 (explicit timeout) tests
+%%% sync_send/4 (explicit timeout) tests
 %%% ============================================================================
 
 sync_send_4_succeeds_with_sufficient_timeout_test() ->
@@ -1763,7 +1763,7 @@ sync_send_4_dead_actor_test() ->
     ).
 
 %%% ============================================================================
-%%% BT-917: cast_send/3 and fire-and-forget handle_cast wire format tests
+%%% cast_send/3 and fire-and-forget handle_cast wire format tests
 %%% ============================================================================
 
 cast_send_to_live_actor_returns_ok_test() ->
@@ -1881,7 +1881,7 @@ async_send_kill_isAlive_false_immediately_after_test() ->
     beamtalk_actor:async_send(Counter, isAlive, [], AliveFuture),
     ?assertEqual(false, beamtalk_future:await(AliveFuture)).
 
-%%% BT-1541: await_initialize / safe_spawn tests
+%%% await_initialize / safe_spawn tests
 
 await_initialize_alive_process_test() ->
     %% await_initialize returns ok for a healthy gen_server
@@ -1903,7 +1903,7 @@ safe_spawn_success_test() ->
     gen_server:stop(Pid).
 
 safe_spawn_does_not_link_caller_test() ->
-    %% BT-3243: safe_spawn/2 must not link the spawned actor to its caller —
+    %% safe_spawn/2 must not link the spawned actor to its caller —
     %% gen_server:start/3, not gen_server:start_link/3. A killed actor must
     %% never be able to take its spawner down via a process link.
     {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
@@ -1914,10 +1914,10 @@ safe_spawn_does_not_link_caller_test() ->
     gen_server:stop(Pid).
 
 safe_spawn_named_still_links_caller_test() ->
-    %% BT-3243: unlike safe_spawn/2 (unnamed), safe_spawn_named/3
+    %% unlike safe_spawn/2 (unnamed), safe_spawn_named/3
     %% (spawnAs:/spawnWith:as:) deliberately STAYS linked — it doubles as
     %% the real OTP supervisor child MFA for named children
-    %% (beamtalk_supervisor:spec_to_otp/1, ADR 0079/BT-1990), where the
+    %% (beamtalk_supervisor:spec_to_otp/1, ADR 0079), where the
     %% link is the restart mechanism. Its own self-spawnAs: risk (a class
     %% method linking the actor to the class gen_server it runs in) is
     %% fixed by unlinking at that call site instead — see
@@ -1930,7 +1930,7 @@ safe_spawn_named_still_links_caller_test() ->
     gen_server:stop(Pid).
 
 safe_spawn_links_caller_when_supervisor_spawn_context_set_test() ->
-    %% BT-3243 supervisor-restart follow-up: when
+    %% When
     %% beamtalk_supervisor:start_child_via_class_method/4 is on the call
     %% stack (a `SupervisionSpec withClassMethod:` child's factory calling
     %% plain `self spawn`/`self spawnWith:`), it marks the process
@@ -1988,7 +1988,7 @@ safe_spawn_restores_trap_exit_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1822: Stacktrace preservation tests
+%%% Stacktrace preservation tests
 %%% ============================================================================
 
 spawn_callback_crash_log_includes_stacktrace_test() ->
@@ -2049,7 +2049,7 @@ collect_log_with_stacktrace(ExpectedMsg, Timeout, Start) ->
     end.
 
 %%% ============================================================================
-%%% BT-1958: Trace context propagation and restoration tests
+%%% Trace context propagation and restoration tests
 %%% ============================================================================
 
 set_and_get_trace_context_test() ->
@@ -2087,7 +2087,7 @@ set_trace_context_merges_test() ->
     beamtalk_actor:clear_trace_context().
 
 %%% ============================================================================
-%%% BT-1958: Causal trace context tests
+%%% Causal trace context tests
 %%% ============================================================================
 
 get_causal_ctx_empty_when_unset_test() ->
@@ -2114,7 +2114,7 @@ get_causal_ctx_with_all_ids_test() ->
     erase('$beamtalk_parent_span_id').
 
 %%% ============================================================================
-%%% BT-1958: Propagated context tests
+%%% Propagated context tests
 %%% ============================================================================
 
 get_propagated_ctx_includes_trace_context_test() ->
@@ -2140,7 +2140,7 @@ get_propagated_ctx_no_causal_when_unset_test() ->
     ?assertEqual(false, maps:is_key(causal, Ctx)).
 
 %%% ============================================================================
-%%% BT-1958: restore_propagated_ctx tests
+%%% restore_propagated_ctx tests
 %%% ============================================================================
 
 restore_propagated_ctx_restores_trace_context_test() ->
@@ -2204,7 +2204,7 @@ restore_propagated_ctx_non_map_is_noop_test() ->
     ok.
 
 %%% ============================================================================
-%%% BT-1958: sync_send/4 invalid timeout test
+%%% sync_send/4 invalid timeout test
 %%% ============================================================================
 
 sync_send_4_invalid_timeout_raises_type_error_test() ->
@@ -2223,7 +2223,7 @@ sync_send_4_invalid_timeout_raises_type_error_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1958: sync_send delegate raises signal error
+%%% sync_send delegate raises signal error
 %%% ============================================================================
 
 sync_send_delegate_raises_signal_error_test() ->
@@ -2238,7 +2238,7 @@ sync_send_delegate_raises_signal_error_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1958: async_send delegate rejects future
+%%% async_send delegate rejects future
 %%% ============================================================================
 
 async_send_delegate_rejects_future_test() ->
@@ -2252,7 +2252,7 @@ async_send_delegate_rejects_future_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
-%%% BT-1958: start_link/3 named registration test
+%%% start_link/3 named registration test
 %%% ============================================================================
 
 start_link_3_named_registration_test() ->
@@ -2265,7 +2265,7 @@ start_link_3_named_registration_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% BT-1958: start_link_supervised/3 test
+%%% start_link_supervised/3 test
 %%% ============================================================================
 
 start_link_supervised_test() ->
@@ -2276,7 +2276,7 @@ start_link_supervised_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% BT-1958: dispatch/4 delegate returns signal error
+%%% dispatch/4 delegate returns signal error
 %%% ============================================================================
 
 dispatch_delegate_returns_signal_error_test() ->
@@ -2289,7 +2289,7 @@ dispatch_delegate_returns_signal_error_test() ->
     ?assertMatch({error, #beamtalk_error{kind = signal}, _}, Result).
 
 %%% ============================================================================
-%%% BT-1958: dispatch/4 perform:withArguments:timeout: tests
+%%% dispatch/4 perform:withArguments:timeout: tests
 %%% ============================================================================
 
 dispatch_perform_with_timeout_valid_test() ->
@@ -2315,7 +2315,7 @@ dispatch_perform_with_timeout_invalid_args_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
-%%% BT-1958: handle_cast fire-and-forget error path
+%%% handle_cast fire-and-forget error path
 %%% ============================================================================
 
 handle_cast_fire_and_forget_error_does_not_crash_actor_test() ->
@@ -2331,7 +2331,7 @@ handle_cast_fire_and_forget_error_does_not_crash_actor_test() ->
     gen_server:stop(Actor).
 
 %%% ============================================================================
-%%% BT-1958: handle_call/handle_cast with propagated context wire format
+%%% handle_call/handle_cast with propagated context wire format
 %%% ============================================================================
 
 handle_call_with_propagated_context_test() ->
@@ -2363,7 +2363,7 @@ handle_cast_fire_and_forget_with_propagated_context_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
-%%% BT-1958: safe_spawn error and ignore paths
+%%% safe_spawn error and ignore paths
 %%% ============================================================================
 
 safe_spawn_error_from_start_link_test() ->
@@ -2391,7 +2391,7 @@ safe_spawn_restores_trap_exit_on_error_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1958: make_self class_mod handling
+%%% make_self class_mod handling
 %%% ============================================================================
 
 make_self_with_class_mod_test() ->
@@ -2414,14 +2414,14 @@ make_self_without_class_mod_test() ->
     ?assertEqual(undefined, Self#beamtalk_object.class_mod).
 
 %%% ============================================================================
-%%% BT-1958: format_method_error_message coverage (via dispatch)
+%%% format_method_error_message coverage (via dispatch)
 %%% ============================================================================
 
 method_badarg_error_test() ->
     %% Trigger a badarg error in a method to cover format_method_error_message badarg path
     {ok, Actor} = test_badarg_actor:start_link(),
     Result = gen_server:call(Actor, {triggerBadarg, []}),
-    %% BT-2704: the runtime-only method path now classifies the kind (badarg ->
+    %% the runtime-only method path now classifies the kind (badarg ->
     %% argument_error) the same as the compiled path, keeping its MFA message.
     ?assertMatch(
         {error, #beamtalk_error{kind = argument_error, selector = triggerBadarg}}, Result
@@ -2435,7 +2435,7 @@ method_badarith_error_test() ->
     %% Trigger a badarith error to cover format_method_error_message badarith path
     {ok, Actor} = test_badarg_actor:start_link(),
     Result = gen_server:call(Actor, {triggerBadarith, []}),
-    %% BT-2704: badarith -> type_error, matching the compiled path.
+    %% badarith -> type_error, matching the compiled path.
     ?assertMatch(
         {error, #beamtalk_error{kind = type_error, selector = triggerBadarith}}, Result
     ),
@@ -2456,7 +2456,7 @@ method_function_clause_error_test() ->
     %% Trigger a function_clause error to cover that path
     {ok, Actor} = test_badarg_actor:start_link(),
     Result = gen_server:call(Actor, {triggerFunctionClause, []}),
-    %% BT-2704: function_clause is an internal bug -> internal_error.
+    %% function_clause is an internal bug -> internal_error.
     ?assertMatch(
         {error, #beamtalk_error{kind = internal_error, selector = triggerFunctionClause}}, Result
     ),
@@ -2465,7 +2465,7 @@ method_function_clause_error_test() ->
     gen_server:stop(Actor).
 
 %%% ============================================================================
-%%% BT-1958: respondsTo: for delegate selector
+%%% respondsTo: for delegate selector
 %%% ============================================================================
 
 respondsTo_delegate_test() ->
@@ -2475,7 +2475,7 @@ respondsTo_delegate_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
-%%% BT-1958: Concurrent async error + future watcher tests
+%%% Concurrent async error + future watcher tests
 %%% ============================================================================
 
 async_error_in_method_rejects_future_test() ->
@@ -2492,7 +2492,7 @@ async_error_in_method_rejects_future_test() ->
     gen_server:stop(Actor).
 
 %%% ============================================================================
-%%% BT-1958: handle_call with unknown message format
+%%% handle_call with unknown message format
 %%% ============================================================================
 
 handle_call_unknown_format_returns_dnu_error_test() ->
@@ -2505,7 +2505,7 @@ handle_call_unknown_format_returns_dnu_error_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
-%%% BT-1958: terminate/2 with various reasons
+%%% terminate/2 with various reasons
 %%% ============================================================================
 
 terminate_with_different_reasons_test() ->
@@ -2520,7 +2520,7 @@ terminate_with_different_reasons_test() ->
     ?assertEqual(ok, beamtalk_actor:terminate(killed, State)).
 
 %%% ============================================================================
-%%% BT-1958: code_change/3 delegates to hot_reload
+%%% code_change/3 delegates to hot_reload
 %%% ============================================================================
 
 code_change_preserves_state_unit_test() ->
@@ -2533,7 +2533,7 @@ code_change_preserves_state_unit_test() ->
     ?assertEqual(State, NewState).
 
 %%% ============================================================================
-%%% BT-1958: sync_send/3 exit catch-all paths
+%%% sync_send/3 exit catch-all paths
 %%% ============================================================================
 
 sync_send_to_shutdown_actor_raises_actor_dead_test() ->
@@ -2548,7 +2548,7 @@ sync_send_to_shutdown_actor_raises_actor_dead_test() ->
     ).
 
 %%% ============================================================================
-%%% BT-1958: lookup_class returns unknown for non-actor pids
+%%% lookup_class returns unknown for non-actor pids
 %%% ============================================================================
 
 lookup_class_unknown_for_non_actor_test() ->
@@ -2567,7 +2567,7 @@ lookup_class_unknown_for_non_actor_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1958: sync_send pid returns the raw PID
+%%% sync_send pid returns the raw PID
 %%% ============================================================================
 
 sync_send_pid_returns_raw_pid_test() ->
@@ -2577,7 +2577,7 @@ sync_send_pid_returns_raw_pid_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
-%%% BT-1958: async_send onExit: with actor that's already dead
+%%% async_send onExit: with actor that's already dead
 %%% ============================================================================
 
 async_send_onExit_already_dead_actor_test() ->
@@ -2597,7 +2597,7 @@ async_send_onExit_already_dead_actor_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1958: sync_send onExit: fires block on death
+%%% sync_send onExit: fires block on death
 %%% ============================================================================
 
 sync_send_onExit_with_kill_reason_test() ->
@@ -2613,7 +2613,7 @@ sync_send_onExit_with_kill_reason_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1987 / ADR 0079: Named-registration intrinsics
+%%% ADR 0079: Named-registration intrinsics
 %%% ============================================================================
 %%%
 %%% Use per-test name suffixes to avoid cross-test collisions. The suffix
@@ -2911,7 +2911,7 @@ actor_carries_process_dict_marker_test() ->
     gen_server:stop(Counter).
 
 %%% ============================================================================
-%%% BT-1988 / ADR 0079 Phase 2: stdlib FFI shims
+%%% ADR 0079 Phase 2: stdlib FFI shims
 %%%
 %%% These exercise the Erlang side of the actor.bt named-registration API —
 %%% `doSpawnAs/2`, `doSpawnWith/3`, `registerAs/2`, `unregister/1`,
@@ -3056,15 +3056,15 @@ dummy_class_self() ->
     }.
 
 %%% ============================================================================
-%%% BT-3072: doSpawn/1, doSpawnWith/2 — actor.bt's lifted `spawn`/`spawnWith:`
+%%% doSpawn/1, doSpawnWith/2 — actor.bt's lifted `spawn`/`spawnWith:`
 %%% bodies (`(Erlang beamtalk_actor) doSpawn: self` / `doSpawnWith: self
 %%% args: initArgs`). `class_send/3`'s explicit `spawn`/`spawnWith:` clauses
 %%% still route every normal dispatch path to the compiled per-class
-%%% `spawn/0` export directly (see beamtalk_class_dispatch.erl's BT-3072
+%%% `spawn/0` export directly (see beamtalk_class_dispatch.erl's matching
 %%% comment), so these functions are unreachable via ordinary Beamtalk sends
 %%% today — exercised directly here rather than left as untested new code.
 %%% Beamtalk-side round-trip (dynamic dispatch, `perform:`, abstract-class
-%%% rejection, the BT-3047 foreign-block shape) is covered by
+%%% rejection, the foreign-block shape) is covered by
 %%% `stdlib/test/actor_spawn_dynamic_dispatch_test.bt`.
 %%% ============================================================================
 
@@ -3120,7 +3120,7 @@ ensure_counter_class_pid() ->
     end.
 
 %%% ============================================================================
-%%% BT-1979: Additional actor system coverage
+%%% Additional actor system coverage
 %%% ============================================================================
 
 %%% maybe_execute_telemetry/3 conditional paths
@@ -3502,7 +3502,7 @@ cast_send_to_non_actor_pid_ok_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-1990 / ADR 0079 Phase 3: name-resolving proxy dispatch
+%%% ADR 0079 Phase 3: name-resolving proxy dispatch
 %%%
 %%% These tests exercise the `{registered, Name}` identity slot through the
 %%% send-site (`sync_send/3,4`, `async_send/4`, `cast_send/3`) and through the
@@ -3794,7 +3794,7 @@ bt1990_wait_until_unregistered_loop(Name, Deadline) ->
             end
     end.
 
-%%% BT-2717: `__local__` threading temporaries must not leak into persisted
+%%% `__local__` threading temporaries must not leak into persisted
 %%% actor state or watch-notification changed slots.
 %%%
 %%% When an actor method threads an outer local through a desugared control-flow
@@ -3863,10 +3863,10 @@ bt2717_watch_teardown(_) ->
     ok.
 
 %%====================================================================
-%% BT-3090: pid_class_name/1 and registered_name_for_pid/1 — consolidated
+%% pid_class_name/1 and registered_name_for_pid/1 — consolidated
 %% sentinel policy.
 %%
-%% Before BT-3090, `beamtalk_actor:pid_class_name/1` and
+%% Previously, `beamtalk_actor:pid_class_name/1` and
 %% `beamtalk_actor:registered_name_for_pid/1` returned Erlang's `undefined`
 %% on a miss, while the (now-deleted) copies in `beamtalk_inspector` and
 %% `beamtalk_process_navigation` returned Beamtalk's `nil`. This pins the

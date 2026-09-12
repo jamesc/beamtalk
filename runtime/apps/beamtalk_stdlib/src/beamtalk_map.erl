@@ -8,7 +8,7 @@
 -moduledoc """
 Runtime helper operations for Dictionary (Erlang maps).
 
-BT-418: Complex Dictionary operations that cannot be inlined as
+Complex Dictionary operations that cannot be inlined as
 direct BIF calls in generated Core Erlang. Called from compiled
 stdlib module bt@stdlib@dictionary.
 
@@ -41,14 +41,14 @@ do_with_key(Map, Block) when is_function(Block, 2) ->
 -doc "Test if the dictionary contains the given value.".
 -spec includes(map(), term()) -> boolean().
 includes(Map, Value) ->
-    %% BT-2997: this searches *values*, which is a linear scan, so it honours an
+    %% This searches *values*, which is a linear scan, so it honours an
     %% `equals:` override. Dictionary *keys* are Erlang map keys and cannot —
     %% their identity is decided in the VM.
     beamtalk_equality:member(Value, maps:values(Map)).
 
 -doc """
 Format a dictionary as Beamtalk syntax: #{key => value, ...}
-BT-535: Used by Dictionary>>printString and REPL display.
+Used by Dictionary>>printString and REPL display.
 """.
 -spec print_string(map()) -> binary().
 print_string(Map) ->

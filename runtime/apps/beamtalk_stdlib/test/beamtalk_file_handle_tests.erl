@@ -6,11 +6,11 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_file_handle module (BT-1173, BT-1762, BT-2975).
+EUnit tests for beamtalk_file_handle module.
 
 Tests dispatch/3 and has_method/1 for FileHandle instances, plus the
-incremental I/O surface (read:/write:/seek:/sync/close/isOpen) added in
-BT-2975. dispatch/3 routes FileHandle selectors to this module and
+incremental I/O surface (read:/write:/seek:/sync/close/isOpen).
+dispatch/3 routes FileHandle selectors to this module and
 delegates Object protocol selectors to beamtalk_object_ops. Unknown
 selectors raise a structured does_not_understand error.
 """.
@@ -80,7 +80,7 @@ has_method_readLine_test() ->
     ?assertNot(beamtalk_file_handle:has_method('readLine')).
 
 has_method_io_selectors_test() ->
-    %% BT-2975: the incremental I/O surface answers respondsTo:.
+    %% The incremental I/O surface answers respondsTo:.
     [
         ?assert(beamtalk_file_handle:has_method(S))
      || S <- [
@@ -119,8 +119,8 @@ dispatch_printString_returns_binary_test() ->
 
 %%% ============================================================================
 %%% dispatch/3 — unknown selector
-%%% BT-1762: dispatch/3 no longer has a catch-all clause.
-%%% Unknown selectors are now handled by the compiled bt@stdlib@file_handle
+%%% dispatch/3 has no catch-all clause.
+%%% Unknown selectors are handled by the compiled bt@stdlib@file_handle
 %%% module via Object inheritance (dispatched through value_type_send).
 %%% ============================================================================
 
@@ -133,7 +133,7 @@ dispatch_unknown_selector_raises_test() ->
     end).
 
 %%% ============================================================================
-%%% Incremental I/O (BT-2975)
+%%% Incremental I/O
 %%% ============================================================================
 
 read_returns_requested_bytes_test() ->
@@ -194,7 +194,7 @@ read_write_mode_overwrites_in_place_test() ->
     end).
 
 %%% ============================================================================
-%%% close / isOpen (BT-2975)
+%%% close / isOpen
 %%% ============================================================================
 
 is_open_is_true_before_close_test() ->
@@ -224,7 +224,7 @@ closed_handle_shares_state_across_copies_test() ->
     end).
 
 %%% ============================================================================
-%%% Closed-handle and wrong-mode errors return Results, never crashes (BT-2975)
+%%% Closed-handle and wrong-mode errors return Results, never crashes
 %%% ============================================================================
 
 read_on_closed_handle_returns_error_test() ->
@@ -262,7 +262,7 @@ read_on_append_only_handle_returns_error_test() ->
     end).
 
 dispatch_write_line_routes_to_handle_test() ->
-    %% BT-2975: 'writeLine:' is a real selector now — on a read-only handle it
+    %% 'writeLine:' is a real selector — on a read-only handle it
     %% comes back as a structured error Result, not a does_not_understand raise.
     with_temp_handle(<<"data">>, fun(Handle) ->
         ?assert(is_error_result(beamtalk_file_handle:dispatch('writeLine:', [<<"text">>], Handle)))
@@ -274,7 +274,7 @@ dispatch_read_routes_to_handle_test() ->
     end).
 
 %%% ============================================================================
-%%% Type errors on non-handle receivers (BT-2975)
+%%% Type errors on non-handle receivers
 %%% ============================================================================
 
 read_on_non_handle_raises_type_error_test() ->
@@ -300,7 +300,7 @@ write_with_non_binary_raises_type_error_test() ->
     end).
 
 lines_on_closed_handle_raises_test() ->
-    %% BT-2975: `lines` returns a Stream, not a Result, so a closed handle
+    %% `lines` returns a Stream, not a Result, so a closed handle
     %% raises rather than handing back a silently empty stream.
     with_temp_handle(<<"a\nb\n">>, fun(Handle) ->
         beamtalk_file_handle:close(Handle),
@@ -311,7 +311,7 @@ lines_on_closed_handle_raises_test() ->
     end).
 
 lines_on_write_only_handle_raises_test() ->
-    %% BT-2975: reading a write-only descriptor crashes the file_io_server, so
+    %% Reading a write-only descriptor crashes the file_io_server, so
     %% every later write on the handle fails silently. `lines` must refuse
     %% before touching it — and the handle must survive intact.
     with_temp_handle(<<>>, append, fun(Handle) ->

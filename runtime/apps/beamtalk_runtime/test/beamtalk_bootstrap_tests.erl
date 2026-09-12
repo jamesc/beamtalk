@@ -8,7 +8,7 @@
 -moduledoc """
 Bootstrap tests.
 
-BT-446: Bootstrap only starts pg now. Class registration is done by
+Bootstrap only starts pg now. Class registration is done by
 compiled stdlib modules. These tests verify the bootstrap + stdlib
 flow produces the correct class hierarchy.
 """.
@@ -66,7 +66,7 @@ teardown(_) ->
     ok.
 
 %%====================================================================
-%% Bootstrap Tests (BT-446)
+%% Bootstrap Tests
 %%====================================================================
 
 %% Bootstrap only starts pg — no class registration
@@ -81,7 +81,7 @@ bootstrap_starts_pg_test_() ->
     end}.
 
 %%====================================================================
-%% Stdlib Class Registration Tests (BT-446)
+%% Stdlib Class Registration Tests
 %%
 %% These tests verify that compiled stdlib modules correctly register
 %% the three foundational classes. They call beamtalk_stdlib:init/0
@@ -229,13 +229,13 @@ actor_methods_test_() ->
 
                 ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
 
-                %% spawn/spawnWith: are class-side methods (BT-1056)
-                %% BT-3071: new/new: are back on Actor's class methods —
+                %% spawn/spawnWith: are class-side methods
+                %% new/new: are back on Actor's class methods —
                 %% lifted from the codegen-injected error stubs into real,
                 %% documented `class sealed new` / `new:` declarations in
                 %% actor.bt. The compiled body still always raises
                 %% instantiation_error, and `check_actor_new_usage`
-                %% (BT-563/BT-1524's own hard compile-time error) still
+                %% (its own hard compile-time error) still
                 %% rejects `ActorSubclass new` before this method is ever
                 %% reached — see
                 %% semantic_analysis::tests::test_actor_new_error_in_standalone_method

@@ -106,7 +106,7 @@ run_one({value, EvalMod, Expected, VarName, Location}, Bindings) ->
         Class:Reason:Stack ->
             {Bindings, {crash, Location, Class, Reason, Stack}}
     end;
-%% Wildcard value assertion: use matches_pattern/2 (BT-502)
+%% Wildcard value assertion: use matches_pattern/2
 run_one({value_wildcard, EvalMod, Expected, VarName, Location}, Bindings) ->
     try EvalMod:eval(Bindings) of
         {Value, RawBindings} ->
@@ -193,12 +193,12 @@ Format a Beamtalk runtime value to its display binary string.
 Mirrors the REPL's term_to_json formatting so that expected values
 written as strings (like E2E tests) match correctly.
 
-BT-3082: the float, pid, `#beamtalk_object{}`, and `{beamtalk_supervisor,
+The float, pid, `#beamtalk_object{}`, and `{beamtalk_supervisor,
 ...}` cases delegate to `beamtalk_primitive`'s canonical renderers
-(`print_string/1`, `pid_label/1`) instead of each carrying its own drifted
-copy — this used to unconditionally render every pid as `#Actor<...>`,
-reporting a dead pid as alive, and re-derived the `#beamtalk_object{}`
-class/Metaclass branch with raw `element/2` calls instead of the record.
+(`print_string/1`, `pid_label/1`) rather than each carrying its own copy —
+`pid_label/1` distinguishes a dead pid from a live one, and
+`#beamtalk_object{}` is matched via the record rather than raw `element/2`
+calls.
 """.
 -spec format_result(term()) -> binary().
 format_result(V) when is_integer(V) ->
@@ -224,12 +224,12 @@ format_result(V) when
     tuple_size(V) >= 2,
     element(1, V) =:= beamtalk_object
 ->
-    %% BT-412 / ADR 0036 / ADR 0094: class objects, Metaclass objects, and
+    %% ADR 0036 / ADR 0094: class objects, Metaclass objects, and
     %% live actor instances — beamtalk_primitive:print_string/1 pattern-matches
     %% the #beamtalk_object{} record directly and handles all three shapes.
     beamtalk_primitive:print_string(V);
 format_result(V) when is_map(V) ->
-    %% BT-535: Use print_string for Beamtalk display format
+    %% Use print_string for Beamtalk display format
     beamtalk_primitive:print_string(V);
 format_result(V) when is_list(V) ->
     case V of
@@ -247,14 +247,14 @@ format_result({beamtalk_supervisor, _, _, _} = Sup) ->
     %% Supervisor(Class, pid) / DynamicSupervisor(Class, pid) by ancestry.
     beamtalk_primitive:print_string(Sup);
 format_result({beamtalk_future, _} = Future) ->
-    %% BT-840: Auto-await tagged futures before formatting.
+    %% Auto-await tagged futures before formatting.
     Value = beamtalk_future:await(Future),
     format_result(Value);
 format_result(V) ->
     iolist_to_binary(io_lib:format("~p", [V])).
 
 %% ──────────────────────────────────────────────────────────────────────────
-%% matches_pattern/2 — glob-style wildcard matching (BT-502)
+%% matches_pattern/2 — glob-style wildcard matching
 %% ──────────────────────────────────────────────────────────────────────────
 
 -doc """

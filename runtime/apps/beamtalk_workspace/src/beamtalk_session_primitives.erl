@@ -3,7 +3,7 @@
 
 -module(beamtalk_session_primitives).
 
-%% `BindingsView size` (ADR 0101 / BT-2731) delegates to a local `size/1`,
+%% `BindingsView size` (ADR 0101) delegates to a local `size/1`,
 %% which shadows the auto-imported `erlang:size/1`. The module never calls the
 %% BIF unqualified, so drop the auto-import to keep the local name unambiguous.
 -compile({no_auto_import, [size/1]}).
@@ -12,7 +12,7 @@
 
 -moduledoc """
 Runtime primitives backing the `Session` and `BindingsView` stdlib classes
-(ADR 0081 Phase 3, BT-2366).
+(ADR 0081 Phase 3).
 
 `Session` is not an actor; its values are tagged maps minted by the factory
 primitives here (the `FileHandle`/`Port` representation pattern):
@@ -153,7 +153,7 @@ id(Session) ->
 
 -doc """
 Return a `Session` value for every live shell, backing `Workspace sessions`
-(ADR 0081 Phase 7, BT-2368).
+(ADR 0081 Phase 7).
 
 Enumerates live shells from `beamtalk_session_sup` (the same live-shell source as
 the `sessions` protocol op, covering CLI, WebSocket, and MCP) and mints one
@@ -186,7 +186,7 @@ Return a `BindingsView` over the named session's locals map.
 
 The view records the target session's id and PID so cross-session writes can be
 rejected.  A read against this view (`at/2`, `keys/1`, …) goes to the
-target shell's `get_bindings` (its locals-only map after BT-2365).
+target shell's `get_bindings` (its locals-only map after resolution).
 """.
 -spec bindings(session() | term()) -> bindings_view().
 bindings(Session) ->

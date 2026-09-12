@@ -18,7 +18,7 @@ Start the Beamtalk runtime application, initializing ETS tables and supervisor t
 """.
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
-    %% BT-1424: Configure SASL before it starts (started as a beamtalk_workspace dep).
+    %% Configure SASL before it starts (started as a beamtalk_workspace dep).
     %% Suppress the legacy SASL error logger — reports flow through the standard
     %% logger framework (OTP 21+) and are captured by the workspace file handler.
     application:set_env(sasl, sasl_error_logger, false),
@@ -26,28 +26,28 @@ start(_StartType, _StartArgs) ->
     %% Initialize extension registry ETS tables
     beamtalk_extensions:init(),
 
-    %% BT-510: Create class hierarchy ETS table at app startup so it's owned
+    %% Create class hierarchy ETS table at app startup so it's owned
     %% by the application master (survives individual class process crashes).
     beamtalk_class_registry:ensure_hierarchy_table(),
 
-    %% BT-1285: Create class module ETS table at app startup for the same
+    %% Create class module ETS table at app startup for the same
     %% reason — owned by the application master, not a transient class process.
     beamtalk_class_registry:ensure_module_table(),
 
-    %% BT-1768: Create pid reverse index ETS table at app startup so it's owned
+    %% Create pid reverse index ETS table at app startup so it's owned
     %% by the application master (survives individual class process crashes).
     beamtalk_class_registry:ensure_pid_table(),
 
-    %% BT-2384: Create the fast loaded-class name index at app startup so the
+    %% Create the fast loaded-class name index at app startup so the
     %% ADR 0087 xref miss-policy can read the loaded-class set from ETS rather
     %% than walking the registry with one gen_server:call per class. Owned by
     %% the application master so it survives class process crashes.
     beamtalk_class_registry:ensure_loaded_classes_table(),
 
-    %% BT-737: Create collision warnings ETS table at app startup.
+    %% Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 
-    %% BT-2736: Create the backing-module reverse index ETS table at app
+    %% Create the backing-module reverse index ETS table at app
     %% startup for the same reason as the loaded-class index above — owned by
     %% the application master so it survives class process crashes.
     beamtalk_class_registry:ensure_backing_module_index_table(),
@@ -59,7 +59,7 @@ start(_StartType, _StartArgs) ->
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of
         {ok, _} = Ok ->
-            %% BT-1888: Now that the supervisor is alive, retroactively set the
+            %% Now that the supervisor is alive, retroactively set the
             %% heir on ETS tables created above (before the supervisor existed).
             %% This ensures the tables survive even if the application controller
             %% process is replaced.
@@ -68,10 +68,10 @@ start(_StartType, _StartArgs) ->
             beamtalk_class_registry:ensure_class_warnings_table(),
             beamtalk_class_registry:ensure_pending_errors_table(),
             beamtalk_class_registry:ensure_backing_module_index_table(),
-            %% BT-2222: Same retroactive heir set for the unified class metadata
+            %% Same retroactive heir set for the unified class metadata
             %% table (created at line 31 before the supervisor existed).
             beamtalk_class_registry:ensure_hierarchy_table(),
-            %% ADR 0036 Phase 1 (BT-802): Post-bootstrap self-grounding assertion.
+            %% ADR 0036 Phase 1: Post-bootstrap self-grounding assertion.
             %% Validates that Metaclass class class == Metaclass class holds
             %% after bootstrap. This is a soft assertion (logs on failure, does not crash).
             verify_metaclass_self_grounding(),
@@ -94,7 +94,7 @@ verify_metaclass_self_grounding() ->
             %% Metaclass not registered — bootstrap may not have run yet.
             ok;
         MetaclassPid ->
-            %% BT-3054: deliberately module_name/1, not module_name_safe/1 —
+            %% Deliberately module_name/1, not module_name_safe/1 —
             %% this runs during application startup, verifying an invariant
             %% right after bootstrap. beamtalk_class_metadata's ETS table may
             %% not be populated yet at this exact point (the `undefined ->

@@ -14,10 +14,11 @@ the handle/4 operation paths that require no running actor registry:
 - inspect/kill ops with invalid or unknown PID strings → error JSON
 - interrupt op with a dead SessionPid → noproc catch → ok status JSON
 
-Plus the term-returning `handle_term/4` (BT-2399): the inspect success path
+Plus the term-returning `handle_term/4`: the inspect success path
 through a live tagged-map actor must return an `{inspect, FieldMap}` term with
 internal fields filtered — exercising the introspection inside the `inspect`
-`try` body (the body whose exception-safety the BT-2399 fix restored).
+`try` body (the body whose exception-safety was restored by moving it back
+inside the `try`).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -190,11 +191,11 @@ handle_interrupt_dead_session_catches_noproc_test() ->
 %%====================================================================
 
 handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
-    %% BT-2399: the term-returning inspect path must return an {inspect, FieldMap}
+    %% The term-returning inspect path must return an {inspect, FieldMap}
     %% *term* (not JSON) for a live tagged-map actor, with internal bookkeeping
     %% keys filtered out. This drives the whole introspection body of the inspect
     %% `try` (is_tagged → field_names → maps:with) to its normal completion — the
-    %% body the BT-2399 fix moved back inside the `try` so any future throw there
+    %% body that was moved back inside the `try` so any future throw there
     %% is caught rather than escaping the op handler.
     stop_registry_if_running(),
     {ok, RegistryPid} = gen_server:start_link(
