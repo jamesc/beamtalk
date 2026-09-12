@@ -314,7 +314,7 @@ impl CoreErlangGenerator {
                 });
             }
 
-            // BT-3488: a value-type `self.field := ...` write this loop cannot
+            // A value-type `self.field := ...` write this loop cannot
             // thread out — here, one nested inside a conditional branch (or
             // any other nested block) rather than being a bare top-level
             // statement, the only shape `plan.threads_value_self` carries.
@@ -398,7 +398,7 @@ impl CoreErlangGenerator {
     /// [`Self::lower_field_assignment_bind`] verbatim — its own hybrid bypass
     /// and `reject_class_var_field_assignment` guard apply unchanged.
     ///
-    /// Returns the assigned value's own temp var — BT-3493's
+    /// Returns the assigned value's own temp var —
     /// `lower_direct_var_update_in_loop_bind` needs it (a field write nested
     /// inside a hybrid/direct-params loop's own local-var assignment, `r :=
     /// (self.x := ...)`, must alias `r` to the SAME value); this statement's
@@ -680,7 +680,7 @@ impl CoreErlangGenerator {
                 });
             }
 
-            // BT-3488: the `Foldl*` half of the same check the Letrec body
+            // The `Foldl*` half of the same check the Letrec body
             // makes — and strictly broader there, since `threads_value_self`
             // is never set for a `Foldl*` plan (a fold accumulator has no
             // trailing `Self` slot), so EVERY value-type field write in this
