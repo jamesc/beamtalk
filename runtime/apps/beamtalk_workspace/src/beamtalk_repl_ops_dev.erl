@@ -8,7 +8,7 @@
 -moduledoc """
 Op handlers for complete, describe, and show-codegen operations.
 
-Extracted from beamtalk_repl_server (BT-705).
+Extracted from beamtalk_repl_server.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -88,20 +88,20 @@ Extracted from beamtalk_repl_server (BT-705).
 -doc """
 Handle complete/describe/show-codegen/methods/inherited-methods/list-classes/
 test/test-all/erlang-help/erlang-complete ops for the WebSocket transport —
-encodes the term result to JSON at the edge (BT-2402).
+encodes the term result to JSON at the edge.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for the developer read-surface ops (BT-2402, ADR 0085).
+Term-returning handler for the developer read-surface ops (ADR 0085).
 
 Returns `{completions, [binary()]}`, `{docs, binary()}`,
 `{codegen, CoreErlang, Warnings}`, `{methods, Methods, StateVars}`,
-`{inherited_methods, Methods}` (BT-3478), `{class_list, [ClassInfo]}`,
+`{inherited_methods, Methods}`, `{class_list, [ClassInfo]}`,
 `{test_results, TestResult}`, `{describe, Ops, Versions}`, `{value, JsonValue}`
-(`list-tests`, `reload-findings` — BT-2801), or `{error, #beamtalk_error{}}` —
+(`list-tests`, `reload-findings`), or `{error, #beamtalk_error{}}` —
 no JSON in this path.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
@@ -607,7 +607,7 @@ handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
     {describe, Ops, Versions}.
 
 -doc """
-Handle show-codegen for a loaded class method (BT-1236).
+Handle show-codegen for a loaded class method.
 
 Looks up the class in the runtime, validates the selector (if given),
 retrieves the authoritative live source from workspace metadata (falling back
@@ -721,7 +721,7 @@ compile_class_source(ClassBin, ClassAtom, ClassPid) ->
 -doc """
 Validate that SelectorBin exists on the class (instance-side or class-side).
 Returns ok when selector is undefined (no validation needed) or when found.
-Returns `{error, #beamtalk_error{}}` when the selector is unknown (BT-2402: a
+Returns `{error, #beamtalk_error{}}` when the selector is unknown (a
 structured error term rather than a pre-encoded JSON binary).
 """.
 -spec validate_selector_if_present(
@@ -889,7 +889,7 @@ Live class/protocol name candidates matching `Prefix` (a raw prefix match,
 `<<>>` to `[]` for the no-receiver top-level case).
 
 Factored out of `get_completions/1` so `type_annotation_completions/2`
-(BT-2918) can offer the same class/protocol candidates it already offered
+can offer the same class/protocol candidates it already offered
 before aliases were considered — filtering out cross-package `internal`
 classes (ADR 0071 Phase 5) exactly as `get_completions/1` does.
 """.
@@ -930,7 +930,7 @@ prefix_match(Name, Prefix) ->
 
 -doc """
 Context-aware completion: parses the line to find a receiver and returns
-matching method selectors (BT-783).  Falls back to get_completions/1 when
+matching method selectors.  Falls back to get_completions/1 when
 no receiver is detected.  Wrapper with no binding context or live alias names.
 """.
 -spec get_context_completions(binary()) -> [binary()].
@@ -944,13 +944,13 @@ get_context_completions(Line, Bindings) ->
 
 -doc """
 Context-aware completion with session bindings and this session's live type
-alias names (BT-2918).
+alias names.
 
 In type-annotation position (immediately after `::`) this offers class/
 protocol names plus `AliasNames` — the live-REPL counterpart to the static
-LSP path's `add_alias_name_completions` (`completion_provider.rs`, BT-2901).
+LSP path's `add_alias_name_completions` (`completion_provider.rs`).
 `AliasNames` is the session's carried-over + current-turn `type Name = ...`
-declarations (ADR 0108 Phase 8, BT-2898/BT-2902), threaded in by the
+declarations (ADR 0108 Phase 8), threaded in by the
 `complete` op handler via `get_session_alias_names/1`. Everywhere else this
 behaves exactly like `get_context_completions/2`.
 """.
@@ -992,7 +992,7 @@ get_context_completions(Line, Bindings, AliasNames) when is_binary(Line) ->
 -doc """
 Detect type-annotation position (immediately after `::`) from a
 `parse_receiver_and_prefix/1` result and extract the partial type name typed
-so far (BT-2918).
+so far.
 
 `::` is built from identifier chars (`is_identifier_char/1` treats `:` as one,
 so keyword selectors like `ifTrue:` complete as a unit) so it surfaces in a
@@ -1043,7 +1043,7 @@ ends_with_double_colon(Bin) ->
     byte_size(Bin) >= 2 andalso binary:part(Bin, byte_size(Bin) - 2, 2) =:= <<"::">>.
 
 -doc """
-Type-annotation-position completions (BT-2918): class/protocol names (the
+Type-annotation-position completions: class/protocol names (the
 same live registry `class_name_completions/1` already offers) plus this
 session's live type alias names, both filtered by the partial type name
 typed so far. Deduplicated and sorted via `lists:usort/1` — a class and an
@@ -1055,7 +1055,7 @@ type_annotation_completions(Prefix, AliasNames) ->
     lists:usort(class_name_completions(Prefix) ++ AliasCompletions).
 
 -doc """
-Compute parse-only diagnostics for an editor buffer (BT-2556).
+Compute parse-only diagnostics for an editor buffer.
 
 `Code` is the full buffer source; `Mode` selects the parse grammar
 (`<<"expression">>` for a top-level script, `<<"method">>` for a bare method
@@ -1087,13 +1087,13 @@ diagnostics_for(_, _) ->
     [].
 
 -doc """
-Normalise the `diagnostics` `mode` param at the Erlang op boundary (BT-2572).
+Normalise the `diagnostics` `mode` param at the Erlang op boundary.
 
 Mirrors the Elixir `BtAttach.Facade` (`invoke(:diagnostics, ...)`): a binary
 `mode` of <<"method">> is preserved; any other binary (e.g. <<"foo">>) is
 normalised to the safe default <<"expression">>. A non-binary `mode` is passed
 through unchanged so `diagnostics_for/2`'s catch-all still degrades it to `[]`
-(the existing BT-2569 behaviour) rather than silently treating it as expression
+(the existing behaviour) rather than silently treating it as expression
 mode.
 """.
 -spec normalize_diagnostics_mode(term()) -> term().
@@ -1105,7 +1105,7 @@ normalize_diagnostics_mode(Mode) ->
     Mode.
 
 -doc """
-Resolve hover documentation for the hovered token (BT-2555).
+Resolve hover documentation for the hovered token.
 
 `Code` is the editor line up to and including the hovered token; we reuse
 `parse_receiver_and_prefix/1` (the completion parser) so the trailing token is
@@ -1190,7 +1190,7 @@ Parse the line up to the cursor into a receiver and prefix.
 Returns:
   {undefined, Prefix}                — no receiver (bare prefix, e.g. <<"s">>)
   {ReceiverToken, Prefix}            — single-token receiver (e.g. <<"Integer">>, <<"42">>)
-  {expression, ReceiverExpr, Prefix} — multi-token receiver expression (e.g. <<"\"hello\" size">>) (BT-1006)
+  {expression, ReceiverExpr, Prefix} — multi-token receiver expression (e.g. <<"\"hello\" size">>)
 
 Examples:
   <<"Integer s">>       → {<<"Integer">>, <<"s">>}
@@ -1363,7 +1363,7 @@ has_invalid_chain_chars(T) ->
 
 -doc """
 Parse a whitespace-separated expression into a receiver token and a list
-of mixed unary/binary hops (BT-1071).
+of mixed unary/binary hops.
 
 Extends `tokenise_send_chain/1` to handle binary message sends mid-chain:
 each binary operator token consumes the following token as its argument.
@@ -1461,7 +1461,7 @@ parse_binary_hops([Token | Rest]) ->
     end.
 
 -doc """
-Walk an instance-side send chain containing mixed unary and binary hops (BT-1071).
+Walk an instance-side send chain containing mixed unary and binary hops.
 
 For each `{unary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
 For each `{binary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
@@ -1493,7 +1493,7 @@ walk_mixed_chain(ClassName, [{_Kind, Sel} | Rest], Depth) ->
     end.
 
 -doc """
-Walk a chain starting from the class side with mixed unary/binary hops (BT-1071).
+Walk a chain starting from the class side with mixed unary/binary hops.
 
 The first hop uses `get_class_method_return_type`; subsequent hops transition to
 instance-side via `walk_mixed_chain/3`.
@@ -1521,9 +1521,9 @@ Resolve the type at the end of a send chain using static return-type metadata.
 Tokenises the expression, classifies the receiver, then walks the chain by
 looking up each send's return type in `method_return_types` on the class registry.
 
-When the unary tokenizer fails, tries the binary/mixed tokenizer (BT-1071).
+When the unary tokenizer fails, tries the binary/mixed tokenizer.
 When both tokenizers fail (e.g. parenthesised subexpressions, keyword sends
-mid-chain), falls back to compiler-based type resolution (BT-1068, ADR 0045 Option C).
+mid-chain), falls back to compiler-based type resolution (ADR 0045 Option C).
 """.
 -spec resolve_chain_type(binary(), map()) -> {ok, atom(), instance | class} | undefined.
 resolve_chain_type(Expr, Bindings) ->
@@ -1554,7 +1554,7 @@ resolve_chain_type(Expr, Bindings) ->
     end.
 
 -doc """
-Compiler-based type resolution fallback for complex expressions (BT-1068).
+Compiler-based type resolution fallback for complex expressions.
 
 Sends the expression to the Rust compiler via the port. The compiler parses
 it fully, runs type inference, and returns the type of the last expression.
@@ -1825,8 +1825,8 @@ get_session_bindings(SessionPid) ->
     end.
 
 -doc """
-Get this session's live type alias names (ADR 0108 Phase 8, BT-2902), for
-type-annotation-position completion (BT-2918). Mirrors get_session_bindings/1:
+Get this session's live type alias names (ADR 0108 Phase 8), for
+type-annotation-position completion. Mirrors get_session_bindings/1:
 returns [] if the session is unavailable.
 """.
 -spec get_session_alias_names(pid()) -> [binary()].
@@ -1872,11 +1872,11 @@ Walk the superclass chain collecting methods via a caller-supplied getter fun.
 
 Local methods shadow inherited ones (Smalltalk-style override): a selector
 redefined by a subclass appears exactly once in the result, attributed to
-the subclass. BT-3087: previously `LocalMethods ++ InheritedMethods` with no
+the subclass. Previously `LocalMethods ++ InheritedMethods` with no
 dedup at all, so an overridden selector appeared twice — a real user-visible
 bug in method-listing completions.
 
-BT-3087: Built on `beamtalk_hierarchy:walk_ancestors/3` — one depth guard,
+Built on `beamtalk_hierarchy:walk_ancestors/3` — one depth guard,
 one `?LOG_WARNING`-on-exhaustion policy, matching every other consolidated
 hierarchy walker (`beamtalk_behaviour_intrinsics:walk_hierarchy/3`,
 `beamtalk_hierarchy_docs`). `Depth` is accepted for API compatibility with
@@ -1885,7 +1885,7 @@ existing callers (always 0) but the walk itself always starts fresh at 0 —
 
 On depth exhaustion (`?MAX_HIERARCHY_DEPTH`, a hierarchy cycle) returns the
 partial set of selectors collected from the ancestors actually visited
-before the guard tripped (BT-3096) — not `[]` — and logs a `?LOG_WARNING`
+before the guard tripped — not `[]` — and logs a `?LOG_WARNING`
 naming the ancestor where the cycle was detected.
 """.
 -spec collect_methods_with_fun(atom(), non_neg_integer(), fun((pid()) -> [atom()])) -> [atom()].
@@ -2125,7 +2125,7 @@ builtin_keywords() ->
 Describe available protocol operations.
 
 The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed
-in BT-2091 (protocol 2.0). See the module doc for migration guidance.
+in protocol 2.0. See the module doc for migration guidance.
 """.
 -spec describe_ops() -> map().
 describe_ops() ->
@@ -2207,7 +2207,7 @@ base_ops() ->
     }.
 
 -doc """
-Return a list of method descriptors for a class by name (BT-1026).
+Return a list of method descriptors for a class by name.
 
 Collects local instance methods and local class-side methods for the named
 class. Returns an empty list if the class name is unknown or not loaded.
@@ -2244,12 +2244,12 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
 
 -doc """
 Collect inherited (non-local) instance and class-side methods for the named
-class, each attributed to its defining class (BT-3478). Returns an empty
+class, each attributed to its defining class. Returns an empty
 list if the class name is unknown or not loaded.
 
 Reuses `beamtalk_hierarchy_docs:collect_flattened_methods/2` and
 `collect_flattened_class_methods/2` — the same defining-class-attributed
-hierarchy walk the `:help` REPL command already builds on (BT-3087) — rather
+hierarchy walk the `:help` REPL command already builds on — rather
 than a new walk, then drops every selector whose defining class is the
 receiver itself (those are already covered by the local `\"methods\"` op).
 
@@ -2280,7 +2280,7 @@ list_inherited_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
     end.
 
 -doc """
-Build inherited-method ws entries from a flattened hierarchy map (BT-3478).
+Build inherited-method ws entries from a flattened hierarchy map.
 `Flattened` is `#{Selector => {DefiningClass, MethodInfo}}` (instance side,
 from `collect_flattened_methods/2`) or `#{Selector => DefiningClass}` (class
 side, from `collect_flattened_class_methods/2`) — entries whose defining
@@ -2323,12 +2323,11 @@ inherited_ws_entries(ClassName, ClassSide, Flattened) ->
     ).
 
 -doc """
-Build one method descriptor for the `\"methods\"` ws op (BT-1026, BT-3439,
-BT-3444).
+Build one method descriptor for the `\"methods\"` ws op.
 
 `line` is the real declaration line from `beamtalk_xref:method_info/3`, or
-`null` when unregistered (e.g. a `ClassBuilder`-built class compiled before
-BT-3439 landed) — the same lookup the LiveView `browse-protocols` op and the
+`null` when unregistered (e.g. an older `ClassBuilder`-built class compiled
+before xref tracked this shape) — the same lookup the LiveView `browse-protocols` op and the
 LSP `nav-query` op read from, instead of leaving `beamtalk.navigateToMethod`
 (VS Code Workspace Explorer sidebar) to guess the position via source-text
 regex.
@@ -2337,10 +2336,10 @@ regex.
 `unindexed_runtime_fun`) via the shared `info_fields/1` helper op 2/3 already
 use (`beamtalk_repl_ops_browse`) — so the sidebar can badge a `synthetic`
 row (a `Value subclass:`'s compiler-generated field accessor) as visibly
-distinct, the same honest fact the LiveView IDE method list already badges
-(BT-2714), instead of a second `source_status`-shaping implementation.
+distinct, the same honest fact the LiveView IDE method list already badges,
+instead of a second `source_status`-shaping implementation.
 `signature`/`doc` are resolved for `synthetic` rows only via the shared
-`row_doc_signature/4` helper (BT-2735) — a value accessor's sidebar hover
+`row_doc_signature/4` helper — a value accessor's sidebar hover
 shows its generated signature instead of a blank tooltip.
 """.
 -spec method_ws_entry(atom(), boolean(), atom(), pid()) -> map().
@@ -2394,7 +2393,7 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
     end.
 
 -doc """
-Resolve a class name that may be package-qualified (ADR 0070 Phase 6, BT-1659).
+Resolve a class name that may be package-qualified (ADR 0070 Phase 6).
 
 Parses `<<"json@Parser">>` into `{ok, 'Parser'}` by looking up the
 package-qualified BEAM module name (`bt@json@parser`) in the class registry.
@@ -2440,7 +2439,7 @@ make_class_not_found_error(ClassName) ->
 
 -doc """
 Extract the first line of a binary string (up to the first newline).
-BT-1404: Used to produce one-line class descriptions from full doc strings.
+Used to produce one-line class descriptions from full doc strings.
 """.
 -spec first_line(binary()) -> binary().
 first_line(Bin) when is_binary(Bin) ->
@@ -2450,7 +2449,7 @@ first_line(Bin) when is_binary(Bin) ->
     end.
 
 -doc """
-BT-2091: Resolve the per-class source file path for list-classes.
+Resolve the per-class source file path for list-classes.
 
 Returns a binary path when workspace metadata knows the class's source,
 or `null` when it does not (e.g. bootstrap-only classes that haven't been
@@ -2465,7 +2464,7 @@ list_classes_source_file(ModName) ->
     end.
 
 -doc """
-BT-2091: Fetch a session module-tracker for list-classes if a session is
+Fetch a session module-tracker for list-classes if a session is
 available, falling back to an empty tracker otherwise.
 
 Editor / non-session callers don't have a SessionPid; in that case we
@@ -2509,7 +2508,7 @@ validate_list_classes_filter(Other) ->
     {error, iolist_to_binary(io_lib:format("~p", [Other]))}.
 
 -doc """
-Filter predicate for list-classes op (BT-1404).
+Filter predicate for list-classes op.
 Uses the pre-validated filter from validate_list_classes_filter/1.
 """.
 -spec should_include_class(
@@ -2531,7 +2530,7 @@ should_include_class(Name, _Super, _ModName, {superclass, FilterAtom}) ->
 %%% Erlang FFI Help
 %%% ============================================================================
 
--doc "Build a \"not found\" error term for Erlang help lookups (BT-2402).".
+-doc "Build a \"not found\" error term for Erlang help lookups.".
 -spec erlang_not_found_error(binary(), binary()) -> {error, #beamtalk_error{}}.
 erlang_not_found_error(What, Hint) ->
     {error,

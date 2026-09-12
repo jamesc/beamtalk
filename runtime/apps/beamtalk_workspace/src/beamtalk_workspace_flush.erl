@@ -23,8 +23,8 @@ Every flushable entry classifies into one of two tiers (`entry_tier/1`):
     file in place, mechanically identical to a patch). Applied by ordinary
     `flush/0` / `flush/1` / `flush_kinds/1` with no gate.
   - **Tier 2** — destroys a file: `'remove-class'`; moves one: `'rename-class'`
-    (ADR 0114, BT-3271); or rewrites a method's confirmed call sites across
-    files in place, no file moved: `'rename-method'` (ADR 0114, BT-3273).
+    (ADR 0114); or rewrites a method's confirmed call sites across
+    files in place, no file moved: `'rename-method'` (ADR 0114).
     Only applied when the caller passes `ConfirmDestructive = true`
     (`flush/2`, `flush_kinds/2`) or calls the unscoped
     `flush_including_destructive/0`. Never silently reached — no workspace
@@ -120,7 +120,7 @@ back to `<file>` — never the unlink, and never a stage left behind by a
 different (earlier, crashed) attempt, which stays exactly as found for a
 future flush to resume.
 
-## Atomicity (class rename — ADR 0114, BT-3271)
+## Atomicity (class rename — ADR 0114)
 
 A `'rename-class'` entry is the first Tier-2 kind that genuinely spans more
 than one file: `sites[0]` is the class's own declaration line (in the file
@@ -201,7 +201,7 @@ forever, defeating the "retry only what's left" guarantee.
 **Per-entry, not per-file, flushed marking.** A `'rename-class'` entry is
 only marked flushed once *every* file it touches (the move's own target
 plus every other rewritten site file) has committed in the SAME Phase B
-pass — `multi_site_entry_fully_committed/3` (BT-3273: shared with
+pass — `multi_site_entry_fully_committed/3` (shared with
 `'rename-method'`). A Phase B failure partway through
 leaves the entry pending in its entirety (even though some of its files are
 now correctly on disk); the per-file `files`/`conflicts` summary still
@@ -224,7 +224,7 @@ styles could coincide for two unrelated class names — so
 (`rename_entry_rename_collisions/1`), rather than leaving it to the day a
 `.tmp` write silently clobbers another rename's in-flight one.
 
-**Renaming the SAME class twice before ever flushing (BT-3283).**
+**Renaming the SAME class twice before ever flushing.**
 `classRenameTo/2` computes a rename entry's `old_path` from the class's
 *compiled* `beamtalk_source` attribute, which is only refreshed by a flush
 COMMIT (the post-commit refresh above) — so `Foo renameTo: #Bar` followed,
@@ -233,7 +233,7 @@ both compute `old_path = foo.bt`, genuinely sharing a file and tripping the
 rename-vs-rename guard just described. This is a same-class rename CHAIN,
 not two unrelated classes colliding, and chain-collapsing it into a single
 effective rename was deliberately rejected (too much atomicity risk for a
-UX nicety — see the Decision on BT-3283) in favour of keeping the existing
+UX nicety — see the design decision) in favour of keeping the existing
 abort-cleanly behaviour but reporting it accurately:
 `rename_entry_rename_collisions/1` detects this specific shape (one entry's
 `old_class` traces back to the other's `class`) and reports
@@ -243,7 +243,7 @@ between renames of the same class rather than implying an unrelated-class
 collision. This is a documented, intentional limitation, not a bug: flush
 between renames of the same class.
 
-**Post-commit source-attribute refresh (BT-3526 review fix).** A class's
+**Post-commit source-attribute refresh.** A class's
 compiled BEAM module embeds its own source path as a `beamtalk_source`
 module attribute at compile time (`beamtalk_reflection:
 source_file_from_module/1`; `Behaviour>>sourceFile`) — this is exactly what
@@ -260,13 +260,13 @@ source/1` best-effort reloads the class from `new_path`
 (`beamtalk_repl_loader:reload_class_file/2` — the same tested machinery
 `Counter reload`/`:reload` already uses) purely to refresh this bookkeeping
 attribute for a possible future rename; the class's in-memory identity and
-behaviour are already correct at this point (`classRenameTo/2`'s own job,
-BT-3278). A reload failure (no compiler available, a bare runtime, or any
+behaviour are already correct at this point (`classRenameTo/2`'s own job).
+A reload failure (no compiler available, a bare runtime, or any
 other error) is logged via `?LOG_WARNING` and never fails the
 already-successful flush — see that function's own doc for the full
 rationale.
 
-## Atomicity (method rename — ADR 0114, BT-3273)
+## Atomicity (method rename — ADR 0114)
 
 A `'rename-method'` entry is also genuinely multi-file (`sites[0]` is the
 definition, `sites[1..]` are every *confirmed* self/super sender site —
@@ -482,7 +482,7 @@ flush_including_destructive() ->
 
 -doc """
 Flush only the Tier 1 ChangeEntries whose kind or author_kind is in `Kinds`
-(ADR 0082 Phase 4, BT-2290).
+(ADR 0082 Phase 4).
 
 `Kinds` is a list of Symbols (atoms). Each symbol classifies as either an
 **entry kind** (`instance`, `class`, `'new-class'`) or an **author kind**
@@ -825,8 +825,8 @@ Classify a ChangeEntry into flush's destructive-confirmation tier.
 Tier 1 — edits a still-existing file (`instance`, `class`, `'new-class'`,
 `'remove-method'`) — applies under ordinary `flush/0` / `flush/1` /
 `flush_kinds/1` with no gate. Tier 2 — destroys a file (`'remove-class'`),
-moves one (`'rename-class'`, ADR 0114 BT-3271), or rewrites a method's
-confirmed call sites across files (`'rename-method'`, ADR 0114 BT-3273) —
+moves one (`'rename-class'`, ADR 0114), or rewrites a method's
+confirmed call sites across files (`'rename-method'`, ADR 0114) —
 only applies when the caller passes `ConfirmDestructive = true`.
 """.
 -spec entry_tier(term()) -> tier1 | tier2.
@@ -1270,7 +1270,7 @@ rename_entry_ordinary_collision(Entry, OrdinaryFiles, OrdinaryGroups) ->
     end.
 
 -doc """
-Suggestion from BT-3526 review: `rename_entry_ordinary_collision/3` only
+`rename_entry_ordinary_collision/3` only
 guards a rename-class entry's touched files against *ordinary* pending
 entries — two rename-class entries whose own files intersect (e.g. a future
 `new_path`-supplying producer, or two unrelated classes whose
@@ -1296,7 +1296,7 @@ same way `rename_entry_ordinary_collision/3` already uses the full set for
 the rename side of its own (asymmetric, since an ordinary patch has no
 separate "old"/"new" path) guard.
 
-Known, accepted limitation (BT-3283): since `old_path` is only ever refreshed
+Known, accepted limitation: since `old_path` is only ever refreshed
 by a recompile (`maybe_reload_renamed_class_source/1`, itself only triggered
 by a flush COMMIT), renaming the SAME class twice before ever flushing
 (`Foo renameTo: #Bar` then, with no flush in between, `Bar renameTo: #Baz`)
@@ -1305,7 +1305,7 @@ sharing a file, so this guard correctly refuses the whole batch as a
 collision rather than the two-hop rename it actually is. Safe (clean abort,
 no data loss, both entries stay pending); collapsing the chain into an
 effective single-hop rename was deliberately rejected as too much
-atomicity risk for a UX nicety (Decision, BT-3283). What this function DOES
+atomicity risk for a UX nicety (a deliberate design decision). What this function DOES
 do for that shape is report it accurately: `same_class_rename_chain/2`
 recognises when a colliding pair is entirely attributable to one entry's
 `old_class` tracing back to the other's `class` (a genuine rename chain,
@@ -1343,7 +1343,7 @@ rename_entry_rename_collision_with(Entry, Files, [Other | Rest]) ->
     end.
 
 -doc """
-Builds the conflict map for one colliding rename-vs-rename pair (BT-3283).
+Builds the conflict map for one colliding rename-vs-rename pair.
 Distinguishes two shapes that both surface as a file collision here:
 
 * A genuine same-class rename CHAIN — `Other` picks up where `Entry` left
@@ -1355,7 +1355,7 @@ Distinguishes two shapes that both surface as a file collision here:
   for a flush between renames — NOT the generic wording below, which would
   wrongly imply two unrelated classes collided.
 * A genuine cross-class collision (e.g. `derive_new_path/3` coincidence, or
-  BT-3526's own `new_path`-equals-other's-`old_path` shape) — reported as
+  the `new_path`-equals-other's-`old_path` shape) — reported as
   `mixed_rename_and_rename_edit`, unchanged from before this fix.
 """.
 -spec rename_pair_conflict(binary(), term(), term()) -> map().
@@ -1408,7 +1408,7 @@ rename_pair_conflict(Collided, Entry, Other) ->
 -doc """
 True when `Entry` and `Other`'s file collision is entirely attributable to
 them being the SAME underlying class renamed twice before any intervening
-flush (BT-3283) — `Other`'s `old_class` traces back to `Entry`'s `class` —
+flush — `Other`'s `old_class` traces back to `Entry`'s `class` —
 rather than two genuinely unrelated classes.
 
 Checked in ONE direction only, deliberately: pair order out of
@@ -2172,7 +2172,7 @@ cleanup_other_prepared(_) -> ok.
 %%% ----------------------------------------------------------------------------
 
 -doc """
-Cross-pipeline collision guard for `'rename-method'` (ADR 0114, BT-3273):
+Cross-pipeline collision guard for `'rename-method'` (ADR 0114):
 abort the whole flush, before any Phase A I/O runs, if a `'rename-method'`
 entry's confirmed-site files overlap any file an ordinary pending patch or a
 pending `'rename-class'` entry is about to touch in the same batch (`OtherFiles`,
@@ -2284,8 +2284,8 @@ rename_method_expected_files_map(RenameMethodEntries) ->
     ).
 
 -doc """
-Phase A for every pending `'rename-method'` entry in this flush (ADR 0114,
-BT-3273): build the union of every entry's CONFIRMED `sites` (never
+Phase A for every pending `'rename-method'` entry in this flush (ADR 0114):
+build the union of every entry's CONFIRMED `sites` (never
 `candidate_sites`) as `{Site, OwnerEntry}` units — sites from different
 entries that land in the same file merge, via `group_units_by_file/1`,
 exactly the way class rename's own OTHER-site references already merge
@@ -2621,8 +2621,7 @@ commit(#prepared{op = move_noop}) ->
     ok.
 
 -doc """
-Best-effort post-commit source-attribute refresh (BT-3526 review Blocker,
-ADR 0114 follow-up). See the moduledoc's "Post-commit source-attribute
+Best-effort post-commit source-attribute refresh (ADR 0114 follow-up). See the moduledoc's "Post-commit source-attribute
 refresh" section for the full "why" — in short: `classRenameTo/2`'s NEXT
 invocation on this same class reads the class's compiled BEAM module's
 `beamtalk_source` attribute to compute ITS `old_path`, and that attribute is
@@ -2642,7 +2641,7 @@ silently misfire if that ever changes).
 
 Deliberately best-effort (design point 1): the class's in-memory identity
 and behaviour are ALREADY correct at this point — `classRenameTo/2`
-(BT-3278) is what made the rename real; this reload only refreshes a
+is what made the rename real; this reload only refreshes a
 bookkeeping attribute for a POSSIBLE FUTURE rename. A failure here (no
 compiler available, a bare runtime, a transient error) must never fail the
 already-successful flush that files are durably written under — surfaced
@@ -2956,7 +2955,7 @@ the entries `phase_b_loop/6` decided are fully committed — rather than
 naively flattening `Committed`'s `.entries` fields. For every existing
 single-file kind these two sets always coincide (each entry belongs to
 exactly one `#prepared{}` record) so this is a no-op change in behaviour;
-for a `'rename-class'` entry (ADR 0114, BT-3271) the SAME entry legitimately
+for a `'rename-class'` entry (ADR 0114) the SAME entry legitimately
 appears in `Committed` once per file it touches (the move plus every other
 rewritten site), and must count once, not once per file — and not at all if
 `phase_b_loop/6` excluded it for not having ALL of its files committed yet.

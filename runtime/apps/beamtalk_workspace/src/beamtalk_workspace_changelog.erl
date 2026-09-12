@@ -48,16 +48,16 @@ Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
 | `class`                | string                                                       | e.g. `"Counter"` |
 | `selector`             | string \| null                                              | null for `new-class` |
 | `kind`                 | `"instance"`\|`"class"`\|`"new-class"`\|`"remove-method"`\|`"remove-class"`\|`"rename-class"`\|`"rename-method"` | open enum |
-| `side`                 | `"instance"`\|`"class"`\|null                               | ADR 0112: explicit only for `"remove-method"`/`"rename-method"` (ADR 0114, BT-3269); legacy `"instance"`/`"class"`-kind entries derive it from `kind` (`entry_side/1`); always null for `"remove-class"`/`"rename-class"` (BT-3206/BT-3269 — no method-level target) |
+| `side`                 | `"instance"`\|`"class"`\|null                               | ADR 0112: explicit only for `"remove-method"`/`"rename-method"` (ADR 0114); legacy `"instance"`/`"class"`-kind entries derive it from `kind` (`entry_side/1`); always null for `"remove-class"`/`"rename-class"` (no method-level target) |
 | `source_ref`           | string \| null                                              | null for `"remove-method"`/`"remove-class"`/`"rename-class"`/`"rename-method"` (nothing replaces the deleted text; a multi-site entry's per-site bodies live under `sites` instead) |
-| `prev_source_ref`      | string \| null                                              | null for `new-class`; the removed class's full prior source for `"remove-class"` (BT-3206); null for `"rename-class"`/`"rename-method"` (superseded by `sites`) |
+| `prev_source_ref`      | string \| null                                              | null for `new-class`; the removed class's full prior source for `"remove-class"`; null for `"rename-class"`/`"rename-method"` (superseded by `sites`) |
 | `sourceFile`           | string \| null                                              | null for stdlib/dynamic; also null for `"rename-class"`/`"rename-method"` (ambiguous for a multi-file entry — see `sites`) |
-| `span`                 | `{start,end}` \| null                                       | null for `new-class` and `"remove-class"` (BT-3206 — no byte range within a whole-file removal); the excised span for `"remove-method"` (BT-2192's future flush-excise step); null for `"rename-class"`/`"rename-method"` (see `sites`) |
-| `old_class`            | string \| null                                              | ADR 0114 (BT-3269): `"rename-class"`-only — the pre-rename class name |
-| `old_selector`         | string \| null                                              | ADR 0114 (BT-3269): `"rename-method"`-only — the pre-rename selector (`selector` holds the new one) |
-| `old_path`/`new_path`  | string \| null                                              | ADR 0114 (BT-3269): `"rename-class"`-only — the file path before/after a rename that also moves the backing file; null for a dynamic class |
-| `sites`                | `[{sourceFile,span,source_ref,prev_source_ref}\|null,...] \| null` | ADR 0114 (BT-3269): `"rename-class"`/`"rename-method"`-only — `sites[0]` is the definition/declaration site (`null` only for a dynamic class with no backing file), `sites[1..]` are every other rewritten reference |
-| `candidate_sites`      | `[{sourceFile,span},...] \| null`                           | ADR 0114 (BT-3269): `"rename-method"`-only — reported, never auto-rewritten senders; no `source_ref`/`prev_source_ref` since nothing here is ever spliced |
+| `span`                 | `{start,end}` \| null                                       | null for `new-class` and `"remove-class"` (no byte range within a whole-file removal); the excised span for `"remove-method"` (a future flush-excise step); null for `"rename-class"`/`"rename-method"` (see `sites`) |
+| `old_class`            | string \| null                                              | ADR 0114: `"rename-class"`-only — the pre-rename class name |
+| `old_selector`         | string \| null                                              | ADR 0114: `"rename-method"`-only — the pre-rename selector (`selector` holds the new one) |
+| `old_path`/`new_path`  | string \| null                                              | ADR 0114: `"rename-class"`-only — the file path before/after a rename that also moves the backing file; null for a dynamic class |
+| `sites`                | `[{sourceFile,span,source_ref,prev_source_ref}\|null,...] \| null` | ADR 0114: `"rename-class"`/`"rename-method"`-only — `sites[0]` is the definition/declaration site (`null` only for a dynamic class with no backing file), `sites[1..]` are every other rewritten reference |
+| `candidate_sites`      | `[{sourceFile,span},...] \| null`                           | ADR 0114: `"rename-method"`-only — reported, never auto-rewritten senders; no `source_ref`/`prev_source_ref` since nothing here is ever spliced |
 | `intent`               | `"durable"`\|`"ephemeral"`                                  | |
 | `flushable`            | boolean                                                      | true iff in-project source; for `"rename-class"`/`"rename-method"`, true iff every entry in `sites` (never `candidate_sites`) resolves to a flushable file |
 | `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists); `"rename-method"` is `"stdlib"`\|`"dynamic"`\|`"dependency:<path>"`\|null — `"extension"` is not reachable there either (ADR 0114 § ChangeLog schema) |
@@ -80,7 +80,7 @@ remain in the log for audit.
 This module implements the gen_server, the append API, the two-part persistence,
 restart epoch/orphan tagging, and the bounded ring with archive rotation. The
 install hook that *emits* entries, `Workspace flush`, and the `change_log.bt`
-stdlib facade are later phases (BT-2280 epic). In run mode (no workspace, no
+stdlib facade are later phases. In run mode (no workspace, no
 `workspace_id`) the gen_server keeps state in ETS only and never touches disk —
 release nodes do not start a workspace, so this code is a no-op there.
 """.
@@ -496,8 +496,8 @@ clear() ->
 
 -doc """
 Find the most recent active ChangeEntry for `(Class, Selector)` and return its
-recorded prior source body (ADR 0082 Phase 4, BT-2290; add/new-class/class-side
-extensions BT-2663/BT-2664/BT-2665; `remove-class` extension ADR 0113, BT-3208).
+recorded prior source body (ADR 0082 Phase 4; add/new-class/class-side
+extensions; `remove-class` extension ADR 0113).
 
 Used by `Workspace changes revert: aMethod` to look up the pre-patch state that
 must be restored. Returns:
@@ -508,14 +508,14 @@ must be restored. Returns:
     `kind` (`instance`/`class`) tells the caller which side to re-install on. This
     is also the path a `'remove-method'` entry reaches: its `prev_source_ref` is
     the removed method's pre-removal body, so re-installing it (on the entry's
-    recorded `side`) is exactly what undoes the removal (ADR 0112, BT-3187).
+    recorded `side`) is exactly what undoes the removal (ADR 0112).
   - `{remove, Entry}` when the most recent active entry is an *addition*: a
     brand-new method whose selector did not exist before the patch (no recorded
     prior body AND the selector is absent from the on-disk source / the class has
     no on-disk source), or a `new-class` entry. The pre-patch state was "this did
     not exist", so revert is a removal rather than a body re-install.
   - `{reinstall_class, PrevBody, Entry}` when the most recent active entry is a
-    `'remove-class'` (ADR 0113, BT-3208): the pre-removal state was "this class
+    `'remove-class'` (ADR 0113): the pre-removal state was "this class
     existed", recorded as the whole-file `prev_source_ref` `capture_class_removal_
     snapshot/1` captures before teardown (falling back to a direct read of the
     entry's own `sourceFile` — `recover_class_prev_from_disk/1` — when the
@@ -523,7 +523,7 @@ must be restored. Returns:
     Revert recompiles and reinstalls the whole class from `PrevBody`, not a
     single-method patch.
   - `{revert_rename, Entry}` when the most recent active entry is a
-    `'rename-class'`/`'rename-method'` (ADR 0114, BT-3274): a multi-site
+    `'rename-class'`/`'rename-method'` (ADR 0114): a multi-site
     target, not a single prior body — the caller (`beamtalk_repl_loader:
     revert_rename_sites/1`) rewrites every one of `Entry`'s own `sites` back
     to its own recorded `prev_source_ref`, against that site's own recorded
@@ -552,7 +552,7 @@ entries has the higher `seq` wins, matching the general highest-seq-candidate ru
 
 `find_revert_target/2` matches candidates on `(Class, Selector)` only — the
 highest-seq active candidate wins regardless of side. Use `find_revert_target/3`
-with an explicit `Side` (ADR 0112, BT-3187) when the caller knows which side it
+with an explicit `Side` (ADR 0112) when the caller knows which side it
 means to revert: same-selector instance/class-side entries (e.g. an instance-side
 patch and a later class-side `'remove-method'` entry for the same selector name)
 are otherwise indistinguishable by `(Class, Selector)` alone, and the wrong one —
@@ -569,7 +569,7 @@ find_revert_target(Class, Selector) ->
 
 -doc """
 Like `find_revert_target/2`, but restricts candidates to the given `Side`
-(`instance` | `class`) when it is not `undefined` (ADR 0112, BT-3187). Side is
+(`instance` | `class`) when it is not `undefined` (ADR 0112). Side is
 resolved per-entry via `entry_side/1`, so it matches both a `'remove-method'`
 entry's explicit `side` field and a legacy `instance`/`class`-kind patch's
 `kind`-derived side. Passing `undefined` reproduces `find_revert_target/2`'s
@@ -740,7 +740,7 @@ recover_prev_from_disk(_Entry) ->
     {error, no_prev_source}.
 
 -doc """
-Fallback for a `'remove-class'` entry (ADR 0113, BT-3208) whose recorded
+Fallback for a `'remove-class'` entry (ADR 0113) whose recorded
 `prev_source_ref` body could not be read via `read_prev_source_body/1` — the
 ChangeLog's bounded ring (`?MAX_ENTRIES`) rotated `sources/` before the
 revert happened, or a rare fs race. Unlike a method's
@@ -881,7 +881,7 @@ shadow_key(E) ->
 %%% ----------------------------------------------------------------------------
 
 -doc """
-Per-site shadow-detection keys for `Entry` (ADR 0114, BT-3269).
+Per-site shadow-detection keys for `Entry` (ADR 0114).
 
 Every existing kind targets exactly one file, so `shadow_key/1`'s single
 tuple already identifies "what does this entry patch" unambiguously — that
@@ -912,10 +912,10 @@ conflated into a false shadow relationship purely because they share a
 file: only a genuinely repeated edit of the *same* rename at the *same*
 location collides.
 
-Exported for the future multi-site rewrite mechanism (BT-3270) and for
+Exported for the future multi-site rewrite mechanism and for
 tests. Not yet wired into `survivor_seqs/1`/the `ChangeEntry` `shadowed`
 flag — `'rename-class'`/`'rename-method'` flush and dirty-view integration
-is out of scope for BT-3269 (schema only).
+is out of scope here (schema only).
 """.
 -spec target_key(entry()) -> [term()].
 target_key(#entry{kind = 'rename-class'} = E) ->
@@ -1151,16 +1151,16 @@ disk_class_body(DiskSource, Class) ->
 
 -doc """
 Compare an on-disk method body with the installed in-memory body and return
-`{Clean, Diff}` (ADR 0082, BT-2575). Both sides are normalised first —
+`{Clean, Diff}` (ADR 0082). Both sides are normalised first —
 trailing whitespace trimmed and the common leading indentation stripped — so the
 comparison and diff are on *content*, not layout. This is deliberate (per the
 "whitespace-only reformat vs real change" criterion): the on-disk span is
-file-indented and doc-inclusive (BT-2577) while the stored body is the compiler's
+file-indented and doc-inclusive while the stored body is the compiler's
 canonical column-0 form, so without the dedent every doc-commented method would
 read as dirty with an indentation-noise diff. `Clean = true` (no diff) when the
 normalised bodies are equal — the revert-to-disk case that drops out of the
-pending view. Exported for tests. (BT-2584 will make a single representation
-flow end-to-end and retire this normalisation.)
+pending view. Exported for tests. (A future change will make a single
+representation flow end-to-end and retire this normalisation.)
 """.
 -spec body_delta(binary(), binary()) -> {boolean(), binary() | undefined}.
 body_delta(DiskBody, MemBody) ->
@@ -1245,7 +1245,7 @@ source_file_value(File) -> File.
 entry_seq(#entry{seq = V}) -> V.
 
 -doc """
-The workspace epoch `Entry` was appended in (ADR 0113, BT-3207).
+The workspace epoch `Entry` was appended in (ADR 0113).
 
 Used, together with `entry_seq/1`, to name the same-filesystem staging path
 for a `'remove-class'` entry's Phase A rename (`<file>.tmp-delete-<epoch>-<seq>`)
@@ -1269,7 +1269,7 @@ entry_kind(#entry{kind = V}) -> V.
 Every atom `kind()` admits, exactly matching that type's literal union above
 — the single runtime-introspectable source of truth for the wire-string
 conformance corpus (`runtime/apps/beamtalk_workspace/test/fixtures/
-flush_file_kind_wire_corpus.json`, BT-3275) that pins the Rust LSP consumer's
+flush_file_kind_wire_corpus.json`) that pins the Rust LSP consumer's
 `FlushFileKind::from_wire` (`crates/beamtalk-lsp/src/runtime.rs`) to this
 module's `kind()` domain: `beamtalk_workspace_changelog_tests` asserts this
 list's `atom_to_binary` image equals the corpus's wire-string set exactly (so
@@ -1296,7 +1296,7 @@ known_entry_kinds() ->
 
 -doc """
 The side (`instance` | `class`) a method-shaped entry targets, or `undefined`
-for an entry with no side (`'new-class'`, `unknown`) (ADR 0112, BT-3187).
+for an entry with no side (`'new-class'`, `unknown`) (ADR 0112).
 
 The supported way to read side — never pattern-match `#entry.side` or
 `entry_kind/1` directly for this. A `'remove-method'` entry stores `side`
@@ -1348,25 +1348,25 @@ entry_source_ref(#entry{source_ref = V}) -> V.
 -spec entry_prev_source_ref(entry()) -> binary() | undefined.
 entry_prev_source_ref(#entry{prev_source_ref = V}) -> V.
 
--doc "The pre-rename class name for a `'rename-class'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-doc "The pre-rename class name for a `'rename-class'` entry (ADR 0114); `undefined` otherwise.".
 -spec entry_old_class(entry()) -> binary() | undefined.
 entry_old_class(#entry{old_class = V}) -> V.
 
--doc "The pre-rename selector for a `'rename-method'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-doc "The pre-rename selector for a `'rename-method'` entry (ADR 0114); `undefined` otherwise.".
 -spec entry_old_selector(entry()) -> binary() | undefined.
 entry_old_selector(#entry{old_selector = V}) -> V.
 
--doc "The pre-rename file path for a `'rename-class'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-doc "The pre-rename file path for a `'rename-class'` entry (ADR 0114); `undefined` otherwise.".
 -spec entry_old_path(entry()) -> binary() | undefined.
 entry_old_path(#entry{old_path = V}) -> V.
 
--doc "The post-rename file path for a `'rename-class'` entry (ADR 0114, BT-3269); `undefined` otherwise.".
+-doc "The post-rename file path for a `'rename-class'` entry (ADR 0114); `undefined` otherwise.".
 -spec entry_new_path(entry()) -> binary() | undefined.
 entry_new_path(#entry{new_path = V}) -> V.
 
 -doc """
 The multi-site rewrite list for a `'rename-class'`/`'rename-method'` entry
-(ADR 0114, BT-3269); `undefined` otherwise. `sites[0]` is always the
+(ADR 0114); `undefined` otherwise. `sites[0]` is always the
 definition/declaration site; a bare `undefined` element (rather than a
 `site()` map) is the dynamic-class "no declaration site" case.
 """.
@@ -1375,7 +1375,7 @@ entry_sites(#entry{sites = V}) -> V.
 
 -doc """
 The reported-but-never-rewritten candidate sender list for a
-`'rename-method'` entry (ADR 0114, BT-3269); `undefined` otherwise
+`'rename-method'` entry (ADR 0114); `undefined` otherwise
 (including for `'rename-class'`, which has no candidate tier).
 """.
 -spec entry_candidate_sites(entry()) -> [candidate_site()] | undefined.
@@ -1424,8 +1424,7 @@ read_source_file(Ref) ->
 
 -doc """
 Read one rewrite site's own recorded body (its `source_ref` or
-`prev_source_ref`) from `<workspace>/changes/sources/<ref>.bt` (ADR 0114,
-BT-3271).
+`prev_source_ref`) from `<workspace>/changes/sources/<ref>.bt` (ADR 0114).
 
 Generalizes `read_source_body/1`/`read_prev_source_body/1` to a `site()`'s
 own per-site ref, rather than the OWNING ENTRY's top-level `source_ref`/
@@ -1451,7 +1450,7 @@ read_site_body(Ref) when is_binary(Ref) ->
 -doc """
 Persist one rewrite site's body to the ChangeLog's `sources/` directory and
 return its ref filename, for building a `'rename-class'`/`'rename-method'`
-entry's `sites` list (ADR 0114, BT-3270).
+entry's `sites` list (ADR 0114).
 
 Generalizes the single-body persistence `do_append/2` already performs for a
 whole entry's `source`/`prev_source` (`write_optional_source/3`) to the

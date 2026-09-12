@@ -44,7 +44,7 @@ into REPL session state. Workspace readiness is detected via
 | `sync'        | Incremental project sync (compile changed files)   |
 | `bind:as:'    | Register a value in workspace namespace             |
 | `unbind:'     | Remove a value from workspace namespace             |
-| `recheckImage'| Whole-image re-check (ADR 0105 Phase 3, BT-2782)    |
+| `recheckImage'| Whole-image re-check (ADR 0105 Phase 3)    |
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -256,7 +256,7 @@ new_class_arg_type_error(ArgName, Value) ->
 
 -doc """
 Move `aClass`'s `.bt` file to `aNewPath` without changing its name (ADR 0114
-Phase 2, BT-3272).
+Phase 2).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) moveClass:
 aClass to: aNewPath`, backing `Workspace moveClass:to:` — a pure filesystem-
@@ -380,7 +380,7 @@ flushIncludingDestructive() ->
     end.
 
 -doc """
-Whole-image re-check (ADR 0105 Phase 3, BT-2782).
+Whole-image re-check (ADR 0105 Phase 3).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) recheckImage`
 from `Workspace recheckImage` / the REPL `:recheck image` alias. The
@@ -398,8 +398,8 @@ recheckImage() ->
     beamtalk_recheck:trigger_image().
 
 -doc """
-Revert a single ChangeEntry (ADR 0082 Phase 4, BT-2290; `remove-method`/
-`remove-class` extension ADR 0113, BT-3208).
+Revert a single ChangeEntry (ADR 0082 Phase 4; `remove-method`/
+`remove-class` extension ADR 0113).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogRevert: anEntry`
 from `ChangeLog>>revert:`. `Entry` is a `ChangeEntry` value-object map (or a
@@ -412,11 +412,9 @@ plain map shaped the same way) carrying at least `className` (Symbol) and
     install path, emitting a fresh `#instance`/`#class` ChangeEntry (per ADR
     0082, revert is "itself a patch, not log mutation", so the original
     entry's audit history is preserved);
-  - an *add* (`'new-class'`, or a brand-new method) — removes what was added
-    (BT-2663/BT-2664/BT-2665);
+  - an *add* (`'new-class'`, or a brand-new method) — removes what was added;
   - a `'remove-class'` removal — recompiles and reinstalls the whole class
-    from `prev_source_ref`, reusing the `newClass:at:` install path (ADR 0113,
-    BT-3208).
+    from `prev_source_ref`, reusing the `newClass:at:` install path (ADR 0113).
 
 Once flushed, an entry drops out of the active view (`is_active/1`) and
 `find_revert_target/3` reports `{error, no_entry}` for it — post-flush revert
@@ -435,13 +433,13 @@ changeLogRevert(Entry) ->
 
 -doc """
 Revert a single method patch by `(Class, Selector)` binaries, returning a
-structured result instead of raising (ADR 0082 Phase 5, BT-2293).
+structured result instead of raising (ADR 0082 Phase 5).
 
 Side-agnostic: falls back to `find_revert_target/3`'s highest-seq selection
 across both sides, same as passing `undefined` to `revert_method/3`. Kept for
 callers with no side information (and for backward compatibility — this was
 the original LiveView-facing surface); the LiveView `Workspace changes` row
-now calls `revert_method/3` with its own `side` instead (ADR 0112, BT-3187),
+now calls `revert_method/3` with its own `side` instead (ADR 0112),
 since a same-selector instance-side and class-side entry are otherwise
 indistinguishable by `(Class, Selector)` alone and the wrong one — whichever
 has the higher `seq` — would be reverted.
@@ -458,8 +456,8 @@ revert_method(ClassNameBin, SelectorBin) when
 
 -doc """
 Revert a single method patch by `(Class, Selector, Side)`, returning a
-structured result instead of raising (ADR 0082 Phase 5, BT-2293; side
-parameter added ADR 0112, BT-3187).
+structured result instead of raising (ADR 0082 Phase 5; side
+parameter added ADR 0112).
 
 The message-send entry point `changeLogRevert/1` `error/1`-raises a wrapped
 `#beamtalk_error{}` on any failure, which crosses an `rpc:call/4` as an opaque
@@ -754,10 +752,10 @@ remove_reverted_class(ClassNameBin) ->
     end.
 
 -doc """
-Undo a `'remove-class'` entry (ADR 0113, BT-3208): recompile and reinstall the
+Undo a `'remove-class'` entry (ADR 0113): recompile and reinstall the
 whole class from `PrevBody` (the entry's recorded `prev_source_ref`), reusing
 the same `newClass:at:` install chokepoint `new-class` revert already uses
-(ADR 0082, BT-2664) rather than a second whole-class-install mechanism.
+(ADR 0082) rather than a second whole-class-install mechanism.
 
 `Entry`'s `sourceFile` — the removed class's own recorded absolute path — is
 the reinstall target. A class removed with no recorded source file (a
@@ -767,8 +765,7 @@ is a loud structured error rather than a silent no-op, matching this module's
 error contract elsewhere (never guess, never drop a revert silently).
 
 Before reinstalling, `check_no_external_drift/3` compares the file currently
-on disk at `SourceFile` against `PrevBody` (BT-3213, Claude review follow-up
-on BT-3208): a still-*pending* `'remove-class'` entry never touches disk
+on disk at `SourceFile` against `PrevBody`: a still-*pending* `'remove-class'` entry never touches disk
 itself (Tier 2 removals only unlink on an explicit
 `flushIncludingDestructive`), so in the common case the file this reads is
 exactly what was there when the class was removed — unless someone edited it
@@ -832,9 +829,9 @@ reinstall_reverted_class_body(ClassNameBin, PrevBody, SourceFile, Entry) ->
     end.
 
 -doc """
-Drift check for a pending `'remove-class'` entry's reinstall (ADR 0113,
-BT-3213 — Claude review follow-up on BT-3208, "revert: of a pending
-remove-class entry can silently discard a concurrent out-of-band edit").
+Drift check for a pending `'remove-class'` entry's reinstall (ADR 0113 —
+closes a gap where reverting a pending remove-class entry could silently
+discard a concurrent out-of-band edit).
 
 Reads `SourceFile` off disk and compares it byte-for-byte against `PrevBody`
 (the entry's recorded whole-file `prev_source_ref` snapshot), the same
@@ -965,7 +962,7 @@ retire_reverted_remove_class_entry(ClassNameBin, Entry) ->
     end.
 
 -doc """
-Undo a `'rename-class'`/`'rename-method'` entry (ADR 0114, BT-3274):
+Undo a `'rename-class'`/`'rename-method'` entry (ADR 0114):
 delegates the actual multi-site reverse-splice to `beamtalk_repl_eval:
 revert_rename_sites/1` (see that function's own doc for the full mechanism —
 locating each site's current position, resolving its owning class, and, for
@@ -1124,7 +1121,7 @@ revert_target_suffix(SelectorAtom) -> <<">>", (atom_to_binary(SelectorAtom, utf8
 
 -doc """
 Discard every pending ChangeLog entry without writing to disk
-(ADR 0082 Phase 4, BT-2290).
+(ADR 0082 Phase 4).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogClear`
 from `ChangeLog>>clear`. Drops every entry from the in-memory active view and
@@ -1146,7 +1143,7 @@ changeLogClear() ->
 
 -doc """
 Flush only the Tier 1 ChangeEntries whose kind or author_kind is in `KindsSet`
-(ADR 0082 Phase 4, BT-2290).
+(ADR 0082 Phase 4).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: aSet`
 from `ChangeLog>>flushKinds:`. `KindsSet` is a Beamtalk `Set` (tagged map)
@@ -1210,7 +1207,7 @@ filter_error_for(Selector, Message) ->
     beamtalk_error:with_message(Err1, Message).
 
 -doc """
-Read the `autoflush` workspace setting (ADR 0082 Phase 4, BT-2290).
+Read the `autoflush` workspace setting (ADR 0082 Phase 4).
 
 Default is `false`. When `true`, every successful durable in-memory patch
 triggers `Workspace flush` synchronously after the install. Called via
@@ -1221,7 +1218,7 @@ autoflush() ->
     beamtalk_workspace_meta:get_setting(autoflush, false).
 
 -doc """
-Set the `autoflush` workspace setting (ADR 0082 Phase 4, BT-2290).
+Set the `autoflush` workspace setting (ADR 0082 Phase 4).
 
 `Value` must be a Boolean. Setting `true` enables auto-flush after every
 successful durable in-memory patch; `false` reverts to the explicit-flush
@@ -1304,7 +1301,7 @@ unbind(Name) ->
     end.
 
 -doc """
-Return the OTP application root supervisor, or nil (BT-1191).
+Return the OTP application root supervisor, or nil.
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) rootSupervisor`.
 Delegates to `beamtalk_supervisor:get_root/0` which reads from the ETS
@@ -1667,7 +1664,7 @@ get_session_bindings() ->
 -doc """
 Resolve a bare name against the session locals and the live workspace sources.
 
-BT-2365 (ADR 0081 Phase 1): the single shared resolver. Replaces eager workspace
+ADR 0081 Phase 1: the single shared resolver. Replaces eager workspace
 injection — instead of copying globals into each session at init, a free
 identifier is resolved lazily, in order:
 
@@ -1795,7 +1792,7 @@ raise_undefined_variable(Name) ->
 -doc """
 Resolve a capitalised class reference whose name is not a session local.
 
-BT-2365 (ADR 0081 Phase 1): the REPL codegen for a `ClassReference` checks the
+ADR 0081 Phase 1: the REPL codegen for a `ClassReference` checks the
 session locals map first (so a session local of the same name takes precedence)
 and, on a miss, calls this. Reuses the same singleton + class-registry tiers as
 `resolve_name/2` so resolution cannot drift, but raises `class_not_found`
@@ -1827,7 +1824,7 @@ resolve_class_reference(_Locals, Name) when is_atom(Name) ->
 -doc """
 Resolve a singleton binding name to its live instance, or `error`.
 
-BT-2365 (ADR 0081 Phase 1): used by the REPL codegen's binding-aware class-send
+ADR 0081 Phase 1: used by the REPL codegen's binding-aware class-send
 fallback. When a message is sent to a singleton receiver (`Workspace bind:as:`,
 `Transcript show:`) the name is no longer eagerly injected into the session map,
 so the `maps:find` receiver lookup misses. This recovers the live instance so the

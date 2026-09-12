@@ -6,18 +6,18 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Reload-triggered re-check orchestration (ADR 0105 Phase 1, BT-2778).
+Reload-triggered re-check orchestration (ADR 0105 Phase 1).
 
 On every live definition change whose signature-generation diff
-(`beamtalk_workspace_signature_store:capture/4`, BT-2777) is *not* `no_op`,
+(`beamtalk_workspace_signature_store:capture/4`) is *not* `no_op`,
 finds the change's known dependents and re-checks them, producing findings at
 ADR 0100 severities. Generalises the Phase 0 spike
 (`docs/internal/adr-0105-phase0-spike-findings.md`) to production.
 
 ## Mechanism (ADR 0105 §Mechanism steps 2-3, receiver-type narrowing ADR 0115)
 
-1. **Dependent lookup.** `beamtalk_xref:senders_of/2` (ADR 0115 Phase 4,
-   BT-3219 — `senders_of/1` before this) is selector-keyed and, since Phase
+1. **Dependent lookup.** `beamtalk_xref:senders_of/2` (ADR 0115 Phase 4
+   — `senders_of/1` before this) is selector-keyed and, since Phase
    4, also filtered against the changed class's receiver-type relatedness:
    sites carry a caller (`owner`/`method`/`line`), a receiver *kind*
    (self/super/ffi/other), and — for compile-time-indexed sites — a receiver
@@ -59,7 +59,7 @@ live source sees the *new* signature for free; no explicit per-class
 override is constructed here. `class_hierarchy` is opt-in on `diagnostics/3`
 rather than the `diagnostics/2` default specifically so this module's new
 behaviour does not also change the keystroke-driven cockpit editor's
-diagnostics (BT-2556, `beamtalk_repl_ops_dev:diagnostics_for/2`), which
+diagnostics (`beamtalk_repl_ops_dev:diagnostics_for/2`), which
 stays on the unchanged class-context-free default.
 
 Returned diagnostics are filtered to the ones attributable to *this* reload,
@@ -98,7 +98,7 @@ receiver-identity) matching is a documented refinement, not built here —
 consistent with the ADR's other accepted-gap tradeoffs (one level of
 fan-out only, the proxy-routed-call miss).
 
-## Pre-save advisory (`trigger_pending/5`, ADR 0105 Phase 3, BT-2782)
+## Pre-save advisory (`trigger_pending/5`, ADR 0105 Phase 3)
 
 `trigger/4` re-checks dependents against the changed class's *installed*
 signature, read from the compiler port's ambient class-hierarchy cache
@@ -108,19 +108,19 @@ same dependent re-check run against a *pending* edit that has not installed
 this by building a **local overlay** of the ambient classes with the pending
 signature spliced into the changed class's entry, and threading that overlay
 map through `do_trigger/4`/`recheck_owner/6` as each candidate's
-`class_hierarchy` request option (ADR 0105 Phase 3, BT-3109) — the compiler
+`class_hierarchy` request option (ADR 0105 Phase 3) — the compiler
 port sees the hypothetical signature for the duration of that one request
 only. `beamtalk_compiler_server`'s shared `classes` state is never written
 to, so there is nothing to restore and no window in which a concurrent
-`register_class/2` from another session could be clobbered (BT-2806's
+`register_class/2` from another session could be clobbered (a
 restore-clobbers-commit race is closed by construction, not mitigated) — see
 `trigger_pending/5`'s own doc for the exact mechanism. Never installs
 anything and never touches `beamtalk_workspace_findings_store`
-(BT-2779) — there is nothing to publish or clear until an actual install
+— there is nothing to publish or clear until an actual install
 happens; the caller (`beamtalk_repl_eval:precheck_method/5`) returns the
 `result()` directly to whichever surface asked.
 
-## Whole-image re-check (`trigger_image/0`, ADR 0105 Phase 3, BT-2782)
+## Whole-image re-check (`trigger_image/0`, ADR 0105 Phase 3)
 
 `Workspace recheckImage` / `:recheck image` is the "complete but unbounded"
 path ADR 0105's Alternatives section keeps out of the default per-reload
@@ -136,12 +136,12 @@ not `result()`.
 Produces and returns findings; publishing them to a surface (LSP / REPL
 notification / workspace UI) and persisting/clearing them across reloads is
 `beamtalk_workspace_findings_store` + `beamtalk_repl_loader`'s
-`maybe_trigger_recheck/4` (ADR 0105 Phase 1, BT-2779) — this module stays a
+`maybe_trigger_recheck/4` (ADR 0105 Phase 1) — this module stays a
 pure "what changed" computation. `result()`'s `checked_owners` field exists
 specifically for that consumer: it is the exact set of caller classes a
 diagnostics round-trip *completed* for this trigger (`ok` status in
 `recheck_owner/6`, regardless of whether that class turned out clean or
-stale), which is what BT-2779 needs to know which owners' stored findings to
+stale), which is what the findings-store consumer needs to know which owners' stored findings to
 replace — a clean re-check still has to `put_owner(Owner, [])` its way past
 a stale generation-A finding (`checked` alone can't answer "which classes",
 and `findings` alone omits clean classes entirely). `trigger/4` is
@@ -152,16 +152,16 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
 `result()`'s `not_checked_owners` field exists for the same consumer, as
 `checked_owners`'s complement: it is the caller-cap-dropped candidates (the
 alphabetically-last owners `apply_cap/2` excluded from `Kept`), named rather
-than only counted (`not_checked`). BT-2802: a candidate dropped by the cap
+than only counted (`not_checked`). A candidate dropped by the cap
 this reload may already have a stored finding from an earlier reload where
 it *was* checked — that finding was never re-verified against the current
 generation and must not keep asserting itself as current forever.
 `beamtalk_repl_loader:maybe_run_recheck/4` uses this field to mark any such
 pre-existing finding's `note` as possibly-stale in place, rather than either
 silently dropping it (could hide a real, still-live problem) or leaving it
-looking freshly-verified (the BT-2802 bug).
+looking freshly-verified.
 
-**`not_verified_owners` (BT-2828)** widens that same treatment to two more
+**`not_verified_owners`** widens that same treatment to two more
 ways a `Kept` candidate can end up with nothing to show for it:
 `recheck_owner/6` (and `recheck_owner_for_shape/4`) returns `{skipped, []}`
 when `beamtalk_workspace_meta:get_class_source/1` has no live source for the
@@ -172,7 +172,7 @@ candidate does, but — before this field existed — were *also* absent from
 `not_checked_owners` (strictly `Candidates -- Kept`, computed before any
 individual re-check runs), so an owner in this state was in neither list:
 never replaced (not checked) and never marked stale (not cap-dropped) — the
-identical stranded-finding symptom BT-2802 fixed, reached via source/
+identical stranded-finding symptom fixed above for the cap case, reached via source/
 diagnostics unavailability instead of the N-candidate cap. `not_verified_owners`
 is `not_checked_owners` unioned with every `Kept` candidate whose outcome
 status was not `ok`, so `beamtalk_repl_loader` has one single set to feed
@@ -331,7 +331,7 @@ trigger(ClassNameBin, SelectorBin, Side, Classification) ->
     end.
 
 -doc """
-Run the shape-triggered re-check orchestration (ADR 0105 Phase 2, BT-2780)
+Run the shape-triggered re-check orchestration (ADR 0105 Phase 2)
 for a class-body reload of `ClassNameBin` classified as `shape_change` by
 `beamtalk_workspace_shape_store:capture/1`, with `FieldChanges` the per-field
 detail (`beamtalk_shape_diff:field_change()` list) that produced that
@@ -349,7 +349,7 @@ step — receiver-type filtering by re-checking the whole candidate class
 (reusing the same `class_hierarchy => true` ambient-cache trick, since the
 reload that triggered this already installed the new shape before this runs
 — see `beamtalk_repl_loader:activate_module/3`), the per-reload caller cap,
-`checked_owners` for BT-2779's findings-store consumer — is identical to
+`checked_owners` for the findings-store consumer — is identical to
 `trigger/4`; see this module's moduledoc.
 
 Never raises: any internal failure is logged and degrades to an empty
@@ -376,7 +376,7 @@ trigger_shape(ClassNameBin, FieldChanges) ->
     end.
 
 -doc """
-Pre-save advisory (ADR 0105 Phase 3, BT-2782): re-check `{ClassNameBin,
+Pre-save advisory (ADR 0105 Phase 3): re-check `{ClassNameBin,
 SelectorBin, Side}`'s known dependents against `PendingSignature` — a
 freshly-compiled but **not-yet-installed** signature — instead of the
 already-live one `trigger/4` relies on.
@@ -387,7 +387,7 @@ computed by compiling the pending edit (e.g.
 `beamtalk_repl_compiler:compile_method_reload/2`) without calling
 `code:load_binary/3`.
 
-## Mechanism: a per-request class-hierarchy overlay (BT-3109)
+## Mechanism: a per-request class-hierarchy overlay
 
 `recheck_owner/6` sees the changed class's signature
 through the compiler port's class-hierarchy context, injected by
@@ -425,7 +425,7 @@ Because the overlay is an ordinary function argument threaded through
 ordinary `gen_server:call/3` requests — never a `register_class/2` cast,
 never `beamtalk_compiler_server` state — there is no window in which the
 hypothetical signature is visible to any other request, and nothing to
-restore afterward. This closes both hazards BT-2806 recorded against the
+restore afterward. This closes both hazards recorded against the
 previous ambient-cache-swap mechanism *by construction*: a process kill
 mid-request leaves no residual global state (there was never a global write
 to begin with), and a concurrent `register_class/2` commit from another
@@ -471,7 +471,7 @@ trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSignatur
     end.
 
 -doc """
-Whole-image re-check (ADR 0105 Phase 3, BT-2782) backing `Workspace
+Whole-image re-check (ADR 0105 Phase 3) backing `Workspace
 recheckImage` / `:recheck image` — the "complete but unbounded" path ADR
 0105's Alternatives section keeps out of the default per-reload trigger.
 Re-checks every live class the workspace has a recorded source for
@@ -529,13 +529,13 @@ trigger_image() ->
     end.
 
 -doc """
-BT-2856 / ADR 0107 Phase A: re-check for every superclass in
+ADR 0107 Phase A: re-check for every superclass in
 `SuperclassBins` that a live class-body reload just made non-leaf (gained
 its first subclass — see
 `beamtalk_repl_loader:superclasses_losing_leaf_status/1`, the detection
 half this composes with).
 
-**BT-2873:** `SuperclassBins` is the *whole* list a single reload event
+`SuperclassBins` is the *whole* list a single reload event
 produced (`superclasses_losing_leaf_status/1` can return more than one name
 when one reload installs several classes at once, each subclassing a
 different previously-leaf superclass) — this runs **one** whole-image sweep
@@ -556,8 +556,8 @@ hierarchy.
 ADR 0107 Phase A's `Type` pattern (`binding :: ClassName`) and
 `matchExhaustive:`'s residual computation over a closed `Known | Nil` union
 are both restricted to **leaf** classes at compile time
-(`match_validators:validate_type_pattern_class`'s "has subclasses" error,
-BT-2854; `is_concrete_leaf_class`, BT-2856). A `matchExhaustive:` site
+(`match_validators:validate_type_pattern_class`'s "has subclasses" error;
+`is_concrete_leaf_class`). A `matchExhaustive:` site
 proved exhaustive while `SuperclassBin` was leaf has that proof silently
 invalidated the moment a live reload gives it a first subclass — with
 nothing to catch it, the first instance of the new subclass to reach that
@@ -571,7 +571,7 @@ Phase 4, its receiver-type-narrowed `senders_of/2` extension) — a
 **selector**-keyed index of message-send call sites, either way. There is no
 selector a `matchExhaustive:`/`Type`-pattern site "sends" that names the
 class it tests, so xref has nothing to look up here (confirmed: no such
-index exists anywhere in this codebase as of BT-2856). Absent a purpose-built index
+index exists anywhere in this codebase). Absent a purpose-built index
 (a real follow-up — see the moduledoc note below), the only currently-shippable
 way to find every affected site is `trigger_image/0`'s own strategy: recompile
 every live class's own recorded source against the current (now-updated)
@@ -592,7 +592,7 @@ Every other relevance filter in this module
 `relevant_image_diagnostic/1`) drops `severity := <<"error">>` outright —
 ADR 0105's own text: "a reload finding is advisory, never build-failing."
 That rule was written before either `matchExhaustive:` (ADR 0106) or the
-"has subclasses" restriction (BT-2854) existed, when no type-checker
+"has subclasses" restriction existed, when no type-checker
 diagnostic was ever `Error` severity, so it was a no-op in practice; it is
 not a no-op here; a genuinely non-exhaustive `matchExhaustive:` or a
 now-non-leaf `Type` pattern arm both compile to `Error`, and dropping them
@@ -611,9 +611,9 @@ mechanism) — a `matchExhaustive:` site in a file nobody has loaded/edited
 this session is invisible here, same limitation `trigger_image/0` already
 has. A dedicated xref index keyed by "classes referenced in a `Type`
 pattern/`matchExhaustive:` site" would make this precise and un-coupled
-from `all_class_sources/0`'s scope; not built here (BT-2856 keeps to the
+from `all_class_sources/0`'s scope; not built here (this change keeps to the
 smallest change that closes the crash-with-no-warning gap) — a candidate
-follow-up alongside BT-2798's own recorded xref extension.
+follow-up alongside another already-recorded xref extension.
 
 Never raises: any internal failure degrades to an empty `result()`, exactly
 like every other trigger in this module.
@@ -638,7 +638,7 @@ trigger_leaf_change(SuperclassBins) ->
     end.
 
 -doc """
-ADR 0108 hot-reload re-check trigger (BT-2899): re-check every live class
+ADR 0108 hot-reload re-check trigger: re-check every live class
 recorded as a dependent of any alias name in `AliasNameBins` — a live
 redefinition of `type Foo = ...` invalidates any annotation-resolution or
 exhaustiveness proof computed against the old expansion. Transitive fan-out
@@ -929,7 +929,7 @@ path) opts into the ambient cache; a map (`do_trigger_pending/5`'s path, BT-
 `trigger_pending/5`'s moduledoc for why this replaces the previous
 ambient-cache mutate-then-restore mechanism.
 
-ADR 0115 Phase 4 (BT-3219): the dependent lookup now calls
+ADR 0115 Phase 4: the dependent lookup now calls
 `beamtalk_xref:senders_of/2`, not `/1` — `ChangedClass`
 (`changed_class_tag/2` applied to `ClassNameBin`'s atom and `Side`) narrows
 the candidate pool to sites whose receiver could actually dispatch to the
@@ -992,7 +992,7 @@ do_trigger(ClassNameBin, SelectorBin, Side, Classification, ClassHierarchy) ->
     }.
 
 -doc """
-ADR 0115 Phase 4 (BT-3219): each shape-dependent selector is filtered through
+ADR 0115 Phase 4: each shape-dependent selector is filtered through
 `beamtalk_xref:senders_of/2` against `ClassNameBin`, individually tagged by
 its own side — `shape_dependent_selectors/1`'s selector set mixes
 `spawnWith:` (a **class-side** message, sent to the class object itself:
@@ -1050,7 +1050,7 @@ group `group_by_owner/1` found) minus `Kept` (`apply_cap/2`'s survivors),
 named as owner binaries. `Candidates` arrives as `Kept`'s superset with
 `Kept` as its prefix (`apply_cap/2`'s contract), so list subtraction is exact
 and does not need a set datatype. See `result()`'s `not_checked_owners` doc
-(BT-2802) for why this is exposed rather than just counted.
+for why this is exposed rather than just counted.
 """.
 -spec not_checked_owners([{atom(), [map()]}], [{atom(), [map()]}]) -> [binary()].
 not_checked_owners(Candidates, Kept) ->
@@ -1062,7 +1062,7 @@ candidate whose `recheck_owner/6`/`recheck_owner_for_shape/4` outcome status
 was not `ok` — i.e. `skipped` (no live source recorded) or `failed` (the
 diagnostics round-trip errored or the compiler port call itself failed).
 Both groups share the same defining property `result()`'s moduledoc
-documents for `not_verified_owners` (BT-2828): a diagnostics round-trip
+documents for `not_verified_owners`: a diagnostics round-trip
 never completed for this owner this trigger, so any pre-existing finding for
 it was neither replaced nor known-fixed — `beamtalk_repl_loader` must not
 treat it as freshly verified. `NotCheckedOwners` and `Outcomes`' owners are
@@ -1080,11 +1080,11 @@ not_verified_owners(NotCheckedOwners, Outcomes) ->
     lists:usort(NotCheckedOwners ++ UnverifiedFromOutcomes).
 
 -doc """
-ADR 0115 Phase 4 (BT-3219): the `ChangedClass` argument `beamtalk_xref:
+ADR 0115 Phase 4: the `ChangedClass` argument `beamtalk_xref:
 senders_of/2` expects — `ClassAtom` unchanged for an instance-side reload, or
 its class-object tag (`'<C> class'`, via `beamtalk_runtime_api:
 class_object_tag/1`) for a class-side one. This is the identical convention
-`recv_type` itself uses for a `Meta{C}` receiver (BT-3217's write path) — the
+`recv_type` itself uses for a `Meta{C}` receiver (its own write path) — the
 ADR reuses it here for `ChangedClass` rather than inventing a third parameter
 or a wider tuple type, and it is exactly what lets `senders_of/2`'s Amendment
 3 side-gating (a class-object receiver only ever dispatches through the
@@ -1175,7 +1175,7 @@ The `with*:` copy-setter selector name for a slot field (mirrors
 `crates/beamtalk-core/src/synthetic_selectors.rs` — capitalising the first
 character and wrapping in `with`/`:`).
 
-BT-3090: this used to capitalise via ASCII-only byte arithmetic
+This used to capitalise via ASCII-only byte arithmetic
 (`First - 32`), which is exact for the ASCII range but silently leaves a
 non-ASCII lowercase first letter (e.g. `"économie"`) uncapitalised — the
 first UTF-8 byte of a multi-byte codepoint never falls in `$a..$z`, so it hit
@@ -1260,7 +1260,7 @@ installed through `beamtalk_repl_loader`, e.g. a stdlib/dependency class) is
 compiler-port failure for this one candidate is `failed` — both degrade to
 "no findings for this caller" rather than failing the whole reload's
 orchestration, but neither counts as a completed check.
-Accepts `ClassHierarchy` (BT-3109) — the `class_hierarchy` option value
+Accepts `ClassHierarchy` — the `class_hierarchy` option value
 passed straight through to `beamtalk_compiler:diagnostics/3`: `true` opts
 into the ambient class cache (`trigger/4`'s path), or a map threads a
 caller-built overlay for this one request only (`trigger_pending/5`'s path)
@@ -1449,8 +1449,7 @@ itself is ambiguous, which *other* changes could equally be the true cause?
   `relevant_diagnostic/4`'s moduledoc documents and accepts for
   `signature_change` — attributes any otherwise-unmatched `Dnu` to the
   *first* `retyped` change in `FieldChanges` when one is present. **When a
-  single reload retypes two or more slots** (BT-2780 adversarial review,
-  BT-2805), there is no field-name signal in the `Dnu` message to
+  single reload retypes two or more slots**, there is no field-name signal in the `Dnu` message to
   disambiguate which retyped slot actually caused it (unlike the
   `Type`/removed-accessor branches above, which match on quoted text), so
   `retyped_fallback/1` cannot pin the finding to a single slot with
@@ -1591,7 +1590,7 @@ diagnostics attributable to one of `SuperclassBins` losing its leaf status
 (`relevant_diagnostic_leaf_change/2`, applied per superclass in the batch —
 see `recheck_owner_for_leaf_change/3`). Structurally mirrors
 `do_trigger_image/0` (same source, same per-class round trip, run **once**
-regardless of how many superclasses are in `SuperclassBins` — BT-2873) but
+regardless of how many superclasses are in `SuperclassBins`) but
 returns a `result()` — not an `image_result()` — since `checked_owners`/
 `not_verified_owners` are what the publish path
 (`beamtalk_repl_loader:publish_leaf_change_recheck_outcome/2`, called once
@@ -1637,7 +1636,7 @@ same `{ok | failed, ...}` degrade-on-failure contract) but filters/builds
 findings via `relevant_diagnostic_leaf_change/2` / `to_finding_leaf_change/3`
 instead of `image_finding/2`.
 
-**BT-2873:** one `diagnostics/3` round trip covers every superclass in the
+One `diagnostics/3` round trip covers every superclass in the
 batch — a diagnostic that happens to name more than one batch member (not
 observed in practice; every shipped diagnostic message names exactly one
 class) contributes one finding per matching superclass, rather than picking
@@ -1686,8 +1685,8 @@ findings_for_leaf_change_diagnostic(OwnerBin, SuperclassBins, Diagnostic) ->
 -doc """
 Is `Diagnostic` attributable to `SuperclassBin` losing its leaf status? A
 `Type`-category diagnostic naming `SuperclassBin` — the "has subclasses"
-compile error (BT-2854) and a non-exhaustive/"cannot verify"
-`matchExhaustive:` (BT-2856, both share `DiagnosticCategory::Type`) are the
+compile error and a non-exhaustive/"cannot verify"
+`matchExhaustive:` (both share `DiagnosticCategory::Type`) are the
 only two diagnostic shapes this hierarchy change can newly introduce, and
 both always name the class in their message text. Deliberately does **not**
 drop `error`-severity (see `trigger_leaf_change/1`'s doc for why this is the
