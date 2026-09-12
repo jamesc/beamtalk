@@ -238,8 +238,8 @@ setup_with_changelog() ->
     %% beamtalk_repl_loader_rewrite_sites_tests.erl's identical setup.
     %%
     %% `Unique` uses `beamtalk_test_unique:id/0` rather than a bare
-    %% `erlang:unique_integer/1` (BT-3281) — see its moduledoc for why: in
-    %% short, `erlang:unique_integer/1`'s counter resets every fresh `rebar3
+    %% `erlang:unique_integer/1` — see `beamtalk_test_unique`'s moduledoc for
+    %% why: in short, `erlang:unique_integer/1`'s counter resets every fresh `rebar3
     %% eunit` invocation, so two SEPARATE test runs reaching this
     %% deterministic call site can compute the IDENTICAL `WorkspaceId`/
     %% `ChangelogHome`. Observed directly (review follow-up, PR #3523): the
@@ -283,7 +283,7 @@ rename_to_changelog(_Fixture) ->
     ].
 
 %%====================================================================
-%% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` undoes a pending
+%% ADR 0114 Phase 4: `Workspace changes revert:` undoes a pending
 %% `'rename-class'` entry — restores the class's original name AND every
 %% rewritten site, including the SAME-CLASS multi-site case (`bt3278_widget_
 %% user.bt`'s two same-line occurrences, both rewritten within the ONE
@@ -404,7 +404,7 @@ dyn_user_source() ->
     >>.
 
 register_dynamic_class(ClassName) ->
-    %% Extracted to `beamtalk_test_dynamic_class` (BT-3443) once
+    %% Extracted to `beamtalk_test_dynamic_class` once
     %% `beamtalk_repl_compiler_rename_freshness_tests` needed this exact
     %% fixture too — see that module's own helper for the shared source.
     beamtalk_test_dynamic_class:register(ClassName).
@@ -516,7 +516,7 @@ bt3278_drain_call_order(Acc) ->
     end.
 
 %%====================================================================
-%% ADR 0114 Phase 4 (BT-3274), review follow-up: `revert_rename_sites/1`
+%% ADR 0114 Phase 4: `revert_rename_sites/1`
 %% has the SAME dynamic-class ordering hazard `do_rename_and_rewrite/7` was
 %% fixed for on PR #3523 (see that function's own doc, mirrored above) —
 %% except in reverse. A dynamic class's identity restore
@@ -543,7 +543,7 @@ setup_dynamic_with_reference_and_changelog() ->
         undefined -> ok;
         LogPid -> gen_server:stop(LogPid)
     end,
-    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`,
+    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`,
     %% same entropy fix `setup_with_changelog/0` documents.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-to-dyn-changelog-" ++ Unique),

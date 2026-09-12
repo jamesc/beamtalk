@@ -29,7 +29,7 @@ session_test_() ->
 
 setup() ->
     %% Defensively stop any supervisor a prior fixture/module left registered, so
-    %% this start_link/0 never hits {already_started, _} (BT-2523). Unlink the
+    %% this start_link/0 never hits {already_started, _}. Unlink the
     %% fresh one so the cleanup shutdown below does not propagate to the runner.
     stop_session_sup(),
     {ok, SupPid} = beamtalk_session_sup:start_link(),
@@ -40,7 +40,7 @@ cleanup(_SupPid) ->
     %% Synchronously stop the supervisor and wait until its registered name is
     %% gone before the next fixture's setup runs. `exit(_, kill) + timer:sleep/1`
     %% is a non-deterministic wait that, under CI load/ordering, can leave the
-    %% registered `beamtalk_session_sup` alive into the next test (BT-2523).
+    %% registered `beamtalk_session_sup` alive into the next test.
     stop_session_sup(),
     ok.
 

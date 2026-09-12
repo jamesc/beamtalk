@@ -219,8 +219,8 @@ removing_a_state_slot_flags_the_real_dependent_test_() ->
         end}}.
 
 %%====================================================================
-%% End-to-end: a clean shape re-check still announces (BT-2780 review fix,
-%% PR #2901) — an empty Findings with non-empty CheckedOwners is the
+%% End-to-end: a clean shape re-check still announces — an empty Findings
+%% with non-empty CheckedOwners is the
 %% "reload-fixes-reload" clearing signal, not silence.
 %%====================================================================
 
@@ -325,7 +325,7 @@ adding_an_unrelated_field_with_no_stale_dependents_still_announces_test_() ->
 
 %%====================================================================
 %% End-to-end: a skipped (no live source) shape-change candidate gets its
-%% pre-existing finding marked stale (BT-2828) — the shape-path counterpart
+%% pre-existing finding marked stale — the shape-path counterpart
 %% of `beamtalk_repl_loader_recheck_tests:skipped_candidate_with_existing_finding_gets_marked_stale_test_`.
 %% `do_trigger_shape/2` and `publish_shape_recheck_outcome/3` share
 %% `not_verified_owners/2` and `mark_unverified_findings_stale/2` with the

@@ -1138,7 +1138,7 @@ erlang_help_known_module_known_function_returns_docs_test() ->
     ?assertEqual(false, maps:is_key(<<"error">>, Decoded)).
 
 %%====================================================================
-%% handle/4 -- erlang-complete op (BT-1903)
+%% handle/4 -- erlang-complete op
 %%====================================================================
 
 erlang_complete_module_prefix_test() ->
@@ -1192,7 +1192,7 @@ erlang_complete_unknown_module_returns_empty_test() ->
     ?assertEqual([], maps:get(<<"completions">>, Decoded)).
 
 erlang_complete_existing_atom_not_a_loaded_module_returns_empty_test() ->
-    %% BT-3337: distinct from the badarg case above — `ok` already exists as
+    %% Distinct from the badarg case above — `ok` already exists as
     %% an atom (used throughout this suite) but names no loaded module, so
     %% `code:get_object_code/1`'s `error` branch is reached instead.
     Msg = make_msg(<<"erlang-complete">>, <<"ec-4">>, undefined),
@@ -1246,7 +1246,7 @@ handle_test_unknown_class_returns_class_not_found_test() ->
     ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown class">>)).
 
 %%====================================================================
-%% handle/4 -- list-classes filter validation (BT-1404)
+%% handle/4 -- list-classes filter validation
 %%====================================================================
 
 handle_list_classes_unknown_filter_returns_error_test() ->
@@ -1375,12 +1375,10 @@ dev_runtime_test_() ->
     end}.
 
 collect_all_methods_dedups_override() ->
-    %% BT-3087 regression: WidgetDev overrides WidgetDevBase's inheritedGreet
-    %% (see setup_dev_runtime/0). Before the fix, collect_methods_with_fun
-    %% built the result as `LocalMethods ++ InheritedMethods` with no dedup,
-    %% so the overridden selector appeared twice — once from WidgetDev's own
-    %% local methods, once from WidgetDevBase's. Local-overrides-wins
-    %% shadowing means it must appear exactly once now.
+    %% Regression: WidgetDev overrides WidgetDevBase's inheritedGreet
+    %% (see setup_dev_runtime/0). Local-overrides-wins shadowing means the
+    %% overridden selector must appear exactly once — never once from
+    %% WidgetDev's own local methods and again from WidgetDevBase's.
     Result = beamtalk_repl_ops_dev:collect_all_methods('WidgetDev', 0),
     Occurrences = [S || S <- Result, S =:= 'inheritedGreet'],
     ?assertEqual(1, length(Occurrences)),
@@ -1389,7 +1387,7 @@ collect_all_methods_dedups_override() ->
     ?assert(lists:member('next', Result)).
 
 inherited_methods_excludes_local_attributes_defining_class() ->
-    %% BT-3478: WidgetDev's own methods (render/resize/next/inheritedGreet
+    %% WidgetDev's own methods (render/resize/next/inheritedGreet
     %% instance-side, create class-side) must not appear — only WidgetDevBase's
     %% never-shadowed baseOnly/baseClassOnly, each carrying its defining class.
     Result = beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDev">>),
@@ -1407,7 +1405,7 @@ inherited_methods_excludes_local_attributes_defining_class() ->
     ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"defining_class">>, ClassRow)).
 
 inherited_methods_excludes_shadowed_override() ->
-    %% BT-3087-style regression, for the new op: WidgetDev overrides
+    %% WidgetDev overrides
     %% WidgetDevBase's inheritedGreet, so it is local now, not inherited —
     %% it must not appear in the inherited-methods result at all (neither
     %% attributed to WidgetDev nor, incorrectly, to WidgetDevBase).
@@ -1545,13 +1543,13 @@ setup_dev_runtime() ->
         superclass => none,
         instance_methods => #{
             'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0},
-            %% BT-3478: a genuinely-inherited (never shadowed) instance
+            %% A genuinely-inherited (never shadowed) instance
             %% method, so `list_inherited_methods_for_ws('WidgetDev')` has
             %% something real to attribute back to WidgetDevBase.
             'baseOnly' => #{block => fun(_, _) -> ok end, arity => 0}
         },
         class_methods => #{
-            %% BT-3478: same, on the class side.
+            %% Same, on the class side.
             'baseClassOnly' => #{block => fun(_, _) -> ok end, arity => 0}
         }
     }),
@@ -1566,10 +1564,10 @@ setup_dev_runtime() ->
             'render' => #{block => fun(_, _) -> ok end, arity => 0},
             'resize' => #{block => fun(_, _, _) -> ok end, arity => 2},
             'next' => #{block => fun(_, _) -> ok end, arity => 0},
-            %% BT-3087: overrides WidgetDevBase's inheritedGreet — regression
-            %% fixture for the duplicate-listing bug (collect_all_methods
-            %% used to return an overridden selector twice, once from
-            %% LocalMethods and once from InheritedMethods).
+            %% Overrides WidgetDevBase's inheritedGreet — regression fixture
+            %% ensuring collect_all_methods does not return an overridden
+            %% selector twice, once from LocalMethods and once from
+            %% InheritedMethods.
             'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0}
         },
         method_return_types => #{
@@ -1727,10 +1725,10 @@ methods_op_returns_methods() ->
     ?assertEqual([<<"class">>], Sides).
 
 methods_op_tags_synthetic_source_status() ->
-    %% BT-3444: the VS Code Workspace Explorer sidebar badges a compiler-
+    %% The VS Code Workspace Explorer sidebar badges a compiler-
     %% generated method (no user-written declaration anywhere in source) as
     %% visibly distinct — the same `source_status = synthetic` fact the
-    %% LiveView IDE method list already badges (BT-2714). WidgetDev's
+    %% LiveView IDE method list already badges. WidgetDev's
     %% `render` isn't really synthetic (it's a plain hand-registered test
     %% fixture method), but xref doesn't know that — tagging its xref row
     %% `synthetic` here exercises the ws op's tagging path exactly as it
@@ -1769,7 +1767,7 @@ methods_op_tags_synthetic_source_status() ->
     ok = beamtalk_xref:register_class('WidgetDev', []).
 
 methods_op_returns_state_vars() ->
-    %% BT-3439: WidgetDev is built directly via beamtalk_object_class:start/2
+    %% WidgetDev is built directly via beamtalk_object_class:start/2
     %% (setup_dev_runtime/0), not compiled — no state_var_xref was ever baked
     %% for it, so every entry's line is `null`. This is exactly the "class
     %% predates the feature / ClassBuilder-built" fallback case
@@ -1786,7 +1784,7 @@ methods_op_returns_state_vars() ->
     ?assertEqual([null, null], Lines).
 
 methods_op_state_vars_carry_line_when_registered() ->
-    %% BT-3439: once beamtalk_xref has real rows for a class (as codegen bakes
+    %% Once beamtalk_xref has real rows for a class (as codegen bakes
     %% for a compiled class via register_class/0), the ws op surfaces them.
     %% beamtalk_xref is a beamtalk_runtime_sup worker; this app's eunit run
     %% doesn't necessarily boot that supervision tree, so stand one up
@@ -1835,7 +1833,7 @@ list_classes_op_returns_class() ->
     ?assertEqual(<<"A widget for dev tests.">>, maps:get(<<"doc">>, Row)),
     ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"superclass">>, Row)),
     ?assertEqual(0, maps:get(<<"actor_count">>, Row)),
-    %% BT-2552-style classification, reused (not re-derived) from the System
+    %% Classification, reused (not re-derived) from the System
     %% Browser's `browse-classes` classifier — see `source_origin_of/2`.
     ?assert(
         lists:member(
@@ -1899,8 +1897,8 @@ validate_selector_known() ->
 
 validate_selector_unknown() ->
     Pid = beamtalk_runtime_api:whereis_class('WidgetDev'),
-    %% BT-2402: validate_selector_if_present/4 returns a structured error term
-    %% (no longer a pre-encoded JSON binary).
+    %% validate_selector_if_present/4 returns a structured error term, not a
+    %% pre-encoded JSON binary.
     Result = beamtalk_repl_ops_dev:validate_selector_if_present(
         <<"WidgetDev">>, 'WidgetDev', Pid, <<"noSuchSelectorXyz">>
     ),
@@ -1956,7 +1954,7 @@ type_annotation_completion_class_name_spaced() ->
     %% "policy :: Widg" (space before `::`) — parse_receiver_and_prefix returns
     %% {expression, <<"policy ::">>, <<"Widg">>}; ends_with_double_colon detects
     %% annotation position and class_name_completions offers WidgetDev, matching
-    %% the static LSP path's class-name-in-annotation-position behaviour (BT-2918).
+    %% the static LSP path's class-name-in-annotation-position behaviour.
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy :: Widg">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)),
     %% Instance/class methods must NOT leak into annotation-position completions.
@@ -1999,7 +1997,7 @@ type_annotation_completion_class_name_spaced_keyword_receiver() ->
 type_annotation_completion_alias_name() ->
     %% AliasNames threaded via get_context_completions/3 are offered in
     %% annotation position alongside class names — the live-REPL counterpart to
-    %% completion_provider.rs's add_alias_name_completions (BT-2901).
+    %% completion_provider.rs's add_alias_name_completions.
     AliasNames = [<<"RestartStrategy">>, <<"OtherAlias">>],
     Result = beamtalk_repl_ops_dev:get_context_completions(
         <<"policy :: Restart">>, #{}, AliasNames
@@ -2125,7 +2123,7 @@ get_session_bindings_dead_pid_returns_empty_test() ->
 
 get_session_alias_names_dead_pid_returns_empty_test() ->
     %% A non-session pid (self) makes beamtalk_repl_shell:get_alias_table throw,
-    %% which the helper catches, returning [] (BT-2918).
+    %% which the helper catches, returning [].
     ?assertEqual([], beamtalk_repl_ops_dev:get_session_alias_names(self())).
 
 handle_test_all_returns_response_test() ->
@@ -2151,7 +2149,7 @@ handle_test_file_returns_response_test() ->
     ?assert(maps:is_key(<<"status">>, Decoded)).
 
 handle_list_tests_returns_classes_term_test() ->
-    %% BT-2557: list-tests discovers TestCase subclasses via the live registry.
+    %% list-tests discovers TestCase subclasses via the live registry.
     %% The bare EUnit image loads no TestCase subclasses, so discovery returns an
     %% empty `classes` list — exercising the op routing + the `{value, _}` term
     %% shape without depending on any fixture class being present.
@@ -2159,7 +2157,7 @@ handle_list_tests_returns_classes_term_test() ->
     {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"list-tests">>, #{}, Msg, self()),
     ?assert(is_list(maps:get(<<"classes">>, Value))).
 
-%% BT-2801: lazily start `beamtalk_workspace_findings_store` for the
+%% Lazily start `beamtalk_workspace_findings_store` for the
 %% duration of `TestFun`, mirroring the `case whereis(...)` precedent used
 %% by `beamtalk_repl_loader_recheck_tests.erl` for the same gen_server. This
 %% file's tests otherwise don't require a running workspace (see the module
@@ -2190,7 +2188,7 @@ with_findings_store(TestFun) ->
 
 handle_reload_findings_returns_empty_snapshot_test() ->
     with_findings_store(fun() ->
-        %% BT-2801: reload-findings is a request/response snapshot read of
+        %% reload-findings is a request/response snapshot read of
         %% `beamtalk_workspace_findings_store:all/0`. With no findings
         %% recorded (the store's initial state), the op still exercises op
         %% routing + the `{value, _}` term shape and returns an empty list,
@@ -2202,7 +2200,7 @@ handle_reload_findings_returns_empty_snapshot_test() ->
 
 handle_reload_findings_returns_wire_shaped_finding_test() ->
     with_findings_store(fun() ->
-        %% BT-2801: a recorded finding must round-trip through the op in the
+        %% A recorded finding must round-trip through the op in the
         %% same wire shape `encode_reload_finding/1` produces for the
         %% `reload_check` push frame — binary keys, atom
         %% `classification`/`category` fields stringified, `undefined`
@@ -2267,10 +2265,10 @@ handle_list_classes_non_binary_filter_test() ->
     ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown filter">>)).
 
 %%====================================================================
-%% is_identifier_char/1 — shared word-boundary conformance corpus (BT-3083)
+%% is_identifier_char/1 — shared word-boundary conformance corpus
 %%====================================================================
 
-%% BT-3083 conformance: every case in the shared corpus must classify
+%% Conformance: every case in the shared corpus must classify
 %% identically here and in the Rust side's `is_completion_word_char`
 %% (`crates/beamtalk-core/src/source_analysis/mod.rs`). The corpus is the
 %% single source of truth both implementations are pinned to; the Rust side
@@ -2294,7 +2292,7 @@ is_identifier_char_matches_shared_corpus_test() ->
     ).
 
 %% Load the shared word-boundary conformance corpus from the repo tree.
-%% `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% `beamtalk_test_corpus` walks up from the test CWD to the
 %% project root (the dir holding `Cargo.toml`), then reads the fixture both
 %% surfaces share.
 load_word_boundary_corpus() ->
@@ -2308,10 +2306,10 @@ load_word_boundary_corpus() ->
     ]).
 
 %%====================================================================
-%% builtin_keywords/0 — shared keyword-vocabulary conformance corpus (BT-3083)
+%% builtin_keywords/0 — shared keyword-vocabulary conformance corpus
 %%====================================================================
 
-%% BT-3083 conformance: every keyword in the shared corpus must be offered
+%% Conformance: every keyword in the shared corpus must be offered
 %% here and by the Rust LSP's static `add_keyword_completions`
 %% (`crates/beamtalk-core/src/queries/completion_provider.rs`). The corpus is
 %% the single source of truth both implementations are pinned to; the Rust

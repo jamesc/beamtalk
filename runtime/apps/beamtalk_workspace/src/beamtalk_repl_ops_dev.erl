@@ -37,25 +37,25 @@ Extracted from beamtalk_repl_server (BT-705).
 
 -include_lib("kernel/include/logger.hrl").
 
-%% BT-1045: Export internals for white-box testing of the binding-lookup pipeline.
+%% Export internals for white-box testing of the binding-lookup pipeline.
 -ifdef(TEST).
 -export([
     get_session_bindings/1,
     get_session_alias_names/1,
     validate_selector_if_present/4,
-    %% BT-2572: white-box test of the diagnostics `mode` normalisation that
+    %% White-box test of the diagnostics `mode` normalisation that
     %% mirrors the Elixir facade at the Erlang op boundary.
     normalize_diagnostics_mode/1,
-    %% BT-3083: white-box test of the completion word-boundary rule against
+    %% White-box test of the completion word-boundary rule against
     %% the shared Rust/Erlang conformance corpus.
     is_identifier_char/1,
-    %% BT-3083: white-box test of the completion keyword vocabulary against
+    %% White-box test of the completion keyword vocabulary against
     %% the shared Rust/Erlang conformance corpus.
     builtin_keywords/0,
-    %% BT-3087: white-box test of the local-overrides-wins dedup fix for
+    %% White-box test of the local-overrides-wins dedup fix for
     %% "all methods including inherited".
     collect_all_methods/2,
-    %% BT-3337: white-box tests of the receiver classifier, the hover
+    %% White-box tests of the receiver classifier, the hover
     %% resolver, and the diagnostics side-effect-free compile path.
     classify_receiver/2,
     hover_docs/2,
@@ -65,7 +65,7 @@ Extracted from beamtalk_repl_server (BT-705).
 
 %% Methods inherited from Object that are internal implementation protocol and
 %% should not appear in user-facing completions. Long-term, reflection methods
-%% (fieldNames, fieldAt:, fieldAt:put:) should move to Mirror classes (BT-1049).
+%% (fieldNames, fieldAt:, fieldAt:put:) should move to Mirror classes.
 -define(COMPLETION_HIDDEN_METHODS, [
     %% Abstract-class stubs — only meaningful inside a class body
     subclassResponsibility,
@@ -108,7 +108,7 @@ no JSON in this path.
     beamtalk_repl_ops:op_result().
 handle_term(<<"complete">>, Params, Msg, SessionPid) ->
     Code = maps:get(<<"code">>, Params, <<>>),
-    %% BT-783: New protocol includes "cursor" field — Code is the full line up to cursor.
+    %% New protocol includes "cursor" field — Code is the full line up to cursor.
     %% Old protocol omits "cursor" — Code is a bare prefix (backward compat).
     Completions =
         case maps:is_key(<<"cursor">>, Params) of
@@ -116,7 +116,7 @@ handle_term(<<"complete">>, Params, Msg, SessionPid) ->
                 %% Completions run on a separate WebSocket session with no user bindings.
                 %% If the client passes its main session ID, resolve bindings from that session
                 %% so instance-method completions work for bound actor variables.
-                %% BT-1045: session is decoded into Msg by the protocol layer and stripped
+                %% Session is decoded into Msg by the protocol layer and stripped
                 %% from Params — use get_session(Msg), NOT maps:get(<<"session">>, Params).
                 BindingPid = beamtalk_session_table:resolve_pid(
                     beamtalk_repl_protocol:get_session(Msg), SessionPid
@@ -125,7 +125,7 @@ handle_term(<<"complete">>, Params, Msg, SessionPid) ->
                 WorkspaceBindings = get_workspace_bindings(),
                 %% Session bindings take priority over workspace globals (e.g. Transcript)
                 Bindings = maps:merge(WorkspaceBindings, SessionBindings),
-                %% BT-2918: this session's live type alias names (cross-turn carried-over
+                %% This session's live type alias names (cross-turn carried-over
                 %% + current-turn `type Name = ...` declarations), offered alongside
                 %% class/protocol names in type-annotation position.
                 AliasNames = get_session_alias_names(BindingPid),
@@ -135,7 +135,7 @@ handle_term(<<"complete">>, Params, Msg, SessionPid) ->
         end,
     {completions, Completions};
 handle_term(<<"hover">>, Params, Msg, SessionPid) ->
-    %% BT-2555: live-image hover for the cockpit CodeMirror editors. `code` is
+    %% Live-image hover for the cockpit CodeMirror editors. `code` is
     %% the editor line up to (and including) the hovered token. We resolve the
     %% token against the LIVE class registry — a bare class name → its docs, a
     %% `Receiver selector` pair → that method's docs — and format signature +
@@ -150,7 +150,7 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
             {docs, <<>>};
         _ ->
             %% Resolve bindings the same way `complete` does so an instance
-            %% receiver that is a bound variable classifies (BT-1045). Hover is
+            %% receiver that is a bound variable classifies. Hover is
             %% answered on a side WebSocket session with no user bindings, so we
             %% resolve the caller's main session via the protocol-decoded id.
             BindingPid = beamtalk_session_table:resolve_pid(
@@ -162,7 +162,7 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
             {docs, hover_docs(Code, Bindings)}
     end;
 handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
-    %% BT-2556: parse-only diagnostics for the cockpit CodeMirror editors. `code`
+    %% Parse-only diagnostics for the cockpit CodeMirror editors. `code`
     %% is the FULL editor buffer (not a line prefix). We run the compiler's
     %% side-effect-free `diagnostics/2` path — parse + semantic check via the
     %% Rust port's `diagnostics` command — which compiles for DIAGNOSIS ONLY: it
@@ -171,23 +171,23 @@ handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% keystroke and a `:read` op (the Observer may see diagnostics). Each entry
     %% carries byte-offset `start`/`end` spans + a `severity` + a `message`; the
     %% client maps spans to editor positions and severities to squiggles.
-    %% `mode` (BT-2569) selects the parse grammar: <<"expression">> (default,
+    %% `mode` selects the parse grammar: <<"expression">> (default,
     %% top-level script — the Workspace + REPL editors) or <<"method">> (a bare
     %% method body — the System Browser method editor, where the `=>` body
     %% separator is not a valid top-level token).
     Code = maps:get(<<"code">>, Params, <<>>),
-    %% BT-2572: normalise an unknown-binary `mode` to <<"expression">> here, at
+    %% Normalise an unknown-binary `mode` to <<"expression">> here, at
     %% the Erlang op boundary, mirroring the Elixir `BtAttach.Facade` (which maps
     %% anything but "method" to "expression"). Without this, an unknown binary
     %% (e.g. <<"foo">>) flowed straight to the Rust port, which only special-cases
     %% "method" and treats everything else as expression mode — so the runtime
     %% behaviour was already correct, but the Erlang boundary was more permissive
     %% than the facade. A non-binary `mode` is passed through unchanged so it
-    %% still degrades to `[]` via the `diagnostics_for/2` catch-all (BT-2569).
+    %% still degrades to `[]` via the `diagnostics_for/2` catch-all.
     Mode = normalize_diagnostics_mode(maps:get(<<"mode">>, Params, <<"expression">>)),
     {diagnostics, diagnostics_for(Code, Mode)};
 handle_term(<<"reload-findings">>, _Params, _Msg, _SessionPid) ->
-    %% BT-2801 (ADR 0105 surface-parity gap): request/response snapshot read
+    %% (ADR 0105 surface-parity gap): request/response snapshot read
     %% of the live reload-induced findings store, mirroring the
     %% workspace/cockpit UI's dist-attached `reload_findings` initial-mount
     %% read (`editors/liveview/lib/bt_attach/workspace.ex:reload_findings/0`,
@@ -198,8 +198,8 @@ handle_term(<<"reload-findings">>, _Params, _Msg, _SessionPid) ->
     %% see `beamtalk_workspace_findings_store`'s moduledoc for why the store
     %% is the sole source of truth every surface publishes from.
     %%
-    %% Projected to the binary-keyed wire shape up front (like `list-tests`,
-    %% BT-2557) so the result travels as a `{value, _}` term — consumed live
+    %% Projected to the binary-keyed wire shape up front (like `list-tests`)
+    %% so the result travels as a `{value, _}` term — consumed live
     %% over distribution, or encoded as JSON identity at the WebSocket edge —
     %% reusing `encode_reload_finding/1`, the exact per-finding shape the
     %% `reload_check` push frame's `findings` field already uses, so a client
@@ -211,7 +211,7 @@ handle_term(<<"reload-findings">>, _Params, _Msg, _SessionPid) ->
     ],
     {value, #{<<"findings">> => Findings}};
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
-    %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
+    %% Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
     ModuleBin = nonempty_or_undefined(maps:get(<<"module">>, Params, undefined)),
     Completions =
@@ -256,7 +256,7 @@ handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
         end,
     {completions, Completions};
 handle_term(<<"erlang-help">>, Params, _Msg, _SessionPid) ->
-    %% BT-1852: `:help Erlang <module>` and `:help Erlang <module> <function>`
+    %% `:help Erlang <module>` and `:help Erlang <module> <function>`
     %% Delegates to beamtalk_erlang_help for formatting.
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     FunctionBin = nonempty_or_undefined(maps:get(<<"function">>, Params, undefined)),
@@ -320,8 +320,8 @@ handle_term(<<"erlang-help">>, Params, _Msg, _SessionPid) ->
             end
     end;
 handle_term(<<"show-codegen">>, Params, _Msg, SessionPid) ->
-    %% BT-700: Compile expression and return Core Erlang source without evaluating.
-    %% BT-1236: Also accepts class+selector to inspect a loaded class method.
+    %% Compile expression and return Core Erlang source without evaluating.
+    %% Also accepts class+selector to inspect a loaded class method.
     %% `class` takes priority when both are present; empty string is treated as absent.
     ClassBin = nonempty_or_undefined(maps:get(<<"class">>, Params, undefined)),
     CodeBin = maps:get(<<"code">>, Params, undefined),
@@ -374,13 +374,13 @@ handle_term(<<"show-codegen">>, Params, _Msg, SessionPid) ->
             end
     end;
 handle_term(<<"methods">>, Params, _Msg, _SessionPid) ->
-    %% BT-1026: Return instance and class-side methods for a loaded class.
+    %% Return instance and class-side methods for a loaded class.
     ClassBin = maps:get(<<"class">>, Params, <<>>),
     Methods = list_class_methods_for_ws(ClassBin),
     StateVars = list_state_vars_for_ws(ClassBin),
     {methods, Methods, StateVars};
 handle_term(<<"inherited-methods">>, Params, _Msg, _SessionPid) ->
-    %% BT-3478: Return inherited (non-local) instance and class-side methods
+    %% Return inherited (non-local) instance and class-side methods
     %% for a loaded class, each attributed to its defining class. Kept as a
     %% separate op (rather than a flag on "methods") so the sidebar's eager
     %% per-class-item fetch — already paid via "methods" on first expand —
@@ -390,8 +390,8 @@ handle_term(<<"inherited-methods">>, Params, _Msg, _SessionPid) ->
     Methods = list_inherited_methods_for_ws(ClassBin),
     {inherited_methods, Methods};
 handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
-    %% BT-1404: List all available classes with one-line descriptions.
-    %% BT-2091: Now also returns `source_file` and `actor_count` so editors
+    %% List all available classes with one-line descriptions.
+    %% Also returns `source_file` and `actor_count` so editors
     %% (VS Code, LSP) can drive class navigation without the deprecated
     %% `modules` op. `source_file` is resolved from workspace metadata;
     %% `actor_count` is session-scoped and is 0 when no session is provided.
@@ -434,7 +434,7 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                 {error, Error} ->
                     {error, Error};
                 {ok, ClassPids} ->
-                    %% BT-2091: Fetch session-scoped data once for all classes.
+                    %% Fetch session-scoped data once for all classes.
                     %% Falls back to an empty tracker when SessionPid is undefined
                     %% or the session is gone, so list-classes still answers in
                     %% editor / non-session contexts (actor_count = 0).
@@ -541,7 +541,7 @@ handle_term(<<"test">>, Params, _Msg, _SessionPid) ->
 handle_term(<<"test-all">>, _Params, _Msg, _SessionPid) ->
     run_test_op(undefined);
 handle_term(<<"list-tests">>, _Params, _Msg, _SessionPid) ->
-    %% BT-2557: discover loaded TestCase subclasses + their selectors for the
+    %% Discover loaded TestCase subclasses + their selectors for the
     %% cockpit's test-runner pane. Pure reflection over the class registry — runs
     %% NO test code — so it is a `:read` op (the Observer may list tests). The
     %% discovery maps are projected to the binary-keyed wire shape so the result
@@ -557,7 +557,7 @@ handle_term(<<"list-tests">>, _Params, _Msg, _SessionPid) ->
     ],
     {value, #{<<"classes">> => Classes}};
 handle_term(<<"load-tests">>, _Params, _Msg, _SessionPid) ->
-    %% BT-2557: load the project's `test/` files into the live image so the
+    %% Load the project's `test/` files into the live image so the
     %% cockpit test-runner pane (and the System Browser's "Tests" group) surface
     %% TestCase subclasses without a CLI `beamtalk test` round-trip. Plain
     %% `load-project` defaults to include_tests=false, so opening a project never
@@ -598,8 +598,8 @@ handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
             _ -> <<"unknown">>
         end,
     Versions = #{
-        %% BT-2091: Bumped to 2.0 — removed deprecated ops docs/load-file/reload/modules.
-        %% BT-3090: shared with beamtalk_version:get/0 via the ?PROTOCOL_VERSION
+        %% Bumped to 2.0 — removed deprecated ops docs/load-file/reload/modules.
+        %% Shared with beamtalk_version:get/0 via the ?PROTOCOL_VERSION
         %% macro (beamtalk.hrl) — no more hand-synced literals.
         <<"protocol">> => ?PROTOCOL_VERSION,
         <<"beamtalk">> => BeamtalkVsnBin

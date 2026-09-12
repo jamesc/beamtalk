@@ -199,7 +199,7 @@ structured_file_errors_non_compile_error_test() ->
     ?assertEqual(<<"file_not_found">>, maps:get(<<"kind">>, E)).
 
 %%====================================================================
-%% format_collision_warning/3 (BT-1659)
+%% format_collision_warning/3
 %%====================================================================
 
 format_collision_warning_with_packages_test() ->
@@ -228,7 +228,7 @@ extract_package_from_module_unqualified_test() ->
     ?assertEqual(undefined, beamtalk_repl_ops_load:extract_package_from_module('bt@counter')).
 
 %%====================================================================
-%% classify_files_by_change/2 (BT-1685)
+%% classify_files_by_change/2
 %%====================================================================
 
 classify_files_all_new_test() ->
@@ -310,7 +310,7 @@ classify_files_mixed_test() ->
     end.
 
 %%====================================================================
-%% filter_mtimes_under_project/2 (BT-2089)
+%% filter_mtimes_under_project/2
 %%====================================================================
 
 filter_mtimes_under_project_basic_test() ->
@@ -375,8 +375,8 @@ filter_mtimes_under_project_no_matches_test() ->
 
 filter_mtimes_under_project_keeps_test_dir_test() ->
     %% Test files under the project root are still scoped in.
-    %% (BT-2089: scoping out test/ when include_tests=false is the
-    %% caller's responsibility — this helper only filters by project root.)
+    %% (Scoping out test/ when include_tests=false is the caller's
+    %% responsibility — this helper only filters by project root.)
     Mtimes = #{
         "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
         "/projects/foo/test/b.bt" => {{2026, 4, 26}, {0, 0, 0}}
@@ -387,7 +387,7 @@ filter_mtimes_under_project_keeps_test_dir_test() ->
     ?assertEqual(2, maps:size(Filtered)).
 
 %%====================================================================
-%% get_file_mtime/1 (BT-1685)
+%% get_file_mtime/1
 %%====================================================================
 
 get_file_mtime_existing_file_test() ->
@@ -408,7 +408,7 @@ get_file_mtime_missing_file_test() ->
     ?assertEqual({{0, 0, 0}, {0, 0, 0}}, Mtime).
 
 %%====================================================================
-%% find_erl_files/2 (BT-1716, BT-2653)
+%% find_erl_files/2
 %%====================================================================
 
 find_erl_files_nonexistent_dir_test() ->
@@ -453,7 +453,7 @@ find_erl_files_skips_test_dir_test() ->
         rm_temp_dir(Dir)
     end.
 
-%% BT-2653: include_tests=true MUST include native/test/ helpers so a `.bt`
+%% include_tests=true MUST include native/test/ helpers so a `.bt`
 %% test can drive them via `(Erlang <helper>) <msg>` on the test-load path.
 find_erl_files_includes_test_dir_when_flag_set_test() ->
     Dir = make_temp_dir(),
@@ -472,7 +472,7 @@ find_erl_files_includes_test_dir_when_flag_set_test() ->
     end.
 
 %%====================================================================
-%% compile_native_erl_files/2 (BT-1716)
+%% compile_native_erl_files/2
 %%====================================================================
 
 compile_native_erl_files_empty_test() ->
@@ -590,7 +590,7 @@ compile_native_erl_files_multiple_test() ->
     end.
 
 %%====================================================================
-%% extract_native_refs/1 (BT-1717)
+%% extract_native_refs/1
 %%====================================================================
 
 extract_native_refs_native_annotation_test() ->
@@ -669,7 +669,7 @@ extract_native_refs_missing_file_test() ->
     ?assertEqual([], Refs).
 
 %%====================================================================
-%% find_project_root/1 (BT-1717)
+%% find_project_root/1
 %%====================================================================
 
 find_project_root_with_manifest_test() ->
@@ -702,7 +702,7 @@ find_project_root_no_manifest_test() ->
     end.
 
 %%====================================================================
-%% maybe_recompile_native_deps/2 (BT-1717)
+%% maybe_recompile_native_deps/2
 %%====================================================================
 
 maybe_recompile_native_deps_no_project_root_test() ->
@@ -933,7 +933,7 @@ activate_dep_ebin_nonexistent_test() ->
     ?assertEqual({ok, []}, beamtalk_module_activation:activate_ebin("/nonexistent/path")).
 
 %%====================================================================
-%% render_class_header/1 (BT-2653)
+%% render_class_header/1
 %%====================================================================
 
 render_class_header_empty_test() ->
@@ -988,7 +988,7 @@ render_class_header_skips_unsafe_names_test() ->
     {ok, _Tokens, _} = erl_scan:string(binary_to_list(Bin)).
 
 %%====================================================================
-%% regenerate_native_class_header/1 (BT-2653)
+%% regenerate_native_class_header/1
 %%====================================================================
 
 regenerate_native_class_header_writes_file_test() ->
@@ -1036,7 +1036,7 @@ native_generated_include_dir_layout_test() ->
     ).
 
 %%====================================================================
-%% compile_native_erl_files/2 — generated-header include path (BT-2653)
+%% compile_native_erl_files/2 — generated-header include path
 %%====================================================================
 
 compile_native_uses_generated_class_header_test() ->
@@ -1072,7 +1072,7 @@ compile_native_uses_generated_class_header_test() ->
     end.
 
 %%====================================================================
-%% Test-load native path: native/test/ helper end-to-end (BT-2653)
+%% Test-load native path: native/test/ helper end-to-end
 %%
 %% Mirrors the beamtalk-http failure: a `.bt` test drives a test-only native
 %% helper in native/test/ via `(Erlang <helper>) <msg>`. On the test-load path
@@ -1152,7 +1152,7 @@ test_load_excludes_native_test_helper_without_flag_test() ->
     end.
 
 %%====================================================================
-%% BT-2671: source-AST-derived class index (cold-load header parity)
+%% Source-AST-derived class index (cold-load header parity)
 %%====================================================================
 
 read_package_name_reads_toml_test() ->
@@ -1174,7 +1174,7 @@ read_package_name_missing_manifest_test() ->
         rm_temp_dir(Dir)
     end.
 
-%% BT-3441: build_source_class_module_index/1 now indexes each file via the
+%% build_source_class_module_index/1 indexes each file via the
 %% compiler port (beamtalk_compiler:build_class_module_index_in_source/3)
 %% instead of a regex + hand-rolled snake-case, so every test below needs the
 %% compiler application (and its port) running. Idempotent and never stopped
@@ -1218,10 +1218,10 @@ relative_bt_path_subdir_test() ->
     end.
 
 build_source_class_module_index_cold_test() ->
-    %% The whole point of BT-2671: on a COLD load (no class registered yet) the
-    %% source index already knows every class defined in src/, keyed to its
-    %% package-qualified module atom. Also exercises a multi-class file (BT-3441:
-    %% the real parser must find every declared class, not just the first).
+    %% On a COLD load (no class registered yet) the source index already
+    %% knows every class defined in src/, keyed to its package-qualified
+    %% module atom. Also exercises a multi-class file (the real parser must
+    %% find every declared class, not just the first).
     ensure_compiler_started(),
     Dir = filename:absname(make_temp_dir()),
     try
@@ -1255,13 +1255,10 @@ build_source_class_module_index_no_package_test() ->
         rm_temp_dir(Dir)
     end.
 
-%% BT-3441 acceptance criterion 3 (regression, analogous to BT-3431/BT-3432):
-%% a subdirectory class whose file-stem casing (HttpResponse.bt, PascalCase)
-%% differs from its snake_case module segment — the exact shape that broke
-%% module-name resolution before the Rust-side registry unified this rule
-%% (BT-3081/BT-3431/BT-3432). Against the new compiler-port-backed
-%% implementation, the module-name segment must come out snake-cased exactly
-%% as `beamtalk build` (compute_relative_module/relative_module_segments)
+%% Acceptance criterion: a subdirectory class whose file-stem casing
+%% (HttpResponse.bt, PascalCase) differs from its snake_case module
+%% segment. The module-name segment must come out snake-cased exactly as
+%% `beamtalk build` (compute_relative_module/relative_module_segments)
 %% would produce, never a lossy or divergent guess.
 build_source_class_module_index_subdir_casing_mismatch_test() ->
     ensure_compiler_started(),
@@ -1284,7 +1281,7 @@ build_source_class_module_index_subdir_casing_mismatch_test() ->
     end.
 
 regenerate_header_includes_cold_source_class_test() ->
-    %% BT-2671 acceptance: regenerate_native_class_header/1 must emit a
+    %% Acceptance: regenerate_native_class_header/1 must emit a
     %% -define for a class defined in src/ even though it is NOT registered
     %% (cold load). The previous registry-only path produced no macro for it.
     ensure_compiler_started(),
@@ -1313,7 +1310,7 @@ cold_load_native_macro_compiles_test() ->
     %% End-to-end cold-load parity (acceptance criterion 1): a native module
     %% using ?BT_CLASS_MODULE_<Class> for a class defined in the SAME package
     %% being loaded must compile+resolve, with the class NEVER registered. The
-    %% pre-BT-2671 registry-only header would omit the macro → compile failure
+    %% previous registry-only header would omit the macro → compile failure
     %% (relocated symptom-2 cascade).
     ensure_compiler_started(),
     Dir = filename:absname(make_temp_dir()),
@@ -1348,7 +1345,7 @@ cold_load_native_macro_compiles_test() ->
     end.
 
 %%====================================================================
-%% BT-2671: live-registry vs CLI module-atom casing parity (gap 2)
+%% Live-registry vs CLI module-atom casing parity (gap 2)
 %%
 %% Loads a real class into the live class registry, then asserts the registry's
 %% module_name/1 atom equals the module atom the source-AST index derives for
@@ -1445,7 +1442,7 @@ last_module_segment(ModuleBin) ->
     lists:last(binary:split(ModuleBin, <<"@">>, [global])).
 
 %%====================================================================
-%% atomic_write_file (BT-3259)
+%% atomic_write_file
 %%
 %% Shared write-back helper for save-native-source and save-section. Before
 %% the fix, the temp path was a FIXED name (`Path ++ ".bt_native_write_tmp"`),
@@ -1540,7 +1537,7 @@ atomic_write_file_no_recheck_when_expected_undefined_test() ->
     end.
 
 atomic_write_file_recheck_rejects_changed_on_disk_test() ->
-    %% The pre-rename recheck (part 2 of BT-3259): when `ExpectedCurrent` no
+    %% The pre-rename recheck: when `ExpectedCurrent` no
     %% longer matches `Path`'s actual on-disk content, abort with a
     %% structured reason and write nothing.
     Dir = make_temp_dir(),
@@ -1582,7 +1579,7 @@ atomic_write_file_recheck_succeeds_when_unchanged_test() ->
     end.
 
 %%====================================================================
-%% save-native-source (BT-2670)
+%% save-native-source
 %%
 %% Edit -> compile -> reload -> write-back for a *project-owned* native `.erl`.
 %% These set up a real on-disk project (beamtalk.toml + native/<mod>.erl),
@@ -1798,7 +1795,7 @@ save_native_source_requires_source_test() ->
     ).
 
 %%====================================================================
-%% save-section (BT-3238)
+%% save-section
 %%
 %% Add/rename a `// === Name ===` divider comment directly in a project-owned
 %% `.bt` source file. Real project + real loaded class (workspace_meta with a
@@ -1885,7 +1882,7 @@ save_section_renames_existing_divider_test() ->
         teardown_project_class(Proj)
     end.
 
-%% BT-3238 review finding: `finish_section_write/4` must re-read the target
+%% `finish_section_write/4` must re-read the target
 %% file immediately before writing and reject the write if it no longer
 %% matches the `Source` the edit was computed from — e.g. a concurrent
 %% method-body flush landed on the file after this op's own read. Exercises
@@ -2395,7 +2392,7 @@ stamp_version() ->
 
 %%====================================================================
 %% handle_term/4 — the protocol-shaped load-project/load-source/unload
-%% entry points (BT-3336). Everything above this point drives the
+%% entry points. Everything above this point drives the
 %% underlying helpers (sync_project/2, find_bt_files/1, ...) directly;
 %% these instead exercise handle_term/4 itself — the params extraction,
 %% empty-source/bad-module guards, and result-tuple shaping that only run
@@ -2573,7 +2570,7 @@ handle_load_source_success_encodes_json_result_test() ->
     end.
 
 %%====================================================================
-%% collect_load_warnings/1 (BT-737) — the load-result-shape wrapper over
+%% collect_load_warnings/1 — the load-result-shape wrapper over
 %% drain_class_warnings_by_names/1 + format_collision_warning/3.
 %%
 %% `beamtalk_runtime_api`/`beamtalk_class_registry` are shared, heavily-used
@@ -2583,7 +2580,7 @@ handle_load_source_success_encodes_json_result_test() ->
 %% moduledoc for the general reasoning against mocking a shared module), so
 %% these drive `beamtalk_class_registry:record_class_collision_warning/3` for
 %% real — the actual producer `beamtalk_object_class:update_class/2` calls on
-%% a genuine collision (BT-737) — against a fresh, uniquely-named atom rather
+%% a genuine collision — against a fresh, uniquely-named atom rather
 %% than faulting the drain call itself.
 %%====================================================================
 
@@ -2616,7 +2613,7 @@ collect_load_warnings_skips_unknown_atom_class_name_test() ->
     ).
 
 %%====================================================================
-%% build_incremental_summary/4 (BT-1723) — the four unchanged/deleted-count
+%% build_incremental_summary/4 — the four unchanged/deleted-count
 %% shape branches (all pure).
 %%====================================================================
 
@@ -2681,7 +2678,7 @@ ops_load_resolve_module_atoms_other_type_test() ->
     ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, [#{name => 42}])).
 
 %%====================================================================
-%% Provenance edge cases not reached by the existing suite (BT-3336):
+%% Provenance edge cases not reached by the existing suite:
 %% a stamp file whose JSON is valid but not an object, the
 %% current_beamtalk_version/0 error branches, and a dependency whose stamp
 %% is fresh (filtered out of collect_stale_dep_provenance/1, rather than

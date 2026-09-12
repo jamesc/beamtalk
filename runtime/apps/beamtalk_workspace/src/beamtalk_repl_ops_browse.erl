@@ -1027,12 +1027,12 @@ native_module_editable_target(Module) when is_atom(Module) ->
 %% loaded without instantiating its classes is invisible to the class-keyed
 %% `browse-classes`).
 %%
-%% **Filter rule (ADR 0072 `native_modules`, BT-2648):** a "native module" is a
+%% **Filter rule (ADR 0072 `native_modules`):** a "native module" is a
 %% module a Beamtalk package *declares* it ships, never the whole code path:
 %%
 %%   1. Walk `beamtalk_package:all/0` — every loaded OTP application that is a
 %%      Beamtalk package (has a non-empty `classes` env, ADR 0070, or a
-%%      non-empty `type_aliases` env with no classes, BT-2915).
+%%      non-empty `type_aliases` env with no classes).
 %%   2. For each package's app, take its declared native modules:
 %%        * user / dependency packages: the generated `{native_modules, [...]}`
 %%          app-env key (ADR 0072 Phase 1; the `native/*.erl` stems);
@@ -1222,14 +1222,14 @@ backing_source_file(Backing) ->
     end.
 
 %%% ====================================================================
-%%% Op 7 — browse-type-aliases (ADR 0108 Phase 8, BT-2903)
+%%% Op 7 — browse-type-aliases (ADR 0108 Phase 8)
 %%% ====================================================================
 
 %% Enumerate every loaded package's declared `type` aliases (ADR 0108).
 %%
 %% Aliases erase entirely at compile time — no BEAM module, no live process —
 %% so unlike `browse-classes` there is nothing to reflect on. The `.app`
-%% file's `{type_aliases, [...]}` env key (BT-2903, `app_file.rs`
+%% file's `{type_aliases, [...]}` env key (`app_file.rs`
 %% `AliasMetadata`/`format_type_aliases_entry`) is the only durable record of
 %% a package's declarations once compiled, so this walks `beamtalk_package:
 %% all/0` and reads each package's env, the same enumeration strategy
@@ -1238,7 +1238,7 @@ backing_source_file(Backing) ->
 %% **Seeding-boundary exclusion (ADR 0108 Implementation — "System Browser /
 %% LiveView IDE"):** an `internal` alias declared in a package other than the
 %% browsing session's current project package is dropped — the browse-op
-%% analogue of how `AliasRegistry::add_pre_loaded` (BT-2898) never seeds a
+%% analogue of how `AliasRegistry::add_pre_loaded` never seeds a
 %% dependency's internal aliases into a consumer's alias table at compile
 %% time. There is no live "current compilation" alias table to consult here
 %% (this op runs against a loaded system, not a single in-flight compile), so
@@ -1259,7 +1259,7 @@ backing_source_file(Backing) ->
 %% deduping here would silently hide one package's real declaration instead
 %% of surfacing both, distinguished by their `package`/`source_origin` tags.
 %%
-%% **Types-only packages (BT-2915):** discovery walks `beamtalk_package:all/0`,
+%% **Types-only packages:** discovery walks `beamtalk_package:all/0`,
 %% which recognises a package via a non-empty `classes` app-env key (ADR 0070)
 %% *or* a non-empty `type_aliases` app-env key with no classes — a types-only
 %% "shared vocabulary" package with zero classes is enumerated the same as any
@@ -1322,8 +1322,8 @@ type_aliases_of_package(PkgName) ->
             []
     end.
 
-%% An app's declared type aliases — the `.app` `{type_aliases, [...]}` env key
-%% (BT-2903). `[]` for a package with no `type` declarations (most packages),
+%% An app's declared type aliases — the `.app` `{type_aliases, [...]}` env key.
+%% `[]` for a package with no `type` declarations (most packages),
 %% or one built before this key existed — no fallback reconstruction needed,
 %% unlike `package_native_modules/1`'s stdlib special case, since there is no
 %% legacy alias surface to recover data from.
@@ -1369,7 +1369,7 @@ alias_row(Entry, PkgName, Origin) ->
 %% (`expansion`/`source_file`/`doc`, via `escape_erlang_string` +
 %% `file:consult`), or `undefined` (`doc`) — never binaries, since
 %% `app_file.rs` emits a literal `.app` Erlang term, not a JSON payload.
-%% Normalise whichever shape comes back to the binary the BT-2399 term
+%% Normalise whichever shape comes back to the binary the term
 %% contract requires.
 -spec alias_field_binary(atom() | binary() | string()) -> binary().
 alias_field_binary(V) when is_binary(V) ->
@@ -1391,7 +1391,7 @@ alias_field_or_null(V) ->
     alias_field_binary(V).
 
 %%% ====================================================================
-%%% Op 8 — browse-alias-source (BT-3314)
+%%% Op 8 — browse-alias-source
 %%% ====================================================================
 
 %% Read-only source view for a declared type alias, keyed by `name` +
@@ -1518,7 +1518,7 @@ safe_relative_path(SourceFile) ->
     filename:pathtype(Str) =:= relative andalso
         not lists:member("..", filename:split(Str)).
 
-%% BT-3314: `name` is required; `package` is optional (disambiguates a
+%% `name` is required; `package` is optional (disambiguates a
 %% same-named alias declared by more than one package). Aliases are not
 %% runtime atoms/modules, so — unlike `validate_class`/`validate_module` —
 %% no atom resolution is needed, just non-empty binary validation.
@@ -1566,7 +1566,7 @@ handle_call_clause_lines(Content) when is_binary(Content) ->
 %% the generic clauses that bind variables (`{Selector, Args, _}`, `Msg`). A
 %% single capture group avoids `re`'s truncation of trailing unmatched groups.
 %%
-%% BT-2582: this is one half of a shared selector→clause-line definition. The
+%% This is one half of a shared selector→clause-line definition. The
 %% Rust LSP mirrors this algorithm in
 %% `definition_provider::clause_selector` (so go-to-implementation lands on the
 %% same clause the System Browser jump does), and both are pinned to the shared
@@ -1642,7 +1642,7 @@ delegate_exported(Exports, Selector) ->
     lists:any(fun({Name, _Arity}) -> atom_to_list(Name) =:= Target end, Exports).
 
 %%% ====================================================================
-%%% Native-module delegate callers (BT-2732)
+%%% Native-module delegate callers
 %%% ====================================================================
 
 -doc """
@@ -1783,12 +1783,12 @@ origin_of(null) -> <<"runtime">>;
 origin_of(SourceFile) when is_binary(SourceFile) -> <<"both">>.
 
 %% Class source origin: the *classification* of where a class comes from —
-%% `project`, `dependency`, or `stdlib`. Used for IDE badges (BT-2552). This is
-%% orthogonal to the *package name* (see `package_of/2`, BT-2643): the package is
+%% `project`, `dependency`, or `stdlib`. Used for IDE badges. This is
+%% orthogonal to the *package name* (see `package_of/2`): the package is
 %% carried in a separate `package` row field, never packed into this value.
 -spec source_origin_of(atom(), binary() | null) -> binary().
 source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
-    %% Stdlib always wins first (BT-2552).
+    %% Stdlib always wins first.
     case beamtalk_class_registry:is_stdlib_module(ModName) of
         true ->
             <<"stdlib">>;
@@ -1796,7 +1796,7 @@ source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
             classify_origin(package_of_module(ModName), project_package_name(), SourceFile)
     end.
 
-%% Classification rule (BT-2640): the module's package segment is the *primary*
+%% Classification rule: the module's package segment is the *primary*
 %% signal, not the filesystem path. `bt@{pkg}@{class}` encodes the owning package;
 %% comparing it to the project's own package name correctly labels dependency
 %% classes whose sources happen to resolve under the project tree, and avoids
@@ -1831,7 +1831,7 @@ path_origin(SourceFile) when is_binary(SourceFile) ->
         dependency -> <<"dependency">>
     end.
 
-%% Package name a class lives in, for ALL origins (BT-2643): `stdlib` for stdlib
+%% Package name a class lives in, for ALL origins: `stdlib` for stdlib
 %% classes, the dependency package for dependencies, and the project's own
 %% package name for project classes. Orthogonal to `source_origin_of/2`'s
 %% classification. The package comes from the module atom (`bt@{pkg}@{class}`)
@@ -1872,7 +1872,7 @@ package_of_module(ModName) when is_atom(ModName) ->
             nil
     end.
 
-%% Secondary fallback (BT-2640): determine if a source file belongs to the
+%% Secondary fallback: determine if a source file belongs to the
 %% project or a dependency by filesystem path. Used only by `classify_origin/3`
 %% when the module's package segment can't decide. Falls back to `project` when
 %% metadata is unavailable (startup, no workspace) — a wrong "project" badge is
@@ -1914,7 +1914,7 @@ origin_for_provenance(_Provenance, _SourceFile) -> <<"both">>.
 %% The class-definition pane (op 4) does NOT use this — see
 %% `class_definition_disk_differs/1`.
 %%
-%% BT-2567: the comparison source is a *live re-read* of the on-disk class
+%% The comparison source is a *live re-read* of the on-disk class
 %% file (`current_disk_source/2`), not the load-time snapshot held in
 %% `beamtalk_workspace_meta`. The snapshot goes stale under out-of-band writes
 %% (an external editor, or another session flushing the file) and is mutated by
@@ -1937,11 +1937,11 @@ disk_differs(SourceFile, ClassName, ImageText) when is_binary(ImageText) ->
             binary:match(DiskSource, ImageText) =:= nomatch
     end.
 
-%% The class' current on-disk source for the divergence diff (BT-2567). Prefer a
+%% The class' current on-disk source for the divergence diff. Prefer a
 %% live re-read of the recorded source file so the comparison reflects the file
 %% as it is *now*, not as it was at load time. Falls back to the in-memory
 %% load-time snapshot when the class has no source file on record or the file
-%% cannot be read (deleted/moved/permissions) — degrading to the pre-BT-2567
+%% cannot be read (deleted/moved/permissions) — degrading to the previous
 %% behaviour rather than dropping the signal entirely.
 -spec current_disk_source(binary() | null, atom()) -> binary() | undefined.
 current_disk_source(null, ClassName) ->
@@ -1991,7 +1991,7 @@ disk_source(ClassName) ->
 %%% Validation
 %%% ====================================================================
 
-%% BT-2648: optional `module` param for `browse-native-source` — a standalone
+%% Optional `module` param for `browse-native-source` — a standalone
 %% native module key (no backing class). `none` when absent (caller falls back to
 %% the `class` form); an error when present but not a loaded module. Resolved to
 %% an existing atom only (untrusted client input must not grow the atom table).
@@ -2133,7 +2133,7 @@ mod_name_for_class(ClassName) ->
 %% dispatch module. A protocol class object (ADR 0068) is dispatched by the shared
 %% `beamtalk_protocol_object` module, which carries no package and no
 %% `beamtalk_source` — so origin would wrongly read "runtime"/"project" for every
-%% protocol, stdlib ones included. BT-2615: resolve the protocol's *defining*
+%% protocol, stdlib ones included. Resolve the protocol's *defining*
 %% module from the registry (recorded at registration via the codegen `module`
 %% key) so a stdlib protocol like `Printable` (`bt@stdlib@printable`) is badged
 %% stdlib and a project protocol is badged project. Falls back to the dispatch
@@ -2255,12 +2255,10 @@ declared_protocol(_Info) ->
 protocol_from_source(_Selector, _Provenance, synthetic, ClassSide) ->
     %% Synthetic methods are compiler-generated. Today that means value-type
     %% field accessors (ADR 0087), always instance-side, bucketed "accessing"
-    %% by construction. (BT-2614 originally also injected synthetic
-    %% class-side actor constructors `new`/`new:`/`spawn`/`spawn:`, bucketed
-    %% "instance creation" — the canonical Pharo protocol for them; BT-3073
-    %% retired those rows once BT-3071/BT-3072 lifted the bodies onto `Actor`
-    %% as real, source-backed — hence `indexed`, not `synthetic` — class
-    %% methods.) The `class_side => true` branch is kept for any future
+    %% by construction. (The actor constructors `new`/`new:`/`spawn`/`spawn:`
+    %% are real, source-backed — hence `indexed`, not `synthetic` — class
+    %% methods on `Actor`, not synthetic entries.) The `class_side => true`
+    %% branch is kept for any future
     %% class-side synthetic entry point (and is exercised directly by the
     %% EUnit tests below with fabricated xref rows) — classify by
     %% `class_side`, not the selector name, so an instance-side synthetic slot

@@ -97,7 +97,7 @@ teardown(_) ->
 
 %% Same "real ChangeLog needs a resolvable HOME" wrinkle
 %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s own
-%% `setup_with_changelog/0` documents. Cross-invocation-unique (BT-3281) —
+%% `setup_with_changelog/0` documents. Cross-invocation-unique —
 %% see `beamtalk_test_unique:id/0`.
 setup_with_changelog() ->
     Fixture = setup(),
@@ -340,18 +340,15 @@ move_class_dependency_refusal(#{proj_dir := ProjDir, gadget_path := GadgetPath})
     ].
 
 %%====================================================================
-%% Revert (ADR 0114 § Undo, BT-3274/BT-3335): a pending `moveClass:to:`
+%% Revert (ADR 0114 § Undo): a pending `moveClass:to:`
 %% entry is a `'rename-class'` ChangeEntry with `old_class == class` (a pure
 %% file-location move never changes a class's name — `move_class/2`'s own
 %% doc). `revert_rename_sites/1` must restore the class to its exact
-%% pre-move state without disturbing its live identity — this is the one
-%% shape `revert_rename_sites/1`'s general-purpose "restore the CURRENT
-%% (post-rename) name" logic was never exercised against before BT-3335: the
-%% CURRENT and OLD names being IDENTICAL made `finish_rename_class_revert/1`
+%% pre-move state without disturbing its live identity — the CURRENT and OLD
+%% names being IDENTICAL must not make `finish_rename_class_revert/1`
 %% resolve both to the same live pid and treat its own just-reinstalled
-%% process as a stale leftover registration to retire — reverting a pending
-%% move used to kill the class it was reverting. See
-%% `finish_rename_class_revert/1`'s own doc for the fix.
+%% process as a stale leftover registration to retire (which would kill the
+%% class it is reverting). See `finish_rename_class_revert/1`'s own doc.
 %%====================================================================
 
 move_class_revert_round_trip_test_() ->
@@ -396,7 +393,7 @@ move_class_revert_round_trip(#{proj_dir := ProjDir}) ->
 %% source between the move and this revert (another session, an ordinary
 %% `compile:source:` patch, ...) is refused loudly rather than spliced over —
 %% `verify_current_spans/1`'s drift check, revert's own analogue of
-%% `'remove-class'` revert's disk-comparison drift check (BT-3213), applied
+%% `'remove-class'` revert's disk-comparison drift check, applied
 %% to a tracked-source SPAN.
 %%====================================================================
 

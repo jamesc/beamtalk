@@ -45,7 +45,7 @@ precheck_setup() ->
         created_at => erlang:system_time(second),
         repl => false
     }),
-    %% ADR 0105 Phase 1 (BT-2777): `previous/3` (the precheck's signature-diff
+    %% ADR 0105 Phase 1: `previous/3` (the precheck's signature-diff
     %% baseline) needs a live store — without it every diff degrades to
     %% `noproc`, matching `beamtalk_repl_loader_tests.erl`'s same fixture note.
     case whereis(beamtalk_workspace_signature_store) of

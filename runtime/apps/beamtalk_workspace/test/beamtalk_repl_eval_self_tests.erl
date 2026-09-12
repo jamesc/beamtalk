@@ -23,15 +23,15 @@ no-op reverse).
 eval_with_self_returns_bound_self_test() ->
     ?assertEqual({ok, 42}, beamtalk_repl_eval:eval_with_self(42, <<"self">>)).
 
-%% BT-2956: `eval_with_self/2` always rejects a class-definition-shaped
+%% `eval_with_self/2` always rejects a class-definition-shaped
 %% source via `eval_not_an_expression_error/0` — it must not register (or,
 %% worse, clobber) a `beamtalk_alias_xref` edge along the way, since nothing
 %% ever reads the ClassInfo that would drive that registration. A pre-existing
 %% edge for the same class name (as a prior real `:load` would have left
-%% behind) must survive the rejected `evaluate:` call completely untouched —
-%% before this fix, `compile_class_definition_result/2`'s unconditional
-%% `register_class(ClassNameBin, ReferencedAliases)` (whole-set replacement,
-%% not a delta) would have stomped it to `[]`.
+%% behind) must survive the rejected `evaluate:` call completely untouched:
+%% `compile_class_definition_result/2`'s `register_class(ClassNameBin,
+%% ReferencedAliases)` is whole-set replacement, not a delta, so it must
+%% never be reached for a rejected evaluation.
 eval_with_self_class_definition_does_not_touch_alias_xref_test_() ->
     {setup, fun alias_xref_setup/0, fun alias_xref_teardown/1, fun() ->
         ok = beamtalk_alias_xref:register_class(<<"EvalSelfXrefClass">>, [

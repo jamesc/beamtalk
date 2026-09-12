@@ -244,7 +244,7 @@ rename_selector_success(_Fixture) ->
     ].
 
 %%====================================================================
-%% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` undoes a pending
+%% ADR 0114 Phase 4: `Workspace changes revert:` undoes a pending
 %% `'rename-method'` entry — restores the original selector everywhere,
 %% including the SAME-CLASS multi-site case (`Bt3279HappyBase`'s own
 %% definition PLUS its own self-send inside `increment`, both rewritten
@@ -261,7 +261,7 @@ setup_happy_with_changelog() ->
         undefined -> ok;
         LogPid -> gen_server:stop(LogPid)
     end,
-    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-selector-changelog-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), "bt-rename-selector-changelog-home-" ++ Unique),
@@ -771,7 +771,7 @@ start_changelog(Fixture, Prefix) ->
         undefined -> ok;
         LogPid -> gen_server:stop(LogPid)
     end,
-    %% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`.
+    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary(Prefix ++ "-" ++ Unique),
     ChangelogHome = filename:join(temp_dir(), Prefix ++ "-home-" ++ Unique),

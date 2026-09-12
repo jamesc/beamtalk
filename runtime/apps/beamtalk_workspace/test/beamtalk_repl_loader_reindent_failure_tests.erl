@@ -52,7 +52,7 @@ setup() ->
     end,
     %% Same "real ChangeLog needs a resolvable HOME" wrinkle
     %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s own
-    %% `setup_with_changelog/0` documents. Cross-invocation-unique (BT-3281)
+    %% `setup_with_changelog/0` documents. Cross-invocation-unique
     %% — see `beamtalk_test_unique:id/0`.
     case whereis(beamtalk_workspace_changelog) of
         undefined -> ok;

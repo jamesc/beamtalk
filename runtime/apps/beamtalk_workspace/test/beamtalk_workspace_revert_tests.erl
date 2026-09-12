@@ -105,13 +105,13 @@ revert_e2e_test_() ->
             fun remove_selector_if_absent_returns_receiver_on_success/1,
             fun remove_selector_allow_stdlib_removes_from_a_stdlib_class/1,
             fun remove_selector_contested_extension_re_exposes_local_method/1,
-            %% ADR 0112 Phase 3 (BT-3187): "remove-method" ChangeLog entries +
+            %% ADR 0112 Phase 3: "remove-method" ChangeLog entries +
             %% the (class, selector, side) flush-shadow-key / revert-side-
             %% resolution required fix.
             fun remove_selector_instance_side_logs_remove_method_changelog_entry/1,
             fun remove_selector_class_side_logs_remove_method_changelog_entry/1,
             fun remove_selector_extension_logs_remove_method_changelog_entry/1,
-            %% BT-3206 (ADR 0113 Phase 1): "remove-class" ChangeLog entries
+            %% ADR 0113 Phase 1: "remove-class" ChangeLog entries
             %% for `removeFromSystem`.
             fun remove_from_system_logs_remove_class_changelog_entry/1,
             fun remove_from_system_dynamic_class_logs_not_flushable_dynamic/1,
@@ -122,14 +122,14 @@ revert_e2e_test_() ->
             fun revert_method_selects_correct_side_entry_when_both_sides_have_entries/1,
             fun revert_method_side_agnostic_fallback_still_picks_highest_seq/1,
             fun recover_prev_from_disk_resolves_remove_method_entry_via_entry_side/1,
-            %% BT-3208 (ADR 0113 Phase 3): `revert:` extended to `"remove-class"`
+            %% ADR 0113 Phase 3: `revert:` extended to `"remove-class"`
             %% entries, and the post-flush "nothing to revert" degrade for both
             %% `"remove-method"` and `"remove-class"`.
             fun revert_remove_class_entry_reinstalls_the_class/1,
             fun revert_remove_class_entry_leaves_no_phantom_pending_entry/1,
             fun revert_remove_class_entry_dynamic_class_has_no_source_to_reinstall_from/1,
             fun revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_missing/1,
-            %% BT-3213 (Claude review follow-up on BT-3208): drift detection
+            %% Drift detection
             %% between the recorded `prev_source_ref` snapshot and the current
             %% on-disk file before a pending "remove-class" entry is treated
             %% as cleanly reverted.
@@ -139,7 +139,7 @@ revert_e2e_test_() ->
             fun revert_remove_class_entry_detects_file_deleted_externally/1,
             fun revert_remove_method_entry_after_flush_is_unsupported/1,
             fun revert_remove_class_entry_after_flush_is_unsupported/1,
-            %% BT-3231: `"remove-method"` revert on an eval-defined class (no
+            %% `"remove-method"` revert on an eval-defined class (no
             %% on-disk `sources/` file at all) — the `do_revert/3`
             %% `no_prev_source` message-wording regression the LiveView e2e
             %% test caught, uncovered by any EUnit test until now.
@@ -167,7 +167,7 @@ suite_teardown(_) ->
 %% changelog and meta gen_servers, with `project_path` pointing at the temp tree
 %% so files written there classify as in-project (flushable + revertable).
 %%
-%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: the
+%% Cross-invocation-unique — see `beamtalk_test_unique:id/0`: the
 %% changelog's own `load_from_disk` would otherwise restore a prior run's
 %% leftover `changes.jsonl` entries into this run's ETS table.
 case_setup() ->
@@ -204,7 +204,7 @@ case_teardown(#{clog_pid := ClogPid, meta_pid := MetaPid, tmp := Tmp, old_home :
     ok.
 
 %%====================================================================
-%% BT-2663 — added instance method reverts as a removal
+%% Added instance method reverts as a removal
 %%====================================================================
 
 revert_added_instance_method_removes_it(#{tmp := Tmp, unique := U}) ->
@@ -229,7 +229,7 @@ revert_added_instance_method_removes_it(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
-%% BT-2290 regression — modified instance method reverts to prior body
+%% Regression — modified instance method reverts to prior body
 %%====================================================================
 
 revert_modified_instance_method_restores_prior_body(#{tmp := Tmp, unique := U}) ->
@@ -251,7 +251,7 @@ revert_modified_instance_method_restores_prior_body(#{tmp := Tmp, unique := U}) 
     ].
 
 %%====================================================================
-%% BT-2665 — class-side add reverts as a removal
+%% Class-side add reverts as a removal
 %%====================================================================
 
 revert_added_class_side_method_removes_it(#{tmp := Tmp, unique := U}) ->
@@ -274,7 +274,7 @@ revert_added_class_side_method_removes_it(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
-%% BT-2665 — class-side modify reverts to the prior class-side body
+%% Class-side modify reverts to the prior class-side body
 %%====================================================================
 
 revert_modified_class_side_method_restores_prior_body(#{tmp := Tmp, unique := U}) ->
@@ -298,7 +298,7 @@ revert_modified_class_side_method_restores_prior_body(#{tmp := Tmp, unique := U}
     ].
 
 %%====================================================================
-%% BT-2664 — new-class reverts as a class removal
+%% New-class reverts as a class removal
 %%====================================================================
 
 revert_new_class_removes_the_class(#{tmp := Tmp, unique := U}) ->
@@ -325,7 +325,7 @@ revert_new_class_removes_the_class(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
-%% BT-3184 — remove_method/3,4 stdlib policy (ADR 0112 Phase 1)
+%% remove_method/3,4 stdlib policy (ADR 0112 Phase 1)
 %%====================================================================
 
 %% remove_method/3 (the arity the revert-of-an-add path above uses) must keep
