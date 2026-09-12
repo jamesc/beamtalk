@@ -209,3 +209,55 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     a := NilTypeMatchSelfMutationRegistry spawn
     self assert: (a bumpWrappedInDo: #(1, 2, 3)) equals: 6
     self assert: a currentCount equals: 6
+
+  // --- BT-3495: `self.field := ...` wrapped in a value-carrying parent
+  // OTHER than a local assignment — `^`, `{a, b} :=`, and a plain
+  // top-level flat method-body statement. ------------------------------
+  testBumpWrappedReturnIfTrueTakenBranchEarlyReturnsFieldValue =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedReturnIfTrue: true) equals: 10
+    self assert: a currentCount equals: 10
+
+  testBumpWrappedReturnIfTrueNotTakenBranchMutatesIndependently =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedReturnIfTrue: false) equals: -1
+    self assert: a currentCount equals: -1
+
+  testBumpWrappedReturnIfTrueAccumulatesAcrossCalls =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpWrappedReturnIfTrue: true
+    result := a bumpWrappedReturnIfTrue: true
+    self assert: result equals: 20
+    self assert: a currentCount equals: 20
+
+  testBumpWrappedDestructureIfTrueTakenBranchSeesBothDestructuredParts =>
+    // pair := (0+10, 0+20) = (10, 20); self.count := 10 + 20 = 30.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedDestructureIfTrue: true) equals: 30
+    self assert: a currentCount equals: 30
+
+  testBumpWrappedDestructureIfTrueNotTakenBranchLeavesStateAlone =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedDestructureIfTrue: false) equals: 0
+    self assert: a currentCount equals: 0
+
+  testBumpWrappedDestructureIfTrueAccumulatesAcrossCalls =>
+    // Second call reads the post-first-call count (30): pair := (40, 50),
+    // count := a + b = 40 + 50 = 90 (a plain replace, not an accumulate).
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpWrappedDestructureIfTrue: true
+    result := a bumpWrappedDestructureIfTrue: true
+    self assert: result equals: 90
+    self assert: a currentCount equals: 90
+
+  testBumpWrappedTopLevelReturnsLocalPlusOne =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    self assert: (a bumpWrappedTopLevel: 5) equals: 6
+    self assert: a currentCount equals: 5
+
+  testBumpWrappedTopLevelAccumulatesAcrossCalls =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpWrappedTopLevel: 5
+    result := a bumpWrappedTopLevel: 3
+    self assert: result equals: 9
+    self assert: a currentCount equals: 8

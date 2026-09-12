@@ -27,7 +27,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, Expression,
-    ExpressionStatement, MatchArm, MessageSelector, Pattern,
+    ExpressionStatement, MatchArm, MessageSelector, Pattern, WellKnownSelector,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -199,28 +199,65 @@ impl CoreErlangGenerator {
     /// field write is a separate, pre-existing gap this detector does not
     /// (yet) cover — see BT-3493's own follow-up notes.
     fn vt_match_arm_field_write(arm: &MatchArm) -> Option<(&str, Span)> {
-        // Paren-stripped so `1 -> (self.x := 1)` is rejected too — it
-        // crashed `erlc` identically. `is_field_assignment` then establishes
-        // the shape (`Assignment` whose target is a `self.<field>`
-        // `FieldAccess`), so the destructuring below is total.
         let bare = arm.body.unwrap_parens();
-        let field_write = if Self::is_field_assignment(bare) {
-            Some(bare)
-        } else if let Expression::Assignment { target, value, .. } = bare
+        // BT-3495: a field write nested inside a `[...] value` block's own
+        // statements (bare, or local-assign-wrapped) — `arm.body` alone is
+        // a `MessageSend` (`value`, zero args) here, not the field write
+        // itself, so the checks below never see it; `match_needs_mutation_threading`
+        // is unconditionally `false` for a value-type instance method (this
+        // function's only caller), so nothing downstream catches this shape
+        // either. Every statement is checked, not just the block's last one —
+        // a field write buried earlier in the block is still a state
+        // mutation with no way to thread through this context.
+        if let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = bare
+            && arguments.is_empty()
+            && matches!(selector.well_known(), Some(WellKnownSelector::Value))
+            && let Expression::Block(block) = receiver.unwrap_parens()
+        {
+            return block
+                .body
+                .iter()
+                .find_map(|stmt| Self::field_write_shape(&stmt.expression))
+                .map(Self::field_write_name_and_span);
+        }
+        Self::field_write_shape(bare).map(Self::field_write_name_and_span)
+    }
+
+    /// The field write nested in `expr` for exactly the two shapes
+    /// [`Self::vt_match_arm_field_write`] and [`Self::generate_match`]'s
+    /// bare-arm check need to recognize: `expr` itself is a `self.field :=
+    /// ...` write (paren-stripped so `(self.x := 1)` matches too — it
+    /// crashes `erlc` identically), or `expr` is a local assignment (`var :=
+    /// ...`) whose own RHS is one (BT-3493's `local_assign_field_write`
+    /// shape). `None` for every other shape.
+    fn field_write_shape(expr: &Expression) -> Option<&Expression> {
+        let bare = expr.unwrap_parens();
+        if Self::is_field_assignment(bare) {
+            return Some(bare);
+        }
+        if let Expression::Assignment { target, value, .. } = bare
             && matches!(target.as_ref(), Expression::Identifier(_))
         {
-            let inner = value.unwrap_parens();
-            Self::is_field_assignment(inner).then_some(inner)
-        } else {
-            None
-        };
-        let Expression::Assignment { target, span, .. } = field_write? else {
+            return Self::local_assign_field_write(value);
+        }
+        None
+    }
+
+    /// Destructures a [`Self::field_write_shape`] result into the
+    /// `(field name, span)` pair [`Self::vt_match_arm_field_write`] returns.
+    fn field_write_name_and_span(field_write: &Expression) -> (&str, Span) {
+        let Expression::Assignment { target, span, .. } = field_write else {
             unreachable!("field_write is always an Assignment, set only via is_field_assignment");
         };
         let Expression::FieldAccess { field, .. } = target.as_ref() else {
             unreachable!("is_field_assignment guarantees a FieldAccess target");
         };
-        Some((field.name.as_str(), *span))
+        (field.name.as_str(), *span)
     }
 
     /// Compiles a `match:` arm body.

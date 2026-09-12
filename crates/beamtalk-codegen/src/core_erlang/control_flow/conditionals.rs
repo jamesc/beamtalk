@@ -1600,6 +1600,50 @@ impl CoreErlangGenerator {
                         }
                         continue;
                     }
+
+                    // BT-3495: `^ (self.field := ...)` — the RHS is itself
+                    // a field write, at any parenthesization depth (the
+                    // same "value-carrying parent" shape BT-3493 fixed for
+                    // `r := (self.x := ...)`, but here the wrapper is
+                    // `Return` instead of a local assignment). Lower it
+                    // through the SAME real-`Bind` producer C1
+                    // (`lower_field_assignment_bind`) uses for a bare
+                    // `self.field := ...` statement, then throw the NLR
+                    // tuple carrying the assigned value — mirroring C0b's
+                    // `DispatchingSelfSend` throw immediately above, just
+                    // with the field write's own value in place of the
+                    // self-send's result.
+                    if let Some(field_write) = Self::local_assign_field_write(value) {
+                        let field_val_var =
+                            self.lower_field_assignment_bind(field_write, frame, span, &mut stmts)?;
+                        let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
+                            CodeGenError::Internal(
+                                "BT-3495: EarlyReturn classification implies an active NLR \
+                                 context, but none is set"
+                                    .to_string(),
+                            )
+                        })?;
+                        let new_state = self.current_state_var();
+                        let throw_var = self.fresh_temp_var("NlrThrow");
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(throw_var.clone()),
+                                " = call 'erlang':'throw'({'$bt_nlr', ",
+                                leaf::var(nlr_token),
+                                ", ",
+                                leaf::var(field_val_var),
+                                ", ",
+                                leaf::var(new_state),
+                                "}) in ",
+                            ],
+                            span,
+                        ));
+                        if is_last {
+                            last_result = Some(ValueRef::Var(throw_var));
+                        }
+                        continue;
+                    }
                 }
             }
 
@@ -1628,9 +1672,36 @@ impl CoreErlangGenerator {
                 // produced or consumed, every binding is a plain local.
                 BodyExprKind::DestructureAssignment => {
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                        for d in binding_docs {
-                            stmts.push(ThreadedStmt::Statement(d, span));
+                        // BT-3495: `{a, b} := (self.field := ...)` — the
+                        // RHS is itself a field write, at any
+                        // parenthesization depth (mirrors C2z's `r := (self.x
+                        // := ...)` fix in `lower_local_var_assignment_bind`,
+                        // for `{a, b} :=` instead of a plain local
+                        // assignment). Lower the field write through its own
+                        // real-`Bind` producer C1 uses, then destructure the
+                        // pattern from the already-evaluated assigned value —
+                        // `generate_destructure_bindings_from_var` is the
+                        // established "RHS already evaluated" entry point
+                        // (`DestructureAssignmentControlFlow`'s own sibling
+                        // shape uses the same idiom in `gen_server/methods.rs`).
+                        if let Some(field_write) = Self::local_assign_field_write(value) {
+                            let field_val_var = self.lower_field_assignment_bind(
+                                field_write,
+                                frame,
+                                span,
+                                &mut stmts,
+                            )?;
+                            let binding_docs = self
+                                .generate_destructure_bindings_from_var(pattern, &field_val_var)?;
+                            for d in binding_docs {
+                                stmts.push(ThreadedStmt::Statement(d, span));
+                            }
+                        } else {
+                            let binding_docs =
+                                self.generate_destructure_bindings(pattern, value)?;
+                            for d in binding_docs {
+                                stmts.push(ThreadedStmt::Statement(d, span));
+                            }
                         }
                     }
                 }
