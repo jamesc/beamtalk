@@ -118,7 +118,7 @@ do_sync_project(AbsPath, IncludeTests, Force0, SessionPid) ->
     %% to roll back, per ADR §4).
     %%
     %% Project scope: a stamp produced by a different toolchain forces a full
-    %% in-memory recompile from source (generalizing BT-2653's header-content
+    %% in-memory recompile from source (generalizing the header-content
     %% force-rebuild). Dependency scope: the workspace recompiles project sources
     %% only, so a stale dep cannot self-heal here — per ADR §4 we FAIL the attach
     %% with a directed message rather than activating stale dep `.beam`, which
@@ -165,7 +165,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
         end,
     AllBtFiles = SrcFiles ++ TestFiles,
     NativeDir = filename:join(AbsPath, "native"),
-    %% BT-2653: On the test-load path (include_tests=true), also discover
+    %% On the test-load path (include_tests=true), also discover
     %% native/test/ helper modules (e.g. a test server that a `.bt` test drives
     %% via `(Erlang <helper>) <msg>`). Under normal load-project they stay
     %% skipped — they are EUnit helpers, not runtime modules — mirroring how the
@@ -177,13 +177,13 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
             {ok, Mtimes} -> Mtimes;
             {error, _} -> #{}
         end,
-    %% BT-2089: Scope previous-mtime tracking to the project being synced.
+    %% Scope previous-mtime tracking to the project being synced.
     %% The workspace meta table accumulates mtimes for every project ever
     %% loaded into this workspace, so unfiltered classification would treat
     %% every other project's files as "deleted" and unload their classes.
     %% Only files whose path lies under AbsPath belong to this project sync.
     ProjectMtimes = filter_mtimes_under_project(PreviousMtimes, AbsPath),
-    %% BT-2089: When include_tests=false, also drop previously-tracked test
+    %% When include_tests=false, also drop previously-tracked test
     %% files from the baseline. Otherwise an `Op::Load` (which defaults to
     %% include_tests=false) classifies the test files loaded by an earlier
     %% `:test`/include_tests=true sync as "deleted" and unregisters them.
@@ -248,7 +248,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
                     code:delete(ModName),
                     code:purge(ModName)
             end,
-            %% BT-3110: erase the compile-time mtime persistent_term entry along
+            %% Erase the compile-time mtime persistent_term entry along
             %% with the module — otherwise it outlives the module forever (one
             %% entry per ever-deleted native module, each `put` also scanning
             %% every scheduler for global GC).
@@ -258,7 +258,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
         DeletedErl
     ),
     DeletedCount = DeletedBtCount + length(DeletedErl),
-    %% BT-2653: Before compiling any native .erl, regenerate the
+    %% Before compiling any native .erl, regenerate the
     %% beamtalk_classes.hrl header from the live class→module index so native
     %% modules that `-include("beamtalk_classes.hrl")` build against the current
     %% class set. A stale header (or a stale .beam compiled against one) causes a
@@ -267,7 +267,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
     %% on every build (build.rs generate_class_header/2); the workspace
     %% incremental path must do the same to stay in sync.
     HeaderChanged = regenerate_native_class_header(AbsPath),
-    %% BT-2653: decide which native .erl to (re)compile. The mtime check only
+    %% Decide which native .erl to (re)compile. The mtime check only
     %% catches .erl edits; it misses the case where the *header* changed (a class
     %% added/moved/renamed) while the .erl is byte-identical — the already-loaded
     %% .beam would stay compiled against the old macro values (stale cascade,
@@ -323,7 +323,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
             end
          || C <- AllClasses
         ],
-    %% BT-2089: Drain class collision warnings so cross-project class
+    %% Drain class collision warnings so cross-project class
     %% redefinitions produce a clear diagnostic instead of silent eviction.
     CollisionWarnings = collect_load_warnings(AllClasses),
     TotalFiles = length(AllFiles) + DeletedCount,
@@ -375,7 +375,7 @@ handle_term(<<"load-project">>, Params, _Msg, SessionPid) ->
             {error, Err};
         {ok, Result} ->
             DepErrors = maps:get(dep_errors, Result, []),
-            %% BT-2089: Surface collision warnings to the load-project caller
+            %% Surface collision warnings to the load-project caller
             %% so that cross-project class collisions produce a clear
             %% diagnostic instead of silent eviction.
             Warnings = maps:get(warnings, Result, []),
@@ -403,7 +403,7 @@ handle_term(<<"load-source">>, Params, _Msg, SessionPid) ->
             end
     end;
 handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
-    %% BT-1239: Restore unload op — fully removes class from system (actors, gen_server,
+    %% Restore unload op — fully removes class from system (actors, gen_server,
     %% BEAM module, workspace_meta, session tracker).
     ClassNameBin = maps:get(<<"module">>, Params, <<>>),
     case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
@@ -429,7 +429,7 @@ handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
             end
     end;
 handle_term(<<"save-native-source">>, Params, _Msg, _SessionPid) ->
-    %% BT-2670: edit → compile → reload → write-back for a *project-owned* native
+    %% Edit → compile → reload → write-back for a *project-owned* native
     %% (`.erl`) module. The write target is re-derived server-side from the
     %% module's own compile info (never a client path), and only a project-origin
     %% native is writable — deps/stdlib are rejected read-only.
@@ -437,7 +437,7 @@ handle_term(<<"save-native-source">>, Params, _Msg, _SessionPid) ->
     Source = maps:get(<<"source">>, Params, <<>>),
     save_native_source(ModuleBin, Source);
 handle_term(<<"save-section">>, Params, _Msg, _SessionPid) ->
-    %% BT-3238: add/rename a `// === Name ===` section-divider comment at the
+    %% Add/rename a `// === Name ===` section-divider comment at the
     %% file/class level. Exactly one of `old_name` (rename) / `before_selector`
     %% (insert) selects the mode — see save_section/5's doc.
     ClassBin = maps:get(<<"class">>, Params, <<>>),
