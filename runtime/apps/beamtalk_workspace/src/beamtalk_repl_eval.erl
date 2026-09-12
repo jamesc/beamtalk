@@ -24,49 +24,49 @@ module loading to beamtalk_repl_loader (BT-863).
     handle_load/2, handle_load/3,
     handle_load_source/3
 ]).
-%% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
+%% ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
 -export([reload_class_file/1, reload_class_file/2]).
 
-%% BT-2598 — cockpit reload-from-disk after a content-mutating git op. Reloads a
+%% Cockpit reload-from-disk after a content-mutating git op. Reloads a
 %% reverted `.bt` file into the live image (image == disk) and repopulates the
 %% workspace_meta class-source cache. Called via RPC from the LiveView client.
 -export([reload_file/1]).
 
-%% ADR 0082 Phase 1 (BT-2285) — new-class creation backing `Workspace newClass:at:'.
+%% ADR 0082 Phase 1 — new-class creation backing `Workspace newClass:at:'.
 -export([new_class/2]).
 -export([move_class/2]).
 
-%% ADR 0113 (BT-3208) — `Workspace changes revert:` extension for a pending
+%% ADR 0113 — `Workspace changes revert:` extension for a pending
 %% `'remove-class'` entry: recompiles and reinstalls the class from its
 %% recorded prior source, reusing new_class/2's own install chokepoint.
 -export([revert_remove_class/2]).
 
-%% ADR 0095 Phase 2 (BT-2503) — stateless evaluate-in-context for the Inspector's
+%% ADR 0095 Phase 2 — stateless evaluate-in-context for the Inspector's
 %% value `evaluate:`. Called via erlang:apply from beamtalk_inspector
 %% (beamtalk_runtime) so the runtime keeps no compile-time dep on beamtalk_workspace.
 -export([eval_with_self/2]).
 
-%% ADR 0082 Phase 1 (BT-2283) — stateless live method patch backing
+%% ADR 0082 Phase 1 — stateless live method patch backing
 %% `Behaviour compile:source:' / `tryCompile:source:'. Called via erlang:apply
 %% from beamtalk_behaviour_intrinsics so beamtalk_runtime keeps no compile-time
 %% dependency on beamtalk_workspace.
 -export([compile_method/4, compile_method/6, compile_method/7]).
 
-%% ADR 0105 Phase 3 (BT-2782) — stateless pre-save advisory precheck backing
+%% ADR 0105 Phase 3 — stateless pre-save advisory precheck backing
 %% `Behaviour precheckCompile:source:'. Called via erlang:apply from
 %% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
 %% as compile_method/4,6,7.
 -export([precheck_method/4]).
 
-%% ADR 0082 revert completeness (BT-2663/BT-2665) — remove a live method (the
-%% *add* revert case) and remove a live class (new-class revert, BT-2664).
-%% ADR 0112 Phase 1 (BT-3184) — remove_method/4 adds an explicit stdlib policy
+%% ADR 0082 revert completeness — remove a live method (the
+%% *add* revert case) and remove a live class (new-class revert).
+%% ADR 0112 Phase 1 — remove_method/4 adds an explicit stdlib policy
 %% so the future `removeSelector:` primitive can reach stdlib classes through
 %% this SAME function rather than a forked copy; remove_method/3 keeps the
 %% revert-of-an-add caller's unchanged refuse-stdlib default.
 -export([remove_method/3, remove_method/4, remove_class/1]).
 
-%% ADR 0112 Phase 3 (BT-3187) — best-effort ChangeLog append after a
+%% ADR 0112 Phase 3 — best-effort ChangeLog append after a
 %% successful `removeSelector:` call. Called via erlang:apply from
 %% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
 %% as remove_method/3,4 above; both are thin forwarding wrappers over
@@ -74,29 +74,29 @@ module loading to beamtalk_repl_loader (BT-863).
 %% (`class_source_file/1` / `classify_source_file/1`) these functions reuse.
 -export([emit_remove_change_entry/5, emit_extension_remove_change_entry/7]).
 
-%% ADR 0114 (BT-3270) — the shared multi-site rewrite mechanism generalizing
+%% ADR 0114 — the shared multi-site rewrite mechanism generalizing
 %% remove_method/3,4 above, plus its best-effort ChangeLog append. Thin
 %% forwarding wrappers over beamtalk_repl_loader, routed through this module
 %% for the same compile-time-dependency reason (a future `beamtalk_behaviour_
-%% intrinsics:classRenameTo/2`/`classRenameSelector/3`, BT-3271/BT-3272, will
+%% intrinsics:classRenameTo/2`/`classRenameSelector/3` will
 %% call these via erlang:apply the same way remove_selector/2 already calls
 %% remove_method/3,4).
 -export([rewrite_sites/2, validate_sites/2, emit_rewrite_change_entry/2]).
 
-%% ADR 0114 Phase 4 (BT-3274): `Workspace changes revert:` for a pending
+%% ADR 0114 Phase 4: `Workspace changes revert:` for a pending
 %% `'rename-class'`/`'rename-method'` entry — thin forwarding wrapper over
 %% `beamtalk_repl_loader:revert_rename_sites/1`, called from `beamtalk_
 %% workspace_interface_primitives:revert_rename_entry/2`.
 -export([revert_rename_sites/1]).
 
-%% BT-3206 — best-effort snapshot + ChangeLog append for a successful
+%% Best-effort snapshot + ChangeLog append for a successful
 %% `removeFromSystem` (class removal). Called via erlang:apply from
 %% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
 %% as emit_remove_change_entry/5 above; both are thin forwarding wrappers
 %% over beamtalk_repl_loader.
 -export([capture_class_removal_snapshot/1, emit_remove_class_change_entry/4]).
 
-%% BT-2531 — workspace binding-mutation announcement with an explicit session id.
+%% Workspace binding-mutation announcement with an explicit session id.
 %% Called from `beamtalk_repl_shell` for the clear / pending put/remove paths,
 %% whose shell gen_server process does not carry `beamtalk_session_id` in its
 %% process dictionary (that is seeded only in eval workers).
@@ -157,7 +157,7 @@ do_eval(Expression, State) ->
 -doc "Evaluate with optional streaming subscriber (BT-696).".
 -spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) -> eval_result().
 do_eval(Expression, State, Subscriber) ->
-    %% ADR 0108 Phase 8 (BT-2902): `:help <Alias>` short-circuits before
+    %% ADR 0108 Phase 8: `:help <Alias>` short-circuits before
     %% compilation — see maybe_help_for_alias/2 for why the ordinary
     %% `Beamtalk help: X` eval path cannot see session-local aliases.
     case maybe_help_for_alias(Expression, State) of
@@ -176,7 +176,7 @@ do_eval_expression(Expression, State, Subscriber) ->
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
     SessionBindings = beamtalk_repl_state:get_bindings(State),
-    %% BT-881: Merge workspace user bindings into session bindings.
+    %% Merge workspace user bindings into session bindings.
     WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
     WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
@@ -184,7 +184,7 @@ do_eval_expression(Expression, State, Subscriber) ->
 
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
 
-    %% ADR 0108 Phase 8 (BT-2902): forward this session's earlier-turn
+    %% ADR 0108 Phase 8: forward this session's earlier-turn
     %% alias declarations so `::` annotations in Expression resolve them.
     KnownTypeAliasSources = beamtalk_repl_state:known_type_alias_sources(State),
 
@@ -193,18 +193,18 @@ do_eval_expression(Expression, State, Subscriber) ->
             Expression, ModuleName, Bindings, KnownTypeAliasSources
         )
     of
-        %% BT-571: Inline class definition
+        %% Inline class definition
         {ok, class_definition, ClassInfo, Warnings} ->
             handle_class_definition(
                 ClassInfo, Warnings, Expression, Bindings, NewState, RegistryPid, Subscriber
             );
-        %% BT-571: Standalone method definition
+        %% Standalone method definition
         {ok, method_definition, MethodInfo, Warnings} ->
             handle_method_definition(MethodInfo, Warnings, Expression, NewState);
-        %% BT-1612: Protocol definition
+        %% Protocol definition
         {ok, protocol_definition, ProtocolInfo, Warnings} ->
             handle_protocol_definition(ProtocolInfo, Warnings, NewState);
-        %% ADR 0108 Phase 8 (BT-2902): type alias definition
+        %% ADR 0108 Phase 8: type alias definition
         {ok, type_alias_definition, AliasInfo, Warnings} ->
             handle_type_alias_definition(AliasInfo, Warnings, NewState);
         {ok, Binary, _ResultExpr, Warnings} ->
@@ -292,7 +292,7 @@ handle_type_alias_definition(AliasInfo, Warnings, State) ->
     #{alias_name := Name, expansion := Expansion, doc_comment := DocComment} = AliasInfo,
     Entry = #{expansion => Expansion, doc_comment => DocComment, declared_in => <<"REPL">>},
     NewState = beamtalk_repl_state:put_alias(Name, Entry, State),
-    %% ADR 0108 hot-reload re-check trigger (BT-2899): keep the compiler
+    %% ADR 0108 hot-reload re-check trigger: keep the compiler
     %% server's ambient alias cache in sync with session state so a later
     %% `diagnostics/3` re-check round trip (`beamtalk_recheck.erl`) — and
     %% every subsequent `compile`/`compile_method` this session — resolves
@@ -361,7 +361,7 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
                     false -> []
                 end,
             {CapturePid, _PrevGroupLeader} = CaptureRef = beamtalk_io_capture:start(Subscriber),
-            %% BT-2963: `beamtalk_io_capture:start/1` only redirects *this*
+            %% `beamtalk_io_capture:start/1` only redirects *this*
             %% worker's IO, but the entry runs one hop away in its class's
             %% gen_server, which kept the node's group leader from spawn — so its
             %% `Console` output went to the detached node's stdout and the client
@@ -385,7 +385,7 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
                         end
                 catch
                     throw:{beamtalk_script_exit, Code} ->
-                        %% BT-2691: `Program exit: Code` from the dispatched entry —
+                        %% `Program exit: Code` from the dispatched entry —
                         %% same connected-exit handling as the `do_eval` path.
                         {script_exit, Code, State};
                     Class:Reason:Stacktrace ->
@@ -398,7 +398,7 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
                     %% purge — the entry runs in already-loaded class code. The
                     %% capture process outlives this call only as a proxy to the
                     %% original group leader, so drop the key before it can name a
-                    %% sink that is no longer streaming (BT-2963).
+                    %% sink that is no longer streaming.
                     case PrevEntryGl of
                         undefined -> erase(beamtalk_entry_group_leader);
                         _ -> put(beamtalk_entry_group_leader, PrevEntryGl)
@@ -438,8 +438,8 @@ resolve_entry(ClassNameBin, SelectorBin) ->
 %% True when the selector is the arity-1 keyword form (`main:`), i.e. it ends in
 %% a single trailing colon — the CLI validates the shape, so a non-empty binary
 %% ending in `:` is the keyword entry and anything else is the unary entry.
-%% BT-3090: delegates to the canonical `beamtalk_class_builder:is_keyword_selector/1`
-%% via `beamtalk_runtime_api` — was a byte-identical copy.
+%% Delegates to the canonical `beamtalk_class_builder:is_keyword_selector/1`
+%% via `beamtalk_runtime_api` instead of duplicating it.
 -spec is_keyword_selector(binary()) -> boolean().
 is_keyword_selector(SelectorBin) -> beamtalk_runtime_api:is_keyword_selector(SelectorBin).
 
@@ -508,7 +508,7 @@ do_eval_trace(Expression, State) ->
                                 BindingsWithRegistry
                             ]),
                             CleanBindings = strip_internal_bindings(UpdatedBindings),
-                            %% BT-1238: Await each step's value. If any future rejects, propagate
+                            %% Await each step's value. If any future rejects, propagate
                             %% as a top-level error (consistent with the non-trace eval path).
                             AwaitedSteps = [
                                 {Src, maybe_await_future(Val)}
@@ -534,7 +534,7 @@ do_eval_trace(Expression, State) ->
                                     ),
                                     {error, FutExObj, ErrState};
                                 false ->
-                                    %% BT-1261: Rebuild bindings from awaited step values so that
+                                    %% Rebuild bindings from awaited step values so that
                                     %% variable assignments whose RHS was a future are stored with
                                     %% the resolved value rather than the raw future handle.
                                     FinalBindings = rebuild_bindings_from_steps(
@@ -547,7 +547,7 @@ do_eval_trace(Expression, State) ->
                             end
                         catch
                             throw:{beamtalk_script_exit, Code} ->
-                                %% BT-2688: `Program exit: Code` inside a traced eval.
+                                %% `Program exit: Code` inside a traced eval.
                                 %% Honour it like the non-trace path
                                 %% (eval_loaded_module) instead of letting the generic
                                 %% clause wrap it as an error, so the shell reports the
