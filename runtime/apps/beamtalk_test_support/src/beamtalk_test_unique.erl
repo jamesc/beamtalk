@@ -7,7 +7,7 @@
 
 -moduledoc """
 Shared EUnit fixture: a genuinely cross-invocation-unique identifier for
-on-disk test paths (BT-3281).
+on-disk test paths.
 
 `erlang:unique_integer/1` alone is NOT enough entropy for a workspace id /
 temp `HOME` directory string that a test resolves an **on-disk** path from:
@@ -28,7 +28,7 @@ fix below, 8/8 clean runs after).
 `os:getpid()` — the OS process id, genuinely distinct per separate VM
 invocation, unlike the in-VM counter — closes the gap when mixed into the
 same string. The two halves are joined with a single lowercase-letter
-separator (`z`), not `-`: BT-3281's own audit found a fixture
+separator (`z`), not `-`: an audit found a fixture
 (`beamtalk_workspace_revert_tests.erl`'s `case_setup/0`) that folds `Unique`
 into a Beamtalk *class name*, where a bare `-` parses as subtraction and
 breaks compilation. A separator is still required, though: `os:getpid()`

@@ -9,12 +9,12 @@
 Shared EUnit fixture: boot the real runtime + stdlib for EUnit suites that
 need a genuinely compiled class (not a hand-written `.erl` test double) —
 e.g. `beamtalk_workspace`'s `beamtalk_repl_docs_tests` (doc-formatting
-integration tests) and `beamtalk_repl_ops_browse_tests` (BT-3242 native-class
+integration tests) and `beamtalk_repl_ops_browse_tests` (a native-class
 delegate-callers regression test), and `beamtalk_stdlib`'s
-`beamtalk_test_case_stdlib_tests` (BT-3251 BIF-fallback-path regression
+`beamtalk_test_case_stdlib_tests` (a BIF-fallback-path regression
 test against a real compiled `TestCase` subclass).
 
-BT-3251: originally `beamtalk_workspace_test_boot`, living under
+Originally `beamtalk_workspace_test_boot`, living under
 `beamtalk_workspace/test/` — moved here (mirroring `beamtalk_test_corpus`'s
 precedent, see its `moduledoc` for the "why a standalone app" rationale) once
 `beamtalk_stdlib`'s EUnit suite needed the same boot sequence too. Reaching

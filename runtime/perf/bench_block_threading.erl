@@ -14,7 +14,7 @@ convention: local vars are packed/unpacked from a map on each iteration.
 This module provides both the naive Erlang equivalent and the StateAcc
 simulation so the overhead can be measured directly.
 
-All benchmarks reflect post-BT-1321 codegen: binary op codegen no longer
+All benchmarks reflect current codegen: binary op codegen no longer
 emits maybe_await (ADR-0043: all actor sends are synchronous).
 """.
 
@@ -119,7 +119,7 @@ sum_stateacc_loop(I, StateAcc) ->
     sum_stateacc_loop(I - 1, StateAcc1).
 
 -doc """
-Simulates what Beamtalk's timesRepeat: codegen produces after BT-1275.
+Simulates what Beamtalk's timesRepeat: codegen currently produces.
 
 Direct-params pattern (no per-iteration maps:get/put):
 
@@ -177,7 +177,7 @@ scale_native_loop(I, _Result) ->
     scale_native_loop(I - 1, I * 2).
 
 -doc """
-Post-BT-1286 + post-BT-1321: direct params, no maybe_await on any operand.
+Direct params, no maybe_await on any operand.
 
 Simulates (result := I * 2 each iteration):
   let Result1 = call 'erlang':'*'(I, 2) in
@@ -261,7 +261,7 @@ Simulates current codegen for pure inject:into: — goes through
 beamtalk_collection:inject_into which wraps the block for arg swap
 and calls to_list.
 
-BT-1327: This benchmarks the ACTUAL overhead of the pure inject:into:
+This benchmarks the ACTUAL overhead of the pure inject:into:
 path (no mutations) as the compiler currently generates it.
 """.
 -spec fold_inject_into_wrapper(list()) -> integer().
@@ -270,7 +270,7 @@ fold_inject_into_wrapper(List) ->
     beamtalk_collection:inject_into(List, 0, Block).
 
 -doc """
-Simulates BT-1327 optimized inject:into: — inline lists:foldl with
+Simulates an optimized inject:into: — inline lists:foldl with
 compile-time arg swap and is_list guard.
 
 For a literal block [:acc :x | acc + x], the compiler can emit the block
@@ -333,7 +333,7 @@ nested_stateacc_loop(I, StateAcc, Items) ->
     nested_stateacc_loop(I - 1, StateAcc1, Items).
 
 -doc """
-BT-1329 target: expanded tuple eliminates StateAcc at both levels.
+Expanded-tuple target: eliminates StateAcc at both levels.
 
 Inner foldl block returns {Result, Count1} — the mutated outer var as a
 tuple position rather than packed in a map. Outer loop threads {Total, Count}
@@ -390,7 +390,7 @@ do_stateacc_mutation(List) ->
     maps:get('__local__total', FinalState).
 
 -doc """
-Simulates `do:` with a local mutation using BT-1276 tuple-acc approach.
+Simulates `do:` with a local mutation using a tuple-acc approach.
 
 Generated pattern (accumulator is a flat tuple {Total}):
   fun(Item, StateAcc) ->
@@ -434,7 +434,7 @@ collect_stateacc_mutation(List) ->
     lists:reverse(RevResults).
 
 -doc """
-Simulates `collect:` with a local mutation using BT-1276 tuple-acc approach.
+Simulates `collect:` with a local mutation using a tuple-acc approach.
 
 Accumulator is {AccList, Count} — no StateAcc map allocation per iteration.
 """.
@@ -473,7 +473,7 @@ fold_stateacc_mutation(List) ->
     Result.
 
 -doc """
-Simulates `inject:into:` with a local mutation using BT-1276 tuple-acc approach.
+Simulates `inject:into:` with a local mutation using a tuple-acc approach.
 
 Accumulator is {Acc, Count} — no StateAcc map allocation per iteration.
 Per-iteration cost: arithmetic + tuple construction only.
@@ -506,7 +506,7 @@ fold_tuple_acc_mutation(List) ->
 -doc """
 Simulates old StateAcc path for a loop with both local + field mutations.
 
-Generated Core Erlang (pre-BT-1326):
+Generated Core Erlang (the old StateAcc-map shape):
   letrec 'loop'/2 = fun(I, StateAcc) ->
     case I =< N of
       true ->
@@ -551,7 +551,7 @@ mixed_native_loop(I, N, Sum, FieldN) ->
     mixed_native_loop(I + 1, N, Sum + 1, FieldN + 1).
 
 -doc """
-BT-1342 full-extract: both locals AND mutated fields as direct params.
+Full-extract: both locals AND mutated fields as direct params.
 Same 4-key map as mixed_stateacc, but locals AND fields are lifted
 to direct params. Loop body is pure arithmetic — zero map ops.
 """.

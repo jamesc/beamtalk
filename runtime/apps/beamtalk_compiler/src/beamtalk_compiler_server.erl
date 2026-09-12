@@ -15,7 +15,7 @@ restarts this server (and thus re-opens the port) on crashes.
 
 Implements in-memory Core Erlang compilation via
 `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'
-to avoid temp files on disk (BT-48).
+to avoid temp files on disk.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -164,8 +164,8 @@ start_link(Args) ->
 -doc """
 Compile a REPL expression.
 Returns `{ok, CoreErlang, Warnings}' for expressions,
-`{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
-`{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+`{ok, class_definition, ClassInfo}' for inline class definitions,
+`{ok, method_definition, MethodInfo}' for standalone method definitions,
 or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
@@ -183,7 +183,7 @@ compile_expression(Source, ModuleName, KnownVars) ->
 Compile a REPL expression with optional compilation options.
 
 Options:
-  class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+  class_superclass_index => #{binary() => binary()} — cross-file superclass info
 """.
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]}
@@ -197,7 +197,7 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
         ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, 30000
     ).
 
--doc "Compile a REPL expression in trace mode (BT-1238).".
+-doc "Compile a REPL expression in trace mode.".
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
@@ -261,19 +261,19 @@ Get diagnostics for source code under a parse `Mode', with options.
 
 Options:
   class_hierarchy => boolean() | #{atom() => map()} — when `true' (ADR 0105
-  Phase 1, BT-2778), threads the ambient class cache (the same
+  Phase 1), threads the ambient class cache (the same
   `register_class' accumulation `compile_expression'/`compile_method' already
   get, ADR 0050 Phase 4) into the request, so a receiver resolving to an
   already-loaded class is checked against that class's *current* interface.
   Defaults to `false' — deliberately opt-in, not the default for
   `diagnostics/1,2', because this command also backs the LiveView cockpit's
-  keystroke-driven editor diagnostics (BT-2556,
-  `beamtalk_repl_ops_dev:diagnostics_for/2'), and changing what fires on
+  keystroke-driven editor diagnostics
+  (`beamtalk_repl_ops_dev:diagnostics_for/2'), and changing what fires on
   every keystroke for every existing caller is a bigger behavioural change
-  than this option's one new caller (BT-2778's re-check orchestration)
+  than this option's one new caller (the re-check orchestration)
   needs.
 
-  Passing a map() instead of `true' (ADR 0105 Phase 3, BT-3109) threads that
+  Passing a map() instead of `true' (ADR 0105 Phase 3) threads that
   map verbatim as the request's class hierarchy *instead of* the ambient
   cache — a caller-built overlay (e.g. the ambient classes with one
   not-yet-installed signature spliced in) is checked against without ever
@@ -281,14 +281,14 @@ Options:
   never becomes visible to any other request. See
   `beamtalk_recheck:trigger_pending/5', the one caller that needs this.
 
-  BT-3473: the ambient protocol-registry cache (`register_protocol/2`'s
+  The ambient protocol-registry cache (`register_protocol/2`'s
   accumulator) rides this same opt-in — whenever the ambient class cache is
   threaded (the `true' case; a map() overlay only ever replaces the class
   side), `State#state.protocols' is threaded alongside it as the request's
   `protocol_registry'. Without this, a protocol registered in another file
   reaches the checker only as a zero-method class-cache entry (see
   `beamtalk_protocol_registry:create_protocol_class/2'), which defeats the
-  BT-2088/BT-3472 nominal-mismatch escape hatch and makes every selector on
+  nominal-mismatch escape hatch and makes every selector on
   a protocol-typed receiver look unresolved.
 """.
 -spec diagnostics(binary(), binary(), map()) ->
@@ -306,7 +306,7 @@ version() ->
 Clear all cached class metadata, the ambient protocol cache, and the
 ambient alias cache (test use only).
 
-ADR 0050 Phase 3 / ADR 0108 (BT-2899) / BT-3473: used for test isolation —
+ADR 0050 Phase 3 / ADR 0108: used for test isolation —
 call before tests that need a clean ambient cache. Synchronous so the next
 compile sees all three caches empty.
 """.
@@ -316,7 +316,7 @@ clear_classes() ->
 
 -doc """
 Force the *next* `diagnostics/3' call to fail with `{error, [#{message =>
-Reason}]}' instead of reaching the real compiler port (BT-2832, test use
+Reason}]}' instead of reaching the real compiler port (test use
 only).
 
 `beamtalk_recheck:recheck_owner/5' (and `recheck_owner_for_shape/4')'s
@@ -338,7 +338,7 @@ inject_diagnostics_failure(Reason) ->
 
 -doc """
 Force the *next* `diagnostics/3' call to exit instead of returning a value at
-all — a stricter sibling of `inject_diagnostics_failure/1' (BT-2806, test use
+all — a stricter sibling of `inject_diagnostics_failure/1' (test use
 only).
 
 `beamtalk_recheck:recheck_image_class/2' and `recheck_owner_for_leaf_change/3'
@@ -377,7 +377,7 @@ inject_diagnostics_exit() ->
 -endif.
 
 -doc """
-Resolve the type of an expression for REPL completion fallback (BT-1068).
+Resolve the type of an expression for REPL completion fallback.
 
 `Expression' is the receiver expression-up-to-cursor with the incomplete
 prefix already stripped. The class hierarchy is injected automatically from
@@ -397,7 +397,7 @@ resolve_completion_type(Expression) ->
     end.
 
 -doc """
-Find call sites of a selector in a single method's source (BT-2190).
+Find call sites of a selector in a single method's source.
 
 Backs `SystemNavigation sendersOf:' — parses the method source and returns a list
 of 1-based line numbers (relative to `Source') where the selector appears
@@ -417,7 +417,7 @@ find_senders_in_source(Source, Selector) ->
     end.
 
 -doc """
-Find every message send in a single method's source (BT-2206).
+Find every message send in a single method's source.
 
 Backs `SystemNavigation unimplementedSelectors' — parses the method source and
 returns every send as a map `#{selector := binary(), line := pos_integer(),
@@ -437,7 +437,7 @@ find_all_sends_in_source(Source) ->
     end.
 
 -doc """
-Find every `announce:' emission in a single method's source (BT-2475).
+Find every `announce:' emission in a single method's source.
 
 Backs `SystemNavigation announcementsSentBy:' — parses the method source and
 returns every announce emission as a map `#{selector := binary(),
@@ -459,7 +459,7 @@ find_announce_sites_in_source(Source) ->
     end.
 
 -doc """
-Find references to a class in a single method's source (BT-2203).
+Find references to a class in a single method's source.
 
 Backs `SystemNavigation referencesTo:' — parses the method source and returns a
 list of 1-based line numbers (relative to `Source') where the class is named
@@ -480,7 +480,7 @@ find_references_to_in_source(Source, ClassName) ->
     end.
 
 -doc """
-Find reads of an field in a single method's source (BT-2208).
+Find reads of an field in a single method's source.
 
 Backs `SystemNavigation fieldReadersOf:in:' — parses the method source and
 returns a list of 1-based line numbers (relative to `Source') where the named
@@ -501,7 +501,7 @@ find_field_readers_in_source(Source, Field) ->
     end.
 
 -doc """
-Find writes of an field in a single method's source (BT-2208).
+Find writes of an field in a single method's source.
 
 Backs `SystemNavigation fieldWritersOf:in:' — parses the method source and
 returns a list of 1-based line numbers (relative to `Source') where the named
@@ -522,7 +522,7 @@ find_field_writers_in_source(Source, Field) ->
     end.
 
 -doc """
-Find Erlang FFI call sites in a single method's source (BT-2211).
+Find Erlang FFI call sites in a single method's source.
 
 Backs `SystemNavigation ffiSitesFor:' — parses the method source and returns a
 list of 1-based line numbers (relative to `Source') where the named Erlang
@@ -574,7 +574,7 @@ resolve_method_span(Source, ClassName, Selector, Side) ->
 
 -doc """
 Resolve the byte span of a class's header + state declarations in `Source'
-(ADR 0082 extension, BT-3248) — never its methods.
+(ADR 0082 extension) — never its methods.
 
 Backs the CHANGES dock's disk-vs-memory diff for a `'class-def'' entry (the
 cockpit `:def' tab's redefinition of an *existing* class) — given the current
@@ -600,7 +600,7 @@ resolve_class_span(Source, ClassName) ->
 
 -doc """
 Resolve the exact byte span(s) of every self/super-directed send of
-`OldSelector' within `MethodSource' (ADR 0114, BT-3279) — see
+`OldSelector' within `MethodSource' (ADR 0114) — see
 `beamtalk_compiler_port:find_selector_send_spans/4' for the full wire shape
 and "why not regex" rationale. Backs `Behaviour>>renameSelector:to:''s
 reference-site rewrite. Returns `{ok, Occurrences}' (a list of lists — one
@@ -625,7 +625,7 @@ find_selector_send_spans(MethodSource, OldSelector, NewSelector) ->
 
 -doc """
 Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
-selector-token span(s) within `Source' (ADR 0114, BT-3279) — see
+selector-token span(s) within `Source' (ADR 0114) — see
 `beamtalk_compiler_port:find_definition_selector_spans/6' for the full wire
 shape. Backs `Behaviour>>renameSelector:to:''s definition-site rewrite — a
 narrow selector-token splice, never the whole method body. Returns
@@ -654,7 +654,7 @@ find_definition_selector_spans(Source, ClassName, OldSelector, NewSelector, Side
 
 -doc """
 Group a class's methods by its `// === Name ===' section dividers
-(BT-3239, extended by BT-3238 with `divider_span'/method `span' for the
+(with `divider_span'/method `span' for the
 Cockpit's section-authoring write path) — see
 `beamtalk_compiler_port:categorize_methods/3' for the full wire shape.
 Returns `{ok, Categories}' on success, `{error, Reason, Message}' on a
@@ -674,7 +674,7 @@ categorize_methods(Source, ClassName) ->
     end.
 
 -doc """
-Build the class→module-name index for a single `src/**/*.bt` file (BT-3441)
+Build the class→module-name index for a single `src/**/*.bt` file
 — see `beamtalk_compiler_port:build_class_module_index_in_source/4' for the
 full wire shape. Backs the REPL/workspace cold-load fallback for
 `class_module_index' (ADR 0050,
@@ -701,7 +701,7 @@ build_class_module_index_in_source(Source, RelativePath, PackageName) ->
 
 -doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
-declarations in `Source' (ADR 0082 extension, BT-3254).
+declarations in `Source' (ADR 0082 extension).
 
 Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2''s sibling
 safety check before marking a `'class-def'' ChangeEntry flushable — see
@@ -723,7 +723,7 @@ class_state_field_defaults(Source, ClassName) ->
     end.
 
 -doc """
-Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
+Re-indent a canonical (column-0) method body to `BaseIndent'.
 
 Produces the on-disk byte-span shape from the compiler's canonical
 `unparse_method' output, so the live-patch install hook can store a
@@ -758,10 +758,10 @@ register_class(ClassName, MetaMap) ->
     ok.
 
 -doc """
-Remove a class from the compiler server's ambient class cache (BT-3105).
+Remove a class from the compiler server's ambient class cache.
 
 Called when a class is removed from the system, closing the class-removal
-gap in the `classes` accumulator documented in BT-2916: redefinition already
+gap in the `classes` accumulator: redefinition already
 overwrites via `register_class/2`, but until now there was no removal path,
 so the compiler kept type-checking against classes long gone from the
 runtime. Fire-and-forget cast, silently dropped if the server is not
@@ -788,8 +788,8 @@ remove_class(ClassName) ->
 Return the current ambient class cache map (`register_class/2`'s
 accumulator).
 
-Production caller: `beamtalk_recheck:trigger_pending/5` (ADR 0105 Phase 3,
-BT-2782) reads this to snapshot a class's current ambient meta before
+Production caller: `beamtalk_recheck:trigger_pending/5` (ADR 0105 Phase 3)
+reads this to snapshot a class's current ambient meta before
 temporarily splicing a pending signature into it. Also used directly by
 tests. Returns an empty map (not an error) if the server is not running,
 mirroring `register_class/2`'s degrade-silently contract.
@@ -804,8 +804,8 @@ get_classes() ->
     end.
 
 -doc """
-Register a protocol with its metadata in the compiler server cache
-(BT-3473), mirroring `register_class/2`.
+Register a protocol with its metadata in the compiler server cache,
+mirroring `register_class/2`.
 
 Fire-and-forget cast. Silently dropped if the server is not running.
 Production caller: `beamtalk_protocol_registry:register_protocol/1` (in
@@ -821,8 +821,8 @@ register_protocol(ProtocolName, Info) ->
     ok.
 
 -doc """
-Remove a protocol from the compiler server's ambient protocol cache
-(BT-3473), mirroring `remove_class/1`.
+Remove a protocol from the compiler server's ambient protocol cache,
+mirroring `remove_class/1`.
 
 Not called from production code: `beamtalk_protocol_registry:unregister_protocol/1`
 (the real caller, in `beamtalk_runtime`) intentionally bypasses this wrapper
@@ -842,7 +842,7 @@ remove_protocol(ProtocolName) ->
 
 -doc """
 Return the current ambient protocol cache map (`register_protocol/2`'s
-accumulator, BT-3473), mirroring `get_classes/0`.
+accumulator), mirroring `get_classes/0`.
 
 Used directly by tests. Returns an empty map (not an error) if the server is
 not running, mirroring `register_class/2`'s degrade-silently contract.
@@ -859,7 +859,7 @@ get_protocols() ->
 -doc """
 Merge `AliasSources` — one reparseable `type Name = <expansion>` line per
 currently-known alias in *this caller's own session* — into the ambient
-session type-alias cache (ADR 0108 hot-reload re-check trigger, BT-2899),
+session type-alias cache (ADR 0108 hot-reload re-check trigger),
 keyed by alias name (see the `aliases` field's doc for why this is a
 per-name merge, not a whole-cache replacement — two independent REPL
 sessions concurrently registering their own, disjoint alias tables must not

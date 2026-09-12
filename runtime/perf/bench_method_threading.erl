@@ -32,8 +32,8 @@ Findings (2026-03-17):
   - Shadow locals (eliminating maps:get for just-written fields) give
     ~1.1-1.3x on method body execution, but this is negligible vs
     gen_server dispatch overhead (~2000ns per call)
-  - Loop-level optimizations (BT-1275/1276/1342) remain the priority
-    due to N-iteration amplification
+  - Loop-level optimizations remain the priority due to N-iteration
+    amplification
 """.
 
 -export([
