@@ -216,33 +216,62 @@ export function classNameToStdlibFilename(className: string): string {
 }
 
 /**
+ * Marker prepended to the package path segment in `aliasSourceUriString`'s
+ * output, so that segment is never empty — see that function's doc for why
+ * this matters. Chosen to be a character no `encodeURIComponent` output ever
+ * starts with on its own (it's a no-op character, never emitted as an
+ * *encoding* of anything else), so `parseAliasSourceUriPath` can strip
+ * exactly one leading occurrence unambiguously.
+ */
+const ALIAS_PACKAGE_SEGMENT_MARKER = "p";
+
+/**
  * Build the path+query-free URI *string* for a `type` alias's read-only
  * source view under the `beamtalk-alias://` virtual URI scheme (BT-3314/
- * BT-3496), e.g. `beamtalk-alias:///my_pkg/Foo.bt`. `pkg` is embedded as a
- * path segment (empty when unknown) so `parseAliasSourceUriPath` can recover
- * it with plain string splitting — `browse-alias-source` needs it to
+ * BT-3496/BT-3505), e.g. `beamtalk-alias:///pmy_pkg/Foo.bt`. `pkg` is embedded as a
+ * path segment, always prefixed with `ALIAS_PACKAGE_SEGMENT_MARKER` (so the
+ * segment is never empty — see below) — `browse-alias-source` needs it to
  * disambiguate a same-named alias declared by more than one package.
+ *
+ * The marker prefix exists because a real `vscode.Uri.parse` (unlike the
+ * WHATWG `URL` this was originally, incorrectly, reasoned about — see
+ * https://github.com/microsoft/vscode-uri) *throws* `UriError: If a URI does
+ * not contain an authority component, then the path cannot begin with two
+ * slash characters ("//")` for an authority-less URI whose path starts with
+ * `//` — exactly what an *empty* `pkg` (unknown package) used to produce
+ * here: `beamtalk-alias:////Foo.bt` has an empty first path segment, so
+ * `.path` becomes `//Foo.bt`. That's reachable even from a current server
+ * whenever `_hasNavigableAliasSource`'s pre-BT-3496 fallback path applies (no
+ * `source_origin` field to gate on) — silently downgrading "Go to
+ * Definition" to a swallowed exception → "Source not available", the same
+ * failure mode as the double-decode bug below, and just as invisible to a
+ * test suite that never runs a real `vscode.Uri.parse` (`vscodeMock.ts` only
+ * stubs `Uri.file`, not `Uri.parse`). Guaranteeing the segment is always
+ * non-empty sidesteps the whole class of "authority-less URI, leading `//`"
+ * failure rather than special-casing the one input that triggers it.
  *
  * Percent-encodes `name`/`pkg` exactly once — the resulting string must be a
  * syntactically valid URI for `vscode.Uri.parse` to accept. `vscode.Uri`
  * itself decodes exactly once when parsing, so the encode here and the
  * (deliberately absent) decode in `parseAliasSourceUriPath` are each meant
  * to run exactly once across a build → `Uri.parse` → `.path` round trip —
- * see that function's doc for the double-decode bug this shape avoids.
+ * see that function's doc for the double-decode bug this shape also avoids.
  *
  * Returns a plain string, not a `vscode.Uri`, so this (like
  * `classNameToStdlibFilename`) stays testable with no `vscode` dependency;
  * `extension.ts`'s `aliasSourceUri` wraps it in `vscode.Uri.parse`.
  */
 export function aliasSourceUriString(name: string, pkg: string | undefined): string {
-  return `beamtalk-alias:///${encodeURIComponent(pkg ?? "")}/${encodeURIComponent(name)}.bt`;
+  const pkgSegment = `${ALIAS_PACKAGE_SEGMENT_MARKER}${encodeURIComponent(pkg ?? "")}`;
+  return `beamtalk-alias:///${pkgSegment}/${encodeURIComponent(name)}.bt`;
 }
 
 /**
  * Inverse of `aliasSourceUriString` — recovers `{ name, pkg }` from a
- * `beamtalk-alias://` URI's `.path` (e.g. `/my_pkg/Foo.bt` → `{ name: "Foo",
- * pkg: "my_pkg" }`). `pkg` is undefined when the segment is empty, mirroring
- * `aliasSourceUriString`'s "unknown package" encoding.
+ * `beamtalk-alias://` URI's `.path` (e.g. `/pmy_pkg/Foo.bt` → `{ name: "Foo",
+ * pkg: "my_pkg" }`). `pkg` is undefined when the segment is just the bare
+ * marker (an empty encoded package), mirroring `aliasSourceUriString`'s
+ * "unknown package" encoding.
  *
  * Takes an *already-decoded* path — a real `vscode.Uri`'s `.path` getter is
  * documented as returning the decoded string (VS Code percent-decodes once
@@ -259,7 +288,7 @@ export function parseAliasSourceUriPath(uriPath: string): {
   pkg: string | undefined;
 } {
   const [pkgSegment, nameSegment] = uriPath.replace(/^\//, "").split("/");
-  const pkg = pkgSegment ?? "";
+  const pkg = (pkgSegment ?? "").slice(ALIAS_PACKAGE_SEGMENT_MARKER.length);
   return {
     name: (nameSegment ?? "").replace(/\.bt$/, ""),
     pkg: pkg.length > 0 ? pkg : undefined,
