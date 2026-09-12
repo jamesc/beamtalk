@@ -197,10 +197,14 @@ fn type_alias_preceded_by_orphaned_class_doc_reattaches_correctly_on_reparse() {
 }
 
 #[test]
-fn type_alias_with_directly_adjacent_doc_comment_has_no_unattached_warning() {
-    // The lint must not flag the alias's own
-    // directly-adjacent `///` comment as unattached just because an
-    // earlier, unrelated block shares the same leading trivia.
+fn type_alias_with_directly_adjacent_doc_comment_emits_orphaned_doc_warning() {
+    // The lint must not flag the alias's own directly-adjacent `///`
+    // comment as unattached just because an earlier, unrelated block shares
+    // the same leading trivia — but BT-3503 says that earlier, unrelated
+    // block (the `HTTPServer` class doc, silently swallowed by the `type`
+    // alias's own doc comment) must itself be flagged as a likely-orphaned
+    // doc comment, since it otherwise attaches to nothing with no signal to
+    // the author (this is the exact HTTPServer.bt bug BT-3503 reports).
     use crate::source_analysis::{Severity, lex_with_eof, parse};
     let tokens = lex_with_eof(HTTPSERVER_REPRO_SOURCE);
     let (_module, diagnostics) = parse(tokens);
@@ -208,10 +212,13 @@ fn type_alias_with_directly_adjacent_doc_comment_has_no_unattached_warning() {
         .iter()
         .filter(|d| d.severity == Severity::Warning)
         .collect();
-    assert!(
-        warnings.is_empty(),
-        "expected no warnings for the BT-2924 repro shape, got: {warnings:?}"
+    assert_eq!(
+        warnings.len(),
+        1,
+        "expected exactly one orphaned-doc-comment warning for the BT-2924 \
+         repro shape, got: {diagnostics:?}"
     );
+    assert!(warnings[0].message.contains("orphaned"));
 }
 
 // --- Top-level declaration order (classes/protocols/type aliases) ---

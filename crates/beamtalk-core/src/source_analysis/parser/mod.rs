@@ -991,13 +991,19 @@ impl Parser {
     /// comment instead of silently dropping it when the source is
     /// reformatted.
     ///
-    /// A [`Severity::Warning`] diagnostic is emitted only when *this*
-    /// declaration itself ends up with no doc comment at all (the returned
-    /// block is empty) because its own directly-adjacent `///` lines were
-    /// broken away by a blank line or `//` comment. An earlier, unrelated
-    /// block breaking away while this declaration's own adjacent block still
-    /// attaches cleanly is not a problem with this declaration's
-    /// documentation, so it does not warn.
+    /// A [`Severity::Warning`] diagnostic is emitted whenever an earlier
+    /// block broke away (`had_unattached`), with wording that depends on
+    /// whether *this* declaration's own doc comment still attached:
+    ///
+    /// * If this declaration itself ends up with no doc comment at all (the
+    ///   returned block is empty) because its own directly-adjacent `///`
+    ///   lines were the ones broken away, the warning says so directly.
+    /// * If this declaration's own adjacent block still attaches cleanly,
+    ///   the *earlier* block is the orphan: it didn't attach to anything and
+    ///   [`Self::collect_comment_attachment`] preserves it only as an inert
+    ///   plain comment, never documentation again. Left unflagged, this is a
+    ///   silent-orphan trap — see BT-3503 — so it warns too, with different
+    ///   wording that doesn't claim *this* declaration is undocumented.
     pub(super) fn collect_doc_comment(&mut self) -> Option<String> {
         // Clone leading trivia to release the shared borrow of `self` so we
         // can push to `self.diagnostics` inside the loop.
@@ -1044,15 +1050,40 @@ impl Parser {
         self.attached_doc_comment_positions =
             Some((current_idx, block_positions.into_iter().collect()));
 
-        if had_unattached && lines.is_empty() {
-            self.diagnostics.push(
-                Diagnostic::warning(
-                    "doc comment not attached to any declaration \
-                     (blank line or // comment breaks attachment)",
-                    current_span,
-                )
-                .with_category(DiagnosticCategory::Lint),
-            );
+        if had_unattached {
+            if lines.is_empty() {
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        "doc comment not attached to any declaration \
+                         (blank line or // comment breaks attachment)",
+                        current_span,
+                    )
+                    .with_category(DiagnosticCategory::Lint),
+                );
+            } else {
+                // This declaration's own `///` block attached fine, but an
+                // *earlier* block in the same leading trivia broke away (via
+                // a blank line or a `// comment`) and attached to nothing.
+                // `collect_comment_attachment` preserves it as an inert
+                // plain comment rather than dropping it, so it doesn't
+                // vanish from the source — but it also never becomes
+                // documentation for anything again. This is the silent-orphan
+                // case: a doc-comment-shaped block separated from its
+                // probably-intended declaration only by another declaration
+                // that has its own doc comment, with no blank line to make
+                // the drop look deliberate. See BT-3503.
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        "doc comment above this declaration's own doc comment \
+                         is orphaned: it did not attach to any declaration \
+                         (a blank line or // comment separates it from this \
+                         declaration's own doc comment) and was likely \
+                         intended to document a different declaration",
+                        current_span,
+                    )
+                    .with_category(DiagnosticCategory::Lint),
+                );
+            }
         }
 
         if had_unattached || !lines.is_empty() {
