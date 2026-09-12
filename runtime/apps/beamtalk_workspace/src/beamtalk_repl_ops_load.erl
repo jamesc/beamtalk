@@ -62,7 +62,7 @@ respectively.
 -endif.
 
 %%% ============================================================================
-%%% sync_project/2 — shared incremental sync logic (BT-1723)
+%%% sync_project/2 — shared incremental sync logic
 %%% ============================================================================
 
 -doc """
