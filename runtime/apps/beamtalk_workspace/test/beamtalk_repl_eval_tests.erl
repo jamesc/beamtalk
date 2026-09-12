@@ -147,7 +147,7 @@ do_eval_preserves_bindings_on_error_test() ->
     %% New binding should NOT be there (eval failed)
     ?assertEqual(false, maps:is_key(z, FinalBindings)).
 
-%%% BT-2688: connected-session Program exit: result plumbing
+%%% Connected-session Program exit: result plumbing
 
 inject_output_script_exit_test() ->
     %% inject_output/3 threads captured output + warnings into the script_exit
@@ -156,7 +156,7 @@ inject_output_script_exit_test() ->
     Result = beamtalk_repl_eval:inject_output({script_exit, 7, State}, <<"out">>, [<<"w">>]),
     ?assertEqual({script_exit, 7, <<"out">>, [<<"w">>], State}, Result).
 
-%%% rebuild_bindings_from_steps tests (BT-1261)
+%%% rebuild_bindings_from_steps tests
 
 rebuild_bindings_from_steps_simple_assignment_test() ->
     %% A single assignment step stores the awaited value under the variable name.
@@ -241,7 +241,7 @@ handle_load_compile_error_test() ->
         Other -> error({unexpected_result, Other})
     end.
 
-%%% IO Capture tests (BT-355)
+%%% IO Capture tests
 
 io_capture_basic_put_chars_test() ->
     %% Test direct put_chars capture
@@ -289,7 +289,7 @@ io_capture_dead_process_test() ->
     Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
-%% === BT-358: Group leader reset for spawned processes ===
+%% === Group leader reset for spawned processes ===
 
 io_capture_resets_spawned_process_group_leader_test() ->
     %% Verify that processes spawned during IO capture get their
@@ -618,7 +618,7 @@ handle_load_empty_file_test() ->
     end.
 
 %%% ===========================================================================
-%%% BT-627: Coverage tests for internal functions and edge cases
+%%% Coverage tests for internal functions and edge cases
 %%% ===========================================================================
 
 %%% is_internal_key/1 tests
@@ -989,7 +989,7 @@ assert_comment_span_case(#{
     ).
 
 %% ===================================================================
-%% compile_expression_via_port catch clauses (BT-627)
+%% compile_expression_via_port catch clauses
 %% ===================================================================
 
 compile_expr_noproc_test() ->
@@ -1005,7 +1005,7 @@ compile_expr_noproc_with_env_test() ->
     ?assertMatch({error, _}, Result).
 
 %% ===================================================================
-%% compile_file_via_port catch clauses (BT-627)
+%% compile_file_via_port catch clauses
 %% ===================================================================
 
 compile_file_noproc_test() ->
@@ -1021,7 +1021,7 @@ compile_file_noproc_stdlib_test() ->
     ?assertMatch({error, _}, Result).
 
 %% ===================================================================
-%% to_snake_case (BT-775)
+%% to_snake_case
 %% ===================================================================
 
 to_snake_case_simple_test() ->
@@ -1050,7 +1050,7 @@ to_snake_case_with_digits_test() ->
     ?assertEqual("app2", beamtalk_repl_loader:to_snake_case("App2")).
 
 %% ===================================================================
-%% handle_class_definition (BT-627)
+%% handle_class_definition
 %% ===================================================================
 
 handle_class_definition_load_error_test() ->
@@ -1083,7 +1083,7 @@ handle_class_definition_empty_classes_test() ->
     ?assertMatch({error, #beamtalk_error{}, <<>>, [<<"warn">>], _}, Result).
 
 %% ===================================================================
-%% handle_method_definition (BT-627)
+%% handle_method_definition
 %% ===================================================================
 
 handle_method_definition_no_source_test() ->
@@ -1127,7 +1127,7 @@ handle_method_definition_with_source_compile_fail_test() ->
     ?assertMatch({error, {compile_error, _}, <<>>, [], _}, Result).
 
 %% ===================================================================
-%% maybe_await_future timeout and flush paths (BT-627)
+%% maybe_await_future timeout and flush paths
 %% ===================================================================
 
 maybe_await_future_non_future_pid_v2_test() ->
@@ -1191,7 +1191,7 @@ maybe_await_future_beamtalk_object_v2_test() ->
     ?assertEqual(Obj, beamtalk_repl_eval:maybe_await_future(Obj)).
 
 %% ===================================================================
-%% IO handling edge cases (BT-627)
+%% IO handling edge cases
 %% ===================================================================
 
 handle_io_request_put_chars_legacy_v2_test() ->
@@ -1241,7 +1241,7 @@ handle_io_request_put_chars_bad_encoding_test() ->
     ?assertEqual(<<"prev">>, Buffer).
 
 %% ===================================================================
-%% reset_captured_group_leaders (BT-627)
+%% reset_captured_group_leaders
 %% ===================================================================
 
 reset_captured_group_leaders_no_matches_test() ->
@@ -1257,7 +1257,7 @@ reset_captured_group_leaders_no_matches_test() ->
     FakePid ! stop.
 
 %% ===================================================================
-%% IO capture full lifecycle (BT-627)
+%% IO capture full lifecycle
 %% ===================================================================
 
 io_capture_with_output_test() ->
@@ -1278,7 +1278,7 @@ io_capture_dead_capture_pid_test() ->
     ?assertEqual(<<>>, Output).
 
 %% ===================================================================
-%% trigger_hot_reload with instances (BT-627)
+%% trigger_hot_reload with instances
 %% ===================================================================
 
 trigger_hot_reload_with_list_name_test() ->
@@ -1304,7 +1304,7 @@ trigger_hot_reload_atom_name_v2_test() ->
     ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_mod, Classes)).
 
 %% ===================================================================
-%% is_stdlib_path edge cases (BT-627)
+%% is_stdlib_path edge cases
 %% ===================================================================
 
 is_stdlib_path_abs_v2_test() ->
@@ -1319,7 +1319,7 @@ is_stdlib_path_rel_lib_v2_test() ->
     ?assertEqual(true, beamtalk_repl_loader:is_stdlib_path("stdlib/src/string.bt")).
 
 %% ===================================================================
-%% should_purge_module edge cases (BT-627)
+%% should_purge_module edge cases
 %% ===================================================================
 
 should_purge_module_with_registry_no_actors_test() ->

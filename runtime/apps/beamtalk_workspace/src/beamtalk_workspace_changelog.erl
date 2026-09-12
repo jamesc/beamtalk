@@ -101,12 +101,12 @@ release nodes do not start a workspace, so this code is a no-op there.
     clear/0,
     find_revert_target/2,
     find_revert_target/3,
-    %% ADR 0114 (BT-3270): per-site body persistence for the shared
+    %% ADR 0114: per-site body persistence for the shared
     %% multi-site rewrite mechanism — see this function's doc.
     store_site_body/1
 ]).
 
-%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
+%% Beamtalk FFI surface (ADR 0082 Phase 1). These build the data the
 %% `change_log.bt` / `change_entry.bt` value objects wrap: each entry becomes a
 %% `$beamtalk_class`-tagged map and `dirtyMethods/0` returns the per-class set
 %% of dirty selectors. The FFI dispatches on the Beamtalk selector verbatim, so
@@ -141,12 +141,12 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_prev_source_ref/1,
     read_source_body/1,
     read_prev_source_body/1,
-    %% ADR 0114 (BT-3271): reads a `site()`'s own ref directly, for
+    %% ADR 0114: reads a `site()`'s own ref directly, for
     %% `beamtalk_workspace_flush`'s multi-site rename-class splice — see this
     %% function's own doc for why it cannot reuse `read_source_body/1`/
     %% `read_prev_source_body/1` verbatim.
     read_site_body/1,
-    %% ADR 0114 (BT-3269).
+    %% ADR 0114.
     entry_old_class/1,
     entry_old_selector/1,
     entry_old_path/1,
@@ -155,7 +155,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_candidate_sites/1
 ]).
 
-%% ADR 0114 (BT-3269): shadow-detection and flushability helpers for the
+%% ADR 0114: shadow-detection and flushability helpers for the
 %% multi-site `'rename-class'`/`'rename-method'` kinds.
 -export([
     target_key/1,
@@ -187,12 +187,12 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% `kind` is an open enum (ADR 0082): newer writers may add values this beam does
 %% not know. Decoding maps any unrecognised value to `unknown` so history is
 %% preserved across versions rather than dropped. `'remove-method'` is ADR
-%% 0112's method-removal kind (BT-3187). `'class-def'` is ADR 0082's
-%% extension for redefining an *existing* class's whole definition (BT-3248) —
+%% 0112's method-removal kind. `'class-def'` is ADR 0082's
+%% extension for redefining an *existing* class's whole definition —
 %% the cockpit `:def` tab's "Compile" action, as opposed to `'new-class'`
 %% (a brand-new class created via `newClass:at:`). `'rename-class'`/
 %% `'rename-method'` are ADR 0114's `renameTo:`/`renameSelector:to:` kinds
-%% (BT-3269) — the first two kinds whose rewrite spans a *set* of files
+%% — the first two kinds whose rewrite spans a *set* of files
 %% (`sites`/`candidate_sites`) rather than one, see those fields' docs below.
 -type kind() ::
     instance
@@ -208,7 +208,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% explicitly only for that kind — legacy `instance`/`class`-kind patch
 %% entries derive their side from `kind` itself (`entry_side/1`), so the field
 %% is additive, not a breaking schema change (ADR 0112 § ChangeLog interaction).
-%% ADR 0114 (BT-3269): `'rename-method'` stores `side` the same explicit way;
+%% ADR 0114: `'rename-method'` stores `side` the same explicit way;
 %% `'rename-class'` always has `side = undefined` (null) — a class identity
 %% change has no method-table side.
 -type side() :: instance | class.
@@ -216,11 +216,11 @@ release nodes do not start a workspace, so this code is a no-op there.
 -type author_kind() :: human | agent | unknown.
 -type span() :: #{start := non_neg_integer(), 'end' := non_neg_integer()}.
 
-%% ADR 0114 (BT-3269): one rewritten reference location in a `'rename-class'`/
+%% ADR 0114: one rewritten reference location in a `'rename-class'`/
 %% `'rename-method'` entry's `sites` list. `source_ref`/`prev_source_ref` name
 %% the recorded pre/post rewrite bodies exactly like the top-level fields do
 %% for a single-file kind (undefined for a site not yet populated with a
-%% recorded body — the site-discovery/rewrite mechanism itself is BT-3270,
+%% recorded body — the site-discovery/rewrite mechanism itself is
 %% out of scope here). A bare `undefined` in place of a `site()` map (rather
 %% than a map with `source_file = undefined`) is the ADR's documented
 %% `sites[0] = null` case: a dynamic (ClassBuilder) class being renamed has no
@@ -232,7 +232,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     prev_source_ref := binary() | undefined
 }.
 
-%% ADR 0114 (BT-3269): one reported-but-never-rewritten sender in a
+%% ADR 0114: one reported-but-never-rewritten sender in a
 %% `'rename-method'` entry's `candidate_sites` list. No `source_ref`/
 %% `prev_source_ref` — nothing here is ever spliced, so there is no prior/new
 %% body to record (ADR 0114 § ChangeLog schema).

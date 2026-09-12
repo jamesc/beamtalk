@@ -46,7 +46,7 @@ See: ADR 0028 §1 (Module Proxy Pattern)
 %%%
 %%% - `none` — inline `(Erlang module)` FFI. Wrapped errors report the
 %%%   Erlang-facing `'ErlangModule'` class and the original selector.
-%%% - `{Class, Selector}` — a `native:` Object delegation (BT-2720). Wrapped
+%%% - `{Class, Selector}` — a `native:` Object delegation. Wrapped
 %%%   errors report the Beamtalk class/selector so they read `Stream>>take:`
 %%%   rather than the bare Erlang MFA.
 -type error_context() :: none | {atom(), atom()}.
@@ -70,7 +70,7 @@ dispatch('printString', _Args, Self) ->
     Module = maps:get(module, Self),
     iolist_to_binary([<<"#ErlangModule<">>, atom_to_binary(Module, utf8), <<">">>]);
 dispatch('methods', _Args, Self) ->
-    %% BT-679: REPL discoverability — return exported functions with arities
+    %% REPL discoverability: return exported functions with arities.
     Module = maps:get(module, Self),
     case get_exports(Module) of
         {ok, Exports} ->
@@ -89,7 +89,7 @@ dispatch('methods', _Args, Self) ->
 dispatch('call:args:', [SelectorSym, ArgsTuple], Self) when
     is_atom(SelectorSym), is_tuple(ArgsTuple)
 ->
-    %% BT-679: Escape hatch for reserved selectors (class, ==, /=, self, etc.)
+    %% Escape hatch for reserved selectors (class, ==, /=, self, etc.).
     Module = maps:get(module, Self),
     Args = tuple_to_list(ArgsTuple),
     validate_and_apply(Module, SelectorSym, Args, 'call:args:');
@@ -236,11 +236,11 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
         coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
     catch
         Class:Reason:Stack ->
-            %% Single catch → shared classifier (BT-2730): the apply and the
-            %% badarg-retry paths used to carry near-verbatim copies of this
-            %% clause set, which drifted apart silently when one gained a clause.
-            %% On `badarg` this path retries once with charlist-coerced args
-            %% (BT-1127); see classify_ffi_exception/9 for the full policy.
+            %% Single catch → shared classifier: the apply and the
+            %% badarg-retry paths must not carry near-verbatim copies of this
+            %% clause set, or they drift apart silently when one gains a clause.
+            %% On `badarg` this path retries once with charlist-coerced args;
+            %% see classify_ffi_exception/9 for the full policy.
             classify_ffi_exception(
                 Class,
                 Reason,
@@ -594,7 +594,7 @@ classifier rather than re-deriving FFI error text in the proxy.
 raise_generic_error(_Module, _FunName, OrigSelector, Context, Reason, Stack) ->
     Ctx = generic_error_context(Context, OrigSelector),
     Wrapped0 = beamtalk_exception_handler:ensure_wrapped(error, Reason, Stack, Ctx),
-    %% BT-2730: keep the FFI `details` contract uniform. The specific clauses
+    %% Keeps the FFI `details` contract uniform. The specific clauses
     %% (raise_wrapped_error/7) store the raw Erlang fault under `erlang_error`
     %% (+ `erlang_stacktrace`); the shared classifier (wrap_raw) instead records
     %% the canonical `reason`/`key`/`value`. Backfill the FFI keys here — without
@@ -676,11 +676,11 @@ coerce_arg(Arg) when is_binary(Arg) ->
         _ -> Arg
     end;
 coerce_arg(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
-    %% BT-1442: Auto-coerce Actor proxy objects to raw PIDs for Erlang FFI.
+    %% Auto-coerce Actor proxy objects to raw PIDs for Erlang FFI.
     %% This enables `Erlang erlang monitor: #process arg: actor` without badarg.
     Pid;
 coerce_arg(Arg) ->
-    %% ADR 0079 / BT-1990: name-resolving proxies (`pid = {registered, _}`)
+    %% ADR 0079: name-resolving proxies (`pid = {registered, _}`)
     %% deliberately pass through unchanged so the receiving FFI shim
     %% (e.g. `beamtalk_actor:registeredName/1`, `unregister/1`) can answer
     %% from the proxy's identity slot rather than resolving the name. Code

@@ -56,7 +56,7 @@ AtomicCounter objects are represented as tagged maps:
 -export([increment/1, incrementBy/2, decrement/1, decrementBy/2, value/1, reset/1, delete/1]).
 %% readValue/1: FFI shim for value/1 — avoids the `value:` block-eval codegen intercept.
 %% The Beamtalk method `value` dispatches via `(Erlang beamtalk_atomic_counter) readValue: self`
-%% to work around BT-1260 (codegen intercepts unary `value:` as block evaluation).
+%% because the unary `value` selector is intercepted by block-evaluation codegen (see ADR-0101).
 -export([readValue/1]).
 
 %% FFI shims for class methods

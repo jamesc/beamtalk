@@ -127,7 +127,6 @@ init() ->
             ok
     end,
 
-    %% Create sources table (BT-2196)
     case ets:info(?SOURCES_TABLE) of
         undefined ->
             ets:new(?SOURCES_TABLE, [
@@ -228,14 +227,14 @@ register(Class, Selector, Fun, Owner, Source) when
             maybe_store_source(Key, Source)
     end,
 
-    %% ADR 0087 Phase 4 (BT-2301): maintain the xref index for extension methods
+    %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
     %% `Source`) is re-parsed and indexed; a sourceless one (`register/4`, or
     %% `register/5` with `Source = undefined`) is recorded as a marker row tagged
     %% `unindexed_runtime_fun` (empty sends + references) so navigation knows the
     %% method exists but cannot be scanned. `index_extension_xref/3` always
     %% indexes at `ClassSide = false`, even for a class-side extension (`Class`
-    %% is already the metaclass tag in that case) — see its doc (BT-3185).
+    %% is already the metaclass tag in that case) — see its doc.
     index_extension_xref(Class, Selector, Source),
     ok.
 
@@ -295,12 +294,12 @@ unregister(Class, Selector, ClassSide) when
     Key = {EtsClass, Selector},
     ets:delete(?EXTENSIONS_TABLE, Key),
     ets:delete(?SOURCES_TABLE, Key),
-    %% BT-3185: clear this selector's conflict history too — previously only
+    %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),
     %% Best-effort: the extension ETS rows are already mutated, so a
     %% dead/restarting beamtalk_xref must not crash unregister. Degrade to a
-    %% no-op if the xref gen_server is unavailable (BT-2301).
+    %% no-op if the xref gen_server is unavailable.
     safe_xref(fun() -> beamtalk_xref:purge_method(EtsClass, false, Selector) end),
     ok.
 
