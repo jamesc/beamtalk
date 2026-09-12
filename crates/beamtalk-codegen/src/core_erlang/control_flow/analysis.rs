@@ -146,7 +146,7 @@ impl CoreErlangGenerator {
     /// [`Self::nested_loop_lost_class_var_mutation`]'s doc comment — so that
     /// shape remains deliberately unsupported.
     ///
-    /// BT-3488 changed only what happens to it *after* this returns `false`:
+    /// What changed is only what happens to it *after* this returns `false`:
     /// it used to compile to a silently-dropped mutation (or, with no sibling
     /// local mutation to thread, an `erlc` `unbound variable 'State'` crash),
     /// and is now rejected at compile time by
@@ -179,15 +179,15 @@ impl CoreErlangGenerator {
             .find(|expr| Self::is_field_assignment(expr))
     }
 
-    /// BT-3488: rejects a value-type `self.field := ...` write in loop-body
+    /// Rejects a value-type `self.field := ...` write in loop-body
     /// statement `expr` that the enclosing loop **cannot** thread out, with
     /// the SAME
     /// [`CodeGenError::FieldAssignmentInUnsupportedBlock`](super::super::CodeGenError::FieldAssignmentInUnsupportedBlock)
     /// the identical class-var shape already produces.
     ///
     /// A value-type field write mints its own `Self{N}` version chain
-    /// (`VersionPrefix::SelfVt`). BT-3484 taught a `Letrec` loop to carry that
-    /// chain through its own recursive tail call, but only for a write that is
+    /// (`VersionPrefix::SelfVt`). A `Letrec` loop carries that chain
+    /// through its own recursive tail call, but only for a write that is
     /// a BARE, TOP-LEVEL STATEMENT of the loop body — exactly the shape
     /// [`Self::loop_body_threads_value_self`] (and hence
     /// `ThreadingPlan::threads_value_self`, passed in here as
@@ -252,7 +252,7 @@ impl CoreErlangGenerator {
                 return;
             }
             // The loop's own tail call carries a top-level statement write
-            // (BT-3484) — but nothing deeper, including one buried in this
+            // — but nothing deeper, including one buried in this
             // very statement's own right-hand side.
             //
             // The root is identified by POINTER IDENTITY rather than by
@@ -296,7 +296,7 @@ impl CoreErlangGenerator {
     /// Only the `Letrec` shape is checked: a `Foldl*` (`do:`/`collect:`/…)
     /// body's value-type field write has no `Self` threading of its own to
     /// lose here — `generate_field_assignment_open` never threads one
-    /// through a fold accumulator. BT-3488 rejects that shape instead, via
+    /// through a fold accumulator. That shape is rejected instead, via
     /// [`Self::reject_unthreadable_value_self_field_write`], which runs
     /// immediately after this check at both call sites.
     pub(super) fn nested_loop_lost_value_self_mutation(&self, expr: &Expression) -> Option<String> {
