@@ -98,6 +98,7 @@
 - Fix a mutation-threaded conditional (`ifTrue:ifFalse:`, `and:`/`or:`, the `ifNil:` family, `match:`) leaking a raw internal tuple when used in expression position — as an argument, nested inside another branch, in a `match:` arm, or inside a `sort:`/`detect:ifNone:` block — instead of its value (BT-3420, #3722).
 - `beamtalk lint` now also detects `with<Field>:` sends and `with*:` cascades (not just `self.field :=`) as field-mutating statements in `TestCase>>setUp`, warning when one isn't the trailing statement (BT-3395, #3690).
 - Fix `respondsTo:` on actor instances disagreeing with value types given the identical situation — an actor's `has_method/1` never checked the foreign-extension registry, never delegated to its superclass, and never short-circuited for a class with a catch-all `doesNotUnderstand:args:` handler, so e.g. `anActor respondsTo: #anExtensionMethod` or `respondsTo: #anInheritedMethod` incorrectly answered `false`. Actor and value-type `has_method/1` now render through one shared `DispatchSpec`-driven emitter (ADR 0006) (BT-3467).
+- Fix type checker emitting duplicate DNU diagnostics for generic-typed state-field default values — the same default-value expression was inferred independently by `validation.rs` and `protocol.rs`; both now read from a shared cache populated once in the inference pass (BT-3481, #3857).
 
 ### Standard Library
 
@@ -163,6 +164,7 @@
 - **`DynamicSupervisor>>startChild: args name: aSymbol`** — starts a dynamic child registered under a stable name via the existing `spawnAs:` named-registration path. After an OTP-driven restart, the child re-registers under the same name, so callers can look it up via `Actor class>>named:` without holding the original pid. A duplicate-name start returns a structured `#beamtalk_error{}` with kind `#name_registered` (BT-3376, #3665).
 - **`Dictionary>>at:ifAbsent:` result type widened to `V | T`** — the absent-block parameter is now `Block(T)` (a fresh type param) instead of `Block(V)`, so `at: key ifAbsent: [nil]` infers `V | Nil` instead of requiring the block's return type to unify with `V`. Eliminates the double-lookup workaround (`includesKey:` then `at:`) (BT-3408, #3708).
 - **`Collection>>detect:ifNone:` result type widened to `E | T`** — the `ifNone:` block parameter is now `Block(T)` instead of `Block(Object)`, so `detect: [...] ifNone: [nil]` infers `E | Nil` instead of the wider `E | Object`. Applies to `Collection`, `List`, `Stream`, and `SupervisionTree`. Enables existing `isNil`-guard flow narrowing to remove the `Nil` arm without manual re-annotation (BT-3409, #3709).
+- `Actor>>registeredName` declares `-> Symbol | Nil` return type, matching the Erlang FFI shim's existing behavior. Also adds type annotations to `Actor>>spawnWith:` (`initArgs :: Object`), `Actor>>unregisterName` (`-> Symbol`), `Object>>fieldAt:put:` (`-> Self`), and several other stdlib methods as part of an FFI-typing audit (#3847).
 
 ### Runtime
 
@@ -427,9 +429,14 @@
 - Fix `beamtalk build` incremental cache silently dropping diagnostics for unchanged files — diagnostics are now cached in a sidecar (`.beamtalk-diagnostics-cache.json`) and replayed on every incremental build, so a diagnostic isn't lost after its first appearance (BT-3410, #3707).
 - Fix `declare native:` misuse diagnostic silently dropped by `beamtalk lint` and MCP — the diagnostic now has a `NativeDeclarationLocation` category so it survives the category filter. New `native-declaration-location` key in `[diagnostics]` severity table (BT-3404, #3703).
 - Fix `declare native:` erroneously rejected via MCP when the file is inside `stubs/` — MCP's `run_module_analysis` now derives `is_stub_file` from the file path, matching CLI and LSP behavior (BT-3398, #3692).
+- VS Code sidebar: class items in the Workspace Explorer now show `///` doc-comment tooltips on hover, matching the existing method/state-var 3-tier fallback (LSP hover → doc-comment read → hardcoded fallback) (BT-3497, #3856).
+- VS Code sidebar: "Go to Definition" on type alias rows now works for all origins (project, dependency, stdlib) via a new `beamtalk-alias://` virtual URI scheme backed by the `browse-alias-source` runtime op (BT-3496, #3849).
 
 ### Internal
 
+- CLI: extract shared `dep_root_for_source` to eliminate duplicated path-dep resolution between `dependency_classes.rs` and `deps/mod.rs` (#3852).
+- Erlang runtime/stdlib comment cleanup: sweep issue-ID references, replace history narration with current-contract statements across ~10 runtime and stdlib apps (BT-3485).
+- Split oversized codegen and semantic-analysis test files by feature (BT-3502, #3862).
 - **ADR 0118 `ThreadedValue` migration (phases 1a–4)** — replace the AST-directed self-send hoist planner with `ThreadedValue`, a composable expression-level state-threading result type with a sequencing rule for evaluation order. All consumers (method-body statements, conditionals, exception arms, stateful-block bodies, loop bodies, `whileTrue:`/`whileFalse:` conditions, and inline-threaded control flow in expression position) now go through the new path. The planner and all associated infrastructure (`HoistSink`, `HoistAction`, `HoistWalk`, `hoist_plan_walk`, `hoist_nested_self_sends`, etc.) are deleted. New `StateEffectEscapesExpression` verifier variant for detecting un-threaded state effects (BT-3415 #3717, BT-3416 #3718, BT-3417 #3719, BT-3418 #3720, BT-3419 #3723, BT-3420 #3722).
 - Extract `MAX_ATOM_BYTES` to module-level const in `gen_server/methods.rs`, replacing 4 local definitions (#3714).
 - **Crate extraction: `beamtalk-codegen` and `beamtalk-language-service`** — codegen (~88k lines, 35% of `beamtalk-core`) and the language service (~24k lines, including the merged `queries/` submodule) are now standalone crates. `beamtalk-lsp` and `beamtalk-lint` no longer compile codegen code they never use; the Compilation→Language Service boundary is now cargo-enforced. The former `beamtalk-boundary-check` crate and its CI step are retired — Cargo's own crate-dependency rules now enforce the layering invariant (BT-3360 #3644, BT-3361 #3646, BT-3362 #3654, BT-3342, BT-3363 #3655).
