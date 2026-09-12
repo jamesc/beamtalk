@@ -44,13 +44,13 @@ changelog_test_() ->
         fun dirty_methods_uses_new_class_placeholder/1,
         fun append_returns_error_on_unwritable_dir/1,
         fun clear_empties_log/1,
-        %% ADR 0082 Phase 4 (BT-2290)
+        %% ADR 0082 Phase 4
         fun find_revert_target_returns_prev_body/1,
         fun find_revert_target_no_entry_when_unknown/1,
         fun find_revert_target_picks_most_recent_entry/1,
         fun find_revert_target_skips_flushed_entries/1,
         fun find_revert_target_rejects_new_class/1,
-        %% Revert completeness (BT-2663/BT-2664/BT-2665). The compiler-dependent
+        %% Revert completeness. The compiler-dependent
         %% add-method-removal case (a method present in memory but absent from the
         %% on-disk source) is covered end-to-end in the eval/primitives suites,
         %% which set up the full compiler port; here we cover the
@@ -72,7 +72,7 @@ changelog_test_() ->
         fun unknown_info_is_ignored/1,
         fun code_change_returns_state/1,
         fun new_class_value_has_nil_source_file/1,
-        %% ADR 0114 (BT-3269): rename-class / rename-method schema
+        %% ADR 0114: rename-class / rename-method schema
         fun rename_class_json_round_trip/1,
         fun rename_method_json_round_trip/1,
         fun rename_method_decode_drops_malformed_candidate_site/1,
@@ -203,7 +203,7 @@ append_new_class_has_no_prev_or_span(#{workspace_id := WsId}) ->
     ].
 
 %%====================================================================
-%% body_delta/2 — net-vs-disk clean check + diff (BT-2575)
+%% body_delta/2 — net-vs-disk clean check + diff
 %%====================================================================
 
 %% Bodies that match modulo a trailing newline are clean (no net change) — the
@@ -225,7 +225,7 @@ body_delta_dirty_emits_diff_test() ->
     ?assertNotEqual(nomatch, binary:match(Diff, <<"- inc => self.v + 1">>)),
     ?assertNotEqual(nomatch, binary:match(Diff, <<"+ inc => self.v + 2">>)).
 
-%% The on-disk span is file-indented and doc-inclusive (BT-2577); the stored body
+%% The on-disk span is file-indented and doc-inclusive; the stored body
 %% is the compiler's column-0 form. Same content modulo indentation → clean (so
 %% "disappear when clean" fires for real doc-commented, indented methods).
 body_delta_clean_modulo_indentation_test() ->
@@ -269,7 +269,7 @@ active_excludes_nothing_in_fresh_session(_Ctx) ->
     ].
 
 %%====================================================================
-%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284)
+%% Beamtalk FFI surface (ADR 0082 Phase 1)
 %%====================================================================
 
 change_entries_builds_tagged_maps(_Ctx) ->
@@ -329,7 +329,7 @@ change_entries_marks_active_flag(_Ctx) ->
 %% patch (ADR 0082 "Undo") — yields multiple active entries for the same
 %% (class, selector). Only the most recent survives the pending view; the older
 %% one is tagged `shadowed` so `ChangeLog>>activeEntries` collapses to one row
-%% per method (BT-2574). A different selector is never shadowed.
+%% per method. A different selector is never shadowed.
 change_entries_marks_shadowed(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
@@ -355,14 +355,13 @@ change_entries_marks_shadowed(_Ctx) ->
         )
     ].
 
-%% Regression for a Claude-review-caught blocker (BT-3248): a `'class-def'`
-%% redefinition and a still-pending `'new-class'` creation for the SAME class
-%% both have `selector = undefined`, so before this fix they collided on the
-%% same shadow key and the newer `'class-def'` entry (always
-%% `flushable: false`) would shadow — hide from the pending view — the older
-%% `'new-class'` entry, which is what `Workspace flush` actually still acts
-%% on. Neither may shadow the other: both must stay visible so the CHANGES
-%% dock never misrepresents what a flush is about to write.
+%% A `'class-def'` redefinition and a still-pending `'new-class'` creation for
+%% the SAME class both have `selector = undefined`, so they must not collide
+%% on the same shadow key: the newer `'class-def'` entry (always
+%% `flushable: false`) must never shadow — hide from the pending view — the
+%% older `'new-class'` entry, which is what `Workspace flush` actually still
+%% acts on. Neither may shadow the other: both must stay visible so the
+%% CHANGES dock never misrepresents what a flush is about to write.
 class_def_entry_does_not_shadow_pending_new_class_entry(_Ctx) ->
     NewClassInput = #{
         class => <<"Widget">>,
@@ -473,7 +472,7 @@ clear_empties_log(#{workspace_id := WsId}) ->
     ].
 
 %%====================================================================
-%% find_revert_target/2 (ADR 0082 Phase 4, BT-2290)
+%% find_revert_target/2 (ADR 0082 Phase 4)
 %%====================================================================
 %% Used by `ChangeLog>>revert:` to recover the prior body for a method.
 %% The lookup walks the active entries (current epoch, not orphaned, not
@@ -557,7 +556,7 @@ find_revert_target_rejects_new_class(_Ctx) ->
         ?_assertEqual({error, no_entry}, NoEntry)
     ].
 
-%% BT-2663 AC (safety): a patch on a dynamic / source-less class (no source_file,
+%% Safety: a patch on a dynamic / source-less class (no source_file,
 %% no prev_source) cannot be told apart from a modify — there is no disk body to
 %% probe for the selector — so revert refuses loudly rather than risk deleting a
 %% method that existed before. Positive add-removal needs `selector_not_found`
@@ -580,7 +579,7 @@ find_revert_target_error_for_sourceless_class(_Ctx) ->
         ?_assertEqual({error, no_prev_source}, Result)
     ].
 
-%% BT-2664: a new-class entry resolves via the `new-class` placeholder selector
+%% A new-class entry resolves via the `new-class` placeholder selector
 %% to a {remove, Entry} outcome so the caller removes the just-created class.
 find_revert_target_remove_for_new_class(_Ctx) ->
     NewClassInput = #{
@@ -603,7 +602,7 @@ find_revert_target_remove_for_new_class(_Ctx) ->
         ?_assertMatch({remove, _Entry}, ByBinary)
     ].
 
-%% BT-2663 AC: a *modify* (no prev_source recorded) whose source file is GONE is
+%% A *modify* (no prev_source recorded) whose source file is GONE is
 %% genuinely unrecoverable — it must surface a loud error, never a silent delete.
 find_revert_target_error_when_modify_file_missing(#{tmp_home := TmpHome}) ->
     MissingFile = filename:join(TmpHome, "does_not_exist.bt"),
@@ -625,7 +624,7 @@ find_revert_target_error_when_modify_file_missing(#{tmp_home := TmpHome}) ->
         ?_assertEqual({error, no_prev_source}, Result)
     ].
 
-%% BT-2665: a class-side *modify* with a recorded prior body returns it for
+%% A class-side *modify* with a recorded prior body returns it for
 %% re-install — the entry's kind (`class`) carries the side to the caller.
 find_revert_target_modify_returns_ok_for_class_side(_Ctx) ->
     Input = #{
@@ -790,7 +789,7 @@ new_class_value_has_nil_source_file(_Ctx) ->
     ].
 
 %%====================================================================
-%% ADR 0114 (BT-3269): rename-class / rename-method schema
+%% ADR 0114: rename-class / rename-method schema
 %%====================================================================
 
 %% JSON round-trip for the new multi-site `'rename-class'` kind, mirroring
@@ -917,7 +916,7 @@ rename_class_does_not_shadow_pending_new_class_entry(_Ctx) ->
 
 %% dirtyMethods/0 uses a `#'rename-class'` placeholder (not `#'new-class'`) for
 %% a selector-less `'rename-class'` entry, mirroring `'class-def'`'s own
-%% placeholder (BT-3248).
+%% placeholder.
 dirty_methods_uses_rename_class_placeholder(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
     Dirty = beamtalk_workspace_changelog:dirtyMethods(),
@@ -927,9 +926,7 @@ dirty_methods_uses_rename_class_placeholder(_Ctx) ->
     ].
 
 %% `change_entries/0` (the `Workspace changes` FFI path) must not crash on a
-%% multi-site entry — `method_delta/1`'s catch-all degrades to "no diff"
-%% (BT-3270's rewrite mechanism, not this schema-only issue, will teach it to
-%% do better).
+%% multi-site entry — `method_delta/1`'s catch-all degrades to "no diff".
 change_entries_handles_rename_class_without_crashing(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
     [Entry] = beamtalk_workspace_changelog:change_entries(),
@@ -938,14 +935,14 @@ change_entries_handles_rename_class_without_crashing(_Ctx) ->
         ?_assertEqual(nil, maps:get(selector, Entry)),
         ?_assertEqual(false, maps:get(clean, Entry)),
         ?_assertEqual(nil, maps:get(diff, Entry)),
-        %% BT-3284: `oldClass` surfaces the pre-rename name as a Symbol so
+        %% `oldClass` surfaces the pre-rename name as a Symbol so
         %% `ChangeEntry>>printString` can render "Counter -> Accumulator
         %% (rename-class)"; `oldSelector` stays nil (this is not a rename-method).
         ?_assertEqual('Counter', maps:get(oldClass, Entry)),
         ?_assertEqual(nil, maps:get(oldSelector, Entry))
     ].
 
-%% BT-3284: the `'rename-method'` mirror of the above — `oldSelector`
+%% The `'rename-method'` mirror of the above — `oldSelector`
 %% surfaces the pre-rename selector as a Symbol; `oldClass` stays nil (this
 %% is not a rename-class).
 change_entries_handles_rename_method_without_crashing(_Ctx) ->
@@ -1298,7 +1295,7 @@ forward_compat_test_() ->
         fun known_entry_kinds_matches_shared_wire_corpus/0
     ].
 
-%% BT-3275 conformance: `known_entry_kinds/0` — the runtime-introspectable
+%% Conformance: `known_entry_kinds/0` — the runtime-introspectable
 %% image of the `kind()` type's literal union — must have exactly the same
 %% atom set as the shared wire-string corpus's `"wire"` column pins (each
 %% converted to an atom the same way `beamtalk_ws_handler:
@@ -1321,7 +1318,7 @@ known_entry_kinds_matches_shared_wire_corpus() ->
     ?assertEqual(KnownKinds, CorpusKinds).
 
 %% Load the shared flush-file-kind wire-string conformance corpus from the
-%% repo tree. `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to
+%% repo tree. `beamtalk_test_corpus` walks up from the test CWD to
 %% the project root (the dir holding `Cargo.toml`), then reads the fixture
 %% both surfaces share.
 load_flush_file_kind_wire_corpus() ->
@@ -1381,11 +1378,11 @@ known_kinds_decode_to_atoms() ->
     NewClass = beamtalk_workspace_changelog:entry_from_json(
         line_json_with(#{<<"kind">> => <<"new-class">>})
     ),
-    %% BT-3248: redefining an *existing* class's whole definition.
+    %% Redefining an *existing* class's whole definition.
     ClassDef = beamtalk_workspace_changelog:entry_from_json(
         line_json_with(#{<<"kind">> => <<"class-def">>})
     ),
-    %% ADR 0114 (BT-3269).
+    %% ADR 0114.
     RenameClass = beamtalk_workspace_changelog:entry_from_json(
         line_json_with(#{<<"kind">> => <<"rename-class">>})
     ),
@@ -1400,7 +1397,7 @@ known_kinds_decode_to_atoms() ->
     ?assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(RenameMethod)).
 
 %%====================================================================
-%% sites_flushable/1 (ADR 0114, BT-3269): pure fold, no gen_server needed
+%% sites_flushable/1 (ADR 0114): pure fold, no gen_server needed
 %%====================================================================
 
 sites_flushable_test_() ->
@@ -1509,11 +1506,11 @@ durable_input(Class, Selector) ->
     }.
 
 %%====================================================================
-%% ADR 0114 (BT-3269) helpers: rename-class / rename-method fixtures
+%% ADR 0114 helpers: rename-class / rename-method fixtures
 %%====================================================================
 
 %% A `site()` map with no recorded source_ref/prev_source_ref — schema-only,
-%% no site-discovery/rewrite mechanism exists yet (BT-3270).
+%% no site-discovery/rewrite mechanism exists yet.
 site_map(SourceFile, Span) ->
     #{
         source_file => SourceFile,
@@ -1568,7 +1565,7 @@ rename_method_input() ->
 %% resolves its changes/ dir under our temp tree. Returns the prior HOME so it
 %% can be restored.
 %%
-%% Cross-invocation-unique (BT-3281) — see `beamtalk_test_unique:id/0`: our
+%% Cross-invocation-unique — see `beamtalk_test_unique:id/0`: our
 %% own `load_from_disk` would otherwise restore a prior run's leftover
 %% `changes.jsonl` entries into this run's ETS table. This is the helper
 %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s

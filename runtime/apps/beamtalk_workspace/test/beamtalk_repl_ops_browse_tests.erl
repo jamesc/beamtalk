@@ -73,7 +73,7 @@ describe_ops_method_source_requires_class_side_selector_test() ->
     ?assert(lists:member(<<"selector">>, Params)).
 
 %%====================================================================
-%% browse-native-source — describe + pure helpers (BT-2578)
+%% browse-native-source — describe + pure helpers
 %%====================================================================
 
 describe_ops_has_native_source_key_test() ->
@@ -136,7 +136,7 @@ native_clause_selector_skips_generic_clauses_test() ->
         beamtalk_repl_ops_browse:clause_selector(<<"    R = handle_call({readLine, []}, F, S),">>)
     ).
 
-%% BT-2582 conformance: every case in the shared corpus must resolve the same
+%% Conformance: every case in the shared corpus must resolve the same
 %% selector here as the Rust LSP's `clause_selector` does. The corpus is the
 %% single source of truth both implementations are pinned to; the Rust side
 %% asserts the identical cases in
@@ -163,7 +163,7 @@ clause_selector_corpus_test() ->
     ).
 
 %% Load the shared selector-conformance corpus from the repo tree.
-%% `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% `beamtalk_test_corpus` walks up from the test CWD to the
 %% project root (the dir holding `Cargo.toml`), then reads the fixture both
 %% surfaces share.
 load_clause_corpus() ->
@@ -198,7 +198,7 @@ native_delegate_exported_marker_test() ->
     ?assertNot(beamtalk_repl_ops_browse:delegate_exported([], readLine)).
 
 %%====================================================================
-%% delegate_callers_of_native_module/1 (BT-2732)
+%% delegate_callers_of_native_module/1
 %%====================================================================
 
 %% self_delegate_selectors/1 recovers the `self delegate` selectors from a facade's

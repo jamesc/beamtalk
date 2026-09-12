@@ -25,7 +25,7 @@
 %%   call 'erlang':'element'(4, Obj)
 %%
 %% Following LFE Flavors' #flavor-instance{} pattern.
-%% ADR 0079 (BT-1990): The `pid` field carries either:
+%% ADR 0079: The `pid` field carries either:
 %%   - a raw `pid()` for ordinary actor handles, or
 %%   - a `{registered, Name :: atom()}` tuple for name-resolving proxies.
 %% The send-site dispatch in `beamtalk_actor` recognises both shapes; the
@@ -106,18 +106,18 @@
 %% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
 -define(MAX_HIERARCHY_DEPTH, 20).
 
-%% @doc REPL/RPC wire protocol version (BT-3090).
+%% @doc REPL/RPC wire protocol version.
 %%
 %% Single source of truth for the protocol version string reported by both
 %% `beamtalk_version:get/0` (the desktop-attach readiness handshake, ADR
 %% 0097) and `beamtalk_repl_ops_dev:handle_term(<<"describe">>, ...)` (the
 %% REPL `describe` op). Before this macro the two were independent `"2.0"`
-%% string literals synced only by a "keep in sync" comment (BT-2091) — bump
+%% string literals synced only by a "keep in sync" comment — bump
 %% this macro and both call sites move together.
 -define(PROTOCOL_VERSION, <<"2.0">>).
 
 %% @doc ADR 0110 class-var shadow write-through process-dictionary key atom
-%% (ADR 0111 Phase D / BT-3135).
+%% (ADR 0111 Phase D).
 %%
 %% Single source of truth for the `'$bt_class_vars_shadow'` atom shared by
 %% `beamtalk_class_dispatch:invoke_class_method/7` (reads it back on the
@@ -138,7 +138,7 @@
 %% that Rust test fails.
 -define(BT_CLASS_VARS_SHADOW_KEY_ATOM, '$bt_class_vars_shadow').
 
-%% @doc BT-3243 (supervisor-restart follow-up): process-dictionary key marking
+%% @doc Process-dictionary key marking
 %% "this process is currently executing a `withClassMethod:` child's factory
 %% method on behalf of `beamtalk_supervisor:start_child_via_class_method/4`,
 %% running directly in the real OTP supervisor process (no process boundary
@@ -151,18 +151,18 @@
 %% present — the link is the supervisor's restart mechanism) or must be
 %% unlinked (key absent — the more common case of a class method running
 %% inside the class's own gen_server, or a plain unsupervised spawn, where a
-%% link would incorrectly tie the new actor's lifetime to the caller; see
-%% BT-3243). Deliberately a *dedicated* key, not `beamtalk_class_name` /
+%% link would incorrectly tie the new actor's lifetime to the caller).
+%% Deliberately a *dedicated* key, not `beamtalk_class_name` /
 %% `beamtalk_class_module` (also set by `start_child_via_class_method/4`,
 %% but *also* set by every class gen_server's own `init/1` via
 %% `beamtalk_object_class.erl` — so their presence alone cannot distinguish
 %% "inside a real supervisor" from "inside a class's own gen_server").
 -define(BT_SUPERVISOR_SPAWN_CONTEXT_KEY, '$bt_supervisor_spawn_context').
 
-%% @doc BT-3022/BT-3199: is `T` an in-flight `^` non-local return signal?
+%% @doc Is `T` an in-flight `^` non-local return signal?
 %%
 %% Codegen throws the state-carrying 4-tuple `{'$bt_nlr', Token, Value,
-%% State}` (ADR 0041); the 3-tuple is the pre-BT-854 shape still recognised
+%% State}` (ADR 0041); the 3-tuple is the legacy shape still recognised
 %% by `beamtalk_result:'tryDo:'/1`. Both are control-flow signals aimed at a
 %% method frame that may live in another process, so any dispatch layer that
 %% might intercept a `throw` (class-side self-sends, instance-side extension

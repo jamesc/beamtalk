@@ -41,7 +41,7 @@ stdlib class — BT-2427 — needs no wrapping layer):
   strategy         => atom() | nil,       % #oneForOne … ; Beamtalk supervisors only
   restartIntensity => #{maxRestarts, window} | nil,  % configured budget; supervisors only
   truncated        => boolean(),          % true when children exceeded the cap
-  parent_pid       => pid() | nil         % adjacency for tree reconstruction (BT-2429)
+  parent_pid       => pid() | nil         % adjacency for tree reconstruction
 }
 ```
 
@@ -87,7 +87,7 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     infra_deny_list/0,
     is_infra/1,
     %% Node / tree accessors consumed by the SupervisionNode & SupervisionTree
-    %% stdlib classes (BT-2429).
+    %% stdlib classes.
     enrich/1,
     child_handles/1,
     rootOf/1,
@@ -308,7 +308,7 @@ guarded_state(_, _) ->
     unavailable.
 
 %%% ============================================================================
-%%% Node / tree accessors (BT-2429)
+%%% Node / tree accessors
 %%%
 %%% The flat snapshot is a list of immutable node maps carrying parent linkage
 %%% (`parent_pid`). Parent/child navigation from a *bare* node needs the sibling
@@ -455,7 +455,7 @@ infra_deny_list() ->
             beamtalk_trace_store,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,
-            %% BT-3236: class gen_servers moved under a supervisor; keep them
+            %% Class gen_servers moved under a supervisor; keep them
             %% (and their recovery monitor) out of the default snapshot, as
             %% class processes always were before supervision.
             beamtalk_class_sup,
@@ -745,7 +745,7 @@ is_supervisor_kind(_) -> false.
 %% marker (its value IS the behaviour class). A Beamtalk supervisor is an OTP
 %% supervisor whose child id is a registered Beamtalk Supervisor/DynamicSupervisor
 %% subclass. Everything else is foreign — minimally tagged here in Phase 1
-%% (`otpSupervisor`/`otpProcess`); behaviour-based foreign detection is BT-2428.
+%% (`otpSupervisor`/`otpProcess`); behaviour-based foreign detection is future work.
 -spec classify(pid(), atom() | undefined, atom() | undefined) ->
     {atom(), beamtalk_object() | nil}.
 classify(Pid, Id, Type) ->
@@ -833,8 +833,8 @@ is_supervisor_pid(Pid, _Unknown) ->
 %% `'$initial_call' => {supervisor, Module, 1}` in its process dictionary
 %% (planted by `proc_lib`). This avoids sending `which_children` to a plain
 %% worker pid, which — not being a gen_server — would never reply and block the
-%% walk. Foreign supervisors with an exotic start path are caught by the
-%% behaviour-based probe in BT-2428; Phase 1 relies on the standard marker.
+%% walk. Foreign supervisors with an exotic start path are caught by a
+%% future behaviour-based probe; Phase 1 relies on the standard marker.
 -spec looks_like_supervisor(pid()) -> boolean().
 looks_like_supervisor(Pid) when is_pid(Pid) ->
     case erlang:process_info(Pid, dictionary) of
@@ -848,7 +848,7 @@ looks_like_supervisor(Pid) when is_pid(Pid) ->
     end.
 
 %%% ============================================================================
-%%% Inspector child handles (ADR 0095 supervisor-aware inspection, BT-2634)
+%%% Inspector child handles (ADR 0095 supervisor-aware inspection)
 %%% ============================================================================
 
 -doc """
@@ -1250,16 +1250,14 @@ class_object(_) ->
 
 %% The Beamtalk class name for an actor pid, read from the `'$beamtalk_actor'`
 %% process-dictionary marker planted by every actor's `init/1`.
-%% BT-3090: delegates to the canonical `beamtalk_actor:pid_class_name/1` —
-%% previously a hand-duplicated copy here.
+%% Delegates to the canonical `beamtalk_actor:pid_class_name/1`.
 -spec actor_class_name(pid()) -> atom() | nil.
 actor_class_name(Pid) ->
     beamtalk_actor:pid_class_name(Pid).
 
 %% The registered name of a pid, or the Beamtalk `nil` atom when unregistered
 %% or dead.
-%% BT-3090: delegates to the canonical `beamtalk_actor:registered_name_for_pid/1`
-%% — previously a hand-duplicated copy here.
+%% Delegates to the canonical `beamtalk_actor:registered_name_for_pid/1`.
 -spec registered_name(pid()) -> atom() | nil.
 registered_name(Pid) when is_pid(Pid) ->
     beamtalk_actor:registered_name_for_pid(Pid).

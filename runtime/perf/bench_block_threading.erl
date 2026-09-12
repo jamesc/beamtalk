@@ -34,10 +34,10 @@ emits maybe_await (ADR-0043: all actor sends are synchronous).
     fold_stateacc_block/1,
     fold_inject_into_wrapper/1,
     fold_inline_swap/1,
-    %% BT-1329: nested list op inside counted loop — StateAcc fallback vs tuple target
+    %% Nested list op inside counted loop — StateAcc fallback vs tuple target
     nested_stateacc_list_op/2,
     nested_tuple_list_op/2,
-    %% BT-1276: list-op with LOCAL VARIABLE mutation — tuple-acc vs StateAcc map
+    %% List-op with LOCAL VARIABLE mutation — tuple-acc vs StateAcc map
     do_native_mutation/1,
     do_stateacc_mutation/1,
     do_tuple_acc_mutation/1,
@@ -45,7 +45,7 @@ emits maybe_await (ADR-0043: all actor sends are synchronous).
     collect_tuple_acc_mutation/1,
     fold_stateacc_mutation/1,
     fold_tuple_acc_mutation/1,
-    %% BT-1342: counted loop with both local + field mutations
+    %% Counted loop with both local + field mutations
     mixed_stateacc/1,
     mixed_full_extract/1,
     mixed_native/1,
@@ -153,15 +153,14 @@ sum_direct_params_loop(I, Sum) ->
 %%====================================================================
 %% Scale loop: multiply-by-literal
 %%
-%% Best-case benchmark for the BT-1286 literal-skipping optimisation:
+%% Best-case benchmark for the literal-skipping optimisation:
 %% every binary op has exactly one variable operand and one literal operand.
 %%
 %%   N timesRepeat: [:i | result := result * 2]
 %%
 %% Two variants:
 %%   scale_native              — idiomatic Erlang, zero overhead
-%%   scale_direct_params_literal_opt  — BT-1275 + BT-1286: literals not wrapped
-%%                                      (post-BT-1286 + post-BT-1321 codegen)
+%%   scale_direct_params_literal_opt  — direct-params codegen: literals not wrapped
 %%====================================================================
 
 -doc """
@@ -288,7 +287,7 @@ fold_inline_swap(List) ->
     lists:foldl(fun(X, Acc) -> Acc + X end, 0, SafeList).
 
 %%====================================================================
-%% BT-1329: nested list op inside counted loop
+%% Nested list op inside counted loop
 %%
 %% Simulates the pattern:
 %%   count := 0. total := 0.
@@ -298,10 +297,10 @@ fold_inline_swap(List) ->
 %%
 %% The inner inject:into: block mutates `count` from the outer scope on every
 %% element. This makes it a Tier-2 call returning {Result, NewStateAcc}, which
-%% forces the outer loop off direct-params (BT-1275) and onto full StateAcc map
+%% forces the outer loop off direct-params and onto full StateAcc map
 %% threading even though `total` and `count` could both be direct params.
 %%
-%% BT-1329 target: inner block emits {Result, Count1} as an expanded tuple
+%% Target: inner block emits {Result, Count1} as an expanded tuple
 %% (no StateAcc map). Outer loop unpacks Count1 directly as a fun parameter.
 %%====================================================================
 
@@ -356,12 +355,12 @@ nested_tuple_loop(I, {_Total, Count}, Items) ->
     nested_tuple_loop(I - 1, {NewTotal, NewCount}, Items).
 
 %%====================================================================
-%% BT-1276: list-op with LOCAL VARIABLE mutation
+%% List-op with LOCAL VARIABLE mutation
 %% These simulate the codegen output for blocks that capture and mutate
 %% outer-scope locals (e.g. `total := 0; list do: [:x | total := total + x]`).
 %%
-%% StateAcc approach: maps:get / maps:put per iteration (pre-BT-1276).
-%% Tuple-acc approach: element(N, T) / {V1, ..., VN} per iteration (BT-1276).
+%% StateAcc approach: maps:get / maps:put per iteration.
+%% Tuple-acc approach: element(N, T) / {V1, ..., VN} per iteration.
 %%====================================================================
 
 -doc """
@@ -491,7 +490,7 @@ fold_tuple_acc_mutation(List) ->
     Result.
 
 %%====================================================================
-%% BT-1326: Counted loop with BOTH local variable + actor field mutations
+%% Counted loop with BOTH local variable + actor field mutations
 %%
 %% Simulates:
 %%   sum := 0
@@ -500,7 +499,7 @@ fold_tuple_acc_mutation(List) ->
 %%
 %% Three variants:
 %%   mixed_stateacc  — old StateAcc path: all state packed into one map
-%%   mixed_hybrid    — BT-1326 hybrid: locals as direct params, State threaded separately
+%%   mixed_hybrid    — hybrid: locals as direct params, State threaded separately
 %%   mixed_native    — idiomatic Erlang baseline (no overhead)
 %%====================================================================
 
@@ -716,7 +715,7 @@ crossover_fe4_loop(I, N, Sum, F1, F2, F3, F4, State) ->
     crossover_fe4_loop(I + 1, N, Sum + 1, F1 + 1, F2 + 1, F3 + 1, F4 + 1, State).
 
 %%====================================================================
-%% BT-1326 large-map variants: same as mixed_* but with >32-key actor state.
+%% Large-map variants: same as mixed_* but with >32-key actor state.
 %%
 %% BEAM's JIT uses a flat tuple representation for small maps (up to ~32
 %% keys). Above that threshold maps switch to a HAMT representation where

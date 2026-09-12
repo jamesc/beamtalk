@@ -60,11 +60,11 @@ cap_note_nonzero_test() ->
     ?assertEqual(<<"3 more not checked">>, beamtalk_recheck:cap_note(3)).
 
 %%====================================================================
-%% Pure helper — not_verified_owners/2 (BT-2828)
+%% Pure helper — not_verified_owners/2
 %%
 %% `not_checked_owners/2` (cap-dropped candidates) already has coverage via
-%% `trigger/4`'s integration tests. `not_verified_owners/2` is the new
-%% BT-2828 merge on top of it: cap-dropped owners unioned with any `Kept`
+%% `trigger/4`'s integration tests. `not_verified_owners/2` merges on top of
+%% it: cap-dropped owners unioned with any `Kept`
 %% candidate whose outcome status was not `ok` — `skipped` (no live source)
 %% or `failed` (compile/compiler-port error). Both statuses collapse to the
 %% same "never actually re-verified" bucket, so one pure test covers both
@@ -198,7 +198,7 @@ relevant_diagnostic_ignores_undefined_category_test() ->
     ).
 
 %%====================================================================
-%% Pure helper — override_method_signature/4 (ADR 0105 Phase 3, BT-2782)
+%% Pure helper — override_method_signature/4 (ADR 0105 Phase 3)
 %%====================================================================
 
 override_method_signature_splices_pending_type_test() ->
@@ -269,7 +269,7 @@ override_method_signature_brand_new_selector_gets_bare_entry_test() ->
     ?assertEqual(error, maps:find(arity, Entry)).
 
 %%====================================================================
-%% Pure helper — relevant_image_diagnostic/1 (ADR 0105 Phase 3, BT-2782)
+%% Pure helper — relevant_image_diagnostic/1 (ADR 0105 Phase 3)
 %%====================================================================
 
 relevant_image_diagnostic_keeps_dnu_test() ->
@@ -301,7 +301,7 @@ relevant_image_diagnostic_drops_unrelated_category_test() ->
     ).
 
 %%====================================================================
-%% Pure helper — relevant_diagnostic_leaf_change/2 (ADR 0107 Phase A, BT-2856)
+%% Pure helper — relevant_diagnostic_leaf_change/2 (ADR 0107 Phase A)
 %%====================================================================
 
 %% A `Type`-category diagnostic naming the class is kept — regardless of
@@ -360,7 +360,7 @@ relevant_diagnostic_leaf_change_drops_unrelated_class_name_test() ->
     ).
 
 %%====================================================================
-%% Pure helper — class_name_mentioned/2 (ADR 0107 Phase A, BT-2856)
+%% Pure helper — class_name_mentioned/2 (ADR 0107 Phase A)
 %%====================================================================
 
 %% Regression pin (adversarial review finding): a bare substring match would
@@ -782,7 +782,7 @@ no_live_source_is_skipped_not_checked_test_() ->
                     ?assertEqual(0, NotChecked),
                     ?assertEqual([], Findings),
 
-                    %% BT-2828: a `skipped` outcome (no live source) is not
+                    %% A `skipped` outcome (no live source) is not
                     %% cap-dropped, so `not_checked_owners` stays empty — but
                     %% it must still show up in `not_verified_owners`, or
                     %% `beamtalk_repl_loader` would neither replace nor mark
@@ -827,7 +827,7 @@ trigger_never_raises_on_unknown_selector_test_() ->
         end}}.
 
 %%====================================================================
-%% Receiver-type-aware dependent lookup (ADR 0115 Phase 4, BT-3219)
+%% Receiver-type-aware dependent lookup (ADR 0115 Phase 4)
 %%====================================================================
 
 %% Pure helpers — changed_class_tag/2, selector_side/1.
@@ -850,7 +850,7 @@ selector_side_accessor_is_instance_side_test() ->
     ?assertEqual(instance, beamtalk_recheck:selector_side('withCount:')).
 
 %% xref payload for the fan-out fixture below: one send of `Selector`, typed
-%% (`recv_type`) at `RecvType` — mirrors the compile-time write path BT-3217
+%% (`recv_type`) at `RecvType` — mirrors the shape the compile-time write path
 %% populates for real code (unlike `dashboard_xref/0`/`listview_xref/0`
 %% above, which deliberately omit `recv_type` to exercise the pre-Phase-2
 %% legacy-row default elsewhere in this file).
@@ -890,7 +890,7 @@ register_fanout_candidate(Name, Selector, RecvType) ->
         NameBin, fanout_candidate_source(NameBin, ReceiverBin, SelectorBin)
     ).
 
-%% BT-3219 AC4: a synthetic fan-out fixture mirroring BT-2781's benchmark
+%% A synthetic fan-out fixture mirroring the benchmark
 %% shape (real dependents interleaved with same-selector, unrelated-type
 %% false positives) for one selector, all comfortably under the default
 %% caller cap (20) so the cap plays no part in this result — proving the
@@ -909,7 +909,7 @@ receiver_type_filter_narrows_pool_before_cap_test_() ->
                     SelectorBin = <<"fanoutSel">>,
                     %% A small synthetic hierarchy, written directly into
                     %% `beamtalk_class_metadata` (mirrors
-                    %% `beamtalk_xref_tests.erl`'s BT-3218
+                    %% `beamtalk_xref_tests.erl`'s
                     %% `bt3218_hierarchy_setup/0` pattern) — both classes must
                     %% be *known* to `beamtalk_class_metadata` for
                     %% `senders_of/2`'s relatedness check to actually run the
@@ -986,7 +986,7 @@ receiver_type_filter_narrows_pool_before_cap_test_() ->
         end}}.
 
 %%====================================================================
-%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%% Shape-change re-check (ADR 0105 Phase 2)
 %%====================================================================
 
 %% Pure helper — shape_dependent_selectors/1.

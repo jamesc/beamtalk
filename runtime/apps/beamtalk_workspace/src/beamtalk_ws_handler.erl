@@ -78,7 +78,7 @@ websocket_info(
         <<>> -> {ok, State};
         _ -> {[{text, Encoded}], State}
     end;
-%% BT-698: Eval code requests stdin input
+%% Eval code requests stdin input
 websocket_info(
     {need_input, CapturePid, Ref, Prompt},
     State = #ws_state{authenticated = true, pending_eval = Msg}
@@ -90,10 +90,10 @@ websocket_info(
         io_capture_pid = CapturePid,
         stdin_ref = Ref
     }};
-%% BT-698: Late need_input after eval completed — drop silently
+%% Late need_input after eval completed — drop silently
 websocket_info({need_input, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
-%% BT-696: Eval completed successfully
+%% Eval completed successfully
 websocket_info(
     {eval_done, Value, Output, Warnings},
     State = #ws_state{authenticated = true, pending_eval = Msg}
@@ -108,7 +108,7 @@ websocket_info(
         io_capture_pid = undefined,
         stdin_ref = undefined
     }};
-%% BT-2531: BindingChanged system announcement (SystemAnnouncer bus), re-encoded
+%% BindingChanged system announcement (SystemAnnouncer bus), re-encoded
 %% to the byte-identical `bindings`/`changed` push frame the legacy
 %% `beamtalk_bindings_events` broadcast produced. The frame carries only the
 %% session id (a refresh trigger); the typed event also carries name/value, which
@@ -126,7 +126,7 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% BT-696: Eval completed with error
+%% Eval completed with error
 websocket_info(
     {eval_error, Reason, Output, Warnings},
     State = #ws_state{authenticated = true, pending_eval = Msg}
@@ -147,7 +147,7 @@ websocket_info(
         io_capture_pid = undefined,
         stdin_ref = undefined
     }};
-%% BT-2688: connected-session `Program exit:` under a streaming eval. Surface the
+%% Connected-session `Program exit:` under a streaming eval. Surface the
 %% exit-status reply (parity with the synchronous op path) so the subscriber gets
 %% a terminal message rather than waiting forever; the session shell has already
 %% stopped. Rare in practice — `Program exit:` is documented for `main:` / bare

@@ -608,7 +608,7 @@ index_extension_xref(Class, Selector, Source) ->
         end,
     %% build_method_entry/5 is pure; only the put_method/4 gen_server call needs
     %% to be best-effort so a dead/restarting beamtalk_xref cannot crash
-    %% register after the extension ETS rows are already mutated (BT-2301).
+    %% register after the extension ETS rows are already mutated.
     Entry = beamtalk_xref:build_method_entry(
         false, Selector, SourceBin, SourceStatus, extension
     ),

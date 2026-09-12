@@ -53,37 +53,36 @@ See also: beamtalk_actor for the runtime implementation
 %%% ===========================================================================
 
 %% Note: For spawn/0 and spawn/1 tests, we use the real compiled counter module
-%% from tests/repl-protocol/fixtures/counter.bt (unified fixture - BT-239) which generates
-%% actual #beamtalk_object{} records.
+%% from tests/repl-protocol/fixtures/counter.bt (the unified fixture) which
+%% generates actual #beamtalk_object{} records.
 %%
-%% BT-3093: counter_module_state/1 and friends below previously claimed to
-%% mirror "the output of compiling" a Counter class — that claim was false.
-%% Real compiled classes get their own generated dispatch/4 case-statement
-%% module (crates/beamtalk-core/src/codegen/core_erlang/gen_server/*); they
-%% never store a `'__methods__'` map of funs in actor state. That funs-table
-%% shape is a *runtime* representation: it is what `beamtalk_actor:dispatch/4`
-%% and `beamtalk_actor:handle_cast/2`'s async future-cast branch
+%% counter_module_state/1 and friends below are not a stand-in for "the
+%% output of compiling" a Counter class. Real compiled classes get their own
+%% generated dispatch/4 case-statement module
+%% (crates/beamtalk-core/src/codegen/core_erlang/gen_server/*); they never
+%% store a `'__methods__'` map of funs in actor state. That funs-table shape
+%% is a *runtime* representation: it is what `beamtalk_actor:dispatch/4` and
+%% `beamtalk_actor:handle_cast/2`'s async future-cast branch
 %% (`{Selector, Args, FuturePid}`) operate on directly, and it is the same
 %% shape produced by Beamtalk's dynamic class-building API
 %% (`Object classBuilder ... classMethods: #{...}; register`).
 %%
 %% Everything that can be expressed as compiled `.bt` source and reached via
-%% the ordinary `{Selector, Args}` synchronous call protocol has been
-%% migrated (BT-3093) onto the fixtures in
-%% runtime/apps/beamtalk_runtime/test_fixtures/ (arithmetic_actor.bt,
-%% rectangle_actor.bt, box_actor.bt, spawner_actor.bt, shadow_actor.bt,
-%% coordinate_actor.bt), following the BT-239 precedent — see the section
-%% headers below for what moved where.
+%% the ordinary `{Selector, Args}` synchronous call protocol is instead
+%% covered by the fixtures in runtime/apps/beamtalk_runtime/test_fixtures/
+%% (arithmetic_actor.bt, rectangle_actor.bt, box_actor.bt, spawner_actor.bt,
+%% shadow_actor.bt, coordinate_actor.bt) — see the section headers below for
+%% what lives where.
 %%
 %% What is kept here, and why: the async future-cast protocol
 %% (`{Selector, Args, FuturePid}` sent via `gen_server:cast/2`) is only
 %% implemented by `beamtalk_actor:handle_cast/2`'s generic fallback clause.
-%% Confirmed empirically (BT-3093): a real compiled actor's generated
-%% `handle_cast/2` (crates/.../gen_server/callbacks.rs `generate_handle_cast`)
-%% only matches the `{cast, Selector, Args}` fire-and-forget tag; a bare
+%% A real compiled actor's generated `handle_cast/2`
+%% (crates/.../gen_server/callbacks.rs `generate_handle_cast`) only matches
+%% the `{cast, Selector, Args}` fire-and-forget tag; a bare
 %% `{Selector, Args, FuturePid}` cast falls through to its `<_> -> {noreply,
-%% State}` catch-all and is silently dropped — verified by spawning
-%% 'bt@arithmetic_actor' and observing the future time out. There is no
+%% State}` catch-all and is silently dropped (verified by spawning
+%% 'bt@arithmetic_actor' and observing the future time out). There is no
 %% compiled `.bt` source construct that reaches this branch, so per the
 %% Consistency-Test Disposition Rule's documented exception ("a runtime-only
 %% failure path that has no corresponding source construct"), the async
@@ -204,11 +203,10 @@ spawn_with_preserves_unspecified_defaults_test() ->
 
     gen_server:stop(Pid).
 
-%% BT-3093: migrated off counter_module_state/raw start_link onto the real
-%% compiled 'bt@counter' module — spawn/1 already merges InitArgs the same
-%% way (proven identically by spawn_with_preserves_unspecified_defaults_test
-%% above), so this now exercises real codegen instead of a hand-simulated
-%% stand-in.
+%% Exercises the real compiled 'bt@counter' module rather than
+%% counter_module_state/raw start_link: spawn/1 merges InitArgs the same way
+%% as spawn_with_preserves_unspecified_defaults_test above, against real
+%% codegen instead of a hand-simulated stand-in.
 spawn_with_multiple_overrides_test() ->
     %% spawnWith: #{value => 10, extra => bar}
     InitArgs = #{value => 10, extra => bar},
@@ -225,10 +223,10 @@ spawn_with_multiple_overrides_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Async future-cast protocol tests (BT-79) — DOCUMENTED AS STAYING SIMULATED
+%%% Async future-cast protocol tests — DOCUMENTED AS STAYING SIMULATED
 %%% ===========================================================================
 %%%
-%%% BT-3093: kept on counter_module_state/1 deliberately. This section
+%%% Kept on counter_module_state/1 deliberately. This section
 %%% exercises `beamtalk_actor:handle_cast/2`'s `{Selector, Args, FuturePid}`
 %%% branch, which is only reachable through the generic actor callback
 %%% module — real compiled classes' generated `handle_cast/2` does not
@@ -570,24 +568,8 @@ async_multiple_awaits_same_future_test() ->
     gen_server:stop(Actor).
 
 %%% ===========================================================================
-%%% Edge cases — MIGRATED / TRIMMED (BT-3093)
+%%% Edge cases
 %%% ===========================================================================
-%%%
-%%% spawn_with_empty_map_same_as_spawn_zero_test was removed: it only
-%%% asserted a property of counter_module_state/1's own `maps:merge/2` call
-%%% (that spawn() and spawn(#{}) merge identically) — plain Erlang map
-%%% semantics, not Beamtalk codegen behavior, and already implied by the
-%%% real-dispatch coverage in the spawn/0 and spawn/1 sections above
-%%% (spawn_zero_uses_default_state_test,
-%%% spawn_with_preserves_unspecified_defaults_test, etc., all against the
-%%% real compiled 'bt@counter' module). No scenario coverage was lost.
-%%%
-%%% spawn_preserves_class_and_methods_test is kept below (not removed) —
-%%% see its own doc comment for why.
-%%%
-%%% spawn_with_nil_values_override_test migrated onto real 'bt@counter'
-%%% spawn/1, since that scenario (spawnWith: #{value => nil}) was not
-%%% otherwise covered against real compiled output.
 
 spawn_with_nil_values_override_test() ->
     %% spawnWith: #{value => nil} should set value to nil
@@ -599,9 +581,9 @@ spawn_with_nil_values_override_test() ->
 
     gen_server:stop(Pid).
 
-%% BT-3093: kept as a direct unit test of the counter_module_state/1 helper
-%% itself, since the async future-cast section above still depends on that
-%% helper producing a `'__methods__'` funs table (see its doc comment).
+%% Kept as a direct unit test of the counter_module_state/1 helper itself,
+%% since the async future-cast section above still depends on that helper
+%% producing a `'__methods__'` funs table (see its doc comment).
 spawn_preserves_class_and_methods_test() ->
     %% Verify $beamtalk_class and __methods__ are preserved after merge
     InitArgs = #{value => 999},
@@ -619,7 +601,7 @@ spawn_preserves_class_and_methods_test() ->
 %%% Block Evaluation Tests (value, value:, value:value:, etc.)
 %%% ===========================================================================
 %%%
-%%% BT-3093 disposition note: the tests from here through the "Complex
+%%% Disposition note: the tests from here through the "Complex
 %%% Message Send Patterns" section below use plain Erlang `fun`s to probe
 %%% closure/control-flow mechanics on BEAM directly (capture, nesting,
 %%% arity, whileTrue:/whileFalse:/repeat, binary-operator precedence).
@@ -854,33 +836,18 @@ inner_while_loop(Inner, Total) ->
     end.
 
 %%% ===========================================================================
-%%% Boolean control flow tests — MIGRATED (BT-3093)
+%%% Boolean control flow
 %%% ===========================================================================
 %%%
-%%% This section used to hand-roll `beamtalk_if_true_if_false/3`,
-%%% `beamtalk_if_true/2`, `beamtalk_if_false/2`, `beamtalk_and/2`,
-%%% `beamtalk_or/2`, `beamtalk_not/1` as Erlang stand-ins for "the exact
-%%% semantics that compiled Beamtalk Boolean methods must produce" — a
-%%% textbook case of the hand-written "simulated compiler output" fixture
-%%% the Consistency-Test Disposition Rule
-%%% (docs/development/architecture-principles.md § 7) says to migrate onto
-%%% real compiled/generated output, per the BT-239 precedent.
-%%%
-%%% Real compiled coverage already existed and needed no new fixture:
-%%% - Value-correctness for ifTrue:ifFalse:, ifTrue:, ifFalse:, and:, or:,
-%%%   not (and xor:) is exercised end-to-end against the real compiled
-%%%   True/False/Boolean stdlib classes (stdlib/src/true.bt, false.bt,
-%%%   boolean.bt) by stdlib/bootstrap-test/booleans.btscript.
-%%% - Short-circuit behavior (the unused block must never run, not just
-%%%   "the result happens to be right") is proven against the same real
-%%%   compiled classes by stdlib/test/boolean_short_circuit_test.bt, added
-%%%   as part of this migration using the AtomicCounter side-effect idiom
-%%%   already established in stdlib/test/blocks_test.bt.
-%%%
-%%% Deleting the Erlang re-implementation here removes the drift risk the
-%%% disposition rule flags: the hand-rolled clauses could silently diverge
-%%% from true.bt/false.bt's actual dispatch without either test file
-%%% failing.
+%%% Boolean control-flow correctness (ifTrue:ifFalse:, ifTrue:, ifFalse:,
+%%% and:, or:, not, xor:), including short-circuit behavior (the unused
+%%% block must never run, not just "the result happens to be right"), is
+%%% tested against the real compiled True/False/Boolean stdlib classes
+%%% (stdlib/src/true.bt, false.bt, boolean.bt) by
+%%% stdlib/bootstrap-test/booleans.btscript and
+%%% stdlib/test/boolean_short_circuit_test.bt — not here, since a hand-rolled
+%%% Erlang re-implementation could silently diverge from their actual
+%%% dispatch without either test file failing.
 
 %%% ===========================================================================
 %%% Block Closure Tests - Captures from outer scope
@@ -1012,11 +979,11 @@ chained_block_evaluation_test() ->
     ?assertEqual(30, Result).
 
 %%% ===========================================================================
-%%% Cascade Message Send Tests (BT-133) — MIGRATED (BT-3093)
+%%% Cascade Message Send Tests
 %%% ===========================================================================
 %%%
-%%% Migrated off counter_module_state/raw start_link onto the real compiled
-%%% 'bt@counter' module (tests/repl-protocol/fixtures/counter.bt).
+%%% Exercises the real compiled 'bt@counter' module
+%%% (tests/repl-protocol/fixtures/counter.bt).
 
 %% Test: Cascade - multiple messages to same actor
 %% Simulates: counter increment; increment; getValue
@@ -1061,13 +1028,12 @@ cascade_returns_last_result_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Multi-Keyword Message Tests (BT-133) — MIGRATED (BT-3093)
+%%% Multi-Keyword Message Tests
 %%% ===========================================================================
 %%%
-%%% Migrated the hand-simulated rectangle_module_state/box_module_state
-%%% fixtures onto real compiled dispatch: rectangle_actor.bt exercises a
-%%% two-keyword message (width:height:), box_actor.bt a three-keyword
-%%% message (width:height:depth:) — both compiled by
+%%% Exercises real compiled dispatch: rectangle_actor.bt for a two-keyword
+%%% message (width:height:), box_actor.bt for a three-keyword message
+%%% (width:height:depth:) — both compiled by
 %%% runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript.
 
 %% Test: Multi-keyword message with two arguments
@@ -1095,14 +1061,13 @@ multi_keyword_three_args_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Actor Interaction Patterns (BT-133) — MIGRATED (BT-3093)
+%%% Actor Interaction Patterns
 %%% ===========================================================================
 %%%
-%%% Migrated the hand-simulated spawner_module_state fixture (and its raw
-%%% counter_module_state siblings) onto real compiled dispatch:
-%%% spawner_actor.bt's spawnChild method spawns an ArithmeticActor
-%%% (arithmetic_actor.bt) from within a compiled method body — proving
-%%% actor-to-actor `ClassName spawn` against real codegen.
+%%% Exercises real compiled dispatch: spawner_actor.bt's spawnChild method
+%%% spawns an ArithmeticActor (arithmetic_actor.bt) from within a compiled
+%%% method body, proving actor-to-actor `ClassName spawn` against real
+%%% codegen.
 
 %% Test: Actor A spawns Actor B
 actor_spawns_another_actor_test() ->
@@ -1181,26 +1146,22 @@ actor_spawn_chain_test() ->
     end.
 
 %%% ===========================================================================
-%%% Error Handling Tests (BT-133) — MIGRATED (BT-3093)
+%%% Error Handling Tests
 %%% ===========================================================================
 %%%
-%%% Migrated off counter_module_state onto real compiled dispatch
-%%% ('bt@counter' / 'bt@arithmetic_actor'). Doing so surfaced real drift in
-%%% the hand-simulated protocol this section used to assert: the fictional
-%%% `counter_divide/2` returned bare `{error, division_by_zero}` /
-%%% `#beamtalk_error{kind = type_error}` shapes that don't match what real
-%%% codegen produces. The corrected assertions below were captured by
-%%% spawning 'bt@arithmetic_actor' directly and observing
-%%% `beamtalk_actor:safe_dispatch/3`'s actual catch shape (matches the
-%%% already-migrated extension_error_propagation_test's
-%%% `{error, {error, Reason, Stacktrace}}` pattern) and the generated
-%%% dispatch/4 arity-mismatch clause (`{'reply', {'error', 'bad_arity'},
-%%% State}`, see crates/beamtalk-core/src/codegen/core_erlang/gen_server/
+%%% Exercises real compiled dispatch ('bt@counter' / 'bt@arithmetic_actor').
+%%% An error raised inside a compiled method is caught by
+%%% `beamtalk_actor:safe_dispatch/3`'s catch clause and surfaces as
+%%% `{error, {error, Reason, Stacktrace}}` (matches
+%%% extension_error_propagation_test's pattern); an arity mismatch is a
+%%% normal (successful) call reply carrying the generated dispatch/4
+%%% arity-mismatch clause's value, `{'reply', {'error', 'bad_arity'},
+%%% State}` (see crates/beamtalk-core/src/codegen/core_erlang/gen_server/
 %%% dispatch.rs and methods.rs).
 
 %% Test: Method not found error
 %%
-%% BT-3093: the DNU fallback for a real compiled actor walks the class
+%% The DNU fallback for a real compiled actor walks the class
 %% hierarchy (beamtalk_dispatch:super/5) up to 'Actor', which is registered
 %% asynchronously by beamtalk_stdlib's background class loader at
 %% application startup. Earlier tests in this suite never happen to need
@@ -1229,12 +1190,11 @@ method_not_found_error_test() ->
     gen_server:stop(Pid).
 
 %% Test: Division by zero error
-%% BT-3093: real division by zero raises a raw `badarith` inside the
-%% compiled method body, caught by safe_dispatch/3's generic try/catch
+%% Real division by zero raises a raw `badarith` inside the compiled method
+%% body, caught by safe_dispatch/3's generic try/catch
 %% (crates/beamtalk-core/src/codegen/core_erlang/gen_server/dispatch.rs
 %% generate_safe_dispatch: `catch <Type, Error, Stacktrace> -> {'error',
-%% {Type, Error, Stacktrace}, State}`) — not the bare `division_by_zero`
-%% atom the old hand-simulated counter_divide/2 fabricated.
+%% {Type, Error, Stacktrace}, State}`).
 division_by_zero_error_test() ->
     Object = 'bt@arithmetic_actor':spawn(),
     Pid = element(4, Object),
@@ -1247,12 +1207,10 @@ division_by_zero_error_test() ->
     gen_server:stop(Pid).
 
 %% Test: Wrong number of arguments error
-%% BT-3093: real generated dispatch matches a known selector against a
-%% fixed-arity Args pattern and falls through to an explicit bad_arity
-%% reply clause on a mismatch — it's a normal (successful) call reply
-%% carrying an error value, not a raised #beamtalk_error{} exception as the
-%% old hand-simulated version (which relied on Erlang function-clause
-%% matching, an implementation detail the real compiler doesn't share).
+%% Real generated dispatch matches a known selector against a fixed-arity
+%% Args pattern and falls through to an explicit bad_arity reply clause on a
+%% mismatch — it's a normal (successful) call reply carrying an error value,
+%% not a raised #beamtalk_error{} exception.
 wrong_arg_count_error_test() ->
     Object = 'bt@arithmetic_actor':spawn(),
     Pid = element(4, Object),
@@ -1289,13 +1247,12 @@ actor_crash_simulation_test() ->
     gen_server:stop(NewPid).
 
 %%% ===========================================================================
-%%% Instance Variable Access Patterns (BT-133) — MIGRATED (BT-3093)
+%%% Instance Variable Access Patterns
 %%% ===========================================================================
 %%%
-%%% Migrated the hand-simulated ModuleState maps onto real compiled
-%%% dispatch: shadow_actor.bt (parameter name shadows an instance variable)
-%%% and coordinate_actor.bt (multiple instance variables mutated by one
-%%% keyword message), both compiled by
+%%% Exercises real compiled dispatch: shadow_actor.bt (parameter name
+%%% shadows an instance variable) and coordinate_actor.bt (multiple instance
+%%% variables mutated by one keyword message), both compiled by
 %%% runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript.
 
 %% Test: Instance variable shadowing
@@ -1353,13 +1310,12 @@ instance_var_persistence_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Nested Message Send Tests (BT-133)
+%%% Nested Message Send Tests
 %%% ===========================================================================
 
 %% Test: Nested unary messages
 %% Simulates: counter getValue getValue (if getValue returned an object)
-%% BT-3093: migrated off counter_module_state onto the real compiled
-%% 'bt@counter' module.
+%% Exercises the real compiled 'bt@counter' module.
 nested_message_sends_simulation_test() ->
     %% This simulates the pattern, not actual nesting since getValue returns int
     Object = 'bt@counter':spawn(),
@@ -1395,7 +1351,7 @@ chained_binary_operators_test() ->
     ?assertEqual(13, Result).
 
 %%% ===========================================================================
-%%% Super Keyword Tests (BT-108) - E2E Runtime Tests
+%%% Super Keyword Tests - E2E Runtime Tests
 %%% ===========================================================================
 %%%
 %%% These tests use the compiled logging_counter module from
@@ -1409,20 +1365,10 @@ chained_binary_operators_test() ->
 %%% 2. Call super increment (Counter's version)
 %%% 3. Return the value
 %%%
-%%% Runtime support (BT-152) is complete - beamtalk_classes:super_dispatch/3
-%%% is implemented and all 356 runtime tests pass.
-%%%
 %%% **Setup:** These tests require beamtalk_classes registry to be running
 %%% with Counter and LoggingCounter classes registered.
 %%%
 %%% See also: tests/fixtures/logging_counter.bt
-%%% See also: BT-152 for runtime super_dispatch/3 implementation
-%%%
-%%% **DISABLED (BT-211):** These tests are commented out because subclass init
-%%% doesn't include inherited state fields from parent classes. The compiled
-%%% logging_counter module doesn't have 'value' field from Counter, so super
-%%% dispatch fails with badarg when accessing missing state.
-%%% Re-enable when BT-211 is fixed.
 
 %% Setup helper for super tests
 %% Both counter and logging_counter have register_class/0 from class syntax.
@@ -1450,7 +1396,7 @@ setup_super_test_classes() ->
     end,
     ok.
 
-%% BT-3093: block until ClassName is registered in the class registry, or
+%% Block until ClassName is registered in the class registry, or
 %% raise if TimeoutMs elapses first. beamtalk_stdlib registers stdlib
 %% classes (including 'Actor') asynchronously in the background at
 %% application startup, so tests whose real-codegen DNU path needs a
@@ -1476,13 +1422,13 @@ wait_for_class_loop(ClassName, Deadline) ->
     end.
 
 %% ==========================================================================
-%% Super Keyword Tests (BT-108, BT-211)
+%% Super Keyword Tests
 %%
 %% These tests use the compiled logging_counter module and verify super
 %% dispatch in an inheritance hierarchy: Actor -> Counter -> LoggingCounter
 %%
-%% Previously disabled due to BT-211 (subclass init didn't merge InitArgs).
-%% Fixed: codegen now does parent defaults → child defaults → user InitArgs.
+%% Subclass init merges InitArgs in order: parent defaults → child defaults
+%% → user InitArgs.
 %% ==========================================================================
 
 %% Test: Super dispatch calls parent method
@@ -1612,7 +1558,7 @@ super_with_init_args_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Extension method tests (BT-229)
+%%% Extension method tests
 %%%
 %%% Tests that extension methods work on compiled Actor classes.
 %%% Uses 'bt@counter':spawn() from compiled tests/repl-protocol/fixtures/counter.bt.
@@ -1621,7 +1567,7 @@ super_with_init_args_test() ->
 %% Test: Extension method dispatches on compiled Actor
 extension_method_on_compiled_actor_test() ->
     beamtalk_extensions:init(),
-    %% BT-1512: Extension funs take (Args, Self, State) and return {Result, NewState}
+    %% Extension funs take (Args, Self, State) and return {Result, NewState}
     ExtFun = fun([], _Self, State) -> {42, State} end,
     beamtalk_extensions:register('Counter', testExtension, ExtFun, test_owner),
     Object = 'bt@counter':spawn(),
@@ -1666,7 +1612,7 @@ extension_coexists_with_regular_methods_test() ->
     end.
 
 %% Test: Unregistered extension falls through to DNU error
-%% BT-3093: see method_not_found_error_test's comment — the DNU fallback
+%% See method_not_found_error_test's comment — the DNU fallback
 %% walks the class hierarchy up to 'Actor', so wait for it deterministically
 %% rather than relying on enough earlier tests having run first.
 unregistered_extension_gives_dnu_test() ->
@@ -1680,7 +1626,7 @@ unregistered_extension_gives_dnu_test() ->
         gen_server:stop(Pid)
     end.
 
-%% Test: BT-1512 — Extension method correctly threads state mutations
+%% Test: Extension method correctly threads state mutations
 extension_method_state_threading_test() ->
     beamtalk_extensions:init(),
     %% Extension that mutates the 'value' field in State
@@ -1716,7 +1662,7 @@ extension_error_propagation_test() ->
     Pid = element(4, Object),
     try
         Result = gen_server:call(Pid, {crashMethod, []}),
-        %% BT-1822: safe_dispatch now includes stacktrace in error tuple
+        %% safe_dispatch includes stacktrace in error tuple
         ?assertMatch({error, {error, extension_crash, _Stacktrace}}, Result),
         {ok, 0} = gen_server:call(Pid, {getValue, []})
     after
