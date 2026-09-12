@@ -2,15 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::core_erlang::CoreErlangGenerator;
-use beamtalk_core::ast::{Block, BlockParameter, Expression, ExpressionStatement, Literal};
+use crate::core_erlang::tests::bare;
+use beamtalk_core::ast::{Block, BlockParameter, Expression, Literal};
 use beamtalk_core::source_analysis::Span;
 
 fn s() -> Span {
     Span::new(0, 0)
-}
-
-fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
 }
 
 #[test]

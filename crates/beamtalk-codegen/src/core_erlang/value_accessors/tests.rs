@@ -5,9 +5,10 @@
 //! rule (ADR 0042), and the opaque-`native:` `basicNew` guard.
 
 use super::*;
+use crate::core_erlang::tests::bare;
 use beamtalk_core::ast::{
-    ClassDefinition as AstClassDefinition, DeclaredKeyword, Expression, ExpressionStatement,
-    Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition, ParameterDefinition,
+    ClassDefinition as AstClassDefinition, DeclaredKeyword, Expression, Identifier, KeywordPart,
+    Literal, MessageSelector, MethodDefinition, ParameterDefinition,
     StateDeclaration as AstStateDeclaration,
 };
 use beamtalk_core::source_analysis::Span;
@@ -15,10 +16,6 @@ use beamtalk_core::test_helpers::test_support::make_actor_class;
 
 fn s() -> Span {
     Span::new(0, 0)
-}
-
-fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
 }
 
 fn simple_unary_method(selector: &str) -> MethodDefinition {

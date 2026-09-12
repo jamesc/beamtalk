@@ -17,17 +17,13 @@
 //! `class_registry::tests` respectively.
 
 use super::*;
-use beamtalk_core::ast::{
-    Expression, ExpressionStatement, Literal, MessageSelector, MethodDefinition,
-};
+use beamtalk_core::ast::{Expression, Literal, MessageSelector, MethodDefinition};
 use beamtalk_core::source_analysis::Span;
+
+use crate::core_erlang::tests::bare;
 
 pub(crate) fn s() -> Span {
     Span::new(0, 0)
-}
-
-pub(crate) fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
 }
 
 pub(crate) fn simple_unary_method(selector: &str) -> MethodDefinition {
