@@ -82,7 +82,7 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
     let _ParentArgs = call 'maps':'put'('__skip_initialize__', 'true', InitArgs) in
     case call 'bt@counter':'init'(_ParentArgs) of
         <{'ok', ParentState}> when 'true' ->
-            %% Merge parent state with this class's fields
+            %% Merge parent state with the fields declared by this class
             let ChildFields = ~{
                 '__class_mod__' => 'logging_counter'
                 , 'logCount' => 0

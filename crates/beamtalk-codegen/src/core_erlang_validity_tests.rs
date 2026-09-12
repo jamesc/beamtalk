@@ -47,6 +47,12 @@ const FRAGMENTS: &[&str] = &[
     "x match: { 1 => \"one\", _ => \"other\" }",
     "Object subclass: Bar\n  greet => \"hello\"",
     "Object subclass: Baz\n  foo: x => x + 1",
+    // A superclass other than Actor/Object (even one undefined in this
+    // module — codegen is one-class-per-file and only inspects the name)
+    // exercises generate_init_function's has_parent_init path, which emits
+    // a parent-state-merge init/1 body distinct from the base-class init
+    // the fragments above generate.
+    "ParentThing subclass: ChildThing\n  state: extra = 0\n  bump => extra := extra + 1",
 ];
 
 fn valid_fragment() -> impl Strategy<Value = String> {
