@@ -10,7 +10,7 @@ Expression evaluation orchestration for the Beamtalk REPL
 
 Orchestrates compilation, module loading, execution, and result processing
 for REPL expressions. Delegates compilation to beamtalk_repl_compiler and
-module loading to beamtalk_repl_loader (BT-863).
+module loading to beamtalk_repl_loader.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -136,7 +136,7 @@ module loading to beamtalk_repl_loader (BT-863).
 -define(WORKSPACE_BINDINGS_KEY, '__workspace_user_bindings__').
 
 -doc """
-Result of evaluating an expression. The `script_exit` shape (BT-2688) carries the
+Result of evaluating an expression. The `script_exit` shape carries the
 status of a connected-session `Program exit: Code` so the shell can report it and
 terminate the session; `ok`/`error` are the ordinary value/failure shapes.
 """.
@@ -154,7 +154,7 @@ terminate the session; `ok`/`error` are the ordinary value/failure shapes.
 do_eval(Expression, State) ->
     do_eval(Expression, State, undefined).
 
--doc "Evaluate with optional streaming subscriber (BT-696).".
+-doc "Evaluate with optional streaming subscriber.".
 -spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) -> eval_result().
 do_eval(Expression, State, Subscriber) ->
     %% ADR 0108 Phase 8: `:help <Alias>` short-circuits before
@@ -227,7 +227,7 @@ do_eval_expression(Expression, State, Subscriber) ->
     end.
 
 -doc """
-Intercept `:help <Alias>` before compilation (ADR 0108 Phase 8, BT-2902).
+Intercept `:help <Alias>` before compilation (ADR 0108 Phase 8).
 
 `:help <Name>` is client-side sugar (`crates/beamtalk-cli/src/commands/repl/mod.rs`'s
 `handle_help_topic`) for evaluating `Beamtalk help: <Name>`, ordinarily routed
@@ -259,8 +259,7 @@ maybe_help_for_alias(Expression, State) ->
     end.
 
 -doc """
-Render `:help <Alias>` output (ADR 0108 Phase 8, BT-2902; stdlib
-provenance BT-2938).
+Render `:help <Alias>` output (ADR 0108 Phase 8).
 
 `type Name = <expansion>`, then — only when a doc comment is present — a
 blank line and the indented doc text, then a blank line and
@@ -285,7 +284,7 @@ format_alias_help(Name, #{
         end,
     <<Header/binary, CommentBlock/binary, "\n\nDeclared in: ", DeclaredIn/binary>>.
 
--doc "Handle a `type Name = ...` declaration (ADR 0108 Phase 8, BT-2902).".
+-doc "Handle a `type Name = ...` declaration (ADR 0108 Phase 8).".
 -spec handle_type_alias_definition(map(), [binary()], beamtalk_repl_state:state()) ->
     eval_result().
 handle_type_alias_definition(AliasInfo, Warnings, State) ->
@@ -320,7 +319,7 @@ handle_type_alias_definition(AliasInfo, Warnings, State) ->
 
 -doc """
 Dispatch a class entry method (`ClassName selector [argv]`) in this connected
-session (BT-2691, ADR 0099 §3 / Phase 5).
+session (ADR 0099 §3 / Phase 5).
 
 The connected-mode counterpart of run-mode's `beamtalk_script_harness:dispatch/3`:
 `beamtalk run ClassName selector [args] --connect` sends a `run-entry` op, which
@@ -338,7 +337,7 @@ receives no arguments. `Subscriber` is the streaming output sink (the connecting
 client) — `Console` writes reach it via the captured group leader, mirroring the
 streaming `eval` path. Because the entry itself runs one process hop away in its
 class's gen_server, the capture process is also published as the *entry group
-leader* so that hop adopts it (BT-2963); see the inline note below.
+leader* so that hop adopts it; see the inline note below.
 
 Returns the shared `eval_result()` shape (`{ok, …}` / `{error, …}` /
 `{script_exit, …}`) so the shell's existing `eval_result` handling applies
@@ -468,7 +467,7 @@ dispatch_dnu_error(ClassNameBin, SelectorBin) ->
     ).
 
 -doc """
-Evaluate a Beamtalk expression in trace mode (BT-1238).
+Evaluate a Beamtalk expression in trace mode.
 
 Returns `{ok, Steps, Output, Warnings, State}' where
 `Steps = [{SourceBin, Value}]' — one entry per top-level statement —
@@ -584,7 +583,7 @@ do_eval_trace(Expression, State) ->
             wrap_compile_err(Reason, NewState)
     end.
 
--doc "Compile a Beamtalk expression and return Core Erlang source (BT-700).".
+-doc "Compile a Beamtalk expression and return Core Erlang source.".
 -spec do_show_codegen(string(), beamtalk_repl_state:state()) ->
     {ok, binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), [binary()], beamtalk_repl_state:state()}.
@@ -610,7 +609,7 @@ do_show_codegen(Expression, State) ->
 handle_load(Path, State) ->
     beamtalk_repl_loader:handle_load(Path, State).
 
--doc "Load a Beamtalk file with pre-built class indexes (BT-1543).".
+-doc "Load a Beamtalk file with pre-built class indexes.".
 -spec handle_load(string(), beamtalk_repl_state:state(), map()) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State, PrebuiltIndexes) ->
@@ -622,7 +621,7 @@ handle_load(Path, State, PrebuiltIndexes) ->
 handle_load_source(SourceBin, Label, State) ->
     beamtalk_repl_loader:handle_load_source(SourceBin, Label, State).
 
--doc "Compile and load a source file without REPL session state (BT-845).".
+-doc "Compile and load a source file without REPL session state.".
 -spec reload_class_file(string()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path) ->
     beamtalk_repl_loader:reload_class_file(Path).
@@ -633,12 +632,12 @@ reload_class_file(Path, ExpectedClassName) ->
 
 -doc """
 Reload a `.bt` file from disk into the live image, returning the names of the
-classes it defines (BT-2598).
+classes it defines.
 
 The clean-returning entry the cockpit uses after a content-mutating git op (e.g.
 `git restore -- <path>`): the on-disk working tree has just changed, so the live
 image is re-installed from disk to keep image == disk (git-first / disk-as-
-source-of-truth, BT-2585). The hot redefinition fires a `ClassLoaded`
+source-of-truth). The hot redefinition fires a `ClassLoaded`
 announcement on the `classes` stream, so subscribed surfaces (the cockpit) refresh
 their open windows.
 
@@ -697,8 +696,8 @@ class_name_binary(#{name := Str}) when is_list(Str) -> list_to_binary(Str);
 class_name_binary(_) -> undefined.
 
 -doc """
-Create a brand-new class from a source String at a target path (ADR 0082 Phase 1,
-BT-2285). Delegates to `beamtalk_repl_loader:new_class/2`; see there for the
+Create a brand-new class from a source String at a target path (ADR 0082 Phase 1).
+Delegates to `beamtalk_repl_loader:new_class/2`; see there for the
 validation contract. Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
 """.
 -spec new_class(binary() | string(), binary() | string()) ->
@@ -708,7 +707,7 @@ new_class(Source, TargetPath) ->
 
 -doc """
 Move a class's `.bt` file to a new path without changing its name (ADR 0114
-Phase 2, BT-3272). Thin forwarding wrapper — see
+Phase 2). Thin forwarding wrapper — see
 `beamtalk_repl_loader:move_class/2` for the full contract.
 """.
 -spec move_class(atom(), binary()) -> ok | {error, term()}.
@@ -716,8 +715,8 @@ move_class(ClassName, NewPathBin) ->
     beamtalk_repl_loader:move_class(ClassName, NewPathBin).
 
 -doc """
-Recompile and reinstall a class from a recorded prior source (ADR 0113,
-BT-3208 — `Workspace changes revert:` extension for a pending `'remove-class'`
+Recompile and reinstall a class from a recorded prior source (ADR 0113
+— `Workspace changes revert:` extension for a pending `'remove-class'`
 entry). Delegates to `beamtalk_repl_loader:revert_remove_class/2`; see there
 for the validation contract (same as `new_class/2` minus the target-must-not-
 exist check). Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
@@ -729,11 +728,11 @@ revert_remove_class(Source, TargetPath) ->
 
 -doc """
 Evaluate `Source` (a Beamtalk expression) with `self` bound to `Self`, returning
-`{ok, Value}` or `{error, #beamtalk_error{}}` (ADR 0095 §1, BT-2503).
+`{ok, Value}` or `{error, #beamtalk_error{}}` (ADR 0095 §1).
 
 Stateless evaluate-in-context for the Inspector's value `evaluate:`: the
 expression is compiled with `self` as a known free variable (resolved from the
-bindings map in REPL codegen, BT-2503) and evaluated in this worker with
+bindings map in REPL codegen) and evaluated in this worker with
 `#{self => Self}` as the only binding. No session state is touched, no workspace
 bindings are merged, and the eval module is purged afterwards. Compile and runtime
 failures are returned as structured `#beamtalk_error{}` — never raised — so the
@@ -860,7 +859,7 @@ eval_with_self_error(Reason) ->
 
 -doc """
 Install a live method patch from a `(ClassName, Selector, Source, Intent)' tuple
-without REPL session state (ADR 0082 Phase 1, BT-2283).
+without REPL session state (ADR 0082 Phase 1).
 
 Equivalent to `compile_method/6' with the author defaulting to `<<"repl">>' /
 `human' — used by callers (e.g. tests) that do not carry audit metadata.
@@ -872,7 +871,7 @@ compile_method(ClassNameBin, Selector, Source, Intent) ->
 
 -doc """
 Install a live method patch, threading the caller's audit metadata
-(ADR 0082 Phase 1, BT-2283).
+(ADR 0082 Phase 1).
 
 Backs `Behaviour compile:source:' (`Intent = durable') and
 `tryCompile:source:' (`Intent = ephemeral'). `Source' is the method definition
@@ -908,7 +907,7 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
     compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind, instance).
 
 -doc """
-Install a live method patch on a chosen side (BT-2665).
+Install a live method patch on a chosen side.
 
 `Side` is `instance` (the `compile:source:` / IDE-save default) or `class` (a
 class-side / static method). Backs class-side revert re-installs, which must
@@ -939,7 +938,7 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind, Side)
     end.
 
 -doc """
-Pre-save advisory precheck (ADR 0105 Phase 3, BT-2782): compile a pending
+Pre-save advisory precheck (ADR 0105 Phase 3): compile a pending
 method edit and report would-be-stale dependents without installing.
 
 Backs `Behaviour precheckCompile:source:'. `Selector`/`Source` mirror
@@ -969,7 +968,7 @@ precheck_method(ClassNameBin, Selector, Source, Side) ->
     end.
 
 -doc """
-Remove a live method from a class (BT-2663/BT-2665 *add* revert case).
+Remove a live method from a class (an *add* revert case).
 
 `Side` (`instance | class`) selects which side's method to drop. Recompiles the
 class without the method and hot-reloads it; the live image is unchanged on error.
@@ -986,7 +985,7 @@ remove_method(ClassNameBin, Selector, Side) ->
 
 -doc """
 Remove a live method from a class, with an explicit stdlib policy (ADR 0112
-Phase 1, BT-3184).
+Phase 1).
 
 Same removal mechanism as `remove_method/3` (recompiles the class without the
 method and hot-reloads it; the live image is unchanged on error), but the
@@ -1024,7 +1023,7 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
 
 -doc """
 Best-effort ChangeLog append for a completed local-method `removeSelector:`
-call (ADR 0112 Phase 3, BT-3187). Thin forwarding wrapper — see
+call (ADR 0112 Phase 3). Thin forwarding wrapper — see
 `beamtalk_repl_loader:emit_remove_change_entry/5` for the full contract.
 Routed through this module (rather than called directly from
 `beamtalk_runtime`) for the same compile-time-dependency reason
@@ -1039,7 +1038,7 @@ emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
 
 -doc """
 Rewrite a definition site plus N reference/sender sites transactionally, in
-memory (ADR 0114, BT-3270). Thin forwarding wrapper — see
+memory (ADR 0114). Thin forwarding wrapper — see
 `beamtalk_repl_loader:rewrite_sites/2` for the full contract, including the
 in-memory atomicity protocol.
 """.
@@ -1051,8 +1050,8 @@ rewrite_sites(DefinitionSite, ReferenceSites) ->
     beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites).
 
 -doc """
-Validate a `rewrite_sites/2` call without installing anything (ADR 0114,
-BT-3278 review follow-up). Thin forwarding wrapper — see
+Validate a `rewrite_sites/2` call without installing anything (ADR 0114).
+Thin forwarding wrapper — see
 `beamtalk_repl_loader:validate_sites/2` for the full contract.
 """.
 -spec validate_sites(
@@ -1063,7 +1062,7 @@ validate_sites(DefinitionSite, ReferenceSites) ->
 
 -doc """
 Best-effort ChangeLog append for a completed `rewrite_sites/2` call (ADR
-0114, BT-3270). Thin forwarding wrapper — see
+0114). Thin forwarding wrapper — see
 `beamtalk_repl_loader:emit_rewrite_change_entry/2` for the full contract.
 """.
 -spec emit_rewrite_change_entry(map(), beamtalk_repl_loader:rewrite_result()) -> ok.
@@ -1072,7 +1071,7 @@ emit_rewrite_change_entry(Spec, RewriteResult) ->
 
 -doc """
 Revert a pending `'rename-class'`/`'rename-method'` ChangeEntry (ADR 0114
-Phase 4, BT-3274). Thin forwarding wrapper — see `beamtalk_repl_loader:
+Phase 4). Thin forwarding wrapper — see `beamtalk_repl_loader:
 revert_rename_sites/1` for the full contract.
 """.
 -spec revert_rename_sites(beamtalk_workspace_changelog:entry()) ->
@@ -1082,7 +1081,7 @@ revert_rename_sites(Entry) ->
 
 -doc """
 Best-effort ChangeLog append for a completed extension-method `removeSelector:`
-call (ADR 0112 Phase 3, BT-3187). Thin forwarding wrapper — see
+call (ADR 0112 Phase 3). Thin forwarding wrapper — see
 `beamtalk_repl_loader:emit_extension_remove_change_entry/7` for the full
 contract.
 """.
@@ -1104,7 +1103,7 @@ emit_extension_remove_change_entry(
 
 -doc """
 Best-effort snapshot of a class's current source + on-disk flushability
-classification, taken before its `removeFromSystem` proceeds (BT-3206). Thin
+classification, taken before its `removeFromSystem` proceeds. Thin
 forwarding wrapper — see
 `beamtalk_repl_loader:capture_class_removal_snapshot/1` for the full
 contract.
@@ -1115,7 +1114,7 @@ capture_class_removal_snapshot(ClassNameBin) ->
 
 -doc """
 Best-effort ChangeLog append for a completed `classRemoveFromSystemByName/1`
-call (BT-3206). Thin forwarding wrapper — see
+call. Thin forwarding wrapper — see
 `beamtalk_repl_loader:emit_remove_class_change_entry/4` for the full
 contract.
 """.
@@ -1126,7 +1125,7 @@ emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     ).
 
 -doc """
-Remove a live class from the system (BT-2664 new-class revert case).
+Remove a live class from the system (a new-class revert case).
 
 Delegates to `beamtalk_runtime_api:remove_class_from_system/1`, which unregisters
 the class, purges its module, and cleans up runtime state. Returns
@@ -1417,7 +1416,7 @@ handle_class_definition(
 handle_method_definition(MethodInfo, Warnings, Expression, State) ->
     beamtalk_repl_loader:reload_method_definition(MethodInfo, Warnings, Expression, State).
 
--doc "Handle protocol definition: load module and register protocol (BT-1612).".
+-doc "Handle protocol definition: load module and register protocol.".
 -spec handle_protocol_definition(map(), [binary()], beamtalk_repl_state:state()) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
@@ -1561,12 +1560,12 @@ process_eval_result(Result, Expression, CleanBindings, State) ->
 
 -doc """
 Announce `BindingChanged` on the `SystemAnnouncer` bus after a workspace variable
-is assigned (ADR 0093 §2, BT-2445).
+is assigned (ADR 0093 §2).
 
 The payload carries `sessionId` — the protocol session id of the evaluating
 session, read from the eval worker's process dictionary (seeded by
 `beamtalk_repl_shell:seed_session_context/3`) — so a multi-session consumer can
-attribute the change without a round-trip (BT-2530). `nil` when the eval runs
+attribute the change without a round-trip. `nil` when the eval runs
 outside a shell-spawned worker.
 
 Guarded by a `whereis` check (the announcements worker may be absent on a
@@ -1584,7 +1583,7 @@ announce_binding_changed(VarName, Value) ->
 
 -doc """
 As `announce_binding_changed/2`, but with an explicit `SessionId` rather than
-reading it from the process dictionary (BT-2531).
+reading it from the process dictionary.
 
 Used by `beamtalk_repl_shell` for the workspace binding-mutation paths — `Session
 clear` (`handle_call(clear_bindings, …)`) and the pending `put`/`remove`/`clear`
@@ -1626,7 +1625,7 @@ cleanup_module(ModuleName, RegistryPid) ->
     ok.
 
 -doc """
-Rebuild bindings by extracting variable assignments from awaited trace steps (BT-1261).
+Rebuild bindings by extracting variable assignments from awaited trace steps.
 
 For each step whose source text is a simple assignment (`VarName := Expr`), the
 binding is updated with the awaited (resolved) value from the step.  This ensures
@@ -1651,7 +1650,7 @@ rebuild_bindings_from_steps(Steps, Bindings) ->
 Extract variable name from assignment expression.
 
 `Expression` is the *whole* source text of a REPL `eval` call, which may
-contain more than one top-level statement (BT-3368). The caller
+contain more than one top-level statement. The caller
 (`process_eval_result/4`) uses a match here to re-bind `VarName` to the
 call's own `Result` — correct only when `Result` and `VarName`'s assignment
 are the *same* statement, i.e. `Expression` is a single statement. Bails to
@@ -1682,12 +1681,12 @@ extract_assignment(Expression) ->
 -doc """
 True when `Expression` has a second top-level statement following the
 first, found by scanning left to right and tracking `[]`/`()`/`{}` nesting
-depth (BT-3368). A `"..."` string or `$x` character literal is skipped
+depth. A `"..."` string or `$x` character literal is skipped
 atomically via `skip_string_literal/1`/`skip_character_literal/1` — as a
 single lexeme, never character-by-character — so nothing inside either one
 (a `.`, a newline, a bracket) is ever individually inspected. A `//...`
 line comment or `/* ... */` block comment is skipped the same way via
-`skip_line_comment/1`/`skip_block_comment/1` (BT-3372) — mirroring
+`skip_line_comment/1`/`skip_block_comment/1` — mirroring
 `lex_line_comment`/`lex_block_comment` (`source_analysis/lexer.rs`) — so a
 bracket, quote, period, or newline inside a comment is never read as real
 code either.
@@ -1751,8 +1750,7 @@ scan_for_second_top_level_statement([_ | Rest], Depth) ->
 -doc """
 Skips one string literal starting at the opening `"`, returning
 `{ok, Rest}` with the characters immediately after its closing `"`, or
-`unsupported` if the string contains string interpolation (BT-3368 review
-follow-up).
+`unsupported` if the string contains string interpolation.
 
 Mirrors `lex_string/0` (`source_analysis/lexer.rs`) for the common,
 non-interpolated case: `""` (doubled delimiter) is a literal `"` inside the
@@ -1807,7 +1805,7 @@ skip_string_literal_body([_ | Rest]) ->
 
 -doc """
 Skips one character literal starting at `$`, returning the characters
-immediately after its single payload character (BT-3368 review follow-up).
+immediately after its single payload character.
 
 Mirrors `lex_character/0` (`source_analysis/lexer.rs`) exactly: `$x` (any
 payload character, including `(`, `"`, `.`, another `$`, ...) or `$\x` (an
@@ -1826,7 +1824,7 @@ skip_character_literal([$$]) ->
 -doc """
 Skips one `//...` line comment starting at the opening `//`, returning the
 characters from (and including) the terminating `\n`, or `[]` if the
-comment runs to end of input (BT-3372).
+comment runs to end of input.
 
 Mirrors `lex_line_comment/0` (`source_analysis/lexer.rs`): the comment body
 is everything up to but not including the next `\n`, consumed atomically
@@ -1857,12 +1855,12 @@ skip_line_comment_body([_ | Rest]) ->
 -doc """
 Skips one `/* ... */` block comment starting at the opening `/*`, returning
 the characters immediately after its closing `*/`, or `[]` if the comment
-is unterminated (runs to end of input) (BT-3372).
+is unterminated (runs to end of input).
 
 Mirrors `lex_block_comment/0` (`source_analysis/lexer.rs`): the whole span,
 delimiters included, is consumed atomically, so a `.`, bracket, or `"`
 inside it is never read as real code. An unterminated block comment is a
-lex-time error in the real compiler (BT-3372's caller never reaches a
+lex-time error in the real compiler (this caller never reaches a
 comment that would fail to compile in practice) but is still consumed
 harmlessly to end of input here, matching `extract_assignment/1`'s existing
 policy of never raising on malformed input.
@@ -1884,7 +1882,7 @@ skip_block_comment_body([$*, $/ | Rest]) ->
 skip_block_comment_body([_ | Rest]) ->
     skip_block_comment_body(Rest).
 
--doc "Auto-await a Future if the result is a tagged future tuple (BT-840).".
+-doc "Auto-await a Future if the result is a tagged future tuple.".
 -spec maybe_await_future(term()) -> term().
 maybe_await_future({beamtalk_future, _} = Future) ->
     try beamtalk_runtime_api:future_await(Future, 30000) of
@@ -1908,7 +1906,7 @@ should_purge_module(ModuleName, RegistryPid) ->
     Actors = beamtalk_repl_actors:list_actors(RegistryPid),
     not lists:any(fun(#{module := ActorModule}) -> ActorModule =:= ModuleName end, Actors).
 
--doc "Strip internal plumbing keys from bindings map (BT-153).".
+-doc "Strip internal plumbing keys from bindings map.".
 -spec strip_internal_bindings(map()) -> map().
 strip_internal_bindings(Bindings) ->
     %% Strip workspace-only binding keys injected by do_eval.

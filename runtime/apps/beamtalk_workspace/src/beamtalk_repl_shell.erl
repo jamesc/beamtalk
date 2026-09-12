@@ -84,7 +84,7 @@ stop(SessionPid) ->
 -doc """
 Evaluate an expression in this session.
 
-The `{script_exit, Code, Output, Warnings}` reply (BT-2688) signals a
+The `{script_exit, Code, Output, Warnings}` reply signals a
 connected-session `Program exit: Code`: the shell sends it, then terminates this
 session (the caller surfaces the status to the connecting client). The shared
 node is unaffected.
@@ -97,7 +97,7 @@ eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
 
 -doc """
-Evaluate an expression in trace mode (BT-1238).
+Evaluate an expression in trace mode.
 Returns `{ok, Steps, Output, Warnings}' or `{error, Reason, Output, Warnings}'.
 """.
 -spec eval_trace(pid(), string()) ->
@@ -108,12 +108,12 @@ eval_trace(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval_trace, Expression}, 30000).
 
 -doc """
-Evaluate an expression with streaming subscriber (BT-696).
+Evaluate an expression with streaming subscriber.
 
 Subscriber receives `{eval_out, Chunk}` messages during eval, then one terminal
 message: `{eval_done, Value, Output, Warnings}`, `{eval_error, Reason, Output,
 Warnings}`, or — when the expression called `Program exit:` in this connected
-session — `{eval_script_exit, Code, Output, Warnings}` (BT-2688), after which the
+session — `{eval_script_exit, Code, Output, Warnings}`, after which the
 session shell stops.
 """.
 -spec eval_async(pid(), string(), pid()) -> ok.
@@ -121,7 +121,7 @@ eval_async(SessionPid, Expression, Subscriber) ->
     gen_server:cast(SessionPid, {eval_async, Expression, Subscriber}).
 
 -doc """
-Dispatch a class entry method with streaming output (BT-2691, ADR 0099 §3).
+Dispatch a class entry method with streaming output (ADR 0099 §3).
 
 The connected-mode `beamtalk run ClassName selector [args] --connect` path: rather
 than compiling an expression, run `ClassName selector` against the live image with
@@ -139,7 +139,7 @@ dispatch_async(SessionPid, ClassNameBin, SelectorBin, Argv, Subscriber) ->
     gen_server:cast(SessionPid, {dispatch_async, ClassNameBin, SelectorBin, Argv, Subscriber}).
 
 -doc """
-Compile expression and return Core Erlang source (BT-700).
+Compile expression and return Core Erlang source.
 Does NOT evaluate the code.
 """.
 -spec show_codegen(pid(), string()) -> {ok, binary(), [binary()]} | {error, term(), [binary()]}.
@@ -160,9 +160,9 @@ get_bindings(SessionPid) ->
     gen_server:call(SessionPid, get_bindings).
 
 -doc """
-Get this session's live type alias table (ADR 0108 Phase 8, BT-2902).
+Get this session's live type alias table (ADR 0108 Phase 8).
 
-Used by `beamtalk_repl_ops_dev`'s `complete` op (BT-2918) to offer type
+Used by `beamtalk_repl_ops_dev`'s `complete` op to offer type
 alias names as candidates in type-annotation position, the live-REPL
 counterpart to the static LSP path's `add_alias_name_completions`.
 """.
@@ -171,7 +171,7 @@ get_alias_table(SessionPid) ->
     gen_server:call(SessionPid, get_alias_table).
 
 -doc """
-Get the protocol session id this shell was started with (BT-2368, ADR 0081
+Get the protocol session id this shell was started with (ADR 0081
 Phase 7).
 
 Used by `beamtalk_session_primitives:liveSessions/0` to mint a `Session` value
@@ -219,7 +219,7 @@ clear_bindings(SessionPid) ->
     gen_server:call(SessionPid, clear_bindings).
 
 -doc """
-Enqueue a deferred session-local mutation (BT-2366, ADR 0081 Phase 2).
+Enqueue a deferred session-local mutation (ADR 0081 Phase 2).
 
 Called by `beamtalk_session_primitives` from inside this session's eval worker.
 The `{op, Key, Value}` tuple is appended to `pending_mutations`; it is applied
@@ -235,7 +235,7 @@ enqueue_mutation(SessionPid, Mutation) ->
 load_file(SessionPid, Path) ->
     gen_server:call(SessionPid, {load_file, Path}, 30000).
 
--doc "Load a Beamtalk source file with pre-built class indexes (BT-1543).".
+-doc "Load a Beamtalk source file with pre-built class indexes.".
 -spec load_file(pid(), string(), map()) -> {ok, [map()]} | {error, term()}.
 load_file(SessionPid, Path, PrebuiltIndexes) ->
     gen_server:call(SessionPid, {load_file, Path, PrebuiltIndexes}, 30000).
@@ -260,7 +260,7 @@ unload_module(SessionPid, Module) ->
 -doc """
 Remove a module from the session tracker only (no BEAM purge).
 
-BT-1239: Used when class removal has already purged the BEAM module
+Used when class removal has already purged the BEAM module
 (e.g., via removeFromSystem), so we only need to clean up the tracker.
 """.
 -spec remove_from_tracker(pid(), atom()) -> ok.
@@ -492,7 +492,7 @@ handle_call({show_codegen, Expression}, _From, {SessionId, State, undefined}) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
--doc "BT-696: Async eval with streaming subscriber".
+-doc "Async eval with streaming subscriber".
 handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined}) ->
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
@@ -551,9 +551,9 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 -doc """
-Worker completed eval successfully (BT-666)
+Worker completed eval successfully
 
-BT-1242: Use ShellState (gen_server state) instead of discarding it: it
+Use ShellState (gen_server state) instead of discarding it: it
 carries pending_module_removals collected while the worker ran.  Apply them
 to the worker's returned WorkerState so modules removed inside the expression
 being executed are not reinstated when the worker snapshot is merged back.
@@ -653,7 +653,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 
 -doc """
-BT-2365 (ADR 0081): seed the eval-worker process dictionary with the session
+ADR 0081: seed the eval-worker process dictionary with the session
 context that session-aware primitives read.
 
 `beamtalk_session_pid` is the shell's pid (the long-lived gen_server, not the
@@ -674,7 +674,7 @@ seed_session_context(ShellPid, SessionId, Meta) ->
     ok.
 
 -doc """
-BT-1242: Apply pending module removals from ShellState to WorkerState.
+Apply pending module removals from ShellState to WorkerState.
 
 ShellState is the gen_server state at eval_result time (may have accumulated
 pending_module_removals while the worker ran).  WorkerState is the worker's
@@ -701,7 +701,7 @@ apply_pending_removals(ShellState, WorkerState) ->
     end.
 
 -doc """
-BT-1242: Apply pending module removals directly to State and clear the list.
+Apply pending module removals directly to State and clear the list.
 
 Used when the worker exits via interrupt or crash (no WorkerState is returned).
 In those paths the shell resumes using its own ShellState, so we fold the
@@ -724,7 +724,7 @@ drain_pending_removals(State) ->
     end.
 
 -doc """
-BT-2366 (ADR 0081 Phase 2): apply queued session-local mutations on the success
+ADR 0081 Phase 2: apply queued session-local mutations on the success
 exit path.
 
 Reads the `pending_mutations` queue from ShellState (which accumulated the
@@ -732,7 +732,7 @@ primitive enqueues that completed before `{eval_result, …}`) and folds it over
 TargetState's locals map in enqueue order, then resets the queue to `[]`.
 
 `put`/`remove` edit a single key; `clear` empties the locals map (no
-injected-key caveat now that the map is locals-only, BT-2365).  Mutations apply
+injected-key caveat now that the map is locals-only).  Mutations apply
 on top of the worker's returned bindings already merged into TargetState, so a
 same-line `bindings at:put:` overrides the worker's own assignment.
 """.
@@ -745,7 +745,7 @@ apply_pending_mutations(ShellState, TargetState, SessionId) ->
     fold_mutations(Mutations, TargetState, SessionId).
 
 -doc """
-BT-2366 (ADR 0081 Phase 2): apply queued session-local mutations on the error
+ADR 0081 Phase 2: apply queued session-local mutations on the error
 exit path — `put`/`remove` only.
 
 A queued `clear` (whole-session destruction) is dropped: `Session current
@@ -764,7 +764,7 @@ apply_pending_mutations_no_clear(ShellState, TargetState, SessionId) ->
     fold_mutations(Kept, TargetState, SessionId).
 
 -doc """
-BT-2366 (ADR 0081 Phase 2): apply pending session-local mutations directly to
+ADR 0081 Phase 2: apply pending session-local mutations directly to
 State and clear the queue.
 
 Used when the worker exits via interrupt (no WorkerState is returned).  The
@@ -779,7 +779,7 @@ drain_pending_mutations(State, SessionId) ->
     fold_mutations(Mutations, State, SessionId).
 
 -doc """
-BT-2366 (ADR 0081 Phase 2): fold a list of `{op, Key, Value}` mutations over the
+ADR 0081 Phase 2: fold a list of `{op, Key, Value}` mutations over the
 locals map of State in order, then clear the pending-mutations queue.
 
 Returns State unchanged (apart from clearing the queue) when the list is empty.
@@ -801,9 +801,9 @@ fold_mutations(Mutations, State, SessionId) ->
     beamtalk_repl_state:clear_pending_mutations(State1).
 
 -doc """
-BT-2366: apply a single {op, Key, Value} mutation to a locals map.
+Apply a single {op, Key, Value} mutation to a locals map.
 
-BT-2531: each binding mutation also emits a typed, session-scoped `BindingChanged`
+Each binding mutation also emits a typed, session-scoped `BindingChanged`
 so the `bindings` push stream refreshes on `bindings at:put:` / `removeKey:` /
 `clear` — not just on `:=` assignment — restoring the coarse refresh the retired
 `beamtalk_bindings_events` channel provided. `put` carries the new value; `remove`
@@ -821,7 +821,7 @@ apply_one_mutation({clear, _, _}, Bindings, SessionId) ->
     #{}.
 
 -doc """
-BT-2531: announce a `BindingChanged` (value `nil`) for each cleared local so push
+Announce a `BindingChanged` (value `nil`) for each cleared local so push
 consumers refresh. One event per key keeps each announcement well-formed and lets
 the LiveView's session filter route it; an empty session announces nothing.
 """.
@@ -832,7 +832,7 @@ announce_bindings_cleared(SessionId, Keys) ->
         Keys
     ).
 
--doc "BT-696: Dispatch eval result to sync caller or async subscriber.".
+-doc "Dispatch eval result to sync caller or async subscriber.".
 reply_eval({async, Subscriber}, Msg) ->
     Subscriber ! Msg,
     ok;

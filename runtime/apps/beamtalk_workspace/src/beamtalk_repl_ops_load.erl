@@ -8,9 +8,9 @@
 -moduledoc """
 Op handlers for load-source, load-project, and unload operations.
 
-Extracted from beamtalk_repl_server (BT-705).
-The deprecated ops `load-file`, `reload`, and `modules` were removed in
-BT-2091 — use `Workspace load:`, `ClassName reload`, and `Workspace classes`
+Extracted from beamtalk_repl_server.
+The deprecated ops `load-file`, `reload`, and `modules` were removed —
+use `Workspace load:`, `ClassName reload`, and `Workspace classes`
 respectively.
 """.
 
@@ -346,14 +346,14 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
 
 -doc """
 Handle load-source/load-project/unload ops for the WebSocket transport —
-encodes the term result to JSON at the edge (BT-2402).
+encodes the term result to JSON at the edge.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for load-source/load-project/unload (BT-2402, ADR 0082
+Term-returning handler for load-source/load-project/unload (ADR 0082
 write-surface). Returns `{loaded, Classes, Warnings}`,
 `{load_project, Classes, Errors, Summary, Warnings}`, `{ok, Value, Output,
 Warnings}` (unload), or `{error, #beamtalk_error{}}` — no JSON in this path.
@@ -450,8 +450,7 @@ handle_term(<<"save-section">>, Params, _Msg, _SessionPid) ->
 %%% Internal helpers
 
 -doc """
-Save (edit → compile → reload → write-back) a project-owned native `.erl` module
-(BT-2670).
+Save (edit → compile → reload → write-back) a project-owned native `.erl` module.
 
 The flow, in order, is fail-safe — the on-disk `.erl` is only overwritten after a
 clean compile + load, so a compile error leaves the source untouched:
@@ -470,7 +469,7 @@ clean compile + load, so a compile error leaves the source untouched:
      + mtime stamp), so the live VM runs the new code.
   4. **Write-back**: overwrite the real `.erl` with the edited source, atomically
      (temp file + rename), and refresh its compile-mtime so the incremental
-     native build does not see it as stale (BT-2653 freshness).
+     native build does not see it as stale (freshness).
 
 Returns `{value, Map}` — `Map` carries `module`, `source_file`, and either
 `ok => true` (clean) or `errors => [ErrMap]` (compile errors, same shape as the
@@ -612,7 +611,7 @@ save re-derives the editable target from that compile-info source
 (`native_module_editable_target/1`), so a stale temp path there would make the
 next save write to the wrong (deleted) file and leave the real `.erl` stale.
 
-Uses `atomic_write_file/2` (no pre-rename recheck, BT-3259): unlike
+Uses `atomic_write_file/2` (no pre-rename recheck): unlike
 `save-section`, `Source` here is the client's freshly edited buffer, not a
 splice computed from a prior read of `ErlPath` — there is no "expected prior
 content" to recheck against, only the already-validated (compiled + loaded)
@@ -698,8 +697,7 @@ atomic_write_file(Path, Content) ->
     atomic_write_file(Path, Content, undefined).
 
 -doc """
-Atomic file write with an optional pre-rename "changed on disk" guard
-(BT-3259).
+Atomic file write with an optional pre-rename "changed on disk" guard.
 
 The temp path is unique per call (`erlang:unique_integer/1`-suffixed), never a
 fixed name — two concurrent writers targeting the same `Path` each get their
@@ -756,15 +754,15 @@ recheck_unchanged(Path, ExpectedCurrent) ->
 
 -doc """
 Add or rename a `// === Name ===` section-divider comment in a class's `.bt`
-source file (BT-3238) — the System Browser's file/class-level section-
+source file — the System Browser's file/class-level section-
 authoring affordance.
 
-Per BT-2601's design ("the divider comment is the storage, no sidecar
+Per this module's design ("the divider comment is the storage, no sidecar
 metadata"), this writes the divider text directly into the source file. It is
 **not** a method-body edit and deliberately does not go through the ADR 0082
 patch/ChangeLog/flush pipeline — a comment-only change has no method body to
 reconcile against a pending patch, so the simpler direct-write path
-`save-native-source` already established for the same reason (BT-2670)
+`save-native-source` already established for the same reason
 applies here too.
 
 Exactly one of two params selects the mode:
@@ -793,7 +791,7 @@ never affects the compiled class, so nothing is recompiled or reloaded.
 Guards against clobbering a concurrent write to the same file: before
 writing, `finish_section_write/4` re-reads `Path` and requires it to still
 byte-match the source this edit was computed from, and `atomic_write_file/3`
-repeats that same check immediately before the final rename (BT-3259) — closing
+repeats that same check immediately before the final rename — closing
 the narrower race where a concurrent write's rename lands in the gap between
 this first read and that rename. Either check mirrors the ADR 0082 flush
 pipeline's `prev_source` check. A mismatch (e.g. another session's method-body
@@ -1237,7 +1235,7 @@ those are EUnit helpers, not runtime modules that should be loaded into the VM.
 When `IncludeTests` is true (the test-load path: `load-tests`/`list-tests`),
 native/test/ helper modules ARE included so a `.bt` test can drive them via
 `(Erlang <helper>) <msg>` — mirroring how the `beamtalk test` CLI compiles
-native/test/ into _build/dev/native/ebin/ (BT-2653).
+native/test/ into _build/dev/native/ebin/.
 
 Returns an empty list if the directory does not exist.
 """.
@@ -1423,14 +1421,14 @@ native_generated_include_dir(ProjectRoot) ->
 -doc """
 Regenerate the `beamtalk_classes.hrl` header from the live class→module index.
 
-BT-2653: Native `.erl` modules `-include("beamtalk_classes.hrl")` to map class
+Native `.erl` modules `-include("beamtalk_classes.hrl")` to map class
 names to compiled BEAM module atoms via `?BT_CLASS_MODULE_<Class>` macros. The
 `beamtalk test` CLI regenerates this header on every build (build.rs
 `generate_class_header/2`); the workspace incremental native build must do the
 same so it never compiles against a stale header — the root cause of the
 `spec for undefined function …` cascade on the LiveView test-load path.
 
-The index is the union of two sources (BT-2671):
+The index is the union of two sources:
 
   1. The project's own `src/**/*.bt` classes, derived by scanning source for
      `Super subclass: Class` declarations and computing the package-qualified
@@ -1536,8 +1534,7 @@ header_content_matches(HrlPath, Content) ->
     end.
 
 -doc """
-Build a class→module index from the project's `src/**/*.bt` source (BT-2671,
-reimplemented on the compiler port for BT-3441).
+Build a class→module index from the project's `src/**/*.bt` source.
 
 This is the source-AST-derived index that gives the cold-load path full parity
 with the CLI: on a clean load the project's own classes are not yet registered,
@@ -1552,7 +1549,7 @@ parses the file with the real grammar (every declared class, not just the first
 package-qualified module atom `bt@<pkg>@<relative@path>` via the shared
 `relative_module_segments` leaf the CLI's own `build_class_module_index`
 (`build.rs`) uses — so this index and a `beamtalk build` of the same project can
-never diverge on either class extraction or module-name casing (BT-3441; see
+never diverge on either class extraction or module-name casing (see
 CLAUDE.md's "No duplicate implementations" rule). The package name is read from
 `beamtalk.toml`.
 
@@ -1620,8 +1617,8 @@ index_bt_file(Path, SrcDir, PackageName, Acc) ->
 `Path`'s file-system path relative to `SrcDir`, `/`-joined with the file
 extension left intact (e.g. `src/util/http_response.bt` under `src/` →
 `<<"util/http_response.bt">>`) — the `relative_path` the compiler port's
-`build_class_module_index_in_source` uses to derive the module-name segments
-(BT-3441). Only locates the relative path; the module-name casing rule itself
+`build_class_module_index_in_source` uses to derive the module-name segments.
+Only locates the relative path; the module-name casing rule itself
 lives entirely on the Rust side (`relative_module_segments`), never
 re-derived here.
 """.
@@ -1824,9 +1821,9 @@ Accumulates in reverse to avoid quadratic ++ and reverses at the end.
 Per-file errors are returned as structured maps with path, kind, and message
 so callers can handle partial failures programmatically.
 
-BT-1608: Class indexes are rebuilt after each successful file load so that
+Class indexes are rebuilt after each successful file load so that
 later files in the batch can reference classes loaded earlier (e.g. test
-files referencing fixture classes). The original BT-1543 optimisation of
+files referencing fixture classes). The original optimisation of
 building indexes once caused "Undefined function" errors when test files
 were compiled before their fixture dependencies were visible in the index.
 """.
@@ -1851,7 +1848,7 @@ load_files_sequential(Files, SessionPid) ->
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
 
 -doc """
-Load files without a session (BT-1723).
+Load files without a session.
 Uses beamtalk_repl_loader:reload_class_file/1 for stateless compilation.
 Called by sync_project when no SessionPid is available (e.g., from
 the Workspace sync primitive).
@@ -1921,7 +1918,7 @@ diagnostic_to_error_map(PathBin, D) ->
 
 -doc """
 Collect collision warnings for the loaded classes after a file load.
-BT-737: Drains warnings from the ETS table keyed by class name and
+Drains warnings from the ETS table keyed by class name and
 formats them as human-readable binary strings for the protocol response.
 """.
 -spec collect_load_warnings([map()]) -> [binary()].
@@ -2307,7 +2304,7 @@ classify_files_by_change(CurrentFiles, PreviousMtimes) ->
 -doc """
 Filter previously-tracked file mtimes to only those under the given project root.
 
-BT-2089: Multiple `load-project` calls against the same workspace should
+Multiple `load-project` calls against the same workspace should
 accumulate, not evict. The workspace meta table accumulates mtimes across
 every project loaded into the workspace, so unfiltered "deleted file"
 detection treats files from sibling projects as deleted and unloads

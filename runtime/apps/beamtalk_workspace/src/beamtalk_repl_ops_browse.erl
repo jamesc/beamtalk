@@ -6,9 +6,9 @@
 %%% **DDD Context:** REPL Session Context (System Browser bridge)
 
 -moduledoc """
-Op handlers for the System Browser browse facade (ADR 0096, BT-2488).
+Op handlers for the System Browser browse facade (ADR 0096).
 
-The LiveView IDE's System Browser (ADR 0017 Phase 3, epic BT-2482) renders the
+The LiveView IDE's System Browser (ADR 0017 Phase 3) renders the
 four-pane Smalltalk navigator — *classes → protocols → selectors → method
 source* plus a class-definition pane. These read-only term-ops populate those
 panes against a live workspace, sourced **static-first / live-augmented**
@@ -21,13 +21,13 @@ panes against a live workspace, sourced **static-first / live-augmented**
 | `browse-protocols` | protocol + selector tree | `{value, ProtocolTree}` |
 | `browse-method-source` | method source pane | `{value, MethodSource}` |
 | `browse-class-definition` | class-definition pane | `{value, ClassDefinition}` |
-| `browse-categories` | divider-grouped method view (BT-3238) | `{value, CategoryView}` |
+| `browse-categories` | divider-grouped method view | `{value, CategoryView}` |
 | `browse-native-source` | read-only native pane | `{value, NativeSource}` |
 | `browse-native-modules` | native-modules section | `{value, [NativeModuleRow]}` |
 | `browse-type-aliases` | type-aliases section | `{value, [AliasRow]}` |
 | `browse-alias-source` | read-only alias source view | `{value, AliasSource}` |
 
-## Term contract (BT-2399)
+## Term contract
 
 Every op returns a `{value, JsonValue}` tagged term — the rows are already a
 wire-shaped JSON value (maps/lists of binaries, integers, booleans, `null`), so
@@ -984,7 +984,7 @@ browse_native_module_source(Module, Selector) ->
     }}.
 
 -doc """
-Resolve a native module to its editable on-disk `.erl` target (BT-2670).
+Resolve a native module to its editable on-disk `.erl` target.
 
 This is the **server-side authorization seam** for `save-native-source`: it
 re-derives — independently of any client-supplied path — where the module's
@@ -1648,7 +1648,7 @@ delegate_exported(Exports, Selector) ->
 -doc """
 The Beamtalk methods that delegate into native module `Module` via ADR 0056
 `self delegate` — the complement of the explicit `(Erlang <module>)` FFI callers
-`beamtalk_xref:callers_of_native_module/1` reports (BT-2732).
+`beamtalk_xref:callers_of_native_module/1` reports.
 
 A `native:` class compiles each `self delegate` method into a `dispatch_<selector>`
 function on its facade module, routed through `beamtalk_actor:sync_send/3`. Those
@@ -1665,7 +1665,7 @@ Returns `[]` for a module that backs no loaded class (or the unresolved-module
 sentinel), so a module with neither FFI callers nor delegating classes keeps the
 honest empty state.
 
-BT-2736: The candidate class names come from `beamtalk_class_registry`'s
+The candidate class names come from `beamtalk_class_registry`'s
 backing-module reverse index — an O(1) ETS `lookup/2` keyed by `Module`,
 populated at class registration/reload time — instead of walking every loaded
 class via `all_classes/0` and probing `erlang:function_exported/3` on each.

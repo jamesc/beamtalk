@@ -8,7 +8,7 @@
 -moduledoc """
 Op handlers for sessions, clone, close, health, and shutdown operations.
 
-Extracted from beamtalk_repl_server (BT-705).
+Extracted from beamtalk_repl_server.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -17,14 +17,14 @@ Extracted from beamtalk_repl_server (BT-705).
 
 -doc """
 Handle sessions/clone/close/health/shutdown ops for the WebSocket transport —
-encodes the term result to JSON at the edge (BT-2402).
+encodes the term result to JSON at the edge.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for sessions/clone/close/health/shutdown (BT-2402).
+Term-returning handler for sessions/clone/close/health/shutdown.
 Returns `{sessions, [Meta]}`, `{ok, NewSessionId, Output, Warnings}` (clone),
 `{status, ok}` (close/shutdown), `{health, WorkspaceId, Nonce}`, or
 `{error, #beamtalk_error{}}` — no JSON in this path.

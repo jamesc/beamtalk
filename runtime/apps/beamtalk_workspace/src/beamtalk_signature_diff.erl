@@ -6,7 +6,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Pure signature-diff classification (ADR 0105 Phase 1, BT-2777).
+Pure signature-diff classification (ADR 0105 Phase 1).
 
 Given a method's previous-generation signature and its newly-compiled
 signature, classifies the change as `signature_change` (return/param types

@@ -10,7 +10,7 @@ Module loading and class activation for the Beamtalk REPL
 
 Handles loading compiled Beamtalk modules into the BEAM runtime,
 registering classes, triggering hot reload, and managing file paths.
-Extracted from beamtalk_repl_eval (BT-863).
+Extracted from beamtalk_repl_eval.
 """.
 
 -export([
@@ -246,7 +246,7 @@ handle_load(Path, State) ->
     end.
 
 -doc """
-Load a Beamtalk file with pre-built class indexes (BT-1543).
+Load a Beamtalk file with pre-built class indexes.
 
 Like `handle_load/2' but accepts pre-built class indexes to avoid
 redundant class registry scans during batch loads (e.g. :load dir).
@@ -354,7 +354,7 @@ load_class_module(ClassInfo, Expression, State) ->
             end
     end.
 
--doc "Recompile and reload a class after a standalone method definition (BT-571).".
+-doc "Recompile and reload a class after a standalone method definition.".
 -spec reload_method_definition(map(), [binary()], string(), beamtalk_repl_state:state()) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
@@ -374,13 +374,12 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
     end.
 
 -doc """
-BT-2873 (ADR 0107 Phase A caller-discipline hardening, BT-2856 adversarial
-review finding #3): load a class-defining module's compiled `Binary` and
-compute `superclasses_losing_leaf_status/1` against `Classes` in the one
-required order, as a single call.
+ADR 0107 Phase A caller-discipline hardening: load a class-defining module's
+compiled `Binary` and compute `superclasses_losing_leaf_status/1` against
+`Classes` in the one required order, as a single call.
 
-Every generated class module's `on_load` hook (`register_class/0`,
-BT-1610) runs **synchronously inside** `code:load_binary/3` and registers
+Every generated class module's `on_load` hook (`register_class/0`)
+runs **synchronously inside** `code:load_binary/3` and registers
 any new subclass link before that call returns — so
 `superclasses_losing_leaf_status/1` MUST run against `Classes` *before*
 `code:load_binary/3`, never after (`activate_module/4`'s doc has the full
@@ -421,7 +420,7 @@ Activate a loaded module with an optional source path for workspace metadata.
 Passing SourcePath ensures the source file is recorded in workspace_meta so that
 new VS Code sessions (which have an empty session tracker) can still navigate to source.
 
-ADR 0105 Phase 2 (BT-2780): `spawn_shape_recheck/1` fires last, after
+ADR 0105 Phase 2: `spawn_shape_recheck/1` fires last, after
 `register_classes/2` has installed the new `register_class/0` (which is what
 refreshes the compiler port's ambient class-hierarchy cache — see
 `beamtalk_recheck:trigger_shape/2`'s moduledoc) — so a shape-change re-check
@@ -443,7 +442,7 @@ every ordinary class load, not just explicit patches — and `spawnWith:`
 step 2 / this ADR's Alternatives) is close to the worst-case common
 selector, used by every Actor subclass in the image. Running the recheck
 synchronously here measurably regressed a heavy sequential-reload scenario
-(discovered via the `repl_protocol` e2e suite, BT-2780 review) — dozens of
+(discovered via the `repl_protocol` e2e suite) — dozens of
 shape-changing reloads in one session each paying the per-reload
 caller-cap's up-to-20 compiler round trips, serialised in front of every
 subsequent REPL response, enough to trip a client-side timeout.
@@ -470,7 +469,7 @@ all already `receive`/subscribe rather than read a synchronous return
 value), so this is not a behaviour change for any surface, only a latency
 and contention fix for the trigger.
 
-**BT-2856 / ADR 0107 Phase A:** this 3-arity form always passes `[]` for the
+**ADR 0107 Phase A:** this 3-arity form always passes `[]` for the
 leaf-change detection `activate_module/4` (below) accepts — see that
 function's doc for why the detection has to happen in the *caller*, before
 `code:load_binary/3`, not here.
@@ -480,12 +479,12 @@ activate_module(ModuleName, Classes, SourcePath) ->
     activate_module(ModuleName, Classes, SourcePath, []).
 
 -doc """
-BT-2856 / ADR 0107 Phase A: same as `activate_module/3`, plus
+ADR 0107 Phase A: same as `activate_module/3`, plus
 `NewlyNonLeafSuperclasses` — the result of
 `superclasses_losing_leaf_status/1`, which the **caller** must have computed
 against `Classes` *before* its own `code:load_binary/3` call (not passed as
 `Classes` here and computed internally): every generated class module
-carries `'on_load' = [{register_class, 0}]` (BT-1610/`actor_codegen.rs`),
+carries `'on_load' = [{register_class, 0}]` (`actor_codegen.rs`),
 and `code:load_binary/3` runs a module's `on_load` function **synchronously,
 before returning** — so by the time *any* `activate_module/*` arity could
 inspect the hierarchy, the calling `register_class/0` (registering the new
@@ -526,7 +525,7 @@ register_classes(_ClassInfoList, ModuleName) ->
             ok
     end.
 
--doc "Trigger hot reload for existing actors after module reload (BT-572).".
+-doc "Trigger hot reload for existing actors after module reload.".
 -spec trigger_hot_reload(atom(), [map()]) -> ok.
 trigger_hot_reload(ModuleName, Classes) ->
     lists:foreach(
@@ -538,7 +537,7 @@ trigger_hot_reload(ModuleName, Classes) ->
     ok.
 
 -doc """
-Compile and load a source file without REPL session state (BT-845).
+Compile and load a source file without REPL session state.
 
 Called from beamtalk_behaviour_intrinsics:classReload/1 via erlang:apply/3
 to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
@@ -567,7 +566,7 @@ Convert a string to snake_case (e.g., "SchemeSymbol" -> "scheme_symbol").
 Matches the Rust to_module_name() convention: inserts underscore before
 uppercase only when the previous character was lowercase.
 
-BT-3081: delegates to `beamtalk_module_name:camel_to_snake/1`, the single
+Delegates to `beamtalk_module_name:camel_to_snake/1`, the single
 Erlang-side authority for this conversion. This function previously had its
 own drifted copy that force-lowercased the first character unconditionally
 (discarding whether it actually started lowercase) and used Unicode
@@ -579,7 +578,7 @@ to_snake_case(Str) ->
     beamtalk_module_name:camel_to_snake(Str).
 
 -doc """
-Verify that the expected class name appears in the compiled class list (BT-868).
+Verify that the expected class name appears in the compiled class list.
 """.
 -spec verify_class_present(atom() | undefined, [#{name := string()}], string()) ->
     ok | {error, term()}.
@@ -769,7 +768,7 @@ snapshot_class_def_prev_sources(Classes) ->
 
 -doc """
 Log a pending `'class-def'` ChangeLog entry for each class in `Classes` that
-*redefined* an already-loaded class (ADR 0082 extension, BT-3248).
+*redefined* an already-loaded class (ADR 0082 extension).
 
 Called from `load_class_module/3` after a successful inline class-body
 install — the cockpit `:def` tab's "Compile" action against an *existing*
@@ -783,7 +782,7 @@ Only classes with a PRIOR tracked source (`PrevSources`, snapshotted by
 `snapshot_class_def_prev_sources/1` before this install overwrote it) are
 logged here — a class with no prior source is a genuinely brand-new class
 defined inline (`Foo subclass: Bar [...]` typed directly, never installed
-before), which is out of this issue's scope: BT-3248's acceptance criteria is
+before), which is out of scope here: this feature's acceptance criteria is
 scoped to redefining an "*existing*" class, and `newClass:at:`'s own
 `emit_new_class_entry/3` already covers the brand-new-class case for the one
 FFI chokepoint that creates a file for it. A REPL-typed brand-new inline class
@@ -858,7 +857,7 @@ emit_class_def_entry(ClassNameBin, NewSource, PrevSource) ->
     end.
 
 -doc """
-Classify a `'class-def'` entry's flushability (BT-3248 Phase 1 → BT-3254).
+Classify a `'class-def'` entry's flushability.
 
 Reuses `class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`
 (the same classification `add_flushability/4` uses for a method patch) to
@@ -866,7 +865,7 @@ decide whether the class is genuinely an in-project file at all — stdlib,
 dependency, and file-less (dynamic) classes stay `flushable: false` exactly
 like a method patch on that kind of class.
 
-BT-3254 made the cockpit `:def` tab's resubmitted skeleton
+A later change made the cockpit `:def` tab's resubmitted skeleton
 (`beamtalk_repl_ops_browse:class_definition_text/7`) round-trip-safe: it now
 carries the `sealed`/`abstract`/`typed` modifier keywords, the
 `field:`/`state:` keyword choice, and `::` type annotations, closing the gap
@@ -876,7 +875,7 @@ and marked the entry flushable whenever the span resolved, regardless of what
 the skeleton actually contained) unsafe: it would have silently downgraded
 e.g. `sealed typed Value subclass: Foo` + `field: x :: Integer` to
 `Value subclass: Foo` + `state: x` on every ordinary flush, caught in
-adversarial review before BT-3248 shipped.
+adversarial review before this shipped.
 
 With the skeleton itself fixed, this function now resolves the real on-disk
 span (`beamtalk_compiler:resolve_class_span/2` — the same resolver
@@ -899,14 +898,14 @@ ITSELF is header+state-only (`class_def_source_is_skeleton_shaped/2`, reusing
 otherwise splicing a `source` that also carries methods into the disk span
 (which, by construction, stops before the file's first method) would jam the
 new methods into the header/state region while leaving the file's real
-methods stale and duplicated right after it. Same bug class BT-3248's
+methods stale and duplicated right after it. Same bug class an earlier
 adversarial review caught for the disk side; this closes the mirror-image gap
 on the resubmitted-text side.
 
 A second, independent adversarial-review finding closes a further gap: a
 compiled (non-`ClassBuilder`) class's field DEFAULT-VALUE TEXT is not
 recoverable from live reflection at all (only whether a field has one —
-`__beamtalk_meta/0`'s `field_has_default`, BT-1976), so `class_definition_
+`__beamtalk_meta/0`'s `field_has_default`), so `class_definition_
 text/7`'s skeleton always renders `default => null` for every field of any
 real, file-backed class — even one whose on-disk declaration has one.
 `resolve_class_def_span_entry/4` therefore ALSO compares each field's
@@ -1303,8 +1302,8 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     end.
 
 -doc """
-Compile half of `reload_compile_and_load/4` — split out for BT-3270's
-in-memory atomicity protocol (ADR 0114 § Decision, final paragraph), which
+Compile half of `reload_compile_and_load/4` — split out for the multi-site
+rewrite's in-memory atomicity protocol (ADR 0114 § Decision, final paragraph), which
 needs to compile/validate every site in a multi-site rewrite batch *before*
 installing any of them (see `rewrite_sites/2`'s doc). Never touches
 `code:load_binary/3` or any other mutating step — a caller can call this as
@@ -1342,10 +1341,10 @@ doc for why this is split out. Takes a successful `compile_reload_source/4`
 result and performs the mutating half: `load_class_binary/4` +
 `activate_module/4` (or the protocol-module equivalent). Never called on a
 value that failed `compile_reload_source/4` — callers gate on `{ok, ...}`
-first, which is exactly BT-3270's atomicity protocol: nothing calls this
+first, which is exactly the multi-site rewrite's atomicity protocol: nothing calls this
 until every site in a batch has independently validated.
 
-Exported (BT-3280) purely so `install_rewrite_group/5`'s own
+Exported purely so `install_rewrite_group/5`'s own
 `?MODULE:install_reload_result/2` call can be intercepted by `meck` in
 `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
 coverage — not part of this module's intended public API otherwise; every
@@ -1469,7 +1468,7 @@ install_method(
     ).
 
 -doc """
-Install a single method into a class, threading the patch side (BT-2665).
+Install a single method into a class, threading the patch side.
 
 `IsClassMethod` selects the side: `false` installs an instance method (the
 `compile:source:` / IDE-save default), `true` installs a class-side (static)
@@ -1618,7 +1617,7 @@ install_method_with_source(
     end.
 
 -doc """
-Pre-save advisory (ADR 0105 Phase 3, BT-2782): compile a pending method edit
+Pre-save advisory (ADR 0105 Phase 3): compile a pending method edit
 and report would-be-stale dependents **without installing** — the read-only
 sibling of `install_method_with_source/10`. Backs `Behaviour>>precheckCompile:
 source:', the editor/LSP's "check before save" hook (the ADR's Phase 3
@@ -1723,8 +1722,8 @@ no_pending_change_result() ->
     }.
 
 -doc """
-Remove a live method from a class by recompiling the class without it (BT-2663,
-BT-2665). Backs the *add* revert case: when a freshly-added method (instance or
+Remove a live method from a class by recompiling the class without it.
+Backs the *add* revert case: when a freshly-added method (instance or
 class side) is reverted, its pre-patch state was "absent", so the revert deletes
 the method rather than re-installing a prior body.
 
@@ -1735,7 +1734,7 @@ and the remaining class source is recompiled + hot-reloaded. Returns
 unavailable, the selector cannot be located, or the recompile/reload fails (the
 live image is unchanged in the error cases). The removal does NOT itself emit a
 ChangeEntry — the caller curtails the original add entry separately (a
-`revert:`-of-an-add), or, for `removeSelector:` (ADR 0112 Phase 3, BT-3187),
+`revert:`-of-an-add), or, for `removeSelector:` (ADR 0112 Phase 3),
 calls `emit_remove_change_entry/5` afterward.
 """.
 -spec remove_method(binary(), atom() | binary(), instance | class) ->
@@ -1904,9 +1903,9 @@ source_path_or_empty(Path) -> Path.
 Rewrite a definition site plus N reference/sender sites transactionally, in
 memory, generalizing `remove_method/3`'s single-site splice+recompile+
 hot-reload for the multi-site case ADR 0114's `renameTo:`/
-`renameSelector:to:` both need (BT-3271/BT-3272, not yet built — this is the
+`renameSelector:to:` both need (not yet built — this is the
 shared mechanism both will call with different, already-computed site lists;
-site *discovery* itself is out of scope here, per this issue's text).
+site *discovery* itself is out of scope here).
 
 `DefinitionSite` is the primary target's own declaration/definition
 (`undefined` only for a dynamic, source-less class being renamed — mirrors
@@ -1949,8 +1948,8 @@ function's answer, per the ADR's own steer:
 3. **Only once every group has validated does the install pass run** — for
    each group in turn, `class_source_unchanged/1` re-checks that the class's
    `beamtalk_workspace_meta` source is still byte-identical to what
-   `build_class_group/2` snapshotted into it BEFORE validation ran (BT-3280 —
-   see point 4 below), then `install_reload_result/2` (load + hot-reload)
+   `build_class_group/2` snapshotted into it BEFORE validation ran (see
+   point 4 below), then `install_reload_result/2` (load + hot-reload)
    updates `beamtalk_workspace_meta`'s tracked source to match. Since every
    group already compiled successfully, `install_reload_result/2` failing
    here is expected to be rare (see its own doc — `code:load_binary/3`
@@ -1965,7 +1964,7 @@ function's answer, per the ADR's own steer:
    so the caller (and its ChangeLog bookkeeping) can tell a documented,
    bounded partial application apart from "nothing happened" — it must NOT
    be treated as equivalent to a clean validation-phase abort.
-4. **Concurrent-writer detection at install time (BT-3280).** Steps 1-2 only
+4. **Concurrent-writer detection at install time.** Steps 1-2 only
    guarantee atomicity WITHIN this one call — nothing serializes a batch
    against another eval-worker process concurrently mutating the same class
    via `Counter compile: '...'`, a single-site patch, or another
@@ -2013,11 +2012,11 @@ function's answer, per the ADR's own steer:
 
 Known, accepted limitation this protocol does NOT close: `compile_file/4`
 itself has a side effect independent of installation — it registers each
-compiled class's `referenced_aliases` into `beamtalk_alias_xref` (BT-2952,
-`compile_file_core/4`'s own doc) as part of merely COMPILING, not installing.
+compiled class's `referenced_aliases` into `beamtalk_alias_xref`
+(`compile_file_core/4`'s own doc) as part of merely COMPILING, not installing.
 A class-group that validates but is never installed (because an earlier or
 later group in the same batch failed validation) can therefore still leave a
-stale alias-xref registration behind. This is not a regression BT-3270
+stale alias-xref registration behind. This is not a regression this protocol
 introduces — `reload_compile_and_load/4`'s existing single-site path already
 has this exact property today (compile-time alias registration happens
 before the install half runs) — so generalizing to N sites does not make it
@@ -2068,7 +2067,7 @@ Run `rewrite_sites/2`'s own validation pass (grouping + the non-mutating
 compile-only check) WITHOUT installing anything — same pure prefix
 `rewrite_sites/2` itself runs before its install pass, exposed standalone
 for a caller that needs to know a rewrite WOULD succeed before committing
-some other, unrelated mutation first (ADR 0114, BT-3278 review follow-up:
+some other, unrelated mutation first (ADR 0114:
 `beamtalk_behaviour_intrinsics:classRenameTo/2`'s dynamic-class path moves
 the class's registry identity via a completely separate call,
 `beamtalk_object_class:rename/2` — outside this module's own atomicity
@@ -2177,8 +2176,8 @@ build_class_group(Class, Sites) ->
     end.
 
 -doc """
-The shared `{start, 'end'}` sort key for a `rewrite_span()` (ADR 0114,
-BT-3270/BT-3274) — the ONE place every function that must order same-class
+The shared `{start, 'end'}` sort key for a `rewrite_span()` (ADR 0114)
+— the ONE place every function that must order same-class
 sites consistently derives its comparator from: `validate_no_overlaps/3`
 (ascending, overlap detection), `apply_site_splices/2` (descending, so it
 applies rightmost-first), and revert's own `current_spans_for_group/1`
@@ -2457,7 +2456,7 @@ slice(Source, #{start := Start, 'end' := End}) ->
 
 -doc """
 Emit a `'rename-class'`/`'rename-method'` ChangeLog entry for a just-completed
-`rewrite_sites/2` call (ADR 0114, BT-3270) — mirrors `emit_remove_change_entry/5`'s
+`rewrite_sites/2` call (ADR 0114) — mirrors `emit_remove_change_entry/5`'s
 placement (called by the caller AFTER the rewrite is already live; a
 ChangeLog write failure never undoes an installed rewrite) and its best-
 effort/self-swallowing failure handling.
@@ -2590,20 +2589,20 @@ store_rewrite_site_ref(Body) ->
 
 -doc """
 Move `ClassName`'s `.bt` file to `NewPathBin`, leaving its name and every
-reference to it untouched (ADR 0114 Phase 2, BT-3272; backs `Workspace
+reference to it untouched (ADR 0114 Phase 2; backs `Workspace
 moveClass:to:`).
 
-Unlike `beamtalk_behaviour_intrinsics:classRenameTo/2` (BT-3278), nothing
+Unlike `beamtalk_behaviour_intrinsics:classRenameTo/2`, nothing
 about the class's identity changes here — no collision check, no cross-file
 reference discovery, no registry re-registration — so `moveClass:to:` has no
 sites beyond the single file being moved (ADR 0114 § "`Workspace
-moveClass:to:`"). The mechanism is still the shared one (BT-3270): resolve
+moveClass:to:`"). The mechanism is still the shared one: resolve
 the class's own declaration span (`beamtalk_compiler:resolve_class_span/2`,
 the same "header + state, never a method" resolver `add_class_def_flushability/2`
 above already uses) and rewrite it to ITSELF — a byte-identical splice — via
 `rewrite_sites/2`, purely so a `'rename-class'` ChangeLog entry with
 `old_class == class`, `old_path` = the class's current `source_file`, and
-`new_path = NewPathBin` gets recorded. `Workspace flush` (BT-3271) already
+`new_path = NewPathBin` gets recorded. `Workspace flush` already
 knows how to replay that entry as a pure file move (the declaration site,
 plus any same-file self-reference, folded into one splice against `old_path`,
 written to `new_path`, then `old_path` unlinked).
@@ -2887,7 +2886,7 @@ ADR 0114's `sites[0] = null` case) has nothing to splice either way —
 `do_revert_rewrite/2` mirrors `rewrite_class_sites/4`'s own trivial-success
 shortcut for that shape, so only the identity move runs.
 
-BT-3335: a pure `Workspace moveClass:to:` (BT-3272) entry never changes a
+A pure `Workspace moveClass:to:` entry never changes a
 class's name at all — its `'rename-class'` entry records `old_class ==
 class` by construction — so there is no "CURRENT (post-rename) name" that
 differs from `old_class` for `install_class_rename/3` to retire. Calling it
@@ -2917,7 +2916,7 @@ still hold exactly the bytes the original rewrite left there
 own doc): an intervening, UNRELATED edit to one of those same classes between
 the rename and this revert is refused loudly here rather than spliced over.
 This is revert's own analogue of `'remove-class'` revert's explicit drift
-check (`check_no_external_drift/3`, BT-3213), applied to a tracked-source
+check (`check_no_external_drift/3`), applied to a tracked-source
 SPAN rather than a whole disk file, since a rename revert can touch several
 classes' sources rather than one file. Ordinary method-patch revert
 (`install_revert_patch/4`) still has no equivalent check and re-installs
@@ -3257,7 +3256,7 @@ same file while the rename sat pending) would otherwise silently shift what
 this cumulative-offset math computes as "current", corrupting the class on
 splice rather than merely producing a stale result. This is revert's own
 analogue of `check_no_external_drift/3`'s `'remove-class'`-specific disk
-comparison (BT-3213) — same "never guess, refuse loudly" posture, applied to
+comparison — same "never guess, refuse loudly" posture, applied to
 a tracked-source SPAN rather than a whole disk file, since a rename revert
 can touch several classes' sources rather than one file.
 """.
@@ -3490,8 +3489,8 @@ new_class(_Source, _TargetPath) ->
 
 -doc """
 Recompile and reinstall a class from a recorded prior source, reusing the same
-compile+install chokepoint `newClass:at:` uses (ADR 0082, BT-2664) rather than
-a second whole-class-install mechanism (ADR 0113, BT-3208 — `Workspace changes
+compile+install chokepoint `newClass:at:` uses (ADR 0082) rather than
+a second whole-class-install mechanism (ADR 0113 — `Workspace changes
 revert:` extended to a pending `'remove-class'` entry).
 
 `TargetPath` is the removed class's own recorded `sourceFile` (already an
@@ -3526,8 +3525,8 @@ file while the removal sat pending) — this function does not itself guard
 against that. The caller,
 `beamtalk_workspace_interface_primitives:reinstall_reverted_class/3`, runs
 `check_no_external_drift/3` first and never calls this function at all if the
-on-disk file has drifted from the recorded `prev_source_ref` snapshot (BT-3213,
-Claude review follow-up on BT-3208) — see that function's doc.
+on-disk file has drifted from the recorded `prev_source_ref` snapshot —
+see that function's doc.
 """.
 -spec revert_remove_class(binary() | string(), binary() | string()) ->
     {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
@@ -4506,7 +4505,7 @@ relies on: `put_owner_origin/3` above already cleared each checked owner's
 stale shape-change findings from the store, and every surface needs the
 announcement itself to know to drop what it was showing, not just a quiet
 store write nobody hears about. Matching `publish_recheck_outcome/5`'s
-structure exactly (found in review, BT-2780): the `?LOG_INFO` is gated on
+structure exactly (found in review): the `?LOG_INFO` is gated on
 `Findings` (nothing worth logging about a clean re-check), the announce is
 gated on `CheckedOwners` alone.
 """.
@@ -4642,7 +4641,7 @@ Was `SuperclassBin` a leaf class (zero direct subclasses) at the moment
 this is called? A superclass name that is not even an interned atom yet was
 never loaded as a class this session, so nothing could depend on it being
 leaf either — `false`, not a crash, matching every other
-`binary_to_existing_atom/2` safety check in this module (BT-2856 adds no
+`binary_to_existing_atom/2` safety check in this module (this adds no
 new atom-table-exhaustion surface: superclass names here are always
 already-loaded class names or the `badarg` catch below fires instead of
 minting a fresh atom from reload-derived text).
@@ -4680,7 +4679,7 @@ queue (mirrors `maybe_trigger_shape_recheck/1` exactly — see its doc — which
 is also why this is exported outside the `-ifdef(TEST)` block, same reason:
 the worker lives in a different module).
 
-**BT-2873:** `beamtalk_recheck:trigger_leaf_change/1` runs **one** shared
+`beamtalk_recheck:trigger_leaf_change/1` runs **one** shared
 whole-image sweep covering every superclass in `Superclasses` (never raises
 — see its own doc), instead of one independent sweep per superclass
 (`spawn_leaf_change_recheck/1`'s doc explains why paying for N sweeps when
@@ -4766,7 +4765,7 @@ so every existing surface renders a leaf-change finding without new wiring.
 site selector this is "about" — same reasoning `finding()`'s doc already
 gives for `shape_change`).
 
-**BT-2873:** `Result` may be a *shared* outcome covering several
+`Result` may be a *shared* outcome covering several
 superclasses at once (`maybe_trigger_leaf_change_recheck/1`'s batched
 sweep) — `Findings` is filtered down to just the ones whose own
 `changed_class` is `SuperclassBin` before anything else runs, so a finding
@@ -5304,7 +5303,7 @@ get `flushable: false` with the matching reason; an in-project class gets
 `flushable: true`. `span` / `prev_source` are resolved against the CURRENT
 on-disk file (not the in-memory source `remove_method/3` just spliced) —
 matching how a patch's span is always resolved against disk rather than
-memory — since that is the byte span BT-2192's future flush-excise step will
+memory — since that is the byte span a future flush-excise step will
 need. A selector already absent from disk (the method being removed was
 itself a live, never-flushed addition) has nothing to excise there either, so
 the entry downgrades to `flushable: false, not_flushable_reason: "not_on_disk"`
@@ -5448,8 +5447,8 @@ so this attributes the entry the most it can honestly claim:
     extension line); building one is out of this issue's scope.
   - The entry is always `flushable: false, not_flushable_reason:
     "extension"` — precise disk attribution/excise for extension removals is
-    unbuilt infrastructure (BT-2192 territory, same boundary as every other
-    `remove-method` flush-excise case), not something this issue invents.
+    unbuilt infrastructure (same boundary as every other
+    `remove-method` flush-excise case), not something invented here.
 
 `Owner` and `PrevBody` (the extension's stored source text) must be captured
 by the CALLER before unregistering — `beamtalk_extensions:unregister/3`
@@ -5546,9 +5545,9 @@ Must be called BEFORE that teardown starts: `class_source_file/1` needs the
 class's still-live registry pid to resolve its module (teardown stops the
 class gen_server), and `beamtalk_workspace_meta:get_class_source/1` needs the
 `class_sources` entry that `beamtalk_class_lifecycle:class_removed/2` purges
-as part of the same teardown (BT-3105). Capturing here — mirrors the
+as part of the same teardown. Capturing here — mirrors the
 "read+parse before mutate" ordering `compile:source:`'s patch hook already
-uses — is what gives `revert:` (BT-3207, later phase) something to restore
+uses — is what gives `revert:` (a later phase) something to restore
 from.
 
 Reuses `class_source_file/1` / `classify_source_file/1` / `no_source_reason/1`
@@ -5591,7 +5590,7 @@ current_class_source(ClassNameBin) ->
 
 -doc """
 Emit a `"remove-class"` ChangeLog entry for a just-completed
-`removeFromSystem` (BT-3206).
+`removeFromSystem`.
 
 Called by `beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1` at
 its existing success point — immediately after `publish_class_removed/2` —

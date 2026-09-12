@@ -61,7 +61,7 @@ websocket_handle(_Frame, State) ->
 
 -doc """
 Handle Erlang messages sent to the handler process.
-BT-696: Streaming stdout chunk from eval
+Streaming stdout chunk from eval
 """.
 websocket_info(
     {eval_out, Chunk},
@@ -589,7 +589,7 @@ format_peer({IpAddr, Port}) when is_integer(Port) ->
 format_peer(_) ->
     undefined.
 
--doc "BT-696: Start async eval with this handler as the streaming subscriber.".
+-doc "Start async eval with this handler as the streaming subscriber.".
 handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     case maps:get(<<"code">>, Params, <<>>) of
@@ -645,7 +645,7 @@ handle_eval_async(Msg, _SessionPid, State) ->
     {[{text, Response}], State}.
 
 -doc """
-BT-2691: Handle the `run-entry` op — dispatch a class entry method (`class` /
+Handle the `run-entry` op — dispatch a class entry method (`class` /
 `selector` / `args`) with streaming output.
 
 The connected-mode `beamtalk run` consumer. `selector` carries its trailing `:`
@@ -725,7 +725,7 @@ validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
     {error, Err1}.
 
 -doc """
-BT-2699: True when `SelectorBin` has a valid run-entry shape — a unary
+True when `SelectorBin` has a valid run-entry shape — a unary
 selector (no `:`) or a single arity-1 keyword selector (exactly one `:`,
 trailing, e.g. `main:`). Mirrors the CLI's `validate_class_and_selector`
 (`crates/beamtalk-cli/src/commands/run.rs`) so a direct WebSocket client (or
@@ -749,7 +749,7 @@ run_entry_args([Arg | Rest], Acc) when is_binary(Arg) -> run_entry_args(Rest, [A
 run_entry_args(_, _Acc) -> error.
 
 -doc """
-BT-698: Handle stdin op — route input to IO capture process with ref correlation.
+Handle stdin op — route input to IO capture process with ref correlation.
 """.
 handle_stdin(
     Msg,
@@ -887,7 +887,7 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
     end.
 
 -doc """
-ADR 0082 Phase 3 (BT-2289): Normalise the file list shipped on a
+ADR 0082 Phase 3: Normalise the file list shipped on a
 `flush_completed` WS push frame. The runtime stores `ChangeEntry.sourceFile`
 as a binary (`<<"src/foo.bt">>` or absolute), and `beamtalk_workspace_flush`
 forwards that shape unchanged. The push consumer (LSP) expects each element
@@ -942,7 +942,7 @@ normalise_files_for_push(Files) when is_list(Files) ->
     ).
 
 -doc """
-BT-3212 (ADR 0113 LSP follow-up): normalise the per-file `{file, kind}` list
+ADR 0113 LSP follow-up: normalise the per-file `{file, kind}` list
 shipped on a `flush_completed` WS push frame. `beamtalk_workspace_flush`
 forwards `[#{file => Path, kind => KindAtom}]`, where `Path` is a binary
 (`ChangeEntry.sourceFile`'s own shape) and `KindAtom` is
@@ -951,12 +951,12 @@ parallel taxonomy invented here. Each valid entry becomes a JSON object
 `{"file": ..., "kind": ...}`; a malformed entry (not a map, missing/non-binary
 `file`, non-atom `kind`) is dropped with a warning so one bad entry cannot
 break the whole push frame — mirrors `normalise_files_for_push/1`'s
-defensiveness. Defaults to `[]` for a producer that predates BT-3212 (the
+defensiveness. Defaults to `[]` for a producer that predates this field (the
 `Event` map simply has no `fileKinds` key), so an older runtime still degrades
 gracefully to an empty list here (the LSP's own existence-check fallback then
 takes over).
 
-ADR 0114 LSP follow-up (BT-3275): an entry may also carry `oldFile` — present
+ADR 0114 LSP follow-up: an entry may also carry `oldFile` — present
 only for the `'rename-class'`-kind file that is the actual moved declaration
 (`beamtalk_workspace_flush:file_kind_map/1`'s `op = move` case) — forwarded
 as `"oldFile"` when present so the LSP can distinguish that file (needs a
@@ -990,7 +990,7 @@ normalise_file_kind_entry(Other) ->
     false.
 
 -doc """
-BT-2531: Encode an `ActorSpawned` announcement payload for the `actors`/`spawned`
+Encode an `ActorSpawned` announcement payload for the `actors`/`spawned`
 push frame. The typed event carries `actorClass` (a Symbol) and `pid`; the live
 frame is `{class, pid}` — `spawned_at` is no longer present on the live event
 (the connect snapshot still carries it, read from the registry).
@@ -1003,7 +1003,7 @@ encode_actor_spawned_event(Event) ->
     }.
 
 -doc """
-BT-2531: Encode an `ActorStopped` announcement payload for the `actors`/`stopped`
+Encode an `ActorStopped` announcement payload for the `actors`/`stopped`
 push frame. `reason` is the typed, normalized stop symbol (`#normal` / `#shutdown`
 / `#crashed`), encoded as its atom string — replacing the legacy raw `~P`-format.
 """.
@@ -1020,7 +1020,7 @@ encode_actor_stopped_event(Event) ->
     }.
 
 -doc """
-BT-2531: Encode a `ClassLoaded` / `ClassRemoved` announcement payload — both
+Encode a `ClassLoaded` / `ClassRemoved` announcement payload — both
 carry `className` (a Symbol) — for the `classes` push frame `{class}`.
 """.
 -spec encode_class_event(map()) -> map().
@@ -1028,7 +1028,7 @@ encode_class_event(Event) ->
     #{<<"class">> => atom_to_binary(maps:get(className, Event, unknown), utf8)}.
 
 -doc """
-ADR 0105 Phase 1 (BT-2779): encode a `'ReloadCheckCompleted'` announcement
+ADR 0105 Phase 1: encode a `'ReloadCheckCompleted'` announcement
 payload (built by `beamtalk_repl_loader:publish_recheck_outcome/5`) for the
 `reload_check`/`completed` push frame.
 """.
@@ -1060,7 +1060,7 @@ encode_event_pid(_) -> null.
 
 -doc """
 Map a `nil` value to JSON `null`, passing any other value through. Distinct
-from `beamtalk_repl_protocol:undefined_to_null/1` (BT-2801), which maps the
+from `beamtalk_repl_protocol:undefined_to_null/1`, which maps the
 Erlang "missing value" idiom `undefined` instead — `json:encode/1` has no
 default clause for an arbitrary atom, so encoding either unconverted would
 raise.
@@ -1070,7 +1070,7 @@ nullable(nil) -> null;
 nullable(Value) -> Value.
 
 -doc """
-BT-1235: Extract line/hint metadata from a compile error for inclusion in JSON response.
+Extract line/hint metadata from a compile error for inclusion in JSON response.
 Returns a map with `<<"line">>' and optionally `<<"hint">>' keys, or an empty map.
 """.
 -spec extract_compile_error_location(term()) -> map().
