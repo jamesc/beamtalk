@@ -739,10 +739,8 @@ conforms_to_invalidated_by_class_removal_test() ->
     ?assertNot(beamtalk_protocol_registry:conforms_to('BT3222RemovalClass', 'BT3222RemovalProto')).
 
 -doc """
-Regression test for the lost-invalidation race flagged in review (BT-3222,
-round 2): a `compute_conforms_to/2` result that finishes *after* a
-concurrent `invalidate_conforms_cache/0` bump must never be treated as a
-cache hit.
+A `compute_conforms_to/2` result that finishes *after* a concurrent
+`invalidate_conforms_cache/0` bump must never be treated as a cache hit.
 
 Simulated directly on the cache's public ETS table rather than with real
 concurrency (this repo has no mocking library, and reliably interleaving a

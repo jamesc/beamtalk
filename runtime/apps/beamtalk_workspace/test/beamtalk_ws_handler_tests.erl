@@ -181,7 +181,7 @@ class_loaded_push_json_format_test() ->
     ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Data)).
 
 %%% ===========================================================================
-%%% WebSocket handler callbacks — direct coverage (BT-2389)
+%%% WebSocket handler callbacks — direct coverage
 %%% ===========================================================================
 
 %%% ===========================================================================
@@ -295,7 +295,7 @@ auth_invalid_cookie_rejected_test() ->
     ?assert(lists:keymember(close, 1, Frames)).
 
 %%% ===========================================================================
-%%% BT-3330: shared wire-corpus conformance (auth handshake)
+%%% Shared wire-corpus conformance (auth handshake)
 %%% ===========================================================================
 %%%
 %%% This module's *production* code — `websocket_init/1` and
@@ -310,7 +310,7 @@ auth_invalid_cookie_rejected_test() ->
 %%% success tests do.
 
 %% Load the shared auth-handshake wire-string conformance corpus from the
-%% repo tree (BT-3099's `beamtalk_test_corpus` walks up from the test CWD to
+%% repo tree (`beamtalk_test_corpus` walks up from the test CWD to
 %% the project root, then reads the fixture both surfaces share).
 load_ws_auth_handshake_wire_corpus() ->
     beamtalk_test_corpus:load_json_fixture([
@@ -416,11 +416,11 @@ eval_when_already_pending_returns_busy_test() ->
     ?assertMatch([{text, _} | _], Frames).
 
 %%% ===========================================================================
-%%% websocket_handle/2 — run-entry op (BT-2699 selector shape validation)
+%%% websocket_handle/2 — run-entry op (selector shape validation)
 %%% ===========================================================================
 
 run_entry_multi_keyword_selector_rejected_test() ->
-    %% BT-2699: a direct WebSocket client sending a multi-keyword selector
+    %% A direct WebSocket client sending a multi-keyword selector
     %% must get a clear rejection, not a bare badarg/DNU from class_send/3.
     Json = op_json(<<"run-entry">>, #{
         <<"class">> => <<"Greeter">>,
@@ -638,7 +638,7 @@ eval_error_with_compile_error_no_line_test() ->
     ),
     ?assertMatch([{text, _} | _], Frames).
 
-%% BT-2531: the push streams now arrive as `{beamtalk_announcement, SubRef,
+%% The push streams arrive as `{beamtalk_announcement, SubRef,
 %% Class, Handler, Event}` tuples from the SystemAnnouncer bus. `ann/2` builds one
 %% with a fresh ref and the inert push-handler term the facade registers.
 ann(Class, Event) ->
@@ -684,7 +684,7 @@ actor_spawned_pushes_frame_test() ->
     ?assertEqual(<<"spawned">>, maps:get(<<"event">>, Decoded)),
     Data = maps:get(<<"data">>, Decoded),
     ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Data)),
-    %% BT-2531: the live spawned frame no longer carries spawned_at (the typed
+    %% The live spawned frame does not carry spawned_at (the typed
     %% ActorSpawned event has no such field — the connect snapshot still does).
     ?assertNot(maps:is_key(<<"spawned_at">>, Data)).
 
@@ -700,7 +700,7 @@ actor_stopped_pushes_frame_test() ->
     ),
     Decoded = first_text(Frames),
     ?assertEqual(<<"stopped">>, maps:get(<<"event">>, Decoded)),
-    %% BT-2531: reason is the typed normalized symbol, not a ~P-formatted term.
+    %% reason is the typed normalized symbol, not a ~P-formatted term.
     ?assertEqual(<<"normal">>, maps:get(<<"reason">>, maps:get(<<"data">>, Decoded))).
 
 actor_stopped_unknown_class_test() ->
@@ -724,7 +724,7 @@ class_loaded_pushes_frame_test() ->
     ?assertEqual(<<"Counter">>, maps:get(<<"class">>, maps:get(<<"data">>, Decoded))).
 
 class_removed_pushes_frame_test() ->
-    %% BT-2531: ClassRemoved is newly visible on the bus-backed `classes` stream.
+    %% ClassRemoved is visible on the bus-backed `classes` stream.
     Event = #{'$beamtalk_class' => 'ClassRemoved', className => 'Counter'},
     {Frames, _State} = beamtalk_ws_handler:websocket_info(
         ann('ClassRemoved', Event), authed_state()
@@ -736,9 +736,9 @@ class_removed_pushes_frame_test() ->
 
 flush_completed_normalises_files_test() ->
     %% Mix of binary, charlist, and invalid entries exercises every
-    %% normalise_files_for_push/1 branch. No `fileKinds` key at all — a
-    %% pre-BT-3212 producer shape — must default to an empty list rather than
-    %% crash (BT-3212 backward-compat tolerance).
+    %% normalise_files_for_push/1 branch. No `fileKinds` key at all — an
+    %% older producer shape — must default to an empty list rather than
+    %% crash (backward-compat tolerance).
     Files = [<<"src/a.bt">>, "src/b.bt", 12345, {bad, tuple}],
     Event = #{'$beamtalk_class' => 'FlushCompleted', files => Files},
     {Frames, _State} = beamtalk_ws_handler:websocket_info(
@@ -753,7 +753,7 @@ flush_completed_normalises_files_test() ->
     ?assertEqual([<<"src/a.bt">>, <<"src/b.bt">>], Out),
     ?assertEqual([], maps:get(<<"fileKinds">>, Data)).
 
-%% BT-3212 (ADR 0113 LSP follow-up): `fileKinds` entries round-trip as
+%% ADR 0113 LSP follow-up: `fileKinds` entries round-trip as
 %% `{"file": ..., "kind": ...}` JSON objects, with a malformed entry (missing
 %% key, non-binary file, non-atom kind) dropped rather than crashing the push
 %% frame — mirrors `flush_completed_normalises_files_test`'s coverage of
@@ -787,7 +787,7 @@ flush_completed_normalises_file_kinds_test() ->
         Out
     ).
 
-%% ADR 0114 LSP follow-up (BT-3275): a `'rename-class'`-kind entry's
+%% ADR 0114 LSP follow-up: a `'rename-class'`-kind entry's
 %% `oldFile` round-trips as `"oldFile"`; a non-binary `oldFile` is dropped
 %% but the rest of the entry survives (degrades to the ordinary-patch
 %% shape rather than losing the whole entry).
@@ -824,7 +824,7 @@ flush_completed_normalises_file_kinds_old_file_test() ->
         Out
     ).
 
-%% ADR 0105 Phase 1 (BT-2779): the reload_check/completed push frame —
+%% ADR 0105 Phase 1: the reload_check/completed push frame —
 %% `beamtalk_repl_loader:publish_recheck_outcome/5`'s `'ReloadCheckCompleted'`
 %% announcement, re-encoded as JSON.
 reload_check_completed_pushes_frame_test() ->
@@ -1047,7 +1047,7 @@ has_frame_with(Frames, K, V) ->
     ).
 
 %% Like has_frame_with/3, but returns the decoded frame itself instead of a
-%% boolean — used by the BT-3330 shared-corpus checks, which need to compare
+%% boolean — used by the shared-corpus checks, which need to compare
 %% more than one field on the matched frame.
 first_frame_with(Frames, K, V) ->
     Decoded = lists:filtermap(
@@ -1088,7 +1088,7 @@ auth_success_creates_session() ->
     ?assert(has_frame_with(Frames, <<"type">>, <<"auth_ok">>)),
     ?assert(has_frame_with(Frames, <<"op">>, <<"session-started">>)).
 
-%% BT-3330: completes the shared-corpus conformance checks started above
+%% Completes the shared-corpus conformance checks started above
 %% (`handshake_pre_auth_frame_matches_shared_wire_corpus_test/0`,
 %% `handshake_auth_error_matches_shared_wire_corpus_test/0`) with the
 %% success-path frames, which need this fixture's live session supervisor.

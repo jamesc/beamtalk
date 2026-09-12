@@ -663,8 +663,8 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             %% prior source — a class-level target, not a single-method patch.
             reinstall_reverted_class(ClassNameBin, PrevBody, Entry);
         {revert_rename, Entry} ->
-            %% A `'rename-class'`/`'rename-method'` revert (ADR 0114,
-            %% BT-3274): a multi-site target, not a single prior body — undo
+            %% A `'rename-class'`/`'rename-method'` revert (ADR 0114): a
+            %% multi-site target, not a single prior body — undo
             %% by rewriting every one of `Entry`'s own `sites` back to its own
             %% recorded `prev_source_ref`.
             revert_rename_entry(ClassNameBin, Entry);
@@ -700,7 +700,7 @@ do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
             )
     end.
 
-%% Resolve a ChangeEntry's revert install/remove side (ADR 0112, BT-3187's
+%% Resolve a ChangeEntry's revert install/remove side (ADR 0112's
 %% required fix to ADR 0082's shipped revert logic — see
 %% `beamtalk_workspace_changelog:entry_side/1`'s doc). Delegates the actual
 %% instance/class resolution to that single accessor rather than pattern-
@@ -728,8 +728,8 @@ revert_side(Entry) ->
     end.
 
 %% Perform an *add* revert by removing what was added. A `new-class` entry removes
-%% the class (BT-2664); a method entry removes that method on its side
-%% (BT-2663/BT-2665). The original add entry stays in the audit log; the removal
+%% the class; a method entry removes that method on its side.
+%% The original add entry stays in the audit log; the removal
 %% itself does not emit a ChangeEntry (it is the inverse of the add, not a new
 %% patch — symmetrical with how a modify-revert's re-install is the only entry).
 -spec revert_removal(binary(), atom(), beamtalk_workspace_changelog:entry()) -> term().
@@ -823,7 +823,7 @@ reinstall_reverted_class_body(ClassNameBin, PrevBody, SourceFile, Entry) ->
             %% either (`new_class_install/8`'s `no_log` mode), so the
             %% original `'remove-class'` entry must be retired here —
             %% otherwise it stays active/pending forever even though
-            %% its effect has been undone (ADR 0113, BT-3208 review
+            %% its effect has been undone (ADR 0113 review
             %% fix: a stale `'remove-class'` entry would misreport
             %% `skipped: destructive`/block a real future removal).
             retire_reverted_remove_class_entry(ClassNameBin, Entry);
@@ -1319,7 +1319,7 @@ rootSupervisor() ->
     beamtalk_supervisor:get_root().
 
 %%% ============================================================================
-%%% Session navigation (ADR 0081 Phases 5 & 7, BT-2368)
+%%% Session navigation (ADR 0081 Phases 5 & 7)
 %%% ============================================================================
 
 -doc """
@@ -1351,7 +1351,7 @@ sessions() ->
     beamtalk_session_primitives:liveSessions().
 
 %%% ============================================================================
-%%% Supervisor lifecycle management (BT-1341)
+%%% Supervisor lifecycle management
 %%% ============================================================================
 
 -doc """
@@ -1596,7 +1596,7 @@ dependencies() ->
     end.
 
 %%% ============================================================================
-%%% Project sync (BT-1723)
+%%% Project sync
 %%% ============================================================================
 
 -doc """
@@ -1954,7 +1954,7 @@ On success, returns the loaded class object(s) so the REPL displays what was loa
 handle_load(Path) when is_binary(Path) ->
     handle_load(binary_to_list(Path));
 handle_load(Path) when is_list(Path) ->
-    %% BT-2091: BT-1719 demand-driven native .erl recompilation. Previously
+    %% Demand-driven native .erl recompilation. Previously
     %% wired into the deprecated `load-file` op handler; mirror the same
     %% pre-step here so `Workspace load: "path"` keeps native FFI working
     %% for package projects with `native/*.erl` sources.
@@ -1997,13 +1997,13 @@ handle_load(Other) ->
             iolist_to_binary([<<"load: expects a String path, got ">>, TypeName])
         )}.
 
-%% BT-2091: Path post-step extracted so the native-compile error path
+%% Path post-step extracted so the native-compile error path
 %% short-circuits without falling through to reload_class_file/1.
 -spec handle_load_after_native(string()) -> term() | {error, #beamtalk_error{}}.
 handle_load_after_native(Path) ->
     case beamtalk_repl_eval:reload_class_file(Path) of
         {ok, ClassNames} ->
-            %% BT-2091: record class source so subsequent `Class >> selector => body`
+            %% Record class source so subsequent `Class >> selector => body`
             %% method-patch syntax (which depends on workspace_meta:get_class_source/1)
             %% keeps working. The deprecated `load-file` op's session-aware path
             %% recorded sources via store_file_class_sources/3; the stateless
@@ -2047,7 +2047,7 @@ handle_load_after_native(Path) ->
                     iolist_to_binary([<<"File not found: ">>, Path])
                 )};
         {error, Reason} ->
-            %% BT-2091: surface structured compile/semantic errors through `Workspace load:`
+            %% Surface structured compile/semantic errors through `Workspace load:`
             %% so e2e callers see specific error reasons (cannot subclass sealed class,
             %% cannot assign to field, etc.) rather than a generic "Failed to load".
             %% The migration target for the deprecated `load-file` op was already running

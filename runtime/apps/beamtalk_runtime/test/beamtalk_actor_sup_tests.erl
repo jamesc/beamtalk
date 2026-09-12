@@ -93,7 +93,7 @@ supervisor_count_children_test() ->
     %% Cleanup
     exit(Pid, normal).
 
-%%% BT-1975: Additional coverage tests
+%%% Additional coverage tests
 
 init_child_spec_shutdown_test() ->
     {ok, {_SupFlags, [ChildSpec]}} = beamtalk_actor_sup:init([]),
@@ -126,7 +126,7 @@ start_link_function_exported_test() ->
     ?assert(erlang:function_exported(beamtalk_actor_sup, start_link, 0)).
 
 %%% ============================================================================
-%%% BT-1979: Child start/stop lifecycle coverage
+%%% Child start/stop lifecycle coverage
 %%% ============================================================================
 
 start_actor_success_starts_child_test() ->

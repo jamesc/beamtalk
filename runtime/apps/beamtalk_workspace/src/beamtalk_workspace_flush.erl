@@ -373,7 +373,7 @@ set. A pending `'remove-class'` entry left out of the applied set because
     filter_shadowed_by_survivor/2,
     renamed_target_keys/1,
     announce_flush_completed/2,
-    %% ADR 0112 (BT-3187): exercises the `(class, selector, side)` shadow-key
+    %% ADR 0112: exercises the `(class, selector, side)` shadow-key
     %% fix directly — the shadow-key logic is exercised without going
     %% through prepare_splice/2.
     shadow_duplicates/1,
@@ -385,11 +385,11 @@ set. A pending `'remove-class'` entry left out of the applied set because
     %% staged path a real flush attempt would have produced, without
     %% duplicating the naming format in the test module.
     delete_staging_path/3,
-    %% ADR 0114 Phase 2 (BT-3271): rename-class multi-file staging, exported
+    %% ADR 0114 Phase 2: rename-class multi-file staging, exported
     %% for direct unit coverage independent of a full flush round-trip.
     resolve_new_path/1,
     is_rename_class_entry/1,
-    %% ADR 0114 Phase 3 (BT-3273): rename-method multi-file staging, exported
+    %% ADR 0114 Phase 3: rename-method multi-file staging, exported
     %% for direct unit coverage independent of a full flush round-trip.
     is_rename_method_entry/1
 ]).
@@ -574,10 +574,10 @@ classify_kinds([Other | _], _EKs, _AKs, _Unknowns) ->
 classify_kind(instance) -> entry;
 classify_kind(class) -> entry;
 classify_kind('new-class') -> entry;
-%% ADR 0082 extension (BT-3248): redefining an *existing* class's whole
+%% ADR 0082 extension: redefining an *existing* class's whole
 %% definition composes exactly like any other entry-kind filter.
 classify_kind('class-def') -> entry;
-%% ADR 0113 Phase 2 (BT-3207): `flushKinds:` accepts both removal kinds too —
+%% ADR 0113 Phase 2: `flushKinds:` accepts both removal kinds too —
 %% `#'remove-method'` (Tier 1) composes exactly like any other entry-kind
 %% filter; `#'remove-class'` (Tier 2) still needs `confirmDestructive: true`
 %% (via `flush_kinds/2`) to actually apply, same as an unfiltered destructive
@@ -585,7 +585,7 @@ classify_kind('class-def') -> entry;
 %% decides whether an in-scope Tier 2 entry is applied or reported skipped.
 classify_kind('remove-method') -> entry;
 classify_kind('remove-class') -> entry;
-%% ADR 0114 (BT-3269/BT-3271/BT-3273): `'rename-class'`/`'rename-method'`
+%% ADR 0114: `'rename-class'`/`'rename-method'`
 %% compose exactly like `'remove-class'`/`'remove-method'` — both are Tier 2
 %% (see `entry_tier/1`) and still need `confirmDestructive: true` to apply,
 %% but `flushKinds:` itself only narrows scope, same as every other kind.
@@ -743,7 +743,7 @@ run_flush(Pending, ConfirmDestructive) ->
     %% any older, now-stale patch (or creation) targeting the same key.
     %% Tiering (ADR 0113) is applied *after* shadowing has decided
     %% survivorship, exactly as `'remove-method'` exclusion used to be
-    %% applied post-shadow (ADR 0112, BT-3187): a `(class, selector, side)`
+    %% applied post-shadow (ADR 0112): a `(class, selector, side)`
     %% target's survivor is whichever entry has the highest seq regardless of
     %% tier, so a stale, older patch never gets spliced back to disk just
     %% because its newer survivor (a removal) was withheld this round.
@@ -755,7 +755,7 @@ run_flush(Pending, ConfirmDestructive) ->
             false -> {Tier1, Tier2}
         end,
     Skipped = [skipped_entry(E) || E <- SkippedTier2],
-    %% ADR 0114 (BT-3271/BT-3273): a `'rename-class'`/`'rename-method'`
+    %% ADR 0114: a `'rename-class'`/`'rename-method'`
     %% entry's top-level `sourceFile` is always null (schema: ambiguous for a
     %% multi-file entry) so neither can ever land in `group_by_file/1`'s
     %% grouping — both are pulled out up front and staged through their own
@@ -768,7 +768,7 @@ run_flush(Pending, ConfirmDestructive) ->
         {conflict, Conflicts0} ->
             {ok, conflict_summary(Conflicts0, Skipped)};
         ok ->
-            %% BT-3273: a `'rename-method'` entry must not race a pending
+            %% A `'rename-method'` entry must not race a pending
             %% ordinary patch OR a pending `'rename-class'` entry over the
             %% same file — see the moduledoc's "Atomicity (method rename)"
             %% section.
@@ -893,7 +893,7 @@ shadow_duplicates(Entries) ->
         Shadowed
     }.
 
-%% ADR 0112 (BT-3187) required fix: keyed on `(class, selector, side)`, not
+%% ADR 0112 required fix: keyed on `(class, selector, side)`, not
 %% just `(class, selector)` — once `kind` is spent distinguishing
 %% `'remove-method'` from a patch, it can no longer also carry side, so a
 %% `(class, selector)`-only key could incorrectly shadow an instance-side
@@ -943,8 +943,8 @@ group_by_file(Entries) ->
 %%% ----------------------------------------------------------------------------
 
 -record(prepared, {
-    %% Absolute target path on disk. For `op = move`/`move_noop` (ADR 0114,
-    %% BT-3271) this is `new_path` — the file this operation ultimately
+    %% Absolute target path on disk. For `op = move`/`move_noop` (ADR 0114)
+    %% this is `new_path` — the file this operation ultimately
     %% leaves on disk — not the file Phase A read from.
     file :: binary(),
     %% The staging path Phase A produced: `<file>.tmp` for `op = write` (and
@@ -964,12 +964,12 @@ group_by_file(Entries) ->
     %% `'new-class'`, `'remove-method'`); `delete` unlinks the staged `tmp`
     %% (class removal, ADR 0113); `noop` performs no I/O (the target file was
     %% already gone — external-edit soft success); `move` renames `tmp` into
-    %% `file` (= `new_path`) THEN unlinks `old_file` (class rename, ADR 0114
-    %% BT-3271); `move_noop` performs no I/O (the move already completed in
+    %% `file` (= `new_path`) THEN unlinks `old_file` (class rename, ADR 0114);
+    %% `move_noop` performs no I/O (the move already completed in
     %% an earlier, crashed/marker-failed attempt — see the moduledoc's
     %% "Atomicity (class rename)" section).
     op = write :: write | delete | noop | move | move_noop,
-    %% ADR 0114 (BT-3271): `op = move`-only — the pre-rename path Phase B
+    %% ADR 0114: `op = move`-only — the pre-rename path Phase B
     %% unlinks after the `tmp` -> `file` (`new_path`) rename succeeds.
     %% `undefined` for every other op.
     old_file :: binary() | undefined
@@ -1083,7 +1083,7 @@ prepare_new_class(File, Entries, Entry) ->
     %% filesystem entry — directory, symlink, unreadable path — is caught
     %% up front as target_exists. Otherwise a directory at the target would
     %% slip past Phase A and fail later with an opaque rename_failed conflict.
-    %% Mirrors the BT-2285 fix in beamtalk_repl_loader:validate_target_path/1.
+    %% Mirrors the same validation in beamtalk_repl_loader:validate_target_path/1.
     case file:read_file_info(AbsPath) of
         {error, enoent} ->
             case beamtalk_workspace_changelog:read_source_body(Entry) of
@@ -1207,7 +1207,7 @@ delete_staging_path(AbsPath, Epoch, Seq) ->
     AbsPath ++ ".tmp-delete-" ++ integer_to_list(Epoch) ++ "-" ++ integer_to_list(Seq).
 
 %%% ----------------------------------------------------------------------------
-%%% Class rename (Tier 2) — multi-file staged move (ADR 0114, BT-3271)
+%%% Class rename (Tier 2) — multi-file staged move (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -1474,7 +1474,7 @@ other_sites(Entry) ->
 %% Multiple entries here must be merged into ONE splice against `old_path`,
 %% never independent ones, or the second would silently discard the first's
 %% edit (mirrors `beamtalk_repl_loader:group_sites_by_class/1`'s identical
-%% same-class merge rule for the in-memory half of this mechanism, BT-3270).
+%% same-class merge rule for the in-memory half of this mechanism).
 -spec move_sites(term()) -> [beamtalk_workspace_changelog:site()].
 move_sites(Entry) ->
     OldPath = beamtalk_workspace_changelog:entry_old_path(Entry),
@@ -2168,7 +2168,7 @@ cleanup_other_prepared({ok, P}) -> cleanup_tmps(P);
 cleanup_other_prepared(_) -> ok.
 
 %%% ----------------------------------------------------------------------------
-%%% Method rename (Tier 2) — multi-file staged splice (ADR 0114, BT-3273)
+%%% Method rename (Tier 2) — multi-file staged splice (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -2476,14 +2476,12 @@ replacement_for(Entry, Body, Start, End, File) ->
         _ ->
             case beamtalk_workspace_changelog:read_source_body(Entry) of
                 {ok, NewSrc} ->
-                    %% BT-2584: the stored `source` is already the on-disk
+                    %% The stored `source` is already the on-disk
                     %% byte-span shape (`source_ref == disk[span]` by
                     %% construction — the install hook reshaped the
                     %% compiler's canonical body to the span's base
                     %% indentation via `reindent_method_source`). The splice
                     %% is a verbatim byte replacement; no reshaping here.
-                    %% This retires the former cross-layer reconciliation
-                    %% (BT-2577's `reindent/2`).
                     {ok, splice(Body, {Start, End}, NewSrc)};
                 {error, Reason} ->
                     {error, source_body_error(File, Reason)}
@@ -2537,7 +2535,7 @@ phase_b_loop([], Shadowed, Committed, Failed, Skipped, RenameExpectedFiles) ->
     Files = lists:reverse([P#prepared.file || P <- Committed]),
     CommittedFilesSet = sets:from_list(Files, [{version, 2}]),
     CommittedEntries = lists:flatten([P#prepared.entries || P <- Committed]),
-    %% ADR 0114 (BT-3271/BT-3273): a `'rename-class'` entry spans multiple
+    %% ADR 0114: a `'rename-class'` entry spans multiple
     %% files (the move target plus every other rewritten site) and a
     %% `'rename-method'` entry does too (the definition plus every confirmed
     %% sender site), so appearing in `CommittedEntries` at all (from ONE of
@@ -2598,7 +2596,7 @@ phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped, RenameExpectedFil
 %%     removal durable.
 %%   - `noop`   — the external-edit soft success (already gone); no I/O.
 %%   - `move`   — rename `tmp` into `file` (= `new_path`) THEN unlink
-%%     `old_file` (ADR 0114, BT-3271): in THAT order, so a crash or failure
+%%     `old_file` (ADR 0114): in THAT order, so a crash or failure
 %%     between the two never loses the file's content — `old_file` is only
 %%     ever removed once its content is durably present at the new name. If
 %%     the unlink itself fails, `old_file` simply lingers (still untouched,
@@ -2749,20 +2747,20 @@ filter_shadowed_by_survivor(Shadowed, SurvivorKeys) ->
 -spec complete_flush([binary()], [#prepared{}], [map()], [non_neg_integer()], [map()]) ->
     {ok, map()}.
 complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
-    %% ADR 0082 Phase 3 (BT-2289): broadcast flush completion so LSP clients
+    %% ADR 0082 Phase 3: broadcast flush completion so LSP clients
     %% can emit `workspace/applyEdit` for each touched file. Fire BEFORE
     %% `mark_flushed/1` so editor refresh fires reliably in the mixed-success
     %% case where renames succeeded but the ChangeLog server is unreachable —
     %% the files are already on disk at this point and the editor needs to
     %% realign regardless of marker outcome.
     %%
-    %% BT-2531: the typed `FlushCompleted` announcement on the SystemAnnouncer
+    %% The typed `FlushCompleted` announcement on the SystemAnnouncer
     %% bus is now the sole flush-completion push source (the legacy
     %% `beamtalk_flush_events` broadcast was retired). Fire-and-forget: the
     %% announcer swallows missing-bus errors so flush never fails on a downstream
     %% subscriber issue.
     %%
-    %% BT-3212: alongside the flat `Files` list, also announce each file's
+    %% Alongside the flat `Files` list, also announce each file's
     %% per-entry operation kind (`file_kind_map/1`) so a `CreateFile`-vs-patch
     %% consumer (the LSP) no longer has to infer "freshly created" from
     %% filesystem existence — see `announce_flush_completed/2`.
@@ -2809,10 +2807,10 @@ complete_flush(Files, Renamed, Failed, Seqs, Skipped) ->
     end.
 
 %% Announce `FlushCompleted` on the `SystemAnnouncer` bus after a flush has
-%% written files to disk (ADR 0093 §2, BT-2530). `files` carries the absolute
+%% written files to disk (ADR 0093 §2). `files` carries the absolute
 %% binary paths, matching the legacy `{flush_completed, Files}` broadcast.
 %%
-%% `FileKinds` (BT-3212, ADR 0113 LSP follow-up) is the per-file companion:
+%% `FileKinds` (ADR 0113 LSP follow-up) is the per-file companion:
 %% one `#{file => Path, kind => Kind}` map per entry in `Files`, where `Kind`
 %% is `beamtalk_workspace_changelog:entry_kind/1`'s own enum value verbatim
 %% (`'new-class'`, `'remove-class'`, `instance`, `class`, `'remove-method'`,

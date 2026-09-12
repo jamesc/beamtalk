@@ -4051,7 +4051,7 @@ do_capture_signature_generation(MethodInfo) ->
     {captured, Prev, Classification}.
 
 %% Undo a capture_signature_generation/1 (or capture_signature_removal/3) call
-%% whose install/removal subsequently failed (ADR 0105 Phase 1, BT-2777).
+%% whose install/removal subsequently failed (ADR 0105 Phase 1).
 %% `not_captured` is a no-op (the capture itself never wrote anything). Best-
 %% effort and self-swallowing — a rollback failure must never surface as the
 %% install/removal error the caller is already propagating.
@@ -4078,9 +4078,9 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
             ok
     end.
 
-%% Fire the re-check orchestration (ADR 0105 Phase 1, BT-2778) for a
+%% Fire the re-check orchestration (ADR 0105 Phase 1) for a
 %% successfully-installed patch/removal, then publish the outcome (ADR 0105
-%% Phase 1, BT-2779): update `beamtalk_workspace_findings_store` and, when
+%% Phase 1): update `beamtalk_workspace_findings_store` and, when
 %% there is something for a live surface (LSP / REPL / workspace UI) to act
 %% on, broadcast a `'ReloadCheckCompleted'` system announcement.
 %%
@@ -4096,7 +4096,7 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
 %% explicit revert bullet with no bespoke revert-specific code, and also
 %% closes the same gap for a plain hand-edit that fixes what a reload broke).
 %%
-%% Accepted tradeoff (flagged on BT-2777's review, recorded on BT-2778):
+%% Accepted tradeoff:
 %% `Classification` is only as correct as the signature-generation store's
 %% chain. Two concurrent sessions patching the same `{Class, Selector, Side}`
 %% key can race `capture/4`/`rollback/4` such that a losing session's
@@ -4105,8 +4105,8 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
 %% unconditional put, not a conditional "restore only if I'm still current"
 %% write) — the *next* capture then diffs against the wrong baseline and this
 %% function can fire on a false `signature_change`/`no_op`. Not fixed here:
-%% the store is BT-2777's merged surface, and a full fix (per-key conditional
-%% rollback) is out of this issue's scope. Advisory-only mitigates the
+%% the store is a merged surface, and a full fix (per-key conditional
+%% rollback) is out of scope here. Advisory-only mitigates the
 %% blast radius (a wrong finding is noise, not a build/runtime failure).
 -spec maybe_trigger_recheck(binary(), binary(), instance | class, capture_outcome()) -> ok.
 maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome) ->
@@ -4119,7 +4119,7 @@ maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome) ->
     ).
 
 %% Best-effort wrapper around `beamtalk_workspace_findings_store:clear_owner/1`
-%% (ADR 0105 Phase 1, BT-2779) — the store is REPL-mode-only (see
+%% (ADR 0105 Phase 1) — the store is REPL-mode-only (see
 %% `beamtalk_workspace_sup`'s `repl_child_specs/6`), so it is legitimately
 %% absent under `beamtalk_repl_loader:install_method/9`'s non-REPL callers
 %% (e.g. `beamtalk_repl_loader_tests.erl`'s unit fixtures, and — per the same
@@ -4232,7 +4232,7 @@ maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classificat
     mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners),
     {Classification, Result}.
 
-%% BT-2802/BT-2828: a candidate whose diagnostics round-trip never completed
+%% A candidate whose diagnostics round-trip never completed
 %% this reload (`NotVerifiedOwners` — `beamtalk_recheck:result()`'s
 %% `not_verified_owners`, covering the caller-cap-dropped candidates AND any
 %% `Kept` candidate that came back `skipped` (no live source recorded) or
@@ -4241,8 +4241,7 @@ maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classificat
 %% changed class* is left exactly as a previous, possibly-now-stale reload
 %% wrote it — nothing here re-verified whether the caller's problem still
 %% holds. Rather than let that finding keep asserting itself as current
-%% forever (the BT-2802 bug, and its BT-2828 skipped/failed-outcome sibling)
-%% or silently drop it (could hide a real, still-live problem), overwrite its
+%% forever or silently drop it (could hide a real, still-live problem), overwrite its
 %% `note` in place, still through `put_owner_origin/3`'s ordinary replace
 %% semantics, to say so. A candidate with no existing finding for this origin
 %% has nothing to mark — most unverified candidates, every reload — so this
@@ -4290,7 +4289,7 @@ findings_store_get_origin(OwnerBin, ChangedClassBin) ->
 
 %% The marker substring `stale_note/2` looks for to avoid re-wrapping a note
 %% that is already marked — a candidate parked outside the cap (or
-%% repeatedly skipped/failed, BT-2828) for many consecutive reloads must not
+%% repeatedly skipped/failed) for many consecutive reloads must not
 %% accumulate one "not re-checked" suffix per reload.
 -define(RECHECK_STALE_MARKER, <<"not re-checked against the latest reload">>).
 
@@ -4306,7 +4305,7 @@ mark_stale_finding(ClassNameBin, Finding = #{note := Note}) when is_binary(Note)
 mark_stale_finding(ClassNameBin, Finding) ->
     Finding#{note => stale_note(ClassNameBin, undefined)}.
 
-%% BT-2828: the reason a candidate went unverified is deliberately not named
+%% The reason a candidate went unverified is deliberately not named
 %% here (caller-cap limit vs. no live source vs. a compiler-port failure) —
 %% `mark_unverified_findings_stale/2` is fed one merged
 %% `not_verified_owners` set with no per-owner reason attached, and inventing
@@ -4393,7 +4392,7 @@ publish_recheck_outcome(
     end.
 
 %%====================================================================
-%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%% Shape-change re-check (ADR 0105 Phase 2)
 %%====================================================================
 
 -doc """
@@ -4531,7 +4530,7 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
         end,
         CheckedOwners
     ),
-    %% BT-2802/BT-2828: same not-verified staleness marking as
+    %% Same not-verified staleness marking as
     %% `maybe_run_recheck/4` (see `mark_unverified_findings_stale/2`'s doc) —
     %% a shape change's candidates go through the same `apply_cap/2` limit
     %% and the same `recheck_owner_for_shape/4` skipped/failed outcomes.
@@ -4569,7 +4568,7 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
             ok
     end.
 
-%% ── BT-2856 / ADR 0107 Phase A: leaf-change re-check ────────────────────
+%% ── ADR 0107 Phase A: leaf-change re-check ────────────────────
 
 -doc """
 Which superclass names declared by `Classes` are, at this exact moment,
@@ -4858,7 +4857,7 @@ publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
             ok
     end.
 
-%% ── ADR 0108 hot-reload re-check trigger (BT-2899): alias-change re-check ──
+%% ── ADR 0108 hot-reload re-check trigger: alias-change re-check ──
 
 -doc """
 Hand `AliasNameBins` off to the shape-recheck worker's queue and return
@@ -5116,7 +5115,7 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
             %% record a flushable entry with no prev span — a later flush appends
             %% the method. The compiler's canonical body is column-0, but the
             %% class body on disk is indented, so reshape the body to the class's
-            %% sibling-method indentation at store time (BT-2583) — mirroring
+            %% sibling-method indentation at store time — mirroring
             %% `store_disk_shaped_entry`'s reshape — so flush's `append_method`
             %% stays a verbatim append into an indented body.
             new_method_entry(Base, SourceFile, DiskSource);
@@ -5126,8 +5125,8 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
     end.
 
 %% Reshape a brand-new method (no prior on-disk span) to the target class body's
-%% indentation at store time, so flush's `append_method' stays a verbatim append
-%% (BT-2583). The compiler's canonical `unparse_method' body is column-0, but the
+%% indentation at store time, so flush's `append_method' stays a verbatim append.
+%% The compiler's canonical `unparse_method' body is column-0, but the
 %% class body on disk is indented; an un-reshaped append would write the method
 %% at column 0 into an indented class. The base indentation is derived from a
 %% sibling method already on disk (falling back to the project's 2-space step),
@@ -5139,7 +5138,7 @@ new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
     BaseIndent = sibling_method_indent(DiskSource),
     %% Reshape via the compiler port: it re-lays-out the canonical body at the
     %% target indent (re-breaking width-sensitive lines, which a pure whitespace
-    %% shift cannot — BT-2594), so the stored body is byte-identical to what
+    %% shift cannot), so the stored body is byte-identical to what
     %% `bt fmt' produces on disk. The port is already up here (the method was just
     %% compiled through it); a transient failure downgrades to memory-only rather
     %% than store a column-0 body flush would append un-indented.
@@ -5156,10 +5155,10 @@ new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
                     domain => [beamtalk, runtime]
                 }
             ),
-            %% BT-2594 deliberately re-introduces this memory-only path that
-            %% BT-2592 removed: the pure-Erlang shift was total but reshaped
-            %% width-sensitive methods wrongly; port re-layout is correct, at the
-            %% cost of a rare transient-failure downgrade.
+            %% This memory-only path is deliberate: the pure-Erlang shift was
+            %% total but reshaped width-sensitive methods wrongly; port
+            %% re-layout is correct, at the cost of a rare transient-failure
+            %% downgrade.
             Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
     end.
 
@@ -5207,7 +5206,7 @@ strip_leading_ws(Bin) ->
 %% Reshape the stored `source' (the compiler's canonical column-0
 %% `unparse_method' body) to the on-disk byte-span shape so the ChangeEntry's
 %% `source_ref' is a drop-in for `disk[span]' — `source_ref == disk[span]' by
-%% construction (BT-2584). A later `Workspace flush' then splices it verbatim
+%% construction. A later `Workspace flush' then splices it verbatim
 %% with no reindent. The base indentation is the leading whitespace of the disk
 %% slice (`PrevSource') the patch replaces. If the reshape FFI is unavailable,
 %% downgrade to memory-only rather than store a column-0 body that flush would
@@ -5217,7 +5216,7 @@ strip_leading_ws(Bin) ->
 ) -> map().
 store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
     BaseIndent = beamtalk_workspace_reshape:leading_ws(PrevSource),
-    %% Reshape via the compiler port (re-layout at the span's indent — BT-2594),
+    %% Reshape via the compiler port (re-layout at the span's indent),
     %% so `source_ref == disk[span]' even for width-sensitive methods a pure shift
     %% would reformat. The port is already up (the patch was just compiled through
     %% it); a transient failure downgrades to memory-only rather than store a
@@ -5228,7 +5227,7 @@ store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSou
             %% the last line of the file with no terminator (ADR 0082). Match that
             %% trailing-newline state on the reshaped body — regardless of whether
             %% the canonical body carries its own — so the splice is a true drop-in
-            %% and never glues the next line or leaves a stray blank one (BT-2584).
+            %% and never glues the next line or leaves a stray blank one.
             DiskShaped = match_trailing_newline(Reindented, PrevSource),
             Base#{
                 source => DiskShaped,
@@ -5247,9 +5246,9 @@ store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSou
                     domain => [beamtalk, runtime]
                 }
             ),
-            %% BT-2594 deliberately re-introduces this memory-only path that
-            %% BT-2592 removed (see new_method_entry/3): port re-layout is correct
-            %% where the pure-Erlang shift reshaped width-sensitive methods wrongly.
+            %% This memory-only path is deliberate (see new_method_entry/3):
+            %% port re-layout is correct where the pure-Erlang shift reshaped
+            %% width-sensitive methods wrongly.
             Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
     end.
 
@@ -5271,7 +5270,7 @@ ends_with_newline(Bin) -> binary:last(Bin) =:= $\n.
 %% A genuine span-resolution failure (`ambiguous', a port/transport error, ...)
 %% downgrades the entry to memory-only with a reason. The brand-new-method case
 %% (`selector_not_found') does NOT come here — it is reshaped and recorded
-%% flushable by `new_method_entry/3' (BT-2583).
+%% flushable by `new_method_entry/3'.
 -spec span_error_entry(map(), binary(), atom()) -> map().
 span_error_entry(Base, _SourceFile, Reason) ->
     Base#{
@@ -5281,7 +5280,7 @@ span_error_entry(Base, _SourceFile, Reason) ->
     }.
 
 %%% ----------------------------------------------------------------------------
-%%% Method-removal ChangeLog entry (ADR 0112 Phase 3, BT-3187)
+%%% Method-removal ChangeLog entry (ADR 0112 Phase 3)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -5410,7 +5409,7 @@ resolve_removal_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, Di
             };
         {error, selector_not_found, _Message} ->
             %% Nothing on disk to excise (the method was a live, never-flushed
-            %% addition) — nothing for BT-2192's future flush-excise step to
+            %% addition) — nothing for a future flush-excise step to
             %% act on either.
             Base#{flushable => false, not_flushable_reason => <<"not_on_disk">>};
         {error, Reason, _Message} ->
@@ -5535,7 +5534,7 @@ maybe_put_extension_source_file(Base, Owner) when is_atom(Owner) ->
     end.
 
 %%% ----------------------------------------------------------------------------
-%%% Class-removal ChangeLog entry (BT-3206)
+%%% Class-removal ChangeLog entry
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -5693,7 +5692,7 @@ is_path_inside(Root, Path) ->
     PathParts = filename:split(Path),
     lists:prefix(RootParts, PathParts).
 
-%% Convert a list of class info maps to a list of existing atoms (BT-738).
+%% Convert a list of class info maps to a list of existing atoms.
 -spec class_name_atoms([map()]) -> [atom()].
 class_name_atoms(Classes) ->
     lists:filtermap(
@@ -5712,7 +5711,7 @@ class_name_atoms(Classes) ->
 safe_atom_result({ok, Atom}) -> {true, Atom};
 safe_atom_result({error, badarg}) -> false.
 
-%% Compute a package-qualified module name for a file (BT-775 / BT-1670).
+%% Compute a package-qualified module name for a file.
 %%
 %% With package context: derives `bt@{package}@{relative_path_segments}`
 %% for files under src/ or test/.  Files outside those directories (e.g.

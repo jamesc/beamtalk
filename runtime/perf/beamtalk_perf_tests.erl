@@ -530,7 +530,7 @@ bench_block_threading() ->
         bench_block_threading:sum_direct_params(N)
     end, ?ITERATIONS, ?WARMUP),
 
-    %% BT-1286: scale loop — best-case for literal-skipping optimisation.
+    %% Scale loop — best-case for literal-skipping optimisation.
     %% result := result * 2 repeated N times: 1 variable + 1 literal per op.
     ScaleNativeTimings = run_benchmark(fun() ->
         bench_block_threading:scale_native(N)
@@ -559,12 +559,12 @@ bench_block_threading() ->
     io:format(standard_error,
         "PERF: block/stateacc_overhead ~.2fx vs native~n",
         [StateAccMedian / max(NativeMedian, 1)]),
-    %% BT-1275: Direct-params overhead should be ≤ 3x native (vs ~26-30x for StateAcc).
+    %% Direct-params overhead should be ≤ 3x native (vs ~26-30x for StateAcc).
     DirectParamsOverhead = DirectParamsMedian / max(NativeMedian, 1),
     io:format(standard_error,
         "PERF: block/direct_params_overhead ~.2fx vs native~n",
         [DirectParamsOverhead]),
-    %% BT-1286: Literal-skipping overhead on scale loop vs native.
+    %% Literal-skipping overhead on scale loop vs native.
     io:format(standard_error,
         "PERF: block/scale_literal_opt_overhead ~.2fx vs native~n",
         [ScaleLiteralOptMedian / max(ScaleNativeMedian, 1)]),
@@ -595,7 +595,7 @@ bench_block_threading() ->
         bench_block_threading:fold_stateacc_block(List)
     end, ?ITERATIONS, ?WARMUP),
 
-    %% BT-1327: inject:into: pure-path variants (no mutations)
+    %% inject:into: pure-path variants (no mutations)
     FoldInjectIntoTimings = run_benchmark(fun() ->
         bench_block_threading:fold_inject_into_wrapper(List)
     end, ?ITERATIONS, ?WARMUP),
@@ -622,7 +622,7 @@ bench_block_threading() ->
         "PERF: block/fold_pure_overhead ~.2fx vs native~n",
         [maps:get(median, FoldInlineSwapStats) / max(maps:get(median, FoldNativeStats), 1)]),
 
-    %% --- BT-1276: list-op with local variable mutation (StateAcc map vs tuple acc) ---
+    %% --- List-op with local variable mutation (StateAcc map vs tuple acc) ---
     DoNativeMutTimings = run_benchmark(fun() ->
         bench_block_threading:do_native_mutation(List)
     end, ?ITERATIONS, ?WARMUP),
@@ -649,7 +649,7 @@ bench_block_threading() ->
     io:format(standard_error,
         "PERF: block/do_tuple_acc_overhead ~.2fx vs native~n",
         [maps:get(median, DoTupleAccMutStats) / max(DoNativeMutMedian, 1)]),
-    %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for do: with mutation.
+    %% Tuple-acc should be at least 1.5x faster than StateAcc for do: with mutation.
     ?assert(DoMutImprovementRatio >= 1.5),
 
     CollectStateAccMutTimings = run_benchmark(fun() ->
@@ -669,7 +669,7 @@ bench_block_threading() ->
     io:format(standard_error,
         "PERF: block/collect_mutation_improvement ~.2fx tuple vs stateacc~n",
         [CollectMutImprovementRatio]),
-    %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for collect: with mutation.
+    %% Tuple-acc should be at least 1.5x faster than StateAcc for collect: with mutation.
     ?assert(CollectMutImprovementRatio >= 1.5),
 
     FoldStateAccMutTimings = run_benchmark(fun() ->
@@ -689,10 +689,10 @@ bench_block_threading() ->
     io:format(standard_error,
         "PERF: block/fold_mutation_improvement ~.2fx tuple vs stateacc~n",
         [FoldMutImprovementRatio]),
-    %% BT-1276: Tuple-acc should be at least 1.5x faster than StateAcc for inject: with mutation.
+    %% Tuple-acc should be at least 1.5x faster than StateAcc for inject: with mutation.
     ?assert(FoldMutImprovementRatio >= 1.5),
 
-    %% --- BT-1329: nested list op inside counted loop (Tier-2 StateAcc fallback) ---
+    %% --- Nested list op inside counted loop (Tier-2 StateAcc fallback) ---
     %%
     %% Outer loop runs 10 times; inner inject:into: runs over a 10,000-element list
     %% mutating an outer-scope variable on every element — the classic Tier-2 pattern.
@@ -719,10 +719,10 @@ bench_block_threading() ->
     io:format(standard_error,
         "PERF: block/nested_list_op_improvement ~.2fx tuple vs stateacc~n",
         [NestedImprovementRatio]),
-    %% BT-1329: Tuple-acc should be at least 1.5x faster than StateAcc for nested list ops.
+    %% Tuple-acc should be at least 1.5x faster than StateAcc for nested list ops.
     ?assert(NestedImprovementRatio >= 1.5),
 
-    %% --- BT-1342: counted loop with both local + field mutations ---
+    %% --- Counted loop with both local + field mutations ---
     MixedNativeTimings = run_benchmark(fun() ->
         bench_block_threading:mixed_native(N)
     end, ?ITERATIONS, ?WARMUP),
@@ -985,7 +985,7 @@ method_bench(Fun) ->
     stats(BatchTimings).
 
 %%====================================================================
-%% BT-2007: Class-method self-dispatch benchmarks
+%% Class-method self-dispatch benchmarks
 %%====================================================================
 
 %% Quantifies the cost introduced by routing inherited class-method
@@ -996,7 +996,7 @@ method_bench(Fun) ->
 %%      method self-send — a single `call '<mod>':'class_<sel>'(
 %%      ClassSelf, ClassVars, Args...)`. This is also the terminal step
 %%      of the helper, so the delta isolates the helper's setup work.
-%%   2. class_self_dispatch/4: the new BT-2007 path used for *inherited*
+%%   2. class_self_dispatch/4: the path used for *inherited*
 %%      class-method self-sends. Walks the superclass chain via ETS +
 %%      two gen_server:calls per level (one for get_local_class_methods,
 %%      one for module_name), constructs ClassSelf, then applies.
@@ -1081,7 +1081,7 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
         erlang:apply(ParentMod, FunName, [ClassSelf, ClassVars | Args])
     end),
 
-    %% Via helper (simulates BT-2007 inherited self-dispatch path).
+    %% Via helper (simulates the inherited self-dispatch path).
     HelperNs = method_bench(fun() ->
         beamtalk_class_dispatch:class_self_dispatch(ChildClass, Selector, ClassVars, Args)
     end),
@@ -1098,8 +1098,8 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
         "PERF: class_self_dispatch/helper_overhead ~.2fx vs direct_apply (~bns absolute)~n",
         [Overhead, AbsOverheadNs]),
 
-    %% Sanity bounds — after BT-2008 the chain walk reads module + selector
-    %% list from ETS (no gen_server hops). Observed median ~1.6µs on the
-    %% Dictionary → Collection chain; 2_000ns leaves headroom for CI noise.
-    ?assert(HelperMedian < 2_000),    %% helper < 2µs per call (post-BT-2008)
+    %% Sanity bounds — the chain walk reads module + selector list from ETS
+    %% (no gen_server hops). Observed median ~1.6µs on the Dictionary →
+    %% Collection chain; 2_000ns leaves headroom for CI noise.
+    ?assert(HelperMedian < 2_000),    %% helper < 2µs per call
     ?assert(DirectMedian < 10_000).   %% direct apply < 10µs per call

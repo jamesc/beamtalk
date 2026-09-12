@@ -1540,7 +1540,7 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(null, maps:get(<<"doc">>, IncRow))
         end},
         {"browse-protocols categorizes selectors by real protocol buckets", fun() ->
-            %% BT-2506: protocol_for_selector decides pragma → xref-extension
+            %% protocol_for_selector decides pragma → xref-extension
             %% source → name heuristic. With no declared category, the seed
             %% selectors land in meaningful buckets (not all "as yet
             %% unclassified"): name conventions for is*/as*/print*, the
@@ -1573,7 +1573,7 @@ browse_tests(#{class_name := Class}) ->
             %% print* prefix path (not the exact-name `printString` match):
             %% `printDetails` must reach the prefix heuristic and land in "printing".
             ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>)),
-            %% BT-2622: instance-side synthetic slots whose names collide with a
+            %% Instance-side synthetic slots whose names collide with a
             %% class-side-constructor-shaped selector must classify by
             %% `class_side` (accessing), NOT by the selector-name convention
             %% (which would say "instance creation").
@@ -1586,13 +1586,12 @@ browse_tests(#{class_name := Class}) ->
             fun() ->
                 %% Exercises the generic `class_side => true` → "instance
                 %% creation" classification rule in `protocol_from_source/4` with
-                %% fabricated xref data (see `browse_xref/0`). BT-2614 originally
-                %% had real actor codegen emit exactly this row shape for
-                %% `new`/`new:`/`spawn`/`spawn:`; BT-3073 retired that (those
-                %% selectors are now real, source-backed `indexed` class methods
-                %% inherited from `Actor`, never a per-subclass synthetic row) —
-                %% this test now covers the classification rule itself, decoupled
-                %% from any real compiler output.
+                %% fabricated xref data (see `browse_xref/0`) —
+                %% `new`/`new:`/`spawn`/`spawn:` are real, source-backed
+                %% `indexed` class methods inherited from `Actor`, never a
+                %% per-subclass synthetic row; this test covers the
+                %% classification rule itself, decoupled from any real
+                %% compiler output.
                 Value = decode_value(
                     beamtalk_repl_ops_browse:handle(
                         <<"browse-protocols">>,
@@ -1624,8 +1623,8 @@ browse_tests(#{class_name := Class}) ->
             %% no editable user source — `browse-method-source` returns `null`
             %% source (and null doc/signature) so the browser badges it
             %% read-only with no `[source]` jump. (For a real actor's
-            %% `spawn`/`new`/`spawnWith:`/`new:`, BT-3073 means there is no
-            %% such row at all — the class simply has no methodXref entry for
+            %% `spawn`/`new`/`spawnWith:`/`new:`, there is no such row at all
+            %% — the class simply has no methodXref entry for
             %% them, and browsing resolves to `Actor`'s real, editable
             %% `indexed` row instead.)
             Value = decode_value(
@@ -1758,7 +1757,7 @@ browse_tests(#{class_name := Class}) ->
                 )
             ),
             ?assertEqual(null, maps:get(<<"source">>, Value)),
-            %% No CompiledMethod → no doc/signature either (BT-2558).
+            %% No CompiledMethod → no doc/signature either.
             ?assertEqual(null, maps:get(<<"doc">>, Value)),
             ?assertEqual(null, maps:get(<<"signature">>, Value)),
             ?assertEqual(<<"unindexed_runtime_fun">>, maps:get(<<"source_status">>, Value))
@@ -1782,7 +1781,7 @@ browse_tests(#{class_name := Class}) ->
                 maps:get(<<"comment">>, Value)
             ),
             %% File-less fixture: the skeleton is still synthesized from the
-            %% loaded class' reflected super + state (BT-2570) — a null
+            %% loaded class' reflected super + state — a null
             %% `source_file` only flips `origin` to runtime, never the definition.
             Definition = maps:get(<<"definition">>, Value),
             ?assert(is_binary(Definition)),
@@ -1833,7 +1832,7 @@ browse_tests(#{class_name := Class}) ->
         end},
 
         %%============================================================
-        %% BT-3337 — not-found / validation error branches reached through
+        %% Not-found / validation error branches reached through
         %% handle_term/4 for every parameterised op.
         %%============================================================
 
@@ -1947,7 +1946,7 @@ browse_tests(#{class_name := Class}) ->
         end},
 
         %%============================================================
-        %% BT-3337 — method_text_fields/4's class-side `indexed` branch: a
+        %% method_text_fields/4's class-side `indexed` branch: a
         %% real class-method source read (distinct from the existing
         %% synthetic-`spawn` null-source case above).
         %%============================================================
@@ -1971,14 +1970,14 @@ browse_tests(#{class_name := Class}) ->
     ].
 
 %%====================================================================
-%% Protocol browse tests (BT-2615)
+%% Protocol browse tests
 %%====================================================================
 %%
 %% A protocol (e.g. Printable) is reified as a sealed abstract class object
 %% (ADR 0068) dispatched by the shared `beamtalk_protocol_object` module. That
 %% dispatch module carries no package and no on-disk source, so without special
 %% handling every protocol would land in the browser's "(uncategorized)" bucket
-%% badged "project". These tests pin the BT-2615 fixes: the `is_protocol` flag
+%% badged "project". These tests pin the fix: the `is_protocol` flag
 %% (so the browser can group them under "Protocols"), origin resolution through
 %% the protocol's *defining* module (so a stdlib protocol badges stdlib), and the
 %% required-member rows (so a protocol's contract is visible instead of empty).
@@ -2088,7 +2087,7 @@ protocol_tests(#{proto_bin := Proto}) ->
     ].
 
 %%====================================================================
-%% source_origin (classification) / package (name) split — BT-2643
+%% source_origin (classification) / package (name) split
 %%====================================================================
 
 %% source_origin_of/2 returns the bare classification, never `dependency:<pkg>`.
@@ -2157,7 +2156,7 @@ package_of_module_extraction_test() ->
     ?assertEqual(nil, beamtalk_repl_ops_browse:package_of_module(no_at_signs)).
 
 %%====================================================================
-%% Package-based source_origin classification — BT-2640
+%% Package-based source_origin classification
 %%====================================================================
 
 %% Without a running workspace_meta the project package is unknown, so a
@@ -2204,8 +2203,8 @@ source_origin_with_meta_project_package_is_project_test() ->
     end).
 
 %% Package =/= project package => dependency, even when the dependency source
-%% resolves under the project tree (the BT-2640 bug: a path-only check would
-%% mislabel this `project`).
+%% resolves under the project tree (a path-only check would mislabel this
+%% `project`).
 source_origin_with_meta_dependency_package_is_dependency_test() ->
     with_project_package(<<"myapp">>, fun() ->
         ?assertEqual(
@@ -2328,7 +2327,7 @@ protocol_of(Protocols, Selector) ->
     end.
 
 %%====================================================================
-%% BT-3337 — dead-pid resilience: class_row/2 and state_slots/2 must never
+%% Dead-pid resilience: class_row/2 and state_slots/2 must never
 %% crash a browse when the class process has already exited (a TOCTOU race
 %% between `all_classes/0` and the per-class reflection calls).
 %%====================================================================
@@ -2350,7 +2349,7 @@ state_slots_dead_pid_degrades_to_empty_list_test() ->
     ?assertEqual([], beamtalk_repl_ops_browse:state_slots(dead_pid(), #{})).
 
 %%====================================================================
-%% BT-3337 — alias_field_binary/1's Erlang-string clause: `.app`-file
+%% alias_field_binary/1's Erlang-string clause: `.app`-file
 %% `expansion`/`source_file`/`doc` fields round-trip as Erlang strings
 %% (via `escape_erlang_string` + `file:consult`), never as binaries.
 %%====================================================================
@@ -2379,7 +2378,7 @@ alias_row_normalises_string_shaped_fields_test() ->
     ?assertEqual(<<"src/direction.bt">>, maps:get(<<"source_file">>, Row)).
 
 %%====================================================================
-%% BT-3337 — delegate_callers_of_native_module/1's `none` sentinel guard
+%% delegate_callers_of_native_module/1's `none` sentinel guard
 %% (`meta_backing_module/1`'s "no backing module" answer, never a real
 %% native module name).
 %%====================================================================
@@ -2392,7 +2391,7 @@ delegate_callers_of_native_module_unbacked_module_is_empty_test() ->
     ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(lists)).
 
 %%====================================================================
-%% BT-3337 — native_module_editable_target/1 (BT-2670): a module with no
+%% native_module_editable_target/1: a module with no
 %% readable on-disk `.erl` source (a core BIF module) is not editable.
 %%====================================================================
 

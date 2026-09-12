@@ -216,10 +216,10 @@ run_all_with_real_module_test() ->
     end.
 
 %%% ============================================================================
-%%% is_valid_setUp_result/2 Tests (BT-1293)
+%%% is_valid_setUp_result/2 Tests
 %%% ============================================================================
 
-%% Valid: same class map — normal BT-900 value-object setUp path
+%% Valid: same class map — normal value-object setUp path
 is_valid_setUp_result_same_class_test() ->
     Instance = #{'$beamtalk_class' => 'MyTest', value => 0},
     Result = #{'$beamtalk_class' => 'MyTest', value => 42},
@@ -263,7 +263,7 @@ is_valid_setUp_result_actor_instance_test() ->
     ?assertNot(beamtalk_test_case:is_valid_setUp_result(Instance, nil)).
 
 %%% ============================================================================
-%%% format_stacktrace/1 Tests (BT-1743: frame ordering)
+%%% format_stacktrace/1 Tests (frame ordering)
 %%% ============================================================================
 
 %% Empty stacktrace returns empty binary.
@@ -317,7 +317,7 @@ format_stacktrace_selects_first_two_plus_last_test() ->
     ?assertNotEqual(nomatch, binary:match(Result, <<"m4">>)).
 
 %%% ============================================================================
-%%% ensure_test_context/4 Tests (BT-1743: frame ordering)
+%%% ensure_test_context/4 Tests (frame ordering)
 %%% ============================================================================
 
 %% When the test method is already in the rendered frames, message is unchanged.

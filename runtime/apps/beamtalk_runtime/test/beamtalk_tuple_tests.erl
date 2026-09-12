@@ -69,7 +69,7 @@ at_non_integer_index_test() ->
 %%% ============================================================================
 
 as_string_test() ->
-    %% BT-536: Atoms now use #symbol notation via beamtalk_primitive:print_string/1
+    %% Atoms use #symbol notation via beamtalk_primitive:print_string/1
     ?assertEqual(<<"{#a, #b}">>, beamtalk_tuple:as_string({a, b})),
     ?assertEqual(<<"{#ok, 42}">>, beamtalk_tuple:as_string({ok, 42})),
     ?assertEqual(<<"{#error, #not_found}">>, beamtalk_tuple:as_string({error, not_found})),
@@ -123,7 +123,7 @@ dispatch_unwrap_or_test() ->
     ?assertEqual(default, 'bt@stdlib@tuple':dispatch('unwrapOr:', [default], {error, reason})).
 
 dispatch_as_string_test() ->
-    %% BT-536: Atoms now use #symbol notation
+    %% Atoms use #symbol notation
     ?assertEqual(<<"{#ok, 42}">>, 'bt@stdlib@tuple':dispatch('asString', [], {ok, 42})).
 
 dispatch_unwrap_or_else_test() ->
@@ -163,7 +163,7 @@ primitive_send_unwrap_test() ->
     ?assertEqual(42, beamtalk_primitive:send({ok, 42}, 'unwrap', [])).
 
 primitive_send_as_string_test() ->
-    %% BT-536: Atoms use #symbol notation via beamtalk_primitive:print_string/1
+    %% Atoms use #symbol notation via beamtalk_primitive:print_string/1
     ?assertEqual(<<"{#a, #b}">>, beamtalk_primitive:send({a, b}, 'asString', [])).
 
 %%% ============================================================================

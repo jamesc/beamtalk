@@ -405,7 +405,7 @@ conflicts_three_way_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-2196: Source tracking tests (register/5, getSource/2,
+%%% Source tracking tests (register/5, getSource/2,
 %%% listAllWithSource/0)
 %%% ============================================================================
 
@@ -601,7 +601,7 @@ get_source_handles_uninitialised_table_test() ->
     end.
 
 %%% ============================================================================
-%%% BT-2202: extenders_of/1 tests
+%%% extenders_of/1 tests
 %%% ============================================================================
 
 extenders_of_empty_table_test_() ->
@@ -678,7 +678,7 @@ extenders_of_no_match_returns_empty_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-2202: extensions_by/1 tests
+%%% extensions_by/1 tests
 %%% ============================================================================
 
 extensions_by_empty_table_test_() ->
@@ -745,7 +745,7 @@ extensions_by_no_match_returns_empty_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-2202: Symmetric round-trip tests
+%%% Symmetric round-trip tests
 %%% ============================================================================
 
 extenders_of_extensions_by_round_trip_test_() ->
@@ -792,7 +792,7 @@ extenders_of_extensions_by_round_trip_test_() ->
     end}.
 
 %%% ============================================================================
-%%% ADR 0087 Phase 4 (BT-2301): xref index hooks for extension lifecycle
+%%% ADR 0087 Phase 4: xref index hooks for extension lifecycle
 %%% ============================================================================
 
 %% Setup that also stands up (and clears) a beamtalk_xref gen_server so the
@@ -893,7 +893,7 @@ register4_marks_unindexed_runtime_fun_test_() ->
                 ?assertEqual(unindexed_runtime_fun, maps:get(source_status, Info)),
                 ?assertEqual(extension, maps:get(provenance, Info)),
 
-                %% ADR 0087 Phase 6 (BT-2304): the unindexed_runtime_fun row is
+                %% ADR 0087 Phase 6: the unindexed_runtime_fun row is
                 %% DEFINED-here — distinct from an absent row, which reports
                 %% `undefined`. A query can tell "defined, sends not analysable"
                 %% apart from "no such method".
@@ -957,7 +957,7 @@ unregister_unknown_is_noop_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-3185: unregister/3 — class-side extension removal + conflict cleanup
+%%% unregister/3 — class-side extension removal + conflict cleanup
 %%% ============================================================================
 
 unregister3_class_side_purges_correct_xref_rows_test_() ->
@@ -965,7 +965,7 @@ unregister3_class_side_purges_correct_xref_rows_test_() ->
         [
             ?_test(begin
                 %% A class-side extension is registered under the metaclass
-                %% tag (ADR 0066/BT-1617's established convention — mirrors
+                %% tag (ADR 0066's established convention — mirrors
                 %% how codegen emits `Target class >> sel` registrations).
                 InstanceClass = 'BT3185Meta',
                 ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
@@ -1150,7 +1150,7 @@ unregister3_clears_conflict_history_for_class_side_selector_test_() ->
     end}.
 
 %%% ============================================================================
-%%% BT-3105: purge_class/1 — full purge on class removal
+%%% purge_class/1 — full purge on class removal
 %%% ============================================================================
 
 purge_class_removes_every_extension_and_xref_row_test_() ->

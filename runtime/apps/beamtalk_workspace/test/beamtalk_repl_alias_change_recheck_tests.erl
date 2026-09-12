@@ -55,7 +55,7 @@ alias_recheck_setup() ->
         repl => false
     }),
     %% Clears the compiler_server's ambient class *and* alias caches (ADR
-    %% 0108, BT-2899 — clear_classes/0 now clears both, see its doc).
+    %% 0108 — clear_classes/0 now clears both, see its doc).
     beamtalk_compiler_server:clear_classes(),
     case whereis(beamtalk_alias_xref) of
         undefined -> ok;
@@ -374,7 +374,7 @@ live_alias_redefinition_back_to_sound_expansion_announces_clearing_test_() ->
         end}}.
 
 %%====================================================================
-%% Regression (adversarial review, BT-2899): the `>>` method-patch path
+%% Regression: the `>>` method-patch path
 %% (`beamtalk_repl_compiler:compile_method_reload/3`, the structured
 %% single-method compile backing IDE save / `compile:source:` / REPL `>>`)
 %% must populate `beamtalk_alias_xref` exactly like a fresh class load does
@@ -426,7 +426,7 @@ compile_method_patch_registers_alias_dependency_test_() ->
             ]
         end}}.
 
-%% BT-2955 follow-up: `compile_method_reload/3`'s `ClassSource` is the
+%% `compile_method_reload/3`'s `ClassSource` is the
 %% class's own reconstructed source (`beamtalk_workspace_meta:get_class_source/1`,
 %% keyed by class name) — it does NOT include a `type Name = ...` alias
 %% declared as a *sibling* of the class in its originating source file (the
@@ -494,7 +494,7 @@ compile_method_patch_preserves_file_local_alias_dependency_test_() ->
         end}}.
 
 %%====================================================================
-%% End-to-end (BT-2916, BT-2899 follow-up): a live redefinition of a
+%% End-to-end: a live redefinition of a
 %% *deeply* (3-level) transitively referenced alias still fires the
 %% dependent's re-check.
 %%
@@ -633,7 +633,7 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
         end}}.
 
 %%====================================================================
-%% BT-2917 (BT-2899 follow-up): a protocol's own method-signature
+%% A protocol's own method-signature
 %% annotation registers the same `beamtalk_alias_xref` dependency edge a
 %% class-defining compile gets — exercised through the file-compile
 %% (`handle_load/2` -> `protocol_definition`) path, the protocol-shaped
@@ -679,8 +679,7 @@ protocol_definition_registers_alias_dependency_test_() ->
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(ProtocolPath, State1),
 
                     %% The protocol itself gets the same alias-xref
-                    %% dependency edge a class-defining compile gets
-                    %% (BT-2917 acceptance criterion #3).
+                    %% dependency edge a class-defining compile gets.
                     ?assertEqual(
                         [<<"AliasChangeProtocolDirectional">>],
                         beamtalk_alias_xref:dependents_of(<<"AliasChangeProtocolDirection">>)
@@ -688,8 +687,8 @@ protocol_definition_registers_alias_dependency_test_() ->
 
                     %% A live redefinition of the alias picks the protocol up
                     %% as a real re-check candidate — confirming a re-check
-                    %% is actually triggered for it (BT-2917 acceptance
-                    %% criterion #4), not just silently indexed.
+                    %% is actually triggered for it, not just silently
+                    %% indexed.
                     Result = beamtalk_recheck:trigger_alias_change([
                         <<"AliasChangeProtocolDirection">>
                     ]),
@@ -705,27 +704,18 @@ protocol_definition_registers_alias_dependency_test_() ->
         end}}.
 
 %%====================================================================
-%% Regression (adversarial review, BT-2917; updated for BT-2952): a
-%% REPL-inline redefinition of the SAME protocol (`compile_expression`, not
-%% `:load`) must NOT lose the alias-xref edge a prior file-compile
-%% registered.
+%% Regression: a REPL-inline redefinition of the SAME protocol
+%% (`compile_expression`, not `:load`) must NOT lose the alias-xref edge a
+%% prior file-compile registered.
 %%
 %% `beamtalk_alias_xref:register_class/2` is whole-set replacement, not a
-%% delta (see its own doc). Before BT-2917, `compile_protocol_definition_result/1`
-%% was shared by both the file-compile and REPL-inline paths but only the
-%% file-compile path had a trustworthy `referenced_aliases` — the REPL-inline
-%% path hardcoded `[]`, so registering unconditionally there would have
-%% clobbered a `:load`-registered edge with an empty one. BT-2917 avoided
-%% that by only registering from a file-compile-only wrapper.
-%%
-%% BT-2952 made the compiler port compute a genuine `referenced_aliases` set
-%% for the REPL-inline path too, so `compile_protocol_definition_result/1`
-%% now registers unconditionally for both callers (see that function's doc).
-%% This test still pins the observable outcome — retyping the IDENTICAL
-%% protocol inline at the REPL leaves the edge unchanged — but now that's
-%% because the REPL-inline recompile registers the same real
-%% `referenced_aliases` set the file-compile did (idempotent
-%% re-registration), not because REPL-inline skips registration.
+%% delta (see its own doc). `compile_protocol_definition_result/1` computes
+%% a genuine `referenced_aliases` set for both the file-compile and
+%% REPL-inline paths and registers unconditionally for both callers (see
+%% that function's doc), so retyping the IDENTICAL protocol inline at the
+%% REPL leaves the edge unchanged: the REPL-inline recompile registers the
+%% same real `referenced_aliases` set the file-compile did (idempotent
+%% re-registration).
 %%====================================================================
 
 protocol_definition_repl_inline_recompile_preserves_alias_dependency_test_() ->
@@ -745,8 +735,8 @@ protocol_definition_repl_inline_recompile_preserves_alias_dependency_test_() ->
                         "  heading: d :: AliasChangeProtocolClobberDirection -> Boolean\n",
 
                     %% Turn 1: `:load` the protocol from a file — registers
-                    %% the real alias-xref edge (BT-2917 acceptance criterion
-                    %% #3, same as protocol_definition_registers_alias_
+                    %% the real alias-xref edge (same as
+                    %% protocol_definition_registers_alias_
                     %% dependency_test_ above).
                     ProtocolPath = filename:join(
                         temp_dir(),
@@ -766,10 +756,10 @@ protocol_definition_repl_inline_recompile_preserves_alias_dependency_test_() ->
                     %% Turn 2: retype the IDENTICAL protocol inline at the
                     %% REPL (`compile_expression`, the `Protocol define:`
                     %% typed-directly path) — must compile successfully and
-                    %% leave the resulting edge unchanged (BT-2952: it now
-                    %% re-registers, but with the same genuinely-computed
-                    %% set, so the observable dependents_of/1 result is
-                    %% identical to Turn 1's). Passes State1's
+                    %% leave the resulting edge unchanged (it re-registers,
+                    %% but with the same genuinely-computed set, so the
+                    %% observable dependents_of/1 result is identical to
+                    %% Turn 1's). Passes State1's
                     %% `known_type_alias_sources` explicitly, mirroring the
                     %% real production call shape (`beamtalk_repl_eval:do_eval/3`).
                     ExprResult = beamtalk_repl_compiler:compile_expression(
@@ -790,21 +780,14 @@ protocol_definition_repl_inline_recompile_preserves_alias_dependency_test_() ->
         end}}.
 
 %%====================================================================
-%% BT-2952 acceptance criterion #4: a class/protocol declared PURELY
-%% inline at the REPL (`compile_expression`, never `:load`ed from a file)
-%% with a method signature referencing a type alias now registers a
-%% `beamtalk_alias_xref` dependency edge — the actual gap this issue closes.
-%% Before this fix:
-%%   - Rust (`crates/beamtalk-compiler-port/src/main.rs`): the compiler
-%%     port's REPL-expression path never computed `referenced_aliases` at
-%%     all for a class definition, and hardcoded `&[]` for a protocol
-%%     definition (BT-2917's known limitation).
-%%   - Erlang (`beamtalk_compiler_port:handle_response/1`): even once the
-%%     Rust side sent a real `referenced_aliases` field, this module's
-%%     `class_definition`/`protocol_definition` clauses silently dropped it.
-%%   - `beamtalk_repl_compiler:compile_class_definition_result/2` never
-%%     called `register_alias_xref_for_classes/2` — only the file-compile
-%%     path (`compile_file_core/4`) did.
+%% A class/protocol declared PURELY inline at the REPL (`compile_expression`,
+%% never `:load`ed from a file) with a method signature referencing a type
+%% alias registers a `beamtalk_alias_xref` dependency edge: the compiler
+%% port computes `referenced_aliases` for the REPL-expression path for both
+%% class and protocol definitions, `beamtalk_compiler_port:handle_response/1`
+%% forwards the field, and `beamtalk_repl_compiler:compile_class_definition_result/2`
+%% calls `register_alias_xref_for_classes/2` the same as the file-compile
+%% path (`compile_file_core/4`) does.
 %% These two tests are the class/protocol siblings of
 %% `protocol_definition_registers_alias_dependency_test_` above, which
 %% proves the identical thing through the file-compile (`:load`) path.
@@ -887,7 +870,7 @@ protocol_definition_repl_inline_registers_alias_dependency_test_() ->
         end}}.
 
 %%====================================================================
-%% BT-2955: a REPL-inline class/protocol redefinition must not clobber a
+%% A REPL-inline class/protocol redefinition must not clobber a
 %% beamtalk_alias_xref edge that came from a FILE-LOCAL type alias — one
 %% declared in the same source file as the class/protocol, never entered
 %% into the REPL session's own known_type_alias_sources (mirrors the real
@@ -931,9 +914,9 @@ class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_
                     %% never called declare_alias/3 wouldn't have it either),
                     %% so this compile's own AliasRegistry has no entry for
                     %% it and `referenced_aliases` comes back without it.
-                    %% Before BT-2955 this would clobber the real edge above
-                    %% with `[]` (`compile_class_definition_result/2`'s
-                    %% then-unconditional whole-set-replace registration).
+                    %% `compile_class_definition_result/2`'s whole-set-replace
+                    %% registration must not clobber the real edge above
+                    %% with `[]`.
                     ClassSource =
                         "Object subclass: AliasChangeFileLocalUser\n"
                         "  heading: d :: AliasChangeFileLocalDirection => d\n",
@@ -949,7 +932,7 @@ class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_
             ]
         end}}.
 
-%% BT-2955 protocol sibling of
+%% Protocol sibling of
 %% `class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_test_`
 %% above — same file-local-alias shape, but for `Protocol define: ...`
 %% (`compile_protocol_definition_result/2`'s `additive` branch).
@@ -989,9 +972,9 @@ protocol_definition_repl_inline_redefinition_preserves_file_local_alias_dependen
                     %% `AliasChangeProtocolFileLocalDirection` at the REPL,
                     %% so this compile's own AliasRegistry has no entry for
                     %% it and `referenced_aliases` comes back without it.
-                    %% Before BT-2955 this would clobber the real edge above
-                    %% with `[]` (`compile_protocol_definition_result/2`'s
-                    %% then-unconditional whole-set-replace registration).
+                    %% `compile_protocol_definition_result/2`'s whole-set-replace
+                    %% registration must not clobber the real edge above
+                    %% with `[]`.
                     ProtocolSource =
                         "Protocol define: AliasChangeProtocolFileLocalDirectional\n"
                         "  heading: d :: AliasChangeProtocolFileLocalDirection -> Boolean\n",

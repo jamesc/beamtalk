@@ -73,14 +73,14 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 
 -export([handle/4, handle_term/4, describe_ops/0, source_origin_of/2]).
 
-%% BT-2670: the editable-native-target resolver, called by the save-native-source
+%% The editable-native-target resolver, called by the save-native-source
 %% op (`beamtalk_repl_ops_load`) to re-derive — server-side, never trusting the
 %% client — whether a native module is a project-owned, editable `.erl` and where
 %% its source lives. Authorization seam: only `<<"project">>` is writable.
 -export([native_module_editable_target/1]).
 
-%% BT-3444: `info_fields/1` (method_info() -> {Line, SourceStatus, Provenance}),
-%% `row_doc_signature/4` (the BT-2735/BT-2714 synthetic-only doc/signature
+%% `info_fields/1` (method_info() -> {Line, SourceStatus, Provenance}),
+%% `row_doc_signature/4` (the synthetic-only doc/signature
 %% resolver), and `side_to_binary/1` (boolean class_side -> `<<"class">>` /
 %% `<<"instance">>`) are the same per-selector shaping op 2 (`browse-protocols`)
 %% already does. Exported so the `methods` ws op (`beamtalk_repl_ops_dev`) — the
@@ -89,7 +89,7 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 %% already does, instead of a second `source_status`-shaping implementation.
 -export([info_fields/1, row_doc_signature/4, side_to_binary/1]).
 
-%% BT-2732: the ADR 0056 `self delegate` callers of a native module — the
+%% The ADR 0056 `self delegate` callers of a native module — the
 %% complement of the explicit `(Erlang <module>)` FFI callers
 %% `beamtalk_xref:callers_of_native_module/1` reports. Called by the
 %% `callers_of_native_module` nav op (`beamtalk_repl_ops_nav`), which merges both
@@ -98,12 +98,12 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 -export([delegate_callers_of_native_module/1]).
 
 -ifdef(TEST).
-%% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
-%% delegate-source marker have no live-class dependency. BT-2643: the
-%% source_origin (classification) / package (name) split helpers. BT-2732: the
-%% `dispatch_<selector>` export → `self delegate` selector recovery. BT-2903:
-%% the seeding-boundary exclusion + row-shaping helpers behind
-%% `browse-type-aliases`. BT-3314: the alias-source param validator.
+%% Pure helpers exercised directly in EUnit: clause parsing and the
+%% delegate-source marker have no live-class dependency; the
+%% source_origin (classification) / package (name) split helpers; the
+%% `dispatch_<selector>` export → `self delegate` selector recovery; the
+%% seeding-boundary exclusion + row-shaping helpers behind
+%% `browse-type-aliases`; the alias-source param validator.
 -export([
     handle_call_clause_lines/1,
     clause_selector/1,
@@ -117,7 +117,7 @@ See `docs/ADR/0096-system-browser-data-source.md`.
     class_definition_text/7,
     validate_alias/1,
     safe_relative_path/1,
-    %% BT-3337: dead-pid resilience (class_row/2, state_slots/2) and the
+    %% Dead-pid resilience (class_row/2, state_slots/2) and the
     %% alias-field string-shape normaliser.
     class_row/2,
     state_slots/2,
@@ -171,10 +171,10 @@ handle_term(<<"browse-categories">>, Params, _Msg, _SessionPid) ->
             arg_error(<<"browse-categories">>, Reason)
     end;
 handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
-    %% BT-2648: the native pane can be keyed by a standalone native `module`
+    %% The native pane can be keyed by a standalone native `module`
     %% (a dependency's hand-written `.erl` with no `native:` class to back it,
     %% surfaced by `browse-native-modules`) as an alternative to a `class`. The
-    %% `module` form takes precedence; the `class` form is the original BT-2578
+    %% `module` form takes precedence; the `class` form is the original
     %% path (resolve a native class's backing module).
     case validate_module(Params) of
         {ok, ModuleName} ->

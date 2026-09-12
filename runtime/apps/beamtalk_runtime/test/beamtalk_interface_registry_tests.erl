@@ -203,7 +203,7 @@ class_named_test_() ->
     end}.
 
 %%====================================================================
-%% classNamed: Metaclass Tag Tests (BT-2223)
+%% classNamed: Metaclass Tag Tests
 %%====================================================================
 
 class_named_metaclass_tag_test_() ->
@@ -268,7 +268,7 @@ class_named_metaclass_tag_test_() ->
     end}.
 
 %%====================================================================
-%% Transient class-process resolution (BT-2467)
+%% Transient class-process resolution
 %%====================================================================
 
 class_object_for_pid_test_() ->
@@ -286,7 +286,7 @@ class_object_for_pid_test_() ->
                 %% A class object process that exited between whereis_class/1
                 %% returning its pid and the module_name/1 gen_server:call must
                 %% surface as nil, not propagate an `erlang_exit` to callers
-                %% such as SystemNavigation classesInPackage:. (BT-2467)
+                %% such as SystemNavigation classesInPackage:.
                 DeadPid = spawn(fun() -> ok end),
                 MRef = erlang:monitor(process, DeadPid),
                 receive

@@ -135,7 +135,7 @@ max_depth_zero_still_runs_step_fun_once_test() ->
     ?assertEqual({max_depth_exceeded, 1}, beamtalk_hierarchy:walk_ancestors(0, StepFun, 0)).
 
 %%% ============================================================================
-%%% Recovering fold state from LastNode (BT-3096) — callers that ride an
+%%% Recovering fold state from LastNode — callers that ride an
 %%% accumulator inside the node itself, e.g. {ClassName, Acc}, as documented
 %%% by beamtalk_behaviour_intrinsics:walk_hierarchy/3's moduledoc.
 %%% ============================================================================

@@ -60,7 +60,7 @@ bindings_initially_empty_test_() ->
         ]
     end}.
 
-%% BT-2368 (ADR 0081 Phase 7): the shell answers its own protocol session id so
+%% ADR 0081 Phase 7: the shell answers its own protocol session id so
 %% liveSessions/0 can mint Session values with the id withId/1 would resolve.
 get_session_id_returns_started_id_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
@@ -111,7 +111,7 @@ eval_empty_expression_test_() ->
     end}.
 
 %%====================================================================
-%% Show Codegen Tests (BT-700)
+%% Show Codegen Tests
 %%====================================================================
 
 show_codegen_returns_core_erlang_test_() ->
@@ -247,7 +247,7 @@ multiple_sessions_independent_test_() ->
     end}.
 
 %%====================================================================
-%% Unload Module Tests (BT-519)
+%% Unload Module Tests
 %%====================================================================
 
 unload_module_removes_from_tracker_test_() ->
@@ -338,7 +338,7 @@ unload_module_not_in_tracker_test_() ->
         ]
     end}.
 
-%% BT-1242: {class_removed, ClassName, Module} info message removes module from tracker.
+%% {class_removed, ClassName, Module} info message removes module from tracker.
 class_removed_event_updates_tracker_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -370,7 +370,7 @@ class_removed_event_updates_tracker_test_() ->
                 ?assert(is_process_alive(Pid)),
                 beamtalk_repl_shell:stop(Pid)
             end),
-            %% BT-1242: class_removed while worker active — pending removal is
+            %% class_removed while worker active — pending removal is
             %% stored (not dropped) so eval_result can apply it.
             ?_test(begin
                 {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-class-removed-3">>),
