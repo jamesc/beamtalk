@@ -389,6 +389,7 @@
     "esbuild": "^0.28.1",
     "typescript": "^5.0.0",
     "vitest": "^4.1.11",
-    "vscode-oniguruma": "^2.0.1"
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-uri": "^3.2.0"
   }
 }

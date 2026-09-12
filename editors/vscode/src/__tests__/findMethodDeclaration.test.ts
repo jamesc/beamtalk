@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+// The real implementation `vscode.Uri` is built on (published by Microsoft,
+// used inside VS Code itself) — used below to test `aliasSourceUriString`/
+// `parseAliasSourceUriPath` against real URI-parsing semantics instead of a
+// hand-rolled simulation. `vscodeMock.ts` (used by other test files in this
+// suite) only stubs `Uri.file`, never `Uri.parse`, so nothing exercised the
+// real parser's behavior before — which is exactly how the two bugs
+// documented below (double-decode, and the "//"-leading-path throw) shipped
+// undetected.
+import { URI } from "vscode-uri";
 import {
   aliasSourceUriString,
   classNameToStdlibFilename,
@@ -810,41 +819,52 @@ describe("classNameToStdlibFilename", () => {
   });
 });
 
-// BT-3496: the `beamtalk-alias://` virtual URI scheme for a type alias's
-// read-only source view. `aliasSourceUriString` builds a percent-encoded URI
-// string with no `vscode` dependency; `extension.ts`'s `aliasSourceUri` wraps
-// it in `vscode.Uri.parse`. `parseAliasSourceUriPath` is the inverse — but it
-// must NOT decode again, since a real `vscode.Uri`'s `.path` getter already
-// returns the decoded string (VS Code decodes exactly once when parsing).
-// `simulatedUriPath` below stands in for that real, already-decoded `.path`
-// — decoding the built string exactly once, the same way `vscode.Uri.parse`
-// would — so these round-trip tests exercise the same encode-once/decode-once
-// contract production code relies on, rather than bypassing it.
-function simulatedUriPath(uriString: string): string {
-  return decodeURIComponent(uriString.replace(/^beamtalk-alias:\/\//, ""));
+// BT-3496/BT-3505: the `beamtalk-alias://` virtual URI scheme for a type
+// alias's read-only source view. `aliasSourceUriString` builds a
+// percent-encoded URI string with no `vscode` dependency; `extension.ts`'s
+// `aliasSourceUri` wraps it in `vscode.Uri.parse`. `parseAliasSourceUriPath`
+// is the inverse, fed `.path` off the real `Uri` that produces.
+//
+// These round-trip tests go through the real `vscode-uri` `URI.parse` (not a
+// hand-rolled simulation) specifically because two real bugs shipped
+// undetected by simulated/mocked round-trips before: (1) double-decoding
+// `.path` (BT-3496 review), and (2) `Uri.parse` *throwing*
+// `UriError: ... the path cannot begin with two slash characters ("//")`
+// for an authority-less URI whose path started with `//` — exactly what an
+// empty/unknown `pkg` used to produce (`beamtalk-alias:////Foo.bt` →
+// `.path === "//Foo.bt"`), reachable via `_hasNavigableAliasSource`'s
+// pre-BT-3496 fallback path even against a current server. `aliasSourceUriString`
+// now guarantees the package path segment is never empty (a marker prefix,
+// `ALIAS_PACKAGE_SEGMENT_MARKER`) specifically to rule out that whole failure
+// class rather than special-case the one input that triggered it (BT-3505).
+function realUriPath(uriString: string): string {
+  return URI.parse(uriString).path;
 }
 
 describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
   it("builds a URI string embedding both package and name as path segments", () => {
-    expect(aliasSourceUriString("Timeout", "my_app")).toBe("beamtalk-alias:///my_app/Timeout.bt");
+    expect(aliasSourceUriString("Timeout", "my_app")).toBe("beamtalk-alias:///pmy_app/Timeout.bt");
   });
 
-  it("encodes an unknown package as an empty path segment", () => {
-    // Four slashes: the `///` scheme separator plus the empty-segment `/`
-    // that precedes the name — mirrors how a real URI parser folds an empty
-    // authority-adjacent segment into an extra leading `/` on `.path`
-    // (`new URL("beamtalk-alias:////Timeout.bt").pathname === "//Timeout.bt"`).
-    expect(aliasSourceUriString("Timeout", undefined)).toBe("beamtalk-alias:////Timeout.bt");
+  it("marks an unknown package with the bare marker segment, never an empty one", () => {
+    expect(aliasSourceUriString("Timeout", undefined)).toBe("beamtalk-alias:///p/Timeout.bt");
   });
 
   it("percent-encodes package/name characters that aren't URI-path-safe", () => {
     const uri = aliasSourceUriString("My Alias", "my pkg");
-    expect(uri).toBe("beamtalk-alias:///my%20pkg/My%20Alias.bt");
+    expect(uri).toBe("beamtalk-alias:///pmy%20pkg/My%20Alias.bt");
   });
 
-  it("round-trips name and package through build → (simulated) Uri.path → parse", () => {
+  it("does not throw when parsed by a real vscode.Uri, for any package presence (BT-3505 regression)", () => {
+    for (const pkg of ["my_app", undefined, "", "beamtalk_stdlib"]) {
+      const uri = aliasSourceUriString("Timeout", pkg);
+      expect(() => URI.parse(uri)).not.toThrow();
+    }
+  });
+
+  it("round-trips name and package through build → real Uri.parse → parse", () => {
     const uri = aliasSourceUriString("RestartStrategy", "beamtalk_stdlib");
-    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
+    expect(parseAliasSourceUriPath(realUriPath(uri))).toEqual({
       name: "RestartStrategy",
       pkg: "beamtalk_stdlib",
     });
@@ -852,7 +872,7 @@ describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
 
   it("round-trips an unknown package back to undefined", () => {
     const uri = aliasSourceUriString("Timeout", undefined);
-    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
+    expect(parseAliasSourceUriPath(realUriPath(uri))).toEqual({
       name: "Timeout",
       pkg: undefined,
     });
@@ -860,7 +880,7 @@ describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
 
   it("round-trips percent-encoded characters (space) back to their original form", () => {
     const uri = aliasSourceUriString("My Alias", "my pkg");
-    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
+    expect(parseAliasSourceUriPath(realUriPath(uri))).toEqual({
       name: "My Alias",
       pkg: "my pkg",
     });
@@ -874,8 +894,8 @@ describe("aliasSourceUriString / parseAliasSourceUriPath", () => {
   // existed.
   it("round-trips a literal '%' in the name/package without throwing (double-decode regression)", () => {
     const uri = aliasSourceUriString("50% Done", "100% Coverage");
-    expect(() => parseAliasSourceUriPath(simulatedUriPath(uri))).not.toThrow();
-    expect(parseAliasSourceUriPath(simulatedUriPath(uri))).toEqual({
+    expect(() => parseAliasSourceUriPath(realUriPath(uri))).not.toThrow();
+    expect(parseAliasSourceUriPath(realUriPath(uri))).toEqual({
       name: "50% Done",
       pkg: "100% Coverage",
     });

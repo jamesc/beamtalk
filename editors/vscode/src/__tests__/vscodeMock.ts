@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { vi } from "vitest";
+// The real implementation `vscode.Uri` is built on (published by Microsoft,
+// used inside VS Code itself) — `Uri.parse` below delegates to it so any test
+// exercising code under test's `vscode.Uri.parse()` call gets real parsing/
+// validation semantics (which throw for cases WHATWG `URL` tolerates, e.g. an
+// authority-less URI whose path starts with `//`), not a hand-rolled stand-in
+// that silently accepts anything. Before this, only `Uri.file` was mocked at
+// all — `Uri.parse` was entirely unstubbed, so no test using this shared mock
+// could ever have caught a `vscode.Uri.parse` throw (see BT-3505).
+import { URI } from "vscode-uri";
 
 // ─── Shared `vscode` module mock ───────────────────────────────────────────────
 //
@@ -79,7 +88,7 @@ export function buildVscodeModule(handles: VscodeMockHandles) {
     MarkdownString,
     TreeItem,
     EventEmitter,
-    Uri: { file: (p: string) => ({ fsPath: p, path: p, toString: () => p }) },
+    Uri: { file: (p: string) => ({ fsPath: p, path: p, toString: () => p }), parse: URI.parse },
     SymbolKind: { Class: 4, Method: 5, Field: 7, Interface: 10 },
     commands: { executeCommand: handles.executeCommandMock },
     window: {},
