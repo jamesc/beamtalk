@@ -621,7 +621,7 @@ the noproc exit is translated to a structured class_not_found error.
     binary(), binary() | undefined
 ) -> beamtalk_repl_ops:op_result().
 show_codegen_class_method(ClassBin, SelectorBin) ->
-    %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
+    %% Support package-qualified class names (e.g. "json@Parser")
     case resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             {error, make_class_not_found_error(ClassBin)};
@@ -2217,7 +2217,7 @@ Each entry is a map with <<"name">>, <<"selector">>, <<"side">>, <<"line">>,
 """.
 -spec list_class_methods_for_ws(binary()) -> [map()].
 list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
-    %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
+    %% Support package-qualified class names (e.g. "json@Parser")
     case resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             [];

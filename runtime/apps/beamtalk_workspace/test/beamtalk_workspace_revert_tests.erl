@@ -384,7 +384,7 @@ remove_method_unknown_policy_fails_closed(_) ->
     ].
 
 %%====================================================================
-%% BT-3186 — classRemoveSelector/2, classRemoveSelectorIfAbsent/3
+%% classRemoveSelector/2, classRemoveSelectorIfAbsent/3
 %% (ADR 0112 Phase 2)
 %%====================================================================
 
@@ -525,7 +525,7 @@ remove_selector_contested_extension_re_exposes_local_method(#{tmp := Tmp, unique
     ].
 
 %%====================================================================
-%% BT-3187 (ADR 0112 Phase 3) — "remove-method" ChangeLog entries; the
+%% ADR 0112 Phase 3 — "remove-method" ChangeLog entries; the
 %% (class, selector, side) flush-shadow-key and revert-side-resolution
 %% required fix to ADR 0082's shipped flush/revert logic.
 %%====================================================================
