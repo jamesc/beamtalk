@@ -73,9 +73,9 @@ Compile a REPL expression through the port.
 
 Sends an ETF-encoded request and receives an ETF-encoded response.
 Returns `{ok, CoreErlang, Warnings}' on success,
-`{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
-`{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-`{ok, protocol_definition, ProtocolInfo}' for protocol definitions (BT-1612),
+`{ok, class_definition, ClassInfo}' for inline class definitions,
+`{ok, method_definition, MethodInfo}' for standalone method definitions,
+`{ok, protocol_definition, ProtocolInfo}' for protocol definitions,
 or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
@@ -95,7 +95,7 @@ Compile a REPL expression with optional compilation options.
 Options:
   class_superclass_index => #{binary() => binary()} — cross-file superclass info
   class_module_index => #{binary() => binary()} — cross-directory module name mapping
-  known_type_aliases => [binary()] — ADR 0108 Phase 8 (BT-2902): reparseable
+  known_type_aliases => [binary()] — ADR 0108 Phase 8: reparseable
     `type Name = <expansion>` lines for aliases declared in earlier turns of
     this REPL session, so `::` annotations in the current turn resolve them
 
@@ -206,7 +206,7 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     end.
 
 -doc """
-Compile a REPL expression in trace mode (BT-1238).
+Compile a REPL expression in trace mode.
 
 Same request format as `compile_expression/4' but sends the
 `compile_expression_trace' command.  The returned Core Erlang module's
@@ -303,7 +303,7 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
     end.
 
 -doc """
-Resolve the type of an expression for REPL completion fallback (BT-1068).
+Resolve the type of an expression for REPL completion fallback.
 
 Sends an ETF-encoded `resolve_completion_type' request and returns
 `{ok, ClassName}' when the type is statically known, or
@@ -362,7 +362,7 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
     end.
 
 -doc """
-Find call sites of a selector in a single method's source (BT-2190).
+Find call sites of a selector in a single method's source.
 
 Sends an ETF-encoded `find_senders_in_source' request and returns
 `{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each
@@ -432,7 +432,7 @@ find_senders_in_source(_Port, _Source, _Selector) ->
     ]}.
 
 -doc """
-Find every message send within a single method's source (BT-2206).
+Find every message send within a single method's source.
 
 Single-pass companion to `find_senders_in_source/3': instead of filtering by
 one known selector, returns EVERY send. Sends an ETF-encoded
@@ -496,7 +496,7 @@ find_all_sends_in_source(_Port, _Source) ->
     ]}.
 
 -doc """
-Find every `announce:' emission within a single method's source (BT-2475).
+Find every `announce:' emission within a single method's source.
 
 Backs `SystemNavigation announcementsSentBy:' — the static dual of
 `AnnouncementNavigation'. Sends an ETF-encoded `find_announce_sites_in_source'
@@ -559,7 +559,7 @@ find_announce_sites_in_source(_Port, _Source) ->
     ]}.
 
 -doc """
-Find references to a class within a single method's source (BT-2203).
+Find references to a class within a single method's source.
 
 Sends an ETF-encoded `find_references_to_in_source' request and returns
 `{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each
@@ -567,7 +567,7 @@ line is a 1-based line number relative to `Source'.
 
 Used by `SystemNavigation referencesTo:' via `beamtalk_interface' to power
 System Browser-style "who mentions this class?" navigation. Mirrors
-`find_senders_in_source/3' (BT-2190) but the visitor matches `ClassReference'
+`find_senders_in_source/3' but the visitor matches `ClassReference'
 AST nodes (and class names in type annotations) instead of `MessageSend' nodes.
 """.
 -spec find_references_to_in_source(port(), binary(), atom() | binary()) ->
@@ -631,7 +631,7 @@ find_references_to_in_source(_Port, _Source, _ClassName) ->
     ]}.
 
 -doc """
-Find reads of an field in a single method's source (BT-2208).
+Find reads of an field in a single method's source.
 
 Sends an ETF-encoded `find_field_readers_in_source' request and returns
 `{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each line is
@@ -647,7 +647,7 @@ find_field_readers_in_source(Port, Source, Field) ->
     field_access_query(Port, find_field_readers_in_source, Source, Field, <<"field readers">>).
 
 -doc """
-Find writes of an field in a single method's source (BT-2208).
+Find writes of an field in a single method's source.
 
 Sends an ETF-encoded `find_field_writers_in_source' request and returns
 `{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each line is
@@ -663,7 +663,7 @@ find_field_writers_in_source(Port, Source, Field) ->
     field_access_query(Port, find_field_writers_in_source, Source, Field, <<"field writers">>).
 
 -doc """
-Shared driver for the field reader/writer queries (BT-2208).
+Shared driver for the field reader/writer queries.
 
 Both queries take a `Source' binary and an field name and return a
 list of 1-based line numbers, so they share the request/response plumbing.
@@ -733,7 +733,7 @@ field_access_query(_Port, Command, _Source, _IVar, _Label) ->
     ]}.
 
 -doc """
-Find Erlang FFI call sites in a single method's source (BT-2211).
+Find Erlang FFI call sites in a single method's source.
 
 Sends an ETF-encoded `find_ffi_sites_in_source' request and returns
 `{ok, [Line]}' on success or `{error, [Diagnostic]}' on failure. Each line is
@@ -913,7 +913,7 @@ handle_method_span_response(Other) ->
 
 -doc """
 Resolve the byte span of a class's header + state declarations in `Source'
-(ADR 0082 extension, BT-3248) — never its methods.
+(ADR 0082 extension) — never its methods.
 
 Given the current on-disk source of a `.bt' file and a target `ClassName',
 returns the byte span of that class's declaration line through its last
@@ -982,7 +982,7 @@ resolve_class_span(_Port, _Source, _ClassName) ->
 
 -doc """
 Resolve the exact byte span(s) of every self/super-directed send of
-`OldSelector' within `MethodSource' (ADR 0114, BT-3279).
+`OldSelector' within `MethodSource' (ADR 0114).
 
 Backs `Behaviour>>renameSelector:to:''s reference-site rewrite:
 `beamtalk_xref:senders_of/1' only carries a *line* number per sending
@@ -1079,7 +1079,7 @@ handle_selector_send_spans_response(Other) ->
 
 -doc """
 Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
-selector-token span(s) within `Source' (ADR 0114, BT-3279) — the narrow
+selector-token span(s) within `Source' (ADR 0114) — the narrow
 rewrite counterpart to `find_selector_send_spans/4' for the definition site
 itself: a `'rename-method'' ChangeLog entry's `sites[0]' must be a narrow
 selector-token splice, never the whole method body, or a rewrite would
@@ -1193,8 +1193,7 @@ decode_selector_send_spans(Spans) when is_list(Spans) ->
     ].
 
 -doc """
-Group a class's methods by its `// === Name ===' section dividers (BT-3239,
-extended by BT-3238).
+Group a class's methods by its `// === Name ===' section dividers.
 
 Given the current on-disk source of a `.bt' file and a target `ClassName',
 returns the class's methods grouped by the divider comments that precede
@@ -1203,9 +1202,8 @@ them, in source order — the same recognition rules
 for every surface (see that module's doc). This is the bridge that lets
 Erlang surfaces reach it without a second, drift-prone implementation of
 the divider grammar (CLAUDE.md's "No duplicate implementations" rule):
-`beamtalk_interface:format_class_help/2' (BT-3239, REPL/MCP `:help'/`docs')
-and the Cockpit System Browser's grouped method view + `save-section'
-(BT-3238).
+`beamtalk_interface:format_class_help/2' (REPL/MCP `:help'/`docs')
+and the Cockpit System Browser's grouped method view + `save-section'.
 
 Returns `{ok, Categories}' on success, where each category is `#{name :=
 binary() | undefined, divider_span := #{start := S, 'end' := E} |
@@ -1214,9 +1212,9 @@ span := #{start := S, 'end' := E}}]}'. `name'/`divider_span' are always
 present — using `undefined' as the "absent" sentinel, never an omitted key
 — for the implicit leading (unnamed) category, matching
 `MethodCategory.name: Option<String>' on the Rust side. `divider_span`/each
-method's `span` are BT-3238's addition over BT-3239's original shape: the
+method's `span` are a later addition over the original shape: the
 Cockpit's `save-section` write path needs a divider's or method's exact
-byte range to splice a rename/insert; the REPL/MCP path (BT-3239) ignores
+byte range to splice a rename/insert; the REPL/MCP path ignores
 them. Resolution failures (class not found, ambiguous) come back as
 `{error, Reason, Message}' with `Reason' an atom. Transport failures (port
 down, timeout) return `{error, port_error, Message}'.
@@ -1345,7 +1343,7 @@ normalize_categorized_method(Other) ->
 
 -doc """
 Field-level default-value presence for a class's `state:'/`field:' declarations
-(ADR 0082 extension, BT-3254).
+(ADR 0082 extension).
 
 Backs `beamtalk_repl_loader:class_def_source_is_skeleton_shaped/2''s sibling
 safety check before marking a `'class-def'' ChangeEntry flushable: whether the
@@ -1432,7 +1430,7 @@ handle_class_state_field_defaults_response(Other) ->
     {error, port_error, <<"Unexpected compiler response">>}.
 
 -doc """
-Build the class→module-name index for a single `src/**/*.bt` file (BT-3441).
+Build the class→module-name index for a single `src/**/*.bt` file.
 
 Backs the REPL/workspace cold-load fallback for `class_module_index' (ADR
 0050) — `beamtalk_repl_ops_load:build_source_class_module_index/1' calls
@@ -1525,7 +1523,7 @@ handle_build_class_module_index_in_source_response(Other) ->
     {error, port_error, <<"Unexpected compiler response">>}.
 
 -doc """
-Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
+Re-indent a canonical (column-0) method body to `BaseIndent'.
 
 Shifts the compiler's canonical `unparse_method' output (column 0, 2-space
 relative steps) so its least-indented line sits at `BaseIndent', producing the
@@ -1765,7 +1763,7 @@ handle_resolve_response(_) ->
     {error, type_unknown}.
 
 -doc """
-Handle ETF response from a find_senders_in_source request (BT-2190).
+Handle ETF response from a find_senders_in_source request.
 Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on failure.
 """.
 -spec handle_senders_response(map()) -> {ok, [non_neg_integer()]} | {error, [map()]}.
@@ -1780,11 +1778,11 @@ handle_senders_response(Other) ->
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 -doc """
-Handle ETF response from a find_all_sends_in_source request (BT-2206).
+Handle ETF response from a find_all_sends_in_source request.
 Returns `{ok, [Send]}' on success (each `Send' a
 `#{selector := binary(), line := pos_integer(), recv := atom(),
 target_module := binary()}' map, passed through unchanged — `target_module' is
-the native module an `erlang_ffi' send targets (BT-2669), `<<>>' otherwise),
+the native module an `erlang_ffi' send targets, `<<>>' otherwise),
 `{error, [Diagnostic]}' on failure.
 """.
 -spec handle_all_sends_response(map()) -> {ok, [map()]} | {error, [map()]}.
@@ -1799,7 +1797,7 @@ handle_all_sends_response(Other) ->
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 -doc """
-Handle ETF response from a find_announce_sites_in_source request (BT-2475).
+Handle ETF response from a find_announce_sites_in_source request.
 Returns `{ok, [Site]}' on success (each `Site' a
 `#{selector := binary(), line := pos_integer(), announcement_class := binary()}'
 map, passed through unchanged), `{error, [Diagnostic]}' on failure.
@@ -1816,7 +1814,7 @@ handle_announce_sites_response(Other) ->
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 -doc """
-Handle ETF response from a find_references_to_in_source request (BT-2203).
+Handle ETF response from a find_references_to_in_source request.
 Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on failure.
 """.
 -spec handle_references_response(map()) -> {ok, [pos_integer()]} | {error, [map()]}.
@@ -1831,8 +1829,8 @@ handle_references_response(Other) ->
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 -doc """
-Handle ETF response from a find_field_readers/writers_in_source request
-(BT-2208). Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on
+Handle ETF response from a find_field_readers/writers_in_source request.
+Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on
 failure. `Label' is used only to disambiguate the unexpected-response log line.
 """.
 -spec handle_field_response(map(), binary()) -> {ok, [pos_integer()]} | {error, [map()]}.
@@ -1847,7 +1845,7 @@ handle_field_response(Other, Label) ->
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 -doc """
-Handle ETF response from a find_ffi_sites_in_source request (BT-2211).
+Handle ETF response from a find_ffi_sites_in_source request.
 Returns `{ok, [Line]}' on success, `{error, [Diagnostic]}' on failure.
 """.
 -spec handle_ffi_sites_response(map()) -> {ok, [pos_integer()]} | {error, [map()]}.
@@ -1862,8 +1860,8 @@ handle_ffi_sites_response(Other) ->
     {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 -doc """
-Normalize a list of diagnostics to a uniform list of maps.
-BT-1235: The port now returns maps with `message', `line', `hint'.
+Normalize a list of diagnostics to a uniform list of maps. The port
+returns maps with `message', `line', `hint'.
 Plain binaries (legacy/protocol errors) are wrapped as `#{message => Bin}'.
 """.
 -spec normalize_diagnostics([term()]) -> [map()].

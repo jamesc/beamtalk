@@ -5,7 +5,7 @@
 -module(beamtalk_perf_tests).
 
 -moduledoc """
-Performance test suite for actor call latency (BT-202)
+Performance test suite for actor call latency.
 
 Benchmarks key actor system operations to track regressions and
 document expected performance characteristics.

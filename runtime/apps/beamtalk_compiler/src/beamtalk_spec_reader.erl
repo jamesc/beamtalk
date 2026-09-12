@@ -84,7 +84,7 @@ order as the input. Each result is:
 The module name is extracted from the `.beam` file's module attribute.
 
 Files are processed across `erlang:system_info(schedulers_online)' worker
-processes (BT-2469): reading `abstract_code' is I/O- and decompression-bound,
+processes: reading `abstract_code' is I/O- and decompression-bound,
 so it parallelises well. A shared, batch-scoped ETS table memoises the parsed
 artifacts of each remote module referenced by a `-spec' (e.g. `sets:set()',
 `queue:queue()'), so a remote module's `.beam' is read and folded at most once
@@ -1005,7 +1005,7 @@ extract_beamtalk_class([_ | Rest]) ->
 -doc """
 Map a union type to a Beamtalk type string.
 
-Dispatch order (BT-2647):
+Dispatch order:
   1. Narrow pure-atom enum first — a union of only plain literal atoms with at
      least one atom beyond `ok`/`error` becomes a singleton union (`#a | #b`),
      even if it contains a bare `ok`/`error` (e.g. `emergency | error | info`).

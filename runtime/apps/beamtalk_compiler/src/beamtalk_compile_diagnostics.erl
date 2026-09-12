@@ -5,7 +5,7 @@
 
 -moduledoc """
 Formats `compile:forms/2' error terms produced while compiling
-Beamtalk-generated Core Erlang to BEAM bytecode (BT-3115).
+Beamtalk-generated Core Erlang to BEAM bytecode.
 
 Every error `compile:forms/2' can return at this pipeline stage is an
 internal-compiler-error by definition: the input is compiler-generated
@@ -44,14 +44,14 @@ Rust CLI's stdout parser only recognises the `beamtalk-compile-*'
 protocol markers and silently drops every other line, so the message was
 being lost outright rather than merely unformatted.
 
-BT-3126 extended this module with `format_warnings/1' for the same
-reason on the *warning* path, fixed in both compile-from-Core-Erlang
+This module also formats warnings via `format_warnings/1' for the same
+reason on the *warning* path, fixing both compile-from-Core-Erlang
 callers:
 
   * `beamtalk_build_worker' (the `beamtalk build' batch CLI worker)
     passed `report_warnings' to `compile:forms/2', which hits the same
-    stdout-not-stderr sink and the same silent-drop as the pre-BT-3115
-    error path above.
+    stdout-not-stderr sink and the same silent-drop as the error path
+    described above.
   * `beamtalk_compiler_server' (the in-memory Port backend, ADR 0022
     Phase 3, backing the REPL/LSP/live-compile path) passed neither
     `report_warnings' nor `return_warnings' at all, so `compile:forms'
@@ -80,7 +80,7 @@ Turn a `compile:forms/2' `Warnings' list (from `return_warnings') into a
 single human-readable binary, one line per underlying warning, prefixed
 `"Warning: "' — matching the wording `report_warnings' would have
 printed, and what `compile.escript''s `print_messages/2' already prints
-for the escript backend (BT-3115).
+for the escript backend.
 """.
 -spec format_warnings([{file:filename() | string() | binary(), [tuple()]}]) -> binary().
 format_warnings(Warnings) when is_list(Warnings) ->

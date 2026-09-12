@@ -59,8 +59,8 @@ Compile a REPL expression.
 `KnownVars' is a list of variable name binaries from the REPL session.
 
 Returns `{ok, CoreErlang, Warnings}' for expressions,
-`{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
-`{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
+`{ok, class_definition, ClassInfo}' for inline class definitions,
+`{ok, method_definition, MethodInfo}' for standalone method definitions,
 or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
@@ -78,7 +78,7 @@ compile_expression(Source, ModuleName, KnownVars) ->
 Compile a REPL expression with optional compilation options.
 
 Options:
-  class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+  class_superclass_index => #{binary() => binary()} — cross-file superclass info
 """.
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]}
@@ -91,7 +91,7 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars, Options).
 
 -doc """
-Compile a REPL expression in trace mode (BT-1238).
+Compile a REPL expression in trace mode.
 
 Returns `{ok, CoreErlang, Warnings}' where the generated module's `eval/1'
 returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of `{Result, FinalState}'.
@@ -139,7 +139,7 @@ compile_method(ClassSource, MethodSource, Options) ->
 Get diagnostics for source code (no code generation).
 
 Returns `{ok, [#{message, severity, category, start, end}]}' or `{error,
-Diagnostics}'. `category' (ADR 0105 Phase 1, BT-2778) is a binary label
+Diagnostics}'. `category' (ADR 0105 Phase 1) is a binary label
 (`<<"Dnu">>', `<<"Type">>', ...) when the checker tagged one, or the atom
 `undefined' otherwise.
 """.
@@ -163,7 +163,7 @@ diagnostics(Source, Mode) ->
 Get diagnostics for source code under a parse `Mode`, with options (no code
 generation).
 
-`Mode' selects the grammar the buffer is analysed under (BT-2569):
+`Mode' selects the grammar the buffer is analysed under:
 
   * `<<"expression">>' — a top-level script (the default): full-module parse
     plus semantic analysis.
@@ -174,8 +174,8 @@ generation).
     field/`self' references) are deferred to Compile.
 
 `Options`: `class_hierarchy => boolean() | #{atom() => map()}` (ADR 0105
-Phase 1, BT-2778, default `false`) — thread the ambient class cache (`true`)
-or a caller-built overlay map (ADR 0105 Phase 3, BT-3109) into the check, so
+Phase 1, default `false`) — thread the ambient class cache (`true`)
+or a caller-built overlay map (ADR 0105 Phase 3) into the check, so
 a receiver resolving to an already-loaded class is checked against its
 *current* (or hypothetical, for an overlay) interface. See
 `beamtalk_compiler_server:diagnostics/3` for why this is opt-in rather than
@@ -192,7 +192,7 @@ version() ->
     beamtalk_compiler_server:version().
 
 -doc """
-Resolve the type of an expression for REPL completion fallback (BT-1068).
+Resolve the type of an expression for REPL completion fallback.
 
 `Expression' is the receiver expression-up-to-cursor with the incomplete
 prefix stripped. Returns `{ok, ClassName}' or `{error, type_unknown}'.
@@ -205,7 +205,7 @@ resolve_completion_type(Expression) ->
 Compile Core Erlang source to BEAM bytecode in memory.
 
 Uses `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'.
-No temp files on disk (BT-48).
+No temp files on disk.
 
 Returns `{ok, ModuleName, Binary}' or `{error, Reason}'.
 """.
@@ -214,7 +214,7 @@ compile_core_erlang(CoreErlangBin) ->
     beamtalk_compiler_server:compile_core_erlang(CoreErlangBin).
 
 -doc """
-Find call sites of a selector in a single method's source (BT-2190).
+Find call sites of a selector in a single method's source.
 
 `Source' is the source of a single compiled method (as returned by
 `CompiledMethod source'). `Selector' is the target selector as an atom or
@@ -233,7 +233,7 @@ find_senders_in_source(Source, Selector) ->
     beamtalk_compiler_server:find_senders_in_source(Source, Selector).
 
 -doc """
-Find every message send in a single method's source (BT-2206).
+Find every message send in a single method's source.
 
 `Source' is the source of a single compiled method (as returned by
 `CompiledMethod source'). Single-pass companion to `find_senders_in_source/2':
@@ -253,7 +253,7 @@ find_all_sends_in_source(Source) ->
     beamtalk_compiler_server:find_all_sends_in_source(Source).
 
 -doc """
-Find every `announce:' emission in a single method's source (BT-2475).
+Find every `announce:' emission in a single method's source.
 
 `Source' is the source of a single compiled method (as returned by
 `CompiledMethod source'). Recognises `announce:', `announceAndWait:', and
@@ -276,7 +276,7 @@ find_announce_sites_in_source(Source) ->
     beamtalk_compiler_server:find_announce_sites_in_source(Source).
 
 -doc """
-Find references to a class in a single method's source (BT-2203).
+Find references to a class in a single method's source.
 
 `Source' is the source of a single compiled method (as returned by
 `CompiledMethod source'). `ClassName' is the target class name as an atom or
@@ -288,7 +288,7 @@ cannot be parsed. Returns `{error, Diagnostics}' if the compiler port is
 unavailable.
 
 Backs `SystemNavigation referencesTo:' for System Browser-style class-reference
-navigation. Mirrors `find_senders_in_source/2' (BT-2190); the underlying
+navigation. Mirrors `find_senders_in_source/2'; the underlying
 visitor matches `ClassReference' AST nodes (and class names in type
 annotations) instead of `MessageSend' nodes.
 """.
@@ -298,7 +298,7 @@ find_references_to_in_source(Source, ClassName) ->
     beamtalk_compiler_server:find_references_to_in_source(Source, ClassName).
 
 -doc """
-Find reads of an field in a single method's source (BT-2208).
+Find reads of an field in a single method's source.
 
 `Source' is the source of a single compiled method (as returned by
 `CompiledMethod source'). `Field' is the target field name as an
@@ -318,7 +318,7 @@ find_field_readers_in_source(Source, Field) ->
     beamtalk_compiler_server:find_field_readers_in_source(Source, Field).
 
 -doc """
-Find writes of an field in a single method's source (BT-2208).
+Find writes of an field in a single method's source.
 
 `Source' is the source of a single compiled method (as returned by
 `CompiledMethod source'). `Field' is the target field name as an
@@ -338,7 +338,7 @@ find_field_writers_in_source(Source, Field) ->
     beamtalk_compiler_server:find_field_writers_in_source(Source, Field).
 
 -doc """
-Find Erlang FFI call sites in a single method's source (BT-2211).
+Find Erlang FFI call sites in a single method's source.
 
 `Source' is the source of a single compiled method (as returned by
 `CompiledMethod source'). `Module' and `Function' name the target Erlang
@@ -393,7 +393,7 @@ resolve_method_span(Source, ClassName, Selector, Side) ->
 -doc """
 Resolve the byte span of a class's declaration line through its last
 `state:'/`field:' declaration in `Source', against the current on-disk `.bt'
-file (ADR 0082 extension, BT-3248).
+file (ADR 0082 extension).
 
 Backs the CHANGES dock's disk-vs-memory diff for a `'class-def'' ChangeEntry
 (the cockpit `:def' tab's "Compile" action against an *existing* class):
@@ -404,7 +404,7 @@ its methods; see
 data-loss bug that boundary avoids — plus the bytes currently occupying it.
 On success: `{ok, Span, PrevSource}'.
 
-Also backs an actual `Workspace flush' splice (BT-3254): once the `:def' tab's
+Also backs an actual `Workspace flush' splice: once the `:def' tab's
 resubmitted skeleton (`beamtalk_repl_ops_browse:class_definition_text/7')
 became round-trip-safe — carrying modifier keywords, the `field:'/`state:'
 keyword choice, and `::' type annotations — a byte-accurate span was most of
@@ -428,7 +428,7 @@ resolve_class_span(Source, ClassName) ->
 
 -doc """
 Resolve the exact byte span(s) of every self/super-directed send of
-`OldSelector' within `MethodSource' (ADR 0114, BT-3279).
+`OldSelector' within `MethodSource' (ADR 0114).
 
 Backs `Behaviour>>renameSelector:to:''s reference-site rewrite
 (`beamtalk_behaviour_intrinsics:classRenameSelector/3'):
@@ -458,7 +458,7 @@ find_selector_send_spans(MethodSource, OldSelector, NewSelector) ->
 
 -doc """
 Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
-selector-token span(s) within `Source' (ADR 0114, BT-3279).
+selector-token span(s) within `Source' (ADR 0114).
 
 Backs `Behaviour>>renameSelector:to:''s definition-site rewrite: the
 `'rename-method'' ChangeLog schema's `sites[0]' must be a narrow
@@ -488,14 +488,13 @@ find_definition_selector_spans(Source, ClassName, OldSelector, NewSelector, Side
     ).
 
 -doc """
-Group a class's methods by its `// === Name ===' section dividers
-(BT-3239, extended by BT-3238).
+Group a class's methods by its `// === Name ===' section dividers.
 
 Given the source text of a `.bt' file and a target `ClassName', returns
 `{ok, Categories}' — the class's methods grouped by the divider comments
 that precede them, in source order, exactly matching
 `beamtalk_core::source_analysis::categorize_methods_in_source' (the shared
-Rust recognizer BT-2601 introduced for the LSP outline). See
+Rust recognizer introduced for the LSP outline). See
 `beamtalk_compiler_port:categorize_methods/3' for the full response shape —
 a list of `#{name := binary() | undefined, divider_span := #{start := S,
 'end' := E} | undefined, methods := [#{selector := binary(), side :=
@@ -506,18 +505,18 @@ implicit leading, unnamed category.
 Two consumers:
 
 * `beamtalk_interface:format_class_help/2' (`Beamtalk help: ClassName' — the
-  CLI REPL's `:help' and the MCP `docs' tool both evaluate this), BT-3239,
+  CLI REPL's `:help' and the MCP `docs' tool both evaluate this),
   reading only `name'/`selector'/`side' — a class with a `.bt' source file
   on disk gets its `Instance methods:' listing grouped the same way the
   editor's Outline view already does.
 * The Cockpit System Browser's divider-grouped method view and file-level
-  section rename/insert (`save-section'), BT-3238, which also needs
+  section rename/insert (`save-section'), which also needs
   `divider_span' and each method's `span' to locate the byte range of an
   existing divider or method for a splice.
 
 A `class_not_found'/`ambiguous' error means the on-disk source doesn't
-match the requested class cleanly; the REPL/MCP path degrades to the
-pre-BT-3239 flat, alphabetical listing rather than erroring.
+match the requested class cleanly; the REPL/MCP path degrades to a
+flat, alphabetical listing rather than erroring.
 """.
 -spec categorize_methods(binary(), atom() | binary()) ->
     {ok, [map()]} | {error, atom(), binary()}.
@@ -525,7 +524,7 @@ categorize_methods(Source, ClassName) ->
     beamtalk_compiler_server:categorize_methods(Source, ClassName).
 
 -doc """
-Build the class→module-name index for a single `src/**/*.bt` file (BT-3441).
+Build the class→module-name index for a single `src/**/*.bt` file.
 
 Given the file's source text, its path relative to the project's `src/`
 directory (extension included, `/`-joined — e.g. `<<"util/http_response.bt">>`),
@@ -551,7 +550,7 @@ build_class_module_index_in_source(Source, RelativePath, PackageName) ->
 
 -doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
-declarations in `Source' (ADR 0082 extension, BT-3254).
+declarations in `Source' (ADR 0082 extension).
 
 The sibling safety check `resolve_class_span/2' alone cannot provide:
 `beamtalk_repl_ops_browse:class_definition_text/7' builds its skeleton from
@@ -578,7 +577,7 @@ class_state_field_defaults(Source, ClassName) ->
     beamtalk_compiler_server:class_state_field_defaults(Source, ClassName).
 
 -doc """
-Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
+Re-indent a canonical (column-0) method body to `BaseIndent'.
 
 Shifts the compiler's canonical `unparse_method' output to the on-disk
 byte-span shape so the live-patch install hook can store a `source' that is a

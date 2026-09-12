@@ -196,10 +196,10 @@ value(_Self) ->
 -doc """
 FFI shim for value/1 — called via (Erlang beamtalk_atomic_counter) readValue: self.
 
-Exists to work around BT-1260: the Beamtalk codegen intercepts the keyword
-selector `value:` as a block evaluation before the Erlang FFI path is reached.
-Using `readValue:` bypasses the intercept and calls this shim, which delegates
-to `value/1`.
+Exists to work around a codegen quirk: the Beamtalk codegen intercepts the
+keyword selector `value:` as a block evaluation before the Erlang FFI path is
+reached. Using `readValue:` bypasses the intercept and calls this shim, which
+delegates to `value/1`.
 """.
 -spec readValue(t()) -> integer().
 readValue(Self) -> value(Self).

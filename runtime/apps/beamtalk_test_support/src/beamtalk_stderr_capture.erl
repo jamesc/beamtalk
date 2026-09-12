@@ -5,7 +5,7 @@
 
 -moduledoc """
 Shared EUnit test helper: capture text written to `standard_error' during
-a function call (BT-3126).
+a function call.
 
 `io:put_chars(standard_error, Chars)' resolves its target device via
 `whereis(standard_error)' (see OTP's `io:request/3'), **not** via the

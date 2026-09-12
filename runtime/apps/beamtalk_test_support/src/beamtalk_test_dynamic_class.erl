@@ -12,7 +12,7 @@ that need a real live class with no `.bt` source file to exercise a
 dynamic-class code path (e.g. `beamtalk_behaviour_intrinsics:classRenameTo/2`'s
 dynamic-class branch).
 
-Extracted (BT-3443) from `beamtalk_behaviour_intrinsics_rename_to_tests`'s
+Extracted from `beamtalk_behaviour_intrinsics_rename_to_tests`'s
 own `register_dynamic_class/1`, once `beamtalk_repl_compiler_rename_freshness_tests`
 needed the identical fixture — same "copied once, extracted on the second
 use" precedent `beamtalk_test_corpus`'s own moduledoc documents (CLAUDE.md's

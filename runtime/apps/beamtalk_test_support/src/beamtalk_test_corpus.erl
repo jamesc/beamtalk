@@ -5,14 +5,14 @@
 
 -moduledoc """
 Shared EUnit test helper: locate the project root and load a JSON
-conformance-corpus fixture from it (BT-3099).
+conformance-corpus fixture from it.
 
 `beamtalk_compiler`, `beamtalk_runtime`, and `beamtalk_workspace` each have
 EUnit suites that pin an Erlang-side implementation to a JSON corpus shared
 with the Rust side (`crates/beamtalk-core`) — walking up from the test CWD to
 the directory holding the workspace `Cargo.toml`, then reading the fixture.
-That pattern was copied byte-for-byte across six test files before BT-3099
-extracted it here.
+That pattern was copied byte-for-byte across six test files before being
+extracted here.
 
 **Why a standalone app, not a shared `test/` dir on one of the peer apps:**
 `beamtalk_compiler` is a peer of `beamtalk_runtime`, not a dependent (ADR

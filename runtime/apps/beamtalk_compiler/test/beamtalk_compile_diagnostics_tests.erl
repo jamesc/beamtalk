@@ -4,7 +4,7 @@
 -module(beamtalk_compile_diagnostics_tests).
 
 -moduledoc """
-Tests for beamtalk_compile_diagnostics (BT-3115).
+Tests for beamtalk_compile_diagnostics.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
