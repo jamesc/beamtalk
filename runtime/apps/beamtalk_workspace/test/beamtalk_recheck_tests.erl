@@ -1033,10 +1033,10 @@ with_star_selector_test_() ->
     ].
 
 %%====================================================================
-%% with_star_selector/1 — shared Rust<->Erlang conformance corpus (BT-3090)
+%% with_star_selector/1 — shared Rust<->Erlang conformance corpus
 %%====================================================================
 
-%% BT-3090 conformance: `with_star_selector/1` must capitalise a field name's
+%% Conformance: `with_star_selector/1` must capitalise a field name's
 %% first character identically to the Rust naming authority
 %% (`crate::synthetic_selectors::with_star_selector`,
 %% `crates/beamtalk-core/src/synthetic_selectors.rs`) — including non-ASCII
@@ -1062,7 +1062,7 @@ with_star_selector_matches_shared_corpus_test() ->
     ).
 
 %% Load the shared with-star-selector conformance corpus from the repo tree.
-%% `beamtalk_test_corpus` (BT-3099) walks up from the test CWD to the
+%% `beamtalk_test_corpus` walks up from the test CWD to the
 %% project root (the dir holding `Cargo.toml`), then reads the fixture both
 %% surfaces share.
 load_with_star_selector_corpus() ->
@@ -1146,8 +1146,7 @@ relevant_diagnostic_shape_retyped_fallback_matches_unrelated_dnu_test() ->
 %% Two retyped slots in the same reload — the Dnu carries no field-name
 %% signal (see relevant_diagnostic_shape/3's doc), so retyped_fallback/1
 %% cannot tell which slot actually caused it. Rather than silently blaming
-%% the first by list order (BT-2780 adversarial review; fixed in BT-2805),
-%% the other candidate(s) come back as the triple's third element so the
+%% the first by list order, the other candidate(s) come back as the triple's third element so the
 %% caller can render the attribution as ambiguous. See
 %% field_change_note_retyped_with_ambiguous_candidates_renders_all_names_test/0
 %% for how the finding's `note` surfaces this.

@@ -164,7 +164,7 @@ websocket_info(
         io_capture_pid = undefined,
         stdin_ref = undefined
     }};
-%% BT-696: Late streaming messages after eval completed — drop silently
+%% Late streaming messages after eval completed — drop silently
 websocket_info({eval_out, _Chunk}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
 websocket_info({eval_done, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
@@ -182,7 +182,7 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
         })
     ),
     {[{text, Push}], State};
-%% BT-2531: actor / class / flush system announcements (SystemAnnouncer bus),
+%% Actor / class / flush system announcements (SystemAnnouncer bus),
 %% re-encoded to the existing JSON push frames. The legacy bespoke channels
 %% (`beamtalk_repl_actors` lifecycle, `beamtalk_class_events`,
 %% `beamtalk_flush_events`) were retired; consumers now discriminate on the

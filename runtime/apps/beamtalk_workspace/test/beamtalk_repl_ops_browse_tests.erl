@@ -317,7 +317,7 @@ delegate_tests(#{class_name := ClassName}) ->
     ].
 
 %%====================================================================
-%% Native-module delegate callers — REAL compiled stdlib class (BT-3242)
+%% Native-module delegate callers — REAL compiled stdlib class
 %%====================================================================
 
 %% Regression coverage: `delegate_callers_of_native_module/1` against a REAL

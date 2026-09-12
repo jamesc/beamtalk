@@ -242,7 +242,7 @@ erlang_proxy_with_args_raises_arity_mismatch_test() ->
 
 %%% ===================================================================
 %%% ===================================================================
-%%% Exception mapping — BT-678 / ADR 0101 Part 2
+%%% Exception mapping — ADR 0101 Part 2
 %%%
 %%% ADR 0101 unifies both apply paths: `exit:*` propagates and `throw:*`
 %%% passes through (rolling back the former erlang_exit / erlang_throw

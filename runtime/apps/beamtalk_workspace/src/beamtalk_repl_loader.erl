@@ -1557,7 +1557,7 @@ install_method_with_source(
         class_name => ClassNameBin,
         %% Side comes from the caller: `false` for the instance-side
         %% `compile:source:` / MCP `save_method` / IDE-save chokepoint; `true`
-        %% for a class-side revert re-install (BT-2665). The REPL `Class class >>
+        %% for a class-side revert re-install. The REPL `Class class >>
         %% sel` path still flows through `reload_method_definition`, which carries
         %% the side in its `MethodInfo`.
         is_class_method => IsClassMethod,
@@ -1587,7 +1587,7 @@ install_method_with_source(
                 merged_class_source := MergedClassSource,
                 warnings := RecompileWarnings
             } = Result,
-            %% ADR 0105 Phase 1 (BT-2777): declared signature, carried through to
+            %% ADR 0105 Phase 1: declared signature, carried through to
             %% load_recompiled_method's capture-before-install hook.
             ReturnType = maps:get(return_type, Result, <<"Dynamic">>),
             ParamTypes = maps:get(param_types, Result, []),
