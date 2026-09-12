@@ -1082,7 +1082,7 @@ diagnostics_for(Code, Mode) when is_binary(Code), is_binary(Mode) ->
 %% number/bool, not just the LiveView surface) degrades to `[]` rather than
 %% crashing the session — diagnostics are advisory and fire on every keystroke,
 %% so this matches the `{error, _}` degradation above and keeps the `binary()`
-%% spec honest at the Erlang boundary (BT-2569).
+%% spec honest at the Erlang boundary.
 diagnostics_for(_, _) ->
     [].
 
@@ -1240,7 +1240,7 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
                             %% Single-token receiver (possibly with leading whitespace)
                             {ReceiverToken, Prefix};
                         true ->
-                            %% Multi-token receiver expression (BT-1006)
+                            %% Multi-token receiver expression
                             ReceiverExpr = list_to_binary(lists:reverse(ReceiverPartRev)),
                             {expression, ReceiverExpr, Prefix}
                     end
