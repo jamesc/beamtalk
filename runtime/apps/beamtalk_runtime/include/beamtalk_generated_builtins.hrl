@@ -9,7 +9,7 @@
 %%
 %% Mirrors `is_generated_builtin_class` in
 %% crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs
-%% (BT-3085) — both are generated from the same stdlib class-metadata pass
+%% — both are generated from the same stdlib class-metadata pass
 %% in build_stdlib.rs, so they cannot drift out of sync with each other.
 
 -ifndef(BEAMTALK_GENERATED_BUILTINS_HRL).

@@ -1756,7 +1756,7 @@ remove_method(ClassNameBin, Selector, Side) ->
                 )
             of
                 {ok, Span, _Body} ->
-                    %% ADR 0105 Phase 1 (BT-2777): record the removal in the
+                    %% ADR 0105 Phase 1: record the removal in the
                     %% signature-generation store BEFORE the recompile-without-
                     %% the-method installs (mirrors capture_signature_generation/1
                     %% in load_recompiled_method/8 — this IS the install for a
@@ -1770,7 +1770,7 @@ remove_method(ClassNameBin, Selector, Side) ->
                     NewSourceBin = splice_out_span(ClassSourceBin, Span),
                     case reload_class_without_method(ClassNameBin, NewSourceBin) of
                         {ok, _} = Ok ->
-                            %% ADR 0105 Phase 1 (BT-2778): the removal is
+                            %% ADR 0105 Phase 1: the removal is
                             %% live — re-check known dependents (mirrors the
                             %% install success path in load_recompiled_method/8,
                             %% including that function's ordering-invariant
@@ -1798,7 +1798,7 @@ remove_method(ClassNameBin, Selector, Side) ->
     end.
 
 %% Record a method removal into the signature-generation store (ADR 0105 Phase
-%% 1, BT-2777). Best-effort and self-swallowing, mirroring
+%% 1). Best-effort and self-swallowing, mirroring
 %% capture_signature_generation/1 — a store failure must never block the
 %% removal itself. Returns the same capture_outcome() so
 %% the caller can roll back on a subsequent recompile failure.
@@ -1850,7 +1850,7 @@ reload_class_without_method(ClassNameBin, NewSourceBin) ->
     end.
 
 %% Cut the bytes `[start, end)' out of `Source', joining the surrounding text.
-%% A thin wrapper over `splice_replace/3` (BT-3270) — removal is replacement
+%% A thin wrapper over `splice_replace/3` — removal is replacement
 %% with the empty binary.
 -spec splice_out_span(binary(), rewrite_span()) -> binary().
 splice_out_span(Source, Span) ->
@@ -1859,7 +1859,7 @@ splice_out_span(Source, Span) ->
 %% Replace the bytes `[start, end)' in `Source' with `NewText', joining the
 %% surrounding text. Shared leaf primitive (CLAUDE.md's no-duplicate-
 %% implementations rule) behind both `splice_out_span/2` (removal — ADR 0112)
-%% and `rewrite_sites/2`'s per-site splice (ADR 0114, BT-3270).
+%% and `rewrite_sites/2`'s per-site splice (ADR 0114).
 -spec splice_replace(binary(), rewrite_span(), binary()) -> binary().
 splice_replace(Source, #{start := Start, 'end' := End}, NewText) ->
     <<Before:Start/binary, _Old:(End - Start)/binary, After/binary>> = Source,
@@ -1897,7 +1897,7 @@ source_path_or_empty(undefined) -> "";
 source_path_or_empty(Path) -> Path.
 
 %%% ----------------------------------------------------------------------------
-%%% Shared multi-site rewrite mechanism (ADR 0114, BT-3270)
+%%% Shared multi-site rewrite mechanism (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -2314,7 +2314,7 @@ compile_rewrite_group(#rewrite_class_group{
     NewSourceStr = unicode:characters_to_list(NewSourceBin),
     compile_reload_source(NewSourceStr, LoadPath, ModuleNameOverride, undefined).
 
-%% BT-3280: is `Group`'s class's CURRENT `beamtalk_workspace_meta` source
+%% Is `Group`'s class's CURRENT `beamtalk_workspace_meta` source
 %% still byte-identical to what `build_class_group/2` snapshotted into
 %% `original_source` before this batch's validation pass ran? `false` for a
 %% class whose source is no longer trackable at all (e.g. removed by a
@@ -2333,7 +2333,7 @@ class_source_unchanged(#rewrite_class_group{class = Class, original_source = Ori
 %% Phase 2 of the atomicity protocol: install every already-validated group,
 %% in class-group order, updating `beamtalk_workspace_meta`'s tracked source
 %% to match each newly-installed class. See `rewrite_sites/2`'s doc for the
-%% pathological partial-install-failure case and the BT-3280 stale-snapshot
+%% pathological partial-install-failure case and the stale-snapshot
 %% case this handles defensively.
 -spec install_rewrite_groups([{#rewrite_class_group{}, term()}], rewrite_site() | undefined) ->
     {ok, rewrite_result()}
@@ -2352,7 +2352,7 @@ install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev)
     #rewrite_class_group{class = Class} = Group,
     case class_source_unchanged(Group) of
         false ->
-            %% BT-3280: a concurrent writer landed on this class's tracked
+            %% A concurrent writer landed on this class's tracked
             %% source between this batch's own validation pass and this
             %% group's own install turn. Fail cleanly and stop the batch here
             %% — never install `NewSource` over it, which would silently
@@ -2386,7 +2386,7 @@ install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev)
 install_rewrite_group(Group, Compiled, Rest, DefinitionSite, InstalledRev) ->
     #rewrite_class_group{class = Class, source_path = SourcePath, new_source = NewSource} = Group,
     LoadPath = source_path_or_empty(SourcePath),
-    %% BT-3280: qualified as `?MODULE:` (rather than a local call) purely so
+    %% Qualified as `?MODULE:` (rather than a local call) purely so
     %% `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
     %% coverage can intercept it via `meck:new(?MODULE, [passthrough])` — see
     %% that test module's own moduledoc for why. Behaviourally identical to a
@@ -2585,7 +2585,7 @@ store_rewrite_site_ref(Body) ->
     end.
 
 %%% ----------------------------------------------------------------------------
-%%% Class move (ADR 0114 Phase 2, BT-3272)
+%%% Class move (ADR 0114 Phase 2)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -2827,7 +2827,7 @@ move_class_rewrite_failed_error(ClassName, Reason) ->
     ).
 
 %%% ----------------------------------------------------------------------------
-%%% Multi-site rewrite revert (ADR 0114, BT-3274)
+%%% Multi-site rewrite revert (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
 -doc """
@@ -3017,7 +3017,7 @@ finish_rename_class_revert(Entry) ->
     OldNameBin = beamtalk_workspace_changelog:entry_old_class(Entry),
     case CurrentNameBin =:= OldNameBin of
         true ->
-            %% BT-3335: a pure `Workspace moveClass:to:` (BT-3272) entry — a
+            %% A pure `Workspace moveClass:to:` entry — a
             %% file-location-only move never changes a class's name, so its
             %% `'rename-class'` entry records `old_class == class` by
             %% construction (`move_class/2`'s own doc). `do_revert_rewrite/2`
@@ -3123,7 +3123,7 @@ class_names_by_source_file() ->
 resolve_revert_sites(Sites, ClassMap) ->
     %% `undefined` (never actually produced today — `entry_sites/1` is always
     %% a list, possibly `[undefined]` for a sourceless dynamic-class
-    %% definition — BT-3269 § ChangeLog schema) degrades to "no sites",
+    %% definition) degrades to "no sites",
     %% defensively, rather than crashing on a future producer that omits it.
     IndexedSites = lists:zip(
         lists:seq(0, length(sites_or_undefined(Sites)) - 1), sites_or_undefined(Sites)

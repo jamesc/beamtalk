@@ -530,7 +530,7 @@ root_supervisor_returns_registered_value_test() ->
     end).
 
 %%====================================================================
-%% sync Tests (BT-1723)
+%% sync Tests
 %%====================================================================
 
 sync_dispatch_raises_when_no_manifest_test() ->
@@ -602,7 +602,7 @@ sync_returns_map_with_expected_keys_test() ->
     end.
 
 %%====================================================================
-%% value_type_name/1 coverage via load/1 — BT-2295
+%% value_type_name/1 coverage via load/1
 %%
 %% load/1 raises a type_error for non-binary, non-list arguments. The
 %% error message is built from value_type_name/1, so each of these tests
@@ -676,7 +676,7 @@ load_type_error_for_object_test() ->
     end.
 
 %%====================================================================
-%% to_atom_name/1 error-path coverage via bind/2 — BT-2295
+%% to_atom_name/1 error-path coverage via bind/2
 %%
 %% bind/2 calls to_atom_name/1 on the name argument. Non-atom names
 %% produce a type_error with a message built from value_type_name/1.
@@ -731,7 +731,7 @@ bind_type_error_for_map_name_test() ->
     end.
 
 %%====================================================================
-%% create_bindings_table/0 and ensure_bindings_table/0 — BT-2295
+%% create_bindings_table/0 and ensure_bindings_table/0
 %%
 %% Both functions are idempotent: calling them twice in sequence must
 %% succeed and return ok without crashing or duplicating the ETS table.
@@ -748,7 +748,7 @@ create_bindings_table_is_idempotent_test() ->
 %% and the many bind/unbind tests that call bind/2 repeatedly.
 
 %%====================================================================
-%% dependencies/0 — BT-2295
+%% dependencies/0
 %%
 %% When beamtalk_workspace_meta is not running, get_package_name/0
 %% returns undefined and dependencies/0 must return an empty map.
@@ -757,8 +757,8 @@ create_bindings_table_is_idempotent_test() ->
 dependencies_returns_empty_when_no_package_test() ->
     %% Snapshot whereis/1 BEFORE calling dependencies/0 so the assertion is
     %% based on the same state that get_package_name/0 observed internally.
-    %% (Copilot BT-2295: capturing after the call is a TOCTOU race — the
-    %% gen_server could stop between the two calls.)
+    %% (Capturing after the call is a TOCTOU race — the gen_server could
+    %% stop between the two calls.)
     WasMissing = whereis(beamtalk_workspace_meta) =:= undefined,
     Result = beamtalk_workspace_interface_primitives:dependencies(),
     ?assert(is_map(Result)),

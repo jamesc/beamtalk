@@ -188,7 +188,7 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
 %% `beamtalk_flush_events`) were retired; consumers now discriminate on the
 %% announced class atom.
 %%
-%% BT-690 (ADR 0017 Phase 2): actor lifecycle. The live `spawned` frame carries
+%% ADR 0017 Phase 2: actor lifecycle. The live `spawned` frame carries
 %% `{class, pid}` only — `spawned_at` is no longer on the live event (it is still
 %% present on the connect snapshot, read from the registry). `stopped` carries the
 %% normalized reason symbol (`#normal`/`#shutdown`/`#crashed`).
@@ -218,7 +218,7 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% BT-1020: Class-loaded push — broadcast when any session loads or reloads a class.
+%% Class-loaded push — broadcast when any session loads or reloads a class.
 websocket_info(
     {beamtalk_announcement, _SubRef, 'ClassLoaded', _Handler, Event},
     State = #ws_state{authenticated = true}
@@ -232,7 +232,7 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% BT-2531: Class-removed push — newly visible to push consumers now that the
+%% Class-removed push — newly visible to push consumers now that the
 %% `classes` stream rides the bus (ADR 0093). Symmetric with the `loaded` frame.
 websocket_info(
     {beamtalk_announcement, _SubRef, 'ClassRemoved', _Handler, Event},
@@ -247,22 +247,22 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% ADR 0082 Phase 3 (BT-2289); ADR 0113 LSP follow-up (BT-3212); ADR 0114 LSP
-%% follow-up (BT-3275): Flush-completion push — broadcast after a `Workspace
+%% ADR 0082 Phase 3; ADR 0113 LSP follow-up; ADR 0114 LSP
+%% follow-up: Flush-completion push — broadcast after a `Workspace
 %% flush` writes one or more `.bt` source files. LSP clients use this to emit
 %% `workspace/applyEdit` so open editor buffers refresh against the new
 %% on-disk state. `files` is the list of absolute paths touched (written or
-%% removed); `fileKinds` is the BT-3212 per-file companion — one
-%% `{file, kind}` object per touched file (plus an optional `oldFile`,
-%% BT-3275), `kind` being `beamtalk_workspace_changelog:entry_kind/1`'s own
+%% removed); `fileKinds` is the per-file companion — one
+%% `{file, kind}` object per touched file (plus an optional `oldFile`),
+%% `kind` being `beamtalk_workspace_changelog:entry_kind/1`'s own
 %% wire value (`"new-class"`, `"remove-class"`, `"instance"`, `"class"`,
 %% `"remove-method"`, `"rename-class"`, `"rename-method"`) — so a consumer
 %% can classify `CreateFile` vs. `DeleteFile` vs. `RenameFile` (the
 %% `"rename-class"` file that also carries `oldFile`) vs. a per-site
 %% `TextDocumentEdit` (`"rename-method"`) vs. an ordinary patch before
 %% touching the filesystem, rather than inferring it from post-flush
-%% existence. Absent/empty on a producer that predates BT-3212 (defensive
-%% default `[]`), so an older runtime still degrades to the pre-BT-3212
+%% existence. Absent/empty on an older producer (defensive
+%% default `[]`), so an older runtime still degrades to the
 %% existence-check fallback client-side.
 websocket_info(
     {beamtalk_announcement, _SubRef, 'FlushCompleted', _Handler, Event},
@@ -280,7 +280,7 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% ADR 0105 Phase 1 (BT-2779): reload-induced re-check outcome — broadcast
+%% ADR 0105 Phase 1: reload-induced re-check outcome — broadcast
 %% whenever `beamtalk_repl_loader:maybe_trigger_recheck/4` has something for a
 %% live surface to act on (a dependent re-check ran, or a caller's stale
 %% findings were cleared because its own source just changed). `checkedOwners`
@@ -301,7 +301,7 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
-%% BT-1433: Log event push from beamtalk_ws_log_handler
+%% Log event push from beamtalk_ws_log_handler
 websocket_info(
     {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
 ) ->
@@ -345,10 +345,10 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
         peer => Peer,
         domain => [beamtalk, runtime]
     }),
-    %% BT-2399: unsubscribe from all live push streams (Transcript, actors,
+    %% Unsubscribe from all live push streams (Transcript, actors,
     %% classes, bindings, flush) via the stable facade.
     beamtalk_repl_subscriptions:unsubscribe_all(),
-    %% Unsubscribe from log streaming (BT-1433) — a separate diagnostic stream,
+    %% Unsubscribe from log streaming — a separate diagnostic stream,
     %% not part of the workspace push-stream facade.
     beamtalk_ws_log_handler:unsubscribe(),
     %% Keep session alive for resume — session idle monitor handles cleanup.
@@ -442,20 +442,20 @@ handle_protocol(Data, SessionPid, State) ->
                 <<"shutdown">> ->
                     handle_shutdown(Msg, State);
                 <<"eval">> ->
-                    %% BT-696: Use async eval for streaming output
+                    %% Use async eval for streaming output
                     handle_eval_async(Msg, SessionPid, State);
                 <<"run-entry">> ->
-                    %% BT-2691: connected-mode `beamtalk run` — dispatch a class
+                    %% Connected-mode `beamtalk run` — dispatch a class
                     %% entry method with argv, streaming output like async eval.
                     handle_run_entry_async(Msg, SessionPid, State);
                 <<"stdin">> ->
-                    %% BT-698: Route stdin input to IO capture process
+                    %% Route stdin input to IO capture process
                     handle_stdin(Msg, State);
                 <<"subscribe-logs">> ->
-                    %% BT-1433: Subscribe to live log streaming
+                    %% Subscribe to live log streaming
                     handle_subscribe_logs(Msg, State);
                 <<"unsubscribe-logs">> ->
-                    %% BT-1433: Unsubscribe from log streaming
+                    %% Unsubscribe from log streaming
                     handle_unsubscribe_logs(Msg, State);
                 _ ->
                     Response = beamtalk_repl_server:handle_protocol_request(Msg, SessionPid),
@@ -485,9 +485,9 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
                         domain => [beamtalk, runtime]
                     }),
                     beamtalk_workspace_meta:update_activity(),
-                    %% BT-2399: subscribe to all live push streams (Transcript,
+                    %% Subscribe to all live push streams (Transcript,
                     %% actors, classes, bindings, flush) via the stable facade.
-                    %% ADR 0082 Phase 3 (BT-2289): the flush stream lets LSP
+                    %% ADR 0082 Phase 3: the flush stream lets LSP
                     %% clients emit `workspace/applyEdit` per touched file.
                     beamtalk_repl_subscriptions:subscribe_all(),
                     InitialActors = actor_snapshot_frames(),
@@ -541,9 +541,9 @@ create_session(SessionId, Meta, State) ->
                 domain => [beamtalk, runtime]
             }),
             beamtalk_workspace_meta:update_activity(),
-            %% BT-2399: subscribe to all live push streams (Transcript, actors,
-            %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3
-            %% (BT-2289): the flush stream lets LSP clients emit
+            %% Subscribe to all live push streams (Transcript, actors,
+            %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3:
+            %% the flush stream lets LSP clients emit
             %% `workspace/applyEdit` on flush.
             beamtalk_repl_subscriptions:subscribe_all(),
             InitialActors = actor_snapshot_frames(),
@@ -837,7 +837,7 @@ handle_shutdown(Msg, State) ->
             {[{text, ErrorJson}], State}
     end.
 
-%%% Internal — Actor lifecycle encoding (BT-690)
+%%% Internal — Actor lifecycle encoding
 
 -doc """
 Build WebSocket text frames for all currently live actors.
@@ -1044,7 +1044,7 @@ encode_reload_check_event(Event) ->
             maps:get(capNote, Event, undefined)
         ),
         <<"checkedOwners">> => maps:get(checkedOwners, Event, []),
-        %% BT-2801: shared with the `reload-findings` op response
+        %% Shared with the `reload-findings` op response
         %% (`beamtalk_repl_ops_dev:handle_term/4`) so the push and
         %% request/response wire shapes can never drift apart.
         <<"findings">> => [
@@ -1089,7 +1089,7 @@ extract_compile_error_location({compile_error, [DiagMap | _]}) when is_map(DiagM
 extract_compile_error_location(_) ->
     #{}.
 
-%%% Internal — Log streaming (BT-1433)
+%%% Internal — Log streaming
 
 -doc "Subscribe to live log events. Accepts an optional level parameter.".
 handle_subscribe_logs(Msg, State = #ws_state{log_subscribed = true}) ->

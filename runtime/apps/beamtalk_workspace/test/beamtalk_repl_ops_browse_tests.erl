@@ -329,11 +329,11 @@ delegate_tests(#{class_name := ClassName}) ->
 %% auto-injects `module_info/0,1` — so a real compiled `bt@stdlib@subprocess`
 %% facade module has no `module_info/1`, unlike `beamtalk_test_native_facade`
 %% (a normal `.erl` file DOES get `module_info` auto-injected by the ordinary
-%% compile pipeline). That gap is exactly why the BT-2732 double above didn't
-%% catch `safe_module_exports/1` silently swallowing the resulting `undef` and
-%% returning `[]` for every real native-backed class (BT-3242) — this test
-%% boots the real stdlib app so the facade module under test is genuinely
-%% `from_core`-compiled, closing the coverage gap that let the bug ship.
+%% compile pipeline). That gap is exactly why the hand-written test double
+%% above didn't catch `safe_module_exports/1` silently swallowing the
+%% resulting `undef` and returning `[]` for every real native-backed class —
+%% this test boots the real stdlib app so the facade module under test is
+%% genuinely `from_core`-compiled, closing that coverage gap.
 real_stdlib_delegate_callers_test_() ->
     {setup, fun real_stdlib_setup/0, fun(_) -> ok end, [
         {"Subprocess (a real native: class) reports its self delegate methods", fun() ->
@@ -353,14 +353,14 @@ real_stdlib_delegate_callers_test_() ->
 %% its real compiled BEAM — not a hand-written test double — and registered as a
 %% live class process. Delegates to the shared `beamtalk_test_boot` (in
 %% `beamtalk_test_support`) fixture (same helper `beamtalk_repl_docs_tests`'s
-%% integration tests use in this app's test suite, and BT-3251's
+%% integration tests use in this app's test suite, and the
 %% `beamtalk_stdlib` regression test uses too) rather than a second copy of
 %% the boot/wait sequence.
 real_stdlib_setup() ->
     beamtalk_test_boot:boot_real_stdlib('Subprocess').
 
 %%====================================================================
-%% browse-native-modules — enumeration + filter + source-path (BT-2648)
+%% browse-native-modules — enumeration + filter + source-path
 %%====================================================================
 
 describe_ops_has_native_modules_key_test() ->
@@ -369,7 +369,7 @@ describe_ops_has_native_modules_key_test() ->
     #{<<"browse-native-modules">> := Info} = Ops,
     %% No params (enumerates every loaded package).
     ?assertEqual([], maps:get(<<"params">>, Info)),
-    %% browse-native-source advertises the BT-2648 `module` alternative key.
+    %% browse-native-source advertises the `module` alternative key.
     #{<<"browse-native-source">> := NS} = Ops,
     ?assert(lists:member(<<"module">>, maps:get(<<"params">>, NS))).
 
@@ -417,7 +417,7 @@ native_modules_sorted_test() ->
     Modules = [maps:get(<<"module">>, R) || R <- Rows],
     ?assertEqual(lists:sort(Modules), Modules).
 
-%% browse-native-source keyed by `module` (BT-2648): a standalone native module
+%% browse-native-source keyed by `module`: a standalone native module
 %% (no backing class) returns its source read-only with `class = null`.
 native_source_by_module_test() ->
     ensure_stdlib(),
@@ -472,7 +472,7 @@ ensure_stdlib() ->
     ok.
 
 %%====================================================================
-%% browse-type-aliases — enumeration + seeding-boundary exclusion (BT-2903)
+%% browse-type-aliases — enumeration + seeding-boundary exclusion
 %%====================================================================
 
 describe_ops_has_type_aliases_key_test() ->
@@ -538,7 +538,7 @@ type_aliases_missing_doc_is_null_test() ->
         end
     ).
 
-%% Seeding-boundary exclusion (ADR 0108 Implementation, BT-2903): an internal
+%% Seeding-boundary exclusion (ADR 0108 Implementation): an internal
 %% alias belonging to a package other than the current project is dropped
 %% entirely — never returned as a row for any browsing session to filter.
 %% Stands in for a dependency package the same way `beamtalk_stdlib` stands in
@@ -617,7 +617,7 @@ type_aliases_malformed_entry_does_not_crash_test() ->
 
 %% A package with zero classes and one or more `type` declarations is
 %% discoverable via `beamtalk_package:all/0` and its aliases appear here
-%% end to end (BT-2915) — unlike `with_stdlib_aliases`, this constructs a
+%% end to end — unlike `with_stdlib_aliases`, this constructs a
 %% real second OTP application (stdlib always carries `classes`, so it can't
 %% exercise the types-only discovery path) with only a `type_aliases` env
 %% key, no `classes` key at all.
@@ -646,7 +646,7 @@ type_aliases_surfaces_types_only_package_test() ->
         end
     ).
 
-%% alias_visible/2 — pure seeding-boundary decision (BT-2903).
+%% alias_visible/2 — pure seeding-boundary decision.
 alias_visible_internal_project_is_visible_test() ->
     ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"project">>)).
 
@@ -693,7 +693,7 @@ alias_row_undefined_doc_is_null_test() ->
     ?assertEqual(null, maps:get(<<"doc">>, Row)).
 
 %%====================================================================
-%% browse-alias-source — read-only alias source view (BT-3314)
+%% browse-alias-source — read-only alias source view
 %%====================================================================
 
 describe_ops_has_alias_source_key_test() ->
@@ -792,7 +792,7 @@ alias_source_disambiguates_same_name_by_package_test() ->
     ).
 
 %% Stdlib/dependency aliases have no live path cache to resolve their
-%% package-relative `source_file` against (BT-3314's documented limitation) —
+%% package-relative `source_file` against (a documented limitation) —
 %% they degrade to the honest `content = null` empty state, never an error.
 alias_source_stdlib_degrades_to_null_content_test() ->
     with_stdlib_aliases(
@@ -943,8 +943,8 @@ validate_alias_with_package_test() ->
     ).
 
 %%====================================================================
-%% class_definition_text/7 — BT-3255 (ADR 0067 field:/state: + typed prefix),
-%% BT-3254 (sealed/abstract modifier round-trip)
+%% class_definition_text/7 — ADR 0067 field:/state: + typed prefix,
+%% sealed/abstract modifier round-trip
 %%====================================================================
 %%
 %% `class_definition_text/7` is pure — no live class needed — so these
@@ -990,16 +990,14 @@ class_definition_text_non_typed_actor_test() ->
 class_definition_text_unknown_kind_falls_back_to_state_test() ->
     %% A file-less ClassBuilder class or a module with no `__beamtalk_meta/0`
     %% carries no `kind` — the skeleton must still render, defaulting to
-    %% `state:` (the pre-BT-3255 behaviour for such classes).
+    %% `state:` (the default behaviour for such classes).
     State = [#{<<"name">> => <<"x">>, <<"default">> => null, <<"type">> => null}],
     Definition = beamtalk_repl_ops_browse:class_definition_text(
         'Loose', none, State, false, false, false, #{}
     ),
     ?assertEqual(<<"Object subclass: Loose\n  state: x">>, Definition).
 
-%% BT-3254: `sealed`/`abstract` are now emitted the same way `typed` already
-%% was — this is the round-trip gap `add_class_def_flushability/2` used to
-%% document as open.
+%% `sealed`/`abstract` are emitted the same way `typed` is.
 class_definition_text_sealed_typed_test() ->
     State = [#{<<"name">> => <<"x">>, <<"default">> => <<"0">>, <<"type">> => <<"Integer">>}],
     Definition = beamtalk_repl_ops_browse:class_definition_text(
@@ -1050,7 +1048,7 @@ find_alias_row(Rows, Name) ->
 %% enumeration tests without building a real `.app` file end-to-end
 %% (`browse-native-modules`'s project/dependency classification is likewise
 %% tested at the pure-function level, see `source_origin_of/2` tests below).
-%% The types-only discovery path (BT-2915) can't be exercised this way,
+%% The types-only discovery path can't be exercised this way,
 %% since stdlib always carries a non-empty `classes` env — see
 %% `with_types_only_fixture_app/3` below for the real second OTP application
 %% that path needs.
@@ -1130,13 +1128,12 @@ browse_setup() ->
     %% Ensure the xref server is up. We never clear it globally: a unique class
     %% name per invocation (below) isolates this fixture from any other class /
     %% xref state, and cleanup purges only this class — so the fixture is
-    %% order-independent and safe to run alongside a populated index (CodeRabbit
-    %% BT-2506: no global xref-table clears, unique class per invocation).
+    %% order-independent and safe to run alongside a populated index.
     XrefPid =
         case whereis(beamtalk_xref) of
             undefined ->
                 %% start-or-get: another fixture may win the race between the
-                %% whereis/1 above and start_link/0 here (CodeRabbit BT-2506).
+                %% whereis/1 above and start_link/0 here.
                 case beamtalk_xref:start_link() of
                     {ok, P} ->
                         P;
