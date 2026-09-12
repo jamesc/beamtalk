@@ -792,3 +792,77 @@ fn test_value_type_field_write_wrapped_in_local_assign_in_match_arm_is_compile_e
         ),
     }
 }
+
+#[test]
+fn test_value_type_field_write_in_match_arm_value_block_is_compile_error() {
+    // BT-3495: unlike the two rejection tests above (a bare, or
+    // local-assign-wrapped, field write directly as `arm.body`), this
+    // field write is nested one level deeper inside a `[...] value`
+    // block's own statements — the shape every Actor `bumpMatch`-style
+    // fixture uses. `generate_match`'s up-front rejection loop previously
+    // inspected `arm.body` only, never looking *inside* a `[...] value`
+    // block, so this reached `erlc: unbound variable 'Self1'` instead of
+    // the same clean diagnostic the bare/local-assign-wrapped shapes get.
+    let src = concat!(
+        "TestCase subclass: VtMatchArmValueBlockSelfWrite\n",
+        "  field: total = 0\n\n",
+        "  computeIt: v -> Integer =>\n",
+        "    v match: [\n",
+        "      1 -> [self.total := self.total + 10] value;\n",
+        "      _ -> 0\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtmatcharmvalueblockselfwrite").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
+            assert_eq!(field, "total");
+        }
+        other => panic!(
+            "Expected ValueSelfFieldAssignmentInMatchArm for a value-type field write nested in \
+             a match: arm's `[...] value` block. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_value_type_field_write_in_match_arm_value_block_local_assign_wrapped_is_compile_error() {
+    // BT-3495: the same `[...] value`-block nesting, but the field write
+    // is ALSO wrapped one level deeper in a local assignment inside the
+    // block (`r := (self.x := ...)`) — pins that the widened detector
+    // looks through both wrappers at once, not just one or the other.
+    let src = concat!(
+        "TestCase subclass: VtMatchArmValueBlockLocalAssignSelfWrite\n",
+        "  field: total = 0\n\n",
+        "  computeIt: v -> Integer =>\n",
+        "    v match: [\n",
+        "      1 -> [\n",
+        "        r := (self.total := self.total + 10)\n",
+        "        r\n",
+        "      ] value;\n",
+        "      _ -> 0\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtmatcharmvalueblocklocalassignselfwrite")
+            .with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
+            assert_eq!(field, "total");
+        }
+        other => panic!(
+            "Expected ValueSelfFieldAssignmentInMatchArm for a local-assign-wrapped value-type \
+             field write nested in a match: arm's `[...] value` block. Got: {other:?}"
+        ),
+    }
+}

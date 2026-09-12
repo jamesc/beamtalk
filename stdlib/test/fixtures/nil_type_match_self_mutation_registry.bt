@@ -33,6 +33,7 @@
 Actor subclass: NilTypeMatchSelfMutationRegistry
   state: count :: Integer = 0
   state: otherCount :: Integer = 0
+  state: pair = nil
 
   initialize =>
     self.count := 0
@@ -253,6 +254,40 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
         self.count := r
       ]
     self.count
+
+  // ── BT-3495: a field write wrapped in a value-carrying parent OTHER
+  // than a local assignment — `^`, `{a, b} :=`, and a plain top-level
+  // flat method-body statement (no `ifTrue:`/loop/`match:` at all). These
+  // are the `single_sequenced_child` shapes BT-3493's acceptance criteria
+  // scoped out as "ideally" rather than "at minimum".
+
+  // `^ (self.field := ...)` inside an `ifTrue:` branch — the early return
+  // must carry the field's freshly-written value, not crash
+  // `ThreadedIr::verify()`.
+  bumpWrappedReturnIfTrue: flag -> Integer =>
+    flag ifTrue: [^(self.count := self.count + 10)]
+    self.count := self.count - 1
+    self.count
+
+  // `{a, b} := (self.field := ...)` inside an `ifTrue:` branch. The
+  // field write's own RHS is a real 2-tuple (not the nonsensical
+  // scalar-destructure the bug report's own repro used), so `a`/`b` are
+  // genuinely usable afterward.
+  bumpWrappedDestructureIfTrue: flag -> Integer =>
+    flag
+      ifTrue: [
+        {a, b} := (self.pair := Tuple withAll: #(self.count + 10, self.count + 20))
+        self.count := a + b
+      ]
+    self.count
+
+  // `r := (self.field := ...)` as a flat top-level (no `ifTrue:`/loop/
+  // `match:`) method-body statement — a different lowering path
+  // (`lower_body_exprs_with_reply`'s `LocalAssignPure` handling) than the
+  // branch/loop/match-arm shapes above.
+  bumpWrappedTopLevel: n -> Integer =>
+    r := (self.count := self.count + n)
+    r + 1
 
   currentCount => self.count
 

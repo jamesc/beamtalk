@@ -171,3 +171,97 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
         "Inner branch should update 'count' via maps:put. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_return_wrapped_field_write_in_if_true_threads_state() {
+    // BT-3495: `^ (self.field := ...)` inside an `ifTrue:` branch — the
+    // same "value-carrying parent" shape BT-3493 fixed for `r := (self.x
+    // := ...)`, but here the wrapper is `Return` instead of a local
+    // assignment. Before this fix, the field write's own `State`/
+    // `StateAcc` `Bind` was invisible to the branch's `ThreadedIr`, tripping
+    // `ThreadedIr::verify()`'s `NonLinearVersion`/`UnboundVersion` check.
+    let src = concat!(
+        "Actor subclass: ReturnWrappedFieldWrite\n",
+        "  state: total = 0\n\n",
+        "  go: flag =>\n",
+        "    flag ifTrue: [\n",
+        "      ^ (self.total := self.total + 10)\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@returnwrappedfieldwrite").with_workspace_mode(true),
+    )
+    .expect("a `^`-wrapped actor field write inside an ifTrue: branch must compile");
+    assert!(
+        code.contains("maps':'put'('total'"),
+        "the field write must still update 'total' via maps:put. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'throw'({'$bt_nlr',"),
+        "the branch's early return must throw the NLR tuple. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@returnwrappedfieldwrite", &code);
+}
+
+#[test]
+fn test_destructure_wrapped_field_write_in_if_true_threads_state() {
+    // BT-3495: `{a, b} := (self.field := ...)` inside an `ifTrue:` branch
+    // — the destructure-assignment counterpart of the `^`-wrapped test
+    // above. Before this fix, the field write's own `Bind` was invisible
+    // to the branch, tripping the same `ThreadedIr::verify()` panic.
+    let src = concat!(
+        "Actor subclass: DestructureWrappedFieldWrite\n",
+        "  state: total = 0\n",
+        "  state: pair = nil\n\n",
+        "  go: flag =>\n",
+        "    flag ifTrue: [\n",
+        "      {a, b} := (self.pair := Tuple withAll: #(self.total + 10, self.total + 20))\n",
+        "      self.total := a + b\n",
+        "    ]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@destructurewrappedfieldwrite").with_workspace_mode(true),
+    )
+    .expect("a destructure-wrapped actor field write inside an ifTrue: branch must compile");
+    assert!(
+        code.contains("maps':'put'('pair'"),
+        "the field write must still update 'pair' via maps:put. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@destructurewrappedfieldwrite", &code);
+}
+
+#[test]
+fn test_local_assign_field_write_at_flat_top_level_threads_state() {
+    // BT-3495: `r := (self.field := ...)` as a flat top-level (no
+    // `ifTrue:`/loop/`match:`) method-body statement — a different
+    // lowering path (`lower_body_exprs_with_reply`'s `LocalAssignPure`
+    // handling) than the branch/loop/match-arm shapes BT-3493 fixed.
+    // Before this fix, this reached `erlc: unbound variable 'State1'`.
+    let src = concat!(
+        "Actor subclass: TopLevelLocalAssignFieldWrite\n",
+        "  state: total = 0\n\n",
+        "  go: n =>\n",
+        "    r := (self.total := self.total + n)\n",
+        "    r + 1\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@toplevellocalassignfieldwrite").with_workspace_mode(true),
+    )
+    .expect("a local-assign-wrapped actor field write as a flat top-level statement must compile");
+    assert!(
+        code.contains("maps':'put'('total'"),
+        "the field write must still update 'total' via maps:put. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@toplevellocalassignfieldwrite", &code);
+}

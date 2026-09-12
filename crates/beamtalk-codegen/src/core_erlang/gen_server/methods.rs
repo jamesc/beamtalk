@@ -1595,23 +1595,60 @@ impl CoreErlangGenerator {
                 BodyExprKind::LocalAssignPure => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::Identifier(id) = target.as_ref() {
-                            let var_name = &id.name;
-                            let core_var = self
-                                .lookup_var(var_name)
-                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            // ADR 0118 phase 1a: `ok := (self recordOnce: x)
-                            // and: [y]`, `total := items size + (self bump)` —
-                            // the RHS's state-effecting sub-expressions land
-                            // in this body's IR as real `Bind`s, in source
-                            // order, via the sequencing rule.
-                            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
-                            stmts.extend(tv.prelude);
-                            let value_str = self.threaded_value_doc(&tv.value);
-                            self.bind_var(var_name, &core_var);
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
-                                span,
-                            ));
+                            // BT-3495: `r := (self.field := ...)` as a flat
+                            // top-level method-body statement — the RHS is
+                            // itself a field write, at any parenthesization
+                            // depth. `classify_body_expr` hands every
+                            // `LocalAssignPure` RHS here regardless of shape,
+                            // and the generic `threaded_expression` compile
+                            // below has no way to fold a NESTED field write's
+                            // own state mutation into this body's `State`
+                            // chain (it recompiles the whole `self.field :=
+                            // ...` expression via plain `generate_expression`,
+                            // producing an `erlc: unbound variable` crash).
+                            // Lower it through the SAME real-`Bind` producer
+                            // `FieldAssignment` (above) and the branch/loop
+                            // lowerings use — `lower_field_assignment_bind`
+                            // — then alias the local var to the identical
+                            // assigned value, exactly as `:=`'s "the whole
+                            // assignment evaluates to the assigned value"
+                            // semantics require (mirrors
+                            // `lower_local_var_assignment_bind`'s C2z fix,
+                            // BT-3493, one level up at this flat top-level
+                            // body instead of a branch/loop frame). Falls
+                            // through to this arm's own reply behavior below
+                            // (`pure_reply_doc`, not the assigned value) when
+                            // this is the body's last statement — only the
+                            // RHS lowering differs.
+                            if let Some(field_write) = Self::local_assign_field_write(value) {
+                                let field_val_var = self.lower_field_assignment_bind(
+                                    field_write,
+                                    threaded_ir::FrameId::ROOT,
+                                    span,
+                                    &mut stmts,
+                                )?;
+                                self.bind_var(&id.name, &field_val_var);
+                            } else {
+                                let var_name = &id.name;
+                                let core_var = self.lookup_var(var_name).map_or_else(
+                                    || Self::to_core_erlang_var(var_name),
+                                    String::clone,
+                                );
+                                // ADR 0118 phase 1a: `ok := (self recordOnce: x)
+                                // and: [y]`, `total := items size + (self bump)` —
+                                // the RHS's state-effecting sub-expressions land
+                                // in this body's IR as real `Bind`s, in source
+                                // order, via the sequencing rule.
+                                let tv =
+                                    self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+                                stmts.extend(tv.prelude);
+                                let value_str = self.threaded_value_doc(&tv.value);
+                                self.bind_var(var_name, &core_var);
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                                    span,
+                                ));
+                            }
                         }
                     }
                     if is_last {
