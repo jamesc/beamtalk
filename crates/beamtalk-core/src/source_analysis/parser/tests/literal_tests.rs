@@ -409,18 +409,20 @@ fn parse_doc_comment_resets_on_regular_comment() {
     // `///` block; only the last consecutive block attaches to the class.
     //
     // The class's own doc comment attaches cleanly here (no blank
-    // line or comment directly breaks *it*), so no warning fires — an
-    // earlier, unrelated orphaned block must not be misreported as "this
-    // declaration's doc comment is not attached" when it plainly is. (The
-    // orphaned block itself is preserved, not silently dropped — see
+    // line or comment directly breaks *it*) — so the warning that fires must
+    // not be misreported as "this declaration's doc comment is not
+    // attached" when it plainly is. Instead, a distinct BT-3503 warning
+    // flags the earlier, unrelated block as a likely-orphaned doc comment.
+    // (The orphaned block itself is preserved, not silently dropped — see
     // `collect_comment_attachment` and the unparse-level regression tests.)
-    let module = parse_ok(
+    let tokens = lex_with_eof(
         "/// Orphaned doc comment.
 // Regular comment interrupts.
 /// Actual class doc.
 Actor subclass: Counter
   increment => 1",
     );
+    let (module, diagnostics) = parse(tokens);
 
     assert_eq!(module.classes.len(), 1);
     // Only the last consecutive block should be collected.
@@ -428,6 +430,17 @@ Actor subclass: Counter
         module.classes[0].doc_comment.as_deref(),
         Some("Actual class doc.")
     );
+
+    let warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "expected exactly one orphaned-doc-comment warning, got: {diagnostics:?}"
+    );
+    assert!(warnings[0].message.contains("orphaned"));
 }
 
 #[test]
@@ -452,19 +465,22 @@ fn parse_doc_comment_blank_line_resets() {
     // `///` block; only the last consecutive block attaches to the class.
     //
     // Same rationale as `parse_doc_comment_resets_on_regular_comment`
-    // above — the class's own doc comment attaches cleanly, so no warning
-    // fires for it. This exact shape (an earlier doc block, a blank line,
-    // then a directly-adjacent doc block that attaches) is also exercised by
-    // `type` alias declarations sandwiched between an outer class's doc
-    // comment and the class itself; see the `unparse` module's
-    // `type_alias_preceded_by_orphaned_class_doc_*` regression tests.
-    let module = parse_ok(
+    // above — the class's own doc comment attaches cleanly, so the warning
+    // that fires is the BT-3503 orphaned-earlier-block warning, not "this
+    // declaration's doc comment is not attached". This exact shape (an
+    // earlier doc block, a blank line, then a directly-adjacent doc block
+    // that attaches) is also exercised by `type` alias declarations
+    // sandwiched between an outer class's doc comment and the class itself;
+    // see the `unparse` module's `type_alias_preceded_by_orphaned_class_doc_*`
+    // regression tests.
+    let tokens = lex_with_eof(
         "/// Orphaned doc comment.
 
 /// Actual class doc.
 Actor subclass: Counter
   increment => 1",
     );
+    let (module, diagnostics) = parse(tokens);
 
     assert_eq!(module.classes.len(), 1);
     // Blank line separates the two doc blocks; only the last is attached.
@@ -472,6 +488,17 @@ Actor subclass: Counter
         module.classes[0].doc_comment.as_deref(),
         Some("Actual class doc.")
     );
+
+    let warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "expected exactly one orphaned-doc-comment warning, got: {diagnostics:?}"
+    );
+    assert!(warnings[0].message.contains("orphaned"));
 }
 
 // ── Unattached doc comment warnings ──────────────────────────────

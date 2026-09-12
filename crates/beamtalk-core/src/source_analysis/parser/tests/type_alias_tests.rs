@@ -104,12 +104,14 @@ fn parse_type_alias_doc_comment() {
 fn parse_type_alias_own_adjacent_doc_comment_not_falsely_unattached() {
     // Regression: a `type` alias with a
     // directly-adjacent `///` doc comment (no blank line) must attach
-    // cleanly and must NOT be reported as unattached, even when an earlier,
-    // unrelated `///` block (meant for a different declaration further down)
-    // shares the same leading trivia. `parse_ok` asserts zero
-    // `Severity::Warning` diagnostics, so this fails if the false-positive
-    // "doc comment not attached" lint fires.
-    let module = parse_ok(
+    // cleanly and must NOT be reported as "this declaration's doc comment is
+    // not attached", even when an earlier, unrelated `///` block (meant for
+    // a different declaration further down) shares the same leading trivia.
+    //
+    // BT-3503: that earlier, unrelated block IS flagged now — as a distinct
+    // "orphaned doc comment" warning — since it silently attaches to
+    // nothing and previously had no diagnostic at all.
+    let tokens = lex_with_eof(
         "/// HTTPServer doc, meant for the class declared further below.
 
 /// Anything HTTPServer accepts as a request handler.
@@ -118,12 +120,24 @@ type HTTPHandlerLike = Integer | String
 Actor subclass: HTTPServer
   start => 1",
     );
+    let (module, diagnostics) = parse(tokens);
     assert_eq!(module.type_aliases.len(), 1);
     assert_eq!(
         module.type_aliases[0].doc_comment.as_deref(),
         Some("Anything HTTPServer accepts as a request handler.")
     );
     assert_eq!(module.classes.len(), 1);
+
+    let warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "expected exactly one orphaned-doc-comment warning, got: {diagnostics:?}"
+    );
+    assert!(warnings[0].message.contains("orphaned"));
 }
 
 #[test]
