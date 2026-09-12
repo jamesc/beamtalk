@@ -280,7 +280,7 @@ init({SessionId, Meta}) when is_map(Meta) ->
     %% Create session-specific REPL state
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
     %%
-    %% BT-2365 (ADR 0081 Phase 1): the session binding map starts EMPTY — it holds
+    %% ADR 0081 Phase 1: the session binding map starts EMPTY — it holds
     %% only session locals. Workspace globals (singletons + bind:as: names) are no
     %% longer eagerly injected here; a free identifier that misses the locals map is
     %% resolved lazily at eval time via beamtalk_workspace:resolve_name/2.
@@ -300,7 +300,7 @@ init({SessionId, Meta}) when is_map(Meta) ->
         end,
     State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0c),
 
-    %% BT-1242: Join class-removed notification group so this session is notified
+    %% Join class-removed notification group so this session is notified
     %% when a class is removed via Beamtalk code (ClassName removeFromSystem).
     %% ensure_pg_started/0 mirrors beamtalk_object_class.erl — guarantees pg is
     %% running before join so failures are real errors, not startup-race artefacts.
@@ -310,11 +310,11 @@ init({SessionId, Meta}) when is_map(Meta) ->
     {ok, {SessionId, State1, undefined}}.
 
 handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
-    %% Spawn eval in a monitored worker process so it can be interrupted (BT-666)
+    %% Spawn eval in a monitored worker process so it can be interrupted
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
-        %% BT-2365 (ADR 0081): seed the worker process context so primitives that
+        %% ADR 0081: seed the worker process context so primitives that
         %% read it (Session current / Workspace currentSession) see this session.
         seed_session_context(Self, SessionId, SessionMeta),
         Result = beamtalk_repl_eval:do_eval(Expression, State),
@@ -325,7 +325,7 @@ handle_call({eval_trace, Expression}, From, {SessionId, State, undefined}) ->
     Self = self(),
     SessionMeta = beamtalk_repl_state:get_client_meta(State),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
-        %% BT-2365 (ADR 0081): seed worker process context (same as the eval path).
+        %% ADR 0081: seed worker process context (same as the eval path).
         seed_session_context(Self, SessionId, SessionMeta),
         Result = beamtalk_repl_eval:do_eval_trace(Expression, State),
         Self ! {eval_result, self(), Result}
@@ -360,11 +360,11 @@ handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}})
     Err0 = beamtalk_error:new(interrupted, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"Interrupted">>),
     reply_eval(EvalFrom, {eval_error, Err1, <<>>, []}),
-    %% BT-1242: Apply any pending module removals that accumulated while the
+    %% Apply any pending module removals that accumulated while the
     %% worker was running.  No WorkerState is returned on interrupt, so we
     %% drain directly from ShellState.
     CleanState0 = drain_pending_removals(State),
-    %% BT-2366 (ADR 0081 Phase 2): drain session-local mutations too — an
+    %% ADR 0081 Phase 2: drain session-local mutations too — an
     %% interrupted eval's issued put/remove/clear edits are not lost.
     CleanState = drain_pending_mutations(CleanState0, SessionId),
     {reply, ok, {SessionId, CleanState, undefined}};
@@ -372,7 +372,7 @@ handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
     %% No eval in progress — nothing to interrupt
     {reply, ok, FullState};
 handle_call({enqueue_mutation, Mutation}, _From, {SessionId, State, Worker}) ->
-    %% BT-2366 (ADR 0081 Phase 2): a session-scope write issued by a primitive
+    %% ADR 0081 Phase 2: a session-scope write issued by a primitive
     %% running inside this session's eval worker.  Enqueue the {op, Key, Value}
     %% tuple on pending_mutations rather than writing the bindings directly: the
     %% worker holds a state snapshot whose returned WorkerState would clobber a
@@ -388,7 +388,7 @@ handle_call(get_alias_table, _From, {SessionId, State, Worker}) ->
     AliasTable = beamtalk_repl_state:get_alias_table(State),
     {reply, {ok, AliasTable}, {SessionId, State, Worker}};
 handle_call(get_session_id, _From, {SessionId, State, Worker}) ->
-    %% BT-2368 (ADR 0081 Phase 7): answered in any worker state so
+    %% ADR 0081 Phase 7: answered in any worker state so
     %% liveSessions/0 enumeration never blocks on a mid-eval shell.
     {reply, {ok, SessionId}, {SessionId, State, Worker}};
 handle_call(get_session_meta, _From, {SessionId, State, Worker}) ->

@@ -1951,7 +1951,7 @@ format_collision_warning(ClassName, OldModule, NewModule) ->
     ClassBin = atom_to_binary(ClassName, utf8),
     OldPkg = extract_package_from_module(OldModule),
     NewPkg = extract_package_from_module(NewModule),
-    %% BT-1659: When both modules come from packages, add a qualified-name hint.
+    %% When both modules come from packages, add a qualified-name hint.
     QualifiedHint =
         case {OldPkg, NewPkg} of
             {OldP, NewP} when OldP =/= undefined, NewP =/= undefined ->
@@ -2074,7 +2074,7 @@ module_to_class_name_map() ->
     ).
 
 %%% ===================================================================
-%%% BT-1717: Demand-driven native .erl recompilation on single-file reload
+%%% Demand-driven native .erl recompilation on single-file reload
 %%% ===================================================================
 
 -doc """
@@ -2208,7 +2208,7 @@ is_native_erl_stale(ErlFile, ModBin) ->
             BeamMtime =
                 case is_list(BeamPath) of
                     true ->
-                        %% BT-1719: When loaded via code:load_binary/3 the stored
+                        %% When loaded via code:load_binary/3 the stored
                         %% path is the .erl source, not a .beam file. Comparing
                         %% its mtime against itself always yields "not stale".
                         %% Use the mtime snapshot taken at compile time instead.
@@ -2264,7 +2264,7 @@ erase_native_compile_mtime(ModAtom) ->
     ok.
 
 %%% ===================================================================
-%%% BT-1685: Incremental load-project helpers
+%%% Incremental load-project helpers
 %%% ===================================================================
 
 -doc """
