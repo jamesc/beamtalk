@@ -602,7 +602,7 @@ remove_selector_extension_logs_remove_method_changelog_entry(#{tmp := Tmp, uniqu
     ].
 
 %%====================================================================
-%% BT-3206 (ADR 0113 Phase 1) — "remove-class" ChangeLog entries for
+%% ADR 0113 Phase 1 — "remove-class" ChangeLog entries for
 %% `removeFromSystem`.
 %%====================================================================
 
@@ -776,7 +776,7 @@ revert_selects_correct_side_entry_when_both_sides_have_entries(#{tmp := Tmp, uni
         ?_assert(lists:member(foo, AfterRevertInstanceMethods))
     ].
 
-%% ADR 0112 (BT-3187) required fix: `revert_method/2` — the LiveView "Workspace
+%% ADR 0112 required fix: `revert_method/2` — the LiveView "Workspace
 %% changes" ChangeLog viewer's *only* revert entry point
 %% (`BtAttach.Workspace.revert/2,3` calls `revert_method/3`) — must resolve the
 %% same way the ChangeEntry-based `changeLogRevert/1` surface above does when
@@ -853,7 +853,7 @@ revert_method_side_agnostic_fallback_still_picks_highest_seq(#{tmp := Tmp, uniqu
         ?_assert(lists:member(foo, AfterRevertClassMethods))
     ].
 
-%% ADR 0112 (BT-3187) required fix: `recover_prev_from_disk/1` — the fallback
+%% ADR 0112 required fix: `recover_prev_from_disk/1` — the fallback
 %% `find_revert_target/3` reaches when an entry's recorded `prev_source_ref`
 %% body file cannot be read (a rotation/cleanup race; here simulated by
 %% deleting it out from under a genuine `'remove-method'` entry) — must resolve

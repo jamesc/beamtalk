@@ -968,7 +968,7 @@ get_context_completions(Line, Bindings, AliasNames) when is_binary(Line) ->
                     %% No receiver — use standard prefix completion
                     get_completions(Prefix);
                 {expression, ReceiverExpr, Prefix} ->
-                    %% Multi-token receiver expression — resolve via chain type inference (BT-1006)
+                    %% Multi-token receiver expression — resolve via chain type inference
                     case resolve_chain_type(ReceiverExpr, Bindings) of
                         {ok, ClassName, class} -> complete_class_methods(ClassName, Prefix);
                         {ok, ClassName, instance} -> complete_instance_methods(ClassName, Prefix);
@@ -1257,7 +1257,7 @@ is_identifier_char(C) ->
         %% `ifTrue:ifFalse:` complete as a unit.  Must stay in sync with
         %% word_start in crates/beamtalk-cli/src/commands/repl/helper.rs.
         C =:= $: orelse
-        %% BT-1659: @ is an identifier char so `json@Parser` is treated as a
+        %% @ is an identifier char so `json@Parser` is treated as a
         %% single token for completions and receiver parsing.
         C =:= $@.
 
@@ -1754,7 +1754,7 @@ classify_receiver(<<$", _/binary>>, _Bindings) ->
         ClassName -> {instance, ClassName}
     end;
 classify_receiver(Receiver, Bindings) ->
-    %% BT-1659: Check for package-qualified class name (e.g. "json@Parser")
+    %% Check for package-qualified class name (e.g. "json@Parser")
     case binary:match(Receiver, <<"@">>) of
         nomatch ->
             %% Lowercase identifier — look up in bindings to find the class
