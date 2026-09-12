@@ -662,7 +662,7 @@ reload_file(Path) ->
             {error, Reason}
     end.
 
-%% BT-2598: repopulate the workspace_meta class-source cache from the just-read
+%% Repopulate the workspace_meta class-source cache from the just-read
 %% file, mirroring `handle_load_after_native/1`. A read failure is non-fatal —
 %% the reload itself already succeeded — so the cache is simply left untouched.
 -spec repopulate_class_sources(string(), [map()]) -> ok.
@@ -748,10 +748,10 @@ eval_with_self(Self, Source) ->
     SourceStr = unicode:characters_to_list(Source),
     %% Reuse a per-process module name (minted once, cached in the process
     %% dictionary) instead of a fresh atom per call, so a hot `evaluate:` loop in
-    %% one process cannot exhaust the never-reclaimed atom table (BT-2503).
+    %% one process cannot exhaust the never-reclaimed atom table.
     ModuleName = eval_module_name(),
     Bindings = #{self => Self},
-    %% BT-2956: use the no-registration variant — every definition-shaped
+    %% Use the no-registration variant — every definition-shaped
     %% result below is rejected immediately via eval_not_an_expression_error/0,
     %% so there is no reader for a beamtalk_alias_xref edge (or even a wasted
     %% bytecode compile) that compile_expression/3 would otherwise trigger.
@@ -1309,7 +1309,7 @@ has_method_header(<<"class ", Rest/binary>>, Head) ->
     %% A class-side method definition leads with the `class ' modifier (e.g.
     %% `class make => ...'). Skip it and test the header on the rest — this keeps
     %% a complete class-side definition (such as a recovered prior body from a
-    %% class-side revert, BT-2665) intact instead of re-wrapping it under a
+    %% class-side revert) intact instead of re-wrapping it under a
     %% synthesised instance-side header.
     has_method_header(trim_leading_ws(Rest), Head);
 has_method_header(Trimmed, Head) ->
@@ -1390,7 +1390,7 @@ handle_class_definition(
         {ok, ClassName, no_trailing, NewState2} ->
             {ok, ClassName, <<>>, Warnings, NewState2};
         {ok, _ClassName, {trailing, TrailingModName, TrailingBinary}, NewState2} ->
-            %% BT-885: eval trailing expressions after class load
+            %% Eval trailing expressions after class load
             case code:load_binary(TrailingModName, "", TrailingBinary) of
                 {module, TrailingModName} ->
                     eval_loaded_module(
@@ -1507,7 +1507,7 @@ eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Wa
             execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State)
         catch
             throw:{beamtalk_script_exit, Code} ->
-                %% BT-2688: `Program exit: Code` evaluated in a connected session
+                %% `Program exit: Code` evaluated in a connected session
                 %% (ADR 0099 §3 / Phase 5). This is the job-level exit signal raised
                 %% by `beamtalk_program:'exit:'/1`, not a user error — surface the
                 %% status so the shell reports it and terminates the session. Caught
@@ -1550,7 +1550,7 @@ process_eval_result(Result, Expression, CleanBindings, State) ->
     case extract_assignment(Expression) of
         {ok, VarName} ->
             NewBindings = CleanBindings#{VarName => Result},
-            %% ADR 0093 §2 (BT-2445): a workspace assignment (`x := ...`) is a
+            %% ADR 0093 §2: a workspace assignment (`x := ...`) is a
             %% BindingChanged system event. Announced after the new binding map is
             %% built; best-effort and fault-isolated (see announce_binding_changed/2).
             announce_binding_changed(VarName, Result),
@@ -1911,7 +1911,7 @@ should_purge_module(ModuleName, RegistryPid) ->
 -doc "Strip internal plumbing keys from bindings map (BT-153).".
 -spec strip_internal_bindings(map()) -> map().
 strip_internal_bindings(Bindings) ->
-    %% BT-881: Strip workspace-only binding keys injected by do_eval.
+    %% Strip workspace-only binding keys injected by do_eval.
     Stripped0 =
         case maps:find(?WORKSPACE_BINDINGS_KEY, Bindings) of
             {ok, WorkspaceOnlyBindings} when is_map(WorkspaceOnlyBindings) ->
@@ -1944,7 +1944,7 @@ inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->
     {error, Reason, Output, Warnings, State};
-%% BT-2688: connected-session `Program exit:` — carry the status alongside any
+%% Connected-session `Program exit:` — carry the status alongside any
 %% output captured before the exit signal fired.
 inject_output({script_exit, Code, State}, Output, Warnings) ->
     {script_exit, Code, Output, Warnings, State}.

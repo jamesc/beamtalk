@@ -1862,7 +1862,7 @@ t_load_class_module_redefinition_with_methods_in_source_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% BT-3254 adversarial-review finding (the mirror image of the "methods in
+%% (The mirror image of the "methods in
 %% source" guard above, on the LEADING side instead of the trailing side): a
 %% raw REPL-typed redefinition that includes a NEW leading `///` doc comment
 %% — unlike the `:def` tab's own skeleton, which never carries one — must
@@ -1910,12 +1910,12 @@ t_load_class_module_redefinition_with_leading_comment_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% BT-3254 adversarial-review finding (the field-defaults gap, distinct from
+%% (The field-defaults gap, distinct from
 %% the modifier/method-safety findings above): a COMPILED class's field
 %% default-value TEXT is not recoverable from live reflection at all — only
 %% `beamtalk_class_builder`-created (file-less) classes populate
 %% `field_defaults`; `__beamtalk_meta/0` for a real `.bt` class carries only
-%% the `field_has_default` boolean (BT-1976). So the `:def` tab's OWN
+%% the `field_has_default` boolean. So the `:def` tab's OWN
 %% skeleton generator (`class_definition_text/7`, fed by
 %% `beamtalk_repl_ops_browse:browse_class_definition/1`'s LIVE reflection —
 %% not a hand-fed `State` list like
@@ -1971,7 +1971,7 @@ t_load_class_module_redefinition_drops_default_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% Claude BeamTalk Review finding on this PR (BT-3254): a `state:`/`field:`
+%% A `state:`/`field:`
 %% declaration positioned AT OR AFTER a method (legal Beamtalk — see
 %% `class_span.rs`'s `excludes_a_method_that_precedes_a_later_state_
 %% declaration` test) is excluded from `resolve_class_span/2`'s clamped span
@@ -2033,7 +2033,7 @@ t_load_class_module_redefinition_state_after_method_not_flushable(_Proj) ->
     {ok, Final} = file:read_file(Path),
     ?assertEqual(Original, Final).
 
-%% BT-3335: `add_class_def_span_or_downgrade/4`'s `file:read_file/1` branch —
+%% `add_class_def_span_or_downgrade/4`'s `file:read_file/1` branch —
 %% the class's `sourceFile` classifies flushable (still resolves to a path
 %% inside the project tree) and the resubmitted skeleton IS header+state-only,
 %% but the file itself is gone from disk by the time this redefinition is
