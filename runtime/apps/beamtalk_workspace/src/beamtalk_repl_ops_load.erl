@@ -541,7 +541,7 @@ the compile-mtime. The project root for the erlc include path is derived from th
 compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
     SourceFileBin = list_to_binary(ErlPath),
     ProjectRoot = find_project_root(ErlPath),
-    %% BT-2653: refresh the generated beamtalk_classes.hrl before compiling so a
+    %% Refresh the generated beamtalk_classes.hrl before compiling so a
     %% module that `-include("beamtalk_classes.hrl")` resolves against a fresh
     %% header (the same invariant the incremental native build relies on). A
     %% missing project root (no beamtalk.toml — should not happen for a resolved
@@ -626,7 +626,7 @@ finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileR
     case atomic_write_file(ErlPath, Source) of
         ok ->
             %% Recompile + reload from the REAL `.erl` (not the validation temp)
-            %% so compile-info `source` = ErlPath and the BT-2653 compile-mtime is
+            %% so compile-info `source` = ErlPath and the compile-mtime is
             %% stamped against the real file (image == disk).
             {ReErrors, _Count} = compile_native_erl_files([ErlPath], CompileRoot),
             case ReErrors of
@@ -1110,7 +1110,7 @@ leading_indent(Bin, N) ->
 finish_section_write(Path, ClassBin, Source, NewSource) ->
     case file:read_file(Path) of
         {ok, Source} ->
-            %% BT-3259: pass `Source` through as the expected-current content
+            %% Pass `Source` through as the expected-current content
             %% so atomic_write_file/3 repeats this same byte-match check
             %% immediately before its rename, closing the gap between this
             %% read and that rename that a check made only here cannot.
@@ -1268,7 +1268,7 @@ compile_native_erl_files([], _ProjectRoot) ->
 compile_native_erl_files(ErlFiles, ProjectRoot) ->
     NativeDir = filename:join(ProjectRoot, "native"),
     IncludeDir = filename:join(NativeDir, "include"),
-    %% BT-2653: Native modules may `-include("beamtalk_classes.hrl")`, the
+    %% Native modules may `-include("beamtalk_classes.hrl")`, the
     %% generated class→module header. The CLI writes it to
     %% _build/dev/native/include/ and adds that dir to the erlc include path;
     %% the workspace path must do the same (regenerate_native_class_header/1
@@ -1299,7 +1299,7 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                 [ErlPath],
                 #{domain => [beamtalk, runtime]}
             ),
-            %% BT-1719: Snapshot the .erl file's mtime before compiling so
+            %% Snapshot the .erl file's mtime before compiling so
             %% is_native_erl_stale/2 can compare against it later.
             ErlMtimeSnapshot = get_file_mtime(ErlPath),
             case compile:file(ErlPath, IncludeOpts) of
