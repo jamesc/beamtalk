@@ -14,14 +14,14 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 import { type DocumentMovedParams, planDocumentRetarget } from "./documentMoved";
-import { resolveClassDocument } from "./documentResolution";
+import {
+  aliasSourceContentFor,
+  resolveAliasDocument,
+  resolveClassDocument,
+} from "./documentResolution";
 import { InspectorPanel } from "./inspectorPanel";
 import { resolveDeclarationOffset } from "./symbolLookup";
-import {
-  aliasSourceUriString,
-  classNameToStdlibFilename,
-  parseAliasSourceUriPath,
-} from "./textUtils";
+import { classNameToStdlibFilename } from "./textUtils";
 import { TranscriptViewProvider } from "./transcriptView";
 import type { ClassInfo, ClassOrigin, LogEntry, TypeAliasInfo } from "./workspaceClient";
 import { WorkspaceClient } from "./workspaceClient";
@@ -287,14 +287,14 @@ export async function openStdlibDocumentForClass(
   }
 }
 
-/**
- * `beamtalk-alias://` virtual URI for a `type` alias's read-only source view
- * (BT-3314/BT-3496) — thin `vscode.Uri` wrapper around `aliasSourceUriString`
- * (kept in `textUtils.ts` so the string-building/parsing logic stays testable
- * without a `vscode` dependency).
- */
-function aliasSourceUri(name: string, pkg: string | undefined): vscode.Uri {
-  return vscode.Uri.parse(aliasSourceUriString(name, pkg));
+/** Bind `workspaceWsClient.browseAliasSource` into the shape `documentResolution.ts`'s
+ * alias-resolution functions accept — null when there's no live workspace
+ * connection, so they can tell that apart from a connected fetch that threw. */
+function aliasSourceFetcher():
+  | ((name: string, pkg?: string) => Promise<{ content: string | null }>)
+  | null {
+  const wsClient = workspaceWsClient;
+  return wsClient ? (name, pkg) => wsClient.browseAliasSource(name, pkg) : null;
 }
 
 /**
@@ -306,59 +306,33 @@ function aliasSourceUri(name: string, pkg: string | undefined): vscode.Uri {
  * no compiled-module path for the LSP's `beamtalk-lsp/fetchContent` sysroot
  * discovery to key off of — the runtime resolves `AliasMetadata.source_file`
  * (a package-relative display path) against its own recorded state instead.
+ *
+ * The actual content logic lives in `aliasSourceContentFor`
+ * (`documentResolution.ts`) so it's covered by tests using a real
+ * `vscode.Uri.parse`/`.path` — see that function's doc for why.
  */
 class AliasContentProvider implements vscode.TextDocumentContentProvider {
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
-    const { name, pkg } = parseAliasSourceUriPath(uri.path);
-    if (!workspaceWsClient) {
-      return `// ${uri.toString()}\n// Not connected to a Beamtalk workspace.\n`;
-    }
-    try {
-      const { content } = await workspaceWsClient.browseAliasSource(name, pkg);
-      return content ?? `// Source not available for type alias \`${name}\`.\n`;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return `// Failed to load type alias source for \`${name}\`.\n// ${message}\n`;
-    }
+    return aliasSourceContentFor(uri, aliasSourceFetcher());
   }
 }
 
 /**
  * Open a `type` alias's read-only source view via the `beamtalk-alias://`
- * virtual URI scheme (BT-3314/BT-3496). Calls `browseAliasSource` directly
- * first (rather than going straight to `openTextDocument`) so a disconnected
- * workspace or a `content: null` result (always the case for a
- * stdlib/dependency-origin alias — see `browseAliasSource`'s doc; possibly a
- * project-origin one whose recorded file no longer exists) is detected as a
- * clean failure here — `openTextDocument` on a `beamtalk-alias://` URI never
- * rejects on its own, since `AliasContentProvider` deliberately returns
- * friendly placeholder comment text instead.
+ * virtual URI scheme (BT-3314/BT-3496). Thin wiring around
+ * `resolveAliasDocument` (`documentResolution.ts`), which owns the actual
+ * existence-check-then-open logic — see that function's doc.
  *
  * Returns undefined when there's nothing to show — callers fall back to
  * their normal "source not available" handling.
- *
- * This existence check and `openTextDocument`'s resulting
- * `AliasContentProvider.provideTextDocumentContent` call each fetch the
- * alias's content once — a harmless duplicate round trip on every click,
- * the same tradeoff `openStdlibDocumentForClass`'s own upfront
- * `fetchContent` call already makes ahead of `StdlibContentProvider`'s.
- * Worth it for a clean early failure instead of a friendly-placeholder tab.
  */
 async function openAliasSourceDocument(
   info: TypeAliasInfo
 ): Promise<vscode.TextDocument | undefined> {
-  if (!workspaceWsClient) return undefined;
-  try {
-    const { content } = await workspaceWsClient.browseAliasSource(info.name, info.package);
-    if (content === null) return undefined;
-  } catch {
-    return undefined;
-  }
-  try {
-    return await vscode.workspace.openTextDocument(aliasSourceUri(info.name, info.package));
-  } catch {
-    return undefined;
-  }
+  const fetchAliasSource = aliasSourceFetcher();
+  if (!fetchAliasSource) return undefined;
+  const result = await resolveAliasDocument(info, fetchAliasSource);
+  return result.kind === "opened" ? result.document : undefined;
 }
 
 /** Method name for the server's `beamtalk-lsp/documentMoved` notification (BT-3285). */
