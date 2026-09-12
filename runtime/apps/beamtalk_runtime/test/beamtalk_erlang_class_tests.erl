@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_erlang_class dispatch (BT-1974).
+Unit tests for beamtalk_erlang_class dispatch.
 
 Tests Erlang class bridging dispatch: class/printString builtins,
 unary module lookup forwarding, keyword selector error, args error,

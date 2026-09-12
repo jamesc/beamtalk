@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_compiled_method_ops direct API (BT-1974).
+Unit tests for beamtalk_compiled_method_ops direct API.
 
 Tests dispatch/3 for all 8 builtin selectors, has_method/1 true/false,
 and does_not_understand error. Complements beamtalk_compiled_method_tests

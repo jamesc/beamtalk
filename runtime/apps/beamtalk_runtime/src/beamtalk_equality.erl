@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Overridable value equality (`equals:`) for primitives that scan (BT-2997).
+Overridable value equality (`equals:`) for primitives that scan.
 
 Beamtalk's four equality operators (`=:=`, `=/=`, `==`, `/=`) lower straight to
 the Erlang BIFs and never dispatch (ADR 0002), so they cannot be overridden.
@@ -130,7 +130,7 @@ Actors are excluded because actor equality *is* process identity: two spawns of
 the same class are never equal, which raw `=:=` already answers correctly.
 Dispatching to one would instead make a synchronous `gen_server` call per actor
 element, turning a side-effect-free membership test into something that blocks
-on live processes and can raise `deadlock_detected` (BT-1325 cycle detection)
+on live processes and can raise `deadlock_detected` (cycle detection)
 or time out — from `aList includes: anActor`, which could not fail before.
 Cheaper and safer to answer by identity.
 

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-StackFrame wrapper for post-exception introspection (BT-107).
+StackFrame wrapper for post-exception introspection.
 
 Converts Erlang stacktrace entries into first-class Beamtalk StackFrame
 value objects (tagged maps). Erlang stacktrace entries have the form:
@@ -37,7 +37,7 @@ StackFrame objects are value types (tagged maps) with fields:
 -doc """
 Convert an Erlang stacktrace (list of tuples) to a list of StackFrame objects.
 
-BT-3081: resolves the module→class registry map once for the whole
+Resolves the module→class registry map once for the whole
 stacktrace rather than once per frame. `beamtalk_class_registry:module_to_class_map/0`
 is a plain ETS fold (`beamtalk_class_metadata:foldl_modules/2`, a
 `read_concurrency: true` table — no process round trips); paying that scan
@@ -103,7 +103,7 @@ Resolve `Module` to a class name using a pre-built module→class map (from
 `beamtalk_class_registry:module_to_class_map/0`), falling back to the string
 heuristic — the batched counterpart to `module_to_class/1`'s single-module
 registry lookup, used by `wrap/1` to avoid re-scanning the class registry
-per frame (BT-3081).
+per frame.
 """.
 -spec resolve_class_name(atom(), #{atom() => atom()}) -> atom() | 'nil'.
 resolve_class_name(Module, ModuleToClass) when is_atom(Module) ->
@@ -119,7 +119,7 @@ resolve_class_name(_, _ModuleToClass) ->
 -doc """
 Map Erlang module name to Beamtalk class name.
 
-BT-3081: Resolves via the class metadata table first
+Resolves via the class metadata table first
 (`beamtalk_class_registry:class_name_for_module/1` — no live process needed),
 which is authoritative — it reads each class's actual registered name rather
 than guessing one from its module name, so it can't mis-capitalize
@@ -160,7 +160,7 @@ module_to_class(_) ->
 -doc """
 Lossy snake_case→CamelCase fallback for `module_to_class/1`, used only when
 the module isn't found in the class metadata table — see that function's doc
-for why this alone is not authoritative (BT-3081).
+for why this alone is not authoritative.
 """.
 -spec module_to_class_heuristic(atom()) -> atom() | 'nil'.
 module_to_class_heuristic(Module) ->

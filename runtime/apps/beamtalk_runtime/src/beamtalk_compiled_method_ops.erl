@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-CompiledMethod primitive class implementation (BT-101).
+CompiledMethod primitive class implementation.
 
 This module provides method dispatch for CompiledMethod objects, enabling
 method introspection in Beamtalk. CompiledMethod objects are maps with

@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Test helper module for BT-732 class chain wire check.
+Test helper module for the class chain wire check.
 
 This module acts as a minimal Class implementation for EUnit tests.
 It provides `testClassProtocol` so tests can verify the dispatch

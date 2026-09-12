@@ -4,7 +4,7 @@
 -module(test_self_aware_actor).
 -behaviour(gen_server).
 
--moduledoc "Test actor with new-style methods (Fun/4) for BT-159 testing".
+-moduledoc "Test actor with new-style methods (Fun/4).".
 
 -include("beamtalk.hrl").
 

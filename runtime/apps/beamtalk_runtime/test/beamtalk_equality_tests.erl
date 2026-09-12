@@ -4,7 +4,7 @@
 -module(beamtalk_equality_tests).
 
 -moduledoc """
-EUnit tests for beamtalk_equality (BT-2997).
+EUnit tests for beamtalk_equality.
 
 Covers the parts that need no compiled stdlib: the raw `=:=` fast path, the
 non-object skipping in the fallback scan, and edge cases. End-to-end dispatch

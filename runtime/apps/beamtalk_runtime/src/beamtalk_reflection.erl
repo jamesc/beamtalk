@@ -66,7 +66,7 @@ ADR 0094 (Critical Risk #4): delegates to the canonical structural renderer
 (`beamtalk_object_printer`) so every value/object formatter produces
 byte-identical output. There are no independent formatters left.
 
-BT-446: Extracted from beamtalk_object_ops:dispatch/4 so that compiled
+Extracted from beamtalk_object_ops:dispatch/4 so that compiled
 Object modules can call it from generated dispatch/4 code.
 """.
 -spec inspect_string(map()) -> binary().

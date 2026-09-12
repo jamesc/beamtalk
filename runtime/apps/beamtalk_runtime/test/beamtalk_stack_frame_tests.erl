@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_stack_frame module (BT-624).
+Unit tests for beamtalk_stack_frame module.
 
 Tests wrap/1, dispatch/3, has_method/1, and internal helpers.
 """.

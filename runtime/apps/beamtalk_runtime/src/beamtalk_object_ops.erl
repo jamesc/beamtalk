@@ -49,8 +49,6 @@ where State is the actor's actual state map (containing `$beamtalk_class`, field
 ## References
 
 - ADR 0006: Unified Method Dispatch with Hierarchy Walking
-- BT-275: printString/yourself/hash protocol
-- BT-282: Bootstrap Object with shared reflection methods
 """.
 
 -export([dispatch/4, try_dispatch/3, has_method/1, class_name/3]).
@@ -88,7 +86,7 @@ Dispatch a message to the Object base class.
 This is called by `beamtalk_dispatch` when a method is found in Object
 during hierarchy walking. State is the actor's actual state map.
 
-BT-753: When dispatched on class objects via chain fallthrough, State is
+When dispatched on class objects via chain fallthrough, State is
 `#{}' (empty map). In that case, class identity is derived from Self
 (`#beamtalk_object.class') instead of the State map.
 """.
@@ -241,7 +239,7 @@ Three cases:
 - **Live actor/supervisor references** (`Self` is a `#beamtalk_object{}` that
   is not a class object) render kind-headed and positional
   (`Actor(ClassName, pid)` / `Supervisor(ClassName, pid)` /
-  `DynamicSupervisor(ClassName, pid)`, BT-2462), derived directly from the
+  `DynamicSupervisor(ClassName, pid)`), derived directly from the
   `#beamtalk_object{}` tuple — no message round-trip, no re-entrancy risk.
 - **Value/plain-object instances** with user fields render structurally as
   `ClassName(field: value, ...)` via the canonical renderer
@@ -283,7 +281,7 @@ class_display_name(Self, State) ->
 -doc """
 Extract class name from Self or State.
 
-BT-753: When dispatched on class objects via chain fallthrough, State is
+When dispatched on class objects via chain fallthrough, State is
 `#{}' (empty map). In that case, derive the class from Self.
 """.
 -spec class_name(term(), map()) -> atom() | undefined.
@@ -302,13 +300,13 @@ class_name(_Self, State, Default) ->
 -doc """
 Compute the `respondsTo:` result for `Selector` against `Self`.
 
-BT-776: Class objects have a virtual metaclass tag (e.g., 'Counter class')
+Class objects have a virtual metaclass tag (e.g., 'Counter class')
 that is not registered in the class registry, so the generic hierarchy-walk
 `beamtalk_dispatch:responds_to/2` cannot be pointed at it directly — it is
 instead started from `'Class'`, reflecting the generic Class/Behaviour/
 Object protocol every class object shares.
 
-BT-3200: that generic-protocol answer used to be the *whole* answer for a
+That generic-protocol answer used to be the *whole* answer for a
 class-object receiver, so `SomeClass respondsTo: #aClassSpecificSelector`
 was always `false` even when `SomeClass` had a matching local/inherited
 class method or class-side extension (ADR 0066/0084). Delegates to

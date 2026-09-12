@@ -5,7 +5,7 @@
 -module(beamtalk_opaque_type_tests).
 
 -moduledoc """
-EUnit tests for opaque BEAM type dispatch (BT-681).
+EUnit tests for opaque BEAM type dispatch.
 
 Tests Pid, Port, and Reference Object protocol methods:
 asString, printString, class, ==, =:=, hash, isAlive (Pid only).

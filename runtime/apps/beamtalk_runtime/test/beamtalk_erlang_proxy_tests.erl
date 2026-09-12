@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_erlang_proxy module (BT-676).
+Unit tests for beamtalk_erlang_proxy module.
 
 Tests ErlangModule proxy dispatch, Erlang class-side proxy,
 error wrapping, and printString formatting.

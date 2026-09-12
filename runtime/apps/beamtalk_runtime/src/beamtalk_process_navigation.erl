@@ -27,7 +27,7 @@ appear or vanish during construction. A supervisor that dies mid-walk yields a
 ## Node shape
 
 Each node is a `SupervisionNode` value (a tagged map, minted here so the
-stdlib class — BT-2427 — needs no wrapping layer):
+stdlib class needs no wrapping layer):
 
 ```
 #{
@@ -164,7 +164,7 @@ supervisor (`beamtalk_supervisor:get_root/0`) plus any supervisors attached
 via `Workspace startSupervisor:` — and filters runtime plumbing via the infra
 deny-list. Returns a flat `[node_map()]` (pre-order: parents precede children);
 the parent/child adjacency is carried in each node's `parent_pid` for tree
-reconstruction (BT-2429).
+reconstruction.
 
 Best-effort and crash-free: a supervisor that dies mid-walk contributes a
 partial subtree rather than raising.
@@ -438,7 +438,7 @@ Return the infra deny-list — the registered names of runtime plumbing that the
 `default` scope filters out (ADR 0092 §6).
 
 Centralised here because this module owns the definition of "infrastructure".
-The deny-list parity test (BT-2433) pins this set: a new runtime supervisor
+The deny-list parity test pins this set: a new runtime supervisor
 that should be hidden from `default` but is missing here fails CI rather than
 leaking into the user-facing snapshot.
 """.

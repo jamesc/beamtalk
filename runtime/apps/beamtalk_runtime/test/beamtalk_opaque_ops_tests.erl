@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Unit tests for beamtalk_opaque_ops direct API (BT-1974).
+Unit tests for beamtalk_opaque_ops direct API.
 
 Tests pid_to_string/1, port_to_string/1, and ref_to_string/1 formatting.
 Validates output matches #Pid<>/#Port<>/#Ref<> patterns.

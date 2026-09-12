@@ -6,7 +6,7 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-Test helper module for BT-1980 beamtalk_supervisor:startLink/1 tests.
+Test helper module for beamtalk_supervisor:startLink/1 tests.
 
 Provides three `start_link/0` variants keyed by an ETS flag so a single
 Module:start_link() dispatch can return {ok, Pid}, {error, {already_started, Pid}},

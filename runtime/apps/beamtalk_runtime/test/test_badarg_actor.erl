@@ -4,7 +4,7 @@
 -module(test_badarg_actor).
 -behaviour(gen_server).
 
--moduledoc "Test actor that triggers various Erlang error types for BT-1958 coverage".
+-moduledoc "Test actor that triggers various Erlang error types.".
 
 %% API
 -export([start_link/0]).
