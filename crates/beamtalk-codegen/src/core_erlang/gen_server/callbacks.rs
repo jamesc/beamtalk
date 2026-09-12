@@ -198,7 +198,7 @@ impl CoreErlangGenerator {
                                     INDENT,
                                     docvec![
                                         line(),
-                                        "%% Merge parent state with this class's fields",
+                                        "%% Merge parent state with the fields declared by this class",
                                         line(),
                                         "let ChildFields = ~{",
                                         nest(
