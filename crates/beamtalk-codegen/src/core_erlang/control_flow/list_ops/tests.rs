@@ -1312,6 +1312,10 @@ fn test_list_do_non_literal_callable_emits_arity_check() {
         code.contains("'erlang':'is_function'"),
         "Non-literal callable do: should emit is_function/2 arity check (BT-909). Got:\n{code}"
     );
+    assert!(
+        code.contains(", 2) of"),
+        "Non-literal callable do: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
+    );
 }
 
 #[test]
@@ -1327,6 +1331,10 @@ fn test_list_collect_non_literal_callable_emits_arity_check() {
     assert!(
         code.contains("'erlang':'is_function'"),
         "Non-literal callable collect: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+    assert!(
+        code.contains(", 2) of"),
+        "Non-literal callable collect: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
 }
 
@@ -1344,6 +1352,10 @@ fn test_list_select_non_literal_callable_emits_arity_check() {
     assert!(
         code.contains("'erlang':'is_function'"),
         "Non-literal callable select: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+    assert!(
+        code.contains(", 2) of"),
+        "Non-literal callable select: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
     // Runtime fallback selector is 'select:' (mapped from 'filter').
     assert!(
