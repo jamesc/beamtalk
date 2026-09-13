@@ -2660,3 +2660,61 @@ fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
         "nested sort: with mutations should generate one fresh state key per call site (outer + inner). Got:\n{code}"
     );
 }
+
+#[test]
+fn test_list_do_non_literal_callable_generates_arity_wrapper() {
+    // do: with a non-literal body (variable) generates an is_function/2 arity-check
+    // wrapper so Tier-2 (arity 2) callables satisfy the arity-1 contract for lists:foreach.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items do: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foreach'"),
+        "Non-literal do: should still delegate to lists:foreach. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal do: should generate is_function arity-check wrapper. Got:\n{code}"
+    );
+    assert!(
+        code.contains(", 2)"),
+        "Non-literal do: should include arity-2 check for Tier-2 blocks. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_list_collect_non_literal_callable_generates_arity_wrapper() {
+    // collect: with a non-literal body (variable) generates an arity-check wrapper.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items collect: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'map'"),
+        "Non-literal collect: should delegate to lists:map. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal collect: should generate is_function arity-check wrapper. Got:\n{code}"
+    );
+    assert!(
+        code.contains(", 2)"),
+        "Non-literal collect: should include arity-2 check for Tier-2 blocks. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_list_select_non_literal_callable_generates_arity_wrapper() {
+    // select: with a non-literal body (variable) generates an arity-check wrapper.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items select: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'filter'"),
+        "Non-literal select: should delegate to lists:filter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal select: should generate is_function arity-check wrapper. Got:\n{code}"
+    );
+    assert!(
+        code.contains(", 2)"),
+        "Non-literal select: should include arity-2 check for Tier-2 blocks. Got:\n{code}"
+    );
+}
