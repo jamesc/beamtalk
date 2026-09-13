@@ -100,6 +100,7 @@
 - `beamtalk lint` now also detects `with<Field>:` sends and `with*:` cascades (not just `self.field :=`) as field-mutating statements in `TestCase>>setUp`, warning when one isn't the trailing statement (BT-3395, #3690).
 - Fix `respondsTo:` on actor instances disagreeing with value types given the identical situation — an actor's `has_method/1` never checked the foreign-extension registry, never delegated to its superclass, and never short-circuited for a class with a catch-all `doesNotUnderstand:args:` handler, so e.g. `anActor respondsTo: #anExtensionMethod` or `respondsTo: #anInheritedMethod` incorrectly answered `false`. Actor and value-type `has_method/1` now render through one shared `DispatchSpec`-driven emitter (ADR 0006) (BT-3467).
 - Fix type checker emitting duplicate DNU diagnostics for generic-typed state-field default values — the same default-value expression was inferred independently by `validation.rs` and `protocol.rs`; both now read from a shared cache populated once in the inference pass (BT-3481, #3857).
+- Fix `self.field := value` wrapped in a value-carrying parent expression (`^ (self.field := ...)`, `{a, b} := (self.field := ...)`, or a flat top-level `r := (self.field := ...)`) inside an `ifTrue:`/`ifFalse:` branch or a `match:` arm block body producing `ThreadedIr` verify panics or `erlc` unbound-variable errors — the field write is now lowered through its own `Bind` producer in each wrapper shape, matching the existing local-assignment fix from BT-3493 (BT-3495, #3885).
 
 ### Standard Library
 
@@ -432,6 +433,7 @@
 - Fix `declare native:` erroneously rejected via MCP when the file is inside `stubs/` — MCP's `run_module_analysis` now derives `is_stub_file` from the file path, matching CLI and LSP behavior (BT-3398, #3692).
 - VS Code sidebar: class items in the Workspace Explorer now show `///` doc-comment tooltips on hover, matching the existing method/state-var 3-tier fallback (LSP hover → doc-comment read → hardcoded fallback) (BT-3497, #3856).
 - VS Code sidebar: "Go to Definition" on type alias rows now works for all origins (project, dependency, stdlib) via a new `beamtalk-alias://` virtual URI scheme backed by the `browse-alias-source` runtime op (BT-3496, #3849).
+- Fix VS Code sidebar "Go to Definition" on type aliases silently failing when the alias's package was empty/undefined — the `beamtalk-alias://` URI collapsed to `beamtalk-alias:////<name>.bt` (path starting with `//`), which `vscode.Uri.parse` rejects with `UriError`. The URI now always includes a non-empty package segment (BT-3505, #3882).
 
 ### Internal
 
