@@ -2665,7 +2665,8 @@ fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
 fn test_list_do_non_literal_callable_generates_arity_wrapper() {
     // do: with a non-literal body (variable) generates an is_function/2 arity-check
     // wrapper so Tier-2 (arity 2) callables satisfy the arity-1 contract for lists:foreach.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items do: block\n";
+    let src =
+        "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foreach'"),
