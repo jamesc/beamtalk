@@ -121,6 +121,29 @@ pub(crate) fn find_project_root() -> Result<Utf8PathBuf> {
     Ok(project_root)
 }
 
+/// Write `contents` to `path` atomically: stage in a sibling temp file keyed
+/// by `tmp_prefix` and the current pid, then rename into place (atomic on the
+/// same filesystem). The pid suffix ensures concurrent builders don't clobber
+/// each other's staging file; the final rename is the accepted last-write-wins
+/// race (ADR 0098 §1).
+///
+/// Shared by `commands/build_stamp` and `commands/deps/snapshot` — both use
+/// the same two-step stage-then-rename pattern and differ only in the prefix
+/// string they pass (`.beamtalk-stamp.` vs `.beamtalk-dep-graph.`), which
+/// keeps temp files identifiable by domain when debugging a partial build.
+pub(crate) fn write_atomic(
+    path: &Utf8Path,
+    contents: &str,
+    tmp_prefix: &str,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_file_name(format!("{}{}.tmp", tmp_prefix, std::process::id()));
+    fs::write(&tmp, contents)?;
+    fs::rename(&tmp, path)
+}
+
 /// Find files matching the given extensions in a path.
 ///
 /// - If `path` is a file, validates it has one of the given extensions and returns it.

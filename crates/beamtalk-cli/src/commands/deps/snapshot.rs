@@ -45,6 +45,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use tracing::{debug, warn};
 
+use crate::commands::util::write_atomic;
+
 use super::DiscoveredDep;
 use crate::commands::build_layout::BuildLayout;
 
@@ -198,22 +200,10 @@ pub(super) fn write(project_root: &Utf8Path, all_deps: &[DiscoveredDep]) {
     };
 
     let path = snapshot_path(project_root);
-    match write_atomic(&path, &data) {
+    match write_atomic(&path, &data, ".beamtalk-dep-graph.") {
         Ok(()) => debug!("Wrote dependency-graph snapshot to {path}"),
         Err(e) => warn!(error = %e, "Failed to write dependency-graph snapshot to {path}"),
     }
-}
-
-/// Write `contents` to `path` atomically: stage in a sibling temp file, then
-/// rename into place (atomic on the same filesystem). The temp name is keyed
-/// by pid so concurrent builders don't clobber each other's staging file.
-fn write_atomic(path: &Utf8Path, contents: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_file_name(format!(".beamtalk-dep-graph.{}.tmp", std::process::id()));
-    fs::write(&tmp, contents)?;
-    fs::rename(&tmp, path)
 }
 
 #[cfg(test)]
