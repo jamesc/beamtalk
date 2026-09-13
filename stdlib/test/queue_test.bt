@@ -4,24 +4,23 @@
 // BUnit tests for Queue class (BT-1250)
 
 TestCase subclass: QueueTest
+  field: q = nil
+
+  setUp => self.q := Queue new
 
   testNewIsEmpty =>
-    q := Queue new
-    self assert: q isEmpty
+    self assert: self.q isEmpty
 
   testNewSizeIsZero =>
-    q := Queue new
-    self assert: q size equals: 0
+    self assert: self.q size equals: 0
 
   testEnqueueIncreasesSize =>
-    q := Queue new
-    q2 := q enqueue: 1
+    q2 := self.q enqueue: 1
     self assert: q2 size equals: 1
 
   testEnqueueDoesNotMutateOriginal =>
-    q := Queue new
-    q enqueue: 42
-    self assert: q isEmpty
+    self.q enqueue: 42
+    self assert: self.q isEmpty
 
   testDequeueReturnsTupleWithValueAndQueue =>
     q := (Queue new) enqueue: 99
@@ -77,6 +76,5 @@ TestCase subclass: QueueTest
     self assert: front equals: (result at: 1)
 
   testEnqueueMultipleTypes =>
-    q := Queue new
-    q2 := ((q enqueue: 1) enqueue: "two") enqueue: #three
+    q2 := ((self.q enqueue: 1) enqueue: "two") enqueue: #three
     self assert: q2 size equals: 3
