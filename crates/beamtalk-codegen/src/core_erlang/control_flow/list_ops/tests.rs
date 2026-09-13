@@ -2677,8 +2677,8 @@ fn test_list_do_non_literal_callable_generates_arity_wrapper() {
         "Non-literal do: should generate is_function arity-check wrapper. Got:\n{code}"
     );
     assert!(
-        code.contains(", 2)"),
-        "Non-literal do: should include arity-2 check for Tier-2 blocks. Got:\n{code}"
+        code.contains(", 2) of"),
+        "Non-literal do: should include arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
 }
 
@@ -2696,8 +2696,8 @@ fn test_list_collect_non_literal_callable_generates_arity_wrapper() {
         "Non-literal collect: should generate is_function arity-check wrapper. Got:\n{code}"
     );
     assert!(
-        code.contains(", 2)"),
-        "Non-literal collect: should include arity-2 check for Tier-2 blocks. Got:\n{code}"
+        code.contains(", 2) of"),
+        "Non-literal collect: should include arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
 }
 
@@ -2715,7 +2715,7 @@ fn test_list_select_non_literal_callable_generates_arity_wrapper() {
         "Non-literal select: should generate is_function arity-check wrapper. Got:\n{code}"
     );
     assert!(
-        code.contains(", 2)"),
-        "Non-literal select: should include arity-2 check for Tier-2 blocks. Got:\n{code}"
+        code.contains(", 2) of"),
+        "Non-literal select: should include arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
 }
