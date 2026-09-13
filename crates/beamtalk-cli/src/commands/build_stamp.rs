@@ -25,6 +25,8 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
+use crate::commands::util::write_atomic;
+
 /// Current provenance-stamp schema. Bump when the meaning of the invalidation
 /// fields changes; an unrecognised schema is treated as a miss (rebuild), so a
 /// newer toolchain's stamp never causes an older binary to reuse foreign bytes.
@@ -160,23 +162,10 @@ pub(crate) fn write_stamp(stamp_path: &Utf8Path, otp_release: Option<&str>) {
         }
     };
 
-    match write_atomic(stamp_path, &data) {
+    match write_atomic(stamp_path, &data, ".beamtalk-stamp.") {
         Ok(()) => debug!("Wrote provenance stamp to {stamp_path}"),
         Err(e) => warn!(error = %e, "Failed to write provenance stamp to {stamp_path}"),
     }
-}
-
-/// Write `contents` to `path` atomically: stage in a sibling temp file, then
-/// rename into place (atomic on the same filesystem). The temp name is keyed by
-/// pid so concurrent builders don't clobber each other's staging file; the final
-/// rename is the ADR 0098 §1 accepted last-write-wins race.
-fn write_atomic(path: &Utf8Path, contents: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_file_name(format!(".beamtalk-stamp.{}.tmp", std::process::id()));
-    fs::write(&tmp, contents)?;
-    fs::rename(&tmp, path)
 }
 
 /// Format a `SystemTime` as a UTC RFC 3339 timestamp (`2026-06-23T10:04:11Z`).
