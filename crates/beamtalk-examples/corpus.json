@@ -30249,14 +30249,19 @@
         "constructor",
         "create",
         "extends",
+        "field",
         "inherit",
         "inheritance",
+        "instance variable",
         "instantiate",
+        "member",
         "mutate",
         "mutation",
         "object",
+        "property",
         "queue_test",
         "set",
+        "setUp",
         "subclassing",
         "testDequeueOnEmptyQueueRaisesError",
         "testDequeueReducesSize",
@@ -30274,7 +30279,7 @@
         "testPeekOnEmptyQueueRaisesError",
         "testPeekReturnsFrontElement"
       ],
-      "source": "// BUnit tests for Queue class (BT-1250)\n\nTestCase subclass: QueueTest\n\n  testNewIsEmpty =>\n    q := Queue new\n    self assert: q isEmpty\n\n  testNewSizeIsZero =>\n    q := Queue new\n    self assert: q size equals: 0\n\n  testEnqueueIncreasesSize =>\n    q := Queue new\n    q2 := q enqueue: 1\n    self assert: q2 size equals: 1\n\n  testEnqueueDoesNotMutateOriginal =>\n    q := Queue new\n    q enqueue: 42\n    self assert: q isEmpty\n\n  testDequeueReturnsTupleWithValueAndQueue =>\n    q := (Queue new) enqueue: 99\n    result := q dequeue\n    self assert: (result at: 1) equals: 99\n    self assert: (result at: 2) isEmpty\n\n  testDequeueReducesSize =>\n    q := ((Queue new) enqueue: 1) enqueue: 2\n    result := q dequeue\n    self assert: (result at: 2) size equals: 1\n\n  testDequeueOnEmptyQueueRaisesError =>\n    self should: [Queue new dequeue] raise: #empty_queue\n\n  testPeekReturnsFrontElement =>\n    q := (Queue new) enqueue: 7\n    self assert: q peek equals: 7\n\n  testPeekDoesNotReduceSize =>\n    q := (Queue new) enqueue: 7\n    q peek\n    self assert: q size equals: 1\n\n  testPeekOnEmptyQueueRaisesError =>\n    self should: [Queue new peek] raise: #empty_queue\n\n  testIsEmptyFalseAfterEnqueue =>\n    q := (Queue new) enqueue: 1\n    self deny: q isEmpty\n\n  testIsEmptyTrueAfterDequeueAll =>\n    q := (Queue new) enqueue: 1\n    result := q dequeue\n    self assert: (result at: 2) isEmpty\n\n  testFifoOrder =>\n    q0 := Queue new\n    q1 := q0 enqueue: \"first\"\n    q2 := q1 enqueue: \"second\"\n    q3 := q2 enqueue: \"third\"\n    r1 := q3 dequeue\n    r2 := (r1 at: 2) dequeue\n    r3 := (r2 at: 2) dequeue\n    self assert: (r1 at: 1) equals: \"first\"\n    self assert: (r2 at: 1) equals: \"second\"\n    self assert: (r3 at: 1) equals: \"third\"\n\n  testPeekMatchesDequeue =>\n    q := (Queue new) enqueue: \"hello\"\n    front := q peek\n    result := q dequeue\n    self assert: front equals: (result at: 1)\n\n  testEnqueueMultipleTypes =>\n    q := Queue new\n    q2 := ((q enqueue: 1) enqueue: \"two\") enqueue: #three\n    self assert: q2 size equals: 3",
+      "source": "// BUnit tests for Queue class (BT-1250)\n\nTestCase subclass: QueueTest\n  field: q = nil\n\n  setUp => self.q := Queue new\n\n  testNewIsEmpty => self assert: self.q isEmpty\n\n  testNewSizeIsZero => self assert: self.q size equals: 0\n\n  testEnqueueIncreasesSize =>\n    q2 := self.q enqueue: 1\n    self assert: q2 size equals: 1\n\n  testEnqueueDoesNotMutateOriginal =>\n    self.q enqueue: 42\n    self assert: self.q isEmpty\n\n  testDequeueReturnsTupleWithValueAndQueue =>\n    q := (Queue new) enqueue: 99\n    result := q dequeue\n    self assert: (result at: 1) equals: 99\n    self assert: (result at: 2) isEmpty\n\n  testDequeueReducesSize =>\n    q := ((Queue new) enqueue: 1) enqueue: 2\n    result := q dequeue\n    self assert: (result at: 2) size equals: 1\n\n  testDequeueOnEmptyQueueRaisesError =>\n    self should: [Queue new dequeue] raise: #empty_queue\n\n  testPeekReturnsFrontElement =>\n    q := (Queue new) enqueue: 7\n    self assert: q peek equals: 7\n\n  testPeekDoesNotReduceSize =>\n    q := (Queue new) enqueue: 7\n    q peek\n    self assert: q size equals: 1\n\n  testPeekOnEmptyQueueRaisesError =>\n    self should: [Queue new peek] raise: #empty_queue\n\n  testIsEmptyFalseAfterEnqueue =>\n    q := (Queue new) enqueue: 1\n    self deny: q isEmpty\n\n  testIsEmptyTrueAfterDequeueAll =>\n    q := (Queue new) enqueue: 1\n    result := q dequeue\n    self assert: (result at: 2) isEmpty\n\n  testFifoOrder =>\n    q0 := Queue new\n    q1 := q0 enqueue: \"first\"\n    q2 := q1 enqueue: \"second\"\n    q3 := q2 enqueue: \"third\"\n    r1 := q3 dequeue\n    r2 := (r1 at: 2) dequeue\n    r3 := (r2 at: 2) dequeue\n    self assert: (r1 at: 1) equals: \"first\"\n    self assert: (r2 at: 1) equals: \"second\"\n    self assert: (r3 at: 1) equals: \"third\"\n\n  testPeekMatchesDequeue =>\n    q := (Queue new) enqueue: \"hello\"\n    front := q peek\n    result := q dequeue\n    self assert: front equals: (result at: 1)\n\n  testEnqueueMultipleTypes =>\n    q2 := ((self.q enqueue: 1) enqueue: \"two\") enqueue: #three\n    self assert: q2 size equals: 3",
       "explanation": "BUnit tests for Queue class (BT-1250)"
     },
     {
