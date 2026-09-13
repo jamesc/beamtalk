@@ -1312,6 +1312,10 @@ fn test_list_do_non_literal_callable_emits_arity_check() {
         code.contains("'erlang':'is_function'"),
         "Non-literal callable do: should emit is_function/2 arity check (BT-909). Got:\n{code}"
     );
+    assert!(
+        code.contains(", 2) of"),
+        "Non-literal callable do: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
+    );
 }
 
 #[test]
@@ -1327,6 +1331,10 @@ fn test_list_collect_non_literal_callable_emits_arity_check() {
     assert!(
         code.contains("'erlang':'is_function'"),
         "Non-literal callable collect: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+    assert!(
+        code.contains(", 2) of"),
+        "Non-literal callable collect: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
 }
 
@@ -1344,6 +1352,10 @@ fn test_list_select_non_literal_callable_emits_arity_check() {
     assert!(
         code.contains("'erlang':'is_function'"),
         "Non-literal callable select: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+    assert!(
+        code.contains(", 2) of"),
+        "Non-literal callable select: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
     // Runtime fallback selector is 'select:' (mapped from 'filter').
     assert!(
@@ -2658,64 +2670,5 @@ fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
     assert_eq!(
         make_ref_count, 2,
         "nested sort: with mutations should generate one fresh state key per call site (outer + inner). Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_list_do_non_literal_callable_generates_arity_wrapper() {
-    // do: with a non-literal body (variable) generates an is_function/2 arity-check
-    // wrapper so Tier-2 (arity 2) callables satisfy the arity-1 contract for lists:foreach.
-    let src =
-        "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items do: block\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foreach'"),
-        "Non-literal do: should still delegate to lists:foreach. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal do: should generate is_function arity-check wrapper. Got:\n{code}"
-    );
-    assert!(
-        code.contains(", 2) of"),
-        "Non-literal do: should include arity-2 case check for Tier-2 blocks. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_list_collect_non_literal_callable_generates_arity_wrapper() {
-    // collect: with a non-literal body (variable) generates an arity-check wrapper.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items collect: block\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'map'"),
-        "Non-literal collect: should delegate to lists:map. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal collect: should generate is_function arity-check wrapper. Got:\n{code}"
-    );
-    assert!(
-        code.contains(", 2) of"),
-        "Non-literal collect: should include arity-2 case check for Tier-2 blocks. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_list_select_non_literal_callable_generates_arity_wrapper() {
-    // select: with a non-literal body (variable) generates an arity-check wrapper.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items select: block\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'filter'"),
-        "Non-literal select: should delegate to lists:filter. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_function'"),
-        "Non-literal select: should generate is_function arity-check wrapper. Got:\n{code}"
-    );
-    assert!(
-        code.contains(", 2) of"),
-        "Non-literal select: should include arity-2 case check for Tier-2 blocks. Got:\n{code}"
     );
 }
