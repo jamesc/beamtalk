@@ -8,11 +8,9 @@ TestCase subclass: QueueTest
 
   setUp => self.q := Queue new
 
-  testNewIsEmpty =>
-    self assert: self.q isEmpty
+  testNewIsEmpty => self assert: self.q isEmpty
 
-  testNewSizeIsZero =>
-    self assert: self.q size equals: 0
+  testNewSizeIsZero => self assert: self.q size equals: 0
 
   testEnqueueIncreasesSize =>
     q2 := self.q enqueue: 1
