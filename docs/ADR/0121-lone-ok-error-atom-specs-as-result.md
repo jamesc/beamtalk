@@ -1,7 +1,7 @@
 # ADR 0121: Lone `ok`/`error` Atom Return Specs Map to `Result` in FFI Type Inference
 
 ## Status
-Proposed
+Accepted (2026-09-14)
 
 ## Context
 
