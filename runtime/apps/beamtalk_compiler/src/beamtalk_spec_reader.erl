@@ -10,6 +10,7 @@ Reads `-spec` attributes and parameter names from `.beam` abstract code.
 
 ADR 0075: Erlang FFI Type Definitions (Phase 1).
 ADR 0076: ok/error → Result type mapping (Phase 2).
+ADR 0121: lone (non-union) `ok`/`error` return specs also map to Result.
 
 Extracts spec forms and spec variable names from the `abstract_code` chunk
 of a `.beam` file in a single pass, mapping Erlang types to Beamtalk types.
@@ -35,7 +36,8 @@ types come from the first clause (Erlang convention).
 -export([
     extract_param_names/1,
     extract_specs_from_forms/1,
-    merge_return_types/1
+    merge_return_types/1,
+    map_return_type/1
 ]).
 -endif.
 
@@ -425,7 +427,7 @@ extract_from_clauses([Clause | Rest], Arity, ParamState, RetAcc) ->
     {ok, [map()], binary()} | fallback.
 extract_clause({type, _, 'fun', [{type, _, product, ArgTypes}, RetType]}) ->
     ParamList = extract_param_names(ArgTypes),
-    {ok, ParamList, map_type(RetType)};
+    {ok, ParamList, map_return_type(RetType)};
 extract_clause(
     {type, _, bounded_fun, [
         {type, _, 'fun', [{type, _, product, ArgTypes}, RetType]},
@@ -434,7 +436,7 @@ extract_clause(
 ) ->
     ConstraintMap = build_constraint_map(Constraints),
     ParamList = extract_param_names_with_constraints(ArgTypes, ConstraintMap),
-    ResolvedRet = resolve_type_with_constraints(RetType, ConstraintMap),
+    ResolvedRet = resolve_return_type_with_constraints(RetType, ConstraintMap),
     {ok, ParamList, ResolvedRet};
 extract_clause(_) ->
     fallback.
@@ -603,6 +605,26 @@ resolve_type_with_constraints({type, Line, union, Branches}, ConstraintMap) ->
     map_union(ResolvedBranches, Line);
 resolve_type_with_constraints(Type, _ConstraintMap) ->
     map_type(Type).
+
+%% Resolve a `bounded_fun` clause's return type, substituting constrained type
+%% variables — the return-type counterpart of `resolve_type_with_constraints/2`
+%% (ADR 0121, BT-3498).
+%%
+%% `resolve_type_with_constraints/2` is also used to resolve *parameter* types
+%% (`extract_param_names_with_constraints/2`), where ADR-0076 Result
+%% recognition must never fire for a lone atom — only a function's top-level
+%% return-type position gets that treatment. So this wrapper reuses
+%% `resolve_type_with_constraints/2`'s var/union clauses verbatim (identical
+%% behavior is correct in both param and return position for those) and only
+%% overrides the final catch-all to route a lone atom through
+%% `map_return_type/1` instead of `map_type/1`.
+-spec resolve_return_type_with_constraints(tuple(), map()) -> binary().
+resolve_return_type_with_constraints({var, _, _} = RetType, ConstraintMap) ->
+    resolve_type_with_constraints(RetType, ConstraintMap);
+resolve_return_type_with_constraints({type, _, union, _} = RetType, ConstraintMap) ->
+    resolve_type_with_constraints(RetType, ConstraintMap);
+resolve_return_type_with_constraints(RetType, _ConstraintMap) ->
+    map_return_type(RetType).
 
 %% Resolve a single union branch, substituting constrained type variables
 %% inside tuple elements. This preserves the abstract form structure so
@@ -984,6 +1006,22 @@ map_type({integer, _, _}) ->
 %% Anything else
 map_type(_) ->
     <<"Dynamic">>.
+
+%% Return-type entry point (ADR 0121, BT-3498) — the only call sites that may
+%% trigger ADR-0076 ok/error-atom Result recognition for a *lone* (non-union)
+%% atom return. Nested type positions (tuple elements, list elements, param
+%% types, resolved user-type bodies) keep calling `map_type/1` directly and
+%% keep mapping a lone `ok`/`error` atom to `Symbol`, unchanged — only a
+%% function clause's top-level return type routes through here.
+-spec map_return_type(tuple()) -> binary().
+map_return_type({type, Line, union, Branches}) ->
+    map_union(Branches, Line);
+map_return_type({atom, _, ok} = RetType) ->
+    map_union_result([RetType]);
+map_return_type({atom, _, error} = RetType) ->
+    map_union_result([RetType]);
+map_return_type(RetType) ->
+    map_type(RetType).
 
 -doc """
 Extract the Beamtalk class name from a typed map's field list.
