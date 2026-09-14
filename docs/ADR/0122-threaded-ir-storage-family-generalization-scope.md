@@ -1,4 +1,4 @@
-# ADR 0121: Scoping the `ThreadedIr` Storage-Family Generalization
+# ADR 0122: Scoping the `ThreadedIr` Storage-Family Generalization
 
 ## Status
 Proposed (2026-09-14)
