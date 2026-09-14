@@ -72,7 +72,7 @@ The two call sites that currently call `map_type(RetType)` directly on a functio
 
 All other call sites of `map_type/1` (tuple elements, list elements, user-type/remote-type body resolution, union-branch resolution) are untouched — a bare `ok`/`error` appearing in any of those positions still maps to `Symbol`, exactly as today.
 
-Because `map_union_result([{atom, _, ok}])` reuses `classify_union_branches/1`, a lone `ok` classifies into `OkTypes = [nil]`, `ErrTypes = []`, which `resolve_ok_type/1` / `resolve_err_type/1` / `format_result_type/2` already turn into the shorthand `Result(Nil)` — the same string a real union branch `{ok, T}` with no error arm produces today. No new formatting rule is introduced; a lone atom is treated as the one-branch case of the union machinery that already exists.
+Because `map_union_result([{atom, _, ok}])` reuses `classify_union_branches/1`, a lone `ok` classifies into `OkTypes = [nil]`, `ErrTypes = []`, which `resolve_ok_type/1` / `resolve_err_type/1` / `format_result_type/2` already turn into the shorthand `Result(Nil)` — the same string a real union branch `{ok, T}` with no error arm produces today. A lone `error` is not the mirror image: it classifies into `OkTypes = []`, `ErrTypes = [nil]`, so `resolve_ok_type([])` yields `Dynamic` (nothing informs the ok side) and `resolve_err_type([nil])` yields `Nil`. `format_result_type/2` only shortens the *error* side when it is `Dynamic` (`format_result_type(OkType, <<"Dynamic">>) -> Result(OkType)`); it has no matching shorthand for a `Dynamic` ok side, so this pair formats as the full two-argument `Result(Dynamic, Nil)`, not `Result(Nil)`. No new formatting rule is introduced; a lone atom is treated as the one-branch case of the union machinery that already exists.
 
 **Beamtalk-facing effect:**
 
@@ -133,7 +133,7 @@ Matches their existing expectation from ADR 0076: any Erlang function whose cont
 No runtime change at all — this is a compile-time type-inference fix. Nothing to test in production; `beamtalk_erlang_proxy:coerce_result/1` is unchanged.
 
 ### Tooling developer (LSP, IDE)
-Auto-extract (ADR 0075) and LSP hover/completions for any Erlang function specced as a lone `-> ok.`/`-> error.` now show `Result(Nil)` instead of `Symbol`, so completions after `.` on such a call offer `map:`, `andThen:`, `ok`, etc. instead of nothing useful.
+Auto-extract (ADR 0075) and LSP hover/completions for any Erlang function specced as a lone `-> ok.`/`-> error.` now show `Result(Nil)` / `Result(Dynamic, Nil)` instead of `Symbol`, so completions after `.` on such a call offer `map:`, `andThen:`, `ok`, etc. instead of nothing useful.
 
 ## Steelman Analysis
 
@@ -178,7 +178,7 @@ Change `map_type({atom, _, ok}) -> <<"Symbol">>.` to unconditionally return `Res
 
 ### Positive
 
-- Closes the static/dynamic type mismatch identified in BT-3498: any Erlang function specced as a lone `-> ok.` or `-> error.` now infers `Result(Nil)` / `Result(Nil)` (error-side), matching `beamtalk_erlang_proxy:coerce_result/1`'s unconditional runtime coercion.
+- Closes the static/dynamic type mismatch identified in BT-3498: any Erlang function specced as a lone `-> ok.` or `-> error.` now infers `Result(Nil)` / `Result(Dynamic, Nil)` (error-side — the ok side is unresolvable from a lone `error` atom, so it stays `Dynamic`), matching `beamtalk_erlang_proxy:coerce_result/1`'s unconditional runtime coercion.
 - No duplicated ok/error-recognition logic — `map_return_type/1` is a 4-clause dispatcher that delegates to the existing `map_union/2` and `map_union_result/1`.
 - `Actor>>unregisterName` can declare its honest return type (`-> Result(Nil)` instead of `-> Symbol`), and its doc comment's claim about ADR 0076/0079 coercion is now enforceable by the type checker rather than just true at runtime.
 - Auto-extract (ADR 0075) and LSP completions improve for the same class of functions, with no per-function manual work.
@@ -199,7 +199,7 @@ Change `map_type({atom, _, ok}) -> <<"Symbol">>.` to unconditionally return `Res
 - **Regenerate generated artifacts:** re-run the native type registry / `generated_builtins.rs` generation step that consumes spec-reader output (per `build_stdlib.rs`-style generator ownership — do not hand-edit the generated file).
 - **`stdlib/src/actor.bt`:** update `Actor>>unregisterName`'s declared return type from `-> Symbol` to `-> Result(Nil)`; audit callers (`Actor>>unregister`, `stdlib/test/*.bt`) for `Symbol`-shaped usage and migrate to `Result`.
 - **Tests:**
-  - `beamtalk_spec_reader_tests.erl`: unit tests for `map_return_type/1` covering `-> ok.` → `Result(Nil)`, `-> error.` → `Result(Nil)`, confirming nested atom positions (tuple element, list element, param type) are unaffected.
+  - `beamtalk_spec_reader_tests.erl`: unit tests for `map_return_type/1` covering `-> ok.` → `Result(Nil)`, `-> error.` → `Result(Dynamic, Nil)`, confirming nested atom positions (tuple element, list element, param type) are unaffected.
   - A type-checker test (alongside the existing `Result`/FFI inference tests in `crates/beamtalk-core/src/semantic_analysis/type_checker/tests/`) confirming `infer_ffi_call` resolves a bare-`ok`-specced Erlang function to `Result(Nil)`.
   - `stdlib/test/actor_test.bt` (or equivalent): confirm `unregisterName`'s declared type checks against its FFI body post-fix.
 - **Affected components:** Erlang spec reader (Compilation-adjacent runtime tooling), type checker's FFI inference (`crates/beamtalk-core/src/semantic_analysis/type_checker/inference/send/ffi.rs`) only insofar as it consumes the now-corrected type string — no logic change expected there since union-sourced `Result(...)` strings already parse correctly today.
