@@ -351,3 +351,197 @@ proven to also hit `ifTrue:` and loop bodies — a bug in the shared ADR 0111
 Addendum 5 statement classifier, not a per-family duplication at all).
 None of the three adds a sixth call site; they are tracked independently
 and don't change the count or the decision above.
+
+## Addendum 2 (2026-09-14): Scoping the generalization (BT-3499)
+
+[BT-3499](https://linear.app/beamtalk/issue/BT-3499) asked two concrete
+questions Addendum 1 deferred, using the five now-merged call sites (loop,
+conditional, `on:do:`/`ensure:`, `match:`, the shared Letrec+Foldl
+rejection) as worked examples rather than hypothetical shapes. This
+addendum answers them and makes the scoping call BT-3499's acceptance
+criteria asked for. It produces a decision, not code — no production files
+change as part of this addendum.
+
+**Q1: Does Actor's `State`/`StateAcc` fit the same abstraction as
+`ClassVars`/`SelfVt`'s "extra slot"?**
+
+At the *identity* layer, yes — already. `VersionPrefix::{State, ClassVars,
+SelfVt}` (`threaded_ir/ir.rs:151-187`) are three variants of one enum
+feeding one `VersionedVar`/`VersionCounter`, and `verify()`'s
+linearity/liveness walk (`threaded_ir/verify.rs`) treats all three
+uniformly — its only prefix-specific branch is the ADR-0110 `ClassVars`
+shadow-write check. This confirms Addendum 1's Constraints section was
+right to say identity is unified; nothing here needs to change.
+
+At the *consumer* layer, no — and the gap is structural, not incidental.
+`State`/`StateAcc` is a real `gen_server` fun parameter, present on every
+call whether or not anything mutates it (`ThreadingPlan::initial_state_var`,
+`plan.rs:82`); a non-mutating construct carries it for free, with nothing
+to detect or gate. `ClassVars`/`SelfVt` have no such standing parameter in
+class-method or value-type context — every one of the five call sites has
+to *detect* a mutation, then *conditionally* append exactly one extra
+trailing slot (`{'nil', StateAcc}` → `{'nil', StateAcc, ClassVars}` or
+`{'nil', StateAcc, Self1}`, the two mutually exclusive by construction),
+with every non-mutating sibling arm carrying a same-shaped, unchanged-value
+slot so the fixed-at-compile-time `element/N` extraction stays valid
+regardless of which arm ran. That "always-present parameter" vs.
+"conditionally-appended slot" distinction is a real fork in the calling
+convention, not a naming difference — a single abstraction spanning all
+three families would have to model both shapes, exactly the difficulty
+ADR 0120's own Constraints section flagged. It is not a reason to abandon
+generalizing `ClassVars`/`SelfVt` together; it is a reason to leave `State`
+out of that generalization's scope rather than force a third shape into it.
+
+**Q2: Can a data-driven `Vec<VersionPrefix>` walk replace the five
+hand-enumerated detectors/emitters without changing Actor/`ClassVars`
+codegen output?**
+
+Per-site, reading the actual detectors and emitters (not just this ADR's
+prose):
+
+- **Loop** — `loop_body_threads_class_vars`/`loop_body_threads_value_self`
+  (`control_flow/analysis.rs:106-180`) are already near-identical: both
+  walk only *top-level* loop-body statements (deliberately non-recursive —
+  a nested self-send tripping this predicate was a real regression, see
+  `analysis.rs:334-343`), matching a bare field write or same-class
+  self-send. Emission (`vt_construct_extra_slot`,
+  `value_type_codegen.rs:2229-2254`) hand-matches `None | ClassVars |
+  ValueSelf` into a fixed tuple position.
+- **Conditional** — the richest and most independent of the five:
+  `is_conditional_with_vt_local_threading`/
+  `is_conditional_with_vt_self_field_threading`
+  (`value_type_codegen.rs:2593-2686`) plus `VtCondBaseline`/`VtCondSlots`/
+  `build_vt_conditional_branch_pieces`/`finish_vt_conditional_branch`
+  (`value_type_codegen.rs:2975-3778`, ~250 lines) reinvent, by hand, almost
+  exactly what `with_branch_context` already does for Actor `State` — a
+  save/reset/restore discipline per arm, both-or-neither slot gating, fixed
+  slot order.
+- **`on:do:`/`ensure:`** — `exception_blocks_thread_value_self`
+  (`exception_handling.rs:209-216`) plus `push_exception_arm`/
+  `exception_self_slot(_doc)` (`exception_handling.rs:88-146`) build the
+  same `{Result, StateAcc, Self1}` shape as the loop's. Notably, this site
+  has **no** `ClassVars` slot at all today — a class-method self-send
+  inside a try/handler body threads through the ordinary
+  `threaded_expression`/Bind-splicing path instead
+  (`exception_handling.rs:482-491`). Whether that's safe by construction or
+  a latent gap parallel to what BT-3486 fixed for `SelfVt` was not
+  resolvable by static reading alone; it should be triaged before or during
+  the generalization below, since the generalized emitter needs to know
+  whether `ClassVars` ever needs a slot here.
+- **`match:`** — the one genuine outlier. `match_needs_mutation_threading`
+  (`gen_server/methods.rs:3251-3290`) is *recursive*
+  (`control_flow_has_mutations`), unlike the other four's top-level-only
+  walk, and supports only `State`/`ClassVars` — a value-type instance
+  method's `self.field :=` in a match arm is rejected outright
+  (`match_lowering.rs:56-83`) because `match:` never built the N-arm merge
+  machinery `ifTrue:`/`ifTrue:ifFalse:` have. Its emission for the two
+  families it does support reuses the conditional's own branch-merge
+  directly — no new tuple shape of its own.
+- **Letrec+Foldl rejection** — confirmed genuinely unified already:
+  `reject_unthreadable_value_self_field_write` (`analysis.rs:241-280`) is
+  one function, parameterized by one bool, called identically from both
+  `lower_letrec_body` and `lower_foldl_body` (`body.rs:324`, `:690`). This
+  is the encouraging precedent: convergence happens for free when a shape
+  is simple enough (reject, don't thread) — but it is the simplest of the
+  five shapes, and doesn't prove the harder extra-slot-threading shapes
+  converge as cheaply.
+
+Total hand-written logic across the five sites is roughly 250 lines of
+detectors (~40% structurally identical top-level-statement/field-write
+matching, ~60% genuinely per-construct — recursive-or-not, which families
+are eligible) and ~450-500 lines of emission (the conditional alone is
+about half of that). A `Vec<VersionPrefix>`-parameterized "detect mutation
+of any of these families at top-level-statement granularity, append N
+trailing slots in a fixed order, gate on whichever sibling mutated" walk
+could plausibly subsume the loop's, the conditional's, and
+`on:do:`/`ensure:`'s detector *and* emitter logic — those three already
+share the "conditionally-appended slot" shape Q1 identified.  `match:`
+resists folding into the same unparameterized function: its detector is
+recursive where the others are not, and its family support is asymmetric
+(2 of 3, not the other four's symmetric-and-mutually-exclusive pair). That
+is a per-site configuration knob, not a blocker, but it means the end
+state is "one generalized mechanism with a small per-site config," not
+"zero per-site code."
+
+The riskiest part of any such migration is not the detector side, which is
+already close to identical; it's reproducing the emitters' exact tuple
+arity, slot order, and baseline-capture semantics without silently
+changing Core Erlang output for the thousands of already-passing
+Actor/`ClassVars` programs in the corpus. `verify-threaded-ir`'s
+linearity/liveness check would not necessarily catch a subtly-reordered or
+wrongly-gated slot — a version graph can be perfectly well-formed (every
+version produced, used once) while the *generated tuple shape* differs
+from before. Every one of the three foldable sites carries a comment
+documenting a real regression from exactly this kind of predicate-widening
+(the loop's nested-self-send regression above; BT-3492/BT-3493's shared
+statement-classifier bugs cited in Addendum 1). A generalization has to
+reproduce each of those hard-won special cases exactly, and the only way
+to be confident it does is to diff generated `Document` output between old
+and new codegen paths over the full stdlib + bootstrap-test corpus before
+removing the old paths — `verify-threaded-ir` passing is necessary but not
+sufficient evidence.
+
+**Decision: generalize now, but scoped — not the full three-family
+generalization ADR 0120 originally sketched.**
+
+Unify the `ClassVars`/`SelfVt` "conditionally-appended extra slot"
+mechanism shared by the loop, the conditional, and `on:do:`/`ensure:` into
+one `Vec<VersionPrefix>`-driven detector-and-emitter. Explicitly keep two
+things out of this generalization's scope:
+
+- **Actor `State`/`StateAcc`** — Q1 showed it is a different shape (an
+  always-present parameter, not an appended slot), not a fourth instance of
+  the same mechanism. Forcing it into the same abstraction was the open
+  question ADR 0120's Constraints section flagged as unresolved, and
+  nothing found while answering Q1/Q2 makes it easier now than it was
+  then. Leaving it out is the direct fix for the regression risk ADR
+  0120's Steelman Analysis worried about: with `State`/Actor code paths
+  untouched, the generalization cannot silently change Actor codegen,
+  because it never runs on that path.
+- **`match:`'s detector and family-support asymmetry** — keep its own
+  recursive detector and its rejection for the unsupported third family;
+  only let its existing branch-merge reuse call into the generalized
+  emitter's slot-append logic for the two families it already supports, as
+  a follow-up, not a precondition.
+
+Recommended issue breakdown (final split TBD at pick-up time, sized like
+BT-3486/3487/3488/3489 — each roughly one PR):
+
+1. Extract one `Vec<VersionPrefix>`-parameterized top-level-statement
+   mutation detector, replacing
+   `find_class_var_mutating_stmt`/`find_value_self_mutating_stmt`
+   (already near-identical). Land as a pure refactor gated by a
+   differential test asserting the old and new detectors agree on every
+   construct in the stdlib + bootstrap-test corpus, before anything is
+   wired to depend on it.
+2. Triage whether `on:do:`/`ensure:` has a latent `ClassVars`-in-try-body
+   gap parallel to BT-3486's `SelfVt` one (Q2, `on:do:`/`ensure:` bullet
+   above) — resolve or explicitly rule out before the generalized emitter
+   has to decide whether that site ever needs a `ClassVars` slot.
+3. Generalize the loop's `VtLoopExtraSlot`/`vt_construct_extra_slot`
+   emission to consume the new detector plus a data-driven ordered slot
+   list. Smallest of the three emitters — do this one first to prove the
+   pattern.
+4. Generalize `on:do:`/`ensure:`'s `push_exception_arm`/
+   `exception_self_slot(_doc)` the same way.
+5. Generalize the conditional's `VtCondBaseline`/`VtCondSlots`/
+   `build_vt_conditional_branch_pieces`/`finish_vt_conditional_branch` —
+   largest and riskiest; do it last, once 3 and 4 have validated the
+   shared emitter against two simpler sites.
+
+Each issue validates against `cargo test -p beamtalk-codegen`,
+`just verify-threaded-ir`, `just test-bunit`/`test-stdlib`,
+`just ci-changed`, and — because `verify-threaded-ir` alone is not
+sufficient per the risk assessment above — a byte-identical `Document`
+output diff between the old and new emitter over the full stdlib +
+bootstrap-test corpus, with the old emitter only deleted once that diff is
+clean.
+
+**Sharper trigger for the excluded scope:** revisit folding `State` into
+the same abstraction if a sixth call site needs `StateAcc` to become
+conditionally-absent the way `ClassVars`/`SelfVt` are (unlikely on current
+evidence — `gen_server` methods always take `State`); revisit `match:`'s
+detector if it needs to support `SelfVt` as a third family (its own sixth
+call site). Neither is "the next gap" in the open-ended sense Addendum 1
+found had already been used twice — each names the specific shape that
+would justify reopening the scope this addendum deliberately narrows.
