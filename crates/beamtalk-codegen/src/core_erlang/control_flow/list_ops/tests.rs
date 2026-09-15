@@ -2672,3 +2672,110 @@ fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
         "nested sort: with mutations should generate one fresh state key per call site (outer + inner). Got:\n{code}"
     );
 }
+
+// ── generate_local_var_assignment_in_loop: Tier 2 and CF-mutations paths ─────
+//
+// These cover `emit_tuple_unwrap_pack_and_rebind` (local_assign.rs:236-275) and
+// the two uncovered branches of `generate_local_var_assignment_in_loop`
+// (lines 313-382): the Tier 2 value-call path and the control-flow-with-mutations
+// path. Both are reachable only via the sort: comparator body handler
+// (transform_ops.rs:2074) or the stateful-while-condition handler
+// (while_loops.rs:511).
+
+#[test]
+fn test_sort_comparator_tier2_local_assign_unpacks_tuple() {
+    // `generate_local_var_assignment_in_loop`'s Tier 2 path (local_assign.rs:313-339)
+    // and `emit_tuple_unwrap_pack_and_rebind` (local_assign.rs:236-275).
+    //
+    // `scan_class_for_tier2_blocks` finds `self sortWith:using:` called from `run`
+    // with a literal block that captures and writes `count`
+    // (local_writes ∩ captured_reads = {count} → has_captured_mutations = true),
+    // registering `transform` (argument index 1) in `tier2_block_params` for the
+    // `sortWith:using:` method.
+    //
+    // Inside `sortWith:using:`, the comparator has `result := transform value: a`:
+    //   - is_local_var_assignment → true (Assignment with Identifier target)
+    //   - is_tier2_value_call(transform value: a) → true (selector `value:`, receiver
+    //     `transform` is in tier2_block_params)
+    // → Tier 2 branch calls emit_tuple_unwrap_pack_and_rebind("T2", "T2St"), which
+    //   emits element(1, ...) to extract the value and element(2, ...) to extract the
+    //   new StateAcc from the {Result, NewState} tuple.
+    let src = concat!(
+        "Actor subclass: TierTwoSortLocal\n",
+        "  state: x = 0\n\n",
+        "  sortWith: items using: transform =>\n",
+        "    result := 0.\n",
+        "    items sort: [:a :b |\n",
+        "      result := transform value: a.\n",
+        "      result < b\n",
+        "    ]\n\n",
+        "  run =>\n",
+        "    count := 0.\n",
+        "    self sortWith: #(3 1 2) using: [:each | count := count + each. each]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("call 'erlang':'element'(1,"),
+        "Tier 2 sort: local-var assign must unpack value via element(1, ...) \
+         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'element'(2,"),
+        "Tier 2 sort: local-var assign must unpack new state via element(2, ...) \
+         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'__local__result'"),
+        "Tier 2 sort: local-var assign must thread 'result' via '__local__result' key. \
+         Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
+    // `generate_local_var_assignment_in_loop`'s control-flow-with-mutations path
+    // (local_assign.rs:357-382) and `emit_tuple_unwrap_pack_and_rebind`.
+    //
+    // `result := (a > 0) ifTrue: [count := count + 1. 1] ifFalse: [0]`:
+    //   - is_local_var_assignment → true (target is `result`)
+    //   - is_tier2_value_call → false (RHS is ifTrue:ifFalse:, not a value/value: send)
+    //   - control_flow_has_mutations → true:
+    //       selector `ifTrue:ifFalse:` is a conditional selector;
+    //       block [count := count + 1. 1] mutates captured outer local `count`
+    //       → block_arg_needs_threading returns true
+    // → CF-mutations branch calls emit_tuple_unwrap_pack_and_rebind("CfTuple", "CfSt"),
+    //   which emits element(1, ...) / element(2, ...) to unpack the {Result, NewState}
+    //   tuple returned by the inline ifTrue:ifFalse: conditional.
+    let src = concat!(
+        "Actor subclass: CfSortMutate\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0.\n",
+        "    result := 0.\n",
+        "    items sort: [:a :b |\n",
+        "      result := (a > 0) ifTrue: [count := count + 1. 1] ifFalse: [0].\n",
+        "      result < b\n",
+        "    ]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("call 'erlang':'element'(1,"),
+        "CF-mutations sort: local-var assign must unpack value via element(1, ...) \
+         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'element'(2,"),
+        "CF-mutations sort: local-var assign must unpack new state via element(2, ...) \
+         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'__local__result'"),
+        "CF-mutations sort: local-var assign must thread 'result' via '__local__result'. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'__local__count'"),
+        "CF-mutations sort: mutation of outer local 'count' in ifTrue: branch must be \
+         threaded via '__local__count'. Got:\n{code}"
+    );
+}
