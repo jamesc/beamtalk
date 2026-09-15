@@ -9,13 +9,20 @@
 //! `while_loops.rs`/`counted_loops.rs`'s `{'nil', StateAcc[, ClassVars |
 //! Self1]}`, `value_type_codegen.rs`'s `vt_construct_extra_slot`/
 //! `emit_vt_threaded_tuple_unwrap_to_var`/`finish_vt_conditional_branch`/
-//! `rebind_vt_conditional_mutations`, `exception_handling.rs`'s
-//! `exception_self_slot`/`_doc`, the Actor conditional's
+//! `rebind_vt_conditional_mutations`, the Actor conditional's
 //! `with_branch_context`/six `generate_*_with_mutations`, and the Foldl
 //! accumulator (once its leading slot normalizes to trailing, BT-3516).
+//! `exception_handling.rs`'s own former `exception_self_slot`/`_doc`
+//! (BT-3486) is already migrated — see `close_exception_result_tuple`
+//! (BT-3506).
 //!
-//! **Not wired into any site yet** — BT-3511's own scope is the helper
-//! only; migrating a site to call it is each site's own later issue.
+//! **`append_family_slots` has its first live caller** —
+//! `exception_handling.rs`'s `close_exception_result_tuple` (BT-3506, the
+//! epic's first real consumer). `append_baseline_family_slots` and
+//! `extract_family_slots` are still unwired — migrating each remaining site
+//! (`while_loops.rs`/`counted_loops.rs`, `value_type_codegen.rs`'s
+//! conditional/foldl branch merges, the Foldl accumulator) is each site's own
+//! later issue.
 //!
 //! **Trailing position only** — no leading-slot mode; Foldl's leading slot
 //! is normalized to trailing when IT migrates (ADR 0122 §Alternatives
@@ -45,10 +52,11 @@ use beamtalk_core::source_analysis::Span;
 /// version step," matching
 /// [`super::super::threaded_ir::VersionCounter`]'s own vocabulary
 /// (`next_var` mints a target from a source in exactly this shape).
-// `#[allow(dead_code)]` throughout this file: nothing outside this module's
-// own unit tests calls any of it yet — ADR 0122, BT-3511 is the emission
-// helper only; migrating a site to route through it is each site's own
-// later issue (BT-3506/3512-3518).
+// `#[allow(dead_code)]` on the remaining items in this file: `append_family_slots`
+// (BT-3506) is live now, but `FamilyVersionStep`/`append_baseline_family_slots`/
+// `extract_family_slots` still have no caller outside this module's own unit
+// tests — migrating a site to route through them is each site's own later
+// issue (BT-3512-3518).
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct FamilyVersionStep {
@@ -91,7 +99,6 @@ impl FamilyVersionStep {
 /// through — so `VersionPrefix::State`'s own loop-context-dependent
 /// `StateAcc` vs. `State` spelling (`RenderCtx`'s prefix resolution) is
 /// handled for free, never re-derived here.
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn append_family_slots(
     base: Document<'static>,
     families: &ThreadedFamilies,

@@ -1013,6 +1013,32 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testStateFieldEnsureAssignRhsTestCase =>
     self assert: self fragStateFieldEnsureAssignRhs equals: 1
 
+  // ── axis 4 × on:do:/ensure:, `ClassVars` via self-send (BT-3506) ──────────
+  // The `ClassVars` twin of the `SelfVt` cells directly above: a same-class
+  // self-send (`self bump`), not a bare `self.runs := ...` — a direct write
+  // stays a clean compile-time rejection through this construct (BT-3506's
+  // decision; see `classVarEnsureTryNonLastReadWrite`'s own comment).
+  testClassVarEnsureTryNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod classVarEnsureTryNonLastReadWrite equals: 1
+
+  testClassVarEnsureCleanupNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod classVarEnsureCleanupNonLastReadWrite equals: 1
+
+  testClassVarEnsureBothNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod classVarEnsureBothNonLastReadWrite equals: 2
+
+  testClassVarOnDoTryNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod classVarOnDoTryNonLastReadWrite equals: 1
+
+  testClassVarOnDoHandlerNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod classVarOnDoHandlerNonLastReadWrite equals: 1
+
+  // BT-3506's own headline repro (shape (b) — self-send is the construct's
+  // ONLY mutation, no co-occurring captured local). No like-for-like
+  // Actor/TestCase cell — see the fragment's own comment.
+  testClassVarEnsureSelfSendOnlyNonLastClassMethod =>
+    self assert: MutationCorpusClassMethod classVarEnsureSelfSendOnlyNonLast equals: 1
+
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3414 (ADR 0118 phase 0) — self-send POSITION axis, Actor-only
   //  (mutation_corpus_actor.bt; a self-send that mutates actor state has no

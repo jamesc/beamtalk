@@ -195,12 +195,12 @@ impl CoreErlangGenerator {
                 Some(result_var) => result_var,
                 None => return Ok(None),
             }
-        } else if self.is_exception_construct_with_vt_local_threading(expr)
-            || self.is_exception_construct_with_vt_self_field_threading(expr)
-        {
+        } else if self.is_exception_construct_with_vt_local_threading(expr) {
             // `on:do:`/`ensure:` — the third construct family this
             // recognizes, alongside loops/foldl-list-ops and read+write
-            // conditionals.
+            // conditionals. (ADR 0122: this predicate now also answers
+            // `true` for `ClassVars`/`SelfVt` family threading, folding what
+            // used to be a two-predicate OR here into one call.)
             self.emit_vt_exception_tuple_unwrap_to_var(expr, &mut parts)?
         } else {
             return Ok(None);
@@ -399,10 +399,9 @@ impl CoreErlangGenerator {
                 self.emit_vt_conditional_assign_rhs(var_name, rhs, body_parts)?,
             ));
         }
-        if self.is_exception_construct_with_vt_local_threading(rhs)
-            || self.is_exception_construct_with_vt_self_field_threading(rhs)
-        {
+        if self.is_exception_construct_with_vt_local_threading(rhs) {
             // The assign-RHS mirror of the `lower_threaded_last` case above.
+            // (ADR 0122: see that case's matching comment.)
             return Ok(Some(
                 self.emit_vt_exception_assign_rhs(var_name, rhs, body_parts)?,
             ));
