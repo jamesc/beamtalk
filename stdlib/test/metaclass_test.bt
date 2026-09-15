@@ -16,25 +16,25 @@ TestCase subclass: MetaclassTest
     self assert: nil class equals: UndefinedObject
     self assert: #symbol class equals: Symbol
     // BT-802 (ADR 0036 Phase 1): Metaclass objects replace the #Metaclass sentinel
-    self assert: (42 class class) isMeta equals: true
-    self assert: ("hello" class class) isMeta equals: true
-    self assert: (true class class) isMeta equals: true
+    self assert: (42 class class) isMeta
+    self assert: ("hello" class class) isMeta
+    self assert: (true class class) isMeta
     // Metaclass objects are not plain classes
-    self assert: (42 class class) isClass equals: false
+    self deny: (42 class class) isClass
     // Metaclass tower terminates: self-grounding invariant (class class class == class class)
     self assert: 42 class class class equals: 42 class class
 
   // BT-803: isMetaclass predicate
   testIsMetaclass =>
-    self assert: (42 class class) isMetaclass equals: true
-    self assert: ("hello" class class) isMetaclass equals: true
-    self assert: (true class class) isMetaclass equals: true
-    self assert: (nil class class) isMetaclass equals: true
+    self assert: (42 class class) isMetaclass
+    self assert: ("hello" class class) isMetaclass
+    self assert: (true class class) isMetaclass
+    self assert: (nil class class) isMetaclass
     // isBehaviour is inherited from Behaviour
-    self assert: (42 class class) isBehaviour equals: true
+    self assert: (42 class class) isBehaviour
     // Regular class objects are not metaclasses
-    self assert: (42 class) isMetaclass equals: false
-    self assert: Integer isMetaclass equals: false
+    self deny: (42 class) isMetaclass
+    self deny: Integer isMetaclass
 
   // BT-803/BT-2232: name — e.g. 42 class class name == #'Integer class' (Symbol)
   testName =>
@@ -117,6 +117,6 @@ TestCase subclass: MetaclassTest
   // Class identity tests for domain classes
   testClassIdentityForDomainClasses =>
     // Random class isMeta returns true (BT-802 / ADR 0036)
-    self assert: (Random class) isMeta equals: true
+    self assert: (Random class) isMeta
     // Regex class isMeta returns true (BT-802 / ADR 0036)
-    self assert: (Regex class) isMeta equals: true
+    self assert: (Regex class) isMeta
