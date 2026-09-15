@@ -303,6 +303,19 @@ jobs:
         if: steps.filter.outputs.run == 'true'
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
+      - name: Cache Erlang/rebar3 artifacts
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
       - name: Cache Rust dependencies
         if: steps.filter.outputs.run == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2

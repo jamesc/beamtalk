@@ -1209,15 +1209,33 @@ verify-threaded-ir: test-stdlib test-bunit
 # and desirable in a shipped `.beam`, but exactly the kind of per-build
 # noise this harness must not compare on, since the whole point is
 # comparing two different commits. Blanked out alongside `otp_release`
-# (stable on one machine, but not guaranteed across two CI runners).
+# (stable on one machine, but not guaranteed across two CI runners). If
+# `__beamtalk_meta` ever grows another provenance field like these two
+# (`class_meta.rs`'s `meta_provenance_entries`), add a normalisation rule
+# for it here too — nothing catches that automatically.
 #
 # OUT_DIR may be relative (resolved against the repo root) or absolute.
-[unix]
+#
+# Linux only, like `test-beam` above: `build-erlang`/`test`/`test-stdlib`
+# need the Erlang/OTP toolchain this recipe's dependency chain builds, and
+# the normalisation step below uses GNU `sed -i`'s syntax (BSD/macOS sed's
+# `-i` takes a mandatory backup-suffix argument, so `-i -E` means something
+# different there — this would silently misbehave rather than fail loudly).
+[linux]
 core-diff-snapshot OUT_DIR: build-rust build-erlang
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p "{{OUT_DIR}}"
     OUT="$(cd "{{OUT_DIR}}" && pwd)"
+    REPO_ROOT="$(git rev-parse --show-toplevel)"
+    # OUT_DIR gets wiped below (`rm -rf "$OUT"/*`) — refuse anything that
+    # isn't clearly a scratch directory of its own, so a careless OUT_DIR
+    # (the repo root, `$HOME`, or a parent of either) can't take real files
+    # with it.
+    if [[ "$OUT" == "$REPO_ROOT" || "$REPO_ROOT" == "$OUT"/* || "$OUT" == "$HOME" || "$HOME" == "$OUT"/* || "$OUT" == "/" ]]; then
+        echo "❌ Refusing to use '$OUT' as OUT_DIR — it (or its contents) would be wiped by this recipe, and it looks like the repo root, \$HOME, or an ancestor of either. Pass a scratch directory (e.g. target/core-diff/head)." >&2
+        exit 1
+    fi
     rm -rf "${OUT:?}"/*
     mkdir -p "$OUT/src" "$OUT/test" "$OUT/bootstrap-test"
 
@@ -1261,6 +1279,9 @@ core-diff-snapshot OUT_DIR: build-rust build-erlang
 # is Phase 0 and blocks every other issue in its epic. Comparing a branch
 # against a pre-BT-3509 `main` doesn't work for that one bootstrapping PR;
 # every use after it does.
+#
+# Linux only — see `core-diff-snapshot`'s own tag; this recipe calls it.
+[linux]
 core-diff BASE_REF="origin/main":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1274,6 +1295,13 @@ core-diff BASE_REF="origin/main":
     just core-diff-snapshot "$HEAD_DIR"
 
     echo "🔎 Snapshotting {{BASE_REF}} ..."
+    # A prior run killed before its own `trap` fired (Ctrl-C, OOM) leaves
+    # $BASE_WORKTREE registered in .git/worktrees/ even after its directory
+    # is gone — `git worktree add` then refuses the path as already in use.
+    # `remove --force`/`prune` clear that registration; both are no-ops on
+    # a clean run.
+    git worktree remove --force "$BASE_WORKTREE" >/dev/null 2>&1 || true
+    git worktree prune
     rm -rf "$BASE_WORKTREE"
     git worktree add --detach --quiet "$BASE_WORKTREE" "{{BASE_REF}}"
     trap 'git worktree remove --force "$BASE_WORKTREE" >/dev/null 2>&1 || true' EXIT
