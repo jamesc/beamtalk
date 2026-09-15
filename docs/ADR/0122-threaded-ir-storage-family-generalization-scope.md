@@ -293,6 +293,15 @@ Every issue: `cargo test -p beamtalk-codegen`, `just verify-threaded-ir`,
 `just test-bunit`/`test-stdlib`, `just ci-changed`, and the issue-0 diff —
 empty, or the intended change and nothing else.
 
+## Implementation Tracking
+
+**Epic:** [BT-3508](https://linear.app/beamtalk/issue/BT-3508)
+**Issues:** BT-3509 (harness), BT-3510 (detector), BT-3511 (helper),
+BT-3506 (`on:do:`/`ensure:`), BT-3512 (VT loop), BT-3513 (VT conditional),
+BT-3514 (Actor conditional), BT-3515 (Actor loops), BT-3516 (Foldl),
+BT-3517 (`match:`), BT-3518 (side channels), BT-3519 (close-out)
+**Status:** Planned
+
 ## Migration Path
 Not applicable to the language. BT-3506 changes observable behaviour (a
 dropped write becomes a kept one); that is a bug fix. The Foldl slot move
