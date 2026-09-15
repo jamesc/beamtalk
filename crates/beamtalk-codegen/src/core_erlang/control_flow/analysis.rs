@@ -8,11 +8,87 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::StateAccFallbackReason;
+use super::super::threaded_ir::{StateAccFallbackReason, VersionPrefix};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::plan::ThreadingPlan;
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
+
+// ─── ADR 0122: unified storage-family detector ─────────────────────────────
+
+/// ADR 0122 Decision 2: canonical slot order for [`ThreadedFamilies`] — the
+/// scratch map (`State`) first, then `ClassVars`, then `SelfVt` — regardless
+/// of the order callers pass an `eligible`/match set in.
+const FAMILY_CANONICAL_ORDER: [VersionPrefix; 3] = [
+    VersionPrefix::State,
+    VersionPrefix::ClassVars,
+    VersionPrefix::SelfVt,
+];
+
+/// ADR 0122 Decision 2: the storage families a construct body mutates, in
+/// canonical slot order. Built by [`CoreErlangGenerator::body_threaded_families`]
+/// (or, for a caller that already has its own per-family answers, by
+/// [`Self::from_matches`]) — never assembled by hand, so the slot order
+/// invariant can't drift per call site.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::core_erlang) struct ThreadedFamilies(Vec<VersionPrefix>);
+
+impl ThreadedFamilies {
+    /// Builds a `ThreadedFamilies` from an arbitrary-order set of matched
+    /// families, re-sorting into [`FAMILY_CANONICAL_ORDER`] — the shared
+    /// normalization every constructor (this one included) routes through,
+    /// so canonical order is a property of the TYPE, not of caller
+    /// discipline.
+    pub(in crate::core_erlang) fn from_matches(matches: &[VersionPrefix]) -> Self {
+        Self(
+            FAMILY_CANONICAL_ORDER
+                .iter()
+                .filter(|prefix| matches.contains(prefix))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// Whether `prefix` is one of the families this body mutates.
+    pub(in crate::core_erlang) fn contains(&self, prefix: &VersionPrefix) -> bool {
+        self.0.contains(prefix)
+    }
+}
+
+/// BT-3510 differential test: one [`super::plan::ThreadingPlan::new_impl`]
+/// call's OLD (still-live, unchanged) `threads_class_vars`/`threads_value_self`
+/// answers, alongside what the NEW recursive
+/// [`CoreErlangGenerator::body_threaded_families`] answers for the exact same
+/// body — recorded by real compiles (`generate_module` over the stdlib +
+/// bootstrap-test corpus) rather than by hand-building a `CoreErlangGenerator`
+/// per corpus construct, so the recorded context (`class_var_names`,
+/// `class_method_selectors`, `context`, `in_class_method`) is always the real
+/// one the compiler itself built.
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(in crate::core_erlang) struct FamilyDetectorDiffRecord {
+    /// `"letrec"` (`allow_direct_params`) or `"foldl"` — which of
+    /// `ThreadingPlan::new_impl`'s two shapes this plan is, since the two
+    /// have genuinely different OLD formulas (see
+    /// `ThreadingPlan::threads_class_vars`'s doc comment).
+    pub(in crate::core_erlang) shape: &'static str,
+    /// The loop/fold body's own span — printed by the differential test so
+    /// a mismatch is reviewable against source.
+    pub(in crate::core_erlang) span: beamtalk_core::source_analysis::Span,
+    pub(in crate::core_erlang) old_threads_class_vars: bool,
+    pub(in crate::core_erlang) old_threads_value_self: bool,
+    pub(in crate::core_erlang) new_families: ThreadedFamilies,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Cleared by the differential test before compiling each corpus file,
+    /// populated by `ThreadingPlan::new_impl` (test builds only — see
+    /// [`FamilyDetectorDiffRecord`]'s doc comment), read back after.
+    pub(in crate::core_erlang) static FAMILY_DETECTOR_DIFF_LOG:
+        std::cell::RefCell<Vec<FamilyDetectorDiffRecord>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
 
 /// which family a [`Self::nested_loop_or_fold_body`] match belongs
 /// to — `ThreadingPlan::threads_class_vars` uses a genuinely different
@@ -31,6 +107,136 @@ enum NestedLoopShape {
 }
 
 impl CoreErlangGenerator {
+    /// ADR 0122 Decision 1: the storage families [`Self::body_threaded_families`]
+    /// may ask about in the CURRENT generator context, derived once here from
+    /// [`CodeGenContext`] + [`Self::in_class_method`] rather than hand-listed
+    /// at each call site — a hand-listed subset is exactly how BT-3489 and
+    /// BT-3506 were missed (ADR 0122 §"Why the gaps keep happening").
+    ///
+    /// * `State` (an Actor's own scratch map) — an ACTOR INSTANCE method
+    ///   only (`Actor` context, not [`Self::in_class_method`]); a class
+    ///   method's own `gen_server` state is `ClassVars`, never this family.
+    /// * `ClassVars` — whenever [`Self::in_class_method`], regardless of the
+    ///   class's own instance `context` (an Actor's and a `ValueType`'s
+    ///   class methods compile identically).
+    /// * `SelfVt` — a `ValueType` INSTANCE method only (`ValueType` context,
+    ///   not [`Self::in_class_method`]).
+    ///
+    /// Mutually exclusive by construction: [`Self::in_class_method`] alone
+    /// decides `State` vs. `ClassVars`, and `context` alone decides
+    /// `ClassVars` vs. `SelfVt` once [`Self::in_class_method`] is fixed — so
+    /// at most one family is ever eligible in `Repl` context too (none, in
+    /// fact, since `Repl` never sets `in_class_method` and is never
+    /// `ValueType`/`Actor`).
+    #[allow(dead_code)] // ADR 0122: only the (test-only) differential test calls this until later issues in the epic wire it into live emission sites
+    pub(in crate::core_erlang) fn eligible_families(&self) -> Vec<VersionPrefix> {
+        let mut eligible = Vec::with_capacity(1);
+        if matches!(self.context, CodeGenContext::Actor) && !self.in_class_method() {
+            eligible.push(VersionPrefix::State);
+        }
+        if self.in_class_method() {
+            eligible.push(VersionPrefix::ClassVars);
+        }
+        if matches!(self.context, CodeGenContext::ValueType) && !self.in_class_method() {
+            eligible.push(VersionPrefix::SelfVt);
+        }
+        eligible
+    }
+
+    /// ADR 0122 Decision 4: the ONE place "what counts as a mutation" is
+    /// answered, per family — never re-derived at a call site:
+    ///
+    /// * `ClassVars` — a bare class-var field write (`self.classVar := ...`)
+    ///   or a same-class-method self-send, the same OR
+    ///   [`Self::find_class_var_mutating_stmt`] (Letrec shape) and the
+    ///   `Foldl*`-shape `threads_class_vars` branch
+    ///   ([`super::plan::ThreadingPlan::new_impl`]) each separately checked
+    ///   before this existed.
+    /// * `SelfVt` — a bare value-type field write (`self.field := ...`
+    ///   outside a class method); the shape
+    ///   [`Self::find_value_self_mutating_stmt`] and
+    ///   `value_type_codegen::is_vt_self_field_assignment` each separately
+    ///   checked.
+    /// * `State` — no shape of its own: an Actor instance method's
+    ///   `StateAcc` threads unconditionally, never as a function of the
+    ///   body's shape (ADR 0122 "`State` already fits"), so
+    ///   [`Self::eligible_families`] alone decides it and this always
+    ///   answers `true` once asked (see
+    ///   [`Self::body_threaded_families`]'s use of this).
+    /// * `Local`/`Gensym` — not a storage family this detector answers for;
+    ///   always `false`.
+    ///
+    /// `pub(in crate::core_erlang)` (not private) so
+    /// `value_type_codegen::is_vt_self_field_assignment` — outside this
+    /// module — delegates to the same one place instead of keeping its own
+    /// copy of the `SelfVt` shape.
+    pub(in crate::core_erlang) fn is_family_mutation(
+        &self,
+        prefix: &VersionPrefix,
+        expr: &Expression,
+    ) -> bool {
+        match prefix {
+            VersionPrefix::State => true,
+            VersionPrefix::ClassVars => {
+                (Self::is_field_assignment(expr) && self.is_class_var_assignment(expr))
+                    || self.is_class_method_self_send(expr)
+            }
+            VersionPrefix::SelfVt => {
+                !self.in_class_method()
+                    && matches!(self.context, CodeGenContext::ValueType)
+                    && Self::is_field_assignment(expr)
+            }
+            VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
+        }
+    }
+
+    /// ADR 0122 Decision 1: the unified, recursive storage-family detector —
+    /// answers "does `body` mutate family `X`", for every `X` in `eligible`
+    /// (see [`Self::eligible_families`]), by walking every top-level
+    /// statement all the way down — including nested block bodies
+    /// ([`beamtalk_core::ast_walker::walk_expression`]'s descend-into-blocks
+    /// behavior) — unlike the narrower, top-level-only walks this is
+    /// differential-tested against
+    /// ([`Self::find_class_var_mutating_stmt`]/
+    /// [`Self::find_value_self_mutating_stmt`]/
+    /// `value_type_codegen::is_vt_self_field_assignment`'s own callers).
+    ///
+    /// A site that cannot carry a mutation found below its own top level
+    /// rejects it via the existing shared rejection functions
+    /// ([`Self::reject_unthreadable_value_self_field_write`],
+    /// `reject_class_var_field_assignment`) — detection and carry-capability
+    /// are deliberately separate questions (ADR 0122 §Decision 1). This
+    /// function is not yet consumed by any live emission site — that
+    /// migration is later issues in ADR 0122's epic (BT-3508) — so today it
+    /// backs only the differential test that validates it against every
+    /// corpus construct the old (still-live) detectors already answer.
+    #[allow(dead_code)] // ADR 0122: only the (test-only) differential test calls this until later issues in the epic wire it into live emission sites
+    pub(in crate::core_erlang) fn body_threaded_families(
+        &self,
+        body: &beamtalk_core::ast::Block,
+        eligible: &[VersionPrefix],
+    ) -> ThreadedFamilies {
+        let matches: Vec<VersionPrefix> = eligible
+            .iter()
+            .filter(|prefix| {
+                // `State` needs no body walk at all — see
+                // `Self::is_family_mutation`'s doc comment.
+                matches!(prefix, VersionPrefix::State)
+                    || body.body.iter().any(|stmt| {
+                        let mut hit = false;
+                        beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                            if self.is_family_mutation(prefix, e) {
+                                hit = true;
+                            }
+                        });
+                        hit
+                    })
+            })
+            .cloned()
+            .collect();
+        ThreadedFamilies::from_matches(&matches)
+    }
+
     /// Emits a codegen diagnostic for the calling convention chosen for a loop.
     ///
     /// Reports which optimization mode was selected (direct-params, tuple-acc, hybrid,
@@ -176,7 +382,7 @@ impl CoreErlangGenerator {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
         filtered_body
             .into_iter()
-            .find(|expr| Self::is_field_assignment(expr))
+            .find(|expr| self.is_family_mutation(&VersionPrefix::SelfVt, expr))
     }
 
     /// Rejects a value-type `self.field := ...` write in loop-body
@@ -349,10 +555,9 @@ impl CoreErlangGenerator {
             return None;
         }
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
-        filtered_body.into_iter().find(|expr| {
-            (Self::is_field_assignment(expr) && self.is_class_var_assignment(expr))
-                || self.is_class_method_self_send(expr)
-        })
+        filtered_body
+            .into_iter()
+            .find(|expr| self.is_family_mutation(&VersionPrefix::ClassVars, expr))
     }
 
     /// if `expr` is itself a nested `Letrec`- or `Foldl*`-shaped

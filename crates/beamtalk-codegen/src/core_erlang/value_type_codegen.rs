@@ -2635,9 +2635,7 @@ impl CoreErlangGenerator {
     /// separate ADR 0110 threading, so it must never be routed through this
     /// issue's `Self` slot.
     fn is_vt_self_field_assignment(&self, expr: &Expression) -> bool {
-        !self.in_class_method()
-            && matches!(self.context, CodeGenContext::ValueType)
-            && Self::is_field_assignment(expr)
+        self.is_family_mutation(&super::threaded_ir::VersionPrefix::SelfVt, expr)
     }
 
     /// `true` if `expr` is an `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`

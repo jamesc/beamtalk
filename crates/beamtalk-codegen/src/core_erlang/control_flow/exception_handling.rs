@@ -206,6 +206,15 @@ impl CoreErlangGenerator {
     /// Actor context (where `state.field :=` and the construct's `StateAcc`
     /// are the same map and thread for free) and in class methods (where
     /// `self.x :=` is a `ClassVar` write with its own ADR 0110 threading).
+    ///
+    /// ADR 0122: [`Self::block_writes_vt_self_field`] (`value_type_codegen.rs`'s
+    /// `is_vt_self_field_assignment`) now delegates its `SelfVt`-mutation
+    /// shape check to `CoreErlangGenerator::is_family_mutation` — the one
+    /// place every family's "what counts as a mutation" answer lives — but
+    /// this site's own top-level-only WALK is unchanged (BT-3510 changes no
+    /// site's emission). Growing this construct a `ClassVars` slot, driven
+    /// by the shared recursive detector, is BT-3506 — the gap that motivated
+    /// this ADR.
     pub(in crate::core_erlang) fn exception_blocks_thread_value_self(
         &self,
         blocks: &[&Block],

@@ -9,8 +9,9 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::StateAccFallbackReason;
+use super::super::threaded_ir::{StateAccFallbackReason, VersionPrefix};
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
+use super::analysis::ThreadedFamilies;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
@@ -377,6 +378,12 @@ impl ThreadingPlan {
         Self::new_impl(generator, body, None, false, Some(kind))
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "dense, load-bearing ADR 0111/0122 rationale comments explaining each mode-selection \
+                  step and why it is ordered where it is — trimming the function without trimming the \
+                  documentation would just move the same complexity to a worse-documented call site"
+    )]
     fn new_impl(
         generator: &mut CoreErlangGenerator,
         body: &beamtalk_core::ast::Block,
@@ -543,7 +550,7 @@ impl ThreadingPlan {
         // Foldl-only wrap on the OUTER Letrec plan (the nested `do:`'s own,
         // separately-constructed Foldl plan still threads correctly on its
         // own terms).
-        let threads_class_vars = if allow_direct_params {
+        let threads_class_vars_answer = if allow_direct_params {
             // Letrec shape: `new_for_letrec`-constructed plans only.
             generator.loop_body_threads_class_vars(body)
         } else {
@@ -559,8 +566,23 @@ impl ThreadingPlan {
         // branch above — Letrec-shaped plans only (`allow_direct_params`),
         // for the same reason: a `Foldl*` accumulator has no trailing `Self`
         // slot to carry the mutation out through.
-        let threads_value_self =
+        let threads_value_self_answer =
             allow_direct_params && generator.loop_body_threads_value_self(body);
+
+        // ADR 0122 Decision 2/3: see `Self::derived_threaded_families`.
+        let threaded_families =
+            Self::derived_threaded_families(threads_class_vars_answer, threads_value_self_answer);
+        let threads_class_vars = threaded_families.contains(&VersionPrefix::ClassVars);
+        let threads_value_self = threaded_families.contains(&VersionPrefix::SelfVt);
+
+        #[cfg(test)]
+        Self::record_family_detector_diff(
+            generator,
+            body,
+            allow_direct_params,
+            threads_class_vars_answer,
+            threads_value_self_answer,
+        );
 
         Self {
             threaded_locals,
@@ -578,6 +600,61 @@ impl ThreadingPlan {
             initial_class_var,
             threads_value_self,
         }
+    }
+
+    /// ADR 0122 Decision 2/3: `threads_class_vars`/`threads_value_self` as
+    /// membership in ONE `ThreadedFamilies` list rather than two
+    /// independently-computed flags that could drift apart — the OLD
+    /// per-shape formulas in [`Self::new_impl`] are unchanged (this issue
+    /// changes no site's emission), only their STORAGE shape does. A later
+    /// issue in ADR 0122's epic (BT-3508) replaces these two derived bools
+    /// with `ThreadedFamilies` itself; this is the storage half of that
+    /// migration landing first.
+    fn derived_threaded_families(
+        threads_class_vars: bool,
+        threads_value_self: bool,
+    ) -> ThreadedFamilies {
+        let mut raw_matches = Vec::with_capacity(2);
+        if threads_class_vars {
+            raw_matches.push(VersionPrefix::ClassVars);
+        }
+        if threads_value_self {
+            raw_matches.push(VersionPrefix::SelfVt);
+        }
+        ThreadedFamilies::from_matches(&raw_matches)
+    }
+
+    /// BT-3510 differential test only (see
+    /// `analysis::FamilyDetectorDiffRecord`'s doc comment) — records the
+    /// NEW recursive detector's answer for `body` alongside the OLD
+    /// (unchanged) `threads_class_vars`/`threads_value_self` answers, so
+    /// `family_detector_differential` can compare them over a real compile
+    /// of the whole corpus. No effect on production builds — `#[cfg(test)]`
+    /// at every call site, never invoked outside a test build.
+    #[cfg(test)]
+    fn record_family_detector_diff(
+        generator: &CoreErlangGenerator,
+        body: &beamtalk_core::ast::Block,
+        allow_direct_params: bool,
+        old_threads_class_vars: bool,
+        old_threads_value_self: bool,
+    ) {
+        let eligible = generator.eligible_families();
+        let new_families = generator.body_threaded_families(body, &eligible);
+        super::analysis::FAMILY_DETECTOR_DIFF_LOG.with(|log| {
+            log.borrow_mut()
+                .push(super::analysis::FamilyDetectorDiffRecord {
+                    shape: if allow_direct_params {
+                        "letrec"
+                    } else {
+                        "foldl"
+                    },
+                    span: body.span,
+                    old_threads_class_vars,
+                    old_threads_value_self,
+                    new_families,
+                });
+        });
     }
 
     /// Select direct fun parameters for letrec loops when the body has no

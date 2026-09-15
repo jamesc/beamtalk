@@ -3248,6 +3248,19 @@ impl CoreErlangGenerator {
     ///
     /// [`CodeGenError::ValueSelfFieldAssignmentInMatchArm`]: super::super::CodeGenError::ValueSelfFieldAssignmentInMatchArm
     /// [`CodeGenError::ClassVarAssignmentInThreadedBody`]: super::super::CodeGenError::ClassVarAssignmentInThreadedBody
+    ///
+    /// ADR 0122: this is the one detector of the epic's three
+    /// (`super::super::control_flow::analysis::body_threaded_families` is
+    /// the shared, recursive replacement for the other two) that is NOT
+    /// migrated by BT-3510 — it answers a strictly wider question (Tier 2
+    /// value-calls, nested control-flow-with-mutations, hoistable self-sends,
+    /// not just "does a family's own bare mutation shape appear"), so
+    /// `body_threaded_families`'s `State`-is-trivially-true rule (correct for
+    /// a loop/conditional's own always-threaded `StateAcc`) does not apply
+    /// here without changing what this function actually decides. Declaring
+    /// this site's own `[State, ClassVars]` capability against the shared
+    /// detector, and dropping this hand-rolled `threads_fields` disjunct, is
+    /// BT-3517.
     pub(in crate::core_erlang) fn match_needs_mutation_threading(
         &self,
         arms: &[beamtalk_core::ast::MatchArm],
