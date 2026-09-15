@@ -13,11 +13,13 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
+use super::control_flow::analysis::ThreadedFamilies;
 use super::control_flow::{BodyKind, ThreadingPlan};
 use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::method_frame::{MethodBoundary, MethodFrame};
 use super::spec_codegen;
+use super::threaded_ir::VersionPrefix;
 use super::util::ClassIdentity;
 use super::value_accessors::{
     AutoSlotMethods, compute_auto_slot_methods, has_opaque_native_representation,
@@ -29,48 +31,6 @@ use beamtalk_core::ast::{
     Block, ClassDefinition, ClassKind, Expression, MessageSelector, MethodDefinition, MethodKind,
     Module, TypeAnnotation, WellKnownSelector,
 };
-
-/// which extra trailing slot (if any) a value-type/class-method
-/// Letrec loop's `{'nil', StateAcc, …}` result tuple carries at position 3.
-///
-/// The two are mutually exclusive by construction — `ClassVars` threading
-/// requires `in_class_method()`, value-type `Self` threading excludes it (see
-/// [`CoreErlangGenerator::loop_body_threads_value_self`]) — which is exactly
-/// why this is one enum rather than two independent booleans threaded through
-/// every extraction call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::core_erlang) enum VtLoopExtraSlot {
-    /// `{'nil', StateAcc}` — no extra slot (also every `Foldl*`-shaped
-    /// construct, whose accumulator has no such slot at all).
-    None,
-    /// `{'nil', StateAcc, ClassVars}` — a class-method loop that
-    /// threads a class-var mutation through its own recursive tail call.
-    ClassVars,
-    /// `{'nil', StateAcc, Self{N}}` — a value-type instance-method
-    /// loop that threads a `self.field := ...` mutation through its own
-    /// recursive tail call.
-    ValueSelf,
-}
-
-impl VtLoopExtraSlot {
-    /// ADR 0122 / BT-3506: converts a
-    /// [`ThreadedFamilies`](super::control_flow::analysis::ThreadedFamilies)
-    /// answer (0 or 1 members for `on:do:`/`ensure:`, per that type's own
-    /// mutual-exclusivity guarantee) into this enum's existing three-way
-    /// shape — so the `on:do:`/`ensure:` extraction sites below reuse the
-    /// SAME `None`/`ClassVars`/`ValueSelf` match every `Letrec`-loop
-    /// extraction site already has, instead of introducing a second,
-    /// parallel two-family enum.
-    pub(in crate::core_erlang) fn from_families(
-        families: &super::control_flow::analysis::ThreadedFamilies,
-    ) -> Self {
-        match families.as_slice().first() {
-            Some(super::threaded_ir::VersionPrefix::ClassVars) => Self::ClassVars,
-            Some(super::threaded_ir::VersionPrefix::SelfVt) => Self::ValueSelf,
-            None | Some(_) => Self::None,
-        }
-    }
-}
 
 /// Classification of how a value-type method body expression should be handled
 /// for Self-threading.  Produced by [`CoreErlangGenerator::classify_vt_body_expr`]
@@ -1035,7 +995,7 @@ impl CoreErlangGenerator {
     /// (which wraps it in `{class_var_result, Result, ClassVarsN}` when class vars were
     /// mutated).
     ///
-    /// ADR 0111 Addendum 9, Question 3: when `expr` is a
+    /// ADR 0111 Addendum 9, Question 3 / ADR 0122 Decision 3: when `expr` is a
     /// Letrec-shaped loop (`whileTrue:`/`whileFalse:`/`to:do:`/`to:by:do:`/
     /// `timesRepeat:`) that threads a `ClassVars` mutation through its own
     /// recursive tail call, ALSO extracts `ClassVars` from element 3 and
@@ -1045,13 +1005,17 @@ impl CoreErlangGenerator {
     /// per-iteration, inside the loop body) would never reach this method's
     /// own `class_var_mutated()`/`current_class_var()` state, so its normal
     /// return would silently carry a stale `ClassVars` value instead of the
+    /// loop's. The value-type `Self` mirror is identical: without it a
+    /// `self.field :=`-mutating loop in last/return position would compile
+    /// and run, but the method's own returned `Self` (and the `{Result,
+    /// Self{N}}` NLR tuple) would carry the pre-loop snapshot instead of the
     /// loop's.
     pub(in crate::core_erlang) fn emit_vt_threaded_tuple_unwrap_to_var(
         &mut self,
         expr: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        let extra_slot = self.vt_construct_extra_slot(expr);
+        let families = self.vt_loop_threaded_families(expr);
         let span = expr.span();
         let tuple_var = self.fresh_temp_var("ThreadedResult");
         let result_var = self.fresh_temp_var("ThreadedValue");
@@ -1067,25 +1031,58 @@ impl CoreErlangGenerator {
             leaf::var(tuple_var.clone()),
             ") in\n",
         ]);
-        match extra_slot {
-            VtLoopExtraSlot::None => {}
-            VtLoopExtraSlot::ClassVars => {
-                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-                let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
-                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-            }
-            // the value-type `Self` mirror — without this a
-            // `self.field :=`-mutating loop in last/return position would
-            // compile and run, but the method's own returned `Self` (and the
-            // `{Result, Self{N}}` NLR tuple) would carry the pre-loop
-            // snapshot instead of the loop's.
-            VtLoopExtraSlot::ValueSelf => {
-                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-                let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
-                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-            }
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
+            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
         Ok(result_var)
+    }
+
+    /// ADR 0122 Decision 3: the ONE place a construct's trailing family slot
+    /// at element 3 of its `{Value, StateAcc, ClassVars|Self}` result tuple
+    /// is extracted and rebound — shared by every construct whose extra
+    /// slot sits at that same position: the value-type/class-method Letrec
+    /// loop's three extraction sites
+    /// ([`Self::emit_vt_threaded_tuple_unwrap_to_var`]'s last-position
+    /// unwrap, [`Self::emit_vt_loop_open_extraction`]'s non-last-position
+    /// open chain, [`Self::emit_vt_threaded_local_assignment`]'s
+    /// assignment-RHS threading) AND `on:do:`/`ensure:`'s own three mirror
+    /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
+    /// [`Self::generate_vt_exception_construct_open`],
+    /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
+    /// independently drift on which family maps to which rebind (CLAUDE.md's
+    /// no-duplicate-implementations rule).
+    ///
+    /// `families` is the caller's own [`ThreadedFamilies`] answer for the
+    /// SAME construct `tuple_var` was bound from
+    /// ([`Self::vt_loop_threaded_families`] for a loop,
+    /// [`Self::exception_construct_threaded_families`] for `on:do:`/
+    /// `ensure:`) — at most one family ever threads through either
+    /// construct's own trailing slot (`ClassVars` requires
+    /// `in_class_method()`, `SelfVt` excludes it — see
+    /// [`CoreErlangGenerator::loop_body_threads_value_self`]), so this reads
+    /// only `families.as_slice().first()`. Returns `None` when the construct
+    /// carries no extra slot at all.
+    fn extract_vt_loop_family_slot(
+        &mut self,
+        tuple_var: &str,
+        families: &ThreadedFamilies,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Option<Document<'static>> {
+        let prefix = families.as_slice().first()?;
+        let value_doc = docvec![
+            "call 'erlang':'element'(3, ",
+            leaf::var(tuple_var.to_string()),
+            ")"
+        ];
+        Some(match prefix {
+            VersionPrefix::ClassVars => self.rebind_class_vars_from_doc(value_doc, span),
+            VersionPrefix::SelfVt => self.rebind_value_self_from_doc(value_doc, span),
+            other => unreachable!(
+                "a value-type/class-method Letrec loop's or on:do:/ensure:'s own \
+                 trailing slot only ever carries ClassVars or SelfVt (ADR 0122 \
+                 mutual exclusivity), got {other:?}"
+            ),
+        })
     }
 
     /// Lowers a last/return-position `on:do:`/`ensure:` into its logical
@@ -1097,16 +1094,17 @@ impl CoreErlangGenerator {
     /// [`Self::generate_vt_exception_construct_open`]'s non-last extraction,
     /// and are discarded here. When the construct also threads a `ClassVars`/
     /// `SelfVt` family ([`Self::exception_construct_threaded_families`]),
-    /// element 3 is rebound via [`Self::rebind_vt_exception_extra_slot`] so
-    /// the method's own returned value (and NLR tuple) reflects the
-    /// construct's mutation rather than the pre-`try` snapshot.
+    /// element 3 is rebound via [`Self::extract_vt_loop_family_slot`] (BT-3512's
+    /// shared extraction helper — this construct's own trailing slot is the
+    /// same shape at the same position, so it reuses that helper rather than
+    /// a second one) so the method's own returned value (and NLR tuple)
+    /// reflects the construct's mutation rather than the pre-`try` snapshot.
     pub(in crate::core_erlang) fn emit_vt_exception_tuple_unwrap_to_var(
         &mut self,
         expr: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        let slot =
-            VtLoopExtraSlot::from_families(&self.exception_construct_threaded_families(expr));
+        let families = self.exception_construct_threaded_families(expr);
         let span = expr.span();
         let tuple_var = self.fresh_temp_var("ExTuple");
         let result_var = self.fresh_temp_var("ExResult");
@@ -1122,7 +1120,7 @@ impl CoreErlangGenerator {
             leaf::var(tuple_var.clone()),
             ") in\n",
         ]);
-        if let Some(rebind_doc) = self.rebind_vt_exception_extra_slot(slot, &tuple_var, span) {
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
         Ok(result_var)
@@ -1862,14 +1860,14 @@ impl CoreErlangGenerator {
         // returns) — this predicate itself doesn't need that, but keeping it
         // adjacent to the other pre-loop reads (`get_while_threaded_locals`)
         // matches the loop codegen's own read order.
-        let extra_slot = self.vt_construct_extra_slot(expr);
+        let families = self.vt_loop_threaded_families(expr);
         // Generate the while loop expression (returns {'nil', StateAcc} tuple)
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = self.get_while_threaded_locals(expr);
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
-            extra_slot,
+            &families,
             expr.span(),
             "WhileResult",
             "WhileState",
@@ -1884,31 +1882,28 @@ impl CoreErlangGenerator {
     /// 2. Extracts the `StateAcc` from element 2
     /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`, rebinding the
     ///    variable names in scope so subsequent code sees the updated values
-    /// 4. ADR 0111 Addendum 9, Question 3: when
-    ///    `extra_slot` is not [`VtLoopExtraSlot::None`], ALSO extracts the
-    ///    loop's trailing element 3 and rebinds it — `ClassVars` via
-    ///    [`CoreErlangGenerator::rebind_class_vars_from_doc`], the value-type
-    ///    `Self` via [`CoreErlangGenerator::rebind_value_self_from_doc`] —
+    /// 4. ADR 0111 Addendum 9, Question 3 / ADR 0122 Decision 3: when
+    ///    `families` is non-empty, ALSO extracts the loop's trailing element
+    ///    3 and rebinds it via [`Self::extract_vt_loop_family_slot`] —
     ///    matching the extra trailing tuple slot `while_loops.rs`/
     ///    `counted_loops.rs` append to the `{'nil', StateAcc, …}` result.
-    ///    Always [`VtLoopExtraSlot::None`] for every
-    ///    `do:`/`collect:`/`select:`/`inject:into:` caller
-    ///    (`generate_vt_foldl_list_op_open`/`generate_value_type_do_open`) —
-    ///    those Foldl-shaped constructs' accumulator has no matching slot
+    ///    Always empty for every `do:`/`collect:`/`select:`/`inject:into:`
+    ///    caller (`generate_vt_foldl_list_op_open`/`generate_value_type_do_open`)
+    ///    — those Foldl-shaped constructs' accumulator has no matching slot
     ///    yet.
     ///
-    /// When there are no threaded locals AND no extra slot, falls back
-    /// to sequencing the loop as a side effect (`let _seqN = <loop> in`).
+    /// When there are no threaded locals AND no extra family slot, falls
+    /// back to sequencing the loop as a side effect (`let _seqN = <loop> in`).
     fn emit_vt_loop_open_extraction(
         &mut self,
         loop_doc: Document<'static>,
         threaded_locals: &[String],
-        extra_slot: VtLoopExtraSlot,
+        families: &ThreadedFamilies,
         span: beamtalk_core::source_analysis::Span,
         result_var_prefix: &str,
         state_var_prefix: &str,
     ) -> Document<'static> {
-        if threaded_locals.is_empty() && matches!(extra_slot, VtLoopExtraSlot::None) {
+        if threaded_locals.is_empty() && families.as_slice().is_empty() {
             // Fallback: just sequence the expression
             let tmp = self.fresh_temp_var("seq");
             return docvec!["    let ", leaf::var(tmp), " = ", loop_doc, " in\n"];
@@ -1956,21 +1951,8 @@ impl CoreErlangGenerator {
             }
         }
 
-        match extra_slot {
-            VtLoopExtraSlot::None => {}
-            VtLoopExtraSlot::ClassVars => {
-                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")",];
-                let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
-                parts.push(docvec!["    ", rebind_doc, "\n"]);
-            }
-            // same slot, same position — the loop's own trailing
-            // `Self` becomes the method's new live `Self{N}` for every
-            // statement after the loop.
-            VtLoopExtraSlot::ValueSelf => {
-                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")",];
-                let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
-                parts.push(docvec!["    ", rebind_doc, "\n"]);
-            }
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, families, span) {
+            parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
 
         Document::Vec(parts)
@@ -2019,14 +2001,14 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        // ADR 0111 Addendum 9, Question 3: which extra
+        // ADR 0111 Addendum 9, Question 3 / ADR 0122 Decision 3: which extra
         // trailing slot `value` carries as an explicit 3rd tuple element,
         // when it is a Letrec-shaped construct (while/counted loop) —
         // see the analogous comment on `emit_vt_threaded_tuple_unwrap_to_var`.
-        // Always `None` for a `Foldl*` construct
-        // (`vt_construct_extra_slot`'s own doc comment) — the class-var half
+        // Always empty for a `Foldl*` construct
+        // (`vt_loop_threaded_families`'s own doc comment) — the class-var half
         // of that shape is handled by the refresh below instead.
-        let extra_slot = self.vt_construct_extra_slot(value);
+        let families = self.vt_loop_threaded_families(value);
         let span = value.span();
         // captured before generating `value` so a class-method
         // self-send inside a `Foldl*` construct (its own accumulator
@@ -2057,7 +2039,7 @@ impl CoreErlangGenerator {
         // `ClassVars` precisely via the 3rd tuple element
         // below — doing both would rebind `ClassVars` twice, shadowing the
         // Letrec extraction with a redundant (if equivalent) shadow read.
-        if !matches!(extra_slot, VtLoopExtraSlot::ClassVars) {
+        if !families.contains(&VersionPrefix::ClassVars) {
             if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
                 body_parts.push(refresh);
             }
@@ -2110,18 +2092,8 @@ impl CoreErlangGenerator {
         // extract the loop's own trailing slot from element
         // 3 and rebind it, same as the non-last-statement / last-position
         // consumers.
-        match extra_slot {
-            VtLoopExtraSlot::None => {}
-            VtLoopExtraSlot::ClassVars => {
-                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-                let rebind_doc = self.rebind_class_vars_from_doc(value_doc, span);
-                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-            }
-            VtLoopExtraSlot::ValueSelf => {
-                let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-                let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
-                body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-            }
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
+            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
 
         Ok(core_var)
@@ -2134,7 +2106,8 @@ impl CoreErlangGenerator {
     /// later statements), and, when the construct also threads a
     /// `ClassVars`/`SelfVt` family
     /// ([`Self::exception_construct_threaded_families`]), rebinds it from
-    /// element 3. The `on:do:`/`ensure:` mirror of
+    /// element 3 (via [`Self::extract_vt_loop_family_slot`], BT-3512's
+    /// shared extraction helper). The `on:do:`/`ensure:` mirror of
     /// [`Self::emit_vt_threaded_local_assignment`].
     ///
     /// Returns the Core Erlang variable bound to the assignment target.
@@ -2144,8 +2117,7 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        let slot =
-            VtLoopExtraSlot::from_families(&self.exception_construct_threaded_families(value));
+        let families = self.exception_construct_threaded_families(value);
         let span = value.span();
         let rhs_doc = self.expression_doc(value)?;
         let tuple_var = self.fresh_temp_var("AssignExTuple");
@@ -2200,7 +2172,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        if let Some(rebind_doc) = self.rebind_vt_exception_extra_slot(slot, &tuple_var, span) {
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
 
@@ -2233,9 +2205,9 @@ impl CoreErlangGenerator {
             || self.loop_body_threads_value_self(body)
     }
 
-    /// ADR 0111 Addendum 9, Questions 3/4: which extra
-    /// trailing slot the loop construct `expr`'s result tuple carries —
-    /// non-`None` only for the Letrec-shaped constructs (`whileTrue:`/
+    /// ADR 0111 Addendum 9, Questions 3/4 / ADR 0122 Decision 3: which extra
+    /// trailing family the loop construct `expr`'s result tuple carries —
+    /// non-empty only for the Letrec-shaped constructs (`whileTrue:`/
     /// `whileFalse:`, `to:do:`/`to:by:do:`/`timesRepeat:`).
     /// `do:`/`collect:`/`select:`/`inject:into:` (Foldl-shaped) never match
     /// here even when class-var-mutating — their accumulator has no matching
@@ -2246,7 +2218,16 @@ impl CoreErlangGenerator {
     /// `ThreadingPlan::new_impl` (`control_flow/plan.rs`) so the routing
     /// decision here and the tuple-shape decision the loop's own codegen
     /// makes can never independently drift out of sync.
-    fn vt_construct_extra_slot(&self, expr: &Expression) -> VtLoopExtraSlot {
+    ///
+    /// Deliberately keeps these two narrow, top-level-only detectors rather
+    /// than the recursive [`CoreErlangGenerator::body_threaded_families`]
+    /// (ADR 0122 Decision 1's eventual end state) — this issue's own
+    /// Phase-0 `.core` diff must stay empty, so the detection formula is
+    /// unchanged; only its result's representation moves from the retired
+    /// `VtLoopExtraSlot` enum onto [`ThreadedFamilies`], the same type
+    /// [`Self::extract_vt_loop_family_slot`] and
+    /// `while_loops.rs`/`counted_loops.rs`'s own exit-arm tuple now share.
+    fn vt_loop_threaded_families(&self, expr: &Expression) -> ThreadedFamilies {
         let expr = expr.unwrap_parens();
         let body = if self.is_while_with_vt_local_threading(expr) {
             match expr {
@@ -2262,14 +2243,14 @@ impl CoreErlangGenerator {
             None
         };
         let Some(body) = body else {
-            return VtLoopExtraSlot::None;
+            return ThreadedFamilies::default();
         };
         if self.loop_body_threads_class_vars(body) {
-            VtLoopExtraSlot::ClassVars
+            ThreadedFamilies::from_matches(&[VersionPrefix::ClassVars])
         } else if self.loop_body_threads_value_self(body) {
-            VtLoopExtraSlot::ValueSelf
+            ThreadedFamilies::from_matches(&[VersionPrefix::SelfVt])
         } else {
-            VtLoopExtraSlot::None
+            ThreadedFamilies::default()
         }
     }
 
@@ -2307,7 +2288,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<Document<'static>> {
         // see the analogous comment in `generate_vt_while_open`.
-        let extra_slot = self.vt_construct_extra_slot(expr);
+        let families = self.vt_loop_threaded_families(expr);
         // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::counted_loop_body_block(expr)
@@ -2316,7 +2297,7 @@ impl CoreErlangGenerator {
         Ok(self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
-            extra_slot,
+            &families,
             expr.span(),
             "CountedLoopResult",
             "CountedLoopState",
@@ -2401,7 +2382,7 @@ impl CoreErlangGenerator {
             // through this tuple slot (Question 6's `{ClassVars, StateAcc}`
             // accumulator shape governs that separately) — nor is there a
             // value-type `Self` slot either.
-            VtLoopExtraSlot::None,
+            &ThreadedFamilies::default(),
             expr.span(),
             "FoldlListOpResult",
             "FoldlListOpState",
@@ -2914,13 +2895,13 @@ impl CoreErlangGenerator {
                 // a non-last loop / foldl list-op that mutates captured locals returns
                 // a `{value, StateAcc}` tuple. Extract and rebind the threaded locals so later
                 // statements in this branch see the updates (the value itself is discarded).
-                let extra_slot = self.vt_construct_extra_slot(body_expr);
+                let families = self.vt_loop_threaded_families(body_expr);
                 let loop_doc = self.expression_doc(body_expr)?;
                 let threaded_locals = self.vt_construct_threaded_locals(body_expr);
                 let doc = self.emit_vt_loop_open_extraction(
                     loop_doc,
                     &threaded_locals,
-                    extra_slot,
+                    &families,
                     body_expr.span(),
                     "BranchThreadedResult",
                     "BranchThreadedState",
@@ -3218,38 +3199,6 @@ impl CoreErlangGenerator {
             .unwrap_or_default()
     }
 
-    /// ADR 0122 / BT-3506: renders whichever storage-family value `slot`
-    /// says `element(3, tuple_var)` holds, and rebinds it via the matching
-    /// shared rebind helper (`rebind_class_vars_from_doc`/
-    /// `rebind_value_self_from_doc`) — the on:do:/ensure: non-loop mirror of
-    /// the `VtLoopExtraSlot` match every `Letrec`-loop extraction site
-    /// already has (e.g. [`Self::emit_vt_threaded_tuple_unwrap_to_var`]),
-    /// factored ONCE here rather than adding a fourth copy of the same
-    /// two-arm match for the three on:do:/ensure: call sites this backs
-    /// (`generate_vt_exception_construct_open`,
-    /// `emit_vt_exception_tuple_unwrap_to_var`, `emit_vt_exception_assign_rhs`).
-    ///
-    /// `None` (no `Document` to push) for [`VtLoopExtraSlot::None`].
-    fn rebind_vt_exception_extra_slot(
-        &mut self,
-        slot: VtLoopExtraSlot,
-        tuple_var: &str,
-        span: beamtalk_core::source_analysis::Span,
-    ) -> Option<Document<'static>> {
-        let value_doc = || {
-            docvec![
-                "call 'erlang':'element'(3, ",
-                leaf::var(tuple_var.to_string()),
-                ")",
-            ]
-        };
-        match slot {
-            VtLoopExtraSlot::None => None,
-            VtLoopExtraSlot::ClassVars => Some(self.rebind_class_vars_from_doc(value_doc(), span)),
-            VtLoopExtraSlot::ValueSelf => Some(self.rebind_value_self_from_doc(value_doc(), span)),
-        }
-    }
-
     /// emits a non-last `on:do:`/`ensure:` that mutates captured
     /// outer locals, in value-type or class-method context, as an open let
     /// chain — binds the construct's own `{Result, StateAcc}` tuple, then
@@ -3262,18 +3211,17 @@ impl CoreErlangGenerator {
     /// BT-3486/BT-3506: when the construct also threads a `ClassVars`/
     /// `SelfVt` family ([`Self::exception_construct_threaded_families`]),
     /// ALSO extracts the trailing element 3 and rebinds it via
-    /// [`Self::rebind_vt_exception_extra_slot`] — the same trailing slot, in
-    /// the same position, and the same rebind that BT-3484's
-    /// [`Self::emit_vt_loop_open_extraction`] gives a Letrec loop. Without it
-    /// the construct's own mutated version stays scoped inside the Core
-    /// Erlang `try` and every later read in the method silently sees the
-    /// pre-`try` snapshot.
+    /// [`Self::extract_vt_loop_family_slot`] (BT-3512's shared extraction
+    /// helper) — the same trailing slot, in the same position, and the same
+    /// rebind that BT-3484's [`Self::emit_vt_loop_open_extraction`] gives a
+    /// Letrec loop. Without it the construct's own mutated version stays
+    /// scoped inside the Core Erlang `try` and every later read in the
+    /// method silently sees the pre-`try` snapshot.
     pub(in crate::core_erlang) fn generate_vt_exception_construct_open(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
         let families = self.exception_construct_threaded_families(expr);
-        let slot = VtLoopExtraSlot::from_families(&families);
         let span = expr.span();
         let tuple_var = self.fresh_temp_var("ExTuple");
         let expr_doc = self.expression_doc(expr)?;
@@ -3308,7 +3256,7 @@ impl CoreErlangGenerator {
                 ]);
             }
         }
-        if let Some(rebind_doc) = self.rebind_vt_exception_extra_slot(slot, &tuple_var, span) {
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             docs.push(rebind_doc);
         }
         Ok(Document::Vec(docs))
@@ -3514,13 +3462,13 @@ impl CoreErlangGenerator {
                     // a non-last threaded loop/foldl that mutates a captured local
                     // returns {value, StateAcc}; extract and rebind the threaded locals so a
                     // later expression in this branch sees the update (value discarded).
-                    let extra_slot = self.vt_construct_extra_slot(body_expr);
+                    let families = self.vt_loop_threaded_families(body_expr);
                     let loop_doc = self.expression_doc(body_expr)?;
                     let threaded_locals = self.vt_construct_threaded_locals(body_expr);
                     parts.push(self.emit_vt_loop_open_extraction(
                         loop_doc,
                         &threaded_locals,
-                        extra_slot,
+                        &families,
                         body_expr.span(),
                         "BranchThreadedResult",
                         "BranchThreadedState",
