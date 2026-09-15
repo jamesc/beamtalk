@@ -377,19 +377,23 @@ Error: Cannot assign to field 'sum' inside a stored closure.
                            
 Field assignments require immediate execution context for state threading.
 
-Fix: Use control flow directly, or extract to a method:
+Fix: Extract the mutation into a method:
 
   // Instead of:
   myBlock := [:item | self.sum := self.sum + item].
   items do: myBlock.
   
-  // Write:
-  items do: [:item | self.sum := self.sum + item].
-  
-  // Or use a method:
+  // Use a method:
   addToSum: item => self.sum := self.sum + item
   items do: [:item | self addToSum: item].
 ```
+
+Only the `addTo{Field}:` method extraction is offered: this diagnostic is
+shared by the Actor, ValueType, and ClassVar producers of the "field
+assignment in an unsupported block" error, and the inline
+`items do: [:item | self.sum := ...]` rewrite is only valid for the Actor
+case — in ValueType and ClassVar context it reproduces the same error
+(BT-3491).
 
 ### Local Mutation in Closure
 
