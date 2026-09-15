@@ -260,6 +260,16 @@ pub enum CodeGenError {
 
     /// Field assignment in a block that can't thread state back — whether the block is
     /// assigned to a variable, passed as an argument, or returned.
+    ///
+    /// BT-3491: this diagnostic is shared by all three producers — the BT-2792
+    /// Actor stored-closure path, the `ValueType` `Foldl*`-shape rejection
+    /// (`reject_unthreadable_value_self_field_write`), and the `ClassVar`
+    /// `validate_stored_closure` fall-through — so its fix suggestion can only
+    /// use wording that is correct in every one of them. An inline
+    /// `items do: [:item | self.{field} := ...]` rewrite is only valid in the
+    /// Actor case; in `ValueType` and `ClassVar` context it reproduces the
+    /// exact same error. Only the `addTo{field_capitalized}:` method
+    /// extraction is valid everywhere, so that's the only fix offered here.
     #[error(
         "Cannot assign to field '{field}' inside this block at {location}.\n\n\
              Field assignments only thread state back to the actor when the block is used \
@@ -267,15 +277,12 @@ pub enum CodeGenError {
              sent directly to self, or immediately invoked (`[...] value`, `[...] value: arg`, \
              `[...] value:value:`, etc.) — not when it's stored in a variable, passed to a \
              user-defined method, or returned as a value.\n\n\
-             Fix: Use the block directly at the call site, or extract the mutation into a method:\n\
+             Fix: Extract the mutation into a method:\n\
              \x20 // Instead of:\n\
              \x20 myBlock := [:item | self.{field} := self.{field} + item].\n\
              \x20 items do: myBlock.\n\
              \x20 \n\
-             \x20 // Write:\n\
-             \x20 items do: [:item | self.{field} := self.{field} + item].\n\
-             \x20 \n\
-             \x20 // Or use a method:\n\
+             \x20 // Use a method:\n\
              \x20 addTo{field_capitalized}: item => self.{field} := self.{field} + item.\n\
              \x20 items do: [:item | self addTo{field_capitalized}: item]."
     )]
