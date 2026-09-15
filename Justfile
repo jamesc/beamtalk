@@ -1179,6 +1179,142 @@ test-bunit *ARGS: build-stdlib
 verify-threaded-ir: test-stdlib test-bunit
     @echo "✅ ThreadedIr verifier: no invariant violations across stdlib + bootstrap-test corpus"
 
+# BT-3509 (ADR 0122 Phase 0): corpus `.core` diff harness. Compiles
+# stdlib/src/*.bt, stdlib/test/*.bt + stdlib/test/fixtures/*.bt (via the
+# `test` command's own fixture pre-pass), and stdlib/bootstrap-test/*.btscript
+# with `.core` retained into OUT_DIR, then normalises away the absolute
+# source paths codegen embeds for BEAM stacktraces.
+#
+# `build-stdlib`/`test`/`test-stdlib` normally treat `.core` as a throwaway
+# intermediate on the way to `.beam` and compile it into a tempdir that's
+# deleted on exit; `BEAMTALK_CORE_SNAPSHOT_DIR` (read by the shared
+# `commands::util::core_output_dir` resolver, so all three call sites share
+# one "check the env var, else make a tempdir" implementation) points them
+# at OUT_DIR instead, and — for `build-stdlib` only — also bypasses its
+# incremental up-to-date skip, since this recipe's whole job is comparing a
+# FRESH compile's output.
+#
+# Every source file's absolute path is embedded into its own `.core` — the
+# `'file'` module attribute and a `{'file', Path}` annotation on nearly
+# every statement (`CoreErlangGenerator::annotate_with_line`), both there so
+# BEAM stacktraces point at the real `.bt` file. That's real behaviour this
+# recipe must not change (out of scope per the ADR), so it normalises the
+# *snapshot's copy* afterwards instead: every corpus file lives under some
+# checkout's `stdlib/`, so collapsing `"<anything>/stdlib/` down to
+# `"stdlib/` inside `.core` string literals makes two snapshots of the same
+# source, taken from checkouts at different absolute paths, byte-identical.
+#
+# Every class's `__beamtalk_meta` also bakes in a `beamtalk_version`
+# provenance binary derived from `git describe` (ADR 0098 Phase 3) — real
+# and desirable in a shipped `.beam`, but exactly the kind of per-build
+# noise this harness must not compare on, since the whole point is
+# comparing two different commits. Blanked out alongside `otp_release`
+# (stable on one machine, but not guaranteed across two CI runners). If
+# `__beamtalk_meta` ever grows another provenance field like these two
+# (`class_meta.rs`'s `meta_provenance_entries`), add a normalisation rule
+# for it here too — nothing catches that automatically.
+#
+# OUT_DIR may be relative (resolved against the repo root) or absolute.
+#
+# Linux only, like `test-beam` above: `build-erlang`/`test`/`test-stdlib`
+# need the Erlang/OTP toolchain this recipe's dependency chain builds, and
+# the normalisation step below uses GNU `sed -i`'s syntax (BSD/macOS sed's
+# `-i` takes a mandatory backup-suffix argument, so `-i -E` means something
+# different there — this would silently misbehave rather than fail loudly).
+[linux]
+core-diff-snapshot OUT_DIR: build-rust build-erlang
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{OUT_DIR}}"
+    OUT="$(cd "{{OUT_DIR}}" && pwd)"
+    REPO_ROOT="$(git rev-parse --show-toplevel)"
+    # OUT_DIR gets wiped below (`rm -rf "$OUT"/*`) — refuse anything that
+    # isn't clearly a scratch directory of its own, so a careless OUT_DIR
+    # (the repo root, `$HOME`, or a parent of either) can't take real files
+    # with it.
+    if [[ "$OUT" == "$REPO_ROOT" || "$REPO_ROOT" == "$OUT"/* || "$OUT" == "$HOME" || "$HOME" == "$OUT"/* || "$OUT" == "/" ]]; then
+        echo "❌ Refusing to use '$OUT' as OUT_DIR — it (or its contents) would be wiped by this recipe, and it looks like the repo root, \$HOME, or an ancestor of either. Pass a scratch directory (e.g. target/core-diff/head)." >&2
+        exit 1
+    fi
+    rm -rf "${OUT:?}"/*
+    mkdir -p "$OUT/src" "$OUT/test" "$OUT/bootstrap-test"
+
+    echo "📦 Snapshotting stdlib/src/*.bt ..."
+    # A stale ebin/ would make build-stdlib's incremental check moot for
+    # nothing (it's already bypassed above) but also mixes this run's
+    # .beam files with a previous one's — start clean.
+    rm -rf runtime/apps/beamtalk_stdlib/ebin
+    BEAMTALK_CORE_SNAPSHOT_DIR="$OUT/src" \
+        cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
+
+    echo "📦 Snapshotting stdlib/bootstrap-test/*.btscript ..."
+    (cd stdlib && BEAMTALK_CORE_SNAPSHOT_DIR="$OUT/bootstrap-test" \
+        cargo run --bin beamtalk --quiet -- test-stdlib --warnings-as-errors --quiet)
+
+    echo "📦 Snapshotting stdlib/test/*.bt + stdlib/test/fixtures/*.bt ..."
+    (cd stdlib && BEAMTALK_CORE_SNAPSHOT_DIR="$OUT/test" \
+        cargo run --bin beamtalk --quiet -- test --warnings-as-errors --quiet)
+
+    echo "🧹 Removing non-.core artifacts (.erl wrappers, .beam) ..."
+    find "$OUT" -type f ! -name '*.core' -delete
+
+    echo "🧹 Normalising embedded absolute source paths and build provenance ..."
+    find "$OUT" -name '*.core' -print0 \
+        | xargs -0 sed -i -E \
+            -e 's#"(/[^"]*/)?stdlib/#"stdlib/#g' \
+            -e "s/'beamtalk_version' => #\{[^}]*\}#/'beamtalk_version' => <<>>/g" \
+            -e "s/'otp_release' => #\{[^}]*\}#/'otp_release' => <<>>/g"
+
+    count=$(find "$OUT" -name '*.core' | wc -l | tr -d ' ')
+    echo "✅ Snapshot written to $OUT ($count .core files)"
+
+# BT-3509: diffs a fresh corpus `.core` snapshot of the current checkout
+# against the same snapshot taken from BASE_REF (default `origin/main`),
+# built in its own git worktree so the comparison never mutates either
+# checkout. Non-zero exit on any difference. See
+# docs/development/testing-strategy.md § Corpus `.core` diff harness.
+#
+# BASE_REF must itself carry this recipe (`core-diff-snapshot`) — true for
+# any commit once this harness has landed on `main`, which is why BT-3509
+# is Phase 0 and blocks every other issue in its epic. Comparing a branch
+# against a pre-BT-3509 `main` doesn't work for that one bootstrapping PR;
+# every use after it does.
+#
+# Linux only — see `core-diff-snapshot`'s own tag; this recipe calls it.
+[linux]
+core-diff BASE_REF="origin/main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT="$(pwd)"
+    OUT_DIR="$ROOT/target/core-diff"
+    HEAD_DIR="$OUT_DIR/head"
+    BASE_DIR="$OUT_DIR/base"
+    BASE_WORKTREE="$OUT_DIR/_base-worktree"
+
+    echo "🔎 Snapshotting current checkout (HEAD) ..."
+    just core-diff-snapshot "$HEAD_DIR"
+
+    echo "🔎 Snapshotting {{BASE_REF}} ..."
+    # A prior run killed before its own `trap` fired (Ctrl-C, OOM) leaves
+    # $BASE_WORKTREE registered in .git/worktrees/ even after its directory
+    # is gone — `git worktree add` then refuses the path as already in use.
+    # `remove --force`/`prune` clear that registration; both are no-ops on
+    # a clean run.
+    git worktree remove --force "$BASE_WORKTREE" >/dev/null 2>&1 || true
+    git worktree prune
+    rm -rf "$BASE_WORKTREE"
+    git worktree add --detach --quiet "$BASE_WORKTREE" "{{BASE_REF}}"
+    trap 'git worktree remove --force "$BASE_WORKTREE" >/dev/null 2>&1 || true' EXIT
+    (cd "$BASE_WORKTREE" && just core-diff-snapshot "$BASE_DIR")
+
+    echo "🔬 Diffing {{BASE_REF}} (base) against HEAD ..."
+    if diff -ru "$BASE_DIR" "$HEAD_DIR"; then
+        echo "✅ core-diff: generated Core Erlang is byte-identical to {{BASE_REF}}"
+    else
+        echo "❌ core-diff: generated Core Erlang differs from {{BASE_REF}} (see diff above)"
+        exit 1
+    fi
+
 # Run learning guide doctests (docs/learning/ — separate from stdlib tests)
 # Extracts ```beamtalk blocks from Markdown chapters and runs them via test-docs
 test-learn: build-stdlib

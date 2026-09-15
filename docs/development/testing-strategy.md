@@ -546,6 +546,67 @@ spawn_zero_uses_default_state_test() ->
 
 ---
 
+### 7b. Corpus `.core` Diff Harness (BT-3509)
+
+Proves a codegen refactor is byte-identical (or shows exactly its intended
+diff) by compiling the full stdlib + bootstrap-test corpus to Core Erlang
+twice — once from the current checkout, once from another ref — and diffing
+the two trees. `just verify-threaded-ir` catches a *malformed* `ThreadedIr`
+graph; this catches a *well-formed* graph that renders to different text,
+which is the failure mode ADR 0122's migration series (BT-3508) exists to
+guard against.
+
+**Location:** `Justfile` (`core-diff-snapshot`, `core-diff` recipes),
+`crates/beamtalk-cli/src/commands/util.rs` (`core_output_dir`).
+
+**Corpus:** `stdlib/src/*.bt` (via `build-stdlib`), `stdlib/test/*.bt` +
+`stdlib/test/fixtures/*.bt` (via the `test` command), and
+`stdlib/bootstrap-test/*.btscript` (via `test-stdlib`) — the same corpus
+`just verify-threaded-ir` already compiles.
+
+**Usage:**
+```bash
+# Snapshot the current checkout's generated .core into a directory:
+just core-diff-snapshot target/core-diff/head
+
+# Full comparison against origin/main (or any ref), in its own git
+# worktree so neither checkout is disturbed. Non-zero exit on any diff:
+just core-diff
+just core-diff some-other-branch-or-tag
+```
+
+**How it stays deterministic:** `build-stdlib`/`test`/`test-stdlib` normally
+treat `.core` as a throwaway intermediate on the way to `.beam` and compile
+it into an auto-deleted tempdir. Setting `BEAMTALK_CORE_SNAPSHOT_DIR` (which
+`core_output_dir` checks before falling back to a tempdir — one resolver
+shared by all three call sites) keeps them instead. Two further quirks of
+real compiler output would otherwise make two snapshots of identical source
+diff as different, so `core-diff-snapshot` normalises them away in the
+snapshot's own copy (it changes no codegen):
+
+- Every source file's **absolute path** is embedded into its own `.core` for
+  BEAM stacktraces — the `'file'` module attribute and a `{'file', Path}`
+  annotation on nearly every statement. Two checkouts at different absolute
+  paths would otherwise diff on every line. Collapsed to a `stdlib/`-relative
+  path.
+- Every class's `__beamtalk_meta` bakes in a `beamtalk_version` build
+  provenance binary (ADR 0098 Phase 3, derived from `git describe`) and an
+  `otp_release`. Real and desirable in a shipped `.beam`, but exactly the
+  per-build noise this harness must not compare on. Blanked out.
+
+**Bootstrapping note:** `core-diff`'s baseline mode runs `core-diff-snapshot`
+*inside* a worktree checked out at the base ref, so that ref must itself
+carry this harness. True for any commit once BT-3509 has landed on `main` —
+which is why it's Phase 0 of its epic and blocks every other issue in it —
+but not for a branch diffed against a pre-BT-3509 `main`.
+
+**CI:** runs as an informational job (`.github/workflows/ci.yml`'s
+`core-diff` job) on PRs touching `crates/beamtalk-codegen/`, reporting any
+diff to the job summary without failing the build. Add the
+`core-diff:enforce` label to a PR to make a real diff fail that job instead.
+
+---
+
 ### 8. REPL Protocol Tests
 
 REPL TCP-protocol integration tests that require a running REPL daemon. (Previously called "E2E tests" — renamed in BT-2085 because they exercise one specific surface, not "end-to-end across surfaces". Cross-surface parity tests live under `tests/parity/`.)

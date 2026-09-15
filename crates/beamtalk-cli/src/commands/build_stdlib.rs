@@ -59,12 +59,19 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
 
     check_duplicate_module_names(&source_files)?;
 
-    // Incremental build: skip if all outputs are newer than all inputs
-    if is_stdlib_up_to_date(
-        &ebin_dir,
-        &source_files,
-        discover_runtime_ebin_dirs().as_deref(),
-    ) {
+    // Incremental build: skip if all outputs are newer than all inputs.
+    // BT-3509's corpus `.core` diff harness (`BEAMTALK_CORE_SNAPSHOT_DIR`,
+    // see `util::core_output_dir`'s doc) always wants a full recompile —
+    // its whole job is comparing freshly generated `.core` output, and an
+    // incremental skip would leave its snapshot stale or empty.
+    let want_core_snapshot = std::env::var_os("BEAMTALK_CORE_SNAPSHOT_DIR").is_some();
+    if !want_core_snapshot
+        && is_stdlib_up_to_date(
+            &ebin_dir,
+            &source_files,
+            discover_runtime_ebin_dirs().as_deref(),
+        )
+    {
         println!("Stdlib up to date (skipped)");
         return Ok(());
     }
@@ -83,12 +90,10 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         println!("Compiling {} stdlib module(s)...", source_files.len());
     }
 
-    // Create a temporary directory for .core files
-    let temp_dir = tempfile::tempdir()
-        .into_diagnostic()
-        .wrap_err("Failed to create temporary directory for Core Erlang files")?;
-    let temp_path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
-        .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
+    // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
+    // unless the corpus `.core` diff harness asks to keep them — see
+    // `util::core_output_dir`'s doc.
+    let (temp_path, _core_output_dir_guard) = crate::commands::util::core_output_dir()?;
 
     // Compiler options: stdlib mode enabled
     let options = stdlib_compiler_options(warnings_as_errors);

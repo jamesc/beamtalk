@@ -544,12 +544,10 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
         println!("Compiling {} test file(s)...", test_files.len());
     }
 
-    // Create temporary build directory
-    let temp_dir = tempfile::tempdir()
-        .into_diagnostic()
-        .wrap_err("Failed to create temporary directory")?;
-    let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
-        .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
+    // BT-3509: `.core` files here are a throwaway intermediate to `.beam`
+    // unless the corpus `.core` diff harness asks to keep them — see
+    // `util::core_output_dir`'s doc.
+    let (build_dir, _core_output_dir_guard) = util::core_output_dir()?;
 
     // Phase 1: Compile all test files (Core Erlang + EUnit wrappers)
     let mut compiled_files = Vec::new();
