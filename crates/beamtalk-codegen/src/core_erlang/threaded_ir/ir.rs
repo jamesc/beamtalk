@@ -138,11 +138,12 @@ impl FrameId {
 /// site here — [`VersionCounter`] is the single implementation behind
 /// `CoreErlangGenerator`'s three (formerly independently implemented)
 /// counters (`StateThreading`, `ClassContext::class_var_version`,
-/// `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc`,
-/// `Put`/`Unpack`, `NlrCatch`/`Return`, and `ValueRef::Version`/`Literal`
-/// remain unit-test-only until a control-flow generator migrates onto the
-/// full `ThreadedIr`/`verify()` pipeline (later issues — this issue is
-/// naming/identity unification only, not IR construction). `Local` gets its
+/// `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc` and
+/// `Put`/`Unpack`/`NlrCatch`/`Return` remain unit-test-only until a
+/// control-flow generator migrates onto the full `ThreadedIr`/`verify()`
+/// pipeline (later issues — this issue is naming/identity unification only,
+/// not IR construction; `ValueRef::Version`'s own first production call site
+/// is ADR 0122's `append_family_slots`, a later addition). `Local` gets its
 /// own production call site via
 /// [`verify_tuple_acc_unpack_invariant`]. `#[allow(dead_code)]` here
 /// documents that the remaining variants stay test-only for now, instead of
@@ -184,6 +185,68 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// [`ThreadedStmt::ConditionalLoop`]'s doc comment for the full
     /// ordering contract.
     Gensym(String),
+}
+
+impl VersionPrefix {
+    /// ADR 0122 Decision 4: whether a mutation to this family must be
+    /// visible to a foreign NLR relay via ADR 0110's process-dictionary
+    /// shadow write (the [`super::verify::VerifyError::ShadowWriteMissing`]
+    /// CONTRACT check, `verify.rs:372-375`). `ClassVars` only — `State`/
+    /// `SelfVt` mutations have no process-dictionary side channel to keep in
+    /// sync; a foreign NLR relay reads THEIR final value straight off the
+    /// thrown NLR tuple/the method's own return, never off a shadow.
+    ///
+    /// `#[allow(dead_code)]`: only [`Self::extraction_bind_op`] and this
+    /// method's own unit tests call it today — ADR 0122, BT-3511 (the
+    /// emission helper only; no site migrated yet).
+    #[allow(dead_code)]
+    pub(in crate::core_erlang) fn requires_shadow_write(&self) -> bool {
+        matches!(self, Self::ClassVars)
+    }
+
+    /// ADR 0122 Decision 3/4: the `(BindOp, shadow_write)` pair a
+    /// construct's own trailing-tuple-slot EXTRACTION `Bind` for this family
+    /// must carry (`control_flow::family_slots::extract_family_slots`) — a
+    /// method here, not a `match` in that helper, so a future fourth family
+    /// cannot grow its own extraction shape without every existing caller of
+    /// the helper picking it up for free (Decision 4: "capability is data").
+    ///
+    /// ALWAYS [`BindOp::Direct`] — never [`BindOp::Put`]: `value` (the
+    /// tuple-element read the caller already built, e.g. `call
+    /// 'erlang':'element'(3, Tuple)`) holds this family's ENTIRE
+    /// post-construct value — the whole `StateAcc`/`ClassVars`/`Self` map —
+    /// not one field of it. `BindOp::Put`'s `maps:put(field, value, source)`
+    /// shape inserts a SINGLE key's value into `source`; applied here it
+    /// would nest the whole new map under one field of the OLD map instead
+    /// of replacing it — wrong for every family, not just this one. Every
+    /// existing hand-rolled extraction site already only ever does a plain
+    /// whole-value rebind this way: `rebind_class_vars_from_doc`,
+    /// `rebind_value_self_from_doc` (`dispatch_codegen.rs`), and
+    /// `rebind_vt_conditional_mutations`'s `let NewCv = element(N, Result)
+    /// in` (`value_type_codegen.rs`) — none of them constructs a `Put` at a
+    /// merge/extraction point, only ever at the ORIGINAL field-write site
+    /// inside the branch that mutated the family in the first place.
+    ///
+    /// `shadow_write` is [`Self::requires_shadow_write`] — `true` only for
+    /// `ClassVars`. Inert on the `Direct` bind this always constructs today:
+    /// `verify()`'s `ShadowWriteMissing` check only ever inspects a
+    /// `BindOp::Put` (see `verify.rs:372-375`), and the mutation this Bind
+    /// merges was already shadow-written, under ADR 0110, by the BRANCH's
+    /// own `Put`-shaped field-write bind — a merge-point rebind is never
+    /// itself a shadow-write producer (see `rebind_class_vars_from_doc`'s own
+    /// doc comment). Set here anyway so `ClassVars`' real ADR 0110 obligation
+    /// lives on the TYPE rather than as a literal a future `Put`-shaped
+    /// extraction consumer would have to remember to flip — exactly the
+    /// unwritten-rule failure mode ADR 0122 exists to remove (§"Why the gaps
+    /// keep happening").
+    ///
+    /// `#[allow(dead_code)]`: only `control_flow::family_slots::extract_family_slots`
+    /// and this method's own unit tests call it today — ADR 0122, BT-3511
+    /// (the emission helper only; no site migrated yet).
+    #[allow(dead_code)]
+    pub(in crate::core_erlang) fn extraction_bind_op(&self, value: ValueRef) -> (BindOp, bool) {
+        (BindOp::Direct(value), self.requires_shadow_write())
+    }
 }
 
 /// A version-identified Core Erlang variable, scoped to the frame that
@@ -459,23 +522,25 @@ impl TokenId {
 
 // ─── Values ─────────────────────────────────────────────────────────────────
 
-/// A value referenced by a [`BindOp`] or [`ThreadedStmt::Return`]. See
-/// [`VersionPrefix`]'s doc comment for why `Version` is test-only for now.
+/// A value referenced by a [`BindOp`] or [`ThreadedStmt::Return`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ValueRef {
     /// A previously-bound versioned variable (e.g. the source of a chained
-    /// mutation).
+    /// mutation) — a construct's own CURRENT version of a family, referenced
+    /// (never mutated) at the point its result tuple closes.
     ///
-    /// Still genuinely unconstructed in production — every real
-    /// `Bind`/`Return` producer that reaches for a prior version threads
-    /// it through the `source: VersionedVar` field directly (`Bind`'s own
-    /// dedicated slot) rather than wrapping it as a `ValueRef`; nothing
-    /// yet needs a *second*, value-position version reference alongside
-    /// `source` in the same node. `render_value`'s arm for it is real,
-    /// tested production code (see `render_value_tests`) — only a
-    /// constructor is missing, kept ready for a future shape that needs
-    /// one (e.g. a `Put`/`Direct` RHS that is itself a bare prior
-    /// version, not a fresh temp or opaque `Doc`).
+    /// Real (non-test) intended constructor:
+    /// `control_flow::family_slots::append_family_slots`, appending each
+    /// family's current version as a trailing tuple slot — the natural fit,
+    /// since [`super::emit::render_value`]'s arm for it already renders
+    /// through `RenderCtx`'s own prefix resolution, which is exactly what
+    /// gives `VersionPrefix::State` its loop-context-aware `StateAcc` vs.
+    /// `State` spelling for free (this variant's whole reason to exist over
+    /// a plain [`Self::Var`]/[`Self::Doc`]). `#[allow(dead_code)]` because
+    /// that helper is itself not yet wired into any live emission site
+    /// (ADR 0122, BT-3511 — the helper only; migrating a site to call it is
+    /// each site's own later issue) — only its own unit tests construct
+    /// this today.
     #[allow(dead_code)]
     Version(VersionedVar),
     /// A fresh, non-versioned Core Erlang variable name (e.g. a computed

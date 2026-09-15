@@ -31,6 +31,9 @@
 //! - [`conditionals`] — `ifTrue:`/`ifFalse:`/`match:` etc.
 //! - [`exception_handling`] — `on:do:`/`ensure:`
 //! - [`loop_mode`] — [`LoopMode`], the generator's own loop-body context field
+//! - [`family_slots`] — ADR 0122 Decision 3: the unified storage-family
+//!   result-tuple append/extract emission helper (not wired into any site
+//!   yet — BT-3511)
 
 pub(in crate::core_erlang) mod analysis;
 mod body;
@@ -38,6 +41,7 @@ mod conditionals;
 mod counted_loops;
 mod dict_ops;
 mod exception_handling;
+pub(in crate::core_erlang) mod family_slots;
 mod list_ops;
 mod local_assign;
 mod loop_mode;
