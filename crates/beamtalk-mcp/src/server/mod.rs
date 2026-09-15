@@ -21,7 +21,7 @@ use std::sync::Arc;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
-    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerConfig},
     tool_handler,
 };
 
@@ -200,8 +200,8 @@ pub(crate) use check_response;
 #[tool_handler]
 impl ServerHandler for BeamtalkMcp {
     /// Return server metadata and capabilities advertised to MCP clients.
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_instructions(
                 "Beamtalk MCP server — interact with live beamtalk objects through the REPL. \
                  Use 'evaluate' to run beamtalk expressions, 'load_project' to load all files \
