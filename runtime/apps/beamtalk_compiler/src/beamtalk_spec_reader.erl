@@ -598,11 +598,7 @@ resolve_type_with_constraints({var, _, VarName}, ConstraintMap) ->
         error -> <<"Dynamic">>
     end;
 resolve_type_with_constraints({type, Line, union, Branches}, ConstraintMap) ->
-    ResolvedBranches = [
-        resolve_branch_with_constraints(B, ConstraintMap)
-     || B <- Branches
-    ],
-    map_union(ResolvedBranches, Line);
+    resolve_union_with_constraints(Branches, Line, ConstraintMap);
 resolve_type_with_constraints(Type, _ConstraintMap) ->
     map_type(Type).
 
@@ -620,11 +616,11 @@ resolve_type_with_constraints(Type, _ConstraintMap) ->
 %% (not `map_type/1`), so a return type that is itself a constrained type
 %% variable resolving to a lone `ok`/`error` atom — e.g.
 %% `-spec f(X) -> T when T :: ok, X :: binary().` — gets ADR-0121 treatment
-%% too, not just a directly-literal `-> ok.` return. The union clause mirrors
-%% `resolve_type_with_constraints/2`'s (constraint substitution inside union
-%% branches via `resolve_branch_with_constraints/2`, then `map_union/2`) since
-%% union handling is already position-agnostic — a union's ok/error branches
-%% get Result recognition in param position too, today, unchanged by ADR 0121.
+%% too, not just a directly-literal `-> ok.` return. The union clause calls
+%% the same `resolve_union_with_constraints/3` helper `resolve_type_with_
+%% constraints/2` uses, since union handling is already position-agnostic —
+%% a union's ok/error branches get Result recognition in param position too,
+%% today, unchanged by ADR 0121 — so the two call sites can't drift apart.
 -spec resolve_return_type_with_constraints(tuple(), map()) -> binary().
 resolve_return_type_with_constraints({var, _, VarName}, ConstraintMap) ->
     % elp:fixme W0032 maps:find with complex branch logic
@@ -633,13 +629,24 @@ resolve_return_type_with_constraints({var, _, VarName}, ConstraintMap) ->
         error -> <<"Dynamic">>
     end;
 resolve_return_type_with_constraints({type, Line, union, Branches}, ConstraintMap) ->
+    resolve_union_with_constraints(Branches, Line, ConstraintMap);
+resolve_return_type_with_constraints(RetType, _ConstraintMap) ->
+    map_return_type(RetType).
+
+%% Resolve a union type's branches, substituting constrained type variables
+%% inside each before ok/error Result recognition runs. Shared by
+%% `resolve_type_with_constraints/2` (param and non-bounded-fun-return
+%% resolution) and `resolve_return_type_with_constraints/2` (ADR 0121 return
+%% resolution) — union handling doesn't depend on param-vs-return position,
+%% so both route through this one implementation rather than each keeping
+%% its own copy that could silently drift.
+-spec resolve_union_with_constraints([tuple()], term(), map()) -> binary().
+resolve_union_with_constraints(Branches, Line, ConstraintMap) ->
     ResolvedBranches = [
         resolve_branch_with_constraints(B, ConstraintMap)
      || B <- Branches
     ],
-    map_union(ResolvedBranches, Line);
-resolve_return_type_with_constraints(RetType, _ConstraintMap) ->
-    map_return_type(RetType).
+    map_union(ResolvedBranches, Line).
 
 %% Resolve a single union branch, substituting constrained type variables
 %% inside tuple elements. This preserves the abstract form structure so
