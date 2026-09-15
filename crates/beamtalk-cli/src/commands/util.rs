@@ -144,6 +144,50 @@ pub(crate) fn write_atomic(
     fs::rename(&tmp, path)
 }
 
+/// Where a corpus-compiling command (`build-stdlib`, `test-stdlib`, `test`)
+/// should write its `.core` files, and how to clean that directory up
+/// afterwards.
+///
+/// Normally these commands only need `.core` files as a throwaway
+/// intermediate on the way to `.beam`, so the default is an auto-cleaned
+/// temp directory. BT-3509's corpus `.core` diff harness (`just core-diff`;
+/// see `docs/development/testing-strategy.md` § Corpus `.core` diff
+/// harness) is the only consumer that needs them to outlive the compiling
+/// process, and it asks for that via `BEAMTALK_CORE_SNAPSHOT_DIR` — sharing
+/// this one resolver rather than each of the three call sites growing its
+/// own copy of the "check the env var, else make a tempdir" branch
+/// (CLAUDE.md's no-duplicate-implementations rule).
+pub(crate) enum CoreOutputDir {
+    /// Deleted when dropped. Never read — held only for its `Drop` impl, so
+    /// every caller binds it (`let (dir, _guard) = ...`) rather than letting
+    /// it drop immediately.
+    Temp(#[allow(dead_code)] tempfile::TempDir),
+    /// Left on disk for the harness to read after this process exits.
+    Persistent,
+}
+
+/// Resolves a [`CoreOutputDir`] and its path.
+///
+/// Bind the returned guard even where its value is never read directly
+/// (`let (dir, _guard) = core_output_dir()?;`) — dropping it early deletes a
+/// temp directory a caller is still writing into.
+pub(crate) fn core_output_dir() -> Result<(Utf8PathBuf, CoreOutputDir)> {
+    if let Ok(dir) = std::env::var("BEAMTALK_CORE_SNAPSHOT_DIR") {
+        let path = Utf8PathBuf::from(dir);
+        fs::create_dir_all(&path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to create '{path}'"))?;
+        return Ok((path, CoreOutputDir::Persistent));
+    }
+
+    let temp_dir = tempfile::tempdir()
+        .into_diagnostic()
+        .wrap_err("Failed to create temporary directory")?;
+    let path = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
+        .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
+    Ok((path, CoreOutputDir::Temp(temp_dir)))
+}
+
 /// Find files matching the given extensions in a path.
 ///
 /// - If `path` is a file, validates it has one of the given extensions and returns it.
