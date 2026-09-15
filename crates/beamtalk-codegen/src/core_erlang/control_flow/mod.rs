@@ -32,7 +32,7 @@
 //! - [`exception_handling`] — `on:do:`/`ensure:`
 //! - [`loop_mode`] — [`LoopMode`], the generator's own loop-body context field
 
-mod analysis;
+pub(in crate::core_erlang) mod analysis;
 mod body;
 mod conditionals;
 mod counted_loops;
