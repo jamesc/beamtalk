@@ -34,10 +34,12 @@
 
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
 use super::super::threaded_ir::{
-    self, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    self, RenderCtx, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::ThreadingPlan;
+use super::analysis::ThreadedFamilies;
+use super::family_slots::append_family_slots;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression};
@@ -280,10 +282,12 @@ impl CoreErlangGenerator {
         // `with_branch_context`), same "extra explicit trailing fun
         // parameter, never folded into `StateAcc`'s own map" shape. Mutually
         // exclusive with `class_var_param` by construction, so the loop's
-        // result tuple grows at most one extra slot.
+        // result tuple grows at most one extra slot. Unlike `cv_param_doc`,
+        // this family's exit-arm slot now routes through
+        // [`super::family_slots::append_family_slots`] (ADR 0122 Decision 3,
+        // BT-3512) rather than a hand-rolled `Document`.
         let self_param = plan.threads_value_self.then(|| self.current_self_var());
         let self_seed_version = self.self_version();
-        let self_param_doc = super::extra_threaded_arg_doc(self_param.as_ref());
 
         // At the start of each loop iteration, read threaded locals from StateAcc.
         // Use push_scope so bindings don't leak to caller after the letrec.
@@ -401,13 +405,40 @@ impl CoreErlangGenerator {
         } else {
             "<'false'> when 'true' -> "
         };
-        let exit_arm = docvec![
-            exit_arm_atom,
-            "{'nil', StateAcc",
-            cv_param_doc,
-            self_param_doc,
-            "} end ",
-        ];
+        // ADR 0122 Decision 3 (BT-3512, value-type context only — the
+        // Actor/class-method `letrec` parameter path is BT-3515): the
+        // `ClassVars` half of this exit-arm tuple (`cv_param_doc`) stays
+        // hand-rolled into `base` here, folded in unchanged; only the
+        // `SelfVt` slot routes through the emission helper. ADR 0122's own
+        // mutual exclusivity (`class_var_param`/`self_param` never both
+        // `Some`) means at most one of the two ever contributes a slot, so
+        // this is byte-identical to the fully hand-rolled tuple it replaces.
+        let self_only_families = ThreadedFamilies::from_matches(
+            self_param
+                .as_ref()
+                .map_or(&[][..], |_| &[VersionPrefix::SelfVt][..]),
+        );
+        let exit_arm_tuple = {
+            let ctx = RenderCtx::new(self);
+            append_family_slots(
+                docvec!["{'nil', StateAcc", cv_param_doc],
+                &self_only_families,
+                |prefix| match prefix {
+                    VersionPrefix::SelfVt => VersionedVar::new(
+                        VersionPrefix::Gensym(self_param.clone().expect(
+                            "self_only_families only ever carries SelfVt when self_param is Some",
+                        )),
+                        0,
+                        frame,
+                    ),
+                    other => unreachable!(
+                        "while-loop exit-arm tuple only ever appends SelfVt via the helper, got {other:?}"
+                    ),
+                },
+                &ctx,
+            )
+        };
+        let exit_arm = docvec![exit_arm_atom, exit_arm_tuple, " end "];
 
         let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, frame)];
         if let Some(cv_name) = &class_var_param {
