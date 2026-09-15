@@ -2300,18 +2300,21 @@ Error: Cannot assign to field 'sum' inside a stored closure.
 
 Field assignments require immediate execution context for state threading.
 
-Fix: Use control flow directly, or extract to a method:
+Fix: Extract the mutation into a method:
   // Instead of:
   myBlock := [:item | self.sum := self.sum + item].
   items do: myBlock.
 
-  // Write:
-  items do: [:item | self.sum := self.sum + item].
-
-  // Or use a method:
+  // Use a method:
   addToSum: item => self.sum := self.sum + item.
   items do: [:item | self addToSum: item].
 ```
+
+The `addTo{Field}:` method fix is offered because it's the only rewrite that's
+valid everywhere this diagnostic fires — writing the block inline
+(`items do: [:item | self.sum := self.sum + item]`) only threads correctly for
+an `Actor subclass:` method. The identical inline rewrite is itself rejected
+in a `Value subclass:` or class method, so it isn't offered as a fix here.
 
 ---
 
