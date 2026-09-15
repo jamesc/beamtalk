@@ -351,7 +351,3 @@ proven to also hit `ifTrue:` and loop bodies — a bug in the shared ADR 0111
 Addendum 5 statement classifier, not a per-family duplication at all).
 None of the three adds a sixth call site; they are tracked independently
 and don't change the count or the decision above.
-
-**Follow-up:** [BT-3499](https://linear.app/beamtalk/issue/BT-3499) answers
-this addendum's two open design questions and makes the generalize-vs-defer
-call — see [ADR 0122](0122-threaded-ir-storage-family-generalization-scope.md).
