@@ -373,6 +373,26 @@ call sites (`actor_codegen.rs`, `gen_server/dispatch.rs`,
 (`wrap_value_type_body_with_nlr_catch`) is a structurally different,
 already-inline mechanism, not applicable.
 
+**Corpus `.core` diff harness (BT-3509, ADR 0122 Phase 0).** The verifier
+above catches a *malformed* `ThreadedIr` graph — an unbound version, a
+missing shadow write, a slot-count mismatch — via `debug_assert!` under
+`just verify-threaded-ir`. It does **not** catch a *well-formed* graph that
+renders to different Core Erlang than before: a changed tuple shape or slot
+order still passes every `VerifyError` check while silently changing
+generated code. ADR 0122's `ThreadedFamilies` unification (unifying how
+`State`/`ClassVars`/`SelfVt` thread through loops, conditionals,
+`on:do:`/`ensure:`, and Foldl bodies) is exactly the kind of refactor where
+that gap matters: every migration in that epic is meant to be
+byte-identical except its own documented, reviewed exception. `just
+core-diff` (see `docs/development/testing-strategy.md` § Corpus `.core`
+diff harness) is the tool that proves it — it compiles the same
+`stdlib/test/*.bt` + `stdlib/bootstrap-test/*.btscript` corpus this
+verifier runs over, from two different checkouts, and diffs the generated
+`.core` byte-for-byte. Run it before and after a `ThreadedIr` emission
+change touching this section's call sites; an empty diff is the strongest
+evidence a refactor changed nothing observable, and a non-empty diff should
+show exactly the change you intended and nothing else.
+
 ## Runtime/REPL Debugging
 
 ```bash

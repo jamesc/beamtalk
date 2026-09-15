@@ -1204,6 +1204,13 @@ verify-threaded-ir: test-stdlib test-bunit
 # `"stdlib/` inside `.core` string literals makes two snapshots of the same
 # source, taken from checkouts at different absolute paths, byte-identical.
 #
+# Every class's `__beamtalk_meta` also bakes in a `beamtalk_version`
+# provenance binary derived from `git describe` (ADR 0098 Phase 3) — real
+# and desirable in a shipped `.beam`, but exactly the kind of per-build
+# noise this harness must not compare on, since the whole point is
+# comparing two different commits. Blanked out alongside `otp_release`
+# (stable on one machine, but not guaranteed across two CI runners).
+#
 # OUT_DIR may be relative (resolved against the repo root) or absolute.
 [unix]
 core-diff-snapshot OUT_DIR: build-rust build-erlang
@@ -1233,9 +1240,12 @@ core-diff-snapshot OUT_DIR: build-rust build-erlang
     echo "🧹 Removing non-.core artifacts (.erl wrappers, .beam) ..."
     find "$OUT" -type f ! -name '*.core' -delete
 
-    echo "🧹 Normalising embedded absolute source paths ..."
+    echo "🧹 Normalising embedded absolute source paths and build provenance ..."
     find "$OUT" -name '*.core' -print0 \
-        | xargs -0 sed -i -E 's#"(/[^"]*/)?stdlib/#"stdlib/#g'
+        | xargs -0 sed -i -E \
+            -e 's#"(/[^"]*/)?stdlib/#"stdlib/#g' \
+            -e "s/'beamtalk_version' => #\{[^}]*\}#/'beamtalk_version' => <<>>/g" \
+            -e "s/'otp_release' => #\{[^}]*\}#/'otp_release' => <<>>/g"
 
     count=$(find "$OUT" -name '*.core' | wc -l | tr -d ' ')
     echo "✅ Snapshot written to $OUT ($count .core files)"
