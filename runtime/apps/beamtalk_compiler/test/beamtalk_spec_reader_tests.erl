@@ -802,6 +802,157 @@ bounded_fun_result_with_constraints_test() ->
     ?assertEqual(<<"Result(String | Binary, Symbol)">>, maps:get(return_type, Spec)).
 
 %%% ---------------------------------------------------------------
+%%% map_return_type/1 — lone (non-union) ok/error return specs (ADR 0121, BT-3498)
+%%% ---------------------------------------------------------------
+
+%% A lone `-> ok.` return spec infers Result(Nil): OkTypes = [nil], ErrTypes = [],
+%% so resolve_ok_type/1 = "Nil" and resolve_err_type/1 = "Dynamic" (elided by
+%% format_result_type/2's Dynamic-error shorthand).
+map_return_type_bare_ok_test() ->
+    ?assertEqual(
+        <<"Result(Nil)">>,
+        beamtalk_spec_reader:map_return_type({atom, 0, ok})
+    ).
+
+%% A lone `-> error.` return spec infers Result(Dynamic, Nil): OkTypes = [],
+%% ErrTypes = [nil], so resolve_ok_type/1 = "Dynamic" and resolve_err_type/1 =
+%% "Nil". format_result_type/2 only shortens a Dynamic *error* side, not a
+%% Dynamic *ok* side, so this is NOT symmetric with the bare-ok case above —
+%% it formats as the full two-argument Result(Dynamic, Nil).
+map_return_type_bare_error_test() ->
+    ?assertEqual(
+        <<"Result(Dynamic, Nil)">>,
+        beamtalk_spec_reader:map_return_type({atom, 0, error})
+    ).
+
+%% A union return spec still dispatches through map_union/2 exactly as
+%% map_type/1 already does — map_return_type/1 changes nothing about union
+%% handling, only the lone-atom case.
+map_return_type_union_test() ->
+    ?assertEqual(
+        <<"Result(Nil, Symbol)">>,
+        beamtalk_spec_reader:map_return_type(
+            {type, 0, union, [
+                {atom, 0, ok}, {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]}
+            ]}
+        )
+    ).
+
+%% Any other return type falls through unchanged to map_type/1.
+map_return_type_other_test() ->
+    ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_return_type({type, 0, integer, []})).
+
+%% beamtalk_actor:unregister/1's actual spec shape — a bare, non-union
+%% `-> ok.` return — now infers Result(Nil) end-to-end via
+%% extract_specs_from_forms/1, not just via the map_return_type/1 unit.
+extract_specs_bare_ok_return_test() ->
+    Forms = [
+        {attribute, 1, export, [{unregister, 1}]},
+        {attribute, 1, spec,
+            {{unregister, 1}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, term, []}]},
+                    {atom, 2, ok}
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(<<"unregister">>, maps:get(name, Spec)),
+    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+
+%% A lone, non-union bare-atom return spec on a bounded_fun clause (`when`
+%% clause present for an unrelated param constraint) also gets Result
+%% recognition via resolve_return_type_with_constraints/2's catch-all —
+%% simulates `-spec f(X) -> ok when X :: binary().`.
+bounded_fun_bare_ok_return_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 1}]},
+        {attribute, 1, spec,
+            {{f, 1}, [
+                {type, 2, bounded_fun, [
+                    {type, 2, 'fun', [
+                        {type, 2, product, [{var, 2, 'X'}]},
+                        {atom, 2, ok}
+                    ]},
+                    [
+                        {type, 3, constraint, [
+                            {atom, 3, is_subtype},
+                            [{var, 3, 'X'}, {type, 3, binary, []}]
+                        ]}
+                    ]
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+
+%% A return type that is itself a constrained type variable resolving to a
+%% lone `ok`/`error` atom also gets ADR-0121 Result recognition — simulates
+%% `-spec f(X) -> T when T :: ok, X :: binary().`. This closes the gap the
+%% PR #3900 review flagged: resolve_return_type_with_constraints/2's `{var,
+%% ...}` clause must resolve through map_return_type/1, not delegate to
+%% resolve_type_with_constraints/2 (which would call map_type/1 and produce
+%% Symbol instead).
+bounded_fun_constrained_var_bare_ok_return_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 1}]},
+        {attribute, 1, spec,
+            {{f, 1}, [
+                {type, 2, bounded_fun, [
+                    {type, 2, 'fun', [
+                        {type, 2, product, [{var, 2, 'X'}]},
+                        {var, 2, 'T'}
+                    ]},
+                    [
+                        {type, 3, constraint, [
+                            {atom, 3, is_subtype},
+                            [{var, 3, 'T'}, {atom, 3, ok}]
+                        ]},
+                        {type, 4, constraint, [
+                            {atom, 4, is_subtype},
+                            [{var, 4, 'X'}, {type, 4, binary, []}]
+                        ]}
+                    ]
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+
+%% Critical regression guard: `resolve_type_with_constraints/2` is shared
+%% between return-type resolution (redirected to `resolve_return_type_with_
+%% constraints/2` by ADR 0121) and PARAM-type resolution
+%% (`extract_param_names_with_constraints/2`'s catch-all clause, used for a
+%% param type that is neither `{ann_type, ...}` nor a bare `{var, ...}` — a
+%% literal type written directly, e.g. `-spec f(ok, Y) -> ... when Y :: ...`).
+%% ADR 0121 deliberately leaves `resolve_type_with_constraints/2` itself
+%% untouched so this shared param path keeps calling `map_type/1`, not
+%% `map_return_type/1` — ADR-0076 Result recognition is a return-position-only
+%% rule. A literal `ok` param type in a bounded_fun clause must stay Symbol.
+bounded_fun_literal_ok_param_stays_symbol_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 2}]},
+        {attribute, 1, spec,
+            {{f, 2}, [
+                {type, 2, bounded_fun, [
+                    {type, 2, 'fun', [
+                        {type, 2, product, [{atom, 2, ok}, {var, 2, 'Y'}]},
+                        {type, 2, integer, []}
+                    ]},
+                    [
+                        {type, 3, constraint, [
+                            {atom, 3, is_subtype},
+                            [{var, 3, 'Y'}, {type, 3, binary, []}]
+                        ]}
+                    ]
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Param1, _Param2] = maps:get(params, Spec),
+    ?assertEqual(<<"Symbol">>, maps:get(type, Param1)).
+
+%%% ---------------------------------------------------------------
 %%% extract_param_names/1 — parameter name extraction
 %%% ---------------------------------------------------------------
 

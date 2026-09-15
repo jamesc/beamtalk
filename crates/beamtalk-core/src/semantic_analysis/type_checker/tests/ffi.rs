@@ -238,6 +238,52 @@ fn ffi_singleton_union_return_matches_declared_annotation() {
     );
 }
 
+/// A lone (non-union) `-> ok.` Erlang spec — e.g. `beamtalk_actor:unregister/1`
+/// — is now recognized by `beamtalk_spec_reader.erl` as `Result(Nil)` (ADR
+/// 0121, BT-3498), not `Symbol`. Builds the registry entry from
+/// `map_type_name("Result(Nil)")`, the exact string the spec reader emits for
+/// this case, so this test exercises the real string-parsing path rather than
+/// a hand-built `InferredType`. A `.bt` method declaring the honest
+/// `-> Result(Nil)` return type over such an FFI call must type-check cleanly
+/// — this is the end-to-end reproduction of `Actor>>unregisterName`.
+#[test]
+fn ffi_bare_ok_spec_infers_result_nil_matching_declared_annotation() {
+    let mut reg = NativeTypeRegistry::new();
+    reg.register_module(
+        "beamtalk_actor",
+        vec![FunctionSignature {
+            name: "unregister".to_string(),
+            arity: 1,
+            params: vec![ParamType {
+                keyword: None,
+                type_: InferredType::Dynamic(DynamicReason::Unknown),
+            }],
+            return_type: map_type_name("Result(Nil)"),
+            provenance: TypeProvenance::Extracted,
+            line: None,
+        }],
+    );
+
+    let src = "typed Object subclass: Reg\n  \
+        unregisterName -> Result(Nil) =>\n    \
+          (Erlang beamtalk_actor) unregister: self";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+    let diags = checker.take_diagnostics();
+    let mismatch: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("inferred body type") || d.message.contains("Declared"))
+        .collect();
+    assert!(
+        mismatch.is_empty(),
+        "bare-ok-specced FFI call should infer Result(Nil), matching the declared \
+         `-> Result(Nil)` return type, got diagnostics: {mismatch:#?}"
+    );
+}
+
 #[test]
 fn test_ffi_call_no_registry_falls_back_to_dynamic() {
     // Without registry, FFI calls should return Dynamic (no regression)
