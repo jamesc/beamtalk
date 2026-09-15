@@ -172,8 +172,18 @@ pub(crate) enum CoreOutputDir {
 /// (`let (dir, _guard) = core_output_dir()?;`) — dropping it early deletes a
 /// temp directory a caller is still writing into.
 pub(crate) fn core_output_dir() -> Result<(Utf8PathBuf, CoreOutputDir)> {
-    if let Ok(dir) = std::env::var("BEAMTALK_CORE_SNAPSHOT_DIR") {
-        let path = Utf8PathBuf::from(dir);
+    if let Some(dir) = std::env::var_os("BEAMTALK_CORE_SNAPSHOT_DIR") {
+        // `var_os`, checked for presence the same way `build_stdlib.rs`'s
+        // `want_core_snapshot` does — and, unlike `env::var`, one that
+        // fails loudly (not a silent fall-through to the temp-dir branch
+        // below) if the value isn't valid UTF-8, so the two checks can
+        // never disagree about whether a snapshot was requested.
+        let path = Utf8PathBuf::from_path_buf(std::path::PathBuf::from(dir)).map_err(|p| {
+            miette::miette!(
+                "BEAMTALK_CORE_SNAPSHOT_DIR is not valid UTF-8: {}",
+                p.display()
+            )
+        })?;
         fs::create_dir_all(&path)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create '{path}'"))?;
