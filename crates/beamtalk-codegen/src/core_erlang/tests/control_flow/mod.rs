@@ -19,6 +19,8 @@
 //! - [`family_detector_differential`] — BT-3510: the unified
 //!   `body_threaded_families` detector vs. the old top-level-only
 //!   detectors, over the whole stdlib + bootstrap-test corpus
+//! - [`family_slots`] — BT-3511: the unified `ThreadedFamilies`
+//!   result-tuple append/extract emission helper
 
 use super::*;
 
@@ -77,6 +79,7 @@ fn field_assignment_rejection_field(src: &str, module_name: &str) -> String {
 mod conditionals;
 mod exception_handling;
 mod family_detector_differential;
+mod family_slots;
 mod list_and_loop_value_threading;
 mod match_arm_state_threading;
 mod match_patterns;

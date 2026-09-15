@@ -53,6 +53,23 @@ impl ThreadedFamilies {
     pub(in crate::core_erlang) fn contains(&self, prefix: &VersionPrefix) -> bool {
         self.0.contains(prefix)
     }
+
+    /// The families, in canonical slot order — the raw slice
+    /// [`super::family_slots::append_family_slots`]/`extract_family_slots`
+    /// iterate over to build/unpack a construct's trailing tuple slots.
+    /// `pub(in crate::core_erlang)` (not private) so that sibling module can
+    /// walk the list without a second, hand-duplicated copy of
+    /// [`FAMILY_CANONICAL_ORDER`]'s ordering guarantee — [`Self::from_matches`]
+    /// is still the only constructor that can PRODUCE a `ThreadedFamilies`,
+    /// so this is a read-only view, never a way to build one out of order.
+    ///
+    /// `#[allow(dead_code)]`: `family_slots`'s helpers (and their own unit
+    /// tests) are the only callers today — ADR 0122, BT-3511 (the emission
+    /// helper only; no site migrated yet).
+    #[allow(dead_code)]
+    pub(in crate::core_erlang) fn as_slice(&self) -> &[VersionPrefix] {
+        &self.0
+    }
 }
 
 /// BT-3510 differential test: one [`super::plan::ThreadingPlan::new_impl`]
