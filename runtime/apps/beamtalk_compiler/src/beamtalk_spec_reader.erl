@@ -1040,6 +1040,15 @@ map_return_type({atom, _, ok} = RetType) ->
     map_union_result([RetType]);
 map_return_type({atom, _, error} = RetType) ->
     map_union_result([RetType]);
+map_return_type({ann_type, _, [_Var, {atom, _, ok} = RetType]}) ->
+    %% An annotated bare atom in return position (e.g. `-spec f() -> Result ::
+    %% ok.`) — map_type/1's own {ann_type, ...} clause unwraps the annotation
+    %% and recurses into map_type/1, not map_return_type/1, so without this
+    %% clause the annotation would bypass ADR-0121 Result recognition entirely
+    %% and fall through to the catch-all below, mapping to Symbol instead.
+    map_union_result([RetType]);
+map_return_type({ann_type, _, [_Var, {atom, _, error} = RetType]}) ->
+    map_union_result([RetType]);
 map_return_type(RetType) ->
     %% Covers the union case too: map_type/1's own union clause already
     %% dispatches to map_union/2, so a separate union clause here would only

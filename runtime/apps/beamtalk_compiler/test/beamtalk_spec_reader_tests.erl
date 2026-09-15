@@ -952,6 +952,44 @@ bounded_fun_literal_ok_param_stays_symbol_test() ->
     [Param1, _Param2] = maps:get(params, Spec),
     ?assertEqual(<<"Symbol">>, maps:get(type, Param1)).
 
+%% An *annotated* bare atom in return position (e.g. `-spec f() -> Result ::
+%% ok.`) must still get ADR-0121 Result recognition. Before this fix,
+%% map_type/1's own {ann_type, ...} clause unwrapped the annotation and
+%% recursed back into map_type/1 (not map_return_type/1), so the annotation
+%% bypassed Result recognition entirely and mapped to Symbol. BT-3507.
+map_return_type_annotated_bare_ok_test() ->
+    ?assertEqual(
+        <<"Result(Nil)">>,
+        beamtalk_spec_reader:map_return_type(
+            {ann_type, 0, [{var, 0, 'Result'}, {atom, 0, ok}]}
+        )
+    ).
+
+map_return_type_annotated_bare_error_test() ->
+    ?assertEqual(
+        <<"Result(Dynamic, Nil)">>,
+        beamtalk_spec_reader:map_return_type(
+            {ann_type, 0, [{var, 0, 'Result'}, {atom, 0, error}]}
+        )
+    ).
+
+%% Same shape end-to-end via extract_specs_from_forms/1, simulating
+%% `-spec f() -> Result :: ok.`.
+extract_specs_annotated_bare_ok_return_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 0}]},
+        {attribute, 1, spec,
+            {{f, 0}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, []},
+                    {ann_type, 2, [{var, 2, 'Result'}, {atom, 2, ok}]}
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(<<"f">>, maps:get(name, Spec)),
+    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+
 %%% ---------------------------------------------------------------
 %%% extract_param_names/1 — parameter name extraction
 %%% ---------------------------------------------------------------
