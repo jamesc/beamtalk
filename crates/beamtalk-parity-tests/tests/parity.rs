@@ -9,6 +9,8 @@
 //! All `#[test]`s here are gated behind `#[ignore]` because they spawn real
 //! workspaces and child binaries. Invoke via `just test-parity`.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -269,7 +271,7 @@ fn stage_simple_project() -> Option<PathBuf> {
     }
     let dst = std::env::temp_dir().join("beamtalk-parity-simple");
     let _ = std::fs::remove_dir_all(&dst);
-    copy_tree(&src, &dst).ok()?;
+    common::copy_tree(&src, &dst).ok()?;
     Some(dst)
 }
 
@@ -285,7 +287,7 @@ fn stage_test_runner_project() -> Option<PathBuf> {
     }
     let dst = std::env::temp_dir().join("beamtalk-parity-test-runner");
     let _ = std::fs::remove_dir_all(&dst);
-    copy_tree(&src, &dst).ok()?;
+    common::copy_tree(&src, &dst).ok()?;
     Some(dst)
 }
 
@@ -303,7 +305,7 @@ fn stage_mixed_project() -> Option<PathBuf> {
     }
     let dst = std::env::temp_dir().join("beamtalk-parity-mixed");
     let _ = std::fs::remove_dir_all(&dst);
-    copy_tree(&src, &dst).ok()?;
+    common::copy_tree(&src, &dst).ok()?;
     Some(dst)
 }
 
@@ -348,21 +350,6 @@ fn stage_diagnostic_file() -> Option<PathBuf> {
     let _ = std::fs::remove_file(&dst);
     std::fs::copy(&src, &dst).ok()?;
     Some(dst)
-}
-
-fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if from.is_dir() {
-            copy_tree(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)?;
-        }
-    }
-    Ok(())
 }
 
 fn parity_root() -> PathBuf {

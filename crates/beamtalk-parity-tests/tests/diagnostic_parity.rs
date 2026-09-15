@@ -43,6 +43,8 @@
     clippy::too_many_lines
 )]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::AtomicU64;
@@ -343,7 +345,7 @@ fn stage_fixture(corpus_root: &Path, case: &CorpusCase) -> Result<StagedFixture,
         std::fs::remove_dir_all(&dst)
             .map_err(|e| format!("remove stale staging dir {}: {e}", dst.display()))?;
     }
-    copy_tree(&src, &dst).map_err(|e| format!("copy_tree {}: {e}", src.display()))?;
+    common::copy_tree(&src, &dst).map_err(|e| format!("copy_tree {}: {e}", src.display()))?;
 
     let lsp_target = dst.join(case.lsp_target);
     let lint_target = if case.lint_target.is_empty() {
@@ -599,21 +601,6 @@ fn corpus_root() -> PathBuf {
         .and_then(|p| p.parent())
         .expect("workspace root")
         .join("tests/parity/diagnostics")
-}
-
-fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if from.is_dir() {
-            copy_tree(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)?;
-        }
-    }
-    Ok(())
 }
 
 fn truncate(s: &str) -> String {
