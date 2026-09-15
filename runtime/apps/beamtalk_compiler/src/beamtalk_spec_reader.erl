@@ -613,16 +613,31 @@ resolve_type_with_constraints(Type, _ConstraintMap) ->
 %% `resolve_type_with_constraints/2` is also used to resolve *parameter* types
 %% (`extract_param_names_with_constraints/2`), where ADR-0076 Result
 %% recognition must never fire for a lone atom — only a function's top-level
-%% return-type position gets that treatment. So this wrapper reuses
-%% `resolve_type_with_constraints/2`'s var/union clauses verbatim (identical
-%% behavior is correct in both param and return position for those) and only
-%% overrides the final catch-all to route a lone atom through
-%% `map_return_type/1` instead of `map_type/1`.
+%% return-type position gets that treatment. So this is a standalone
+%% return-position variant, not a thin wrapper around
+%% `resolve_type_with_constraints/2`: its `{var, ...}` clause resolves the
+%% constraint and then routes the resolved type through `map_return_type/1`
+%% (not `map_type/1`), so a return type that is itself a constrained type
+%% variable resolving to a lone `ok`/`error` atom — e.g.
+%% `-spec f(X) -> T when T :: ok, X :: binary().` — gets ADR-0121 treatment
+%% too, not just a directly-literal `-> ok.` return. The union clause mirrors
+%% `resolve_type_with_constraints/2`'s (constraint substitution inside union
+%% branches via `resolve_branch_with_constraints/2`, then `map_union/2`) since
+%% union handling is already position-agnostic — a union's ok/error branches
+%% get Result recognition in param position too, today, unchanged by ADR 0121.
 -spec resolve_return_type_with_constraints(tuple(), map()) -> binary().
-resolve_return_type_with_constraints({var, _, _} = RetType, ConstraintMap) ->
-    resolve_type_with_constraints(RetType, ConstraintMap);
-resolve_return_type_with_constraints({type, _, union, _} = RetType, ConstraintMap) ->
-    resolve_type_with_constraints(RetType, ConstraintMap);
+resolve_return_type_with_constraints({var, _, VarName}, ConstraintMap) ->
+    % elp:fixme W0032 maps:find with complex branch logic
+    case maps:find(VarName, ConstraintMap) of
+        {ok, Type} -> map_return_type(Type);
+        error -> <<"Dynamic">>
+    end;
+resolve_return_type_with_constraints({type, Line, union, Branches}, ConstraintMap) ->
+    ResolvedBranches = [
+        resolve_branch_with_constraints(B, ConstraintMap)
+     || B <- Branches
+    ],
+    map_union(ResolvedBranches, Line);
 resolve_return_type_with_constraints(RetType, _ConstraintMap) ->
     map_return_type(RetType).
 
@@ -1014,13 +1029,14 @@ map_type(_) ->
 %% keep mapping a lone `ok`/`error` atom to `Symbol`, unchanged — only a
 %% function clause's top-level return type routes through here.
 -spec map_return_type(tuple()) -> binary().
-map_return_type({type, Line, union, Branches}) ->
-    map_union(Branches, Line);
 map_return_type({atom, _, ok} = RetType) ->
     map_union_result([RetType]);
 map_return_type({atom, _, error} = RetType) ->
     map_union_result([RetType]);
 map_return_type(RetType) ->
+    %% Covers the union case too: map_type/1's own union clause already
+    %% dispatches to map_union/2, so a separate union clause here would only
+    %% duplicate that routing.
     map_type(RetType).
 
 -doc """

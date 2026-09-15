@@ -886,6 +886,39 @@ bounded_fun_bare_ok_return_test() ->
     [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
     ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
 
+%% A return type that is itself a constrained type variable resolving to a
+%% lone `ok`/`error` atom also gets ADR-0121 Result recognition — simulates
+%% `-spec f(X) -> T when T :: ok, X :: binary().`. This closes the gap the
+%% PR #3900 review flagged: resolve_return_type_with_constraints/2's `{var,
+%% ...}` clause must resolve through map_return_type/1, not delegate to
+%% resolve_type_with_constraints/2 (which would call map_type/1 and produce
+%% Symbol instead).
+bounded_fun_constrained_var_bare_ok_return_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 1}]},
+        {attribute, 1, spec,
+            {{f, 1}, [
+                {type, 2, bounded_fun, [
+                    {type, 2, 'fun', [
+                        {type, 2, product, [{var, 2, 'X'}]},
+                        {var, 2, 'T'}
+                    ]},
+                    [
+                        {type, 3, constraint, [
+                            {atom, 3, is_subtype},
+                            [{var, 3, 'T'}, {atom, 3, ok}]
+                        ]},
+                        {type, 4, constraint, [
+                            {atom, 4, is_subtype},
+                            [{var, 4, 'X'}, {type, 4, binary, []}]
+                        ]}
+                    ]
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+
 %% Critical regression guard: `resolve_type_with_constraints/2` is shared
 %% between return-type resolution (redirected to `resolve_return_type_with_
 %% constraints/2` by ADR 0121) and PARAM-type resolution
