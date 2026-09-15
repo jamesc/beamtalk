@@ -1,7 +1,7 @@
 # ADR 0122: Unify `ThreadedIr` Storage-Family Threading
 
 ## Status
-Proposed (2026-09-15)
+Accepted (2026-09-15)
 
 ## Context
 
