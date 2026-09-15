@@ -63,10 +63,12 @@ impl ThreadedFamilies {
     /// is still the only constructor that can PRODUCE a `ThreadedFamilies`,
     /// so this is a read-only view, never a way to build one out of order.
     ///
-    /// `#[allow(dead_code)]`: `family_slots`'s helpers (and their own unit
-    /// tests) are the only callers today — ADR 0122, BT-3511 (the emission
-    /// helper only; no site migrated yet).
-    #[allow(dead_code)]
+    /// BT-3512 (ADR 0122 Phase 3): also read directly by
+    /// `value_type_codegen.rs`'s value-type/class-method Letrec loop
+    /// extraction (`extract_vt_loop_family_slot`'s `.first()`,
+    /// `emit_vt_loop_open_extraction`'s empty check) — that site's trailing
+    /// slot is always at most one family, so it reads the slice directly
+    /// rather than going through [`super::family_slots::extract_family_slots`].
     pub(in crate::core_erlang) fn as_slice(&self) -> &[VersionPrefix] {
         &self.0
     }

@@ -10,9 +10,12 @@
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods.
 
 use super::super::threaded_ir::{
-    self, LoopCounter, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    self, LoopCounter, RenderCtx, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result};
+use super::analysis::ThreadedFamilies;
+use super::family_slots::append_family_slots;
 use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -365,8 +368,10 @@ impl CoreErlangGenerator {
         // the value-type `Self` mirror of the two lines above —
         // `self_version`, like `class_var_version`, is inherited (never
         // reset) across `with_branch_context`, so this names the identity
-        // the loop body's own first `SelfVt` `Bind` will source from.
-        let self_param_doc = extra_threaded_arg_doc(frame.self_param.as_ref());
+        // the loop body's own first `SelfVt` `Bind` will source from. Unlike
+        // `cv_param_doc`, this family's own exit-arm slot now routes through
+        // [`append_family_slots`] (ADR 0122 Decision 3, BT-3512) rather than
+        // a hand-rolled `Document`.
         let self_seed_version = self.self_version();
 
         self.push_scope();
@@ -399,12 +404,38 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
-        let exit_arm = docvec![
-            "<'false'> when 'true' -> {'nil', StateAcc",
-            cv_param_doc,
-            self_param_doc,
-            "} end "
-        ];
+        // ADR 0122 Decision 3 (BT-3512, value-type context only — the
+        // Actor/class-method `letrec` parameter path is BT-3515): mutual
+        // exclusivity (`class_var_param`/`self_param` never both `Some`)
+        // means at most one of the two ever contributes a slot, so this is
+        // byte-identical to the fully hand-rolled tuple it replaces.
+        let self_only_families = ThreadedFamilies::from_matches(
+            frame
+                .self_param
+                .as_ref()
+                .map_or(&[][..], |_| &[VersionPrefix::SelfVt][..]),
+        );
+        let exit_arm_tuple = {
+            let ctx = RenderCtx::new(self);
+            append_family_slots(
+                docvec!["{'nil', StateAcc", cv_param_doc],
+                &self_only_families,
+                |prefix| match prefix {
+                    VersionPrefix::SelfVt => VersionedVar::new(
+                        VersionPrefix::Gensym(frame.self_param.clone().expect(
+                            "self_only_families only ever carries SelfVt when self_param is Some",
+                        )),
+                        0,
+                        ir_frame,
+                    ),
+                    other => unreachable!(
+                        "counted-loop exit-arm tuple only ever appends SelfVt via the helper, got {other:?}"
+                    ),
+                },
+                &ctx,
+            )
+        };
+        let exit_arm = docvec!["<'false'> when 'true' -> ", exit_arm_tuple, " end "];
 
         let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, ir_frame)];
         if let Some(cv_name) = &frame.class_var_param {
