@@ -82,7 +82,10 @@ Object subclass: CvProbe
 
 The self-send's `ClassVars2` is bound inside the try-body fun and discarded;
 the post-`ensure:` read uses the pre-try `ClassVars1`. Same for the cleanup
-block, the `on:do:` body and handler, last and non-last position. A direct
+block, the `on:do:` body and handler, last and non-last position. The site's
+own doc comment (`exception_body_outer_state`, `exception_handling.rs:484-491`)
+says class-var mutations are "threaded entirely separately" and never need a
+slot here; the generated code above is the counterexample. A direct
 `self.runs :=` in the same place is a compile-time rejection — so `SelfVt`
 is *supported* here (BT-3486) while `ClassVars` is *rejected* or *dropped*.
 This is BT-3486 for `ClassVars`, it is in production-reachable code (class
@@ -222,7 +225,8 @@ Rejected. Two slot positions is one rule too many. The move is a visible
 `.core` diff reviewed on its own issue.
 
 ### Defer again
-Rejected. The "next gap" trigger has fired three times.
+Rejected. ADR 0120's "next gap" trigger has fired twice since it was set:
+BT-3489 during BT-3490, and BT-3506 during this ADR.
 
 ## Consequences
 
