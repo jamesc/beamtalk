@@ -361,3 +361,86 @@ Object subclass: MutationCorpusClassMethod
         seen := seen + 1
       ]
     self.runs
+
+  // ── class-var mutation via self-send through on:do:/ensure: (BT-3506) ──────
+  // The `ClassVars` twin of `mutation_corpus_value.bt`'s BT-3486
+  // `fragStateFieldEnsure*`/`fragStateFieldOnDo*` fragments: the mutation
+  // rides a same-class self-send (`self bump`), never a bare
+  // `self.runs := ...` — a direct class-var write stays a clean compile-time
+  // rejection through `on:do:`/`ensure:` (BT-3506's decision, mirroring
+  // `classVarToDoNonLastReadWrite`'s own loop-body counterpart: threading a
+  // BARE class-var field write through this construct's own trailing slot
+  // was deliberately left unsupported; see `ClassVarAssignmentInThreadedBody`).
+  class classVarEnsureTryNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    [
+      self bump
+      seen := seen + 1
+    ] ensure: [nil]
+    self.runs
+
+  class classVarEnsureCleanupNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    [
+      seen := seen + 1
+      nil
+    ]
+      ensure: [
+        self bump
+        nil
+      ]
+    self.runs
+
+  class classVarEnsureBothNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    [
+      self bump
+      seen := seen + 1
+    ]
+      ensure: [
+        self bump
+        nil
+      ]
+    self.runs
+
+  class classVarOnDoTryNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    [
+      self bump
+      seen := seen + 1
+    ] on: Error do: [:e | nil]
+    self.runs
+
+  class classVarOnDoHandlerNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    [
+      seen := seen + 1
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:e |
+        self bump
+        nil
+      ]
+    self.runs
+
+  // BT-3506's own headline repro, verbatim: the self-send is the
+  // construct's ONLY mutation, with no co-occurring captured-local
+  // read+write — `needs_mutation_threading`'s class-method branch only ever
+  // checked for THAT, so before this fix the whole construct compiled via
+  // the closure-based path, discarding the self-send's own `ClassVars`
+  // rebind once the closure's own body (which evaluates to `nil`) returned.
+  // No like-for-like Actor/TestCase cell for this one shape — see
+  // `fragStateFieldEnsureWriteOnlyNonLast`'s own matching comment for why.
+  class classVarEnsureSelfSendOnlyNonLast =>
+    self.runs := 0
+    [
+      self bump
+      nil
+    ] ensure: [nil]
+    self.runs

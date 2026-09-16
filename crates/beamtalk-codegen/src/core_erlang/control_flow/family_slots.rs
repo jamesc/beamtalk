@@ -5,26 +5,34 @@
 //! [`ThreadedFamilies`] slots to a construct's own result tuple and
 //! extracting them back out afterwards — the shared machinery every
 //! currently hand-rolled trailing-slot site will route through once each
-//! migrates (later issues in ADR 0122's epic, BT-3508). BT-3512 (Phase 3)
-//! is the first live consumer: `while_loops.rs`/`counted_loops.rs`'s own
-//! `{'nil', StateAcc[, ClassVars | Self1]}` exit-arm tuple appends its
-//! `SelfVt` slot via [`append_family_slots`] (the `ClassVars` half — the
-//! Actor/class-method letrec parameter path — stays hand-rolled until
-//! BT-3515). Still to migrate: `value_type_codegen.rs`'s
-//! `finish_vt_conditional_branch`/`rebind_vt_conditional_mutations`,
-//! `exception_handling.rs`'s `exception_self_slot`/`_doc`, the Actor
-//! conditional's `with_branch_context`/six `generate_*_with_mutations`, and
-//! the Foldl accumulator (once its leading slot normalizes to trailing,
-//! BT-3516). `value_type_codegen.rs`'s own value-type/class-method Letrec
-//! loop extraction (formerly `vt_construct_extra_slot`/
-//! `emit_vt_threaded_tuple_unwrap_to_var`) now reads
-//! [`ThreadedFamilies`] too, but dispatches through its own
-//! `extract_vt_loop_family_slot` onto the existing, already-verified
-//! `rebind_class_vars_from_doc`/`rebind_value_self_from_doc` rather than
-//! [`extract_family_slots`] directly — that pair's own backfill/shadow-write
-//! verify machinery (`construct_and_verify_class_var_bind`,
-//! `verify_simple_bind`) is a correctness invariant this helper's plain
-//! [`VersionPrefix::extraction_bind_op`] does not (yet) reproduce.
+//! migrates (later issues in ADR 0122's epic, BT-3508). Two sites have
+//! migrated so far:
+//! - `exception_handling.rs`'s former `exception_self_slot`/`_doc`
+//!   (BT-3486) — `on:do:`/`ensure:`'s result tuple now closes through
+//!   [`append_family_slots`] via `close_exception_result_tuple` (BT-3506,
+//!   the epic's first real consumer).
+//! - `while_loops.rs`/`counted_loops.rs`'s own `{'nil', StateAcc[, ClassVars
+//!   | Self1]}` exit-arm tuple (BT-3512, Phase 3) appends its `SelfVt` slot
+//!   via [`append_family_slots`] too (the `ClassVars` half — the
+//!   Actor/class-method letrec parameter path — stays hand-rolled until
+//!   BT-3515). `value_type_codegen.rs`'s own value-type/class-method Letrec
+//!   loop extraction (formerly `vt_construct_extra_slot`/
+//!   `emit_vt_threaded_tuple_unwrap_to_var`) now reads [`ThreadedFamilies`]
+//!   too, but dispatches through its own `extract_vt_loop_family_slot` onto
+//!   the existing, already-verified
+//!   `rebind_class_vars_from_doc`/`rebind_value_self_from_doc` rather than
+//!   [`extract_family_slots`] directly — that pair's own backfill/
+//!   shadow-write verify machinery (`construct_and_verify_class_var_bind`,
+//!   `verify_simple_bind`) is a correctness invariant this helper's plain
+//!   [`VersionPrefix::extraction_bind_op`] does not (yet) reproduce.
+//!
+//! Still to migrate: `value_type_codegen.rs`'s
+//! `finish_vt_conditional_branch`/`rebind_vt_conditional_mutations`, the
+//! Actor conditional's `with_branch_context`/six `generate_*_with_mutations`,
+//! and the Foldl accumulator (once its leading slot normalizes to trailing,
+//! BT-3516). `append_baseline_family_slots` and `extract_family_slots`
+//! remain unwired by either migration so far — both `append_family_slots`
+//! callers only ever needed the append half.
 //!
 //! **Trailing position only** — no leading-slot mode; Foldl's leading slot
 //! is normalized to trailing when IT migrates (ADR 0122 §Alternatives
@@ -54,11 +62,12 @@ use beamtalk_core::source_analysis::Span;
 /// version step," matching
 /// [`super::super::threaded_ir::VersionCounter`]'s own vocabulary
 /// (`next_var` mints a target from a source in exactly this shape).
-// `#[allow(dead_code)]` on the extract half throughout this file: BT-3512
-// (the first migration) is an append-only consumer (see the module doc
-// comment) — `FamilyVersionStep`/`extract_family_slots`/
-// `append_baseline_family_slots` still have no production caller until a
-// later site in ADR 0122's epic (BT-3506/3513-3518) needs them.
+// `#[allow(dead_code)]` on the remaining items in this file: both
+// migrations so far (BT-3506, BT-3512) are append-only consumers (see the
+// module doc comment) — `FamilyVersionStep`/`append_baseline_family_slots`/
+// `extract_family_slots` still have no caller outside this module's own unit
+// tests — migrating a site to route through them is each site's own later
+// issue (BT-3513-3518).
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct FamilyVersionStep {

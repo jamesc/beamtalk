@@ -147,7 +147,6 @@ impl CoreErlangGenerator {
     /// at most one family is ever eligible in `Repl` context too (none, in
     /// fact, since `Repl` never sets `in_class_method` and is never
     /// `ValueType`/`Actor`).
-    #[allow(dead_code)] // ADR 0122: only the (test-only) differential test calls this until later issues in the epic wire it into live emission sites
     pub(in crate::core_erlang) fn eligible_families(&self) -> Vec<VersionPrefix> {
         let mut eligible = Vec::with_capacity(1);
         if matches!(self.context, CodeGenContext::Actor) && !self.in_class_method() {
@@ -207,6 +206,42 @@ impl CoreErlangGenerator {
             }
             VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
         }
+    }
+
+    /// ADR 0122 / BT-3506: whether ANY top-level statement of `block`
+    /// mutates `prefix`, per the single shared [`Self::is_family_mutation`]
+    /// rule (Decision 4) — deliberately top-level-only, exactly like
+    /// [`Self::find_class_var_mutating_stmt`]/
+    /// [`Self::find_value_self_mutating_stmt`] (the `Letrec`-loop-body
+    /// detectors this mirrors), NOT [`Self::body_threaded_families`]'s own
+    /// recursive walk: `on:do:`/`ensure:`'s own per-statement E1..E7 dispatch
+    /// (`exception_handling.rs`'s `generate_exception_body_with_threading_inner`)
+    /// only ever produces a family-mutation `Bind` this construct's tuple can
+    /// carry for a BARE top-level statement — a mutation nested one level
+    /// deeper (inside this block's own `ifTrue:`, say) already threads
+    /// correctly through THAT construct's own separate branch-merge
+    /// machinery instead, confirmed by `ExceptionArm`'s own before/after
+    /// live-version diff (which this predicate's answer never influences
+    /// point-for-point — only whether the CONSTRUCT allocates a slot at
+    /// all). Migrating this detector's own walk to the recursive one is
+    /// explicitly out of scope for the issue that added this function (see
+    /// `tests::control_flow::family_detector_differential`'s own scope
+    /// note, which names `on:do:`/`ensure:` as a LATER migration).
+    ///
+    /// The sole caller is `exception_handling.rs`'s
+    /// `exception_construct_families` — kept here (not there) so it sits
+    /// beside [`Self::is_family_mutation`] and
+    /// [`Self::find_class_var_mutating_stmt`]/
+    /// [`Self::find_value_self_mutating_stmt`], the three other top-level
+    /// mutation walks this module already owns.
+    pub(in crate::core_erlang) fn block_top_level_mutates_family(
+        &self,
+        block: &beamtalk_core::ast::Block,
+        prefix: &VersionPrefix,
+    ) -> bool {
+        super::super::util::collect_body_exprs(&block.body)
+            .into_iter()
+            .any(|expr| self.is_family_mutation(prefix, expr))
     }
 
     /// ADR 0122 Decision 1: the unified, recursive storage-family detector —

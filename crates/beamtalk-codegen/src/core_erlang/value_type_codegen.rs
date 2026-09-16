@@ -910,14 +910,16 @@ impl CoreErlangGenerator {
         if self.is_conditional_with_vt_self_field_threading(expr) {
             return VtBodyExprKind::ConditionalWithSelfFieldThreading;
         }
-        // BT-3486: an `on:do:`/`ensure:` whose ONLY mutation is a value-type
-        // `self.field := ...` write has no threaded outer local, so the
-        // BT-3177 predicate alone says `false` and the construct falls through
-        // to `Pure` — sequenced away as `let _seqN = <construct> in`, which
-        // discards the trailing `Self` slot and silently loses the mutation.
-        if self.is_exception_construct_with_vt_local_threading(expr)
-            || self.is_exception_construct_with_vt_self_field_threading(expr)
-        {
+        // BT-3486/BT-3506: an `on:do:`/`ensure:` whose ONLY mutation is a
+        // `ClassVars`/`SelfVt` family write has no threaded outer local, so
+        // the BT-3177 predicate alone says `false` and the construct falls
+        // through to `Pure` — sequenced away as `let _seqN = <construct> in`,
+        // which discards the trailing family slot and silently loses the
+        // mutation.
+        // `is_exception_construct_with_vt_local_threading` (ADR 0122) now
+        // ALSO answers `true` for family threading, folding what used to be
+        // a two-predicate OR here into one call.
+        if self.is_exception_construct_with_vt_local_threading(expr) {
             return VtBodyExprKind::ExceptionConstructWithThreading;
         }
         if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
@@ -1035,21 +1037,28 @@ impl CoreErlangGenerator {
         Ok(result_var)
     }
 
-    /// ADR 0122 Decision 3: the ONE place a value-type/class-method Letrec
-    /// loop's trailing family slot (element 3 of its `{'nil'|Value, StateAcc,
-    /// ClassVars|Self}` result tuple) is extracted and rebound — shared by
-    /// this loop shape's three extraction sites
+    /// ADR 0122 Decision 3: the ONE place a construct's trailing family slot
+    /// at element 3 of its `{Value, StateAcc, ClassVars|Self}` result tuple
+    /// is extracted and rebound — shared by every construct whose extra
+    /// slot sits at that same position: the value-type/class-method Letrec
+    /// loop's three extraction sites
     /// ([`Self::emit_vt_threaded_tuple_unwrap_to_var`]'s last-position
     /// unwrap, [`Self::emit_vt_loop_open_extraction`]'s non-last-position
     /// open chain, [`Self::emit_vt_threaded_local_assignment`]'s
-    /// assignment-RHS threading) so they can never independently drift on
-    /// which family maps to which rebind (CLAUDE.md's
+    /// assignment-RHS threading) AND `on:do:`/`ensure:`'s own three mirror
+    /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
+    /// [`Self::generate_vt_exception_construct_open`],
+    /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
+    /// independently drift on which family maps to which rebind (CLAUDE.md's
     /// no-duplicate-implementations rule).
     ///
-    /// `families` is [`Self::vt_loop_threaded_families`]'s answer for the
-    /// SAME construct `tuple_var` was bound from — at most one family ever
-    /// threads through this loop shape's own trailing slot (`ClassVars`
-    /// requires `in_class_method()`, `SelfVt` excludes it — see
+    /// `families` is the caller's own [`ThreadedFamilies`] answer for the
+    /// SAME construct `tuple_var` was bound from
+    /// ([`Self::vt_loop_threaded_families`] for a loop,
+    /// [`Self::exception_construct_threaded_families`] for `on:do:`/
+    /// `ensure:`) — at most one family ever threads through either
+    /// construct's own trailing slot (`ClassVars` requires
+    /// `in_class_method()`, `SelfVt` excludes it — see
     /// [`CoreErlangGenerator::loop_body_threads_value_self`]), so this reads
     /// only `families.as_slice().first()`. Returns `None` when the construct
     /// carries no extra slot at all.
@@ -1069,31 +1078,33 @@ impl CoreErlangGenerator {
             VersionPrefix::ClassVars => self.rebind_class_vars_from_doc(value_doc, span),
             VersionPrefix::SelfVt => self.rebind_value_self_from_doc(value_doc, span),
             other => unreachable!(
-                "value-type/class-method Letrec loop's trailing slot only ever \
-                 carries ClassVars or SelfVt (ADR 0122 mutual exclusivity), got {other:?}"
+                "a value-type/class-method Letrec loop's or on:do:/ensure:'s own \
+                 trailing slot only ever carries ClassVars or SelfVt (ADR 0122 \
+                 mutual exclusivity), got {other:?}"
             ),
         })
     }
 
     /// Lowers a last/return-position `on:do:`/`ensure:` into its logical
-    /// result var: binds the construct's own `{Result, StateAcc[, Self]}`
-    /// tuple and extracts element 1. The `SelfVt` mirror of
+    /// result var: binds the construct's own `{Result, StateAcc[, Family]}`
+    /// tuple and extracts element 1. The family mirror of
     /// [`Self::emit_vt_threaded_tuple_unwrap_to_var`] for the
     /// exception-construct family. Threaded outer locals (element 2) do not
     /// escape in last position, unlike
     /// [`Self::generate_vt_exception_construct_open`]'s non-last extraction,
-    /// and are discarded here. When the construct also threads a value-type
-    /// `Self` ([`Self::is_exception_construct_with_vt_self_field_threading`]),
-    /// element 3 is rebound via
-    /// [`CoreErlangGenerator::rebind_value_self_from_doc`] so the method's
-    /// own returned `Self` (and NLR tuple) reflects the construct's
-    /// mutation rather than the pre-`try` snapshot.
+    /// and are discarded here. When the construct also threads a `ClassVars`/
+    /// `SelfVt` family ([`Self::exception_construct_threaded_families`]),
+    /// element 3 is rebound via [`Self::extract_vt_loop_family_slot`] (BT-3512's
+    /// shared extraction helper — this construct's own trailing slot is the
+    /// same shape at the same position, so it reuses that helper rather than
+    /// a second one) so the method's own returned value (and NLR tuple)
+    /// reflects the construct's mutation rather than the pre-`try` snapshot.
     pub(in crate::core_erlang) fn emit_vt_exception_tuple_unwrap_to_var(
         &mut self,
         expr: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        let threads_value_self = self.is_exception_construct_with_vt_self_field_threading(expr);
+        let families = self.exception_construct_threaded_families(expr);
         let span = expr.span();
         let tuple_var = self.fresh_temp_var("ExTuple");
         let result_var = self.fresh_temp_var("ExResult");
@@ -1109,9 +1120,7 @@ impl CoreErlangGenerator {
             leaf::var(tuple_var.clone()),
             ") in\n",
         ]);
-        if threads_value_self {
-            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-            let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
         Ok(result_var)
@@ -2094,9 +2103,11 @@ impl CoreErlangGenerator {
     /// `on:do:`/`ensure:` construct: binds the target to element 1 (the
     /// construct's logical result), rebinds each threaded outer local from
     /// element 2 (`StateAcc` — unlike last position, these must escape to
-    /// later statements), and, when the construct also threads a value-type
-    /// `Self` ([`Self::is_exception_construct_with_vt_self_field_threading`]),
-    /// rebinds it from element 3. The `on:do:`/`ensure:` mirror of
+    /// later statements), and, when the construct also threads a
+    /// `ClassVars`/`SelfVt` family
+    /// ([`Self::exception_construct_threaded_families`]), rebinds it from
+    /// element 3 (via [`Self::extract_vt_loop_family_slot`], BT-3512's
+    /// shared extraction helper). The `on:do:`/`ensure:` mirror of
     /// [`Self::emit_vt_threaded_local_assignment`].
     ///
     /// Returns the Core Erlang variable bound to the assignment target.
@@ -2106,7 +2117,7 @@ impl CoreErlangGenerator {
         value: &Expression,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
-        let threads_value_self = self.is_exception_construct_with_vt_self_field_threading(value);
+        let families = self.exception_construct_threaded_families(value);
         let span = value.span();
         let rhs_doc = self.expression_doc(value)?;
         let tuple_var = self.fresh_temp_var("AssignExTuple");
@@ -2161,9 +2172,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        if threads_value_self {
-            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-            let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             body_parts.push(docvec!["    ", rebind_doc, "\n"]);
         }
 
@@ -2686,10 +2695,16 @@ impl CoreErlangGenerator {
     /// `Self{N}` binding this arm's return tuple can actually name. A write
     /// buried in a sub-expression keeps its own nested-`let` scoping,
     /// untouched by this issue.
-    /// BT-3486 also calls this, via
-    /// [`CoreErlangGenerator::exception_blocks_thread_value_self`], for an
-    /// `on:do:`/`ensure:`'s protected and handler/cleanup blocks — the same
-    /// rule, the same top-level-only reason.
+    ///
+    /// **BT-3506 update:** `on:do:`/`ensure:`'s own equivalent check
+    /// (`exception_handling.rs`'s `exception_construct_families`) no longer
+    /// calls this directly — it went through
+    /// [`CoreErlangGenerator::is_family_mutation`] instead (ADR 0122
+    /// Decision 4's one shared "what counts as a mutation" answer, which
+    /// this predicate's own `is_vt_self_field_assignment` already delegates
+    /// to), applied to the SAME top-level walk this function performs. The
+    /// two stay behaviourally identical for `SelfVt` by construction, not by
+    /// a "keep in sync" comment.
     pub(in crate::core_erlang) fn block_writes_vt_self_field(
         &self,
         block: &beamtalk_core::ast::Block,
@@ -3071,15 +3086,23 @@ impl CoreErlangGenerator {
     }
 
     /// whether `expr` is an `on:do:`/`ensure:` whose try/handler/
-    /// cleanup blocks mutate an outer local, in value-type or class-method
-    /// context. Unlike [`Self::is_conditional_with_vt_local_threading`] and
-    /// its loop/foldl siblings, `on:do:`/`ensure:`'s own codegen
+    /// cleanup blocks mutate an outer local, OR a `ClassVars`/`SelfVt`
+    /// family (ADR 0122 / BT-3506), in value-type or class-method context.
+    /// Unlike [`Self::is_conditional_with_vt_local_threading`] and its
+    /// loop/foldl siblings, `on:do:`/`ensure:`'s own codegen
     /// (`exception_handling.rs`'s `generate_on_do_with_mutations`/
     /// `generate_ensure_with_mutations`) is already context-agnostic since
     /// `exception_body_outer_state` — it needs no separate
-    /// vt-specific construction, only its returned `{Result, StateAcc}`
-    /// tuple unpacked here at the non-last-position call site (see
+    /// vt-specific construction, only its returned
+    /// `{Result, StateAcc[, Family]}` tuple unpacked here at the
+    /// non-last-position call site (see
     /// [`Self::generate_vt_exception_construct_open`]).
+    ///
+    /// Folds what used to be a two-predicate OR at every call site
+    /// (`self.is_exception_construct_with_vt_local_threading(expr) ||
+    /// self.is_exception_construct_with_vt_self_field_threading(expr)`) into
+    /// this one function, now that [`Self::exception_construct_threaded_families`]
+    /// answers for `ClassVars` too, not just `SelfVt`.
     pub(in crate::core_erlang) fn is_exception_construct_with_vt_local_threading(
         &self,
         expr: &Expression,
@@ -3095,8 +3118,14 @@ impl CoreErlangGenerator {
             return false;
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-        beamtalk_core::state_threading_selectors::is_exception_selector(&sel)
-            && self.get_control_flow_threaded_vars(expr).is_some()
+        if !beamtalk_core::state_threading_selectors::is_exception_selector(&sel) {
+            return false;
+        }
+        self.get_control_flow_threaded_vars(expr).is_some()
+            || !self
+                .exception_construct_threaded_families(expr)
+                .as_slice()
+                .is_empty()
     }
 
     /// the protected block and the handler/cleanup block of an
@@ -3148,21 +3177,26 @@ impl CoreErlangGenerator {
         Some([protected, other])
     }
 
-    /// `true` if `expr` is an `on:do:`/`ensure:` whose protected or
-    /// handler/cleanup block contains a value-type `self.field := ...` write,
-    /// so its result tuple carries the trailing `Self` slot that
-    /// [`Self::generate_vt_exception_construct_open`] extracts.
+    /// ADR 0122 / BT-3506: the storage families (`ClassVars`/`SelfVt`) that
+    /// `expr` — an `on:do:`/`ensure:` `MessageSend` — threads out through its
+    /// trailing tuple slot, so its result tuple carries the slot that
+    /// [`Self::generate_vt_exception_construct_open`] (and its
+    /// last-position/assign-RHS siblings) extract. Empty (never rejected)
+    /// for any other `Expression`.
     ///
     /// Deliberately shares
-    /// [`CoreErlangGenerator::exception_blocks_thread_value_self`] with the
+    /// [`CoreErlangGenerator::exception_construct_families`] with the
     /// emitter rather than restating the rule, so the tuple shape written and
-    /// the shape read back cannot drift.
-    pub(in crate::core_erlang) fn is_exception_construct_with_vt_self_field_threading(
+    /// the shape read back cannot drift — the successor to BT-3486's
+    /// `is_exception_construct_with_vt_self_field_threading` (`SelfVt`-only,
+    /// a bare `bool`).
+    pub(in crate::core_erlang) fn exception_construct_threaded_families(
         &self,
         expr: &Expression,
-    ) -> bool {
+    ) -> super::control_flow::analysis::ThreadedFamilies {
         Self::exception_construct_blocks(expr)
-            .is_some_and(|blocks| self.exception_blocks_thread_value_self(&[blocks[0], blocks[1]]))
+            .map(|blocks| self.exception_construct_families(&blocks))
+            .unwrap_or_default()
     }
 
     /// emits a non-last `on:do:`/`ensure:` that mutates captured
@@ -3174,20 +3208,20 @@ impl CoreErlangGenerator {
     /// extraction, minus that path's `ThreadedStmt::Bind`/`next_state_var`
     /// step — there is no ambient `gen_server` `State` to thread into here).
     ///
-    /// BT-3486: when the construct also threads a value-type `Self`
-    /// ([`Self::is_exception_construct_with_vt_self_field_threading`]), ALSO
-    /// extracts the trailing element 3 and rebinds it via
-    /// [`CoreErlangGenerator::rebind_value_self_from_doc`] — the same trailing
-    /// slot, in the same position, and the same rebind that BT-3484's
-    /// [`Self::emit_vt_loop_open_extraction`] gives a Letrec loop. Without it
-    /// the construct's own `Self{N}` stays scoped inside the Core Erlang
-    /// `try` and every later `self.field` read in the method silently sees the
-    /// pre-`try` snapshot.
+    /// BT-3486/BT-3506: when the construct also threads a `ClassVars`/
+    /// `SelfVt` family ([`Self::exception_construct_threaded_families`]),
+    /// ALSO extracts the trailing element 3 and rebinds it via
+    /// [`Self::extract_vt_loop_family_slot`] (BT-3512's shared extraction
+    /// helper) — the same trailing slot, in the same position, and the same
+    /// rebind that BT-3484's [`Self::emit_vt_loop_open_extraction`] gives a
+    /// Letrec loop. Without it the construct's own mutated version stays
+    /// scoped inside the Core Erlang `try` and every later read in the
+    /// method silently sees the pre-`try` snapshot.
     pub(in crate::core_erlang) fn generate_vt_exception_construct_open(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        let threads_value_self = self.is_exception_construct_with_vt_self_field_threading(expr);
+        let families = self.exception_construct_threaded_families(expr);
         let span = expr.span();
         let tuple_var = self.fresh_temp_var("ExTuple");
         let expr_doc = self.expression_doc(expr)?;
@@ -3222,9 +3256,7 @@ impl CoreErlangGenerator {
                 ]);
             }
         }
-        if threads_value_self {
-            let value_doc = docvec!["call 'erlang':'element'(3, ", leaf::var(tuple_var), ")"];
-            let rebind_doc = self.rebind_value_self_from_doc(value_doc, span);
+        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             docs.push(rebind_doc);
         }
         Ok(Document::Vec(docs))

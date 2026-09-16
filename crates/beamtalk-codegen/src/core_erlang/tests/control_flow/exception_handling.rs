@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Value-type and actor `self` threading through `on:do:`/
+//! Value-type/`ClassVars` mutation threading through `on:do:`/
 //! `ensure:` exception-handling constructs, including chained and
 //! nested ensure blocks.
 
@@ -301,11 +301,12 @@ fn test_value_type_on_do_both_arms_writing_mint_sibling_self_versions() {
 
 #[test]
 fn test_actor_ensure_keeps_two_element_result_tuple() {
-    // The trailing slot is value-type-only. For an actor, `state.field :=` and
-    // the construct's own `StateAcc` are the SAME map, so the mutation already
-    // threads out through slot 2 and adding a third would be dead weight —
-    // `exception_blocks_thread_value_self` is gated on
-    // `CodeGenContext::ValueType`, and this pins that gate.
+    // The trailing slot is value-type/class-method-only. For an actor,
+    // `state.field :=` and the construct's own `StateAcc` are the SAME map,
+    // so the mutation already threads out through slot 2 and adding a third
+    // would be dead weight — `exception_construct_families` filters `State`
+    // out of `eligible_families` for exactly this reason, and this pins that
+    // gate.
     let src = concat!(
         "Actor subclass: ActorEnsureNoSelfSlot\n",
         "  state: total = 0\n\n",
@@ -448,9 +449,9 @@ fn test_value_type_parenthesized_ensure_as_assignment_rhs_unwraps_tuple() {
     // (`r := (... ensure: [...])`) must not dodge `emit_threaded_assign_rhs`'s
     // detection — mirrors the identical paren-stripping fix for
     // match-arm field writes. `is_exception_construct_with_vt_local_threading`
-    // / `is_exception_construct_with_vt_self_field_threading` are checked
-    // against `value.unwrap_parens()`, so the parenthesized wrapper must not
-    // hide the construct and fall back to the generic (tuple-leaking) path.
+    // is checked against `value.unwrap_parens()`, so the parenthesized
+    // wrapper must not hide the construct and fall back to the generic
+    // (tuple-leaking) path.
     let src = concat!(
         "TestCase subclass: VtParenAssignRhsEnsure\n",
         "  field: total = 0\n\n",
@@ -533,5 +534,187 @@ fn test_class_method_ensure_last_position_and_assign_rhs_thread_local() {
         "class_computeLast's own return value must be the unwrapped logical result, not \
          the raw exception-construct tuple. Trailing line was: {trailing_line:?}. Full \
          function:\n{compute_last}"
+    );
+}
+
+// ─── ADR 0122 / BT-3506: `ClassVars` threading through `on:do:`/`ensure:` ──
+//
+// The `ClassVars` twin of the `SelfVt` threading pinned above (BT-3486):
+// a class-method self-send inside `on:do:`/`ensure:` mutates a class var, but
+// (before this fix) the construct's own `{Result, StateAcc}` tuple had no
+// slot to carry it out, so the mutation was silently discarded on every
+// normal return. Runtime ground truths for these shapes are pinned in
+// `stdlib/test/fixtures/mutation_corpus_class_method.bt`.
+
+#[test]
+fn test_class_method_self_send_in_ensure_try_body_threads_class_vars_out() {
+    // BT-3506's headline repro (case (b)): before the fix this compiled
+    // cleanly and returned 0 — `bump`'s own `ClassVars1` was bound only
+    // inside the try body's own rendered Document, out of scope once the
+    // `try` closed.
+    let src = concat!(
+        "Object subclass: CvEnsureSelfSend\n",
+        "  classState: runs = 0\n\n",
+        "  class bump => self.runs := self.runs + 1\n\n",
+        "  class selfSendEnsure =>\n",
+        "    self.runs := 0\n",
+        "    [\n",
+        "      self bump\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    self.runs\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvensureselfsend").with_workspace_mode(true),
+    )
+    .expect("a class-method self-send inside an ensure: try body must compile");
+
+    assert!(
+        code.contains(", StateAcc1, ClassVars1}") || code.contains(", StateAcc, ClassVars1}"),
+        "the try body's return tuple must grow a trailing slot carrying its own \
+         mutated ClassVars. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let ClassVars1 = call 'erlang':'element'(3,")
+            || code.contains("let ClassVars2 = call 'erlang':'element'(3,"),
+        "the post-construct rebind must extract the threaded ClassVars from tuple slot 3. \
+         Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@cvensureselfsend", &code);
+}
+
+#[test]
+fn test_class_method_self_send_in_on_do_handler_threads_class_vars_out() {
+    // The `on:do:` handler mirror of the `ensure:` repro above — the
+    // handler is a SIBLING arm of the try body, so both must return the
+    // same tuple shape, and the try arm (which does not itself mutate)
+    // carries the construct's pre-`try` `ClassVars` in its own slot.
+    let src = concat!(
+        "Object subclass: CvOnDoSelfSend\n",
+        "  classState: runs = 0\n\n",
+        "  class bump => self.runs := self.runs + 5\n\n",
+        "  class selfSendOnDo =>\n",
+        "    [\n",
+        "      nil\n",
+        "    ] on: Error do: [:e |\n",
+        "      self bump\n",
+        "      nil\n",
+        "    ]\n",
+        "    self.runs\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvondoselfsend").with_workspace_mode(true),
+    )
+    .expect("a class-method self-send inside an on:do: handler must compile");
+
+    assert!(
+        code.contains(", ClassVars}"),
+        "the non-mutating try arm must carry the pre-try ClassVars in the same slot. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains(", ClassVars1}"),
+        "the mutating handler arm must carry its own mutated ClassVars1. Got:\n{code}"
+    );
+    assert!(
+        code.contains("let ClassVars1 = call 'erlang':'element'(3,"),
+        "the post-construct rebind must extract the threaded ClassVars from tuple slot 3. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('runs', ClassVars1)"),
+        "the trailing field read must see the threaded ClassVars1. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@cvondoselfsend", &code);
+}
+
+#[test]
+fn test_class_method_self_send_ensure_with_co_occurring_local_mutation_compiles() {
+    // BT-3506's shape (c): a self-send AND a local-var mutation in the same
+    // try body. Before this fix, the self-send's own `ClassVars` `Bind`
+    // sourced from whatever `class_var_version()` the method's own top
+    // frame had already reached — a version this arm's OWN fresh
+    // `ThreadedIr` frame never produced — tripping `NonLinearVersion`/
+    // `UnboundVersion` in a debug-build `verify()` panic. The new
+    // `seed_exception_arm_family` reset-and-shadow (mirroring BT-3486's
+    // `SelfVt` fix) resets the arm's own `ClassVars` counter to 0 first, so
+    // the self-send's `Bind` sources from the frame's own implicit,
+    // always-bound version-0 entry instead.
+    let src = concat!(
+        "Object subclass: CvEnsureSelfSendWithLocal\n",
+        "  classState: runs = 0\n\n",
+        "  class bump => self.runs := self.runs + 1\n\n",
+        "  class selfSendEnsureWithLocal =>\n",
+        "    self.runs := 0\n",
+        "    seen := 0\n",
+        "    [\n",
+        "      self bump\n",
+        "      seen := seen + 1\n",
+        "    ] ensure: [nil]\n",
+        "    self.runs + seen\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvensureselfsendwithlocal").with_workspace_mode(true),
+    )
+    .expect(
+        "a class-method self-send alongside a co-occurring local mutation inside an \
+         ensure: try body must compile without a ThreadedIr verify failure",
+    );
+    assert_compiles_through_erlc("bt@cvensureselfsendwithlocal", &code);
+}
+
+#[test]
+fn test_class_method_direct_class_var_write_in_ensure_try_body_still_rejected() {
+    // BT-3506's shape (a) decision: a BARE, direct `self.classVar := ...`
+    // write remains rejected at compile time — unlike the identical `SelfVt`
+    // shape, which BT-3486 made supported. `lower_field_assignment_bind`
+    // (shared by every threaded-body construct: loops, conditionals, blocks,
+    // `on:do:`/`ensure:`) unconditionally rejects a bare class-var write via
+    // `reject_class_var_field_assignment` — widening that shared gate to
+    // support this one shape for `on:do:`/`ensure:` alone would require
+    // threading a new bypass flag through every one of its call sites for a
+    // shape BT-3506 deliberately left rejected rather than support: assign to
+    // a local inside the block, then mutate the class var once after, is
+    // already a clean, well-established fix. This pins that the construct
+    // still rejects it, and with the accurate `ClassVarAssignmentInThreadedBody`
+    // diagnostic (not a claim that the shape compiles fine).
+    let src = concat!(
+        "Object subclass: CvEnsureDirectWrite\n",
+        "  classState: runs = 0\n\n",
+        "  class directWriteEnsure =>\n",
+        "    self.runs := 0\n",
+        "    [\n",
+        "      self.runs := self.runs + 1\n",
+        "      nil\n",
+        "    ] ensure: [nil]\n",
+        "    self.runs\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvensuredirectwrite").with_workspace_mode(true),
+    );
+    let err = match result {
+        Err(err @ CodeGenError::ClassVarAssignmentInThreadedBody { .. }) => err,
+        other => panic!(
+            "expected ClassVarAssignmentInThreadedBody for a direct class-var write inside \
+             an ensure: try body. Got: {other:?}"
+        ),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("Cannot assign to class variable 'runs'"),
+        "the diagnostic must accurately describe a class-variable write (not a generic \
+         'field'). Got:\n{rendered}"
     );
 }
