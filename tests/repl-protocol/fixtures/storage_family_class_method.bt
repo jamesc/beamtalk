@@ -1,0 +1,98 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0122 / BT-3519 close-out: e2e coverage of the class-method `ClassVars`
+// storage family threading through every construct the epic unified, driven
+// from a live REPL session. Fragment bodies mirror
+// stdlib/test/fixtures/mutation_corpus_class_method.bt verbatim.
+//
+// `to:do:`/`whileTrue:`/`ifTrue:ifFalse:` accept a BARE, top-level
+// `self.runs := ...` write — `loop_body_threads_class_vars`'s Letrec gate.
+// `do:`/`collect:` (Foldl-shaped) and `on:do:`/`ensure:` only ever thread a
+// `ClassVars` mutation via a same-class SELF-SEND (`self bump`); a bare
+// direct write in either position is a compile-time rejection (see
+// storage_family_class_method_foldl_reject.bt /
+// storage_family_class_method_ensure_reject.bt) — ADR 0122 / BT-3506's own
+// decision, mirrored consistently across both construct families.
+
+Object subclass: StorageFamilyClassMethod
+  classState: runs = 0
+
+  class bump => self.runs := self.runs + 1
+
+  // ── to:do: (bare direct write) ──────────────────────────────────────────
+  class toDo =>
+    self.runs := 0
+    seen := 0
+    1
+      to: 5
+      do: [:i |
+        self.runs := self.runs + i
+        seen := seen + 1
+      ]
+    self.runs
+
+  // ── whileTrue: (bare direct write) ──────────────────────────────────────
+  class whileTrue =>
+    self.runs := 0
+    n := 0
+    [n < 5]
+      whileTrue: [
+        self.runs := self.runs + 1
+        n := n + 1
+      ]
+    self.runs
+
+  // ── ifTrue:ifFalse: (bare direct write) ─────────────────────────────────
+  class ifTrueIfFalse: flag =>
+    self.runs := 0
+    seen := 0
+    flag
+      ifTrue: [
+        self.runs := self.runs + 1
+        seen := seen + 1
+      ]
+      ifFalse: [self.runs := self.runs + 100]
+    self.runs
+
+  // ── do:/collect: (Foldl-shaped — self-send only) ────────────────────────
+  class doViaSelfSend =>
+    self.runs := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        self bump
+        seen := seen + 1
+      ]
+    self.runs
+
+  // ── on:do: (self-send — ADR 0122 / BT-3506's second construct family) ──
+  class onDoViaSelfSend =>
+    self.runs := 0
+    seen := 0
+    [
+      self bump
+      seen := seen + 1
+    ] on: Error do: [:e | nil]
+    self.runs
+
+  // ── ensure: — BT-3506's own headline repro, verbatim (see ADR 0122's "A
+  // sixth gap" section): the self-send is the construct's ONLY mutation,
+  // with no co-occurring captured-local read+write. Before BT-3506 this
+  // compiled via the closure path and silently discarded the mutation.
+  class ensureViaSelfSendOnly =>
+    self.runs := 0
+    [
+      self bump
+      nil
+    ] ensure: [nil]
+    self.runs
+
+  // ── match: (self-send — `MATCH_ARM_FAMILIES` includes `ClassVars`) ──────
+  class matchArm: v =>
+    self.runs := 0
+    v match: [
+      1 -> self bump;
+      _ -> nil
+    ]
+    self.runs

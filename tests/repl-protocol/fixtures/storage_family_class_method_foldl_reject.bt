@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0122: a BARE, direct class-var write inside a `Foldl*`-shaped list-op
+// body (`do:`/`collect:`/...), with no co-occurring self-send, never trips
+// `body_analysis.has_self_sends` — the Foldl shape's only `ClassVars`
+// threading trigger (`ThreadingPlan::new_impl`'s
+// `!Actor && in_class_method() && has_self_sends` gate) — so the block never
+// reaches the class-var-aware dispatch at all and falls through to the
+// generic stored-closure-body rejection instead
+// (`FieldAssignmentInUnsupportedBlock`, BT-2792's `validate_stored_closure`),
+// not the more specific `ClassVarAssignmentInThreadedBody` a loop/conditional
+// body's direct write produces. Still a clean compile-time rejection either
+// way — own fixture file for the same reason as
+// storage_family_class_method_ensure_reject.bt.
+
+Object subclass: StorageFamilyClassMethodFoldlReject
+  classState: runs = 0
+
+  class doDirectWrite =>
+    self.runs := 0
+    #(1, 2, 3) do: [:i | self.runs := self.runs + i]
+    self.runs

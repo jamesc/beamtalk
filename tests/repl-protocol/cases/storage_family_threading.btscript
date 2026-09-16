@@ -1,0 +1,170 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E families x constructs matrix for ADR 0122 (Unify `ThreadedIr`
+// Storage-Family Threading) — BT-3519, the epic's close-out issue.
+//
+// Every one of BT-3509 through BT-3518 landed a Rust-level (unit/BUnit)
+// migration; none of them exercised the REPL's own `:load`/eval path, which
+// is a materially different code path (Workspace class registration, live
+// gen_server class/actor processes, REPL response formatting) than a
+// `cargo test -p beamtalk-codegen` or `just test-bunit` run. This file
+// proves the three storage families ADR 0122 unified — Actor `state:`,
+// class-method `classState:`, and value-type `TestCase` field — thread
+// correctly through each construct, end-to-end, via `:load` + a live method
+// call, and that the shapes still rejected at compile time (ADR 0122's own
+// decision, not a bug) fail with the expected diagnostic.
+//
+// Fixtures (one class per file so a REJECTED method never keeps a whole
+// fixture from loading):
+//   storage_family_actor.bt                    — Actor `state:`, all ACCEPT
+//   storage_family_class_method.bt              — class `classState:`, all ACCEPT
+//   storage_family_class_method_ensure_reject.bt   — classState REJECT (ensure:)
+//   storage_family_class_method_foldl_reject.bt    — classState REJECT (do:)
+//   storage_family_value_type.bt                — TestCase field, ACCEPT cells
+//   storage_family_value_type_foldl_reject.bt      — TestCase field REJECT (do:)
+//   storage_family_value_type_match_reject.bt      — TestCase field REJECT (match:)
+//
+// Ground-truth values mirror the already-verified BUnit corpus fragments
+// (stdlib/test/fixtures/mutation_corpus_actor.bt,
+// stdlib/test/fixtures/mutation_corpus_class_method.bt,
+// stdlib/test/value_type_mutation_matrix_test.bt's `frag*` methods) rather
+// than being independently derived here.
+
+// ===========================================================================
+// FAMILY 1: Actor `state:` — every construct ACCEPTS (ADR 0122: `State`
+// threads unconditionally, never a function of body shape).
+// ===========================================================================
+
+:load tests/repl-protocol/fixtures/storage_family_actor.bt
+// => Loaded: StorageFamilyActor
+
+(StorageFamilyActor spawn) toDo
+// => 15
+
+(StorageFamilyActor spawn) whileTrue
+// => 5
+
+(StorageFamilyActor spawn) ifTrueIfFalse: true
+// => 1
+
+(StorageFamilyActor spawn) ifTrueIfFalse: false
+// => 100
+
+(StorageFamilyActor spawn) doSum
+// => 6
+
+(StorageFamilyActor spawn) onDo
+// => 3
+
+(StorageFamilyActor spawn) ensure
+// => 1
+
+(StorageFamilyActor spawn) matchArm: 1
+// => 1
+
+(StorageFamilyActor spawn) matchArm: 2
+// => 0
+
+// ===========================================================================
+// FAMILY 2: class-method `classState:` — `to:do:`/`whileTrue:`/
+// `ifTrue:ifFalse:` accept a bare direct class-var write; `do:`/`collect:`
+// and `on:do:`/`ensure:` accept it only via a same-class self-send (ADR
+// 0122 / BT-3506).
+// ===========================================================================
+
+:load tests/repl-protocol/fixtures/storage_family_class_method.bt
+// => Loaded: StorageFamilyClassMethod
+
+StorageFamilyClassMethod toDo
+// => 15
+
+StorageFamilyClassMethod whileTrue
+// => 5
+
+StorageFamilyClassMethod ifTrueIfFalse: true
+// => 1
+
+StorageFamilyClassMethod ifTrueIfFalse: false
+// => 100
+
+StorageFamilyClassMethod doViaSelfSend
+// => 3
+
+StorageFamilyClassMethod onDoViaSelfSend
+// => 1
+
+// BT-3506's own headline repro (ADR 0122 "A sixth gap"), verbatim, now
+// proven through the REPL's own load/eval path: before the fix this
+// compiled via the closure path and silently discarded the self-send's
+// mutation, returning 0.
+StorageFamilyClassMethod ensureViaSelfSendOnly
+// => 1
+
+StorageFamilyClassMethod matchArm: 1
+// => 1
+
+StorageFamilyClassMethod matchArm: 2
+// => 0
+
+// ── REJECT: a bare direct class-var write nested inside `ensure:` stays a
+// compile-time rejection (ClassVarAssignmentInThreadedBody) — the self-send
+// form above is the only shape `on:do:`/`ensure:` can carry.
+:load tests/repl-protocol/fixtures/storage_family_class_method_ensure_reject.bt
+// => ERROR: Cannot assign to class variable 'runs' inside this loop/conditional body
+
+_error kind
+// => compile_error
+
+// ── REJECT: a bare direct class-var write inside a Foldl-shaped `do:` body,
+// with no co-occurring self-send, never reaches the class-var-aware
+// dispatch at all (Foldl's only `ClassVars` trigger is a self-send) and
+// falls through to the generic stored-closure-body rejection instead — a
+// different diagnostic than the loop/conditional-body one above, but still
+// a clean compile-time rejection.
+:load tests/repl-protocol/fixtures/storage_family_class_method_foldl_reject.bt
+// => ERROR: Cannot assign to field 'runs' inside this block
+
+// ===========================================================================
+// FAMILY 3: value-type `TestCase` field — `to:do:`/`whileTrue:`/
+// `ifTrue:ifFalse:` (BT-3484) and `on:do:`/`ensure:` (BT-3486) accept a bare
+// top-level `self.field := ...` write; `do:`/`collect:` (BT-3487/BT-3488)
+// and `match:` (BT-3489) are compile-time rejections.
+// ===========================================================================
+
+:load tests/repl-protocol/fixtures/storage_family_value_type.bt
+// => Loaded: StorageFamilyValueType
+
+(StorageFamilyValueType new) fragToDo
+// => 15
+
+(StorageFamilyValueType new) fragWhileTrue
+// => 5
+
+(StorageFamilyValueType new) fragIfTrueIfFalse: true
+// => 1
+
+(StorageFamilyValueType new) fragIfTrueIfFalse: false
+// => 100
+
+(StorageFamilyValueType new) fragOnDo
+// => 3
+
+(StorageFamilyValueType new) fragEnsure
+// => 1
+
+// ── REJECT: a value-type field write inside a Foldl-shaped `do:` body has
+// no matching accumulator slot to thread through — clean compile-time
+// rejection (FieldAssignmentInUnsupportedBlock) rather than the erlc
+// "unbound variable 'State'" crash it used to produce (BT-3487/BT-3488).
+:load tests/repl-protocol/fixtures/storage_family_value_type_foldl_reject.bt
+// => ERROR: Cannot assign to field 'total' inside this block
+
+_error kind
+// => compile_error
+
+// ── REJECT: a value-type field write as a `match:` arm body — `match:`'s N
+// arms have no branch-merge machinery of their own the way
+// `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` do (BT-3489).
+:load tests/repl-protocol/fixtures/storage_family_value_type_match_reject.bt
+// => ERROR: Cannot assign to field 'self.total' inside a match: arm

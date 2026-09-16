@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0122 / BT-3506: a BARE, direct class-var write (not a same-class
+// self-send) nested inside an `ensure:` body is a deliberate compile-time
+// rejection (`ClassVarAssignmentInThreadedBody`) — the same policy a direct
+// write already has inside a loop/conditional body
+// (mutation_corpus_class_method.bt's own `classVarEnsureTryNonLastReadWrite`
+// comment). A rejected method can't share a class with methods that must
+// compile, hence its own fixture file.
+
+Object subclass: StorageFamilyClassMethodEnsureReject
+  classState: runs = 0
+
+  class ensureDirectWrite =>
+    self.runs := 0
+    [
+      self.runs := self.runs + 1
+      nil
+    ] ensure: [nil]
+    self.runs

@@ -258,6 +258,74 @@ self-send, and a `Foldl*` accumulator has no `SelfVt` slot), but both stay
 keyed by `VersionPrefix` generically per ADR 0122's "one list, one helper"
 goal rather than reverting to a `ClassVars`-only shape.
 
+**ADR 0122 close-out: one detector, one list, one helper (BT-3519).** ADR
+0122 unified the six hand-written sites that each separately answered "does
+this body mutate storage family X, and how do I carry it out" —
+`while_loops.rs`/`counted_loops.rs`, `value_type_codegen.rs`'s loop and
+conditional sites, `conditionals.rs`'s Actor conditional,
+`exception_handling.rs`'s `on:do:`/`ensure:`, and `plan.rs`'s Foldl
+accumulator — into three shared pieces, all in `control_flow/`:
+
+- **One type, `ThreadedFamilies`** (`analysis.rs`) — an ordered
+  `Vec<VersionPrefix>` in canonical slot order (`State`, then `ClassVars`,
+  then `SelfVt`; ADR 0122 Decision 2), constructed only via
+  `ThreadedFamilies::from_matches` so no call site can hand-assemble one out
+  of order.
+- **One emission helper, `family_slots.rs`** — `append_family_slots`/
+  `append_baseline_family_slots` close a construct's result tuple with one
+  trailing slot per family; `extract_family_slots` unpacks them back out
+  afterwards. Every site in the table above routes its own trailing-slot
+  tuple through this pair now, instead of a hand-rolled per-site
+  `Option<usize>`/bool-pair shape.
+- **The capability-declaration pattern** — a site names which families it
+  can carry as data, not as a hand-written `if` per family: `eligible_families`
+  answers "which families exist in this generator context right now" once,
+  centrally, from `CodeGenContext`/`in_class_method()` (never re-derived per
+  call site — this is exactly the "ask about the ones in front of you"
+  mistake ADR 0122's own "Why the gaps keep happening" section names as the
+  root cause of BT-3489 and BT-3506); `match_lowering.rs`'s
+  `MATCH_ARM_FAMILIES` (`[State, ClassVars]`, `SelfVt` excluded) is the
+  clearest example of a site declaring a narrower capability than
+  `eligible_families` would allow, with the exclusion checked against the
+  shared detector rather than hand-matched. A family a site does not declare
+  is *meant* to be rejected through the construct's own existing diagnostic
+  (`ClassVarAssignmentInThreadedBody`, `FieldAssignmentInUnsupportedBlock`,
+  `ValueSelfFieldAssignmentInMatchArm`) — detection and carry-capability stay
+  deliberately separate questions (ADR 0122 Decision 1). That pairing is
+  verified present for the loop sites; it is **not yet wired up for two
+  shapes found auditing this close-out** — a `ClassVars` mutation nested
+  inside a conditional inside `on:do:`/`ensure:`, and a `SelfVt` mutation
+  nested inside a value-type conditional's own `ifTrue:`/`ifFalse:` block —
+  both missed by the narrow detector with no rejection to catch the miss,
+  so the mutation is silently dropped instead. Tracked as
+  [BT-3522](https://linear.app/beamtalk/issue/BT-3522).
+
+What ADR 0122 did **not** collapse into one recursive walk, on purpose: each
+site's own "does THIS body's TOP-LEVEL statements mutate family X" predicate
+(`CoreErlangGenerator::loop_body_threads_class_vars`/
+`loop_body_threads_value_self`, `ThreadingPlan::threads_class_vars`/
+`threads_value_self`, `exception_handling.rs`'s
+`block_top_level_mutates_family`) stays narrower than the fully recursive
+`body_threaded_families` (`analysis.rs`) the ADR's Decision 1 describes as
+the eventual end state. The narrow predicates are the *actual carrying
+formula* — the recursive one is a validation/differential-test tool
+(`tests/control_flow/family_detector_differential.rs` runs both over the
+whole corpus and asserts agreement everywhere the old formula fires),
+deliberately not wired into live emission: a construct can only thread a
+mutation its own tail-call/tuple shape has a slot for, and that slot only
+ever comes from a BARE top-level statement (a mutation nested inside the
+body's own conditional/loop keeps its own, more narrowly-scoped version
+chain — see `find_class_var_mutating_stmt`'s doc comment for the
+`class_var_sub_expr.bt` regression this scoping prevents). Widening a live
+site's own detector to the recursive walk would change which programs
+compile and how — exactly the kind of diff `just core-diff` (below) exists
+to catch — so it stayed out of scope; `body_threaded_families` carries
+`#[allow(dead_code)]` in production builds for the same reason. This is a
+documented, differential-tested design decision, not leftover duplication:
+CLAUDE.md's no-duplicate-implementations rule is satisfied by the
+differential test enforcing the invariant, not by deleting one of the two
+formulas.
+
 **The `whileTrue:`/`whileFalse:` condition as real IR (ADR 0118 phase 3,
 BT-3419).** `ConditionalLoop` no longer treats its condition as an opaque,
 outside-the-frame `Document` (the pre-BT-3419 `continue_header` field): it

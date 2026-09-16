@@ -1,7 +1,7 @@
 # ADR 0122: Unify `ThreadedIr` Storage-Family Threading
 
 ## Status
-Accepted (2026-09-15)
+Implemented (2026-09-16)
 
 ## Context
 
@@ -296,11 +296,46 @@ empty, or the intended change and nothing else.
 ## Implementation Tracking
 
 **Epic:** [BT-3508](https://linear.app/beamtalk/issue/BT-3508)
-**Issues:** BT-3509 (harness), BT-3510 (detector), BT-3511 (helper),
-BT-3506 (`on:do:`/`ensure:`), BT-3512 (VT loop), BT-3513 (VT conditional),
-BT-3514 (Actor conditional), BT-3515 (Actor loops), BT-3516 (Foldl),
-BT-3517 (`match:`), BT-3518 (side channels), BT-3519 (close-out)
-**Status:** Planned
+**Status:** Done — all 11 issues merged to `main`.
+
+| Phase | Issue | Title | Status |
+|-------|-------|-------|--------|
+| 0 | [BT-3509](https://linear.app/beamtalk/issue/BT-3509) | Corpus `.core` diff harness | Done |
+| 1 | [BT-3510](https://linear.app/beamtalk/issue/BT-3510) | Unified storage-family detector (`body_threaded_families`/`ThreadedFamilies`), differential-tested | Done |
+| 2 | [BT-3511](https://linear.app/beamtalk/issue/BT-3511) | Storage-family emission helper (append/extract family slots) | Done |
+| 3 | [BT-3506](https://linear.app/beamtalk/issue/BT-3506) | `on:do:`/`ensure:` grows a `ClassVars` slot (the epic's first real consumer; ADR's "sixth gap") | Done |
+| 4 | [BT-3512](https://linear.app/beamtalk/issue/BT-3512) | Value-type loop site (`VtLoopExtraSlot`/`vt_construct_extra_slot`) onto the helper | Done |
+| 5 | [BT-3513](https://linear.app/beamtalk/issue/BT-3513) | Value-type conditional site (`VtCondSlots`/`finish_vt_conditional_branch`) onto the helper | Done |
+| 6 | [BT-3514](https://linear.app/beamtalk/issue/BT-3514) | Actor conditional site (`with_branch_context`/`generate_*_with_mutations`) onto the helper | Done |
+| 7 | [BT-3515](https://linear.app/beamtalk/issue/BT-3515) | Actor and class-method loops (letrec parameter + result tuple) onto the helper | Done |
+| 8 | [BT-3516](https://linear.app/beamtalk/issue/BT-3516) | Foldl list-op accumulators onto the helper; `ClassVars` slot moves leading → trailing | Done |
+| 9 | [BT-3517](https://linear.app/beamtalk/issue/BT-3517) | `match:` declares `[State, ClassVars]` as data; drops `match_needs_mutation_threading` | Done |
+| 10 | [BT-3518](https://linear.app/beamtalk/issue/BT-3518) | `ClassVars`-only `LoopMode` side channels folded into `ThreadedFamilies` | Done |
+| Close-out | [BT-3519](https://linear.app/beamtalk/issue/BT-3519) | e2e REPL families × constructs matrix; dead-code sweep; ADR marked Implemented | Done |
+
+Corpus `.core` diff against `main` (`just core-diff`): empty — every intended
+codegen diff (BT-3506's new slot, the Foldl slot move) landed earlier in the
+epic, so the close-out issue's own diff has nothing left to review.
+
+Dead-code sweep (BT-3519): `VtLoopExtraSlot`, `VtCondSlots`,
+`exception_self_slot`(`_doc`), `exception_blocks_thread_value_self`, and
+`match_needs_mutation_threading` are fully retired — grepping the crate
+finds them only in doc comments narrating the migration history, never as
+live code. `VtCondBaseline`, `loop_body_threads_class_vars`/
+`loop_body_threads_value_self`, and `ThreadingPlan::threads_class_vars`/
+`threads_value_self` survive by design, not oversight — see this ADR's own
+"Steelman Analysis" (the narrow, top-level-only detectors trade recall for
+the empirically-confirmed regression the recursive detector's own
+differential test guards against) and each symbol's doc comment for the
+specific reason it still exists. `exception_handling.rs`'s
+`block_top_level_mutates_family` (BT-3506) is the same kind of deliberate
+narrow survivor, but unlike the loop detectors it was not verified to pair
+with a rejection for every family/site combination it misses: a `ClassVars`
+mutation nested inside a conditional inside `on:do:`/`ensure:`, and (via the
+same shared function) a `SelfVt` mutation nested inside a value-type
+conditional, are both silently dropped rather than rejected today. Filed as
+[BT-3522](https://linear.app/beamtalk/issue/BT-3522), found auditing this
+close-out.
 
 ## Migration Path
 Not applicable to the language. BT-3506 changes observable behaviour (a
