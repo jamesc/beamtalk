@@ -15,6 +15,7 @@ TestCase subclass: BT3377ActorValueSelectorTest
   setUp =>
     self.probe := BT3377ValueProbe spawn
     self.probe setIt
+    self
 
   tearDown => self.probe isNil ifFalse: [self.probe stop]
 
