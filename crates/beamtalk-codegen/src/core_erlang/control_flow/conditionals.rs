@@ -1087,7 +1087,7 @@ impl CoreErlangGenerator {
     ) -> bool {
         let expr = expr.unwrap_parens();
         if let Expression::Match { arms, .. } = expr {
-            return self.match_needs_mutation_threading(arms);
+            return self.match_needs_state_threading(arms);
         }
         let Expression::MessageSend {
             receiver,

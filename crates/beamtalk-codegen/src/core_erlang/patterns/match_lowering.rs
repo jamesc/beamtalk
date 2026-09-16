@@ -20,6 +20,7 @@
 
 use std::collections::HashSet;
 
+use super::super::threaded_ir::VersionPrefix;
 use super::super::util::index_lit;
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
@@ -30,6 +31,19 @@ use beamtalk_core::ast::{
     ExpressionStatement, MatchArm, MessageSelector, Pattern, WellKnownSelector,
 };
 use beamtalk_core::source_analysis::Span;
+
+/// ADR 0122 Decision 4: the storage families a `match:` arm can carry
+/// through [`CoreErlangGenerator::generate_match_arm_body`]'s merge —
+/// data, not a hand-written per-context check. `SelfVt` is deliberately
+/// excluded: a value-type INSTANCE method's `Self`/`SelfN` chain has no
+/// N-arm merge to thread a field write through at all (see
+/// [`CoreErlangGenerator::generate_match`]'s up-front rejection, driven by
+/// this same declaration, and
+/// [`CoreErlangGenerator::match_needs_state_threading`], which uses it to
+/// decide whether a bare field-write arm threads). Adding `SelfVt` support
+/// later is the one-line change ADR 0122's Implementation 9 "Out of Scope"
+/// note describes — extend this list, nothing else.
+const MATCH_ARM_FAMILIES: &[VersionPrefix] = &[VersionPrefix::State, VersionPrefix::ClassVars];
 
 impl CoreErlangGenerator {
     /// Generates code for a match expression.
@@ -61,16 +75,26 @@ impl CoreErlangGenerator {
         // `case` clause. The Actor form of the same shape IS supported, via
         // `generate_match_arm_body`'s branch-merge route below.
         //
-        // Runs before `match_needs_mutation_threading` decides `base_state`
+        // ADR 0122: driven by the shared capability declaration
+        // (`MATCH_ARM_FAMILIES`) against the shared, per-context detector
+        // (`Self::eligible_families`) rather than a hand-written
+        // `ValueType && !in_class_method()` check — `SelfVt` is the one
+        // family `eligible_families` can report here that `MATCH_ARM_FAMILIES`
+        // excludes, and `eligible_families` reports it in exactly the same
+        // context the old check named (a value-type INSTANCE method), so the
+        // two are equivalent by construction.
+        //
+        // Runs before `match_needs_state_threading` decides `base_state`
         // below, so a value-type instance method never reaches the threading
         // path at all — see that function's own context-gating note.
         //
         // Scoped to a value-type INSTANCE method: inside a value-type CLASS
-        // method `self.x :=` is a class-var write on the `ClassVars` chain,
-        // which threads (and is rejected on its own terms by
-        // `reject_class_var_field_assignment`) rather than needing this.
-        if matches!(self.context, super::super::CodeGenContext::ValueType)
-            && !self.in_class_method()
+        // method `self.x :=` is a class-var write on the `ClassVars` chain
+        // (which IS in `MATCH_ARM_FAMILIES`), so it threads (and is rejected
+        // on its own terms by `reject_class_var_field_assignment`) rather
+        // than needing this.
+        if self.eligible_families().contains(&VersionPrefix::SelfVt)
+            && !MATCH_ARM_FAMILIES.contains(&VersionPrefix::SelfVt)
         {
             for arm in arms {
                 if let Some((field, span)) = Self::vt_match_arm_field_write(arm) {
@@ -136,8 +160,8 @@ impl CoreErlangGenerator {
         // `[...] value` block). When it does, every arm below is compiled to a
         // uniform `{Value, State}` shape via `generate_match_arm_body`, so the
         // whole `match:` expression threads state exactly like `ifTrue:`/
-        // `ifFalse:` mutations — see `match_needs_mutation_threading`.
-        let base_state = if self.match_needs_mutation_threading(arms) {
+        // `ifFalse:` mutations — see `match_needs_state_threading`.
+        let base_state = if self.match_needs_state_threading(arms) {
             Some(self.current_state_var())
         } else {
             None
@@ -187,6 +211,84 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// `true` when a `match:` needs state threading — i.e. at least one arm's
+    /// body either is a Tier 2 value-call (most commonly a state-mutating
+    /// `[...] value` block), is itself a nested control-flow-with-mutations
+    /// construct (`ifTrue:`/`ifFalse:`/a nested `match:`/etc. with no
+    /// `[...] value` wrapper, e.g. `nil -> flag ifTrue: [self.x := 1]`), or
+    /// is a bare `self.field := ...` write, parentheses aside (BT-3489), IN A
+    /// CONTEXT where this `match:` can actually carry that write's family
+    /// (`MATCH_ARM_FAMILIES`). `generate_match` checks this once per `match:`
+    /// and, when true, compiles every arm's body to a uniform `{Value,
+    /// State}` shape so the whole expression can be unwrapped by the same
+    /// machinery as `ifTrue:`/`ifFalse:` mutations
+    /// (`CoreErlangGenerator::control_flow_has_mutations`'s `Expression::Match`
+    /// branch — this function is mutually recursive with it, which is what
+    /// lets a nested `match:` arm body be detected too).
+    ///
+    /// # ADR 0122: capability as data
+    ///
+    /// The "does a bare field write in this context thread at all" question
+    /// (formerly `threads_fields`, a hand-written `is_actor ||
+    /// (ValueType && in_class_method())` check) is now answered by
+    /// intersecting [`CoreErlangGenerator::eligible_families`] — the shared,
+    /// Decision 1 answer to "which storage families exist in the CURRENT
+    /// generator context" — with [`MATCH_ARM_FAMILIES`], this site's own
+    /// declared capability. The two formulas are equivalent by construction:
+    /// `eligible_families` reports at most one family per context (its own
+    /// doc comment proves this), and that family is exactly the one the old
+    /// formula named — `State` for an Actor instance method, `ClassVars` for
+    /// any class method (Actor's or a value type's), `SelfVt` — excluded from
+    /// `MATCH_ARM_FAMILIES` — for a value-type instance method. A
+    /// value-type instance method DOES still reach this function (a
+    /// `match:` with no field-writing arm has nothing for `generate_match`'s
+    /// up-front rejection to catch), but `carries_family_write` is `false`
+    /// there — `eligible_families` reports only `SelfVt`, which
+    /// `MATCH_ARM_FAMILIES` excludes — so the field-write disjunct never
+    /// fires for it either; the two checks agree on every arm shape, not
+    /// just the rejected one (BT-3489).
+    ///
+    /// The remaining three disjuncts (Tier 2 value-calls, nested
+    /// control-flow-with-mutations, hoistable self-sends) answer a strictly
+    /// wider question than "does a family's own bare mutation shape appear"
+    /// — [`super::super::control_flow::analysis::body_threaded_families`]'s
+    /// `State`-is-trivially-true rule (correct for a loop/conditional's own
+    /// always-threaded `StateAcc`) does not apply here without changing what
+    /// this function decides — so they stay their own Actor-only checks,
+    /// unmigrated by ADR 0122.
+    pub(in crate::core_erlang) fn match_needs_state_threading(&self, arms: &[MatchArm]) -> bool {
+        let is_actor = self.context == super::super::CodeGenContext::Actor;
+        // A field write in a `match:` arm can only be merged back where
+        // there is an N-arm-capable version chain to merge it into — exactly
+        // the families this site declares it can carry.
+        let carries_family_write = self
+            .eligible_families()
+            .iter()
+            .any(|family| MATCH_ARM_FAMILIES.contains(family));
+        arms.iter().any(|arm| {
+            // BT-3489: a `self.field := ...` arm body. Before this, nothing
+            // here matched it, so `generate_match` left `base_state` as
+            // `None` and the arm compiled through plain `expression_doc`,
+            // whose field-write binding (`State1`/`ClassVars1`) is scoped to
+            // that one `case` arm — yet the code after the `match:` referenced
+            // it unconditionally, so `erlc` rejected the module outright.
+            (carries_family_write && Self::is_field_assignment(arm.body.unwrap_parens()))
+                || (is_actor
+                    && (self.is_tier2_value_call(&arm.body)
+                        || self.control_flow_has_mutations(&arm.body)
+                        // (ADR 0118 phase 4): an arm body that is
+                        // neither a Tier 2 block-value call nor itself a nested
+                        // control-flow-with-mutations construct, but DOES
+                        // contain a (possibly nested, hoistable) actor
+                        // self-send — `1 -> 1 + (self bumpCount)` — still needs
+                        // this `match:` threaded, so `generate_match_arm_body`'s
+                        // plain-wrap arm gets a chance to hoist it instead of
+                        // silently dropping the mutation via a bare
+                        // `expression_doc` compile.
+                        || self.conditional_receiver_needs_threading(&arm.body)))
+        })
+    }
+
     /// [`Self::generate_match`]'s value-type-instance rejection detector:
     /// the assigned field's name and span when `arm`'s body is a
     /// `self.field := ...` write with no `Self`-version merge to thread
@@ -203,7 +305,7 @@ impl CoreErlangGenerator {
         // BT-3495: a field write nested inside a `[...] value` block's own
         // statements (bare, or local-assign-wrapped) — `arm.body` alone is
         // a `MessageSend` (`value`, zero args) here, not the field write
-        // itself, so the checks below never see it; `match_needs_mutation_threading`
+        // itself, so the checks below never see it; `match_needs_state_threading`
         // is unconditionally `false` for a value-type instance method (this
         // function's only caller), so nothing downstream catches this shape
         // either. Every statement is checked, not just the block's last one —
@@ -265,7 +367,7 @@ impl CoreErlangGenerator {
     /// When `base_state` is `None` (no arm in this `match:` needs actor state
     /// threading — the common case), this is exactly `expression_doc`.
     ///
-    /// When `base_state` is `Some` (`match_needs_mutation_threading` found at
+    /// When `base_state` is `Some` (`match_needs_state_threading` found at
     /// least one arm that does), every arm must yield a `{Value, State}` tuple
     /// so the whole `match:` expression has one consistent shape that the
     /// caller (`generate_match`) can return as-is, letting the existing

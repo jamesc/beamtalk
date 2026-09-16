@@ -99,7 +99,7 @@ fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapp
     // Tier 2 block via `self.<field> value` (not a `[...] value` block
     // literal) is a different receiver shape than the one this fix inlines.
     // `is_tier2_value_call` still classifies it as needing threading (so
-    // `match_needs_mutation_threading` returns true for the whole match:),
+    // `match_needs_state_threading` returns true for the whole match:),
     // but `generate_match_arm_body`'s literal-block branch doesn't match a
     // `self.field` receiver, so it falls to `expression_doc`, which already
     // unwraps+discards that call's own NewState via
