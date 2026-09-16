@@ -3962,6 +3962,26 @@ impl CoreErlangGenerator {
             },
             span,
         );
+        // `extract_family_slots` itself never verifies its own output (its
+        // doc comment flags this): check each family's minted version step
+        // via the same generic per-mutation invariant every other
+        // `Self{N}`/`State{N}` version step already uses
+        // (`check_simple_field_bind_invariant` / `verify_simple_bind`).
+        // Safe to reuse for `ClassVars` here too — `extraction_bind_op`
+        // always returns `BindOp::Direct`, and `ShadowWriteMissing` (the one
+        // check `verify_simple_bind`'s hardcoded `shadow_write: false`
+        // wouldn't model) never fires on a `Direct` bind, so the extra
+        // shadow-write-eligibility scaffolding `construct_and_verify_class_var_bind`
+        // carries for `Put`-shaped binds is not needed here.
+        for (prefix, step) in &steps {
+            self.check_simple_field_bind_invariant(
+                prefix.clone(),
+                step.source.version,
+                step.target.version,
+                "value-type conditional's family-slot extraction",
+                span,
+            );
+        }
         let mut ctx = RenderCtx::new(self);
         docs.push(render(&extraction, &mut ctx));
     }
