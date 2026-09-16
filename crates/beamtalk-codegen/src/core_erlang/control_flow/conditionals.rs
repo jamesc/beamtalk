@@ -57,6 +57,8 @@ use super::super::threaded_ir::{
 };
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use super::StateAccFallbackReason;
+use super::analysis::ThreadedFamilies;
+use super::family_slots::{self, FamilyVersionStep};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -459,7 +461,6 @@ impl CoreErlangGenerator {
         span: Span,
     ) -> ThreadedValue {
         let tuple_var = self.fresh_temp_var("CF");
-        let source_version = self.state_version();
         let mut prelude = vec![ThreadedStmt::Statement(
             docvec![
                 "let ",
@@ -470,25 +471,107 @@ impl CoreErlangGenerator {
             ],
             span,
         )];
-        let _ = self.next_state_var();
-        let target_version = self.state_version();
-        prelude.push(ThreadedStmt::Bind {
-            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-            op: BindOp::Direct(ValueRef::Doc(docvec![
-                "call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.clone()),
-                ")",
-            ])),
-            shadow_write: false,
-            span,
-        });
+        prelude.extend(self.extract_state_family(&tuple_var, frame, span));
         let value = ValueRef::Doc(docvec![
             "call 'erlang':'element'(1, ",
             leaf::var(tuple_var),
             ")",
         ]);
         ThreadedValue { prelude, value }
+    }
+
+    /// ADR 0122 Decision 3/BT-3514: this construct's post-merge `[State]`
+    /// extraction — the `Bind` half [`Self::control_flow_tuple_to_threaded_value`]
+    /// used to hand-roll (`State_{n+1} <- element(2, CF)`) — routed through
+    /// the shared [`family_slots::extract_family_slots`] instead. `step`
+    /// mints the family's fresh successor version FIRST (exactly as the
+    /// hand-rolled version did: `next_state_var()` before reading
+    /// `state_version()`), matching every other `extract_family_slots`
+    /// caller's "caller mints `target` itself" contract. `base_arity` is
+    /// always `1` here — every `_tuple` builder's own value occupies element
+    /// 1, `State` is the sole family and always occupies element 2 (ADR 0122
+    /// §"State already fits": "element 2 of the same result tuple the other
+    /// families are appended to").
+    fn extract_state_family(
+        &mut self,
+        tuple_var: &str,
+        frame: FrameId,
+        span: Span,
+    ) -> Vec<ThreadedStmt> {
+        let source_version = self.state_version();
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        family_slots::extract_family_slots(
+            tuple_var,
+            1,
+            &Self::actor_conditional_families(),
+            |_| {
+                FamilyVersionStep::new(
+                    VersionedVar::new(VersionPrefix::State, source_version, frame),
+                    VersionedVar::new(VersionPrefix::State, target_version, frame),
+                )
+            },
+            span,
+        )
+    }
+
+    /// ADR 0122 Decision 2/BT-3514: the Actor conditional's own
+    /// [`ThreadedFamilies`] — always exactly `[State]` (ADR 0122 §Context,
+    /// "State already fits": an Actor instance method's `StateAcc` threads
+    /// through unconditionally, never as a function of a specific block's
+    /// mutations, so "in a slot-list model it is the trivial case: the
+    /// predicate is always true"). All six `generate_*_with_mutations`
+    /// producers below, plus [`Self::extract_state_family`], build this same
+    /// value rather than re-deriving `[VersionPrefix::State]` at each call
+    /// site.
+    fn actor_conditional_families() -> ThreadedFamilies {
+        ThreadedFamilies::from_matches(&[VersionPrefix::State])
+    }
+
+    /// ADR 0122 Decision 3/BT-3514: this Actor conditional's own
+    /// non-taken-arm / absent-block-passthrough tuple — `{<value_doc>,
+    /// <base_state>}` — through the shared
+    /// [`family_slots::append_baseline_family_slots`] helper with `[State]`,
+    /// rather than each of the six `generate_*_with_mutations` producers
+    /// hand-rolling its own `"{lit, ", base_state, "}"` `Document` splice.
+    /// Byte-identical to the hand-rolled shape: `append_family_slots`'s
+    /// `base` here always carries one prior element (`value_doc`), so the
+    /// helper always prepends `", "` before the (sole) family slot — the
+    /// exact `"{'nil', "` + var + `"}"` splice every call site built by hand.
+    ///
+    /// `base_state` is a plain Core Erlang variable name, not necessarily a
+    /// canonical `State{N}`/`StateAcc{N}` counter value —
+    /// `seed_conditional_locals` mints a disconnected `SeededState` temp
+    /// when outer locals are threaded through this conditional (a
+    /// pre-minted, verbatim name, ADR 0111 Addendum 2's "naming-scheme
+    /// mismatch" Gap 2) — so it renders through [`VersionPrefix::Gensym`],
+    /// whose [`VersionedVar::render_name`] returns the stored name back out
+    /// VERBATIM regardless of `version`, rather than through a numbered
+    /// `VersionPrefix::State` [`VersionedVar`] (which would render via
+    /// `RenderCtx`'s loop-context-dependent `State{N}`/`StateAcc{N}`
+    /// counter naming instead of `base_state`'s own text). The family LIST
+    /// passed to the helper is still `[State]` (`Self::actor_conditional_families`) —
+    /// matching ADR 0122's "State already fits" designation — only the
+    /// RENDER for this particular slot's value uses the verbatim-name path
+    /// already established for exactly this "pre-minted name" situation.
+    fn conditional_baseline_tuple(
+        &mut self,
+        value_doc: Document<'static>,
+        base_state: &str,
+    ) -> Document<'static> {
+        let base = docvec!["{", value_doc];
+        let slot = VersionedVar::new(
+            VersionPrefix::Gensym(base_state.to_string()),
+            0,
+            FrameId::ROOT,
+        );
+        let ctx = threaded_ir::RenderCtx::new(self);
+        family_slots::append_baseline_family_slots(
+            base,
+            &Self::actor_conditional_families(),
+            |_| slot.clone(),
+            &ctx,
+        )
     }
 }
 
@@ -546,6 +629,10 @@ impl CoreErlangGenerator {
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+        // ADR 0122 Decision 3/BT-3514: the non-taken (false) arm's
+        // {'nil', <state>} tuple, through the shared family emission
+        // helper with [State] rather than a hand-rolled splice.
+        let false_tuple = self.conditional_baseline_tuple(Document::Str("'nil'"), &base_state);
 
         Ok(docvec![
             cond_preamble,
@@ -560,9 +647,8 @@ impl CoreErlangGenerator {
             leaf::var(base_state.clone()),
             " in ",
             branch_doc,
-            " <'false'> when 'true' -> {'nil', ",
-            leaf::var(base_state),
-            "}",
+            " <'false'> when 'true' -> ",
+            false_tuple,
             no_match_fallback,
             " end",
         ])
@@ -611,6 +697,10 @@ impl CoreErlangGenerator {
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+        // ADR 0122 Decision 3/BT-3514: the non-taken (true) arm's
+        // {'nil', <state>} tuple, through the shared family emission
+        // helper with [State] rather than a hand-rolled splice.
+        let true_tuple = self.conditional_baseline_tuple(Document::Str("'nil'"), &base_state);
 
         Ok(docvec![
             cond_preamble,
@@ -621,9 +711,9 @@ impl CoreErlangGenerator {
             cond_val_doc,
             " in case ",
             leaf::var(cond_var),
-            " of <'true'> when 'true' -> {'nil', ",
-            leaf::var(base_state.clone()),
-            "} <'false'> when 'true' -> let StateAcc = ",
+            " of <'true'> when 'true' -> ",
+            true_tuple,
+            " <'false'> when 'true' -> let StateAcc = ",
             leaf::var(base_state),
             " in ",
             branch_doc,
@@ -681,6 +771,10 @@ impl CoreErlangGenerator {
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+        // ADR 0122 Decision 3/BT-3514: the non-taken (false) arm's
+        // {'false', <state>} tuple, through the shared family emission
+        // helper with [State] rather than a hand-rolled splice.
+        let false_tuple = self.conditional_baseline_tuple(Document::Str("'false'"), &base_state);
 
         Ok(docvec![
             cond_preamble,
@@ -695,9 +789,8 @@ impl CoreErlangGenerator {
             leaf::var(base_state.clone()),
             " in ",
             branch_doc,
-            " <'false'> when 'true' -> {'false', ",
-            leaf::var(base_state),
-            "}",
+            " <'false'> when 'true' -> ",
+            false_tuple,
             no_match_fallback,
             " end",
         ])
@@ -749,6 +842,10 @@ impl CoreErlangGenerator {
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+        // ADR 0122 Decision 3/BT-3514: the non-taken (true) arm's
+        // {'true', <state>} tuple, through the shared family emission
+        // helper with [State] rather than a hand-rolled splice.
+        let true_tuple = self.conditional_baseline_tuple(Document::Str("'true'"), &base_state);
 
         Ok(docvec![
             cond_preamble,
@@ -759,9 +856,9 @@ impl CoreErlangGenerator {
             cond_val_doc,
             " in case ",
             leaf::var(cond_var),
-            " of <'true'> when 'true' -> {'true', ",
-            leaf::var(base_state.clone()),
-            "} <'false'> when 'true' -> let StateAcc = ",
+            " of <'true'> when 'true' -> ",
+            true_tuple,
+            " <'false'> when 'true' -> let StateAcc = ",
             leaf::var(base_state),
             " in ",
             branch_doc,
@@ -928,7 +1025,9 @@ impl CoreErlangGenerator {
                 branch_doc,
             ]
         } else {
-            docvec!["{'nil', ", leaf::var(base_state.clone()), "}"]
+            // ADR 0122 Decision 3/BT-3514: through the shared family
+            // emission helper with [State] rather than a hand-rolled splice.
+            self.conditional_baseline_tuple(Document::Str("'nil'"), &base_state)
         };
 
         let not_nil_arm = if let Some(block) = not_nil_block {
@@ -950,13 +1049,9 @@ impl CoreErlangGenerator {
                 branch_doc,
             ]
         } else {
-            docvec![
-                "{",
-                leaf::var(obj_var.clone()),
-                ", ",
-                leaf::var(base_state.clone()),
-                "}",
-            ]
+            // ADR 0122 Decision 3/BT-3514: through the shared family
+            // emission helper with [State] rather than a hand-rolled splice.
+            self.conditional_baseline_tuple(leaf::var(obj_var.clone()), &base_state)
         };
 
         Ok(docvec![
