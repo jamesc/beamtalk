@@ -13,10 +13,17 @@
 //! proves the safety net: an extraction that forgets a family `verify()`
 //! catches as `UnboundVersion`.
 //!
-//! Not wired into any emission site yet (BT-3511's own scope) — every test
-//! here builds `ThreadedFamilies` and `ThreadedIr` fixtures directly, the
-//! same way `threaded_ir/tests/*.rs` pins `render()`/`verify()` shapes
-//! without going through a real compile.
+//! Also pins the `Document::Nil` `base` convention BT-3513 added to
+//! [`append_family_slots`] for a construct whose own tuple has no element
+//! before its one family slot (`value_type_codegen.rs`'s
+//! `finish_vt_conditional_branch`, when an arm mutates a family but no
+//! outer local).
+//!
+//! Every test here builds `ThreadedFamilies` and `ThreadedIr` fixtures
+//! directly, the same way `threaded_ir/tests/*.rs` pins `render()`/
+//! `verify()` shapes without going through a real compile — real-compile
+//! coverage for a migrated site lives at that site's own call sites instead
+//! (e.g. `value_type_mutation_matrix_test.bt`).
 
 use crate::core_erlang::CoreErlangGenerator;
 use crate::core_erlang::control_flow::analysis::ThreadedFamilies;
@@ -167,6 +174,55 @@ fn append_empty_families_just_closes_the_base_tuple() {
         panic!("no family should be queried for an empty list, got: {prefix:?}")
     });
     assert_eq!(doc, "{'nil'}");
+}
+
+#[test]
+fn append_with_nil_base_omits_the_leading_separator_before_the_first_family() {
+    // BT-3513: the value-type conditional's per-arm return value when the
+    // arm has NO threaded local to open the tuple with — only a `ClassVars`/
+    // `SelfVt` write (`ConditionalWithSelfFieldThreading`). There is no
+    // prior tuple element (no `'nil'`, no `Result`, no joined locals list),
+    // so `base` is `Document::Nil` and the FIRST family renders with no
+    // leading `", "` — a single-element tuple, not `"{, ClassVars1}"`.
+    let families = ThreadedFamilies::from_matches(&[VersionPrefix::SelfVt]);
+    let mut generator = CoreErlangGenerator::new("bt@family_slots_nil_base_test");
+    let ctx = RenderCtx::new(&mut generator);
+    let doc = append_family_slots(
+        Document::Nil,
+        &families,
+        |prefix| match prefix {
+            VersionPrefix::SelfVt => self_vt(2),
+            other => panic!("unexpected family queried: {other:?}"),
+        },
+        &ctx,
+    )
+    .to_pretty_string();
+    assert_eq!(doc, "{Self2}");
+}
+
+#[test]
+fn append_with_nil_base_and_two_families_still_separates_the_second() {
+    // The `Document::Nil` convention only omits the separator before the
+    // VERY FIRST family — a second family (reachable only via
+    // `ThreadedFamilies::from_matches`'s general contract, never in practice
+    // at the one real `Document::Nil` call site, which carries at most one
+    // family) still gets its own leading `", "`.
+    let families =
+        ThreadedFamilies::from_matches(&[VersionPrefix::ClassVars, VersionPrefix::SelfVt]);
+    let mut generator = CoreErlangGenerator::new("bt@family_slots_nil_base_multi_test");
+    let ctx = RenderCtx::new(&mut generator);
+    let doc = append_family_slots(
+        Document::Nil,
+        &families,
+        |prefix| match prefix {
+            VersionPrefix::ClassVars => class_vars(1),
+            VersionPrefix::SelfVt => self_vt(2),
+            other => panic!("unexpected family queried: {other:?}"),
+        },
+        &ctx,
+    )
+    .to_pretty_string();
+    assert_eq!(doc, "{ClassVars1, Self2}");
 }
 
 #[test]

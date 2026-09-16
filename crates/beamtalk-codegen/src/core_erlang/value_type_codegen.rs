@@ -14,12 +14,13 @@ use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
 use super::control_flow::analysis::ThreadedFamilies;
+use super::control_flow::family_slots::{self, FamilyVersionStep};
 use super::control_flow::{BodyKind, ThreadingPlan};
 use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::method_frame::{MethodBoundary, MethodFrame};
 use super::spec_codegen;
-use super::threaded_ir::VersionPrefix;
+use super::threaded_ir::{FrameId, RenderCtx, VersionPrefix, VersionedVar, render};
 use super::util::ClassIdentity;
 use super::value_accessors::{
     AutoSlotMethods, compute_auto_slot_methods, has_opaque_native_representation,
@@ -104,21 +105,38 @@ struct VtBranchPieces {
 /// every arm so both are true siblings starting from the same baseline, and
 /// to the post-`case` rebind so the merged version is the single successor of
 /// the pre-`case` one rather than of whichever arm generated last.
+///
+/// ADR 0122 / BT-3513: the family half of what used to be a hand-rolled
+/// `VtCondSlots` (a `{class_vars: bool, self_vt: bool}` pair) is now a real
+/// [`ThreadedFamilies`], computed once both arms are known (unchanged timing
+/// — see [`CoreErlangGenerator::generate_vt_conditional_open`]). This
+/// baseline struct survives that migration unchanged: `ThreadedFamilies`
+/// only says WHICH families the conditional threads, never their version
+/// numbers, so the pre-`case` snapshot each arm/the post-`case` rebind reads
+/// still needs its own home. [`Self::version_for`] is the one place that
+/// maps a [`VersionPrefix`] onto the matching field, so every call site
+/// shares it instead of re-matching by hand.
 #[derive(Debug, Clone, Copy)]
 struct VtCondBaseline {
     class_vars: usize,
     self_vt: usize,
 }
 
-/// which trailing slots a value-type conditional's
-/// branch-merge tuple carries. Each is set when EITHER arm mutated that
-/// storage — both arms must then carry the slot, since the `element/N`
-/// extraction after the `case` is fixed at compile time and runs whichever
-/// arm actually executed.
-#[derive(Debug, Clone, Copy)]
-struct VtCondSlots {
-    class_vars: bool,
-    self_vt: bool,
+impl VtCondBaseline {
+    /// The baseline version for `prefix` — `ClassVars`/`SelfVt` only; a
+    /// value-type conditional's trailing family slot never carries any other
+    /// [`VersionPrefix`] (ADR 0122 mutual exclusivity: `ClassVars` requires
+    /// [`CoreErlangGenerator::in_class_method`], `SelfVt` excludes it).
+    fn version_for(&self, prefix: &VersionPrefix) -> usize {
+        match prefix {
+            VersionPrefix::ClassVars => self.class_vars,
+            VersionPrefix::SelfVt => self.self_vt,
+            other => unreachable!(
+                "a value-type conditional's trailing family slot only ever carries \
+                 ClassVars or SelfVt (ADR 0122 mutual exclusivity), got {other:?}"
+            ),
+        }
+    }
 }
 
 /// the class-side selectors that actually produce an instance of
@@ -2662,6 +2680,19 @@ impl CoreErlangGenerator {
     /// [`Self::is_conditional_with_vt_local_threading`], classified ahead of
     /// this in [`Self::classify_vt_body_expr`], and routed to the same
     /// `generate_vt_conditional_open` for the non-last case.
+    ///
+    /// ADR 0122 / BT-3513: reads [`ThreadedFamilies`] via
+    /// [`CoreErlangGenerator::exception_construct_families`] — the same
+    /// general-purpose "does any of these blocks mutate an eligible family"
+    /// detector `on:do:`/`ensure:` already shares with
+    /// `Self::exception_construct_threaded_families` — rather than this
+    /// predicate's own `block_writes_vt_self_field` walk. Behaviourally
+    /// identical: the `!self.in_class_method()` guard above already fixes
+    /// [`Self::eligible_families`] at `[SelfVt]` for every input this
+    /// function can still reach (`ClassVars` requires
+    /// [`Self::in_class_method`]), so `exception_construct_families` can
+    /// only ever answer `[]` or `[SelfVt]` here — never widening what this
+    /// predicate reports.
     fn is_conditional_with_vt_self_field_threading(&self, expr: &Expression) -> bool {
         if self.in_class_method() || !matches!(self.context, CodeGenContext::ValueType) {
             return false;
@@ -2678,10 +2709,17 @@ impl CoreErlangGenerator {
         if !matches!(sel.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:") {
             return false;
         }
-        arguments.iter().any(|arg| match arg {
-            Expression::Block(block) => self.block_writes_vt_self_field(block),
-            _ => false,
-        })
+        let blocks: Vec<&Block> = arguments
+            .iter()
+            .filter_map(|arg| match arg {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        !self
+            .exception_construct_families(&blocks)
+            .as_slice()
+            .is_empty()
     }
 
     /// `true` if any TOP-LEVEL statement of `block` is a value-type
@@ -3002,15 +3040,20 @@ impl CoreErlangGenerator {
         // case's return tuple iff either arm mutated one — both arms must
         // agree on the return shape since the `element/N` extraction after the
         // case is fixed at compile time and runs regardless of which arm
-        // actually executed.
-        let slots = VtCondSlots {
-            class_vars: true_pieces.cv_mutated_version.is_some()
-                || false_pieces.cv_mutated_version.is_some(),
-            self_vt: true_pieces.self_mutated_version.is_some()
-                || false_pieces.self_mutated_version.is_some(),
-        };
-        let true_branch = Self::finish_vt_conditional_branch(true_pieces, slots, baseline);
-        let false_branch = Self::finish_vt_conditional_branch(false_pieces, slots, baseline);
+        // actually executed. ADR 0122 / BT-3513: this set of "either arm
+        // mutated it" families IS the construct's own `ThreadedFamilies` —
+        // the direct successor of the old `VtCondSlots` bool pair.
+        let mut mutated_families = Vec::with_capacity(2);
+        if true_pieces.cv_mutated_version.is_some() || false_pieces.cv_mutated_version.is_some() {
+            mutated_families.push(VersionPrefix::ClassVars);
+        }
+        if true_pieces.self_mutated_version.is_some() || false_pieces.self_mutated_version.is_some()
+        {
+            mutated_families.push(VersionPrefix::SelfVt);
+        }
+        let families = ThreadedFamilies::from_matches(&mutated_families);
+        let true_branch = self.finish_vt_conditional_branch(true_pieces, &families, baseline);
+        let false_branch = self.finish_vt_conditional_branch(false_pieces, &families, baseline);
 
         // Generate the case expression and rebind variables after it.
         let result_var = self.fresh_temp_var("CondResult");
@@ -3030,8 +3073,9 @@ impl CoreErlangGenerator {
             &mut docs,
             &all_mutations,
             &result_var,
-            slots,
+            &families,
             baseline,
+            expr.span(),
         );
 
         Ok(Document::Vec(docs))
@@ -3727,97 +3771,113 @@ impl CoreErlangGenerator {
     }
 
     /// Combines an arm's preamble with its finalized return value,
-    /// appending a trailing `ClassVars` slot when `any_cv_mutated` and/or a trailing
-    /// `Self{N}` slot when `any_self_mutated` (each carrying this arm's own resulting
-    /// version if it mutated that storage, else the unchanged baseline) — i.e. when
+    /// appending a trailing `ClassVars`/`SelfVt` slot per `families` (each
+    /// carrying this arm's own resulting version if IT mutated that family,
+    /// else the unchanged baseline `VtCondBaseline` carries) — i.e. when
     /// *either* sibling arm threads one, both arms must agree on the tuple shape so the
     /// `element/N` extraction after the case is valid regardless of which arm ran.
     ///
-    /// Slot order is fixed: locals, then `ClassVars`, then `Self` — matching
+    /// Slot order is fixed: locals, then `ClassVars`, then `Self` —
+    /// [`ThreadedFamilies`]' own canonical order, matching
     /// [`Self::rebind_vt_conditional_mutations`]'s extraction order. In practice at most
-    /// one of the two trailing slots is ever present (a class method's `self.x :=` is a
-    /// class-var write, a value-type instance method's is a `Self` write), but the order
-    /// is defined rather than assumed.
+    /// one family is ever present (a class method's `self.x :=` is a
+    /// class-var write, a value-type instance method's is a `Self` write —
+    /// ADR 0122 mutual exclusivity), but the order is defined rather than assumed.
     ///
-    /// When both flags are `false`, this renders byte-identically to the
+    /// When `families` is empty, this renders byte-identically to the
     /// original shape (bare value for one mutation, `{v1, v2,...}` tuple otherwise).
+    ///
+    /// ADR 0122 / BT-3513: the two hand-rolled `any_cv_mutated`/
+    /// `any_self_mutated` arms this replaced now route through
+    /// [`family_slots::append_family_slots`] for the (common) case of at
+    /// least one local — the join'd `pieces.local_values` become the
+    /// already-open `base` the helper appends onto. The zero-locals edge
+    /// case (`ifTrue: [self.x := v]` with no local write —
+    /// `VtBodyExprKind::ConditionalWithSelfFieldThreading`) has no prior
+    /// tuple element for `base` to open with, so it passes
+    /// [`Document::Nil`] (see that function's own doc comment on why this is
+    /// additive, not a new code path the helper's other callers share).
     fn finish_vt_conditional_branch(
+        &mut self,
         pieces: VtBranchPieces,
-        slots: VtCondSlots,
+        families: &ThreadedFamilies,
         baseline: VtCondBaseline,
     ) -> Document<'static> {
-        let (any_cv_mutated, any_self_mutated) = (slots.class_vars, slots.self_vt);
-        let (cv_before, self_before) = (baseline.class_vars, baseline.self_vt);
-        let n_locals = pieces.local_values.len();
-        let return_doc = if !any_cv_mutated && !any_self_mutated && n_locals == 1 {
-            pieces
-                .local_values
-                .into_iter()
-                .next()
-                .unwrap_or(Document::Nil)
-        } else {
-            let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{")];
-            let mut filled = 0usize;
-            for (i, doc) in pieces.local_values.into_iter().enumerate() {
-                if i > 0 {
-                    tuple_parts.push(Document::Str(", "));
-                }
-                tuple_parts.push(doc);
-                filled += 1;
-            }
-            if any_cv_mutated {
-                // This arm's own resulting ClassVars: its mutated version if it
-                // advanced the counter, else the baseline (unchanged) version
-                // inherited from before the conditional.
-                let cv_version = pieces.cv_mutated_version.unwrap_or(cv_before);
-                if filled > 0 {
-                    tuple_parts.push(Document::Str(", "));
-                }
-                tuple_parts.push(leaf::var(super::util::versioned_var(
-                    "ClassVars",
-                    cv_version,
-                )));
-                filled += 1;
-            }
-            if any_self_mutated {
-                // this arm's own resulting `Self` — its mutated
-                // version if the arm performed a `self.field := ...` write,
-                // else the baseline (unchanged) version live before the
-                // `case`. Both arms carry the slot whenever EITHER does, for
-                // the same reason `any_cv_mutated` forces it: the `element/N`
-                // extraction after the `case` is fixed at compile time and
-                // runs whichever arm actually executed.
-                let self_version = pieces.self_mutated_version.unwrap_or(self_before);
-                if filled > 0 {
-                    tuple_parts.push(Document::Str(", "));
-                }
-                tuple_parts.push(leaf::var(super::util::versioned_var("Self", self_version)));
-            }
-            tuple_parts.push(Document::Str("}"));
-            Document::Vec(tuple_parts)
+        let VtBranchPieces {
+            preamble,
+            local_values,
+            cv_mutated_version,
+            self_mutated_version,
+        } = pieces;
+        let n_locals = local_values.len();
+        // this arm's own value for `prefix`: its own mutated version
+        // if IT advanced that family's counter, else the baseline (unchanged)
+        // version inherited from before the conditional — the same
+        // both-or-neither resolution `exception_handling.rs`'s
+        // `exception_family_slot` already performs for `on:do:`/`ensure:`.
+        let arm_version_for = |prefix: &VersionPrefix| -> usize {
+            let mutated = match prefix {
+                VersionPrefix::ClassVars => cv_mutated_version,
+                VersionPrefix::SelfVt => self_mutated_version,
+                other => unreachable!(
+                    "a value-type conditional's trailing family slot only ever carries \
+                     ClassVars or SelfVt (ADR 0122 mutual exclusivity), got {other:?}"
+                ),
+            };
+            mutated.unwrap_or_else(|| baseline.version_for(prefix))
         };
-        Document::Vec(vec![Document::Vec(pieces.preamble), return_doc])
+        let return_doc = if families.as_slice().is_empty() && n_locals == 1 {
+            local_values.into_iter().next().unwrap_or(Document::Nil)
+        } else {
+            let base = if n_locals == 0 {
+                // no prior tuple element for `append_family_slots` to open
+                // with (see that function's own doc comment on this
+                // `Document::Nil` convention).
+                Document::Nil
+            } else {
+                docvec!["{", join(local_values, &Document::Str(", "))]
+            };
+            let ctx = RenderCtx::new(self);
+            family_slots::append_family_slots(
+                base,
+                families,
+                |prefix| VersionedVar::new(prefix.clone(), arm_version_for(prefix), FrameId::ROOT),
+                &ctx,
+            )
+        };
+        Document::Vec(vec![Document::Vec(preamble), return_doc])
     }
 
     /// Appends `let VAR = <result_var>` or `let VAR = element(N, <result_var>)` bindings
     /// to `docs`, updating the scope so subsequent expressions see the new variable
-    /// names. When `any_cv_mutated`, also mints and binds a fresh outer
+    /// names. When `families` carries `ClassVars`, also mints and binds a fresh outer
     /// `ClassVarsN` from the case result's trailing tuple element, so a class-var
     /// mutation made inside either arm is visible — and, via `class_var_mutated`'s
     /// sticky flag, correctly reflected in the method's own `{class_var_result, ...}`
-    /// wrapping — to code following the conditional.
+    /// wrapping — to code following the conditional. `SelfVt` is the direct mirror.
+    ///
+    /// ADR 0122 / BT-3513: the trailing-slot pickup this replaced (`next_slot
+    /// = all_mutations.len() + 1`, two hand-rolled `element/N` arms) now
+    /// mints each family's fresh successor version exactly as before
+    /// (`next_class_var`/`next_self_var` — including ADR 0110's sticky
+    /// `class_var_mutated` flag, a generator-state side effect
+    /// [`family_slots::extract_family_slots`] itself never performs; see
+    /// that function's own doc comment: "a caller mints `target` itself...
+    /// BEFORE calling this"), then builds the extraction `Bind`s through
+    /// [`family_slots::extract_family_slots`] and renders them via
+    /// [`render`] — the SAME `let NewCv = element(N, Result) in ` shape,
+    /// just built from typed leaves instead of hand-spliced `Document`s.
     fn rebind_vt_conditional_mutations(
         &mut self,
         docs: &mut Vec<Document<'static>>,
         all_mutations: &[String],
         result_var: &str,
-        slots: VtCondSlots,
+        families: &ThreadedFamilies,
         baseline: VtCondBaseline,
+        span: beamtalk_core::source_analysis::Span,
     ) {
-        let (any_cv_mutated, any_self_mutated) = (slots.class_vars, slots.self_vt);
-        let (cv_before, self_before) = (baseline.class_vars, baseline.self_vt);
-        if !any_cv_mutated && !any_self_mutated && all_mutations.len() == 1 {
-            // Single variable, no class-var threading: case returns the value directly.
+        if families.as_slice().is_empty() && all_mutations.len() == 1 {
+            // Single variable, no family threading: case returns the value directly.
             let var = &all_mutations[0];
             let core_var = Self::to_core_erlang_var(var);
             self.bind_var(var, &core_var);
@@ -3830,7 +3890,7 @@ impl CoreErlangGenerator {
             ]);
             return;
         }
-        // Multiple variables (and/or a threaded class var): case returns a tuple,
+        // Multiple variables (and/or a threaded family): case returns a tuple,
         // extract with element/N.
         for (i, var) in all_mutations.iter().enumerate() {
             let core_var = Self::to_core_erlang_var(var);
@@ -3845,40 +3905,65 @@ impl CoreErlangGenerator {
                 ") in ",
             ]);
         }
-        let mut next_slot = all_mutations.len() + 1;
-        if any_cv_mutated {
-            self.set_class_var_version(cv_before);
-            let new_cv = self.next_class_var();
-            docs.push(docvec![
-                "let ",
-                leaf::var(new_cv),
-                " = call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(next_slot).unwrap_or(i64::MAX)),
-                ", ",
-                leaf::var(result_var.to_string()),
-                ") in ",
-            ]);
-            next_slot += 1;
+        if families.as_slice().is_empty() {
+            return;
         }
-        if any_self_mutated {
-            // the merged `Self` becomes the method's new LIVE
-            // `Self{N}` for every statement after the conditional — the
-            // direct counterpart of Actor's `let State1 = element(2, _CF10)
-            // in`. `set_self_version(self_before)` first so the minted name
-            // is the single successor of the pre-`case` version, never of
-            // whichever arm happened to be generated last.
-            self.set_self_version(self_before);
-            let new_self = self.next_self_var();
-            docs.push(docvec![
-                "let ",
-                leaf::var(new_self),
-                " = call 'erlang':'element'(",
-                leaf::int_lit(i64::try_from(next_slot).unwrap_or(i64::MAX)),
-                ", ",
-                leaf::var(result_var.to_string()),
-                ") in ",
-            ]);
-        }
+        // mint each family's fresh successor version FIRST (the
+        // side-effecting step `family_slots::extract_family_slots` itself
+        // never performs), then hand the resulting (source, target) pairs to
+        // the shared extraction helper.
+        let steps: Vec<(VersionPrefix, FamilyVersionStep)> = families
+            .as_slice()
+            .iter()
+            .map(|prefix| {
+                let (source_version, target_version) = match prefix {
+                    VersionPrefix::ClassVars => {
+                        self.set_class_var_version(baseline.class_vars);
+                        self.next_class_var();
+                        (baseline.class_vars, self.class_var_version())
+                    }
+                    VersionPrefix::SelfVt => {
+                        // the merged `Self` becomes the method's new LIVE
+                        // `Self{N}` for every statement after the conditional
+                        // — the direct counterpart of Actor's `let State1 =
+                        // element(2, _CF10) in`. `set_self_version` first so
+                        // the minted name is the single successor of the
+                        // pre-`case` version, never of whichever arm happened
+                        // to be generated last.
+                        self.set_self_version(baseline.self_vt);
+                        self.next_self_var();
+                        (baseline.self_vt, self.self_version())
+                    }
+                    other => unreachable!(
+                        "a value-type conditional's trailing family slot only ever carries \
+                         ClassVars or SelfVt (ADR 0122 mutual exclusivity), got {other:?}"
+                    ),
+                };
+                (
+                    prefix.clone(),
+                    FamilyVersionStep::new(
+                        VersionedVar::new(prefix.clone(), source_version, FrameId::ROOT),
+                        VersionedVar::new(prefix.clone(), target_version, FrameId::ROOT),
+                    ),
+                )
+            })
+            .collect();
+        let extraction = family_slots::extract_family_slots(
+            result_var,
+            all_mutations.len(),
+            families,
+            |prefix| {
+                steps
+                    .iter()
+                    .find(|(p, _)| p == prefix)
+                    .expect("families and steps built from the same list, in the same order")
+                    .1
+                    .clone()
+            },
+            span,
+        );
+        let mut ctx = RenderCtx::new(self);
+        docs.push(render(&extraction, &mut ctx));
     }
 
     /// Returns true if the class is a non-instantiable primitive type.

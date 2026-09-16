@@ -196,10 +196,12 @@ impl VersionPrefix {
     /// sync; a foreign NLR relay reads THEIR final value straight off the
     /// thrown NLR tuple/the method's own return, never off a shadow.
     ///
-    /// `#[allow(dead_code)]`: only [`Self::extraction_bind_op`] and this
-    /// method's own unit tests call it today — ADR 0122, BT-3511 (the
-    /// emission helper only; no site migrated yet).
-    #[allow(dead_code)]
+    /// Called from [`Self::extraction_bind_op`], which BT-3513 gave a real
+    /// production caller (`family_slots::extract_family_slots`, via
+    /// `value_type_codegen.rs`'s `rebind_vt_conditional_mutations`) —
+    /// previously only [`Self::extraction_bind_op`]'s own unit tests reached
+    /// it (ADR 0122, BT-3511: the emission helper only, no site migrated
+    /// yet).
     pub(in crate::core_erlang) fn requires_shadow_write(&self) -> bool {
         matches!(self, Self::ClassVars)
     }
@@ -240,10 +242,11 @@ impl VersionPrefix {
     /// unwritten-rule failure mode ADR 0122 exists to remove (§"Why the gaps
     /// keep happening").
     ///
-    /// `#[allow(dead_code)]`: only `control_flow::family_slots::extract_family_slots`
-    /// and this method's own unit tests call it today — ADR 0122, BT-3511
-    /// (the emission helper only; no site migrated yet).
-    #[allow(dead_code)]
+    /// Called from `control_flow::family_slots::extract_family_slots`, which
+    /// BT-3513 gave a real production caller
+    /// (`value_type_codegen.rs`'s `rebind_vt_conditional_mutations`) — ADR
+    /// 0122, BT-3511 introduced this as the emission helper only, with no
+    /// site migrated yet.
     pub(in crate::core_erlang) fn extraction_bind_op(&self, value: ValueRef) -> (BindOp, bool) {
         (BindOp::Direct(value), self.requires_shadow_write())
     }

@@ -5,8 +5,8 @@
 //! [`ThreadedFamilies`] slots to a construct's own result tuple and
 //! extracting them back out afterwards — the shared machinery every
 //! currently hand-rolled trailing-slot site will route through once each
-//! migrates (later issues in ADR 0122's epic, BT-3508). Two sites have
-//! migrated so far:
+//! migrates (later issues in ADR 0122's epic, BT-3508). Sites migrated so
+//! far:
 //! - `exception_handling.rs`'s former `exception_self_slot`/`_doc`
 //!   (BT-3486) — `on:do:`/`ensure:`'s result tuple now closes through
 //!   [`append_family_slots`] via `close_exception_result_tuple` (BT-3506,
@@ -25,14 +25,26 @@
 //!   shadow-write verify machinery (`construct_and_verify_class_var_bind`,
 //!   `verify_simple_bind`) is a correctness invariant this helper's plain
 //!   [`VersionPrefix::extraction_bind_op`] does not (yet) reproduce.
+//! - `value_type_codegen.rs`'s `finish_vt_conditional_branch`/
+//!   `rebind_vt_conditional_mutations` (BT-3513, Phase 3's second consumer,
+//!   and the first PRODUCTION caller of [`extract_family_slots`] — every
+//!   earlier migration only ever needed the append half). Each arm's own
+//!   trailing family value is resolved to "this arm's own mutated version,
+//!   else the pre-`case` baseline" BEFORE calling [`append_family_slots`]
+//!   (the same both-or-neither resolution `exception_handling.rs`'s
+//!   `exception_family_slot` already performs for `on:do:`/`ensure:`), so
+//!   [`append_baseline_family_slots`] itself still has no production
+//!   caller — every real branch-merge site so far folds the "taken or
+//!   baseline" choice into its own `current`/`step` closure instead of a
+//!   second call. `append_family_slots` also grew a `Document::Nil` `base`
+//!   convention here — this site's own arm return value can have NO other
+//!   tuple element before its one family slot (a branch that only writes a
+//!   value-type field, no outer local) — see that function's own doc
+//!   comment.
 //!
-//! Still to migrate: `value_type_codegen.rs`'s
-//! `finish_vt_conditional_branch`/`rebind_vt_conditional_mutations`, the
-//! Actor conditional's `with_branch_context`/six `generate_*_with_mutations`,
-//! and the Foldl accumulator (once its leading slot normalizes to trailing,
-//! BT-3516). `append_baseline_family_slots` and `extract_family_slots`
-//! remain unwired by either migration so far — both `append_family_slots`
-//! callers only ever needed the append half.
+//! Still to migrate: the Actor conditional's `with_branch_context`/six
+//! `generate_*_with_mutations`, and the Foldl accumulator (once its leading
+//! slot normalizes to trailing, BT-3516).
 //!
 //! **Trailing position only** — no leading-slot mode; Foldl's leading slot
 //! is normalized to trailing when IT migrates (ADR 0122 §Alternatives
@@ -43,7 +55,10 @@
 //! drift on slot order or count:
 //! - [`append_family_slots`] — the taken-arm / normal-completion shape.
 //! - [`append_baseline_family_slots`] — the "non-taken arm" shape for branch
-//!   merges (ADR 0122's both-or-neither discipline).
+//!   merges (ADR 0122's both-or-neither discipline); a thin entry point over
+//!   [`append_family_slots`] real call sites remain free to fold into their
+//!   own `current` closure instead (see BT-3513's note above) — both read
+//!   the same way to a reviewer.
 //! - [`extract_family_slots`] — unpacks the trailing slots back into fresh
 //!   per-family versions after the construct completes.
 
@@ -62,13 +77,12 @@ use beamtalk_core::source_analysis::Span;
 /// version step," matching
 /// [`super::super::threaded_ir::VersionCounter`]'s own vocabulary
 /// (`next_var` mints a target from a source in exactly this shape).
-// `#[allow(dead_code)]` on the remaining items in this file: both
-// migrations so far (BT-3506, BT-3512) are append-only consumers (see the
-// module doc comment) — `FamilyVersionStep`/`append_baseline_family_slots`/
-// `extract_family_slots` still have no caller outside this module's own unit
-// tests — migrating a site to route through them is each site's own later
-// issue (BT-3513-3518).
-#[allow(dead_code)]
+/// BT-3513: `value_type_codegen.rs`'s `rebind_vt_conditional_mutations` is
+/// this type's first production constructor — every earlier migration
+/// (BT-3506, BT-3512) was append-only. `append_baseline_family_slots` alone
+/// remains a test-only convenience (see the module doc comment's BT-3513
+/// note on why real branch-merge sites fold "taken or baseline" into their
+/// own closure instead).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct FamilyVersionStep {
     pub(in crate::core_erlang) source: VersionedVar,
@@ -76,7 +90,6 @@ pub(in crate::core_erlang) struct FamilyVersionStep {
 }
 
 impl FamilyVersionStep {
-    #[allow(dead_code)]
     pub(in crate::core_erlang) fn new(source: VersionedVar, target: VersionedVar) -> Self {
         Self { source, target }
     }
@@ -85,13 +98,25 @@ impl FamilyVersionStep {
 /// ADR 0122 Decision 3, append half: closes `base` into a full tuple
 /// `Document`, appending one trailing slot per family in `families`'
 /// canonical order first — e.g. `base = "{'nil', StateAcc"` (an OPEN
-/// prefix — no closing brace of its own, matching
-/// `finish_vt_conditional_branch`'s own `tuple_parts` before ITS closing
-/// `Document::Str("}")` push), `families = [State, ClassVars]`, `current`
+/// prefix — no closing brace of its own; the caller's own `base` value
+/// supplies whatever comes before the family slots — a joined locals list,
+/// a bare `'nil'`, …), `families = [State, ClassVars]`, `current`
 /// answering `ClassVars2` for `VersionPrefix::ClassVars` produces
 /// `"{'nil', StateAcc, ClassVars2}"`. With an empty `families` this is just
 /// `base` plus the closing brace — the common case for a construct that
 /// threads no extra family.
+///
+/// `base` is [`Document::Nil`] for a construct whose OWN tuple has NO
+/// element before the family slots — BT-3513's value-type conditional arm
+/// when the arm mutates a family but no outer local (`ifTrue: [self.x :=
+/// v]` with no local write, `n_locals == 0`): there is no `"{'nil',
+/// StateAcc"`-style prefix to open with, so this renders the opening `"{"`
+/// itself and omits the leading `", "` before the FIRST family slot only
+/// (matching the hand-rolled `if filled > 0 { push(", ") }` gate
+/// `finish_vt_conditional_branch` used before this helper existed). Every
+/// other existing call site passes a real, already-open `base` (at least
+/// one prior element — `'nil'`, `Result`, a joined locals list, …), so this
+/// is purely additive: unchanged for every caller that predates it.
 ///
 /// `current` supplies each family's CURRENT [`VersionedVar`] — the version
 /// already live at the point the construct's result tuple closes. Kept a
@@ -116,10 +141,20 @@ pub(in crate::core_erlang) fn append_family_slots(
     current: impl Fn(&VersionPrefix) -> VersionedVar,
     ctx: &RenderCtx<'_>,
 ) -> Document<'static> {
-    let mut docs = vec![base];
-    for prefix in families.as_slice() {
+    let no_prior_elements = matches!(base, Document::Nil);
+    let mut docs = vec![if no_prior_elements {
+        Document::Str("{")
+    } else {
+        base
+    }];
+    for (i, prefix) in families.as_slice().iter().enumerate() {
         let var = current(prefix);
-        docs.push(docvec![", ", render_value(&ValueRef::Version(var), ctx)]);
+        let rendered = render_value(&ValueRef::Version(var), ctx);
+        docs.push(if no_prior_elements && i == 0 {
+            rendered
+        } else {
+            docvec![", ", rendered]
+        });
     }
     docs.push(Document::Str("}"));
     Document::Vec(docs)
@@ -129,10 +164,11 @@ pub(in crate::core_erlang) fn append_family_slots(
 /// same-shaped tuple [`append_family_slots`] builds, but sourced from each
 /// family's BASELINE (pre-branch, unchanged) version rather than a version a
 /// branch freshly mutated — the both-or-neither discipline
-/// `finish_vt_conditional_branch`/`conditionals.rs` both already hand-write
-/// today (ADR 0122 §"What is hand-written today"): whichever arm actually
-/// ran, `element/N` after the merge must be valid, so an arm that did not
-/// itself touch a family still carries a value in that family's slot.
+/// `finish_vt_conditional_branch` hand-wrote before BT-3513 (and
+/// `conditionals.rs`'s still-unmigrated Actor conditional still does today —
+/// ADR 0122 §"What is hand-written today"): whichever arm actually ran,
+/// `element/N` after the merge must be valid, so an arm that did not itself
+/// touch a family still carries a value in that family's slot.
 ///
 /// A thin, self-documenting entry point over [`append_family_slots`] — never
 /// a second tuple-building implementation, so the two can never
@@ -181,7 +217,6 @@ pub(in crate::core_erlang) fn append_baseline_family_slots(
 /// [`VersionPrefix::extraction_bind_op`] — a method on the type, never a
 /// match in this function (ADR 0122 Decision 4) — see that method's own doc
 /// comment for why it is always a plain rebind, never a `maps:put`.
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn extract_family_slots(
     tuple_var: &str,
     base_arity: usize,
