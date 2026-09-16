@@ -2687,13 +2687,21 @@ impl CoreErlangGenerator {
     /// general-purpose "does any of these blocks mutate an eligible family"
     /// detector `on:do:`/`ensure:` already shares with
     /// `Self::exception_construct_threaded_families` — rather than this
-    /// predicate's own `block_writes_vt_self_field` walk. Behaviourally
-    /// identical: the `!self.in_class_method()` guard above already fixes
+    /// predicate's own `block_writes_vt_self_field` walk. The
+    /// `!self.in_class_method()` guard above fixes
     /// [`Self::eligible_families`] at `[SelfVt]` for every input this
     /// function can still reach (`ClassVars` requires
-    /// [`Self::in_class_method`]), so `exception_construct_families` can
-    /// only ever answer `[]` or `[SelfVt]` here — never widening what this
-    /// predicate reports.
+    /// [`Self::in_class_method`]), so that detector can only ever answer
+    /// `[]` or `[SelfVt]` here.
+    ///
+    /// **BT-3522:** that shared detector is now ADR 0122's RECURSIVE
+    /// `body_threaded_families`, so this predicate also reports a write
+    /// nested BELOW a branch block's own top level — which
+    /// [`Self::generate_vt_conditional_open`] cannot carry. It rejects that
+    /// shape there (`reject_nested_vt_conditional_self_field_writes`) rather
+    /// than narrowing the detector back: before BT-3522 the same shape was
+    /// classified `Pure` and sequenced away, which dropped the mutation just
+    /// as silently.
     fn is_conditional_with_vt_self_field_threading(&self, expr: &Expression) -> bool {
         if self.in_class_method() || !matches!(self.context, CodeGenContext::ValueType) {
             return false;
@@ -2735,15 +2743,19 @@ impl CoreErlangGenerator {
     /// buried in a sub-expression keeps its own nested-`let` scoping,
     /// untouched by this issue.
     ///
-    /// **BT-3506 update:** `on:do:`/`ensure:`'s own equivalent check
-    /// (`exception_handling.rs`'s `exception_construct_families`) no longer
-    /// calls this directly — it went through
-    /// [`CoreErlangGenerator::is_family_mutation`] instead (ADR 0122
-    /// Decision 4's one shared "what counts as a mutation" answer, which
-    /// this predicate's own `is_vt_self_field_assignment` already delegates
-    /// to), applied to the SAME top-level walk this function performs. The
-    /// two stay behaviourally identical for `SelfVt` by construction, not by
-    /// a "keep in sync" comment.
+    /// **BT-3506 / BT-3522 update:** `on:do:`/`ensure:`'s own equivalent
+    /// check (`exception_handling.rs`'s `exception_construct_families`) does
+    /// not call this — it goes through ADR 0122's shared
+    /// [`CoreErlangGenerator::body_threaded_families`], whose walk is
+    /// RECURSIVE rather than top-level-only. The two therefore answer
+    /// differently for a write nested below a block's top level, and
+    /// deliberately so: this predicate answers "can this construct's branch
+    /// tuple NAME the write's `Self{N}`" (only a bare statement's can),
+    /// while the detector answers "is there a mutation here at all". What
+    /// they DO share is the one shape rule underneath —
+    /// [`CoreErlangGenerator::is_family_mutation`] (Decision 4), which
+    /// `is_vt_self_field_assignment` above delegates to — so "what counts as
+    /// a `SelfVt` write" can never drift between them.
     pub(in crate::core_erlang) fn block_writes_vt_self_field(
         &self,
         block: &beamtalk_core::ast::Block,
@@ -3001,6 +3013,23 @@ impl CoreErlangGenerator {
             Expression::Block(block) => self.block_writes_vt_self_field(block),
             _ => false,
         });
+        // BT-3522: `threads_self` (and the branch-arm `Self{N}` merge it
+        // gates) covers a write that is a BARE TOP-LEVEL STATEMENT of a
+        // branch block — the base case this site was built for. A write
+        // nested one level deeper (inside a further `ifTrue:` within the
+        // branch, a nested loop/exception body, ...) mints a `Self{N}` that
+        // dies with its own nested scope, so no branch tuple can name it.
+        // Before this check that shape was a SILENT DROP at this call site:
+        // with no outer-local mutation to carry either, the early return
+        // below erased the whole conditional from the emitted method body
+        // (`Document::Nil`), and `is_conditional_with_vt_self_field_threading`
+        // — which since BT-3522 shares `on:do:`/`ensure:`'s own recursive
+        // `exception_construct_families` detector — routes MORE of exactly
+        // that shape here than it used to. Reuses the same per-statement
+        // rejection `exception_handling.rs` applies to its own arms (root
+        // skipped when the statement IS the carried top-level write), so
+        // both sites produce one diagnostic from one rule.
+        self.reject_nested_vt_conditional_self_field_writes(arguments)?;
         if all_mutations.is_empty() && !threads_self {
             return Ok(Document::Nil);
         }
@@ -3080,6 +3109,38 @@ impl CoreErlangGenerator {
         );
 
         Ok(Document::Vec(docs))
+    }
+
+    /// BT-3522: rejects a value-type `self.field := ...` write that a
+    /// conditional's branch block hides below its own top level, which
+    /// [`Self::generate_vt_conditional_open`]'s branch-merge tuple cannot
+    /// carry — see that function's own call-site comment for the shape and
+    /// for why it used to be a silent drop.
+    ///
+    /// Delegates per top-level statement to the shared
+    /// [`CoreErlangGenerator::reject_unthreadable_value_self_field_write`],
+    /// passing `threads_value_self = is_field_assignment(stmt)` exactly as
+    /// `exception_handling.rs`'s own per-statement pass does: that helper's
+    /// pointer-identity root skip then lets a bare top-level write (the
+    /// carried base case) through while rejecting anything deeper, including
+    /// one buried in that statement's own right-hand side. A no-op outside
+    /// value-type instance-method context (the helper's own guard).
+    fn reject_nested_vt_conditional_self_field_writes(
+        &self,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        for arg in arguments {
+            let Expression::Block(block) = arg else {
+                continue;
+            };
+            for stmt in super::util::collect_body_exprs(&block.body) {
+                self.reject_unthreadable_value_self_field_write(
+                    stmt,
+                    Self::is_field_assignment(stmt),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Builds the `(true_arm, false_arm)` [`VtBranchPieces`] pair for one of
