@@ -133,7 +133,7 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
   // BT-3489: a bare field-writing arm inside a NESTED match: arm. The outer
   // match sees its arm body is itself a threading match: (the mutual
   // recursion between `control_flow_has_mutations` and
-  // `match_needs_mutation_threading`), so both levels must root at the same
+  // `match_needs_state_threading`), so both levels must root at the same
   // pre-match state.
   bumpBareNested: v -> Integer =>
     v match: [
