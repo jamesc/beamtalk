@@ -371,6 +371,20 @@ Actor subclass: MutationCorpusActor
       ]
     self.total
 
+  // BT-3521 (density): the OTHER statement ordering — the field write
+  // itself is the block's own last statement (`lower_field_assign_last_expr`'s
+  // own FoldlCollect branch, as opposed to `lower_local_assign_last_expr`'s
+  // above) — hit the identical unbound-`_Val` crash before the fix, since
+  // both branches shared the same hardcoded-literal bug independently.
+  stateFieldCollectFieldWriteLastReadWrite =>
+    seen := 0
+    #(1, 2, 3)
+      collect: [:i |
+        seen := seen + 1
+        self.total := self.total + i
+      ]
+    self.total
+
   // BT-3521 (density): the identical bug reproduces in every OTHER Foldl
   // family that consumes the block's own last-statement value, not just
   // `collect:` — `select:`'s predicate family and `inject:into:`'s

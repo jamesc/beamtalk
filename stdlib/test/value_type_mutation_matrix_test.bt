@@ -902,6 +902,12 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testStateFieldCollectNonLastReadWriteActor =>
     self assert: self actorCorpus stateFieldCollectNonLastReadWrite equals: 6
 
+  // BT-3521 (density): the field write itself as the block's last statement
+  // (`lower_field_assign_last_expr`'s own branch) — see the fragment's own
+  // comment in mutation_corpus_actor.bt.
+  testStateFieldCollectFieldWriteLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldCollectFieldWriteLastReadWrite equals: 6
+
   // BT-3521 (density): same bug, `select:`'s predicate family and
   // `inject:into:`'s accumulator family — see the fragments' own comment in
   // mutation_corpus_actor.bt for why the fix must not be scoped to

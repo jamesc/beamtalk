@@ -51,7 +51,7 @@
 (StorageFamilyActor spawn) ifTrueIfFalse: false
 // => 100
 
-(StorageFamilyActor spawn) doSum
+(StorageFamilyActor spawn) collectSum
 // => 6
 
 (StorageFamilyActor spawn) onDo
