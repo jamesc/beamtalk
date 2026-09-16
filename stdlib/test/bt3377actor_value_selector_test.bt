@@ -16,8 +16,7 @@ TestCase subclass: BT3377ActorValueSelectorTest
     self.probe := BT3377ValueProbe spawn
     self.probe setIt
 
-  tearDown =>
-    self.probe isNil ifFalse: [self.probe stop]
+  tearDown => self.probe isNil ifFalse: [self.probe stop]
 
   testExternalUnaryValueReturnsPlainResultNotOkTuple =>
     self assert: self.probe value equals: 99
