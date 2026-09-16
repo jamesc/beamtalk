@@ -960,3 +960,46 @@ fn test_class_method_non_mutating_self_send_nested_in_conditional_in_ensure_stil
     .expect("a provably non-class-var-mutating nested self-send must still compile");
     assert_compiles_through_erlc("bt@cvnestedpureselfsend", &code);
 }
+
+#[test]
+fn test_class_method_self_send_reaching_mutation_via_class_reference_wrapper_is_compile_error() {
+    // Adversarial-review finding on BT-3522: `class_var_mutating_selectors()`'s
+    // fixed point originally only followed `self foo`-spelled same-class
+    // sends when deciding whether a callee transitively mutates — a callee
+    // reached only via `ClassName foo` (still a same-class, same-activation
+    // send; `generate_class_method_self_send` treats the two spellings
+    // identically) was invisible to it. `wrapper`'s body is `Holder bump`
+    // (a `ClassReference` send, not a `self` send) to `bump`, which DOES
+    // write `self.runs`. Before the fix this made
+    // `reject_unthreadable_class_var_mutation` treat `self wrapper` (nested
+    // inside `ifTrue:`, so not itself carried) as provably pure and let it
+    // through — reintroducing this issue's own headline silent-drop bug one
+    // level of indirection away from the direct case.
+    let src = concat!(
+        "Object subclass: Holder\n",
+        "  classState: runs = 0\n\n",
+        "  class bump => self.runs := self.runs + 1\n\n",
+        "  class wrapper => Holder bump\n\n",
+        "  class probe: flag =>\n",
+        "    self.runs := 0\n",
+        "    [\n",
+        "      flag ifTrue: [ self wrapper ]\n",
+        "    ] ensure: [nil]\n",
+        "    self.runs\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvclassrefwrapper").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "a self-send nested in a conditional must be rejected even when the mutation is only \
+         reachable through a `ClassName foo`-spelled same-class send, not just a `self foo` \
+         one. Got: {result:?}"
+    );
+}
