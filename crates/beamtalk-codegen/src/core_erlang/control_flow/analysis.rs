@@ -109,6 +109,68 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// BT-3522: the two shapes [`CoreErlangGenerator::is_family_mutation`]
+/// recognises for [`VersionPrefix::ClassVars`], reduced to just what
+/// [`CoreErlangGenerator::reject_unthreadable_class_var_mutation`]'s
+/// diagnostic needs.
+///
+/// Exists because `ast_walker::walk_expression`'s visitor is a
+/// higher-ranked `FnMut(&Expression)` — the matched node cannot outlive the
+/// walk, so the facts are copied out at the point of match instead of the
+/// reference being carried back to the caller.
+#[derive(Debug)]
+enum ClassVarMutationSite {
+    /// A bare `self.classVar := ...` write.
+    FieldWrite { field: String, span: Span },
+    /// A same-class self-send whose target may mutate a class variable.
+    SelfSend { selector: String, span: Span },
+}
+
+impl ClassVarMutationSite {
+    /// Classifies an expression [`CoreErlangGenerator::is_family_mutation`]
+    /// has ALREADY matched for `ClassVars` — the caller's guard, not a
+    /// second copy of the shape rule (ADR 0122 Decision 4).
+    fn new(expr: &Expression) -> Self {
+        if let Some(field) = CoreErlangGenerator::field_assignment_name(expr) {
+            return Self::FieldWrite {
+                field: field.to_string(),
+                span: expr.span(),
+            };
+        }
+        let Expression::MessageSend { selector, .. } = expr.unwrap_parens() else {
+            // `is_family_mutation(&ClassVars, _)` matches exactly two
+            // shapes: the field write handled above, and a self-send —
+            // which `is_class_method_self_send` only ever reports for a
+            // `MessageSend`.
+            unreachable!("a non-field-write ClassVars mutation is always a MessageSend");
+        };
+        Self::SelfSend {
+            selector: selector.name().to_string(),
+            span: expr.span(),
+        }
+    }
+
+    fn span(&self) -> Span {
+        match self {
+            Self::FieldWrite { span, .. } | Self::SelfSend { span, .. } => *span,
+        }
+    }
+
+    /// Reuses the existing diagnostic that already describes each shape —
+    /// no third "nested class-var mutation" variant is needed (CLAUDE.md's
+    /// no-duplicate-implementations rule).
+    fn into_error(self, location: String) -> CodeGenError {
+        match self {
+            Self::FieldWrite { field, .. } => {
+                CodeGenError::ClassVarAssignmentInThreadedBody { field, location }
+            }
+            Self::SelfSend { selector, .. } => {
+                CodeGenError::ClassMethodSelfSendInUnthreadedBlock { selector, location }
+            }
+        }
+    }
+}
+
 /// which family a [`Self::nested_loop_or_fold_body`] match belongs
 /// to — `ThreadingPlan::threads_class_vars` uses a genuinely different
 /// formula for each (see that field's doc comment), so
@@ -208,42 +270,6 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0122 / BT-3506: whether ANY top-level statement of `block`
-    /// mutates `prefix`, per the single shared [`Self::is_family_mutation`]
-    /// rule (Decision 4) — deliberately top-level-only, exactly like
-    /// [`Self::find_class_var_mutating_stmt`]/
-    /// [`Self::find_value_self_mutating_stmt`] (the `Letrec`-loop-body
-    /// detectors this mirrors), NOT [`Self::body_threaded_families`]'s own
-    /// recursive walk: `on:do:`/`ensure:`'s own per-statement E1..E7 dispatch
-    /// (`exception_handling.rs`'s `generate_exception_body_with_threading_inner`)
-    /// only ever produces a family-mutation `Bind` this construct's tuple can
-    /// carry for a BARE top-level statement — a mutation nested one level
-    /// deeper (inside this block's own `ifTrue:`, say) already threads
-    /// correctly through THAT construct's own separate branch-merge
-    /// machinery instead, confirmed by `ExceptionArm`'s own before/after
-    /// live-version diff (which this predicate's answer never influences
-    /// point-for-point — only whether the CONSTRUCT allocates a slot at
-    /// all). Migrating this detector's own walk to the recursive one is
-    /// explicitly out of scope for the issue that added this function (see
-    /// `tests::control_flow::family_detector_differential`'s own scope
-    /// note, which names `on:do:`/`ensure:` as a LATER migration).
-    ///
-    /// The sole caller is `exception_handling.rs`'s
-    /// `exception_construct_families` — kept here (not there) so it sits
-    /// beside [`Self::is_family_mutation`] and
-    /// [`Self::find_class_var_mutating_stmt`]/
-    /// [`Self::find_value_self_mutating_stmt`], the three other top-level
-    /// mutation walks this module already owns.
-    pub(in crate::core_erlang) fn block_top_level_mutates_family(
-        &self,
-        block: &beamtalk_core::ast::Block,
-        prefix: &VersionPrefix,
-    ) -> bool {
-        super::super::util::collect_body_exprs(&block.body)
-            .into_iter()
-            .any(|expr| self.is_family_mutation(prefix, expr))
-    }
-
     /// ADR 0122 Decision 1: the unified, recursive storage-family detector —
     /// answers "does `body` mutate family `X`", for every `X` in `eligible`
     /// (see [`Self::eligible_families`]), by walking every top-level
@@ -258,13 +284,16 @@ impl CoreErlangGenerator {
     /// A site that cannot carry a mutation found below its own top level
     /// rejects it via the existing shared rejection functions
     /// ([`Self::reject_unthreadable_value_self_field_write`],
+    /// [`Self::reject_unthreadable_class_var_mutation`],
     /// `reject_class_var_field_assignment`) — detection and carry-capability
-    /// are deliberately separate questions (ADR 0122 §Decision 1). This
-    /// function is not yet consumed by any live emission site — that
-    /// migration is later issues in ADR 0122's epic (BT-3508) — so today it
-    /// backs only the differential test that validates it against every
-    /// corpus construct the old (still-live) detectors already answer.
-    #[allow(dead_code)] // ADR 0122: only the (test-only) differential test calls this until later issues in the epic wire it into live emission sites
+    /// are deliberately separate questions (ADR 0122 §Decision 1).
+    ///
+    /// BT-3522 wired the first live emission consumer:
+    /// `exception_handling.rs`'s `exception_construct_families` (shared with
+    /// `value_type_codegen.rs`'s VT-conditional and `on:do:`/`ensure:`
+    /// consumer sites). The loop/`Foldl*` sites still run the older
+    /// top-level-only walks, differential-tested against this one by
+    /// `tests::control_flow::family_detector_differential`.
     pub(in crate::core_erlang) fn body_threaded_families(
         &self,
         body: &beamtalk_core::ast::Block,
@@ -498,7 +527,7 @@ impl CoreErlangGenerator {
     /// it is the single place that turns a positive match into the
     /// diagnostic, so the `Letrec` and `Foldl*` call sites cannot drift out of
     /// sync (CLAUDE.md's no-duplicate-implementations rule).
-    pub(super) fn reject_unthreadable_value_self_field_write(
+    pub(in crate::core_erlang) fn reject_unthreadable_value_self_field_write(
         &self,
         expr: &Expression,
         threads_value_self: bool,
@@ -537,6 +566,120 @@ impl CoreErlangGenerator {
             &field,
             self.location_label(expr.span()),
         ))
+    }
+
+    /// BT-3522 (ADR 0122): the `ClassVars` counterpart of
+    /// [`Self::reject_unthreadable_value_self_field_write`] — rejects a
+    /// class-var mutation that `expr` (ONE top-level statement of an
+    /// `on:do:`/`ensure:` arm) hides inside a NESTED BLOCK, which the
+    /// enclosing construct's trailing `ClassVars` slot cannot carry.
+    ///
+    /// # Why a nested-block walk, not a whole-subtree walk
+    ///
+    /// The `SelfVt` sibling rejects any write below the statement's root,
+    /// its own right-hand side included. `ClassVars` is genuinely different,
+    /// and the difference was confirmed empirically rather than assumed:
+    ///
+    /// * A class-var mutation in this statement's own SUB-EXPRESSION
+    ///   (`t := 1 + (self bump)`) **is** carried. ADR 0118 phase 5b taught
+    ///   `subexpr_needs_prelude`/`thread_ahead` to recognize a class-var
+    ///   producer, so `generate_exception_body_with_threading_inner`'s E6/E7
+    ///   arms lower it into a real `ThreadedStmt::Bind` in the arm's OWN
+    ///   frame, advancing the ambient class-var version that
+    ///   `ExceptionArm::family_mutated_version` then reads back out into the
+    ///   construct's trailing slot. (Before BT-3522 widened
+    ///   `exception_construct_families` to the recursive
+    ///   [`Self::body_threaded_families`], that `Bind` had no slot to land
+    ///   in and the shape tripped `verify()`'s `UnboundVersion` — an `erlc`
+    ///   unbound-variable crash in a release build. Rejecting it now would
+    ///   swap one regression for another.)
+    /// * A class-var mutation inside a nested BLOCK (`flag ifTrue: [self
+    ///   bump]`, a nested `on:do:`/`ensure:` arm, a nested loop body) is
+    ///   **not** carried: that block compiles to its own closure or its own
+    ///   branch-merge tuple, whose `ClassVars` rebind is scoped strictly
+    ///   inside it, and nothing in this construct's E1..E7 dispatch unpacks
+    ///   it back out. Confirmed empirically: the mutation is simply
+    ///   discarded on normal return (the BT-3522 headline repro returned
+    ///   `0` instead of `1`), with the emitted arm tuple silently naming a
+    ///   same-spelled outer version instead.
+    ///
+    /// So the walk descends the statement looking for nested blocks, then
+    /// searches each block's own body — at any depth, since
+    /// [`beamtalk_core::ast_walker::walk_expression`] descends into blocks
+    /// itself — for a match. "What counts as a mutation" is
+    /// [`Self::is_family_mutation`] (ADR 0122 Decision 4), so the bare
+    /// class-var field write and the same-class self-send shapes are covered
+    /// by the one shared rule rather than re-derived here.
+    ///
+    /// # Why the self-send shape is narrowed once more before rejecting
+    ///
+    /// [`Self::is_family_mutation`] answers the DETECTION question, and for
+    /// `ClassVars` it counts every same-class self-send, mutating or not —
+    /// correct there, because `generate_class_method_self_send` rebinds
+    /// `ClassVars` from the callee's `{'class_var_result', …}` reply
+    /// unconditionally, so the construct needs a slot either way. It is the
+    /// wrong question for REJECTING: when the callee provably never writes a
+    /// class variable, the rebind it returns is the caller's own map
+    /// unchanged, so losing it inside a nested block loses nothing, and
+    /// erroring would break code that compiles and behaves correctly today
+    /// (confirmed empirically on a `class helper => 42` self-send inside an
+    /// arm's `ifTrue:`). `class_var_mutating_selectors()` — a whole-class
+    /// fixed point that already assumes the worst for anything it cannot
+    /// resolve (`compute_class_var_mutating_selectors`) — is the same
+    /// narrowing `check_no_unsafe_class_method_self_sends` (`blocks.rs`)
+    /// applies for the identical "a block cannot thread this back" reason,
+    /// reused here rather than re-derived.
+    ///
+    /// Reuses the two existing diagnostics rather than adding a third:
+    /// [`CodeGenError::ClassVarAssignmentInThreadedBody`](super::super::CodeGenError::ClassVarAssignmentInThreadedBody)
+    /// for a bare write and
+    /// [`CodeGenError::ClassMethodSelfSendInUnthreadedBlock`](super::super::CodeGenError::ClassMethodSelfSendInUnthreadedBlock)
+    /// for a self-send — whose wording ("this block has no way to thread
+    /// such a mutation back to the class method that owns it") already
+    /// describes exactly this shape.
+    pub(super) fn reject_unthreadable_class_var_mutation(&self, expr: &Expression) -> Result<()> {
+        if !self.in_class_method() {
+            return Ok(());
+        }
+        // The visitor is a `FnMut(&Expression)` with a higher-ranked
+        // lifetime, so the matched node itself cannot escape the walk —
+        // the diagnostic's own inputs are extracted in place instead.
+        let mut found: Option<ClassVarMutationSite> = None;
+        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
+            if found.is_some() {
+                return;
+            }
+            let Expression::Block(block) = e else {
+                return;
+            };
+            for stmt in &block.body {
+                beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |inner| {
+                    if found.is_some() || !self.is_family_mutation(&VersionPrefix::ClassVars, inner)
+                    {
+                        return;
+                    }
+                    let site = ClassVarMutationSite::new(inner);
+                    // See "Why the self-send shape is narrowed once more"
+                    // above: a provably non-mutating callee's rebind is the
+                    // caller's own map unchanged, so there is nothing to
+                    // lose and nothing to reject.
+                    if let ClassVarMutationSite::SelfSend { selector, .. } = &site {
+                        if !self
+                            .class_var_mutating_selectors()
+                            .contains(selector.as_str())
+                        {
+                            return;
+                        }
+                    }
+                    found = Some(site);
+                });
+            }
+        });
+        let Some(site) = found else {
+            return Ok(());
+        };
+        let location = self.location_label(site.span());
+        Err(site.into_error(location))
     }
 
     /// the `SelfVt` mirror of
