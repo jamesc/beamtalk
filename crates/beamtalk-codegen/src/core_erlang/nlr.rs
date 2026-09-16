@@ -358,3 +358,44 @@ impl CoreErlangGenerator {
         self.value_type_context_mut().current_nlr_token = token;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nlr_arm_result_actor_reply_yields_reply_tuple() {
+        let doc = nlr_arm_result("Val", "St", NlrBoundary::ActorReply);
+        assert_eq!(doc.to_pretty_string(), "{'reply', Val, St}");
+    }
+
+    #[test]
+    fn nlr_arm_result_class_method_with_vars_yields_class_var_result_tuple() {
+        let doc = nlr_arm_result(
+            "V",
+            "S",
+            NlrBoundary::ClassMethod {
+                has_class_vars: true,
+            },
+        );
+        assert_eq!(doc.to_pretty_string(), "{'class_var_result', V, S}");
+    }
+
+    #[test]
+    fn nlr_arm_result_class_method_without_vars_yields_bare_value() {
+        let doc = nlr_arm_result(
+            "V",
+            "S",
+            NlrBoundary::ClassMethod {
+                has_class_vars: false,
+            },
+        );
+        assert_eq!(doc.to_pretty_string(), "V");
+    }
+
+    #[test]
+    fn nlr_arm_result_value_type_yields_value_state_tuple() {
+        let doc = nlr_arm_result("V", "S", NlrBoundary::ValueType);
+        assert_eq!(doc.to_pretty_string(), "{V, S}");
+    }
+}

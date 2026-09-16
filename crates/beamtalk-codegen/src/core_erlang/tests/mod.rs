@@ -164,6 +164,7 @@ mod control_flow;
 mod dispatch;
 mod expressions;
 mod gen_server;
+mod nlr;
 mod primitives;
 mod recv_type;
 mod supervisor;
