@@ -75,7 +75,7 @@ fn make_plan(
         fallback_reason: StateAccFallbackReason::None,
         mutated_fields,
         threaded_families: ThreadedFamilies::default(),
-        initial_class_var: "ClassVars".to_string(),
+        initial_class_var_version: 0,
     }
 }
 

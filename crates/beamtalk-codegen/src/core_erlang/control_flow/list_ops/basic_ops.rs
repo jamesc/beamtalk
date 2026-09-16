@@ -198,6 +198,7 @@ impl CoreErlangGenerator {
             leaf::var(init_state),
             &safe_list_var,
             &fold_result,
+            body.span,
         )];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
 
@@ -429,6 +430,7 @@ impl CoreErlangGenerator {
                 docvec!["{[], ", leaf::var(init_state), "}"],
                 &safe_list_var,
                 &fold_result,
+                body.span,
             ),
             "let ",
             leaf::var(rev_list.clone()),
