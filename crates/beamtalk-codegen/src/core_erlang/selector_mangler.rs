@@ -22,7 +22,8 @@
 //! selector→string authority (selector text needs no mangling of
 //! its own to become atom content). This module provides the
 //! atom-*length*-safe mangling utilities layered on top —
-//! [`safe_class_method_selector`] and [`safe_class_method_fn_name`].
+//! [`safe_class_method_selector`], [`safe_class_method_fn_name`],
+//! [`sealed_fn_name`], and [`dispatch_fn_name`].
 //!
 //! Quoting an atom string for Core Erlang output is **not** done here: that is
 //! the job of the `leaf::atom` (from `beamtalk_cerl_doc`) typed-leaf helper (ADR 0089), which
@@ -41,6 +42,15 @@ const CLASS_METHOD_PREFIX: &str = "class_";
 /// called directly (bypassing dynamic dispatch). Both the function definition
 /// and its direct call sites must agree on this name.
 const SEALED_PREFIX: &str = "__sealed_";
+
+/// The prefix used for `self delegate` dispatch function names in native
+/// facade modules.
+///
+/// A `self delegate` method `writeLine:` compiles to a `'dispatch_writeLine:'/N`
+/// function that forwards to the backing `gen_server` via `beamtalk_actor:sync_send`.
+/// Both the export entry and the function definition must use this helper so
+/// the name is never constructed inline with `format!()`.
+const DISPATCH_PREFIX: &str = "dispatch_";
 
 /// Returns an atom-safe version of `name`.
 ///
@@ -109,6 +119,28 @@ pub fn sealed_fn_name(selector: &str) -> String {
     } else {
         let hash = fnv1a_64(selector.as_bytes());
         format!("{SEALED_PREFIX}kw_{hash:016x}")
+    }
+}
+
+/// Returns a safe function name atom for a `self delegate` dispatch function
+/// in a native facade module.
+///
+/// A `self delegate` method `selector` compiles to a `'dispatch_{selector}'/N`
+/// function. This helper centralises construction of that name so the export
+/// entry and the function definition site stay in lock-step without inline
+/// `format!()` calls at the codegen leaf level.
+///
+/// If `"dispatch_" + selector` would exceed Erlang's 255-char atom limit, the
+/// selector is replaced with a deterministic FNV-1a hash (`"kw_<16-hex>"`),
+/// mirroring [`sealed_fn_name`]. For all realistic selectors (≤ 246 chars)
+/// the result is exactly `"dispatch_" + selector`.
+#[must_use]
+pub fn dispatch_fn_name(selector: &str) -> String {
+    if DISPATCH_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
+        format!("{DISPATCH_PREFIX}{selector}")
+    } else {
+        let hash = fnv1a_64(selector.as_bytes());
+        format!("{DISPATCH_PREFIX}kw_{hash:016x}")
     }
 }
 
@@ -200,6 +232,39 @@ mod tests {
         let r2 = sealed_fn_name(&long);
         assert_eq!(r1, r2);
         assert!(r1.starts_with("__sealed_kw_"));
+    }
+
+    #[test]
+    fn dispatch_fn_name_short() {
+        assert_eq!(dispatch_fn_name("writeLine:"), "dispatch_writeLine:");
+        assert_eq!(dispatch_fn_name("doSomething"), "dispatch_doSomething");
+        assert_eq!(dispatch_fn_name("x:y:"), "dispatch_x:y:");
+    }
+
+    #[test]
+    fn dispatch_fn_name_exactly_fits() {
+        // "dispatch_" is 9 chars; 246 + 9 = 255, exactly at the limit.
+        let sel = "a".repeat(246);
+        assert_eq!(dispatch_fn_name(&sel), format!("dispatch_{sel}"));
+    }
+
+    #[test]
+    fn dispatch_fn_name_boundary() {
+        // 247 + 9 = 256 > 255, so the selector is hashed.
+        let sel = "a".repeat(247);
+        let name = dispatch_fn_name(&sel);
+        assert!(name.starts_with("dispatch_kw_"));
+        // "dispatch_" (9) + "kw_" (3) + 16 hex digits = 28 chars.
+        assert_eq!(name.len(), 28);
+    }
+
+    #[test]
+    fn dispatch_fn_name_deterministic() {
+        let long = "a".repeat(300);
+        let r1 = dispatch_fn_name(&long);
+        let r2 = dispatch_fn_name(&long);
+        assert_eq!(r1, r2);
+        assert!(r1.starts_with("dispatch_kw_"));
     }
 
     #[test]

@@ -13,6 +13,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use super::super::selector_mangler::dispatch_fn_name;
 use super::super::spec_codegen;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
@@ -112,7 +113,7 @@ impl CoreErlangGenerator {
                 let dispatch_arity = method.selector.arity() + 1; // +1 for Self
                 parts.push(docvec![
                     ", ",
-                    leaf::fname(format!("dispatch_{selector_name}"), dispatch_arity),
+                    leaf::fname(dispatch_fn_name(&selector_name), dispatch_arity),
                 ]);
             }
             Document::Vec(parts)
@@ -877,7 +878,7 @@ impl CoreErlangGenerator {
         };
 
         docvec![
-            leaf::fname(format!("dispatch_{selector_name}"), dispatch_arity),
+            leaf::fname(dispatch_fn_name(&selector_name), dispatch_arity),
             " = fun (",
             params_doc,
             ") ->",
