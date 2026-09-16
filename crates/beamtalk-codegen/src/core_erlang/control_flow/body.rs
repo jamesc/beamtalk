@@ -710,9 +710,16 @@ impl CoreErlangGenerator {
                 // called internally, rejects it at compile time — unchanged
                 // by this migration; only a same-class self-send can mutate
                 // a class var inside a `Foldl*` body, handled below).
-                self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
+                let field_val_var =
+                    self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                 if is_last {
-                    self.lower_field_assign_last_expr(&mut stmts, kind, pred_var.as_ref(), span);
+                    self.lower_field_assign_last_expr(
+                        &mut stmts,
+                        kind,
+                        pred_var.as_ref(),
+                        &field_val_var,
+                        span,
+                    );
                 }
             } else if self.is_actor_self_send(expr) {
                 has_mutations = true;
@@ -814,20 +821,24 @@ impl CoreErlangGenerator {
                     // branch calls (`lower_local_var_assignment_bind`,
                     // documented as byte-identical to
                     // `generate_local_var_assignment_in_loop`'s hand-rolled
-                    // `Document`). The returned value var name is discarded
-                    // here too, matching the pre-migration call site
-                    // (`lower_local_assign_last_expr` always receives `None`
-                    // on this path — its `plan.use_tuple_acc` branch, the
-                    // only one that reads it, is unreachable here).
+                    // `Document`). The returned value var name is captured and
+                    // threaded through to `lower_local_assign_last_expr` (its
+                    // non-tuple-acc branch, below) — BT-3521: a StateAcc-mode
+                    // `FoldlCollect`/`FoldlInject`/predicate family that ends
+                    // on a bare local-var assignment needs the real bound
+                    // value to build its result, not a fictional literal
+                    // `_Val` (the generator only ever mints versioned
+                    // `_ValN` names — see `VariableContext::fresh_var`).
                     has_mutations = true;
-                    self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
+                    let val_var =
+                        self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
                     if is_last {
                         self.lower_local_assign_last_expr(
                             &mut stmts,
                             kind,
                             pred_var.as_ref(),
                             plan,
-                            None,
+                            Some(&val_var),
                             span,
                         );
                     }
@@ -1534,6 +1545,7 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
         kind: &BodyKind,
         pred_var: Option<&String>,
+        last_val: &str,
         span: Span,
     ) {
         match kind {
@@ -1546,7 +1558,9 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 stmts.push(ThreadedStmt::Statement(
                     docvec![
-                        "{[_Val | AccList], ",
+                        "{[",
+                        leaf::var(last_val.to_string()),
+                        " | AccList], ",
                         leaf::var(self.current_state_var()),
                         "}",
                     ],
@@ -1563,14 +1577,26 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec!["let ", leaf::var(pv.clone()), " = _Val in ",],
+                        docvec![
+                            "let ",
+                            leaf::var(pv.clone()),
+                            " = ",
+                            leaf::var(last_val.to_string()),
+                            " in ",
+                        ],
                         span,
                     ));
                 }
             }
             BodyKind::FoldlInject => {
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["{_Val, ", leaf::var(self.current_state_var()), "}",],
+                    docvec![
+                        "{",
+                        leaf::var(last_val.to_string()),
+                        ", ",
+                        leaf::var(self.current_state_var()),
+                        "}",
+                    ],
                     span,
                 ));
             }
@@ -1732,6 +1758,7 @@ impl CoreErlangGenerator {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lower_local_assign_last_expr(
         &self,
         stmts: &mut Vec<ThreadedStmt>,
@@ -1794,6 +1821,9 @@ impl CoreErlangGenerator {
             }
             return;
         }
+        // Map/StateAcc mode — BT-3521: same `last_val` handling as the
+        // tuple-acc branch above (a bare `_Val` is never actually bound).
+        let val = last_val.unwrap_or("_Val");
         match kind {
             BodyKind::FoldlDo => {
                 stmts.push(ThreadedStmt::Statement(
@@ -1804,7 +1834,9 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 stmts.push(ThreadedStmt::Statement(
                     docvec![
-                        " {[_Val | AccList], ",
+                        " {[",
+                        leaf::var(val.to_string()),
+                        " | AccList], ",
                         leaf::var(self.current_state_var()),
                         "}",
                     ],
@@ -1821,14 +1853,26 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlGroupBy { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec![" let ", leaf::var(pv.clone()), " = _Val in ",],
+                        docvec![
+                            " let ",
+                            leaf::var(pv.clone()),
+                            " = ",
+                            leaf::var(val.to_string()),
+                            " in ",
+                        ],
                         span,
                     ));
                 }
             }
             BodyKind::FoldlInject => {
                 stmts.push(ThreadedStmt::Statement(
-                    docvec![" {_Val, ", leaf::var(self.current_state_var()), "}",],
+                    docvec![
+                        " {",
+                        leaf::var(val.to_string()),
+                        ", ",
+                        leaf::var(self.current_state_var()),
+                        "}",
+                    ],
                     span,
                 ));
             }

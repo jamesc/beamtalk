@@ -354,6 +354,23 @@ Actor subclass: MutationCorpusActor
       ]
     self.total
 
+  // BT-3521: the same axis-4 shape, but as a bare (result-discarded,
+  // non-last) `collect:` statement — the block's own LAST statement is the
+  // local-var assignment `seen := seen + 1`, not the field write. `collect:`
+  // (FoldlCollect) is the family that actually reads that last statement's
+  // value (to build the mapped result list), unlike `do:` (FoldlDo, above),
+  // which only cares that `State` threads correctly and never touches the
+  // block's own return value — that's why this shape crashed erlc with an
+  // unbound `_Val` while the `do:` cell already worked.
+  stateFieldCollectNonLastReadWrite =>
+    seen := 0
+    #(1, 2, 3)
+      collect: [:i |
+        self.total := self.total + i
+        seen := seen + 1
+      ]
+    self.total
+
   // BT-3486: the same axis-4 shape in the third construct family —
   // `on:do:`/`ensure:`. These are the reference cells the TestCase-context
   // (value-type) analogues in value_type_mutation_matrix_test.bt are compared

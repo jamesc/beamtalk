@@ -891,6 +891,17 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testClassVarToDoNonLastReadWriteClassMethod =>
     self assert: MutationCorpusClassMethod classVarToDoNonLastReadWrite equals: 15
 
+  // BT-3521: an Actor state-field write inside a bare (non-last) `collect:`
+  // statement crashed erlc with an unbound `_Val` in `dispatch/4` — the
+  // `collect:` family reads the block's last-statement value (a local-var
+  // assignment here) to build its mapped result, and that value's real
+  // bound name was silently discarded before threading it into the
+  // accumulator tail. No TestCase-context analogue: a Foldl-shaped list-op
+  // body performing a `self.field :=` write in the value-type/TestCase
+  // context is unrelated to this Actor-only codegen path.
+  testStateFieldCollectNonLastReadWriteActor =>
+    self assert: self actorCorpus stateFieldCollectNonLastReadWrite equals: 6
+
   testStateFieldIfTrueNonLastReadWriteTrueActor =>
     self assert: (self actorCorpus stateFieldIfTrueNonLastReadWrite: true) equals: 7
 
