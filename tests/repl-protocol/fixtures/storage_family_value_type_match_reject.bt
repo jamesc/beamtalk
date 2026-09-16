@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0122 / BT-3489: a value-type `self.field := ...` write as a `match:`
+// arm body is a compile-time rejection (`ValueSelfFieldAssignmentInMatchArm`)
+// — `MATCH_ARM_FAMILIES` (`patterns/match_lowering.rs`) is `[State,
+// ClassVars]`; `SelfVt` is deliberately excluded because a match:'s N arms
+// have no branch-merge machinery of their own the way `ifTrue:`/`ifFalse:`/
+// `ifTrue:ifFalse:` do (`generate_vt_conditional_open`'s `ThreadedFamilies`
+// trailing-slot tuple is wired for exactly those two arms). Own fixture
+// file: a rejected method can't share a class with methods that must
+// compile.
+
+TestCase subclass: StorageFamilyValueTypeMatchReject
+  field: total = 0
+
+  fragMatchDirectWrite: v =>
+    v match: [
+      1 -> self.total := self.total + 10;
+      _ -> self.total := self.total + 1
+    ]
+    self.total

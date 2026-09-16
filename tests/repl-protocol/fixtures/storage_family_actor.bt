@@ -1,0 +1,91 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0122 / BT-3519 close-out: e2e coverage of the Actor `state:` storage
+// family threading through every construct the epic unified, driven from a
+// live REPL session (unit/BUnit tests already cover this — see
+// stdlib/test/fixtures/mutation_corpus_actor.bt, whose fragment bodies these
+// mirror verbatim — but never through the REPL's own `:load`/eval path).
+// `State` threads through every construct unconditionally (ADR 0122 "State
+// already fits" — it is the actor's own scratch map, not a function of body
+// shape), so every cell here is an ACCEPT.
+
+Actor subclass: StorageFamilyActor
+  state: total = 0
+
+  bump => self.total := self.total + 1
+
+  // ── to:do: ──────────────────────────────────────────────────────────────
+  toDo =>
+    seen := 0
+    1
+      to: 5
+      do: [:i |
+        self.total := self.total + i
+        seen := seen + 1
+      ]
+    self.total
+
+  // ── whileTrue: ──────────────────────────────────────────────────────────
+  whileTrue =>
+    n := 0
+    [n < 5]
+      whileTrue: [
+        self.total := self.total + 1
+        n := n + 1
+      ]
+    self.total
+
+  // ── ifTrue:ifFalse: ─────────────────────────────────────────────────────
+  ifTrueIfFalse: flag =>
+    x := 1
+    flag
+      ifTrue: [
+        self.total := self.total + 1
+        x := x + 1
+      ]
+      ifFalse: [self.total := self.total + 100]
+    self.total
+
+  // ── do:/collect: (Foldl-shaped list op) ────────────────────────────────
+  //
+  // `do:`, not `collect:` — a direct Actor state-field write inside a bare
+  // (result-discarded) `collect:` statement hits a separate, pre-existing
+  // codegen bug (`unbound variable '_Val'` from `erlc`), filed as BT-3521
+  // and out of this issue's scope (it is not one of ADR 0122's six
+  // hand-written sites; `do:` and `collect:` share the same `Foldl*`
+  // family-threading formula this construct family is meant to exercise).
+  doSum =>
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        self.total := self.total + i
+        seen := seen + 1
+      ]
+    self.total
+
+  // ── on:do: ──────────────────────────────────────────────────────────────
+  onDo =>
+    seen := 0
+    [
+      self.total := self.total + 3
+      seen := seen + 1
+    ] on: Error do: [:e | nil]
+    self.total
+
+  // ── ensure: ─────────────────────────────────────────────────────────────
+  ensure =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+    ] ensure: [nil]
+    self.total
+
+  // ── match: (self-send mutation — MATCH_ARM_FAMILIES includes `State`) ───
+  matchArm: v =>
+    v match: [
+      1 -> self bump;
+      _ -> nil
+    ]
+    self.total

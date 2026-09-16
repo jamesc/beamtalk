@@ -1,0 +1,74 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0122 / BT-3519 close-out: e2e coverage of the value-type `SelfVt`
+// storage family threading through every ACCEPTED construct the epic
+// unified, driven from a live REPL session. Fragment bodies mirror
+// stdlib/test/value_type_mutation_matrix_test.bt's `frag*` methods verbatim.
+//
+// A genuine `Value subclass:` can never write `self.field :=` at all (ADR
+// 0042); the only route by which it compiles under `CodeGenContext::ValueType`
+// is the BT-1533 `TestCase` immutability exemption — hence `TestCase
+// subclass:` here rather than `Value subclass:`, matching the ADR/epic's own
+// "value-type TestCase field" family description.
+//
+// `to:do:`/`whileTrue:`/`ifTrue:ifFalse:` thread a bare top-level
+// `self.field := ...` write via BT-3484's `Self`/`SelfN` version chain.
+// `on:do:`/`ensure:` thread it via BT-3486's trailing family slot (ADR
+// 0122's first real `family_slots.rs` consumer). `do:`/`collect:` and
+// `match:` are RECOGNIZED shapes but REJECTED, not accepted — see
+// storage_family_value_type_foldl_reject.bt /
+// storage_family_value_type_match_reject.bt.
+
+TestCase subclass: StorageFamilyValueType
+  field: total = 0
+
+  // ── to:do: ──────────────────────────────────────────────────────────────
+  fragToDo =>
+    seen := 0
+    1
+      to: 5
+      do: [:i |
+        self.total := self.total + i
+        seen := seen + 1
+      ]
+    self.total
+
+  // ── whileTrue: ──────────────────────────────────────────────────────────
+  fragWhileTrue =>
+    n := 0
+    [n < 5]
+      whileTrue: [
+        self.total := self.total + 1
+        n := n + 1
+      ]
+    self.total
+
+  // ── ifTrue:ifFalse: ─────────────────────────────────────────────────────
+  fragIfTrueIfFalse: flag =>
+    x := 1
+    flag
+      ifTrue: [
+        self.total := self.total + 1
+        x := x + 1
+      ]
+      ifFalse: [self.total := self.total + 100]
+    self.total
+
+  // ── on:do: ──────────────────────────────────────────────────────────────
+  fragOnDo =>
+    seen := 0
+    [
+      self.total := self.total + 3
+      seen := seen + 1
+    ] on: Error do: [:e | nil]
+    self.total
+
+  // ── ensure: ─────────────────────────────────────────────────────────────
+  fragEnsure =>
+    seen := 0
+    [
+      self.total := self.total + 1
+      seen := seen + 1
+    ] ensure: [nil]
+    self.total

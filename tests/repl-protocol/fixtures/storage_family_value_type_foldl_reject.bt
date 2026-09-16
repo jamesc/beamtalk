@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0122 / BT-3487/BT-3488: a value-type `self.field := ...` write inside
+// a `Foldl*`-shaped list-op body (`do:`/`collect:`/...) is unconditionally
+// rejected — `ThreadingPlan::threads_value_self` is never set for a Foldl
+// plan (no matching accumulator slot), so every such write is a clean
+// `FieldAssignmentInUnsupportedBlock` compile-time rejection rather than the
+// `erlc` "unbound variable 'State'" crash it used to produce. Own fixture
+// file: a rejected method can't share a class with methods that must
+// compile.
+
+TestCase subclass: StorageFamilyValueTypeFoldlReject
+  field: total = 0
+
+  fragDoDirectWrite =>
+    #(1, 2, 3) do: [:i | self.total := self.total + i]
+    self.total
