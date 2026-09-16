@@ -371,6 +371,33 @@ Actor subclass: MutationCorpusActor
       ]
     self.total
 
+  // BT-3521 (density): the identical bug reproduces in every OTHER Foldl
+  // family that consumes the block's own last-statement value, not just
+  // `collect:` — `select:`'s predicate family and `inject:into:`'s
+  // accumulator family share the exact same StateAcc-mode epilogue helpers
+  // (`lower_field_assign_last_expr`/`lower_local_assign_last_expr` in
+  // body.rs), so a fix scoped to `collect:` alone would have left these
+  // crashing. The predicate here must itself stay Boolean-typed (`_keep`),
+  // so the field write is deliberately NOT the last statement — same shape
+  // as the `collect:` cell above, just with a boolean-valued local assign.
+  stateFieldSelectNonLastReadWrite =>
+    _keep := true
+    #(1, 2, 3)
+      select: [:i |
+        self.total := self.total + i
+        _keep := i > 1
+      ]
+    self.total
+
+  stateFieldInjectNonLastReadWrite =>
+    #(1, 2, 3)
+      inject: 0
+      into: [:acc :i |
+        self.total := self.total + i
+        acc := acc + i
+      ]
+    self.total
+
   // BT-3486: the same axis-4 shape in the third construct family —
   // `on:do:`/`ensure:`. These are the reference cells the TestCase-context
   // (value-type) analogues in value_type_mutation_matrix_test.bt are compared
