@@ -156,7 +156,7 @@ impl CoreErlangGenerator {
     /// node — the Letrec counterpart of [`Self::generate_foldl_loop_body`]
     /// (the `Foldl*` family's own merged-node builder). Mirrors that
     /// function's `with_branch_context` wrapping, plus its own
-    /// `loop_threads_class_vars`/`last_loop_class_var` bookkeeping (a
+    /// `threading_families` bookkeeping (ADR 0122 Decision 5, BT-3518 — a
     /// Letrec-only concern — `Foldl*` threads `ClassVars` via the
     /// `{ClassVars, StateAcc}` accumulator wrap instead, entirely inside
     /// `lower_foldl_body`); `while_loops.rs`/`counted_loops.rs` call this and
@@ -168,12 +168,9 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
     ) -> Result<(Vec<ThreadedStmt>, FrameId)> {
         self.with_branch_context(|this| {
-            this.loop_mode.loop_threads_class_vars = plan.threads_class_vars();
+            this.loop_mode.threading_families = plan.threaded_families().clone();
             let frame = this.current_branch_frame();
             let result = this.lower_letrec_body(body, plan, frame);
-            if plan.threads_class_vars() {
-                this.loop_mode.last_loop_class_var = Some(this.current_class_var());
-            }
             result.map(|stmts| (stmts, frame))
         })
     }
@@ -339,20 +336,25 @@ impl CoreErlangGenerator {
                 let tv = self.threaded_expression(expr, frame)?;
                 stmts.extend(tv.prelude);
             } else if self.is_class_method_self_send(expr) {
-                if self.loop_mode.loop_threads_class_vars {
+                if self
+                    .loop_mode
+                    .threading_families
+                    .contains(&VersionPrefix::ClassVars)
+                {
                     let tv = self.threaded_expression(expr, frame)?;
                     stmts.extend(tv.prelude);
                 } else {
                     // Defensive fallback: `generate_letrec_body_ir` already
-                    // sets `loop_mode.loop_threads_class_vars` from
-                    // `plan.threads_class_vars` before this loop runs, and
+                    // sets `loop_mode.threading_families` from
+                    // `plan.threaded_families()` before this loop runs, and
                     // `ThreadingPlan`'s own analysis
                     // (`Self::loop_body_threads_class_vars`) detects exactly
                     // this bare, top-level self-send shape ahead of time —
-                    // so `loop_threads_class_vars` should already be `true`
-                    // whenever `is_class_method_self_send` matches here. Not
-                    // expected to be live in practice; kept as a safety net
-                    // against a plan/body detection mismatch.
+                    // so `threading_families` should already contain
+                    // `ClassVars` whenever `is_class_method_self_send`
+                    // matches here. Not expected to be live in practice;
+                    // kept as a safety net against a plan/body detection
+                    // mismatch.
                     let selector = if let Expression::MessageSend { selector, .. } = expr {
                         selector.name().to_string()
                     } else {
@@ -420,7 +422,12 @@ impl CoreErlangGenerator {
             unreachable!("is_field_assignment guarantees a FieldAccess target");
         };
 
-        if self.is_class_var_assignment(expr) && self.loop_mode.loop_threads_class_vars {
+        if self.is_class_var_assignment(expr)
+            && self
+                .loop_mode
+                .threading_families
+                .contains(&VersionPrefix::ClassVars)
+        {
             let branch_frame = self.current_branch_frame();
             let (preamble_doc, bind, val_var) =
                 self.lower_class_var_field_assignment_bind(&field.name, value, branch_frame)?;
@@ -1482,10 +1489,13 @@ impl CoreErlangGenerator {
             // record this closure's peak class-var version (BEFORE
             // `with_branch_context`'s guard restores it on drop, right after
             // this function returns) so `ThreadingPlan::foldl_call_doc` can
-            // fast-forward past it — see `last_foldl_class_var_peak`'s own
-            // doc comment for why a naive post-fold `next_class_var()` call
-            // would otherwise mint an already-used name.
-            self.set_foldl_class_var_peak(cv_version);
+            // fast-forward past it — see `LoopMode::foldl_peak_versions`'s
+            // own doc comment for why a naive post-fold `next_class_var()`
+            // call would otherwise mint an already-used name. `ClassVars` is
+            // the only family a `Foldl*` accumulator can ever carry (see the
+            // `unreachable!` arm just below), so this is always the key this
+            // records against.
+            self.set_foldl_class_var_peak(VersionPrefix::ClassVars, cv_version);
             let ThreadedStmt::Statement(tail, tail_span) = stmts
                 .pop()
                 .expect("a Foldl* body must push at least one tail-expression Statement")

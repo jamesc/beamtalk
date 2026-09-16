@@ -734,7 +734,10 @@ fn test_field_assignment_open_class_var_threads_class_vars_with_shadow_write() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_in_class_method(true);
     generator.class_var_names_mut().insert("total".to_string());
-    generator.loop_mode.loop_threads_class_vars = true;
+    generator.loop_mode.threading_families =
+        crate::core_erlang::control_flow::analysis::ThreadedFamilies::from_matches(&[
+            crate::core_erlang::threaded_ir::VersionPrefix::ClassVars,
+        ]);
     let expr = self_field_assignment_expr("total", Expression::Literal(Literal::Integer(42), s()));
     let (doc, val_var) = generator.generate_field_assignment_open(&expr).unwrap();
     let output = doc.to_pretty_string();

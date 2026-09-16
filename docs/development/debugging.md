@@ -235,6 +235,29 @@ trigger state threading in the first place — see `docs/beamtalk-language-featu
 of that boundary, and ADR 0111 Addendum 9 for the full six-question design
 this migration implements.
 
+**Per-family loop-entry/`Foldl` peak state (ADR 0122 Decision 5, BT-3518).**
+`LoopMode` (`control_flow/loop_mode.rs`) carries two small maps, both keyed
+by `VersionPrefix` rather than hardcoded to `ClassVars`, that back the
+threading above: `threading_families` — the storage families the innermost
+Letrec loop body is threading through its own recursive tail call right
+now, reset to empty on every `enter_branch_context` entry and restored on
+exit by `BranchContextGuard` (the same reset-on-entry discipline as
+`state_version`) — and `foldl_peak_versions` — the peak version each family
+reached *inside* a `Foldl*` body's own `with_branch_context` scope, a
+one-shot value `ThreadingPlan::foldl_call_doc` reads back *after* that
+scope's guard has already restored the live counter, so it is deliberately
+NOT part of the branch-guard reset/restore cycle (folding it in would erase
+it before its one reader ever runs). Both replace what used to be three
+`ClassVars`-only fields (`loop_threads_class_vars`, `last_loop_class_var`,
+`last_foldl_class_var_peak`) — `last_loop_class_var` had no reader left
+once BT-3515 moved the loop's own recursive-tail-call argument onto
+`ThreadingPlan::capture_loop_family_params`/`family_slots::append_family_slots`,
+so it was deleted rather than folded in. `SelfVt` never actually populates
+either surviving map in practice (a value-type method has no same-class
+self-send, and a `Foldl*` accumulator has no `SelfVt` slot), but both stay
+keyed by `VersionPrefix` generically per ADR 0122's "one list, one helper"
+goal rather than reverting to a `ClassVars`-only shape.
+
 **The `whileTrue:`/`whileFalse:` condition as real IR (ADR 0118 phase 3,
 BT-3419).** `ConditionalLoop` no longer treats its condition as an opaque,
 outside-the-frame `Document` (the pre-BT-3419 `continue_header` field): it
