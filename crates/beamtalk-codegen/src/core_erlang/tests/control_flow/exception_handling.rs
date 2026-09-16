@@ -1084,3 +1084,39 @@ fn test_class_method_self_send_nested_in_nested_ensure_in_ensure_try_body_is_com
          body must be a clean compile error, not a silent drop. Got: {result:?}"
     );
 }
+
+#[test]
+fn test_class_method_self_send_nested_in_conditional_in_ensure_cleanup_block_is_compile_error() {
+    // Coverage-gap note from the BT-3522 adversarial review: every other new
+    // test in this module targets the try body or the `on:do:` handler; none
+    // targeted the `ensure:` CLEANUP block specifically, which is lowered
+    // twice (once for the normal-return path, once for the exception path)
+    // through its own call to the same `generate_exception_body_with_threading`
+    // this issue's per-statement rejection lives in. Pinning it here confirms
+    // that sharing, rather than assuming it from the try-body/handler cases.
+    let src = concat!(
+        "Object subclass: CvNestedEnsureCleanup\n",
+        "  classState: runs = 0\n\n",
+        "  class bump => self.runs := self.runs + 1\n\n",
+        "  class probe: flag =>\n",
+        "    self.runs := 0\n",
+        "    [nil] ensure: [\n",
+        "      flag ifTrue: [ self bump ]\n",
+        "    ]\n",
+        "    self.runs\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvnestedensurecleanup").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "a class-var-mutating self-send nested inside an ensure:'s own CLEANUP block must be a \
+         clean compile error, not a silent drop. Got: {result:?}"
+    );
+}
