@@ -9,6 +9,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use crate::core_erlang::control_flow::analysis::ThreadedFamilies;
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::{CodeGenContext, CodeGenError, Result, block_analysis};
 use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
@@ -43,8 +44,24 @@ impl CoreErlangGenerator {
                 .any(|v| analysis.local_writes.contains(v))
         } else if self.context == CodeGenContext::Actor {
             // Actor methods: field writes, self-sends,
-            // OR local variable mutations all need threading
-            analysis.has_state_effects() || !analysis.local_writes.is_empty()
+            // OR local variable mutations all need threading.
+            //
+            // ADR 0122/BT-3514: the "family half" of this OR (field
+            // writes/self-sends) is gated behind `ThreadedFamilies`
+            // non-emptiness — `eligible_families()` reports exactly
+            // `[State]` for a non-class-method Actor instance method,
+            // never empty, matching ADR 0122 §"State already fits": "the
+            // predicate is always true" once `State` is eligible. ANDed
+            // with the real, data-dependent `has_state_effects()` check
+            // (a block with no field write/self-send still doesn't need
+            // threading on this account), this is behavior-preserving —
+            // the "outer-local half" (`!analysis.local_writes.is_empty()`)
+            // is untouched.
+            let family_half = !ThreadedFamilies::from_matches(&self.eligible_families())
+                .as_slice()
+                .is_empty()
+                && analysis.has_state_effects();
+            family_half || !analysis.local_writes.is_empty()
         } else {
             // Value types have no State variable, so self-sends should
             // NOT trigger state threading. Only field writes need threading.

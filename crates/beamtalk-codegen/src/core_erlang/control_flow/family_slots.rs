@@ -41,10 +41,17 @@
 //!   tuple element before its one family slot (a branch that only writes a
 //!   value-type field, no outer local) — see that function's own doc
 //!   comment.
+//! - `conditionals.rs`'s `with_branch_context`/six `generate_*_with_mutations`
+//!   (BT-3514, the first PRODUCTION Actor-path consumer, and
+//!   [`append_baseline_family_slots`]'s first production caller — the
+//!   Actor conditional's own non-taken/absent-block-passthrough arm genuinely
+//!   is "whichever arm ran, the other's baseline must still be valid,"
+//!   unlike BT-3513's own closure-folded resolution). The family list is
+//!   always `[State]` — ADR 0122's "State already fits" — never data-driven
+//!   per call site.
 //!
-//! Still to migrate: the Actor conditional's `with_branch_context`/six
-//! `generate_*_with_mutations`, and the Foldl accumulator (once its leading
-//! slot normalizes to trailing, BT-3516).
+//! Still to migrate: the Foldl accumulator (once its leading slot
+//! normalizes to trailing, BT-3516).
 //!
 //! **Trailing position only** — no leading-slot mode; Foldl's leading slot
 //! is normalized to trailing when IT migrates (ADR 0122 §Alternatives
@@ -173,7 +180,14 @@ pub(in crate::core_erlang) fn append_family_slots(
 /// A thin, self-documenting entry point over [`append_family_slots`] — never
 /// a second tuple-building implementation, so the two can never
 /// independently drift on shape, slot count, or order.
-#[allow(dead_code)]
+///
+/// BT-3514: `conditionals.rs`'s `conditional_baseline_tuple` is this
+/// function's first production caller — the Actor conditional's own
+/// non-taken-arm/absent-block-passthrough tuple genuinely IS "whichever arm
+/// actually ran, the other's baseline must still be valid," unlike
+/// BT-3513's value-type conditional (which folds "taken or baseline" into
+/// its own `arm_version_for` closure instead — see this module's own
+/// BT-3513 note above).
 pub(in crate::core_erlang) fn append_baseline_family_slots(
     base: Document<'static>,
     families: &ThreadedFamilies,
