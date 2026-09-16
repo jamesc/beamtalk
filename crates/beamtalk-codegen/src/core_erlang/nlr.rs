@@ -371,13 +371,25 @@ mod tests {
 
     #[test]
     fn nlr_arm_result_class_method_with_vars_yields_class_var_result_tuple() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod { has_class_vars: true });
+        let doc = nlr_arm_result(
+            "V",
+            "S",
+            NlrBoundary::ClassMethod {
+                has_class_vars: true,
+            },
+        );
         assert_eq!(doc.to_pretty_string(), "{'class_var_result', V, S}");
     }
 
     #[test]
     fn nlr_arm_result_class_method_without_vars_yields_bare_value() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod { has_class_vars: false });
+        let doc = nlr_arm_result(
+            "V",
+            "S",
+            NlrBoundary::ClassMethod {
+                has_class_vars: false,
+            },
+        );
         assert_eq!(doc.to_pretty_string(), "V");
     }
 
