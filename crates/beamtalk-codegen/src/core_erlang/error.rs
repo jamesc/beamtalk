@@ -230,9 +230,10 @@ pub enum CodeGenError {
     /// routes it through the same `generate_conditional_branch_inline` branch-merge
     /// an `ifTrue:` branch's field write uses. The value type's `Self`/`SelfN`
     /// version chain (`VersionPrefix::SelfVt`) has its own, separate merge
-    /// machinery (`generate_vt_conditional_open`'s `VtCondSlots` trailing-slot
-    /// tuple), wired for exactly the two arms of `ifTrue:`/`ifFalse:`/
-    /// `ifTrue:ifFalse:` — a `match:`'s N pattern arms have no equivalent yet, so
+    /// machinery (`generate_vt_conditional_open`'s `ThreadedFamilies`
+    /// trailing-slot tuple, ADR 0122 / BT-3513), wired for exactly the two
+    /// arms of `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` — a `match:`'s N
+    /// pattern arms have no equivalent yet, so
     /// the arm's `Self{N}` binding never escapes its own `case` clause and `erlc`
     /// rejects the module (`unbound variable 'Self1'`). Rejected here rather than
     /// left to crash, mirroring how every other unsupported value-type field-write
