@@ -167,10 +167,10 @@ impl CoreErlangGenerator {
         plan: &ThreadingPlan,
     ) -> Result<(Vec<ThreadedStmt>, FrameId)> {
         self.with_branch_context(|this| {
-            this.loop_mode.loop_threads_class_vars = plan.threads_class_vars;
+            this.loop_mode.loop_threads_class_vars = plan.threads_class_vars();
             let frame = this.current_branch_frame();
             let result = this.lower_letrec_body(body, plan, frame);
-            if plan.threads_class_vars {
+            if plan.threads_class_vars() {
                 this.loop_mode.last_loop_class_var = Some(this.current_class_var());
             }
             result.map(|stmts| (stmts, frame))
@@ -321,7 +321,7 @@ impl CoreErlangGenerator {
             // Rejected with the SAME diagnostic the identical class-var shape
             // already gets; see
             // `reject_unthreadable_value_self_field_write`.
-            self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self)?;
+            self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;
 
             if Self::is_field_assignment(expr) {
                 let _ = self.lower_letrec_field_assignment(expr, frame, span, &mut stmts)?;
@@ -687,7 +687,7 @@ impl CoreErlangGenerator {
             // body is unthreadable, top-level statement included. Same shared
             // helper, so the two call sites cannot drift; see
             // `reject_unthreadable_value_self_field_write`.
-            self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self)?;
+            self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
@@ -1469,7 +1469,7 @@ impl CoreErlangGenerator {
         // Addendum 15) — this function's callers now only ever pass a
         // `Foldl*` `kind`, so `plan.threads_class_vars` here always means
         // this shape.
-        if plan.threads_class_vars {
+        if plan.threads_class_vars() {
             let cv = self.current_class_var();
             // record this closure's peak class-var version (BEFORE
             // `with_branch_context`'s guard restores it on drop, right after
@@ -1984,7 +1984,7 @@ impl CoreErlangGenerator {
                     // own tail (fired whenever `plan.threads_class_vars`, independent of
                     // `has_mutations`) then referenced that now-out-of-scope name,
                     // an `erlc` "unbound variable" regression confirmed empirically.
-                    let threads_here = has_mutations || has_plain_lets || plan.threads_class_vars;
+                    let threads_here = has_mutations || has_plain_lets || plan.threads_class_vars();
                     if threads_here {
                         let doc = self.bind_closed_expr_threading_class_vars(expr, "_", plan)?;
                         stmts.push(ThreadedStmt::Statement(doc, span));

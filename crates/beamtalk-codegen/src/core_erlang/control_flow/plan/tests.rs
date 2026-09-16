@@ -74,9 +74,8 @@ fn make_plan(
         readonly_fields,
         fallback_reason: StateAccFallbackReason::None,
         mutated_fields,
-        threads_class_vars: false,
+        threaded_families: ThreadedFamilies::default(),
         initial_class_var: "ClassVars".to_string(),
-        threads_value_self: false,
     }
 }
 
