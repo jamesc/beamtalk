@@ -14,8 +14,8 @@
 //! - `while_loops.rs`/`counted_loops.rs`'s own `{'nil', StateAcc[, ClassVars
 //!   | Self1]}` exit-arm tuple (BT-3512, Phase 3) appends its `SelfVt` slot
 //!   via [`append_family_slots`] too (the `ClassVars` half — the
-//!   Actor/class-method letrec parameter path — stays hand-rolled until
-//!   BT-3515). `value_type_codegen.rs`'s own value-type/class-method Letrec
+//!   Actor/class-method letrec parameter path — stayed hand-rolled until
+//!   BT-3515, below). `value_type_codegen.rs`'s own value-type/class-method Letrec
 //!   loop extraction (formerly `vt_construct_extra_slot`/
 //!   `emit_vt_threaded_tuple_unwrap_to_var`) now reads [`ThreadedFamilies`]
 //!   too, but dispatches through its own `extract_vt_loop_family_slot` onto
@@ -49,6 +49,14 @@
 //!   unlike BT-3513's own closure-folded resolution). The family list is
 //!   always `[State]` — ADR 0122's "State already fits" — never data-driven
 //!   per call site.
+//! - `while_loops.rs`'s/`counted_loops.rs`'s own extra `letrec` fun
+//!   parameter(s), `produces` entries, and exit-arm tuple slot(s) (BT-3515,
+//!   Phase 7) now route `ClassVars` through [`append_family_slots`] too,
+//!   generically over `ThreadingPlan::threaded_families()` alongside
+//!   `SelfVt` — one path instead of BT-3512's SelfVt-only append plus a
+//!   hand-rolled `ClassVars` half. `ThreadingPlan::capture_loop_family_params`
+//!   replaces the former per-family `Option<String>`/`.then(...)` capture
+//!   pair with one call generic over however many families are present.
 //!
 //! Still to migrate: the Foldl accumulator (once its leading slot
 //! normalizes to trailing, BT-3516).

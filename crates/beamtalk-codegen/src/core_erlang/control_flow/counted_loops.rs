@@ -14,7 +14,6 @@ use super::super::threaded_ir::{
     VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result};
-use super::analysis::ThreadedFamilies;
 use super::family_slots::append_family_slots;
 use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
@@ -66,20 +65,6 @@ pub(super) struct CountedLoopFrame {
     /// unique suffix also keeps it distinct from underscore-prefixed user
     /// identifiers (which `to_core_var` passes through verbatim).
     pub counter: String,
-    /// ADR 0111 Addendum 9, Question 3: the pre-loop `ClassVars`
-    /// name (`current_class_var()`, captured before body generation runs),
-    /// when the body threads a `ClassVars` mutation through the loop's own
-    /// recursive tail call. `None` when it doesn't. Used, verbatim, as both
-    /// the letrec fun's extra trailing formal parameter and the initial
-    /// `apply`'s trailing argument — see [`extra_threaded_arg_doc`].
-    pub class_var_param: Option<String>,
-    /// the pre-loop value-type `Self` name (`current_self_var()`,
-    /// captured before body generation runs), when the body threads a
-    /// `self.field := ...` value-type mutation through the loop's own
-    /// recursive tail call. `None` when it doesn't. The `SelfVt` mirror of
-    /// `class_var_param`, used identically (fun formal parameter + exit-arm
-    /// reference) and never set at the same time as it.
-    pub self_param: Option<String>,
 }
 
 impl CountedLoopFrame {
@@ -91,24 +76,6 @@ impl CountedLoopFrame {
             self.next_counter.clone(),
         )
     }
-}
-
-/// ADR 0111 Addendum 9, Question 3: renders
-/// `", <name>"` for a threaded extra fun-argument slot — the `ClassVars`
-/// one (class-method loops) or the value-type `Self` one — or nothing when
-/// the loop threads neither. Shared by `while_loops.rs`'s and
-/// `counted_loops.rs`'s (via `generate_counted_stateful_loop`) Letrec
-/// base-path plumbing: the letrec fun signature, both `apply` call sites,
-/// and the exit arm all need the identical "extra trailing arg, or nothing"
-/// shape, so it is written once rather than copy-evolved per call site.
-///
-/// At most ONE of the two slots is ever present on a given loop —
-/// `ThreadingPlan::threads_class_vars` and `threads_value_self` are mutually
-/// exclusive by construction (see
-/// [`CoreErlangGenerator::loop_body_threads_value_self`]'s doc comment) — so
-/// the threaded slot is always at tuple position 3, whichever it is.
-pub(super) fn extra_threaded_arg_doc(name: Option<&String>) -> Document<'static> {
-    name.map_or(Document::Nil, |v| docvec![", ", leaf::var(v.clone())])
 }
 
 impl CoreErlangGenerator {
@@ -156,15 +123,6 @@ impl CoreErlangGenerator {
         // cannot collide with the loop fun parameter.
         let counter = self.fresh_temp_var("loopidx");
 
-        // ADR 0111 Addendum 9, Question 3: pre-loop ClassVars name,
-        // captured before `generate_counted_stateful_loop` runs —
-        // `with_branch_context` inherits (never resets) the outer
-        // `class_var_version`, so this is both the letrec fun's own extra
-        // trailing formal parameter and the exit arm's reference to it.
-        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        // the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
-        let self_param = plan.threads_value_self.then(|| self.current_self_var());
-
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
@@ -186,8 +144,6 @@ impl CoreErlangGenerator {
             initial_counter: leaf::int_lit(1),
             body_param: None,
             counter,
-            class_var_param,
-            self_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -211,12 +167,6 @@ impl CoreErlangGenerator {
 
         // Bind the block parameter name (e.g. "i" in [:i | ...])
         let body_param = body.parameters.first().map(|p| p.name.to_string());
-
-        // ADR 0111 Addendum 9, Question 3: see the analogous
-        // comment in `generate_times_repeat_with_mutations`.
-        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        // the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
-        let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -243,8 +193,6 @@ impl CoreErlangGenerator {
             initial_counter: leaf::var(start_var),
             body_param,
             counter,
-            class_var_param,
-            self_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -270,12 +218,6 @@ impl CoreErlangGenerator {
         let counter = self.fresh_temp_var("loopidx");
 
         let body_param = body.parameters.first().map(|p| p.name.to_string());
-
-        // ADR 0111 Addendum 9, Question 3: see the analogous
-        // comment in `generate_times_repeat_with_mutations`.
-        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        // the `SelfVt` mirror — see `CountedLoopFrame::self_param`.
-        let self_param = plan.threads_value_self.then(|| self.current_self_var());
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -327,8 +269,6 @@ impl CoreErlangGenerator {
             initial_counter: leaf::var(start_var),
             body_param,
             counter,
-            class_var_param,
-            self_param,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -344,9 +284,10 @@ impl CoreErlangGenerator {
     /// eliminating per-iteration `maps:get` / `maps:put` calls.
     ///
     /// ADR 0111 Addendum 15: lowers to one `ThreadedStmt::ConditionalLoop`
-    /// node — `produces` is `[State@0]` plus `ClassVars` (at its own live
-    /// version, since `class_var_version` never resets across
-    /// `with_branch_context`) when `frame.class_var_param` is set;
+    /// node — `produces` is `[State@0]` plus one entry per family in
+    /// `plan.threaded_families()` (at its own live version, since
+    /// `class_var_version`/`self_version` never reset across
+    /// `with_branch_context` — see `ThreadingPlan::capture_loop_family_params`);
     /// `counter` carries `frame`'s own gensym'd index name plus its
     /// initial/next expressions (ADR 0111 Addendum 2 Gap 1).
     pub(super) fn generate_counted_stateful_loop(
@@ -363,16 +304,11 @@ impl CoreErlangGenerator {
         }
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-        let cv_param_doc = extra_threaded_arg_doc(frame.class_var_param.as_ref());
-        let class_var_seed_version = self.class_var_version();
-        // the value-type `Self` mirror of the two lines above —
-        // `self_version`, like `class_var_version`, is inherited (never
-        // reset) across `with_branch_context`, so this names the identity
-        // the loop body's own first `SelfVt` `Bind` will source from. Unlike
-        // `cv_param_doc`, this family's own exit-arm slot now routes through
-        // [`append_family_slots`] (ADR 0122 Decision 3, BT-3512) rather than
-        // a hand-rolled `Document`.
-        let self_seed_version = self.self_version();
+        // ADR 0111 Addendum 9, Question 3 / ADR 0122 Decision 3 (BT-3515):
+        // see `ThreadingPlan::capture_loop_family_params`'s doc comment —
+        // captured before the body's own lowering runs, at most one entry
+        // for a Letrec plan (`ClassVars`/`SelfVt` mutually exclusive).
+        let family_params = plan.capture_loop_family_params(self);
 
         self.push_scope();
 
@@ -404,33 +340,25 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
-        // ADR 0122 Decision 3 (BT-3512, value-type context only — the
-        // Actor/class-method `letrec` parameter path is BT-3515): mutual
-        // exclusivity (`class_var_param`/`self_param` never both `Some`)
-        // means at most one of the two ever contributes a slot, so this is
-        // byte-identical to the fully hand-rolled tuple it replaces.
-        let self_only_families = ThreadedFamilies::from_matches(
-            frame
-                .self_param
-                .as_ref()
-                .map_or(&[][..], |_| &[VersionPrefix::SelfVt][..]),
-        );
+        // ADR 0122 Decision 3 (BT-3515): every threaded family's exit-arm
+        // slot now routes through the emission helper — `ClassVars` no
+        // longer stays hand-rolled into `base` the way BT-3512 left it (that
+        // phase only migrated `SelfVt`, since the value-type loop site could
+        // never reach `ClassVars`). Mutual exclusivity
+        // (`plan.threaded_families()` carries at most one entry for a Letrec
+        // plan) means this is byte-identical to the fully hand-rolled tuple
+        // it replaces.
         let exit_arm_tuple = {
             let ctx = RenderCtx::new(self);
             append_family_slots(
-                docvec!["{'nil', StateAcc", cv_param_doc],
-                &self_only_families,
-                |prefix| match prefix {
-                    VersionPrefix::SelfVt => VersionedVar::new(
-                        VersionPrefix::Gensym(frame.self_param.clone().expect(
-                            "self_only_families only ever carries SelfVt when self_param is Some",
-                        )),
-                        0,
-                        ir_frame,
-                    ),
-                    other => unreachable!(
-                        "counted-loop exit-arm tuple only ever appends SelfVt via the helper, got {other:?}"
-                    ),
+                docvec!["{'nil', StateAcc"],
+                plan.threaded_families(),
+                |prefix| {
+                    family_params
+                        .iter()
+                        .find(|p| &p.prefix == prefix)
+                        .expect("append_family_slots only ever asks for a family in `families`")
+                        .gensym_seed(ir_frame)
                 },
                 &ctx,
             )
@@ -438,25 +366,13 @@ impl CoreErlangGenerator {
         let exit_arm = docvec!["<'false'> when 'true' -> ", exit_arm_tuple, " end "];
 
         let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, ir_frame)];
-        if let Some(cv_name) = &frame.class_var_param {
+        for param in &family_params {
             // ADR 0111 Addendum 15: see `Self::rebase_loop_seed`'s doc
-            // comment for why this loop's own `ClassVars` `produces` entry
-            // must be `Gensym`-seeded, not the method's live (possibly
-            // nonzero) `ClassVars` version.
-            let real_seed =
-                VersionedVar::new(VersionPrefix::ClassVars, class_var_seed_version, ir_frame);
-            let gensym_seed =
-                VersionedVar::new(VersionPrefix::Gensym(cv_name.clone()), 0, ir_frame);
-            Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
-            produces.push(gensym_seed);
-        }
-        // identical treatment for the value-type `Self` slot —
-        // mutually exclusive with the `ClassVars` one above, so at most one
-        // of these two `produces` entries ever exists.
-        if let Some(self_name) = &frame.self_param {
-            let real_seed = VersionedVar::new(VersionPrefix::SelfVt, self_seed_version, ir_frame);
-            let gensym_seed =
-                VersionedVar::new(VersionPrefix::Gensym(self_name.clone()), 0, ir_frame);
+            // comment for why this loop's own family `produces` entry must
+            // be `Gensym`-seeded, not the method's live (possibly nonzero)
+            // version.
+            let real_seed = param.real_seed(ir_frame);
+            let gensym_seed = param.gensym_seed(ir_frame);
             Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
             produces.push(gensym_seed);
         }

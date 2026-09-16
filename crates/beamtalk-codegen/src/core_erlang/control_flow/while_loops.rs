@@ -38,7 +38,6 @@ use super::super::threaded_ir::{
 };
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::ThreadingPlan;
-use super::analysis::ThreadedFamilies;
 use super::family_slots::append_family_slots;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -258,36 +257,18 @@ impl CoreErlangGenerator {
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
-        // ADR 0111 Addendum 9, Question 3: when the body threads a
-        // `ClassVars` mutation through the loop's own recursive tail call,
-        // the letrec fun grows an extra, explicit trailing parameter —
-        // `fun (StateAcc, ClassVars)`, never folded into `StateAcc`'s own
-        // map. Captured before the body's own lowering runs: `current_class_var()`/
-        // `class_var_version()` name/version the method's own LIVE class-var
-        // identity at loop entry (bare "ClassVars"/`0` the first time a
-        // method mutates one, "ClassVarsN"/`N` otherwise) — `class_var_param`
-        // is both the fun's own formal parameter identifier and the exit
-        // arm's reference to it; `class_var_seed_version` names the identity
-        // the loop body's own first class-var `Bind` sources from, needed
-        // below to rebase it onto the `produces` seed
-        // (`Self::rebase_loop_seed`'s own doc comment has the full
-        // "why").
-        let class_var_param = plan.threads_class_vars.then(|| self.current_class_var());
-        let class_var_seed_version = self.class_var_version();
-        let cv_param_doc = super::extra_threaded_arg_doc(class_var_param.as_ref());
-
-        // the value-type `Self` mirror of the three lines above —
-        // same capture-before-body-lowering discipline (`self_version`, like
-        // `class_var_version`, is inherited rather than reset across
-        // `with_branch_context`), same "extra explicit trailing fun
-        // parameter, never folded into `StateAcc`'s own map" shape. Mutually
-        // exclusive with `class_var_param` by construction, so the loop's
-        // result tuple grows at most one extra slot. Unlike `cv_param_doc`,
-        // this family's exit-arm slot now routes through
-        // [`super::family_slots::append_family_slots`] (ADR 0122 Decision 3,
-        // BT-3512) rather than a hand-rolled `Document`.
-        let self_param = plan.threads_value_self.then(|| self.current_self_var());
-        let self_seed_version = self.self_version();
+        // ADR 0111 Addendum 9, Question 3 / ADR 0122 Decision 3 (BT-3515):
+        // when the body threads a storage-family mutation (`ClassVars` or
+        // value-type `Self`) through the loop's own recursive tail call, the
+        // letrec fun grows an extra, explicit trailing parameter per family
+        // — `fun (StateAcc, ClassVars)`, never folded into `StateAcc`'s own
+        // map. Captured before the body's own lowering runs — see
+        // `ThreadingPlan::capture_loop_family_params`'s doc comment. At most
+        // one entry for a Letrec plan (`ClassVars`/`SelfVt` are mutually
+        // exclusive — see `CoreErlangGenerator::loop_body_threads_value_self`'s
+        // doc comment), so the loop's result tuple grows at most one extra
+        // slot.
+        let family_params = plan.capture_loop_family_params(self);
 
         // At the start of each loop iteration, read threaded locals from StateAcc.
         // Use push_scope so bindings don't leak to caller after the letrec.
@@ -398,42 +379,32 @@ impl CoreErlangGenerator {
 
         // the exit arm is reached WITHOUT running the body this
         // round (the condition check failed) — it must reference the fun's
-        // own incoming `ClassVars` parameter (`class_var_param`, the SAME
-        // text as the fun signature), never a post-body identity.
+        // own incoming family parameter(s) (`family_params`, the SAME text
+        // as the fun signature), never a post-body identity.
         let exit_arm_atom = if negate {
             "<'true'> when 'true' -> "
         } else {
             "<'false'> when 'true' -> "
         };
-        // ADR 0122 Decision 3 (BT-3512, value-type context only — the
-        // Actor/class-method `letrec` parameter path is BT-3515): the
-        // `ClassVars` half of this exit-arm tuple (`cv_param_doc`) stays
-        // hand-rolled into `base` here, folded in unchanged; only the
-        // `SelfVt` slot routes through the emission helper. ADR 0122's own
-        // mutual exclusivity (`class_var_param`/`self_param` never both
-        // `Some`) means at most one of the two ever contributes a slot, so
-        // this is byte-identical to the fully hand-rolled tuple it replaces.
-        let self_only_families = ThreadedFamilies::from_matches(
-            self_param
-                .as_ref()
-                .map_or(&[][..], |_| &[VersionPrefix::SelfVt][..]),
-        );
+        // ADR 0122 Decision 3 (BT-3515): every threaded family's exit-arm
+        // slot now routes through the emission helper — `ClassVars` no
+        // longer stays hand-rolled into `base` the way BT-3512 left it (that
+        // phase only migrated `SelfVt`, since the value-type loop site could
+        // never reach `ClassVars`). Mutual exclusivity
+        // (`plan.threaded_families()` carries at most one entry for a Letrec
+        // plan) means this is byte-identical to the fully hand-rolled tuple
+        // it replaces.
         let exit_arm_tuple = {
             let ctx = RenderCtx::new(self);
             append_family_slots(
-                docvec!["{'nil', StateAcc", cv_param_doc],
-                &self_only_families,
-                |prefix| match prefix {
-                    VersionPrefix::SelfVt => VersionedVar::new(
-                        VersionPrefix::Gensym(self_param.clone().expect(
-                            "self_only_families only ever carries SelfVt when self_param is Some",
-                        )),
-                        0,
-                        frame,
-                    ),
-                    other => unreachable!(
-                        "while-loop exit-arm tuple only ever appends SelfVt via the helper, got {other:?}"
-                    ),
+                docvec!["{'nil', StateAcc"],
+                plan.threaded_families(),
+                |prefix| {
+                    family_params
+                        .iter()
+                        .find(|p| &p.prefix == prefix)
+                        .expect("append_family_slots only ever asks for a family in `families`")
+                        .gensym_seed(frame)
                 },
                 &ctx,
             )
@@ -441,17 +412,9 @@ impl CoreErlangGenerator {
         let exit_arm = docvec![exit_arm_atom, exit_arm_tuple, " end "];
 
         let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, frame)];
-        if let Some(cv_name) = &class_var_param {
-            let real_seed =
-                VersionedVar::new(VersionPrefix::ClassVars, class_var_seed_version, frame);
-            let gensym_seed = VersionedVar::new(VersionPrefix::Gensym(cv_name.clone()), 0, frame);
-            Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
-            produces.push(gensym_seed);
-        }
-        // identical treatment for the value-type `Self` slot.
-        if let Some(self_name) = &self_param {
-            let real_seed = VersionedVar::new(VersionPrefix::SelfVt, self_seed_version, frame);
-            let gensym_seed = VersionedVar::new(VersionPrefix::Gensym(self_name.clone()), 0, frame);
+        for param in &family_params {
+            let real_seed = param.real_seed(frame);
+            let gensym_seed = param.gensym_seed(frame);
             Self::rebase_loop_seed(&mut body_stmts, &real_seed, &gensym_seed);
             produces.push(gensym_seed);
         }
