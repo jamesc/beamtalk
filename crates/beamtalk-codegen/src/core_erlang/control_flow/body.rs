@@ -23,6 +23,7 @@ use super::super::threaded_ir::{
     self, BindOp, FrameId, ThreadedStmt, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
+use super::family_slots;
 use super::list_ops::BodyKind;
 use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::docvec;
@@ -1428,20 +1429,24 @@ impl CoreErlangGenerator {
             }
         }
 
-        // ADR 0111 Addendum 9, Question 6: whenever this fold body
-        // threads `ClassVars`, wrap its returned TAIL VALUE — regardless of
-        // which `BodyKind` arm above produced it, and regardless of that
-        // arm's own internal shape (a bare `StateAcc`, `{[Result|AccList],
-        // StateAcc}`, `{AccOut, StateAcc}`, a filter/predicate tuple, …) —
-        // as `{ClassVars, <original tail value>}`. This is the single choke
-        // point every `Foldl*` exit arm's tail value flows through
+        // ADR 0111 Addendum 9, Question 6 / ADR 0122 Decision 3 (BT-3516):
+        // whenever this fold body threads a storage family (`ClassVars` —
+        // the only family a `Foldl*` accumulator can carry, per
+        // [`ThreadingPlan::threaded_families`]'s doc comment), wrap its
+        // returned TAIL VALUE — regardless of which `BodyKind` arm above
+        // produced it, and regardless of that arm's own internal shape (a
+        // bare `StateAcc`, `{[Result|AccList], StateAcc}`, `{AccOut,
+        // StateAcc}`, a filter/predicate tuple, …) — as `{<original tail
+        // value>, ClassVars}`, **trailing** (ADR 0122 Decision 2: "Foldl's
+        // leading slot is normalized to trailing"). This is the single
+        // choke point every `Foldl*` exit arm's tail value flows through
         // (`generate_threaded_loop_body`'s only call site into this
         // function), so it closes the silent-loss gap uniformly
         // without touching any of the ~15 individual exit-arm branches
         // above: each keeps building exactly the value it always did.
         //
         // Deliberately `docs.pop()` + re-push, NOT `let FoldTail = <all of
-        // docs> in {ClassVars, FoldTail}` (an earlier, rejected version of
+        // docs> in {<tail>, ClassVars}` (an earlier, rejected version of
         // this fix): `docs` is an OPEN Core Erlang let-chain — every element
         // but the last ends in `in `, and the last is a bare tail
         // expression, still lexically inside every preceding `let`'s scope.
@@ -1452,7 +1457,7 @@ impl CoreErlangGenerator {
         // — confirmed the hard way: `erlc` rejected it with "unbound
         // variable", not a scoping warning. Popping and rewrapping only the
         // last element leaves every earlier `let`'s scope untouched and
-        // still open, so `cv` (itself possibly bound by one of those
+        // still open, so `cv_version` (itself possibly bound by one of those
         // `let`s) stays visible at the exact point it's used.
         //
         // Read AFTER the loop body is fully generated (not before) so a
@@ -1460,24 +1465,27 @@ impl CoreErlangGenerator {
         // iteration (`emit_class_var_result_unwrap`, frame-scoped to this
         // loop body's `current_branch_frame()` per Question 2) is reflected.
         //
-        // this `{ClassVars, tail}` accumulator wrap is the `Foldl*`
+        // this `{tail, ClassVars}` accumulator wrap is the `Foldl*`
         // shape's own mechanism (Question 6) — `while_loops.rs`/
         // `counted_loops.rs`'s Letrec loops build their own, textually
-        // different `{ClassVars1, <tail>}` true-arm shape via the loop's
+        // different `{<tail>, ClassVars1}` true-arm shape via the loop's
         // extra recursive-tail-call fun parameter (Question 3), lowered
         // through `ThreadedStmt::ConditionalLoop` instead (ADR 0111
         // Addendum 15) — this function's callers now only ever pass a
         // `Foldl*` `kind`, so `plan.threads_class_vars` here always means
-        // this shape.
-        if plan.threads_class_vars() {
-            let cv = self.current_class_var();
+        // this shape. Routes through [`family_slots::append_family_slots`]
+        // (ADR 0122 Decision 3) rather than a hand-spliced tuple, matching
+        // every other migrated site — this is the per-iteration counterpart
+        // of `ThreadingPlan::foldl_call_doc`'s own initial-accumulator wrap.
+        if !plan.threaded_families().as_slice().is_empty() {
+            let cv_version = self.class_var_version();
             // record this closure's peak class-var version (BEFORE
             // `with_branch_context`'s guard restores it on drop, right after
             // this function returns) so `ThreadingPlan::foldl_call_doc` can
             // fast-forward past it — see `last_foldl_class_var_peak`'s own
             // doc comment for why a naive post-fold `next_class_var()` call
             // would otherwise mint an already-used name.
-            self.set_foldl_class_var_peak(self.class_var_version());
+            self.set_foldl_class_var_peak(cv_version);
             let ThreadedStmt::Statement(tail, tail_span) = stmts
                 .pop()
                 .expect("a Foldl* body must push at least one tail-expression Statement")
@@ -1486,10 +1494,25 @@ impl CoreErlangGenerator {
                     "every Foldl* body push above is a ThreadedStmt::Statement by construction"
                 );
             };
-            stmts.push(ThreadedStmt::Statement(
-                docvec!["{", leaf::var(cv), ", ", tail, "}"],
-                tail_span,
-            ));
+            let wrapped = {
+                let ctx = threaded_ir::RenderCtx::new(self);
+                family_slots::append_family_slots(
+                    docvec!["{", tail],
+                    plan.threaded_families(),
+                    |prefix| match prefix {
+                        VersionPrefix::ClassVars => {
+                            VersionedVar::new(VersionPrefix::ClassVars, cv_version, frame)
+                        }
+                        other => unreachable!(
+                            "a Foldl* body's own tail wrap only ever carries ClassVars \
+                             (never SelfVt — a fold accumulator has no matching slot), \
+                             got {other:?}"
+                        ),
+                    },
+                    &ctx,
+                )
+            };
+            stmts.push(ThreadedStmt::Statement(wrapped, tail_span));
         }
         Ok(stmts)
     }

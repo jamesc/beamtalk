@@ -9,12 +9,16 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::threaded_ir::{FrameId, StateAccFallbackReason, VersionPrefix, VersionedVar};
+use super::super::threaded_ir::{
+    FrameId, RenderCtx, StateAccFallbackReason, VersionPrefix, VersionedVar, render,
+};
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
+use super::family_slots::{self, FamilyVersionStep};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
+use beamtalk_core::source_analysis::Span;
 
 // ─── ThreadingPlan ────────────────────────────────────────────────────────────
 
@@ -193,14 +197,19 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// `reject_class_var_field_assignment` already rejects that at compile
     /// time, unchanged by this field.
     threaded_families: ThreadedFamilies,
-    /// the class-var version name (`generator.current_class_var()`)
-    /// in effect immediately before this loop/fold begins — mirrors
-    /// `initial_state_var`'s own capture-at-construction-time discipline.
-    /// Only meaningful for the `Foldl*` shape of `threads_class_vars`
-    /// (`allow_direct_params: false`) — the Letrec shape threads `ClassVars`
-    /// via its own recursive-call fun parameter instead, never consulting
-    /// this field.
-    pub initial_class_var: String,
+    /// ADR 0122 Decision 3 (BT-3516): the `ClassVars` version NUMBER
+    /// (`generator.class_var_version()`) in effect immediately before this
+    /// fold begins — mirrors `initial_state_var`'s own
+    /// capture-at-construction-time discipline, but stores the raw version
+    /// rather than a pre-rendered name so [`Self::class_var_fun_param`]/
+    /// [`Self::foldl_call_doc`] can build [`VersionedVar`]s for
+    /// [`family_slots::append_family_slots`]/[`family_slots::extract_family_slots`]
+    /// instead of re-splicing a captured string (the former `initial_class_var:
+    /// String` field this replaces). Only meaningful for the `Foldl*` shape
+    /// of `threads_class_vars` (`allow_direct_params: false`) — the Letrec
+    /// shape threads `ClassVars` via its own recursive-call fun parameter
+    /// instead (`LoopFamilyParam`), never consulting this field.
+    pub initial_class_var_version: usize,
 }
 
 /// ADR 0122 Decision 3 (BT-3515): one storage family's pre-loop identity for
@@ -597,7 +606,7 @@ impl ThreadingPlan {
                 && generator.in_class_method()
                 && body_analysis.has_self_sends
         };
-        let initial_class_var = generator.current_class_var();
+        let initial_class_var_version = generator.class_var_version();
 
         // the `SelfVt` mirror of `threads_class_vars`' Letrec
         // branch above — Letrec-shaped plans only (`allow_direct_params`),
@@ -632,7 +641,7 @@ impl ThreadingPlan {
             fallback_reason,
             mutated_fields,
             threaded_families,
-            initial_class_var,
+            initial_class_var_version,
         }
     }
 
@@ -1048,10 +1057,10 @@ impl ThreadingPlan {
         docs
     }
 
-    /// ADR 0111 Addendum 9, Question 6: returns the fold fun's own
+    /// ADR 0122 Decision 3 (BT-3516): returns the fold fun's own
     /// second (accumulator) parameter name to print at the `fun (Item, <here>) ->`
     /// position, plus a prelude `Document` binding `real_param_name` (and,
-    /// when threading, the loop-entry `ClassVars` name) from it.
+    /// when threading, each threaded family's loop-entry seed name) from it.
     ///
     /// When `threads_class_vars` is `false`, returns `(real_param_name,
     /// Document::Nil)` unchanged — the caller's existing `fun (Item,
@@ -1059,54 +1068,105 @@ impl ThreadingPlan {
     /// byte-identical to before this field existed.
     ///
     /// When `true`, the fold's own accumulator is wrapped one level deeper as
-    /// `{ClassVars, <original accumulator>}` (Question 6's "`gate_slots=0`"
-    /// shape — the only reachable one per Question 4 Part A). This method
-    /// mints a fresh raw parameter name to receive that 2-tuple and returns a
-    /// prelude that unwraps it: `let <initial_class_var> = element(1, Raw) in
-    /// let <real_param_name> = element(2, Raw) in`. Every existing line of
+    /// `{<original accumulator>, ClassVars}` — **trailing**, per ADR 0122
+    /// Decision 2 ("Foldl's leading slot is normalized to trailing as part of
+    /// its migration") — the only reachable shape per Question 4 Part A. This
+    /// method mints a fresh raw parameter name to receive that 2-tuple and
+    /// returns a prelude that unwraps it: `let <real_param_name> = element(1,
+    /// Raw) in let <seed name> = element(2, Raw) in`. Every existing line of
     /// code downstream of the fun header that references `real_param_name`
     /// (however it further destructures that value — a bare `StateAcc`, or a
     /// `{AccList, StateAcc}` pair for `collect:`/`inject:into:`-shaped
     /// bodies) needs no change: after this prelude, `real_param_name` is
     /// bound to exactly the same value it always was.
+    ///
+    /// This is a re-materialization of an ALREADY-existing identity (the
+    /// version captured in [`Self::initial_class_var_version`] at plan
+    /// construction, before this lambda even exists), never a fresh mint —
+    /// unlike [`family_slots::extract_family_slots`]'s "mint the target
+    /// first" contract, so it stays a plain generic loop over
+    /// [`Self::threaded_families`] rather than a call into that helper
+    /// (mirroring `value_type_codegen.rs`'s own `extract_vt_loop_family_slot`,
+    /// which dispatches to its own function for the identical reason — see
+    /// `family_slots.rs`'s module doc comment). The one genuine
+    /// mint-and-extract half of this migration is [`Self::foldl_call_doc`]'s
+    /// post-fold unwrap, below.
     pub fn class_var_fun_param(
         &self,
         generator: &mut CoreErlangGenerator,
         real_param_name: &str,
     ) -> (String, Document<'static>) {
-        if !self.threads_class_vars() {
+        if self.threaded_families.as_slice().is_empty() {
             return (real_param_name.to_string(), Document::Nil);
         }
         let raw = generator.fresh_temp_var("AccCV");
-        let doc = docvec![
+        let base_arity = 1;
+        let mut docs = vec![docvec![
             "let ",
-            leaf::var(self.initial_class_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(raw.clone()),
-            ") in let ",
             leaf::var(real_param_name.to_string()),
-            " = call 'erlang':'element'(2, ",
+            " = call 'erlang':'element'(",
+            leaf::int_lit(i64::try_from(base_arity).unwrap_or(1)),
+            ", ",
             leaf::var(raw.clone()),
             ") in ",
-        ];
-        (raw, doc)
+        ]];
+        for (i, prefix) in self.threaded_families.as_slice().iter().enumerate() {
+            let seed_name = match prefix {
+                VersionPrefix::ClassVars => VersionedVar::new(
+                    VersionPrefix::ClassVars,
+                    self.initial_class_var_version,
+                    FrameId::ROOT,
+                )
+                .render_name(),
+                other => unreachable!(
+                    "a Foldl ThreadingPlan's threaded_families only ever contains \
+                     ClassVars (never SelfVt — a fold accumulator has no matching \
+                     slot), got {other:?}"
+                ),
+            };
+            let slot = base_arity + i + 1;
+            docs.push(docvec![
+                "let ",
+                leaf::var(seed_name),
+                " = call 'erlang':'element'(",
+                leaf::int_lit(i64::try_from(slot).unwrap_or(i64::MAX)),
+                ", ",
+                leaf::var(raw.clone()),
+                ") in ",
+            ]);
+        }
+        (raw, Document::Vec(docs))
     }
 
-    /// ADR 0111 Addendum 9, Question 6: builds
+    /// ADR 0122 Decision 3 (BT-3516): builds
     /// `" in let <fold_result> = call 'lists':'foldl'(<lambda>, <init_acc>,
-    /// <list>) in "` — transparently wrapping `init_acc` with a leading
-    /// `ClassVars` slot, and unwrapping the fold's own result back out
-    /// immediately after the call, whenever `threads_class_vars`. Every call
-    /// site's existing post-fold code keeps referencing `fold_result` by the
-    /// same name, bound to exactly the same (unwrapped) shape it always was —
-    /// only the freshly-minted post-fold `ClassVars` version name differs,
-    /// silently making the mutated value visible to subsequent statements in
-    /// the calling method via the generator's own class-var version counter
-    /// (`next_class_var`).
+    /// <list>) in "` — transparently wrapping `init_acc` with a **trailing**
+    /// `ClassVars` slot (ADR 0122 Decision 2: "Foldl's leading slot is
+    /// normalized to trailing"), and unwrapping the fold's own result back
+    /// out immediately after the call, whenever `threads_class_vars`. Every
+    /// call site's existing post-fold code keeps referencing `fold_result` by
+    /// the same name, bound to exactly the same (unwrapped) shape it always
+    /// was — only the freshly-minted post-fold `ClassVars` version name
+    /// differs, silently making the mutated value visible to subsequent
+    /// statements in the calling method via the generator's own class-var
+    /// version counter (`next_class_var`).
     ///
     /// When `threads_class_vars` is `false`, this is exactly the `" in let
     /// <fold_result> = call 'lists':'foldl'(...) in "` text every call site
     /// built by hand before this method existed — byte-identical.
+    ///
+    /// The two trailing-slot operations here are the genuine append/extract
+    /// pair [`family_slots`] exists for: the initial accumulator wrap is
+    /// `family_slots::append_family_slots`'s own "current, already-live
+    /// version" shape; the post-fold unwrap mints each family's fresh
+    /// successor version FIRST (`next_class_var`, mirroring
+    /// `rebind_vt_conditional_mutations`'s identical mint-then-extract
+    /// order), verifies the resulting version step via
+    /// `check_simple_field_bind_invariant` — the BT-3513 lesson this site
+    /// also needs, since `family_slots::extract_family_slots` never verifies
+    /// its own output — then builds the extraction `Bind`s through
+    /// [`family_slots::extract_family_slots`] and renders them via
+    /// [`render`].
     pub fn foldl_call_doc(
         &self,
         generator: &mut CoreErlangGenerator,
@@ -1114,8 +1174,9 @@ impl ThreadingPlan {
         init_acc: Document<'static>,
         safe_list_var: &str,
         fold_result: &str,
+        span: Span,
     ) -> Document<'static> {
-        if !self.threads_class_vars() {
+        if self.threaded_families.as_slice().is_empty() {
             return docvec![
                 " in let ",
                 leaf::var(fold_result.to_string()),
@@ -1129,6 +1190,16 @@ impl ThreadingPlan {
             ];
         }
         let raw = generator.fresh_temp_var("RawFoldCV");
+        let current_version = self.initial_class_var_version;
+        let init_tuple = {
+            let ctx = RenderCtx::new(generator);
+            family_slots::append_family_slots(
+                docvec!["{", init_acc],
+                &self.threaded_families,
+                |prefix| VersionedVar::new(prefix.clone(), current_version, FrameId::ROOT),
+                &ctx,
+            )
+        };
         // fast-forward past whatever peak the fold body's own
         // closure reached internally (already restored by now) before
         // minting — otherwise this mint can collide with an
@@ -1137,27 +1208,51 @@ impl ThreadingPlan {
         // one compiled function) — see `last_foldl_class_var_peak`'s doc
         // comment.
         generator.catch_up_class_var_version_to_foldl_peak();
-        let cv_after = generator.next_class_var();
+        generator.next_class_var();
+        let target_version = generator.class_var_version();
+        // BT-3513's lesson (see CLAUDE.md's state-threading rule):
+        // `extract_family_slots` mints no version itself and verifies
+        // nothing — the caller checks each minted step. Safe to reuse the
+        // generic per-mutation invariant for `ClassVars` here too:
+        // `extraction_bind_op` always returns `BindOp::Direct`, so
+        // `ShadowWriteMissing` (the one check `verify_simple_bind`'s
+        // hardcoded `shadow_write: false` wouldn't model) never fires.
+        generator.check_simple_field_bind_invariant(
+            VersionPrefix::ClassVars,
+            current_version,
+            target_version,
+            "foldl accumulator's family-slot extraction",
+            span,
+        );
+        let extraction = family_slots::extract_family_slots(
+            &raw,
+            1,
+            &self.threaded_families,
+            |prefix| {
+                FamilyVersionStep::new(
+                    VersionedVar::new(prefix.clone(), current_version, FrameId::ROOT),
+                    VersionedVar::new(prefix.clone(), target_version, FrameId::ROOT),
+                )
+            },
+            span,
+        );
+        let mut ctx = RenderCtx::new(generator);
+        let extraction_doc = render(&extraction, &mut ctx);
         docvec![
             " in let ",
             leaf::var(raw.clone()),
             " = call 'lists':'foldl'(",
             leaf::var(lambda_var.to_string()),
-            ", {",
-            leaf::var(self.initial_class_var.clone()),
             ", ",
-            init_acc,
-            "}, ",
+            init_tuple,
+            ", ",
             leaf::var(safe_list_var.to_string()),
             ") in let ",
-            leaf::var(cv_after),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(raw.clone()),
-            ") in let ",
             leaf::var(fold_result.to_string()),
-            " = call 'erlang':'element'(2, ",
+            " = call 'erlang':'element'(1, ",
             leaf::var(raw),
             ") in ",
+            extraction_doc,
         ]
     }
 

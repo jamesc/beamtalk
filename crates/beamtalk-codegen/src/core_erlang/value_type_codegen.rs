@@ -2466,7 +2466,7 @@ impl CoreErlangGenerator {
         )?;
 
         // a second, throwaway `ThreadingPlan` — constructed purely to
-        // read `threads_class_vars`/`initial_class_var` (both pure functions
+        // read `threads_class_vars`/`initial_class_var_version` (both pure functions
         // of the current generator state and `body`, computed identically to
         // the one `generate_list_do_body_with_threading` builds internally
         // below via `ThreadingPlan::new`) — NOT passed to
@@ -2579,6 +2579,7 @@ impl CoreErlangGenerator {
             leaf::var(init_state_code),
             &safe_list_var,
             &fold_result,
+            body.span,
         )];
         for var_name in &threaded_locals {
             let core_var = Self::to_core_erlang_var(var_name);

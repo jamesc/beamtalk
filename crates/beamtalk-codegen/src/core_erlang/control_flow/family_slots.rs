@@ -57,9 +57,28 @@
 //!   hand-rolled `ClassVars` half. `ThreadingPlan::capture_loop_family_params`
 //!   replaces the former per-family `Option<String>`/`.then(...)` capture
 //!   pair with one call generic over however many families are present.
+//! - `plan.rs`'s `foldl_call_doc` (BT-3516, Phase 8, the last Foldl
+//!   consumer) normalizes the fold accumulator's `ClassVars` slot from
+//!   leading to **trailing** — the intended Phase-0 diff ADR 0122's
+//!   "Keep Foldl's leading slot" alternative rejected — and routes the
+//!   initial-accumulator wrap through [`append_family_slots`] and the
+//!   post-fold unwrap through [`extract_family_slots`] (mint-then-extract,
+//!   the same order `rebind_vt_conditional_mutations` uses, including its
+//!   `check_simple_field_bind_invariant` verification — BT-3513's lesson:
+//!   `extract_family_slots` never verifies its own output). `class_var_fun_param`'s
+//!   own per-iteration seed re-materialization (the fold LAMBDA's own
+//!   parameter unwrap) stays a plain generic loop over `ThreadedFamilies`,
+//!   not a call into `extract_family_slots` — it re-binds an
+//!   ALREADY-existing identity captured before the lambda exists, never
+//!   mints a fresh one, so `extract_family_slots`'s "mint the target first"
+//!   contract does not apply (mirrors `value_type_codegen.rs`'s own
+//!   `extract_vt_loop_family_slot`, which dispatches to its own function for
+//!   the identical reason — see this module's own note above).
 //!
-//! Still to migrate: the Foldl accumulator (once its leading slot
-//! normalizes to trailing, BT-3516).
+//! Foldl was the last construct in ADR 0122 §"What is hand-written today"
+//! whose own accumulator tuple built/unpacked a family slot by hand; the
+//! epic's remaining issues (`match:`'s detector, the `ClassVars`-only side
+//! channels) are cleanup on top of this, not new append/extract call sites.
 //!
 //! **Trailing position only** — no leading-slot mode; Foldl's leading slot
 //! is normalized to trailing when IT migrates (ADR 0122 §Alternatives
