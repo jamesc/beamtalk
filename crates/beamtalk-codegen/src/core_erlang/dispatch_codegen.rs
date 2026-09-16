@@ -2255,13 +2255,18 @@ impl CoreErlangGenerator {
                 // reached through `lower_field_write`'s `ClassVar` arm), but
                 // tagged with the loop's real, already-minted frame
                 // (`current_branch_frame()`) instead of `FrameId::ROOT`, per
-                // Question 2's resolution. `loop_threads_class_vars` scopes
-                // this to exactly the Letrec loop-body call path — see its
-                // own doc comment for why it can never leak into a nested
-                // Foldl body, conditional, or block literal (all of which
-                // still hit `reject_class_var_field_assignment` below,
-                // unchanged).
-                if self.is_class_var_assignment(expr) && self.loop_mode.loop_threads_class_vars {
+                // Question 2's resolution. `loop_mode.threading_families`
+                // (ADR 0122 Decision 5) scopes this to exactly the Letrec
+                // loop-body call path — see its own doc comment for why it
+                // can never leak into a nested Foldl body, conditional, or
+                // block literal (all of which still hit
+                // `reject_class_var_field_assignment` below, unchanged).
+                if self.is_class_var_assignment(expr)
+                    && self
+                        .loop_mode
+                        .threading_families
+                        .contains(&VersionPrefix::ClassVars)
+                {
                     let frame = self.current_branch_frame();
                     return self.lower_field_write(
                         FieldWriteSite::ClassVar,

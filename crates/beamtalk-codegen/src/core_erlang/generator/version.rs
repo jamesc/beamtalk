@@ -8,6 +8,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use crate::core_erlang::control_flow::analysis::ThreadedFamilies;
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::threaded_ir::{self, VersionCounter, VersionPrefix};
 use crate::core_erlang::util;
@@ -138,25 +139,52 @@ impl CoreErlangGenerator {
             .current_var(VersionPrefix::ClassVars)
     }
 
-    /// records the peak `class_var_version` reached inside a
+    /// records the peak version `prefix`'s live counter reached inside a
     /// `Foldl*` body's own `with_branch_context` scope, for
-    /// [`Self::take_foldl_class_var_peak`] to consume once that scope's
-    /// guard has restored the live counter — see
-    /// `last_foldl_class_var_peak`'s own doc comment for the full rationale.
-    pub(in crate::core_erlang) fn set_foldl_class_var_peak(&mut self, version: usize) {
-        self.loop_mode.last_foldl_class_var_peak = Some(version);
+    /// [`Self::catch_up_class_var_version_to_foldl_peak`] to consume once
+    /// that scope's guard has restored the live counter — see
+    /// `LoopMode::foldl_peak_versions`'s own doc comment for the full
+    /// rationale.
+    pub(in crate::core_erlang) fn set_foldl_class_var_peak(
+        &mut self,
+        prefix: VersionPrefix,
+        version: usize,
+    ) {
+        self.loop_mode.foldl_peak_versions.insert(prefix, version);
     }
 
-    /// takes (clears) the peak class-var version recorded by
-    /// [`Self::set_foldl_class_var_peak`], if any, and — when it exceeds the
-    /// live (already-restored) counter — fast-forwards the live counter to
-    /// it, so the next [`Self::next_class_var`] mint is guaranteed not to
-    /// collide with a name already used inside the fold body's own closure.
-    /// A no-op when no peak was recorded (non-`ClassVars`-threading bodies).
-    pub(in crate::core_erlang) fn catch_up_class_var_version_to_foldl_peak(&mut self) {
-        if let Some(peak) = self.loop_mode.last_foldl_class_var_peak.take() {
-            if peak > self.class_var_version() {
-                self.set_class_var_version(peak);
+    /// takes (removes) the peak version recorded by
+    /// [`Self::set_foldl_class_var_peak`] for each family in `families`, if
+    /// any, and — when it exceeds that family's live (already-restored)
+    /// counter — fast-forwards the live counter to it, so the next mint
+    /// (e.g. [`Self::next_class_var`]) is guaranteed not to collide with a
+    /// name already used inside the fold body's own closure. A no-op for a
+    /// family with no recorded peak (a non-threading body, or a family this
+    /// generation never populates in practice).
+    ///
+    /// ADR 0122 Decision 5 (BT-3518): iterates `families` — `ThreadingPlan::foldl_call_doc`
+    /// passes its own `threaded_families()` — rather than hardcoding a
+    /// single `ClassVars` take, even though `ClassVars` is the only family a
+    /// `Foldl*` accumulator can ever carry.
+    pub(in crate::core_erlang) fn catch_up_class_var_version_to_foldl_peak(
+        &mut self,
+        families: &ThreadedFamilies,
+    ) {
+        for prefix in families.as_slice() {
+            let Some(peak) = self.loop_mode.foldl_peak_versions.remove(prefix) else {
+                continue;
+            };
+            match prefix {
+                VersionPrefix::ClassVars => {
+                    if peak > self.class_var_version() {
+                        self.set_class_var_version(peak);
+                    }
+                }
+                other => unreachable!(
+                    "a Foldl* body's own peak-tracking only ever carries ClassVars \
+                     (never SelfVt — a fold accumulator has no matching slot), \
+                     got {other:?}"
+                ),
             }
         }
     }

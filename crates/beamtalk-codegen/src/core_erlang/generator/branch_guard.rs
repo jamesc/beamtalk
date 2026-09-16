@@ -6,6 +6,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use crate::core_erlang::control_flow::analysis::ThreadedFamilies;
 use crate::core_erlang::generator::CoreErlangGenerator;
 
 /// RAII guard for [`CoreErlangGenerator::with_branch_context`]'s
@@ -38,13 +39,18 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 ///   can enter `with_branch_context` with a nonzero `self_version`, so
 ///   `self_version` is saved and restored unconditionally, on the same
 ///   `class_vars` discipline, rather than left untouched.
+/// - **`threading_families`** (ADR 0122 Decision 5, BT-3518): reset to
+///   empty on entry, same as `state`, so a nested construct never inherits
+///   an enclosing Letrec loop's threaded families by default — restored on
+///   exit via [`std::mem::take`] rather than a `Copy`/`Clone`, since a
+///   [`ThreadedFamilies`] holds a small owned `Vec`.
 pub(in crate::core_erlang) struct BranchContextGuard<'a> {
     generator: &'a mut CoreErlangGenerator,
     saved_in_loop: bool,
     saved_state_version: usize,
     saved_class_var_version: usize,
     saved_self_version: usize,
-    saved_loop_threads_class_vars: bool,
+    saved_threading_families: ThreadedFamilies,
 }
 
 impl Drop for BranchContextGuard<'_> {
@@ -54,7 +60,8 @@ impl Drop for BranchContextGuard<'_> {
         self.generator
             .set_class_var_version(self.saved_class_var_version);
         self.generator.set_self_version(self.saved_self_version);
-        self.generator.loop_mode.loop_threads_class_vars = self.saved_loop_threads_class_vars;
+        self.generator.loop_mode.threading_families =
+            std::mem::take(&mut self.saved_threading_families);
         // class_var_mutated intentionally NOT restored — sticky.
     }
 }
@@ -68,13 +75,13 @@ impl CoreErlangGenerator {
         let saved_in_loop = self.in_loop_body;
         let saved_class_var_version = self.class_var_version();
         let saved_self_version = self.self_version();
-        let saved_loop_threads_class_vars = self.loop_mode.loop_threads_class_vars;
+        let saved_threading_families = std::mem::take(&mut self.loop_mode.threading_families);
         self.set_state_version(0);
         self.in_loop_body = true;
         // reset-on-entry, like `state_version` — see
-        // `loop_threads_class_vars`'s own doc comment for why this must
-        // never inherit an enclosing Letrec loop's `true` by default.
-        self.loop_mode.loop_threads_class_vars = false;
+        // `threading_families`'s own doc comment for why this must
+        // never inherit an enclosing Letrec loop's families by default.
+        // `mem::take` above already reset it to empty.
         // mint a fresh frame identity for this branch context —
         // see `current_branch_frame`'s doc comment. Never reset/restored
         // (unlike the version counters above): frame identity must stay
@@ -97,7 +104,7 @@ impl CoreErlangGenerator {
             saved_state_version,
             saved_class_var_version,
             saved_self_version,
-            saved_loop_threads_class_vars,
+            saved_threading_families,
         }
     }
 

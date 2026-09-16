@@ -637,8 +637,8 @@ impl CoreErlangGenerator {
     ///   `ThreadingPlan::new_impl` decides `threads_class_vars`. A bare
     ///   class-var field write inside a `Foldl*` body needs no matching
     ///   trigger here: `generate_field_assignment_open` never threads one
-    ///   regardless of nesting (`loop_threads_class_vars` stays scoped to
-    ///   `BodyKind::Letrec`), so it is already unconditionally rejected by
+    ///   regardless of nesting (`loop_mode.threading_families` stays scoped
+    ///   to `BodyKind::Letrec`), so it is already unconditionally rejected by
     ///   `reject_class_var_field_assignment` at any depth.
     ///
     /// This is a detection-only predicate, deliberately separate from

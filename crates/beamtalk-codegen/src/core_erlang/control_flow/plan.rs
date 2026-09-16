@@ -1205,9 +1205,9 @@ impl ThreadingPlan {
         // minting — otherwise this mint can collide with an
         // already-used-inside-the-closure name (Core Erlang requires
         // globally unique variable names across nested `fun` scopes within
-        // one compiled function) — see `last_foldl_class_var_peak`'s doc
-        // comment.
-        generator.catch_up_class_var_version_to_foldl_peak();
+        // one compiled function) — see `LoopMode::foldl_peak_versions`'s
+        // doc comment.
+        generator.catch_up_class_var_version_to_foldl_peak(&self.threaded_families);
         generator.next_class_var();
         let target_version = generator.class_var_version();
         // BT-3513's lesson (see CLAUDE.md's state-threading rule):
