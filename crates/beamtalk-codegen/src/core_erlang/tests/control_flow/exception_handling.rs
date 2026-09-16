@@ -1003,3 +1003,84 @@ fn test_class_method_self_send_reaching_mutation_via_class_reference_wrapper_is_
          one. Got: {result:?}"
     );
 }
+
+#[test]
+fn test_class_method_self_send_nested_in_match_arm_in_ensure_is_compile_error() {
+    // Adversarial-review finding on BT-3522: `MatchArm::body` is a bare
+    // `Expression`, not a `Block`, so `reject_unthreadable_class_var_mutation`'s
+    // original walk (which only special-cased `Expression::Block`) never
+    // searched inside a `match:` arm at all — a class-var mutation reached
+    // only through a `1 -> self bump` arm, itself nested inside an `ensure:`
+    // try body, compiled cleanly and silently returned the pre-mutation
+    // value. Confirmed empirically with `beamtalk test` before adding this
+    // Rust-level pin. The fix extends the walk to search `match:` arm
+    // bodies (and guards) the same way it already searches a nested block's
+    // statements.
+    let src = concat!(
+        "Object subclass: CvMatchArmNestedEnsure\n",
+        "  classState: runs = 0\n\n",
+        "  class bump => self.runs := self.runs + 1\n\n",
+        "  class probe: v =>\n",
+        "    self.runs := 0\n",
+        "    [\n",
+        "      v match: [\n",
+        "        1 -> self bump;\n",
+        "        _ -> 0\n",
+        "      ]\n",
+        "    ] ensure: [nil]\n",
+        "    self.runs\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvmatcharmnestedensure").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "a class-var-mutating self-send nested inside a match: arm within an ensure: try body \
+         must be a clean compile error, not a silent drop. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_method_self_send_nested_in_nested_ensure_in_ensure_try_body_is_compile_error() {
+    // Adversarial-review finding on BT-3522: a nested `ensure:`/`on:do:` is
+    // itself a top-level statement of the OUTER arm, and its own codegen
+    // recursion emits its own real `ClassVars` rebind (the same detection
+    // shape as the carried sub-expression case). This test pins that the
+    // OUTER construct still rejects rather than silently drops: the inner
+    // `ensure:`'s own `ClassVars` slot is scoped to its own generated tuple,
+    // which nothing in the outer arm's E1..E7 dispatch unpacks, so the same
+    // "can't carry, so reject" rule applies as it does to a bare nested
+    // block. No test previously pinned either the carry or the reject
+    // direction for this specific double-nested-construct shape.
+    let src = concat!(
+        "Object subclass: CvNestedEnsureInEnsure\n",
+        "  classState: runs = 0\n\n",
+        "  class bump => self.runs := self.runs + 1\n\n",
+        "  class probe =>\n",
+        "    self.runs := 0\n",
+        "    [\n",
+        "      [ self bump ] ensure: [nil]\n",
+        "    ] ensure: [nil]\n",
+        "    self.runs\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvnestedensureinensure").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "a class-var-mutating self-send nested inside an ensure: within another ensure:'s try \
+         body must be a clean compile error, not a silent drop. Got: {result:?}"
+    );
+}

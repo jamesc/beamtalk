@@ -603,13 +603,34 @@ impl CoreErlangGenerator {
     ///   `0` instead of `1`), with the emitted arm tuple silently naming a
     ///   same-spelled outer version instead.
     ///
-    /// So the walk descends the statement looking for nested blocks, then
-    /// searches each block's own body — at any depth, since
+    /// So the walk descends the statement looking for nested blocks OR
+    /// `match:` arms, then searches each one's own body (and a `match:`
+    /// arm's own guard, if it has one) — at any depth, since
     /// [`beamtalk_core::ast_walker::walk_expression`] descends into blocks
-    /// itself — for a match. "What counts as a mutation" is
-    /// [`Self::is_family_mutation`] (ADR 0122 Decision 4), so the bare
+    /// and `match:` arms itself — for a match. "What counts as a mutation"
+    /// is [`Self::is_family_mutation`] (ADR 0122 Decision 4), so the bare
     /// class-var field write and the same-class self-send shapes are covered
     /// by the one shared rule rather than re-derived here.
+    ///
+    /// # Why `match:` arms need the same treatment as a nested block
+    ///
+    /// BT-3522 adversarial review: [`beamtalk_core::ast::MatchArm::body`] is
+    /// a bare `Expression`, not a [`beamtalk_core::ast::Block`], so it is
+    /// invisible to a walk that only special-cases
+    /// [`Expression::Block`](beamtalk_core::ast::Expression::Block). ADR
+    /// 0122 Phase 9 (BT-3517) made `match:` declare `[State, ClassVars]` as
+    /// data it may thread — but only for a `match:` that is ITSELF the
+    /// construct doing the threading (i.e. reached the same way a top-level
+    /// bare mutation is). Confirmed empirically that this does NOT extend to
+    /// a `match:` sitting inside `on:do:`/`ensure:`: a class-method self-send
+    /// inside a `1 -> self bump` arm, itself inside an `ensure:`'s try body,
+    /// compiled cleanly and silently returned the pre-mutation value — the
+    /// exact silent-drop shape this issue exists to close, just reached
+    /// through a `match:` arm instead of an `ifTrue:` block. So a `match:`
+    /// arm's body (and its guard, which could in principle hide the same
+    /// shape) gets the identical "can't carry, so reject" treatment as a
+    /// nested block, rather than being assumed safe because it isn't
+    /// syntactically one.
     ///
     /// # Why the self-send shape is narrowed once more before rejecting
     ///
@@ -649,30 +670,31 @@ impl CoreErlangGenerator {
             if found.is_some() {
                 return;
             }
-            let Expression::Block(block) = e else {
-                return;
-            };
-            for stmt in &block.body {
-                beamtalk_core::ast_walker::walk_expression(&stmt.expression, &mut |inner| {
-                    if found.is_some() || !self.is_family_mutation(&VersionPrefix::ClassVars, inner)
-                    {
-                        return;
-                    }
-                    let site = ClassVarMutationSite::new(inner);
-                    // See "Why the self-send shape is narrowed once more"
-                    // above: a provably non-mutating callee's rebind is the
-                    // caller's own map unchanged, so there is nothing to
-                    // lose and nothing to reject.
-                    if let ClassVarMutationSite::SelfSend { selector, .. } = &site {
-                        if !self
-                            .class_var_mutating_selectors()
-                            .contains(selector.as_str())
+            match e {
+                Expression::Block(block) => {
+                    for stmt in &block.body {
+                        if let Some(site) = self.find_class_var_mutation_in_scope(&stmt.expression)
                         {
+                            found = Some(site);
                             return;
                         }
                     }
-                    found = Some(site);
-                });
+                }
+                Expression::Match { arms, .. } => {
+                    for arm in arms {
+                        if let Some(guard) = &arm.guard {
+                            if let Some(site) = self.find_class_var_mutation_in_scope(guard) {
+                                found = Some(site);
+                                return;
+                            }
+                        }
+                        if let Some(site) = self.find_class_var_mutation_in_scope(&arm.body) {
+                            found = Some(site);
+                            return;
+                        }
+                    }
+                }
+                _ => {}
             }
         });
         let Some(site) = found else {
@@ -680,6 +702,37 @@ impl CoreErlangGenerator {
         };
         let location = self.location_label(site.span());
         Err(site.into_error(location))
+    }
+
+    /// Searches one nested scope (a block's own statement, or a `match:`
+    /// arm's body/guard) for the first [`Self::is_family_mutation`] match
+    /// for `ClassVars`, applying the same self-send purity narrowing
+    /// [`Self::reject_unthreadable_class_var_mutation`]'s own doc comment
+    /// explains ("Why the self-send shape is narrowed once more"). Factored
+    /// out so [`Self::reject_unthreadable_class_var_mutation`]'s two scope
+    /// kinds (block statements, `match:` arms) share one search rather than
+    /// two copies of this narrowing.
+    fn find_class_var_mutation_in_scope(
+        &self,
+        scope_expr: &Expression,
+    ) -> Option<ClassVarMutationSite> {
+        let mut found: Option<ClassVarMutationSite> = None;
+        beamtalk_core::ast_walker::walk_expression(scope_expr, &mut |inner| {
+            if found.is_some() || !self.is_family_mutation(&VersionPrefix::ClassVars, inner) {
+                return;
+            }
+            let site = ClassVarMutationSite::new(inner);
+            if let ClassVarMutationSite::SelfSend { selector, .. } = &site {
+                if !self
+                    .class_var_mutating_selectors()
+                    .contains(selector.as_str())
+                {
+                    return;
+                }
+            }
+            found = Some(site);
+        });
+        found
     }
 
     /// the `SelfVt` mirror of
