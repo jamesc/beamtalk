@@ -1002,6 +1002,25 @@ resolution and a `migrateFromV*` guard in ADR 0114's rename validator; a
 composed per-ancestor chain; automatic `local_call` lowering of ancestor
 reuse; an ADR 0113-style hard gate on lossy reloads.
 
+## Implementation Tracking
+
+**Epic:** [BT-3533](https://linear.app/beamtalk/issue/BT-3533)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 0 | [BT-3531](https://linear.app/beamtalk/issue/BT-3531) | Hot reload drops inherited fields / never reaches subclasses | M | – |
+| 0 | [BT-3532](https://linear.app/beamtalk/issue/BT-3532) | Hot reload field migration silently no-ops (`init(#{})` 3-tuple) | S | – |
+| 0 | [BT-3534](https://linear.app/beamtalk/issue/BT-3534) | `'__shape_version__'` tracking + suspend-on-failure semantics | M | BT-3531, BT-3532 |
+| 1 | [BT-3535](https://linear.app/beamtalk/issue/BT-3535) | Hook napkin: prove `local_call/3` during a class's own reload | S | BT-3534 |
+| 2 | [BT-3536](https://linear.app/beamtalk/issue/BT-3536) | `beamtalk_shape_chain` + `beamtalk_shape_migration`: `migrate/3`, `pack/1`, `unpack/1` | M | BT-3535 |
+| 3 | [BT-3537](https://linear.app/beamtalk/issue/BT-3537) | `shapeVersion:` header clause + `migrateFromVN:` language surface | M | BT-3536 |
+| 4 | [BT-3538](https://linear.app/beamtalk/issue/BT-3538) | Shape-change reload findings | M | BT-3537 |
+| 4 | [BT-3539](https://linear.app/beamtalk/issue/BT-3539) | LSP completion + hover for the migration chain | S | BT-3537 |
+| 5 | [BT-3540](https://linear.app/beamtalk/issue/BT-3540) | Docs + REPL-protocol e2e | S | BT-3538, BT-3539 |
+
+**Status:** Planned. Recommended start: BT-3531 / BT-3532 (unblocked, `agent-ready`).
+
 ## References
 - Related issues: [BT-3524](https://linear.app/beamtalk/issue/BT-3524)
   (this ADR); blocks [BT-3527](https://linear.app/beamtalk/issue/BT-3527)
