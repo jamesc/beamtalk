@@ -10,113 +10,103 @@
 // with two adjacent arms that each mutate a different field.
 
 TestCase subclass: NilTypeMatchSelfMutationActorTest
+  field: a = nil
+
+  setUp => self.a := NilTypeMatchSelfMutationRegistry spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   testBumpMatchReturnsIntegerNotTuple =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    result := a bumpMatch
+    result := self.a bumpMatch
     self assert: result equals: 1
-    self assert: a currentCount equals: 1
+    self assert: self.a currentCount equals: 1
 
   testBumpMatchThreadsStateAcrossCalls =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpMatch
-    a bumpMatch
-    result := a bumpMatch
+    self.a bumpMatch
+    self.a bumpMatch
+    result := self.a bumpMatch
     self assert: result equals: 3
-    self assert: a currentCount equals: 3
+    self assert: self.a currentCount equals: 3
 
   testBumpMatchIfTrueReturnsIntegerNotTuple =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    result := a bumpMatchIfTrue: true
+    result := self.a bumpMatchIfTrue: true
     self assert: result equals: 1
-    self assert: a currentCount equals: 1
+    self assert: self.a currentCount equals: 1
 
   testBumpMatchIfTrueThreadsStateAcrossCalls =>
     // count: 0 -> 1 -> 2 -> 1 (the last call passes false, taking the
     // ifFalse: branch, self.count := self.count - 1 = 1). The assignment's
     // value is what's returned, so `result` is that decremented count, not
     // the pre-decrement value.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpMatchIfTrue: true
-    a bumpMatchIfTrue: true
-    result := a bumpMatchIfTrue: false
+    self.a bumpMatchIfTrue: true
+    self.a bumpMatchIfTrue: true
+    result := self.a bumpMatchIfTrue: false
     self assert: result equals: 1
-    self assert: a currentCount equals: 1
+    self assert: self.a currentCount equals: 1
 
   testBumpEitherOfMutatesOnlyTheMatchingArmsField =>
     // Each arm must start from the same pre-match state: bumping the `2`
     // arm after two `1` bumps must not see (or leak into) the count the
     // `1` arm mutated, and vice versa.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    r1 := a bumpEitherOf: 1
-    r2 := a bumpEitherOf: 1
-    r3 := a bumpEitherOf: 2
+    r1 := self.a bumpEitherOf: 1
+    r2 := self.a bumpEitherOf: 1
+    r3 := self.a bumpEitherOf: 2
     self assert: r1 equals: 1
     self assert: r2 equals: 2
     self assert: r3 equals: 1
-    self assert: a currentCount equals: 2
-    self assert: a currentOtherCount equals: 1
+    self assert: self.a currentCount equals: 2
+    self assert: self.a currentOtherCount equals: 1
 
   // --- BT-3489: bare `self.field := ...` arm bodies -------------------------
   testBumpBareThreadsMatchingArmMutation =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBare: 1) equals: 10
-    self assert: a currentCount equals: 10
+    self assert: (self.a bumpBare: 1) equals: 10
+    self assert: self.a currentCount equals: 10
 
   testBumpBareThreadsWildcardArmMutation =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBare: 99) equals: 1
-    self assert: a currentCount equals: 1
+    self assert: (self.a bumpBare: 99) equals: 1
+    self assert: self.a currentCount equals: 1
 
   testBumpBareAccumulatesAcrossCalls =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpBare: 1
-    a bumpBare: 99
-    self assert: (a bumpBare: 1) equals: 21
-    self assert: a currentCount equals: 21
+    self.a bumpBare: 1
+    self.a bumpBare: 99
+    self assert: (self.a bumpBare: 1) equals: 21
+    self assert: self.a currentCount equals: 21
 
   testBumpBareEitherOfMutatesOnlyTheMatchingArmsField =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpBareEitherOf: 1
-    a bumpBareEitherOf: 1
-    self assert: (a bumpBareEitherOf: 2) equals: 3
-    self assert: a currentCount equals: 2
-    self assert: a currentOtherCount equals: 1
+    self.a bumpBareEitherOf: 1
+    self.a bumpBareEitherOf: 1
+    self assert: (self.a bumpBareEitherOf: 2) equals: 3
+    self assert: self.a currentCount equals: 2
+    self assert: self.a currentOtherCount equals: 1
 
   testBumpBareUsingResultSeesBothValueAndMutation =>
     // The arm's assigned value (10) is the match's value, and the post-match
     // `self.count` read sees the same mutated 10 — so 20, not 10 or 0.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBareUsingResult: 1) equals: 20
-    self assert: a currentCount equals: 10
+    self assert: (self.a bumpBareUsingResult: 1) equals: 20
+    self assert: self.a currentCount equals: 10
 
   testBumpBareTypedThreadsTypePatternArmMutation =>
     // `Pattern::Type` arm -> generate_match_chain lowering, not the
     // all-native fast path the other bumpBare* tests exercise.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBareTyped: 5) equals: 5
-    self assert: a currentCount equals: 5
+    self assert: (self.a bumpBareTyped: 5) equals: 5
+    self assert: self.a currentCount equals: 5
 
   testBumpBareTypedThreadsWildcardArmMutation =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBareTyped: "not an integer") equals: 1
-    self assert: a currentCount equals: 1
+    self assert: (self.a bumpBareTyped: "not an integer") equals: 1
+    self assert: self.a currentCount equals: 1
 
   testBumpBareInLoopAccumulatesOnePerIteration =>
     // i=1 takes the `1 ->` arm (+10), i=2..4 take the wildcard (+1 each): 13.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBareInLoop: 4) equals: 13
-    self assert: a currentCount equals: 13
+    self assert: (self.a bumpBareInLoop: 4) equals: 13
+    self assert: self.a currentCount equals: 13
 
   testBumpBareNestedThreadsInnerArmMutation =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBareNested: 1) equals: 5
-    self assert: a currentCount equals: 5
+    self assert: (self.a bumpBareNested: 1) equals: 5
+    self assert: self.a currentCount equals: 5
 
   testBumpBareNestedLeavesStateAloneOnNonMatchingArm =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpBareNested: 99) equals: 0
-    self assert: a currentCount equals: 0
+    self assert: (self.a bumpBareNested: 99) equals: 0
+    self assert: self.a currentCount equals: 0
 
   // --- BT-3493: `self.field := ...` wrapped in a local assignment
   // (`r := (self.x := ...)`), reproduced with no `match:` involved at all
@@ -124,140 +114,118 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
   // loop body. -------------------------------------------------------------
   testBumpWrappedIfTrueTakenBranchSeesFreshlyWrittenLocal =>
     // r := (self.count := 0 + 10) = 10; self.count := r + 1 = 11.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedIfTrue: true) equals: 11
-    self assert: a currentCount equals: 11
+    self assert: (self.a bumpWrappedIfTrue: true) equals: 11
+    self assert: self.a currentCount equals: 11
 
   testBumpWrappedIfTrueNotTakenBranchMutatesIndependently =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedIfTrue: false) equals: -1
-    self assert: a currentCount equals: -1
+    self assert: (self.a bumpWrappedIfTrue: false) equals: -1
+    self assert: self.a currentCount equals: -1
 
   testBumpWrappedIfTrueAccumulatesAcrossCalls =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpWrappedIfTrue: true
-    result := a bumpWrappedIfTrue: true
+    self.a bumpWrappedIfTrue: true
+    result := self.a bumpWrappedIfTrue: true
     self assert: result equals: 22
-    self assert: a currentCount equals: 22
+    self assert: self.a currentCount equals: 22
 
   testBumpWrappedIfTrueReadAfterMergeSeesFieldWrittenValue =>
     // Claude Review follow-up: `r` is seeded (declared before the
     // conditional) and reassigned via the wrapped shape only in the taken
     // arm — the post-merge read must see 10 + 1 = 11, not the stale seeded
     // 0 + 1 = 1 a missing StateAcc `Put` in the C2z fast path would produce.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedIfTrueReadAfterMerge: true) equals: 11
-    self assert: a currentCount equals: 10
+    self assert: (self.a bumpWrappedIfTrueReadAfterMerge: true) equals: 11
+    self assert: self.a currentCount equals: 10
 
   testBumpWrappedIfTrueReadAfterMergeNonTakenBranchUnaffected =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedIfTrueReadAfterMerge: false) equals: 6
-    self assert: a currentCount equals: 0
+    self assert: (self.a bumpWrappedIfTrueReadAfterMerge: false) equals: 6
+    self assert: self.a currentCount equals: 0
 
   testBumpWrappedInLoopAccumulatesOnePerIteration =>
     // 1+2+3+4 = 10, written and re-read through the wrapped local each
     // iteration.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedInLoop: 4) equals: 10
-    self assert: a currentCount equals: 10
+    self assert: (self.a bumpWrappedInLoop: 4) equals: 10
+    self assert: self.a currentCount equals: 10
 
   testBumpWrappedInLoopZeroIterationsLeavesStateAlone =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedInLoop: 0) equals: 0
-    self assert: a currentCount equals: 0
+    self assert: (self.a bumpWrappedInLoop: 0) equals: 0
+    self assert: self.a currentCount equals: 0
 
   testBumpWrappedInLoopReadAfterLoopSeesLastIterationValue =>
     // i=1: count 0->1. i=2: count 1->3. i=3: count 3->6. r == 6 after the
     // loop, read from outside every iteration's own frame.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedInLoopReadAfterLoop: 3) equals: 6
-    self assert: a currentCount equals: 6
+    self assert: (self.a bumpWrappedInLoopReadAfterLoop: 3) equals: 6
+    self assert: self.a currentCount equals: 6
 
   testBumpWrappedMatchThreadsMatchingArmMutation =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedMatch: 1) equals: 10
-    self assert: a currentCount equals: 10
+    self assert: (self.a bumpWrappedMatch: 1) equals: 10
+    self assert: self.a currentCount equals: 10
 
   testBumpWrappedMatchThreadsWildcardArmMutation =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedMatch: 99) equals: 1
-    self assert: a currentCount equals: 1
+    self assert: (self.a bumpWrappedMatch: 99) equals: 1
+    self assert: self.a currentCount equals: 1
 
   testBumpWrappedMatchAccumulatesAcrossCalls =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpWrappedMatch: 1
-    a bumpWrappedMatch: 99
-    result := a bumpWrappedMatch: 1
+    self.a bumpWrappedMatch: 1
+    self.a bumpWrappedMatch: 99
+    result := self.a bumpWrappedMatch: 1
     self assert: result equals: 21
-    self assert: a currentCount equals: 21
+    self assert: self.a currentCount equals: 21
 
   testBumpWrappedIfTrueNestedLoopReadsCapturedLocal =>
     // count: 0 -> (r=10) -> 10 -> +10 -> 20 -> +10 -> 30.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedIfTrueNestedLoopReadsCapturedLocal: true) equals: 30
-    self assert: a currentCount equals: 30
+    self assert: (self.a bumpWrappedIfTrueNestedLoopReadsCapturedLocal: true) equals: 30
+    self assert: self.a currentCount equals: 30
 
   testBumpWrappedInHybridLoopThreadsBothFieldAndOuterLocal =>
     // i=1: count 0->1, sum 0->1. i=2: count 1->3, sum 1->4.
     // i=3: count 3->6, sum 4->10.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedInHybridLoop: 3) equals: 10
-    self assert: a currentCount equals: 6
+    self assert: (self.a bumpWrappedInHybridLoop: 3) equals: 10
+    self assert: self.a currentCount equals: 6
 
   testBumpWrappedInDoAccumulatesOverList =>
     // x=1: count 0->1. x=2: count 1->3. x=3: count 3->6.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedInDo: #(1, 2, 3)) equals: 6
-    self assert: a currentCount equals: 6
+    self assert: (self.a bumpWrappedInDo: #(1, 2, 3)) equals: 6
+    self assert: self.a currentCount equals: 6
 
   // --- BT-3495: `self.field := ...` wrapped in a value-carrying parent
   // OTHER than a local assignment — `^`, `{a, b} :=`, and a plain
   // top-level flat method-body statement. ------------------------------
   testBumpWrappedReturnIfTrueTakenBranchEarlyReturnsFieldValue =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedReturnIfTrue: true) equals: 10
-    self assert: a currentCount equals: 10
+    self assert: (self.a bumpWrappedReturnIfTrue: true) equals: 10
+    self assert: self.a currentCount equals: 10
 
   testBumpWrappedReturnIfTrueNotTakenBranchMutatesIndependently =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedReturnIfTrue: false) equals: -1
-    self assert: a currentCount equals: -1
+    self assert: (self.a bumpWrappedReturnIfTrue: false) equals: -1
+    self assert: self.a currentCount equals: -1
 
   testBumpWrappedReturnIfTrueAccumulatesAcrossCalls =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpWrappedReturnIfTrue: true
-    result := a bumpWrappedReturnIfTrue: true
+    self.a bumpWrappedReturnIfTrue: true
+    result := self.a bumpWrappedReturnIfTrue: true
     self assert: result equals: 20
-    self assert: a currentCount equals: 20
+    self assert: self.a currentCount equals: 20
 
   testBumpWrappedDestructureIfTrueTakenBranchSeesBothDestructuredParts =>
     // pair := (0+10, 0+20) = (10, 20); self.count := 10 + 20 = 30.
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedDestructureIfTrue: true) equals: 30
-    self assert: a currentCount equals: 30
+    self assert: (self.a bumpWrappedDestructureIfTrue: true) equals: 30
+    self assert: self.a currentCount equals: 30
 
   testBumpWrappedDestructureIfTrueNotTakenBranchLeavesStateAlone =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedDestructureIfTrue: false) equals: 0
-    self assert: a currentCount equals: 0
+    self assert: (self.a bumpWrappedDestructureIfTrue: false) equals: 0
+    self assert: self.a currentCount equals: 0
 
   testBumpWrappedDestructureIfTrueAccumulatesAcrossCalls =>
     // Second call reads the post-first-call count (30): pair := (40, 50),
     // count := a + b = 40 + 50 = 90 (a plain replace, not an accumulate).
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpWrappedDestructureIfTrue: true
-    result := a bumpWrappedDestructureIfTrue: true
+    self.a bumpWrappedDestructureIfTrue: true
+    result := self.a bumpWrappedDestructureIfTrue: true
     self assert: result equals: 90
-    self assert: a currentCount equals: 90
+    self assert: self.a currentCount equals: 90
 
   testBumpWrappedTopLevelReturnsLocalPlusOne =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    self assert: (a bumpWrappedTopLevel: 5) equals: 6
-    self assert: a currentCount equals: 5
+    self assert: (self.a bumpWrappedTopLevel: 5) equals: 6
+    self assert: self.a currentCount equals: 5
 
   testBumpWrappedTopLevelAccumulatesAcrossCalls =>
-    a := NilTypeMatchSelfMutationRegistry spawn
-    a bumpWrappedTopLevel: 5
-    result := a bumpWrappedTopLevel: 3
+    self.a bumpWrappedTopLevel: 5
+    result := self.a bumpWrappedTopLevel: 3
     self assert: result equals: 9
-    self assert: a currentCount equals: 8
+    self assert: self.a currentCount equals: 8
