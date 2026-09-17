@@ -140,7 +140,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0111](0111-lowered-ir-verifier-for-state-threading.md) | Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return | Implemented | 2026-08-11 |
 | [0112](0112-method-level-removal-language-primitive.md) | Method-Level Removal Language Primitive (`Behaviour removeSelector:`) | Implemented | 2026-08-15 |
 | [0113](0113-destructive-workspace-operations.md) | Destructive Workspace Operations — File Deletion in Flush | Implemented | 2026-08-18 |
-| [0114](0114-class-and-method-rename.md) | Class and Method Rename in the Live Workspace | Proposed | 2026-08-18 |
+| [0114](0114-class-and-method-rename.md) | Class and Method Rename in the Live Workspace | Accepted | 2026-08-25 |
 | [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Implemented | 2026-08-20 |
 | [0116](0116-number-on-the-left-arithmetic-coercion.md) | Double-Dispatch Coercion for Number-on-the-Left Arithmetic | Accepted | 2026-08-25 |
 | [0117](0117-beamtalk-core-crate-split.md) | Splitting `beamtalk-core` into Sub-Crates | Proposed | 2026-08-30 |
@@ -149,6 +149,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0120](0120-value-type-self-threading-scope.md) | Value-Type `Self` Threading — Patch the Remaining Gaps, or Generalize `ThreadedIr`'s Storage Families? | Implemented | 2026-09-09 |
 | [0121](0121-lone-ok-error-atom-specs-as-result.md) | Lone `ok`/`error` Atom Return Specs Map to `Result` in FFI Type Inference | Accepted | 2026-09-14 |
 | [0122](0122-threaded-ir-storage-family-generalization-scope.md) | Unify `ThreadedIr` Storage-Family Threading | Implemented | 2026-09-16 |
+| [0123](0123-versioned-state-migration.md) | Versioned State Migration as a Language Surface (`shapeVersion:` + `migrateFromVN:`) | Accepted | 2026-09-17 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
