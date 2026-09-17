@@ -428,20 +428,27 @@ validator enforces.
   version onto the state *before* the chain reads the old one. The old
   version is read from the incoming `State` first, as an explicit ordering
   requirement, not an accident of code layout.
-- The `Extra` contract changes from `{NewInstanceVars, Module}` to a map:
+- The `Extra` contract changes from `{NewInstanceVars, Module}` to a map
+  carrying **only what the state cannot tell you**:
 
   ```erlang
-  #{module := atom(), fields := [atom()], shape_version := pos_integer()}
+  #{module := atom()}
   ```
 
-  where `fields` is the **flattened** list. `code_change(_OldVsn, State,
-  Extra)` reads `V` from the state map (not from `OldVsn`, which stays
-  ignored — the *state* is the source of truth, which is exactly what lets
-  the same chain run for persistence, where there is no `OldVsn` at all),
-  calls `beamtalk_shape_migration:migrate/3` on `user_field_keys(State)`,
-  and re-attaches the internal keys plus the new `'__shape_version__'`.
-  The one caller (`hot_reload_class/2`) is updated in the same change;
-  there is no transitional tuple clause.
+  Everything else is derived, in one place, by `beamtalk_shape_migration`:
+  the class from the state's `'$beamtalk_class'` tag, the target version
+  and the migrations table from the module's `__beamtalk_meta`, and the
+  flattened field list from the class registry walk (¶4). The loader no
+  longer computes a field list at all — the old `{IVars, Module}` shape
+  was the *cause* of ¶4, because it let the caller choose which list to
+  pass. `code_change(_OldVsn, State, Extra)` reads `V` from the state map
+  (not from `OldVsn`, which stays ignored — the *state* is the source of
+  truth, which is exactly what lets the same chain run for persistence,
+  where there is no `OldVsn` at all), calls
+  `beamtalk_shape_migration:migrate/3` on the user fields of `State`, and
+  re-attaches the internal keys plus the new `'__shape_version__'`. The one
+  caller (`hot_reload_class/2`) is updated in the same change; there is no
+  transitional tuple clause.
 - **On failure the actor stays suspended.** Not "stops": raising inside
   `code_change/3` cannot stop a `gen_server` — `sys`'s
   `system_code_change/4` wraps the callback in a bare `catch`, so a throw
@@ -900,7 +907,7 @@ Three internal changes need coordinated updates, all inside this repo:
 | Change | Who updates | When |
 |---|---|---|
 | Reconcile uses the flattened field list and `init(#{'__skip_initialize__' => true})` (the two bug fixes) | `beamtalk_hot_reload`, `hot_reload_class/2`, `beamtalk_hot_reload_tests` | Phase 0 |
-| `Extra` becomes a map (`{NewInstanceVars, Module}` → `#{module, fields, shape_version}`) | same three | Phase 0, one commit — no transitional tuple clause, since the only caller is in-tree |
+| `Extra` becomes `#{module := atom()}` (`{NewInstanceVars, Module}` → the field list is derived, never passed) | same three | Phase 0, one commit — no transitional tuple clause, since the only caller is in-tree |
 | Failed migration leaves the instance suspended instead of being resumed on old state | `trigger_code_change/3`'s resume path; workspace reload reporting; any test asserting resume-on-failure | Phase 0 |
 
 The two bug fixes are **behaviour changes users will notice and want**: a
@@ -920,7 +927,7 @@ cheap wins are banked:
    list via `classAllFieldNames/1` semantics; `init(#{'__skip_initialize__'
    => true})` as the defaults source; `'__shape_version__'` in
    `internal_fields/0` with read-before-seed ordering and the
-   never-on-a-Value test; the `Extra` map; descendants walk via
+   never-on-a-Value test; `Extra` reduced to `#{module}`; descendants walk via
    `direct_subclasses/1`; failed `code_change` leaves the pid suspended
    (conditional `sys:resume`). Reads `'shape_version'`/`'shape_migrations'`
    from `__beamtalk_meta` with defaults `1`/`#{}`, so it works before the
