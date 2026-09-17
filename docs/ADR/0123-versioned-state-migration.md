@@ -57,6 +57,26 @@ the rest with a `?LOG_WARNING`. `OldVsn` is ignored (the loader passes
    (`{update, Mod, {advanced, Extra}}`: suspend → load → `code_change` →
    resume). BT-3528 will need that ordering anyway.
 
+4. **The field list the reload path passes is local-only, and that is a
+   pre-existing bug this ADR must not inherit.**
+   `fetch_instance_vars/1` → `beamtalk_runtime_api:instance_variables/1` →
+   `beamtalk_object_class`'s `#class_state.fields`, which is populated from
+   `__beamtalk_meta`'s `'fields'` key — and `class_meta.rs` builds that from
+   `class.state`, **this class's own declarations only** (the same split the
+   stdlib names explicitly: `fieldNames` is "not inherited",
+   `allFieldNames` is "including inherited"). But a subclass instance's
+   state map *does* carry inherited fields, because `init/1` calls the
+   parent's `init` and merges. So `migrate_fields/3`'s
+   `NewVarSet = sets:from_list(NewInstanceVars)` does not contain the
+   inherited names, and every inherited field is dropped — with a
+   "Hot reload dropped fields" warning — on any reload of a subclass with
+   live instances. `beamtalk_hot_reload_tests` has no inherited-field case,
+   which is why this has gone unnoticed. The fix belongs to Phase 0
+   regardless of the rest of this ADR: the reconcile step takes the
+   **flattened** field list (`classAllFieldNames/1`'s semantics — it walks
+   the superclass chain — rather than `instance_variables/1`), and gets the
+   subclass regression test that is missing today.
+
 Values (`Value subclass:` with `field:`) have no process, so hot reload never
 touches a live Value; they are only ever *re-created* by new code. Their
 versioning problem is entirely the persistence/distribution one: a Value
@@ -108,8 +128,10 @@ Actor subclass: Cart
   no migration of the corpus is needed.
 - At most one per class (a second is a compile error). It is *not*
   inherited: versions and chains are **per concrete class, over the
-  flattened field dictionary** (inherited fields included, exactly as
-  `fetch_instance_vars` already flattens them). A subclass's chain consists
+  flattened field dictionary** — inherited fields included, because that is
+  what an instance's state map actually holds (`init/1` chains parent init
+  and merges). Note this is *not* what the reload path passes today: see
+  Current state ¶4. A subclass's chain consists
   of the `migrateFromVN:` methods *it* defines — inherited class methods
   are not pulled into a subclass's chain, because the two classes' version
   numbers are unrelated. To reuse an ancestor's step, call it explicitly
@@ -254,8 +276,10 @@ and any future persistence/distribution module), owns the whole rule:
    **no-op** — nothing is defaulted or dropped between hooks, because the
    runtime knows only the *final* declared shape, not what shape `K+1` was.
    The result of a hook must be a `Dictionary`, else the step fails.
-3. **Reconcile** against the declared field list (today's `migrate_fields/3`
-   logic, moved here): a declared field present in the dictionary is kept;
+3. **Reconcile** against the declared field list — the **flattened** one
+   (`classAllFieldNames/1` semantics, walking the superclass chain), not
+   today's local-only `instance_variables/1` list (Current state ¶4): a
+   declared field present in the dictionary is kept;
    absent → its declared default; absent with no default → `nil` on an
    untyped class, **failure** on a `typed` class (the same post-`initialize`
    validation ADR 0078 runs — a migration may not leave a typed slot
@@ -274,13 +298,29 @@ instance per step, because the version is written *with* the state.
 class, the step (`from`/`to`), and the underlying error, with a hint naming
 the method (`"Cart class >> migrateFromV1: raised …"`).
 
-**Migrations run in the migrating process**, not the class's gen_server: the
-runtime invokes the compiled class-side function directly (the same
-"class code executing in the caller" that ADR 0109 established, with class
-identity closure-captured per its BT-3047 amendment). This is why `self.`
-access is a compile error — there is no class-process context — and it
-keeps a migration from being serialised through, or deadlocking on, the
-class process while that class is itself mid-reload.
+**Migrations run in the migrating process**, not the class's gen_server —
+and the mechanism already exists: `beamtalk_object_class:local_call/3`
+("Execute a class method in the caller's process… calls
+`Module:class_<Selector>(nil, #{}, Args)` directly — bypassing the class
+object's gen_server"). That matters for more than latency: it keeps a
+migration from being serialised through, or deadlocking on, the class
+process while that class is itself mid-reload.
+
+`local_call/3`'s existing contract is also *why* the purity rule is a
+compile error rather than a convention. It passes `nil` as ClassSelf and
+`#{}` as the class variables, and discards any `{class_var_result, Value,
+NewClassVars}` mutation the method returns. A migration that read a class
+variable would therefore silently see an empty map, and one that wrote
+would have the write silently dropped. The validator must reject both at
+compile time so that contract is never reached by accident — the same
+lesson ADR 0109's BT-3047 amendment drew for class identity (never read it
+from the executing process; it must be supplied, not inferred).
+
+**Not** a general "class methods run in the caller" rule: ADR 0109's Scope
+explicitly excludes generalising its call-site interception, and this ADR
+does not widen it. `local_call/3` is an existing, narrowly-contracted entry
+point for exactly the "method does not touch class state" case, which the
+purity rule enforces.
 
 **Hot reload** (`beamtalk_hot_reload`):
 
@@ -545,6 +585,26 @@ structural equality between a pre- and post-reload `Point` with equal
 fields. Values are immutable and re-created by code; their versioning need
 is the envelope. Recorded as a deferred follow-up (Consequences).
 
+### Ship the migration chain now, defer the envelope (narrower scope)
+This ADR decides two things: the migration language surface, and the
+`{beamtalk_shape, Class, Version, Fields}` envelope. Hot reload — the only
+consumer that exists today — needs the first and not the second: it
+migrates a live map in place and never serialises anything. A narrower ADR
+could ship §1–§2 plus `migrate/3`, and leave `pack`/`unpack` to the
+persistence and distribution ADRs that actually consume them.
+
+This is the most defensible scope reduction on offer, and it was rejected
+for one reason: BT-3527 and BT-3528 are *blocked on this ADR* precisely for
+the envelope, and defining it separately in each would duplicate the
+version/tier rule across two documents — the exact shared-leaf failure
+this project's architecture principles name. The envelope is also small
+(a tagged tuple plus a tier check) and, more importantly, its existence
+constrains the design above it: `migrate/3` takes a version and a plain
+field map *because* an envelope must be able to call it with no `OldVsn`
+and no live process. Designing the chain without that constraint risks a
+hook shape that only works for hot reload. It stays, and Phase 1 ships it
+with EUnit but no production consumer.
+
 ### Single dispatcher, table of blocks, instance-side hook
 See Steelman Analysis.
 
@@ -588,6 +648,22 @@ See Steelman Analysis.
   step is absent until the final reconcile, so hooks reading such keys
   must guard. The alternative — reconciling after every step — is not
   available, because only the final shape is declared.
+- **A restart is not a migration.** When a `#permanent`/`#transient` actor
+  is stopped by a failed migration, its supervisor restarts it with fresh
+  `init/1` state — the process comes back healthy and its previous state is
+  gone. That reads as success to anything watching liveness, so the §4
+  `Error` finding and the exit reason are the only signal that data was
+  lost; operators should alert on them rather than on process liveness.
+  A fleet of instances failing the same buggy hook also restarts as a
+  group, which the supervisor's restart intensity may escalate into a
+  wider shutdown — the usual OTP behaviour, but newly reachable from a
+  one-line typo in a migration.
+- **Class rename interacts with the envelope.** The envelope keys on the
+  class *atom*, so a class renamed via ADR 0114 makes previously packed
+  terms unreadable — the persistence and distribution ADRs will need a
+  rename-aware resolution step (an alias table, or storing the renamed-from
+  atom). Nothing in hot reload is affected, since it never unpacks.
+  Recorded in Deferred, and flagged to ADR 0114.
 
 ### Neutral
 - Codegen of methods and dispatch is unchanged; `code_change/3` still
@@ -596,33 +672,74 @@ See Steelman Analysis.
   release concern, not a shape concern.
 - No new severity levels — findings slot into ADR 0100.
 
+## Migration Path
+
+**No `.bt` source changes are required, anywhere.** An absent
+`shapeVersion:` is v1 and the structural fallback is unchanged, so every
+existing class in the stdlib, the tests, and downstream projects keeps
+compiling and reloading exactly as today. There is no deprecation period
+because nothing is deprecated.
+
+Two internal changes do need coordinated updates, both inside this repo:
+
+| Change | Who updates | When |
+|---|---|---|
+| `Extra` becomes a map (`{NewInstanceVars, Module}` → `#{module, fields, shape_version}`) | `beamtalk_hot_reload`, its one caller `hot_reload_class/2`, `beamtalk_hot_reload_tests` | Phase 1, one commit — no transitional tuple clause, since the only caller is in-tree |
+| Failed migration stops the actor instead of being logged and skipped | workspace reload reporting; any test asserting the old log-and-continue behaviour | Phase 1 |
+
+The inherited-field fix (Current state ¶4) is a **behaviour change users
+will notice and want**: a subclass with live instances stops silently
+losing its inherited fields on reload. It is called out here rather than
+buried because anything that came to depend on the old dropping behaviour
+(nothing in-tree does) would see different state after reload.
+
 ## Implementation
 
 Phases sized for `/plan-adr`:
 
-1. **Phase 0 — runtime leaf (M):** `beamtalk_shape` with `migrate/3`,
-   `pack/1`, `unpack/1`, reconcile moved out of `beamtalk_hot_reload`;
-   `'__shape_version__'` in `beamtalk_tagged_map:internal_fields/0`; new
-   `Extra` map contract; stop-on-failure exit reason;
-   suspend → load → change → resume ordering in `beamtalk_repl_loader`.
-   Reads `'shape_version'`/`'shape_migrations'` from `__beamtalk_meta`
+0. **Phase 0 — napkin / walking skeleton (S, and this is the risky part):**
+   one actor class, one hand-written `class_migrateFromV1:` function, one
+   live instance, through a *real* reload — proving the three assumptions
+   the rest of the design rests on, before any of it is built:
+   (a) `beamtalk_object_class:local_call/3` can invoke a class-side method
+   from inside `code_change/3` **while that class's own module is being
+   reloaded** (the one ordering the existing `local_call/3` callers never
+   exercise); (b) `'__shape_version__'` can join
+   `beamtalk_tagged_map:internal_fields/0` without disturbing its existing
+   consumers (`fieldNames`, `user_field_keys/1`, `printString`, the
+   Inspector); (c) the suspend → load → change → resume reorder leaves the
+   existing reload path green. No keyword, no validators, no envelope. If
+   (a) fails, the "pure class-side function" hook is the wrong shape and
+   the ADR needs revisiting — which is precisely why this is not folded
+   into Phase 1. **Tests:** `beamtalk_hot_reload_tests` +
+   one REPL-protocol case.
+1. **Phase 1 — runtime leaf (M):** `beamtalk_shape` with `migrate/3`,
+   `pack/1`, `unpack/1`, reconcile moved out of `beamtalk_hot_reload` and
+   corrected to the **flattened** field list (Current state ¶4), with the
+   subclass regression test that is missing today; new `Extra` map
+   contract; stop-on-failure exit reason. Reads
+   `'shape_version'`/`'shape_migrations'` from `__beamtalk_meta`
    (absent → `1` / `#{}`), so it works before the compiler emits them.
-   EUnit for chain order, gaps, downgrade, idempotency, typed-slot failure,
-   `not_serialisable`.
-2. **Phase 1 — language surface (M):** `shapeVersion:` keyword (parser,
+   **Tests:** EUnit for chain order, gaps, downgrade, idempotency,
+   typed-slot failure, inherited-field preservation, `not_serialisable`.
+2. **Phase 2 — language surface (M):** `shapeVersion:` keyword (parser,
    `ClassDefinition`, unparser, `ClassBuilder shapeVersion:`), validators
    (literal, duplicate, `migrateFromVN:` arity/purity/unreachable), meta
    emission of `'shape_version'` and `'shape_migrations'`, `Behaviour
    shapeVersion` and `migrateShape:from:`, `init/1` writing the version.
-3. **Phase 2 — reload integration (M):** in-process invocation of migration
-   methods (ADR 0109 mechanism, closure-captured class identity), post-
-   migration typed validation reuse (ADR 0078 path), reload result
-   reporting of migrated/failed counts, `docs/development/surface-parity.md`
-   entry.
-4. **Phase 3 — tooling (M):** shape fingerprint in the ADR 0105 signature
+   **Tests:** parser/unparse round-trip, validator diagnostics, codegen
+   meta snapshot.
+3. **Phase 3 — reload integration (M):** migration invocation via
+   `local_call/3` generalised from the Phase 0 skeleton, post-migration
+   typed validation reuse (ADR 0078 path), reload result reporting of
+   migrated/failed counts, `docs/development/surface-parity.md` entry.
+   **Tests:** REPL-protocol reload cases (success, hook raises, typed slot
+   left unset).
+4. **Phase 4 — tooling (M):** shape fingerprint in the ADR 0105 signature
    store; the five findings in §4 on all surfaces; LSP completion for
    `migrateFromV<N-1>:` after a bump; hover showing the chain.
-5. **Phase 4 — docs and e2e (S):** `beamtalk-language-features.md` § Live
+   **Tests:** language-service finding tests per row of the §4 table.
+5. **Phase 5 — docs and e2e (S):** `beamtalk-language-features.md` § Live
    Patching gains a *Shape Versioning* section; REPL-protocol e2e extending
    the existing `hot_counter.bt` / `hot_counter_v2.bt` fixtures to a
    v1 → v2 → v3 chain with a failing step; BUnit tests for
@@ -637,7 +754,9 @@ Phases sized for `/plan-adr`:
 method dispatch, expression codegen, the artifact build.
 
 **Deferred:** downgrade hooks (BT-3528); Value-instance versioning or
-deep-reconcile on live reload; cross-node wrapping policy (BT-3527).
+deep-reconcile on live reload; cross-node wrapping policy (BT-3527);
+rename-aware envelope resolution (ADR 0114 × the envelope's `Class` atom —
+for whichever of persistence/BT-3527 unpacks first).
 
 ## References
 - Related issues: [BT-3524](https://linear.app/beamtalk/issue/BT-3524)
@@ -655,8 +774,15 @@ deep-reconcile on live reload; cross-node wrapping policy (BT-3527).
   [ADR 0103](0103-sendability-typing-from-class-kinds.md) (tiers; `handleScope:`
   keyword precedent), [ADR 0105](0105-live-image-recheck-on-reload.md)
   (shape re-check, findings channel), [ADR 0109](0109-block-scoped-class-methods-run-blocks-in-the-caller.md)
-  (class code in the caller's process)
+  (BT-3047 amendment — class identity must be supplied, not read from the
+  executing process; its call-site interception is *not* generalised here),
+  [ADR 0114](0114-class-and-method-rename.md) (rename — interacts with the
+  envelope's `Class` atom)
 - Code: `runtime/apps/beamtalk_runtime/src/beamtalk_hot_reload.erl`,
+  `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl`
+  (`local_call/3` — the in-caller class-method entry point; `#class_state.fields`),
+  `runtime/apps/beamtalk_runtime/src/beamtalk_behaviour_intrinsics.erl`
+  (`classAllFieldNames/1` — the flattened field list),
   `runtime/apps/beamtalk_runtime/src/beamtalk_tagged_map.erl`,
   `runtime/apps/beamtalk_workspace/src/beamtalk_repl_loader.erl`
   (`hot_reload_class/2`), `crates/beamtalk-codegen/src/core_erlang/class_meta.rs`
