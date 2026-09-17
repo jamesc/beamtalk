@@ -1533,3 +1533,110 @@ revert_side_field_binary_test() ->
 %% path requires a real compiled class and is exercised by the repl-protocol
 %% e2e suite — see the report notes on integration-only branches.)
 %%====================================================================
+
+%%====================================================================
+%% extract_revert_target/1 _Other arm
+%%
+%% The three-clause match:
+%%   1. #{'$beamtalk_class' := 'ChangeEntry'} → extract_revert_target_from_map/1
+%%   2. #{className := _}                      → extract_revert_target_from_map/1
+%%   3. _Other                                  → type_error (this test)
+%%
+%% Clauses 1 and 2 are exercised by the changelog_live_test_ fixture above
+%% (revert_no_active_entry_raises_state_error and revert_via_object_keyed_map).
+%% Clause 3 is reached by passing any non-map value — the function returns
+%% {error, #beamtalk_error{kind=type_error}} before touching any gen_server.
+%%====================================================================
+
+%% Non-map argument → _Other arm of extract_revert_target/1 → type_error.
+%% No changelog/workspace needed; the validation fires before any delegation.
+revert_non_change_entry_atom_raises_type_error_test() ->
+    ?assertException(
+        error,
+        #{error := #beamtalk_error{kind = type_error, class = 'ChangeLog', selector = 'revert:'}},
+        beamtalk_workspace_interface_primitives:changeLogRevert(not_a_change_entry)
+    ).
+
+%% Binary value — same _Other arm.
+revert_non_change_entry_binary_raises_type_error_test() ->
+    ?assertException(
+        error,
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_workspace_interface_primitives:changeLogRevert(<<"not a map">>)
+    ).
+
+%% Integer value — same _Other arm.
+revert_non_change_entry_integer_raises_type_error_test() ->
+    ?assertException(
+        error,
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_workspace_interface_primitives:changeLogRevert(42)
+    ).
+
+%%====================================================================
+%% extract_revert_target_from_map/1 error arm
+%%
+%% A map that has the `className` key (hitting clause 2 of
+%% extract_revert_target/1) but whose className/selector values are not
+%% atoms (e.g. binaries) falls through to the `_` catch-all inside
+%% extract_revert_target_from_map/1 and returns
+%% {error, revert_type_error("missing className/selector fields")}.
+%%====================================================================
+
+%% Non-atom className in a className-keyed map → type_error.
+revert_non_atom_class_name_raises_type_error_test() ->
+    Entry = #{className => <<"StringNotAtom">>, selector => some_selector},
+    ?assertException(
+        error,
+        #{error := #beamtalk_error{kind = type_error, class = 'ChangeLog'}},
+        beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+    ).
+
+%% className is an atom but selector is a binary (not an atom) → type_error.
+revert_binary_selector_raises_type_error_test() ->
+    Entry = #{className => 'SomeClass', selector => <<"notAnAtom">>},
+    ?assertException(
+        error,
+        #{error := #beamtalk_error{kind = type_error, class = 'ChangeLog'}},
+        beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+    ).
+
+%%====================================================================
+%% existing_selector_atom/1 — {ok, Atom} branch
+%%
+%% This function is private; it is exercised via revert_method/3, which
+%% calls it before looking up the changelog entry. When the selector binary
+%% corresponds to a well-known existing atom (e.g. <<"ok">>), the function
+%% returns {ok, ok}; revert_method then tries do_revert, which calls the
+%% changelog gen_server. If the changelog is not running the outer catch
+%% returns {error, #beamtalk_error{}} rather than crashing the caller.
+%%====================================================================
+
+%% <<"ok">> maps to the well-known atom `ok` → {ok, ok} branch is hit.
+%% The subsequent changelog call fails gracefully (no server running),
+%% returning a structured error rather than an exception.
+existing_selector_atom_ok_branch_test() ->
+    Result = beamtalk_workspace_interface_primitives:revert_method(
+        <<"NoSuchClass">>, <<"ok">>, undefined
+    ),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%% <<"true">> is another well-known atom — exercises the same branch.
+existing_selector_atom_true_branch_test() ->
+    Result = beamtalk_workspace_interface_primitives:revert_method(
+        <<"NoSuchClass">>, <<"true">>, undefined
+    ),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%%====================================================================
+%% check_no_external_drift/3 — file-read error arms
+%%
+%% This private function is reached via do_revert → reinstall_reverted_class/3
+%% when find_revert_target/3 returns {reinstall_class, PrevBody, Entry}.
+%% Triggering that path requires a live changelog with a pending remove-class
+%% entry, which is an integration-level concern exercised by the repl-protocol
+%% e2e suite. The three internal file-error branches are therefore not
+%% unit-testable without a full workspace fixture; they are noted here for
+%% documentation, and the coverage gap is tracked in the issue referenced in
+%% the moduledoc.
+%%====================================================================
