@@ -351,8 +351,10 @@ and `beamtalk_workspace_reshape` already exist with ADR 0105's meaning of
 
 **Chain semantics** (`migrate/3`), in order. `migrate/3` takes a class,
 not a module: `beamtalk_shape_migration` resolves `Module` from `Class`
-through the class registry (`beamtalk_object_class:module_name/1`, the
-same mapping every other class-keyed runtime operation uses), so the
+through the class registry (`beamtalk_class_metadata:lookup_module/1` —
+`class_name() -> {ok, module()} | not_found` — the same mapping
+`beamtalk_actor`, `beamtalk_class_dispatch`, `beamtalk_class_instantiation`
+and `beamtalk_supervisor` already use for atom→module resolution), so the
 envelope — which carries only the class atom — and hot reload call the
 same function.
 
