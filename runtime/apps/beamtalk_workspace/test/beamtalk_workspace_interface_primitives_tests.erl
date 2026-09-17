@@ -1637,6 +1637,5 @@ existing_selector_atom_true_branch_test() ->
 %% entry, which is an integration-level concern exercised by the repl-protocol
 %% e2e suite. The three internal file-error branches are therefore not
 %% unit-testable without a full workspace fixture; they are noted here for
-%% documentation, and the coverage gap is tracked in the issue referenced in
-%% the moduledoc.
+%% documentation only.
 %%====================================================================
