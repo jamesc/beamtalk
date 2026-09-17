@@ -49,16 +49,16 @@ Actor subclass: StorageFamilyActor
 
   // ── do:/collect: (Foldl-shaped list op) ────────────────────────────────
   //
-  // `do:`, not `collect:` — a direct Actor state-field write inside a bare
-  // (result-discarded) `collect:` statement hits a separate, pre-existing
-  // codegen bug (`unbound variable '_Val'` from `erlc`), filed as BT-3521
-  // and out of this issue's scope (it is not one of ADR 0122's six
-  // hand-written sites; `do:` and `collect:` share the same `Foldl*`
-  // family-threading formula this construct family is meant to exercise).
-  doSum =>
+  // BT-3521 fixed the `collect:`-with-state-mutation codegen bug this cell
+  // used to route around by calling `do:` instead (a direct Actor
+  // state-field write inside a bare, result-discarded `collect:` statement
+  // hit `erlc`'s "unbound variable '_Val'"). Uses `collect:` directly now —
+  // `do:` and `collect:` share the same `Foldl*` family-threading formula
+  // this construct family is meant to exercise.
+  collectSum =>
     seen := 0
     #(1, 2, 3)
-      do: [:i |
+      collect: [:i |
         self.total := self.total + i
         seen := seen + 1
       ]
