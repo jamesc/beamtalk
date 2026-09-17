@@ -1034,7 +1034,7 @@ impl CoreErlangGenerator {
                         // `check_no_unsafe_class_method_self_sends`'s doc
                         // comment.
                         let analysis = crate::core_erlang::block_analysis::analyze_block(block);
-                        self.check_no_unsafe_class_method_self_sends(&analysis, block.span)?;
+                        self.check_no_unsafe_class_method_self_sends(&analysis, block, block.span)?;
                         let (wrapped_doc, is_stateful) =
                             self.generate_erlang_interop_wrapper(block)?;
                         if is_stateful {

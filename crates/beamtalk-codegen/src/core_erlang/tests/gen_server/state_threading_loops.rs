@@ -771,6 +771,82 @@ fn test_class_method_self_send_in_while_condition_block_is_compile_error() {
 }
 
 #[test]
+fn test_class_reference_send_in_do_block_is_compile_error() {
+    // BT-3529: `check_no_unsafe_class_method_self_sends` filtered
+    // `analysis.self_send_selectors` directly, which only ever records a
+    // bare `self`-receiver send — a same-class send spelled `ClassName foo`
+    // (same-class, same-activation, treated identically by
+    // `is_class_method_self_send` in codegen) was invisible to it, so it was
+    // never even considered a candidate for rejection. This is the issue's
+    // own repro: `Holder bump` called directly inside a bare `do:` block
+    // must be rejected exactly like `self bump` would be — previously it
+    // compiled cleanly via the plain/BIF `do:` fallback, silently returning
+    // `0` instead of `3`.
+    let src = "Object subclass: Holder\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class probe =>\n    self.runs := 0\n    #(1, 2, 3) do: [:x | Holder bump]\n    self.runs";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@classrefdoblock").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating ClassName-spelled same-class send inside a bare do: block must be \
+         caught by BT-3529's guard just like a self-spelled send. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_reference_send_in_while_condition_block_is_compile_error() {
+    // BT-3529: same blind spot as
+    // `test_class_reference_send_in_do_block_is_compile_error`, at the
+    // whileTrue:/whileFalse: condition call site instead of a list-op body.
+    let src = "Value subclass: DriverCondClassRef\n  classState: runs = 0\n  class shouldContinue: n => self.runs := self.runs + 1. self.runs < n\n  class run: n =>\n    i := 0\n    [DriverCondClassRef shouldContinue: n] whileTrue: [i := i + 1]\n    i";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@drivercondclassref").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating ClassName-spelled same-class send inside a whileTrue: condition \
+         block must be caught by BT-3529's guard just like a self-spelled send. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_class_reference_send_in_erlang_interop_block_is_compile_error() {
+    // BT-3529: same blind spot as
+    // `test_class_reference_send_in_do_block_is_compile_error`, at the
+    // Erlang interop boundary call site (`generate_direct_erlang_call`)
+    // instead of a list-op body.
+    let src = "Value subclass: DriverErlangInteropClassRef\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class run: aList =>\n    (Erlang lists) foreach: [:x | DriverErlangInteropClassRef bump] over: aList\n    self.runs";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@drivererlanginteropclassref").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. })
+        ),
+        "A mutating ClassName-spelled same-class send inside a block crossing the \
+         Erlang interop boundary must be caught by BT-3529's guard just like a \
+         self-spelled send. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_class_method_self_send_in_block() {
     // Class method self-send inside a block should produce valid Core Erlang.
     // Previously, the open-scope `let ... in ` from the self-send was not closed,

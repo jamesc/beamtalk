@@ -532,7 +532,7 @@ impl CoreErlangGenerator {
             // `Integer>>timesRepeat:` — a same-process, in-process call, same
             // as `select:`/`do:`. See
             // `check_no_unsafe_class_method_self_sends`'s doc comment.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
+            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -569,7 +569,7 @@ impl CoreErlangGenerator {
                 return Ok(Some(doc));
             }
             // see the analogous check in `try_generate_times_repeat`.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
+            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }
@@ -610,7 +610,7 @@ impl CoreErlangGenerator {
                 return Ok(Some(doc));
             }
             // see the analogous check in `try_generate_times_repeat`.
-            self.check_no_unsafe_class_method_self_sends(&analysis, body_block.span)?;
+            self.check_no_unsafe_class_method_self_sends(&analysis, body_block, body_block.span)?;
         }
         Ok(None)
     }

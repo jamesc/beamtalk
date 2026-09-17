@@ -188,7 +188,7 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         if let Some(block) = Self::extract_block_literal(body) {
             let analysis = block_analysis::analyze_block(block);
-            self.check_no_unsafe_class_method_self_sends(&analysis, block.span)?;
+            self.check_no_unsafe_class_method_self_sends(&analysis, block, block.span)?;
         }
         Ok(())
     }
