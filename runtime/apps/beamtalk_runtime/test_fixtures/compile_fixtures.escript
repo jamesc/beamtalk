@@ -85,8 +85,12 @@ main([]) ->
         "spawner_actor",
         "shadow_actor",
         "coordinate_actor",
-        %% BT-3532 - class with `initialize` for hot-reload field migration
-        "init_hook_counter"
+        %% BT-3532 - classes whose generated init/1 needs `__skip_initialize__`
+        %% for hot-reload field migration: one with `initialize`, one with a
+        %% typed-no-default field (either alone triggers the same guarded
+        %% init/1 branch).
+        "init_hook_counter",
+        "typed_field_counter"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

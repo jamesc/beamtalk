@@ -232,6 +232,7 @@ field_migration_setup() ->
     beamtalk_stdlib:init(),
     ok = ensure_counter_loaded(),
     ok = ensure_init_hook_counter_loaded(),
+    ok = ensure_typed_field_counter_loaded(),
     ok.
 
 field_migration_teardown(_) ->
@@ -250,6 +251,8 @@ field_migration_test_() ->
                 fun test_field_migration_preserves_internal_keys/0},
             {"adds new field default for a class with an initialize method (BT-3532)",
                 fun test_field_migration_initialize_class_adds_new_field/0},
+            {"adds new field default for a class with a typed no-default field (BT-3532)",
+                fun test_field_migration_typed_no_default_class_adds_new_field/0},
             {"does not fire lifecycle start telemetry during migration (BT-3532)",
                 fun test_field_migration_initialize_class_no_telemetry/0},
             {"logs a warning when init/1 returns an unexpected shape (BT-3532)",
@@ -355,6 +358,29 @@ test_field_migration_initialize_class_adds_new_field() ->
     %% New field appears with the plain field default, not the value
     %% `initialize` would have computed — migration must not run initialize.
     ?assertEqual(<<"default">>, maps:get(label, NewState)).
+
+%% BT-3532: TypedFieldCounter has a typed-no-default field and no
+%% `initialize` method — chain_has_typed_no_default alone (ADR 0078)
+%% selects the same guarded init/1 branch as a class with `initialize`,
+%% so this must be fixed independently of the `initialize` case above.
+test_field_migration_typed_no_default_class_adds_new_field() ->
+    {ok, Defaults} = 'bt@typed_field_counter':init(#{'__skip_initialize__' => true}),
+    NewInstanceVars = [
+        K
+     || K <- maps:keys(Defaults),
+        not lists:member(K, beamtalk_tagged_map:internal_fields())
+    ],
+    ?assert(lists:member(label, NewInstanceVars)),
+    OldState = #{
+        '$beamtalk_class' => 'TypedFieldCounter',
+        '__class_mod__' => 'bt@typed_field_counter',
+        value => 3
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@typed_field_counter'}
+    ),
+    ?assertEqual(3, maps:get(value, NewState)),
+    ?assertEqual(nil, maps:get(label, NewState)).
 
 %% BT-3532: migration must never fire lifecycle start telemetry — that's
 %% only for real actor spawns, and firing it during a code_change would
@@ -596,4 +622,25 @@ ensure_init_hook_counter_loaded() ->
             end;
         {error, Reason} ->
             error({init_hook_counter_module_not_found, Reason})
+    end.
+
+%% BT-3532: TypedFieldCounter (typed-no-default field, no `initialize`)
+%% exercises the chain_has_typed_no_default half of the same codegen guard.
+ensure_typed_field_counter_loaded() ->
+    case code:ensure_loaded('bt@typed_field_counter') of
+        {module, 'bt@typed_field_counter'} ->
+            case beamtalk_class_registry:whereis_class('TypedFieldCounter') of
+                undefined ->
+                    case erlang:function_exported('bt@typed_field_counter', register_class, 0) of
+                        true ->
+                            'bt@typed_field_counter':register_class(),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                _Pid ->
+                    ok
+            end;
+        {error, Reason} ->
+            error({typed_field_counter_module_not_found, Reason})
     end.

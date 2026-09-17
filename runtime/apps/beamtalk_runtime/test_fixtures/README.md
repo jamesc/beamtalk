@@ -22,6 +22,7 @@ runtime/apps/beamtalk_runtime/test_fixtures/
 ├── coordinate_actor.bt  # Multiple instance vars, one keyword message (BT-3093)
 ├── bif_fallback_test_case.bt  # Real TestCase subclass for the BIF-fallback path (BT-3251)
 ├── init_hook_counter.bt # Actor with `initialize`, for hot-reload field migration (BT-3532)
+├── typed_field_counter.bt # Actor with typed-no-default field, for hot-reload field migration (BT-3532)
 └── README.md           # This file
 ```
 
@@ -164,6 +165,16 @@ telemetry) instead of the plain `{ok, Map}`. Used by
 `Module:init(#{'__skip_initialize__' => true})` — which always returns the
 2-tuple — rather than the bare `init(#{})` that used to make field
 migration silently no-op for any such class.
+
+### typed_field_counter.bt (BT-3532)
+
+**Source:** `runtime/apps/beamtalk_runtime/test_fixtures/typed_field_counter.bt`
+**Purpose:** Hot-reload field migration regression fixture
+
+A `typed` actor with a typed-no-default field and no `initialize` method —
+proves the same generated-`init/1` guarded branch as `init_hook_counter.bt`
+is selected by a typed-no-default field alone (ADR 0078's
+`chain_has_typed_no_default`), independent of `initialize`.
 
 ## References
 
