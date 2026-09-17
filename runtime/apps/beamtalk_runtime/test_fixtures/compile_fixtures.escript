@@ -84,7 +84,9 @@ main([]) ->
         "box_actor",
         "spawner_actor",
         "shadow_actor",
-        "coordinate_actor"
+        "coordinate_actor",
+        %% BT-3532 - class with `initialize` for hot-reload field migration
+        "init_hook_counter"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

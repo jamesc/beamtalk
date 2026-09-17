@@ -157,7 +157,9 @@ maybe_migrate_class_key(State) ->
 -doc """
 Migrate actor state fields during hot reload.
 
-Calls the module's init(#{}) to get default state, then:
+Calls the module's init(#{'__skip_initialize__' => true}) to get default
+state — the 2-tuple, no-telemetry branch, so migration never fires
+`initialize` or lifecycle start telemetry — then:
 - Preserves all existing field values from old state
 - Adds new fields with their default values
 - Drops removed fields (with log warning)
@@ -165,10 +167,12 @@ Calls the module's init(#{}) to get default state, then:
 """.
 -spec migrate_fields(map(), [atom()], atom()) -> map().
 migrate_fields(OldState, NewInstanceVars, Module) ->
-    %% Get new default state by calling init with empty args
+    %% Get new default state by calling init with the skip-initialize flag,
+    %% guaranteeing the plain {ok, Map} return regardless of whether the
+    %% class defines `initialize` or has typed-no-default fields.
     case
         try
-            Module:init(#{})
+            Module:init(#{'__skip_initialize__' => true})
         catch
             _:_ -> init_error
         end
@@ -225,8 +229,19 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
                     )
             end,
             Kept;
-        _ ->
-            %% init failed — keep state unchanged
+        Other ->
+            %% init returned an unexpected shape (or raised) — keep state
+            %% unchanged, but this is not silent: log it.
+            ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
+            ?LOG_WARNING(
+                "Hot reload field migration skipped: unexpected init/1 return",
+                #{
+                    class => ClassName,
+                    module => Module,
+                    returned => Other,
+                    domain => [beamtalk, runtime]
+                }
+            ),
             OldState
     end.
 

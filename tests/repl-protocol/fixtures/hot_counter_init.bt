@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload counter with an `initialize` method - initial version (BT-3532)
+// Used by hot_reload_initialize.btscript to verify hot reload field
+// migration for classes whose chain defines `initialize`.
+
+Actor subclass: HotCounterInit
+  state: value = 0
+
+  initialize => self.value := 100
+
+  increment => self.value := self.value + 1
+
+  getValue => ^self.value
