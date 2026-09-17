@@ -21,6 +21,8 @@ runtime/apps/beamtalk_runtime/test_fixtures/
 ├── shadow_actor.bt      # Param name shadows an instance var (BT-3093)
 ├── coordinate_actor.bt  # Multiple instance vars, one keyword message (BT-3093)
 ├── bif_fallback_test_case.bt  # Real TestCase subclass for the BIF-fallback path (BT-3251)
+├── init_hook_counter.bt # Actor with `initialize`, for hot-reload field migration (BT-3532)
+├── typed_field_counter.bt # Actor with typed-no-default field, for hot-reload field migration (BT-3532)
 └── README.md           # This file
 ```
 
@@ -150,6 +152,29 @@ instance either way, so it wouldn't prove `check_lifecycle_methods/2` (vs.
 scope), this fixture's `.beam` is copied into `beamtalk_stdlib`'s test build
 dir instead, since that's the app `beamtalk_test_case` and its regression
 test both live in. See `copy_to_build_dirs/4` in `compile_fixtures.escript`.
+
+### init_hook_counter.bt (BT-3532)
+
+**Source:** `runtime/apps/beamtalk_runtime/test_fixtures/init_hook_counter.bt`
+**Purpose:** Hot-reload field migration regression fixture
+
+An actor with an `initialize` method — the shape whose generated `init/1`
+returns `{ok, State, {continue, initialize}}` (3-tuple, plus lifecycle
+telemetry) instead of the plain `{ok, Map}`. Used by
+`beamtalk_hot_reload_tests.erl` to prove `migrate_fields/3` calls
+`Module:init(#{'__skip_initialize__' => true})` — which always returns the
+2-tuple — rather than the bare `init(#{})` that used to make field
+migration silently no-op for any such class.
+
+### typed_field_counter.bt (BT-3532)
+
+**Source:** `runtime/apps/beamtalk_runtime/test_fixtures/typed_field_counter.bt`
+**Purpose:** Hot-reload field migration regression fixture
+
+A `typed` actor with a typed-no-default field and no `initialize` method —
+proves the same generated-`init/1` guarded branch as `init_hook_counter.bt`
+is selected by a typed-no-default field alone (ADR 0078's
+`chain_has_typed_no_default`), independent of `initialize`.
 
 ## References
 

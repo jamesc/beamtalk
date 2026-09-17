@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E regression test for BT-3532: hot reload field migration used to
+// silently no-op for any class whose chain defines `initialize` (or has a
+// typed-no-default field). Generated init/1 returns
+// {ok, State, {continue, initialize}} for such classes unless called with
+// '__skip_initialize__' => true — a shape beamtalk_hot_reload:migrate_fields/3
+// didn't recognize when it called bare init(#{}), so it silently kept the
+// old state unchanged instead of adding the new field.
+//
+// HotCounterInit defines `initialize`. Reloading it to a version that adds
+// a new field must still add that field with its default to live instances.
+
+// ---------------------------------------------------------------------------
+// Load initial version and spawn an actor
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter_init.bt
+// => Loaded: HotCounterInit
+
+hci := HotCounterInit spawn
+// => Actor(HotCounterInit, _)
+
+// initialize ran on spawn (value starts at 100, not 0)
+hci increment
+// => 101
+
+// ---------------------------------------------------------------------------
+// Reload with v2: adds new field 'bonus'
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter_init_v2.bt
+// => Loaded: HotCounterInit
+
+// Existing value is preserved across reload
+hci getValue
+// => 101
+
+// New field 'bonus' gets its default value on the live instance —
+// this used to silently no-op before the BT-3532 fix
+hci getBonus
+// => 42

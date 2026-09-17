@@ -16,6 +16,13 @@ Tests hot code reloading, actor migration, and module replacement.
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3]).
 
+%% Logger handler callback for the unexpected-init-return warning test below.
+-export([log/2]).
+
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {log_event, LogEvent},
+    ok.
+
 %%====================================================================
 %% Tests for beamtalk_hot_reload domain service
 %%====================================================================
@@ -224,6 +231,8 @@ field_migration_setup() ->
     application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok = ensure_counter_loaded(),
+    ok = ensure_init_hook_counter_loaded(),
+    ok = ensure_typed_field_counter_loaded(),
     ok.
 
 field_migration_teardown(_) ->
@@ -239,7 +248,15 @@ field_migration_test_() ->
                 fun test_field_migration_init_failure_preserves_state/0},
             {"drops removed fields", fun test_field_migration_drops_removed_fields/0},
             {"preserves internal keys from new defaults",
-                fun test_field_migration_preserves_internal_keys/0}
+                fun test_field_migration_preserves_internal_keys/0},
+            {"adds new field default for a class with an initialize method (BT-3532)",
+                fun test_field_migration_initialize_class_adds_new_field/0},
+            {"adds new field default for a class with a typed no-default field (BT-3532)",
+                fun test_field_migration_typed_no_default_class_adds_new_field/0},
+            {"does not fire lifecycle start telemetry during migration (BT-3532)",
+                fun test_field_migration_initialize_class_no_telemetry/0},
+            {"logs a warning when init/1 returns an unexpected shape (BT-3532)",
+                fun test_field_migration_unexpected_init_return_logs_warning/0}
         ]
     end}.
 
@@ -313,6 +330,133 @@ test_field_migration_preserves_internal_keys() ->
         v1, OldState, {NewInstanceVars, 'bt@counter'}
     ),
     ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
+
+%% BT-3532: InitHookCounter defines `initialize`, so its generated init/1
+%% returns {ok, State, {continue, initialize}} (a 3-tuple) unless called
+%% with '__skip_initialize__' => true. Before the fix, migrate_fields/3
+%% called bare init(#{}), matched only {ok, map()}, and silently kept
+%% OldState unchanged — 'label' would never be added. Simulate reloading
+%% into a version that added 'label' by omitting it from OldState.
+test_field_migration_initialize_class_adds_new_field() ->
+    {ok, Defaults} = 'bt@init_hook_counter':init(#{'__skip_initialize__' => true}),
+    NewInstanceVars = [
+        K
+     || K <- maps:keys(Defaults),
+        not lists:member(K, beamtalk_tagged_map:internal_fields())
+    ],
+    ?assert(lists:member(label, NewInstanceVars)),
+    OldState = #{
+        '$beamtalk_class' => 'InitHookCounter',
+        '__class_mod__' => 'bt@init_hook_counter',
+        value => 7
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@init_hook_counter'}
+    ),
+    %% Old value preserved.
+    ?assertEqual(7, maps:get(value, NewState)),
+    %% New field appears with the plain field default, not the value
+    %% `initialize` would have computed — migration must not run initialize.
+    ?assertEqual(<<"default">>, maps:get(label, NewState)).
+
+%% BT-3532: TypedFieldCounter has a typed-no-default field and no
+%% `initialize` method — chain_has_typed_no_default alone (ADR 0078)
+%% selects the same guarded init/1 branch as a class with `initialize`,
+%% so this must be fixed independently of the `initialize` case above.
+test_field_migration_typed_no_default_class_adds_new_field() ->
+    {ok, Defaults} = 'bt@typed_field_counter':init(#{'__skip_initialize__' => true}),
+    NewInstanceVars = [
+        K
+     || K <- maps:keys(Defaults),
+        not lists:member(K, beamtalk_tagged_map:internal_fields())
+    ],
+    ?assert(lists:member(label, NewInstanceVars)),
+    OldState = #{
+        '$beamtalk_class' => 'TypedFieldCounter',
+        '__class_mod__' => 'bt@typed_field_counter',
+        value => 3
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@typed_field_counter'}
+    ),
+    ?assertEqual(3, maps:get(value, NewState)),
+    ?assertEqual(nil, maps:get(label, NewState)).
+
+%% BT-3532: migration must never fire lifecycle start telemetry — that's
+%% only for real actor spawns, and firing it during a code_change would
+%% double-report actor starts.
+test_field_migration_initialize_class_no_telemetry() ->
+    _ = application:ensure_all_started(telemetry),
+    HandlerId = {beamtalk_hot_reload_tests, make_ref()},
+    ok = telemetry:attach(
+        HandlerId,
+        [beamtalk, actor, lifecycle, start],
+        fun(Event, Measurements, Metadata, #{dest := Dest}) ->
+            Dest ! {telemetry_event, Event, Measurements, Metadata}
+        end,
+        #{dest => self()}
+    ),
+    try
+        {ok, Defaults} = 'bt@init_hook_counter':init(#{'__skip_initialize__' => true}),
+        NewInstanceVars = [
+            K
+         || K <- maps:keys(Defaults),
+            not lists:member(K, beamtalk_tagged_map:internal_fields())
+        ],
+        OldState = #{
+            '$beamtalk_class' => 'InitHookCounter',
+            '__class_mod__' => 'bt@init_hook_counter',
+            value => 1
+        },
+        {ok, _NewState} = beamtalk_hot_reload:code_change(
+            v1, OldState, {NewInstanceVars, 'bt@init_hook_counter'}
+        ),
+        receive
+            {telemetry_event, _, _, _} ->
+                ?assert(false)
+        after 200 ->
+            ok
+        end
+    after
+        telemetry:detach(HandlerId)
+    end.
+
+%% BT-3532: an init/1 return that is still not {ok, Map} (module loaded,
+%% no exception, just an unexpected shape) must be logged at ?LOG_WARNING
+%% with the class and the actual returned shape — not silently treated as
+%% "keep old state".
+test_field_migration_unexpected_init_return_logs_warning() ->
+    %% test/sys.config pins the primary logger level to `error` to keep CI
+    %% output clean, which would otherwise drop this ?LOG_WARNING before it
+    %% reaches any handler (BT-1822 uses the same trick for an error-level
+    %% log, where it's a no-op).
+    logger:set_primary_config(level, all),
+    HandlerId = bt_3532_hot_reload_warning_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all
+    }),
+    try
+        OldState = #{'$beamtalk_class' => 'Weird', value => 3},
+        {ok, NewState} = beamtalk_hot_reload:code_change(
+            v1, OldState, {[value], beamtalk_hot_reload_bad_init_test_helper}
+        ),
+        %% State is kept unchanged, same as any other init-not-usable case.
+        ?assertEqual(OldState, NewState),
+        receive
+            {log_event, #{level := warning, meta := Meta}} ->
+                ?assertEqual('Weird', maps:get(class, Meta, undefined)),
+                ?assertEqual(
+                    beamtalk_hot_reload_bad_init_test_helper, maps:get(module, Meta, undefined)
+                ),
+                ?assertEqual({error, not_a_state_map}, maps:get(returned, Meta, undefined))
+        after 1000 ->
+            ?assert(false)
+        end
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
+    end.
 
 %%====================================================================
 %% Helpers
@@ -457,4 +601,46 @@ ensure_counter_loaded() ->
             end;
         {error, Reason} ->
             error({counter_module_not_found, Reason})
+    end.
+
+%% BT-3532: InitHookCounter (defines `initialize`) exercises the codegen
+%% branch bare init(#{}) used to break field migration for.
+ensure_init_hook_counter_loaded() ->
+    case code:ensure_loaded('bt@init_hook_counter') of
+        {module, 'bt@init_hook_counter'} ->
+            case beamtalk_class_registry:whereis_class('InitHookCounter') of
+                undefined ->
+                    case erlang:function_exported('bt@init_hook_counter', register_class, 0) of
+                        true ->
+                            'bt@init_hook_counter':register_class(),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                _Pid ->
+                    ok
+            end;
+        {error, Reason} ->
+            error({init_hook_counter_module_not_found, Reason})
+    end.
+
+%% BT-3532: TypedFieldCounter (typed-no-default field, no `initialize`)
+%% exercises the chain_has_typed_no_default half of the same codegen guard.
+ensure_typed_field_counter_loaded() ->
+    case code:ensure_loaded('bt@typed_field_counter') of
+        {module, 'bt@typed_field_counter'} ->
+            case beamtalk_class_registry:whereis_class('TypedFieldCounter') of
+                undefined ->
+                    case erlang:function_exported('bt@typed_field_counter', register_class, 0) of
+                        true ->
+                            'bt@typed_field_counter':register_class(),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                _Pid ->
+                    ok
+            end;
+        {error, Reason} ->
+            error({typed_field_counter_module_not_found, Reason})
     end.

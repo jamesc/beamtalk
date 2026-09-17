@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload counter with `initialize` - version 2 adds a new field
+// 'bonus' (BT-3532)
+
+Actor subclass: HotCounterInit
+  state: value = 0
+  state: bonus = 42
+
+  initialize => self.value := 100
+
+  increment => self.value := self.value + 1
+
+  getValue => ^self.value
+
+  getBonus => ^self.bonus

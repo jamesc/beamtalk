@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Actor with a typed-no-default field and no `initialize` method
+// (BT-3532 regression fixture).
+//
+// A typed-no-default field alone (no `initialize` needed) makes
+// generate_init_function's `chain_has_typed_no_default` true, which
+// selects the same guarded init/1 branch (init_initialize_guarded_doc)
+// as a class with `initialize` — the branch whose non-skip arm returns
+// {ok, State, {continue, initialize}} instead of {ok, Map}.
+
+typed Actor subclass: TypedFieldCounter
+  state: value :: Integer = 0
+  state: label :: String
+
+  getValue -> Integer => ^self.value
+
+  getLabel -> String => self.label

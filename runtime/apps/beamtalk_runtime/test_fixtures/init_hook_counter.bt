@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Actor with an `initialize` method (BT-3532 regression fixture).
+//
+// Before the fix, beamtalk_hot_reload:migrate_fields/3 called
+// Module:init(#{}) to get field defaults. For any class whose chain
+// defines `initialize` (like this one), generated init/1 returns the
+// 3-tuple {ok, State, {continue, initialize}} instead of the plain
+// {ok, Map} migrate_fields expects — so field migration silently no-op'd.
+//
+// migrate_fields/3 now calls Module:init(#{'__skip_initialize__' => true}),
+// which always returns the plain 2-tuple regardless of `initialize`.
+
+Actor subclass: InitHookCounter
+  state: value = 0
+  state: label = "default"
+
+  initialize =>
+    self.label := "initialized"
+
+  increment => self.value := self.value + 1
+
+  getValue => ^self.value
+
+  getLabel => ^self.label
