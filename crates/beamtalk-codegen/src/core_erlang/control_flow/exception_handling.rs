@@ -308,17 +308,28 @@ impl CoreErlangGenerator {
     /// alone decides one from the other), so the result never carries more
     /// than one entry for this construct.
     ///
-    /// A family counts as mutated when ANY top-level statement of EITHER
-    /// block matches it, via the shared
-    /// [`Self::block_top_level_mutates_family`] — deliberately top-level-only
-    /// (not [`Self::body_threaded_families`]'s recursive walk): this
-    /// construct's own per-statement E1..E7 dispatch
-    /// (`generate_exception_body_with_threading_inner`) only ever produces a
-    /// family-mutation `Bind` this construct's tuple can carry for a bare
-    /// top-level statement — migrating this detector's own walk to the
-    /// recursive one is explicitly out of this issue's scope (see
-    /// `tests::control_flow::family_detector_differential`'s own scope
-    /// note).
+    /// A family counts as mutated when EITHER block mutates it ANYWHERE,
+    /// per ADR 0122's unified recursive detector
+    /// [`Self::body_threaded_families`] (BT-3522). It replaced a
+    /// deliberately top-level-only walk of its own
+    /// (`block_top_level_mutates_family`, deleted with that migration), whose
+    /// blindness below depth 0 meant a nested mutation got no slot allocated
+    /// at all and was silently discarded on normal return.
+    ///
+    /// Detection and carry-capability stay separate questions (ADR 0122
+    /// §Decision 1), and the two have genuinely different answers here:
+    ///
+    /// * a mutation in a top-level statement's own SUB-EXPRESSION
+    ///   (`t := 1 + (self bump)`) is carried end-to-end once a slot exists,
+    ///   because ADR 0118's `thread_ahead` already lowers it into a real
+    ///   `Bind` in the arm's own frame — before BT-3522 it had no slot to
+    ///   land in and tripped `verify()`'s `UnboundVersion`;
+    /// * a mutation inside a NESTED BLOCK is not carried, and is rejected
+    ///   per-statement by
+    ///   [`Self::reject_unthreadable_value_self_field_write`] (`SelfVt`) /
+    ///   [`Self::reject_unthreadable_class_var_mutation`] (`ClassVars`) in
+    ///   [`Self::generate_exception_body_with_threading_inner`], never
+    ///   silently dropped.
     ///
     /// Shared with the consumer side
     /// (`value_type_codegen.rs`'s `exception_construct_threaded_families`) so
@@ -335,12 +346,12 @@ impl CoreErlangGenerator {
             .into_iter()
             .filter(|prefix| !matches!(prefix, VersionPrefix::State))
             .collect();
-        let matches: Vec<VersionPrefix> = eligible
-            .into_iter()
-            .filter(|prefix| {
-                blocks
-                    .iter()
-                    .any(|block| self.block_top_level_mutates_family(block, prefix))
+        let matches: Vec<VersionPrefix> = blocks
+            .iter()
+            .flat_map(|block| {
+                self.body_threaded_families(block, &eligible)
+                    .as_slice()
+                    .to_vec()
             })
             .collect();
         ThreadedFamilies::from_matches(&matches)
@@ -1528,6 +1539,18 @@ impl CoreErlangGenerator {
             // bare top-level write `exception_construct_families`
             // already threads.
             self.reject_unthreadable_value_self_field_write(expr, Self::is_field_assignment(expr))?;
+            // BT-3522: the `ClassVars` half of the same safety net, which
+            // this loop was missing — only `SelfVt` had one. A class-var
+            // mutation (bare write or same-class self-send) buried inside a
+            // NESTED BLOCK of this statement is invisible to E1..E7's own
+            // per-shape Bind construction, so the construct's trailing
+            // `ClassVars` slot never carries it and it was silently
+            // discarded on normal return. See
+            // [`CoreErlangGenerator::reject_unthreadable_class_var_mutation`]
+            // for why this one walks nested blocks specifically rather than
+            // the whole statement subtree (a mutation in the statement's own
+            // sub-expression IS carried, via `thread_ahead`).
+            self.reject_unthreadable_class_var_mutation(expr)?;
 
             if Self::is_field_assignment(expr) {
                 // E1 — same shape/mint-order as C1; reused directly.

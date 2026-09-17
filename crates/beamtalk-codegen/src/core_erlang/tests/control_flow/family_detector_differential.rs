@@ -11,15 +11,17 @@
 //! and `Foldl*` body `ThreadingPlan::new_impl` builds while compiling the
 //! whole `stdlib/src` + `stdlib/test` + `stdlib/bootstrap-test` corpus.
 //!
-//! Scope: `on:do:`/`ensure:` (BT-3506, migrated to its own top-level-only
-//! `exception_construct_families` — see `exception_handling.rs`) and `match:`
-//! (`match_needs_state_threading`, migrated to its own `MATCH_ARM_FAMILIES`
-//! capability declaration by BT-3517) are the other two detector families ADR
-//! 0122 names — this test covers the loop/
-//! `Foldl*` sites `ThreadingPlan::new_impl` already builds, which is where
+//! Scope: `on:do:`/`ensure:` and `match:` are the other two detector families
+//! ADR 0122 names, and both have since finished their own migrations —
+//! `exception_construct_families` now CALLS `body_threaded_families` directly
+//! (BT-3522, the "later migration" this note used to defer to), and
+//! `match_needs_state_threading` moved to its own `MATCH_ARM_FAMILIES`
+//! capability declaration (BT-3517). Neither needs differential coverage here
+//! any more: one has no second detector left to differ from, the other has no
+//! body walk at all. This test covers the loop/`Foldl*` sites
+//! `ThreadingPlan::new_impl` already builds, which is where
 //! `find_class_var_mutating_stmt`/`find_value_self_mutating_stmt` (the
-//! detector pair this issue's `body_threaded_families` replaces) actually
-//! live.
+//! detector pair `body_threaded_families` is slated to replace) still live.
 //!
 //! Per ADR 0122 §Implementation step 1: "the only expected differences are
 //! nested mutations the old walks did not report, which the rejection

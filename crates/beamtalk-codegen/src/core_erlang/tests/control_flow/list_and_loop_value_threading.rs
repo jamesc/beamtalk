@@ -645,3 +645,90 @@ fn test_value_type_multiple_top_level_field_writes_in_loop_still_thread() {
     .expect("two bare top-level value-type writes must still compile");
     assert_compiles_through_erlc("bt@vtmultitopwrite", &code);
 }
+
+// ─── BT-3522: the VT conditional's own depth limit ─────────────────────────
+
+#[test]
+fn test_value_type_field_write_in_non_last_conditional_threads_self_out() {
+    // The guard rail for the rejection below: the BASE CASE this site was
+    // built for — a bare `self.field := ...` as a TOP-LEVEL statement of a
+    // non-last conditional's branch block — must keep threading, so an
+    // over-firing rejection turns this red rather than passing silently.
+    // (`reject_nested_vt_conditional_self_field_writes` reuses
+    // `reject_unthreadable_value_self_field_write`'s pointer-identity root
+    // skip for exactly this.)
+    let src = concat!(
+        "TestCase subclass: VtCondSelfNonLast\n",
+        "  field: total = 0\n\n",
+        "  computeTotal: flag =>\n",
+        "    flag ifTrue: [self.total := self.total + 7]\n",
+        "    self.total\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@vtcondselfnonlast").with_workspace_mode(true),
+    )
+    .expect("a top-level field write in a non-last conditional branch must compile");
+    assert!(
+        code.contains("call 'maps':'get'('total', Self1)"),
+        "the method's trailing field read must see the branch-merged Self1. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_type_field_write_nested_deeper_in_conditional_is_compile_error() {
+    // BT-3522's second, independent silent-drop instance. The write is one
+    // level below the conditional branch block's own top level, so
+    // `block_writes_vt_self_field` (top-level-only, and the gate on
+    // `generate_vt_conditional_open`'s `threads_self`) reports `false`. With
+    // no outer-local mutation to carry either, that function's early return
+    // emitted `Document::Nil` — the whole conditional vanished from the
+    // method body, mutation and all, with no error.
+    //
+    // Neither rejection function was called anywhere in
+    // `value_type_codegen.rs` before this; the site now applies the SAME
+    // per-statement `reject_unthreadable_value_self_field_write` pass
+    // `exception_handling.rs` applies to its own arms, so both produce one
+    // diagnostic from one rule.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtCondSelfNested\n",
+            "  field: total = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    flag\n",
+            "      ifTrue: [\n",
+            "        flag ifTrue: [self.total := self.total + 7]\n",
+            "      ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtcondselfnested",
+    );
+    assert_eq!(field, "total");
+}
+
+#[test]
+fn test_value_type_field_write_nested_beside_a_threadable_top_level_write_is_compile_error() {
+    // The root skip is per-STATEMENT, not per-branch-block: a branch that
+    // mixes a carried top-level write with an uncarried nested one rejects
+    // on the nested one rather than quietly threading only half the
+    // mutations. Mirrors
+    // `test_value_type_nested_field_write_rejected_beside_threadable_top_level_write`'s
+    // claim for the loop sites.
+    let field = field_assignment_rejection_field(
+        concat!(
+            "TestCase subclass: VtCondSelfMixed\n",
+            "  field: total = 0\n\n",
+            "  computeTotal: flag =>\n",
+            "    flag\n",
+            "      ifTrue: [\n",
+            "        self.total := self.total + 1\n",
+            "        flag ifTrue: [self.total := self.total + 7]\n",
+            "      ]\n",
+            "    self.total\n",
+        ),
+        "bt@vtcondselfmixed",
+    );
+    assert_eq!(field, "total");
+}

@@ -444,3 +444,37 @@ Object subclass: MutationCorpusClassMethod
       nil
     ] ensure: [nil]
     self.runs
+
+  // ── class-var mutation BELOW an arm's top level (BT-3522) ─────────────────
+  // BT-3506 gated the construct's trailing `ClassVars` slot on a
+  // top-level-only walk, so a mutation at any depth >= 1 got no slot at all.
+  // The two fragments below are the half that the widened (recursive)
+  // detector makes thread end-to-end: the self-send sits in a top-level
+  // STATEMENT's own sub-expression, where ADR 0118's `thread_ahead` already
+  // binds it into the arm's own frame — it only ever lacked a slot to land
+  // in. (On the parent commit these did not merely lose the mutation: the
+  // orphaned `Bind` tripped `ThreadedIr::verify`'s `UnboundVersion`, an
+  // `erlc` unbound-variable crash in a release build.)
+  //
+  // The OTHER half — a mutation inside a NESTED BLOCK (`flag ifTrue: [self
+  // bump]`) — is a clean compile-time rejection, so it cannot be a fragment
+  // in a file that must compile; it is pinned at the Rust level instead, by
+  // `test_class_method_self_send_nested_in_conditional_in_ensure_try_body_is_compile_error`
+  // in `crates/beamtalk-codegen/src/core_erlang/tests/control_flow/exception_handling.rs`.
+  class classVarEnsureSelfSendInSubExprNonLast =>
+    self.runs := 0
+    _t := 0
+    [
+      _t := 1 + (self bump)
+      nil
+    ] ensure: [nil]
+    self.runs
+
+  class classVarOnDoSelfSendAsReceiverNonLast =>
+    self.runs := 0
+    _t := 0
+    [
+      _t := (self bump) + 0
+      nil
+    ] on: Error do: [:e | nil]
+    self.runs

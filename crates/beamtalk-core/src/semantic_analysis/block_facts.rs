@@ -98,9 +98,22 @@ pub fn analyze_method_body(
 
 /// Computes the set of this class's own class-method selectors that
 /// are *known or suspected* to mutate a class variable — directly (`self.cv
-/// := ...` for `cv` in `class_var_names`) or transitively (a self-send,
-/// anywhere in the method body including inside nested blocks, to another
-/// selector already in this set).
+/// := ...` for `cv` in `class_var_names`) or transitively (a same-class send
+/// — `self foo` OR `ClassName foo`, anywhere in the method body including
+/// inside nested blocks — to another selector already in this set).
+///
+/// BT-3522 adversarial review: the transitive closure originally walked only
+/// [`BlockMutationAnalysis::self_send_selectors`], which — like
+/// [`BlockMutationAnalysis::has_self_sends`] — only ever records a `self`-receiver
+/// send ([`is_self_reference`]). `ClassName foo` reaches the exact same
+/// same-class call as `self foo` (`beamtalk-codegen`'s
+/// `is_class_method_self_send` treats both identically), so excluding it here
+/// made a mutation reached only through the `ClassName`-spelled call invisible
+/// to this fixed point — silently treated as pure. [`same_class_reference_send_selectors`]
+/// closes that gap by unioning in same-class `ClassReference` sends
+/// separately, without widening `self_send_selectors`/`has_self_sends`
+/// themselves (both have other, unrelated consumers across the codebase that
+/// depend on their current `self`-only meaning).
 ///
 /// A self-send to a selector NOT defined in this class's own `class_methods`
 /// (inherited from a superclass, or otherwise unresolvable at this class's
@@ -142,40 +155,47 @@ pub fn compute_class_var_mutating_selectors(
     class: &ClassDefinition,
     class_var_names: &HashSet<String>,
 ) -> HashSet<String> {
-    let methods: Vec<(String, BlockMutationAnalysis)> = class
+    let class_name = class.name.name.as_str();
+    let methods: Vec<(String, BlockMutationAnalysis, HashSet<String>)> = class
         .class_methods
         .iter()
         .filter(|m| m.kind == MethodKind::Primary)
         .map(|m| {
+            let analysis = analyze_method_body(&m.parameters, &m.body);
+            let mut same_class_call_targets = analysis.self_send_selectors.clone();
+            same_class_call_targets
+                .extend(same_class_reference_send_selectors(&m.body, class_name));
             (
                 m.selector.name().to_string(),
-                analyze_method_body(&m.parameters, &m.body),
+                analysis,
+                same_class_call_targets,
             )
         })
         .collect();
-    let local_selectors: HashSet<&str> = methods.iter().map(|(sel, _)| sel.as_str()).collect();
+    let local_selectors: HashSet<&str> = methods.iter().map(|(sel, _, _)| sel.as_str()).collect();
 
     let mut mutating: HashSet<String> = methods
         .iter()
-        .filter(|(_, analysis)| {
+        .filter(|(_, analysis, _)| {
             analysis
                 .field_writes
                 .iter()
                 .any(|f| class_var_names.contains(f))
         })
-        .map(|(sel, _)| sel.clone())
+        .map(|(sel, _, _)| sel.clone())
         .collect();
 
-    // Fixed-point closure over self-sends: a method becomes "mutating" if it
-    // self-sends a selector already known to mutate, or one this class
-    // doesn't itself define (unresolvable — assume the worst).
+    // Fixed-point closure over same-class sends: a method becomes "mutating"
+    // if it same-class-sends (`self foo` or `ClassName foo`) a selector
+    // already known to mutate, or one this class doesn't itself define
+    // (unresolvable — assume the worst).
     loop {
         let mut changed = false;
-        for (sel, analysis) in &methods {
+        for (sel, _, same_class_call_targets) in &methods {
             if mutating.contains(sel) {
                 continue;
             }
-            let calls_unsafe = analysis.self_send_selectors.iter().any(|called| {
+            let calls_unsafe = same_class_call_targets.iter().any(|called| {
                 mutating.contains(called) || !local_selectors.contains(called.as_str())
             });
             if calls_unsafe {
@@ -189,6 +209,39 @@ pub fn compute_class_var_mutating_selectors(
     }
 
     mutating
+}
+
+/// Selectors sent via a same-class `ClassName selector` receiver (as opposed
+/// to `self selector`) anywhere in `body`, including nested blocks — the
+/// [`Expression::ClassReference`] counterpart to [`is_self_reference`]-based
+/// `self_send_selectors` tracking. See
+/// [`compute_class_var_mutating_selectors`]'s own doc comment for why its
+/// fixed point needs this unioned in separately rather than folded into
+/// [`BlockMutationAnalysis::self_send_selectors`] itself.
+fn same_class_reference_send_selectors(
+    body: &[ExpressionStatement],
+    class_name: &str,
+) -> HashSet<String> {
+    let mut selectors = HashSet::new();
+    for stmt in body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            let Expression::MessageSend {
+                receiver, selector, ..
+            } = e
+            else {
+                return;
+            };
+            let is_own_class_reference = matches!(
+                receiver.as_ref(),
+                Expression::ClassReference { name, package, .. }
+                    if package.is_none() && name.name == class_name
+            );
+            if is_own_class_reference {
+                selectors.insert(selector.name().to_string());
+            }
+        });
+    }
+    selectors
 }
 
 /// Shared statement-list walker behind [`analyze_block`] and [`analyze_method_body`].
