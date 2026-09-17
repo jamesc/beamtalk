@@ -100,6 +100,29 @@ pub fn is_valid_class_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Returns `true` if `name` is a valid Erlang unquoted-atom module name.
+///
+/// A valid Erlang module name:
+/// - is non-empty
+/// - starts with an ASCII lowercase letter or an underscore (Erlang allows
+///   unquoted atoms starting with `_`, e.g. `_erl_prim_loader`)
+/// - contains only ASCII alphanumeric characters and underscores
+///
+/// This is the canonical definition; tools that validate user-supplied Erlang
+/// module names (CLI stub generation, MCP) must delegate their boolean check
+/// here so the rule stays in one place.
+///
+/// Some contexts use a more permissive predicate that additionally admits `@`
+/// for Erlang namespaced atoms (ADR 0016) and imposes no first-character
+/// requirement — appropriate for security-path validation where `@`-namespaced
+/// atoms must not be rejected. Use *this* function when the question is
+/// "is this a plain, unquoted Erlang module identifier?"
+pub fn is_valid_erlang_module_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Returns `true` if `c` is a binary-selector (operator) character.
 ///
 /// The canonical character set — `+ - * / < > = ~ % & ? , \` — shared between
@@ -244,6 +267,27 @@ mod naming_tests {
     #[test]
     fn invalid_digit_start() {
         assert!(!is_valid_class_name("123Foo"));
+    }
+
+    #[test]
+    fn erlang_module_name_accepts_valid_names() {
+        assert!(is_valid_erlang_module_name("lists"));
+        assert!(is_valid_erlang_module_name("my_app"));
+        assert!(is_valid_erlang_module_name("gen_server2"));
+        assert!(is_valid_erlang_module_name("a"));
+        assert!(is_valid_erlang_module_name("_erl_prim_loader")); // underscore-leading is valid Erlang
+        assert!(is_valid_erlang_module_name("_"));
+    }
+
+    #[test]
+    fn erlang_module_name_rejects_invalid_names() {
+        assert!(!is_valid_erlang_module_name("")); // empty
+        assert!(!is_valid_erlang_module_name("Lists")); // uppercase start
+        assert!(!is_valid_erlang_module_name("foo-bar")); // hyphen
+        assert!(!is_valid_erlang_module_name("my.module")); // dot
+        assert!(!is_valid_erlang_module_name("1bad")); // digit start
+        assert!(!is_valid_erlang_module_name("foo bar")); // space
+        assert!(!is_valid_erlang_module_name("bt@foo")); // @ — use beam_compiler::is_valid_module_name
     }
 
     #[test]

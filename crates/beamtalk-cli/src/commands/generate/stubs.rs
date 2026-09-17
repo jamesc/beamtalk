@@ -216,14 +216,13 @@ fn locate_beam_file(module_name: &str) -> Result<BeamLocation> {
 
 /// Checks whether a derived module name is a valid Erlang atom.
 ///
-/// A valid module name starts with a lowercase ASCII letter and contains
-/// only ASCII alphanumeric characters and underscores. This prevents
-/// file stems with dashes, dots, or other special characters from being
-/// treated as module names.
+/// Delegates to the canonical definition in
+/// `beamtalk_core::source_analysis::is_valid_erlang_module_name`, which
+/// accepts lowercase-or-underscore starts and alphanumeric+underscore bodies.
+/// This prevents file stems with dashes, dots, or other special characters from
+/// being treated as module names.
 fn is_valid_module_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    beamtalk_core::source_analysis::is_valid_erlang_module_name(name)
 }
 
 /// Format a complete `.bt` stub file for a module.
@@ -569,6 +568,8 @@ mod tests {
         assert!(is_valid_module_name("my_app"));
         assert!(is_valid_module_name("gen_server2"));
         assert!(is_valid_module_name("a"));
+        // Underscore-leading names are valid Erlang atoms (e.g. _erl_prim_loader).
+        assert!(is_valid_module_name("_private_helper"));
     }
 
     #[test]
