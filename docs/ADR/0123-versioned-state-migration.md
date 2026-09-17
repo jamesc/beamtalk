@@ -349,7 +349,12 @@ and `beamtalk_workspace_reshape` already exist with ADR 0105's meaning of
 -type envelope() :: {beamtalk_shape, Class :: atom(), ShapeVersion :: pos_integer(), Fields :: map()}.
 ```
 
-**Chain semantics** (`migrate/3`), in order:
+**Chain semantics** (`migrate/3`), in order. `migrate/3` takes a class,
+not a module: `beamtalk_shape_migration` resolves `Module` from `Class`
+through the class registry (`beamtalk_object_class:module_name/1`, the
+same mapping every other class-keyed runtime operation uses), so the
+envelope — which carries only the class atom — and hot reload call the
+same function.
 
 1. `V = FromVersion`, `T = Cart shapeVersion` (read from `__beamtalk_meta`).
 2. For each `K` in `V, V+1, …, T-1`: if `'shape_migrations'` has `K`, apply
