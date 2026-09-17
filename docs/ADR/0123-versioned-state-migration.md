@@ -1,7 +1,7 @@
 # ADR 0123: Versioned State Migration as a Language Surface
 
 ## Status
-Proposed (2026-09-17)
+Accepted (2026-09-17)
 
 ## Context
 
