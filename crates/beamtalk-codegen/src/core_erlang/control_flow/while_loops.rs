@@ -295,7 +295,11 @@ impl CoreErlangGenerator {
                 // `generate_stateful_while_condition` directly — see
                 // `check_no_unsafe_class_method_self_sends`'s doc comment.
                 let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
-                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
+                this.check_no_unsafe_class_method_self_sends(
+                    &analysis,
+                    cond_block,
+                    cond_block.span,
+                )?;
                 if cond_effects {
                     this.generate_stateful_while_condition(cond_block)
                 } else {
@@ -568,7 +572,11 @@ impl CoreErlangGenerator {
             if let Expression::Block(cond_block) = condition {
                 // see the analogous check in `generate_while_loop`.
                 let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
-                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)?;
+                this.check_no_unsafe_class_method_self_sends(
+                    &analysis,
+                    cond_block,
+                    cond_block.span,
+                )?;
                 this.generate_block_body(cond_block)
             } else {
                 this.generate_expression(condition)
@@ -968,7 +976,7 @@ impl CoreErlangGenerator {
             let result = if let Expression::Block(cond_block) = condition {
                 // see the analogous check in `generate_while_loop`.
                 let analysis = crate::core_erlang::block_analysis::analyze_block(cond_block);
-                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block.span)
+                this.check_no_unsafe_class_method_self_sends(&analysis, cond_block, cond_block.span)
                     .and_then(|()| this.generate_block_body(cond_block))
             } else {
                 this.generate_expression(condition)

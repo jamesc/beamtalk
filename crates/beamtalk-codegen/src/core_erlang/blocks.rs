@@ -122,11 +122,26 @@ impl CoreErlangGenerator {
         None
     }
 
-    /// Rejects a same-class self-send inside a block whose target
+    /// Rejects a same-class send — spelled `self foo` OR `ClassName foo`,
+    /// both same-class, same-activation, and treated identically by
+    /// `is_class_method_self_send` in codegen — inside a block whose target
     /// selector isn't provably free of class-variable mutation (see
     /// `ClassMethodSelfSendInUnthreadedBlock`'s doc comment for the full
     /// rationale) — such a block has no way to thread a classState mutation
     /// back to the class method that owns it, silently losing it otherwise.
+    ///
+    /// BT-3529: `analysis.self_send_selectors` only ever records a bare
+    /// `self`-receiver send ([`beamtalk_core::semantic_analysis::block_facts::analyze_expression`]),
+    /// so a same-class send spelled `ClassName foo` inside `block` was
+    /// invisible to this predicate even though `compute_class_var_mutating_selectors`
+    /// (BT-3522) already treats it as an equally valid mutation-reaching
+    /// path. Unions in `block_analysis::same_class_reference_send_selectors`
+    /// — the same BT-3522 helper `compute_class_var_mutating_selectors`
+    /// uses for its own transitive closure — rather than widening
+    /// `BlockMutationAnalysis::self_send_selectors`/`has_self_sends`
+    /// themselves, which have other consumers (e.g. `plan.rs`'s
+    /// Actor-instance threading) that depend on their current self-only
+    /// meaning.
     ///
     /// Scoped to class-method context only (this is a classState concern,
     /// not an actor-state one), and gated on the class actually declaring
@@ -172,17 +187,25 @@ impl CoreErlangGenerator {
     pub(super) fn check_no_unsafe_class_method_self_sends(
         &self,
         analysis: &crate::core_erlang::block_analysis::BlockMutationAnalysis,
+        block: &Block,
         span: beamtalk_core::source_analysis::Span,
     ) -> Result<()> {
         if !self.in_class_method() || self.class_var_names().is_empty() {
             return Ok(());
         }
-        let mut unsafe_selectors: Vec<&String> = analysis
+        let same_class_reference_sends =
+            crate::core_erlang::block_analysis::same_class_reference_send_selectors(
+                &block.body,
+                &self.class_name(),
+            );
+        let mut unsafe_selectors: Vec<&str> = analysis
             .self_send_selectors
             .iter()
+            .map(String::as_str)
+            .chain(same_class_reference_sends.iter().map(String::as_str))
             .filter(|sel| {
-                self.class_var_mutating_selectors().contains(sel.as_str())
-                    || !self.class_method_selectors().contains(sel.as_str())
+                self.class_var_mutating_selectors().contains(*sel)
+                    || !self.class_method_selectors().contains(*sel)
             })
             .collect();
         if let Some(selector) = {
@@ -190,7 +213,7 @@ impl CoreErlangGenerator {
             unsafe_selectors.into_iter().next()
         } {
             return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
-                selector: selector.clone(),
+                selector: selector.to_string(),
                 location: self.location_label(span),
             });
         }

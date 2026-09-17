@@ -218,7 +218,16 @@ pub fn compute_class_var_mutating_selectors(
 /// [`compute_class_var_mutating_selectors`]'s own doc comment for why its
 /// fixed point needs this unioned in separately rather than folded into
 /// [`BlockMutationAnalysis::self_send_selectors`] itself.
-fn same_class_reference_send_selectors(
+///
+/// `pub` (BT-3529): also called directly on a bare block's own body by
+/// `beamtalk-codegen`'s `check_no_unsafe_class_method_self_sends`
+/// (`core_erlang/blocks.rs`) — that predicate filters
+/// [`BlockMutationAnalysis::self_send_selectors`] the same way this
+/// function's own fixed point originally did, and inherited the identical
+/// `ClassName`-spelled blind spot for the same reason. Re-exported via
+/// `beamtalk-codegen`'s `block_analysis` module (CLAUDE.md's
+/// no-duplicate-implementations rule) rather than reimplemented there.
+pub fn same_class_reference_send_selectors(
     body: &[ExpressionStatement],
     class_name: &str,
 ) -> HashSet<String> {
