@@ -568,8 +568,6 @@ mod tests {
         assert!(is_valid_module_name("my_app"));
         assert!(is_valid_module_name("gen_server2"));
         assert!(is_valid_module_name("a"));
-        // Underscore-leading names are valid Erlang atoms (e.g. _erl_prim_loader).
-        assert!(is_valid_module_name("_private_helper"));
     }
 
     #[test]
@@ -578,6 +576,8 @@ mod tests {
         assert!(!is_valid_module_name(""));
         // Starts with uppercase
         assert!(!is_valid_module_name("Lists"));
+        // Starts with underscore — variable in Erlang, not an atom
+        assert!(!is_valid_module_name("_private_helper"));
         // Contains dash
         assert!(!is_valid_module_name("foo-bar"));
         // Contains dot

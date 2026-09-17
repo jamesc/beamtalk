@@ -104,8 +104,9 @@ pub fn is_valid_class_name(name: &str) -> bool {
 ///
 /// A valid Erlang module name:
 /// - is non-empty
-/// - starts with an ASCII lowercase letter or an underscore (Erlang allows
-///   unquoted atoms starting with `_`, e.g. `_erl_prim_loader`)
+/// - starts with an ASCII lowercase letter (per the Erlang atom grammar:
+///   unquoted atoms must begin with a lowercase letter; `_` and uppercase
+///   letters start a *variable*, not an atom)
 /// - contains only ASCII alphanumeric characters and underscores
 ///
 /// This is the canonical definition; tools that validate user-supplied Erlang
@@ -119,7 +120,7 @@ pub fn is_valid_class_name(name: &str) -> bool {
 /// "is this a plain, unquoted Erlang module identifier?"
 pub fn is_valid_erlang_module_name(name: &str) -> bool {
     !name.is_empty()
-        && name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -275,14 +276,15 @@ mod naming_tests {
         assert!(is_valid_erlang_module_name("my_app"));
         assert!(is_valid_erlang_module_name("gen_server2"));
         assert!(is_valid_erlang_module_name("a"));
-        assert!(is_valid_erlang_module_name("_erl_prim_loader")); // underscore-leading is valid Erlang
-        assert!(is_valid_erlang_module_name("_"));
+        assert!(is_valid_erlang_module_name("erl_prim_loader"));
     }
 
     #[test]
     fn erlang_module_name_rejects_invalid_names() {
         assert!(!is_valid_erlang_module_name("")); // empty
         assert!(!is_valid_erlang_module_name("Lists")); // uppercase start
+        assert!(!is_valid_erlang_module_name("_foo")); // underscore start — variable, not atom
+        assert!(!is_valid_erlang_module_name("_")); // bare wildcard — variable
         assert!(!is_valid_erlang_module_name("foo-bar")); // hyphen
         assert!(!is_valid_erlang_module_name("my.module")); // dot
         assert!(!is_valid_erlang_module_name("1bad")); // digit start
