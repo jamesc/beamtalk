@@ -84,7 +84,12 @@ fn validate_erlang_module_name_valid() {
     assert!(validate_erlang_module_name("lists").is_ok());
     assert!(validate_erlang_module_name("maps").is_ok());
     assert!(validate_erlang_module_name("beamtalk_runtime").is_ok());
-    assert!(validate_erlang_module_name("_private").is_ok());
+}
+
+#[test]
+fn validate_erlang_module_name_underscore_start_is_error() {
+    // Underscore-leading identifiers are Erlang variables, not atoms.
+    assert!(validate_erlang_module_name("_private").is_err());
 }
 
 #[test]

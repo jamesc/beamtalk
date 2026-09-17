@@ -147,7 +147,7 @@ fn validate_class_name(name: &str) -> Result<(), rmcp::ErrorData> {
 
 /// Validate that a string is a valid Erlang module name.
 ///
-/// Erlang module names are lowercase atoms: start with a lowercase letter or underscore,
+/// Erlang module names are unquoted atoms: start with a lowercase letter,
 /// followed by alphanumerics and underscores. Delegates to the canonical definition in
 /// `beamtalk_core::source_analysis::is_valid_erlang_module_name`.
 fn validate_erlang_module_name(name: &str) -> Result<(), rmcp::ErrorData> {
