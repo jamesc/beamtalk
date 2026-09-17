@@ -339,7 +339,19 @@ now calls `body_threaded_families` directly, `block_top_level_mutates_family`
 is deleted, and both previously-silent shapes are clean compile-time
 rejections (a mutation reachable only through a top-level statement's own
 sub-expression still threads end-to-end, since the family-slot machinery can
-actually carry that one).
+actually carry that one). BT-3522's own review passes (including an
+adversarial pass) found three more instances of the same root cause once the
+detector widened: a `ClassVars` mutation reached only through a
+`ClassName foo`-spelled same-class send (rather than `self foo`) was invisible
+to `compute_class_var_mutating_selectors`'s own purity closure; a mutation
+hidden inside a `match:` arm (`MatchArm::body` is a bare `Expression`, not a
+`Block`, so the nested-block-only walk never searched it); and a
+double-nested `ensure:`-in-`ensure:`. All three now reject the same way. A
+fourth, structurally identical gap in a sibling self-send safety check
+(`check_no_unsafe_class_method_self_sends`, gating bare list-op/`whileTrue:`/
+Erlang-interop blocks) was found but is a separate, untouched code path —
+tracked as [BT-3529](https://linear.app/beamtalk/issue/BT-3529) rather than
+folded into this fix.
 
 ## Migration Path
 Not applicable to the language. BT-3506 changes observable behaviour (a
