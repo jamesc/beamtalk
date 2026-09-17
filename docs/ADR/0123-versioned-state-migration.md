@@ -107,9 +107,17 @@ Actor subclass: Cart
 - **Absent means `shapeVersion: 1`.** Every existing class is at version 1;
   no migration of the corpus is needed.
 - At most one per class (a second is a compile error). It is *not*
-  inherited: a subclass declares its own version, and its migrations see
-  the full flattened field dictionary (inherited fields included), exactly
-  as `fetch_instance_vars` already flattens them.
+  inherited: versions and chains are **per concrete class, over the
+  flattened field dictionary** (inherited fields included, exactly as
+  `fetch_instance_vars` already flattens them). A subclass's chain consists
+  of the `migrateFromVN:` methods *it* defines — inherited class methods
+  are not pulled into a subclass's chain, because the two classes' version
+  numbers are unrelated. To reuse an ancestor's step, call it explicitly
+  (`Base migrateFromV1: old`); an abstract ancestor's `migrateFromVN:` is a
+  helper for its subclasses, never run on its own (it has no instances).
+  The cost — a superclass shape change must be answered by a bump in each
+  concrete subclass — is caught by the §4 warning, which fingerprints the
+  flattened shape.
 - It parses wherever `state:`/`field:`/`classState:` may appear (it joins
   `is_state_like_declaration_keyword`'s set), so the unparser, LSP
   completion, and `ClassBuilder` (`shapeVersion:` builder keyword, ADR 0038)
@@ -172,18 +180,24 @@ Value subclass: Money
     (old at: #amount put: (old at: #cents) / 100.0) removeKey: #cents
 ```
 
-A three-step chain where the middle step was purely additive and needs no
-method — the structural fallback covers it:
+A three-step chain where two steps were purely additive and need no
+method — the structural fallback covers them at the end of the chain. The
+one hook must not assume those earlier steps have run: a hook sees the
+**raw** accumulated dictionary, and a v1 instance reaching `migrateFromV3:`
+has never had `#tags` (it was added in v3 and only the *final* shape is
+known to the runtime), so the hook guards:
 
 ```beamtalk
 Actor subclass: Session
   shapeVersion: 4
   state: user :: String = ""
-  state: startedAt = nil        // added in v2 — defaulted, no method needed
-  state: tags :: List = #()     // v3 stored this as a comma string
+  state: startedAt = nil        // added in v2 — defaulted at reconcile, no method needed
+  state: tags :: List = #()     // added in v3 as a comma string; v4 makes it a List
 
   class migrateFromV3: old -> Dictionary =>
-    old at: #tags put: ((old at: #tags) splitOn: ",")
+    (old includesKey: #tags)
+      ifTrue: [old at: #tags put: ((old at: #tags) splitOn: ",")]
+      ifFalse: [old]              // pre-v3 instance: reconcile defaults #tags to #()
 ```
 
 Rules, all checked statically by the class validators:
@@ -194,8 +208,12 @@ Rules, all checked statically by the class validators:
   **This table is the Rust↔Erlang conformance mechanism**: the runtime never
   parses selector names, it reads the table codegen produced.
 - A method with `N ≥ shapeVersion` is a **warning** (unreachable migration).
-  Gaps are allowed — a missing step means "structural fallback for that
-  step".
+  Gaps are allowed — a missing step is a **no-op on the dictionary**; the
+  structural fallback runs once, after the whole chain, against the final
+  declared shape. Consequently a hook receives the raw dictionary as left
+  by the hooks before it, and a key introduced at an earlier *un-hooked*
+  step may be absent: read such keys with `at:ifAbsent:` or `includesKey:`
+  (the `Session` example above).
 - The body may not read or write `self.` slots or class variables
   (compile error). Migrations are **pure functions of `old`**: that is what
   makes them REPL-testable, dry-runnable, and safe to run outside the class
@@ -232,8 +250,10 @@ and any future persistence/distribution module), owns the whole rule:
 
 1. `V = FromVersion`, `T = Cart shapeVersion` (read from `__beamtalk_meta`).
 2. For each `K` in `V, V+1, …, T-1`: if `'shape_migrations'` has `K`, apply
-   `migrateFromVK:` to the current dictionary; otherwise leave it unchanged.
-   The result must be a `Dictionary`, else the step fails.
+   `migrateFromVK:` to the current dictionary; otherwise the step is a
+   **no-op** — nothing is defaulted or dropped between hooks, because the
+   runtime knows only the *final* declared shape, not what shape `K+1` was.
+   The result of a hook must be a `Dictionary`, else the step fails.
 3. **Reconcile** against the declared field list (today's `migrate_fields/3`
    logic, moved here): a declared field present in the dictionary is kept;
    absent → its declared default; absent with no default → `nil` on an
@@ -322,9 +342,16 @@ the unreachable-migration warning (§2).
 
 **Reload time** (extends ADR 0105's shape re-check, which already fires on
 `state:`/`field:` changes): the language service keeps a per-class shape
-**fingerprint** — the sorted `(field, declared type)` list — alongside the
-signature-generation store, and on reload emits, through the existing
-reload-findings channel on every surface (LSP, workspace UI, REPL):
+**fingerprint** — the sorted `(field, declared type)` list over the
+**flattened** field set, inherited fields included, since that is the
+dictionary migrations see — alongside the signature-generation store. A
+superclass that removes or retypes a field therefore changes the
+fingerprint of every concrete subclass, and each one with live instances
+that has not bumped its own `shapeVersion:` gets the warning below (the
+diff is in a class the author may not be looking at, which is exactly why
+the check is on the flattened shape). On reload the service emits, through
+the existing reload-findings channel on every surface (LSP, workspace UI,
+REPL):
 
 | Reload observed | Finding |
 |---|---|
@@ -552,6 +579,15 @@ See Steelman Analysis.
 - Migrations that need class variables or other process-bound context
   cannot be written; the purity rule is a real restriction, accepted for
   dry-runnability.
+- Chains are per concrete class, so a superclass shape change is answered
+  once per subclass (each calling the shared `Base migrateFromVN:` helper).
+  A composed per-ancestor chain, with `'__shape_version__'` becoming a
+  per-class map, is the recorded refinement if hierarchies with many
+  stateful subclasses make this tedious in practice.
+- Hooks see the raw dictionary: a key introduced at an earlier un-hooked
+  step is absent until the final reconcile, so hooks reading such keys
+  must guard. The alternative — reconciling after every step — is not
+  available, because only the final shape is declared.
 
 ### Neutral
 - Codegen of methods and dispatch is unchanged; `code_change/3` still
