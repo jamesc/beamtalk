@@ -328,7 +328,16 @@ maybe_apply_migration_hook(ClassName, Module, OldFields) ->
                     of
                         NewFields when is_map(NewFields) ->
                             NewFields;
-                        _ ->
+                        Other ->
+                            ?LOG_WARNING(
+                                "migrateFromV1: hook returned a non-map value; ignoring",
+                                #{
+                                    class => ClassName,
+                                    module => Module,
+                                    returned => Other,
+                                    domain => [beamtalk, runtime]
+                                }
+                            ),
                             OldFields
                     end
             end;

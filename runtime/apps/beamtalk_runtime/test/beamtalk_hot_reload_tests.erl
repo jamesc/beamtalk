@@ -277,6 +277,11 @@ field_migration_test_() ->
             {"a class with no migrateFromV1: export is unaffected by the hook (BT-3535)",
                 fun test_field_migration_hook_absent_is_no_op/0},
             {
+                "a class exporting migrateFromV1: with no registered class actor "
+                "degrades the whole reload to no declared fields (BT-3535)",
+                fun test_field_migration_hook_no_class_actor_is_no_op/0
+            },
+            {
                 "migrateFromV1: hook runs on a live actor's real suspend/change_code/resume "
                 "cycle, inspectable via sys:get_state (BT-3535)",
                 fun test_field_migration_hook_live_actor_sys_get_state/0
@@ -610,6 +615,44 @@ test_field_migration_hook_absent_is_no_op() ->
     ),
     ?assertEqual(9, maps:get(value, NewState)),
     ?assertNot(maps:is_key(total, NewState)).
+
+%% The `whereis_class(ClassName) =:= undefined` branch of
+%% maybe_apply_migration_hook/3 — the class module exports migrateFromV1:
+%% (function_exported/3 is true), but the class has no registered class
+%% actor to local_call/3 through. Mocks whereis_class/1 (meck, passthrough,
+%% per the beamtalk_class_monitor_tests convention) to force `undefined`
+%% for ShapeHookCart specifically, leaving every other class's lookup
+%% untouched.
+%%
+%% `whereis_class/1` is not just the hook's own lookup: migrate_fields/2's
+%% NewInstanceVars also resolves via `classAllFieldNamesByName/1` ->
+%% `walk_hierarchy/3`, which calls the very same `whereis_class/1` and
+%% returns `[]` the moment it comes back `undefined` (beamtalk_behaviour_
+%% intrinsics.erl). So with no registered class actor, the *whole* reload
+%% degrades to "no declared fields" — not just the migration hook — and
+%% `itemCount` is dropped like every other field, hook or no hook. That is
+%% the real, already-existing behavior this test pins down; it is not
+%% independent of maybe_apply_migration_hook/3's own no-op.
+test_field_migration_hook_no_class_actor_is_no_op() ->
+    meck:new(beamtalk_class_registry, [passthrough]),
+    meck:expect(beamtalk_class_registry, whereis_class, fun
+        ('ShapeHookCart') -> undefined;
+        (ClassName) -> meck:passthrough([ClassName])
+    end),
+    try
+        OldState = #{
+            '$beamtalk_class' => 'ShapeHookCart',
+            '__class_mod__' => 'bt@shape_hook_cart',
+            itemCount => 4
+        },
+        {ok, NewState} = beamtalk_hot_reload:code_change(
+            v1, OldState, #{module => 'bt@shape_hook_cart'}
+        ),
+        ?assertNot(maps:is_key(itemCount, NewState)),
+        ?assertNot(maps:is_key(total, NewState))
+    after
+        meck:unload(beamtalk_class_registry)
+    end.
 
 %% Spawn → set state → reload → inspect via sys:get_state: the hook runs
 %% on a genuinely live actor's real suspend/change_code/resume cycle
