@@ -125,7 +125,7 @@ unwatch(ClassName) ->
 %%% ============================================================================
 
 init(Opts) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     State0 = #state{
         max_restarts = maps:get(max_restarts, Opts, ?DEFAULT_MAX_RESTARTS),
         window_ms = maps:get(window_ms, Opts, ?DEFAULT_WINDOW_MS)
