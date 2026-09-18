@@ -31,6 +31,7 @@ that the Behaviour/Class libraries can rely on.
 | classIncludesSelector/2     | Membership check in local method dictionary               |
 | classFieldNames/1           | Field names from class gen_server state                   |
 | classAllFieldNames/1        | Combined field names via superclass chain                 |
+| classAllFieldNamesByName/1  | Same as classAllFieldNames/1, by ClassName (no instance needed) |
 | classClassVarNames/1        | Class-side field names (class variables) from class meta   |
 | classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
@@ -65,6 +66,7 @@ that the Behaviour/Class libraries can rely on.
     classCanUnderstandFromName/2,
     classFieldNames/1,
     classAllFieldNames/1,
+    classAllFieldNamesByName/1,
     %% class-side field (class variable) reflection
     classClassVarNames/1,
     classAllClassVarNames/1,
@@ -355,6 +357,18 @@ falls back to gen_server for dynamic classes.
 classAllFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    classAllFieldNamesByName(ClassName).
+
+-doc """
+Same as `classAllFieldNames/1`, taking a class name directly instead of an
+instance's class object — for callers that only have a `ClassName` atom
+(e.g. `beamtalk_hot_reload`'s BT-3531 field-migration reconcile step, which
+needs the flattened field set for a class it never has a
+`#beamtalk_object{}` for). Returns `[]` for an unregistered class, same as
+`walk_hierarchy/3`'s own empty-chain behavior.
+""".
+-spec classAllFieldNamesByName(atom()) -> [atom()].
+classAllFieldNamesByName(ClassName) ->
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, Acc) ->

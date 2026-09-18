@@ -525,16 +525,50 @@ register_classes(_ClassInfoList, ModuleName) ->
             ok
     end.
 
--doc "Trigger hot reload for existing actors after module reload.".
+-doc """
+Trigger hot reload for existing actors after module reload.
+
+BT-3531: also reconciles every loaded descendant of each reloaded class —
+a class hierarchy's live subclass instances carry the superclass's fields
+too (generated `init/1` merges them in), so a field change on the
+superclass must reach them even though the descendant's own module wasn't
+recompiled.
+""".
 -spec trigger_hot_reload(atom(), [map()]) -> ok.
 trigger_hot_reload(ModuleName, Classes) ->
     lists:foreach(
         fun(ClassMap) ->
-            hot_reload_class(ModuleName, ClassMap)
+            case resolve_class_name(ClassMap) of
+                undefined ->
+                    ok;
+                ClassName ->
+                    hot_reload_class(ModuleName, ClassName),
+                    hot_reload_descendants(ClassName)
+            end
         end,
         Classes
     ),
     ok.
+
+-doc """
+BT-3531: hot-reload every loaded descendant of ClassName, each against its
+own (unchanged) module — only the field set being reconciled changed,
+via the ancestor's field addition/removal, not the descendant's code.
+""".
+-spec hot_reload_descendants(atom()) -> ok.
+hot_reload_descendants(ClassName) ->
+    lists:foreach(
+        fun(Descendant) ->
+            case beamtalk_runtime_api:whereis_class(Descendant) of
+                undefined ->
+                    ok;
+                ClassPid ->
+                    DescendantModule = beamtalk_runtime_api:module_name(ClassPid),
+                    hot_reload_class(DescendantModule, Descendant)
+            end
+        end,
+        beamtalk_class_registry:all_subclasses(ClassName)
+    ).
 
 -doc """
 Compile and load a source file without REPL session state.
@@ -1191,28 +1225,25 @@ extract_trailing_info(ClassInfo) ->
             no_trailing
     end.
 
-%% Trigger hot reload for a single class.
--spec hot_reload_class(atom(), map()) -> ok.
-hot_reload_class(ModuleName, ClassMap) ->
-    ClassName = resolve_class_name(ClassMap),
-    case ClassName of
-        undefined ->
+%% Trigger hot reload for a single class's live instances, against
+%% ModuleName (that class's own BEAM module — the just-reloaded module for
+%% the reloaded class itself, or an unchanged descendant module when called
+%% from hot_reload_descendants/1).
+-spec hot_reload_class(atom(), atom()) -> ok.
+hot_reload_class(ModuleName, ClassName) ->
+    Pids =
+        try
+            beamtalk_runtime_api:all_instances(ClassName)
+        catch
+            error:badarg -> []
+        end,
+    case Pids of
+        [] ->
             ok;
         _ ->
-            Pids =
-                try
-                    beamtalk_runtime_api:all_instances(ClassName)
-                catch
-                    error:badarg -> []
-                end,
-            case Pids of
-                [] ->
-                    ok;
-                _ ->
-                    IVars = fetch_instance_vars(ClassName),
-                    Extra = {IVars, ModuleName},
-                    beamtalk_runtime_api:trigger_code_change(ModuleName, Pids, Extra)
-            end
+            IVars = fetch_instance_vars(ClassName),
+            Extra = {IVars, ModuleName},
+            beamtalk_runtime_api:trigger_code_change(ModuleName, Pids, Extra)
     end.
 
 %% Resolve a class name atom from a class map entry.
@@ -1245,18 +1276,20 @@ safe_list_to_atom(List) ->
         error:badarg -> undefined
     end.
 
-%% Fetch instance variables from the class registry.
+%% Fetch a class's full field list, including inherited fields, from the
+%% class registry.
+%%
+%% BT-3531: previously called `instance_variables/1`, which is this class's
+%% own declarations only — every inherited field then read as "removed" by
+%% `beamtalk_hot_reload:migrate_fields/3`'s dropped-field logic, even though
+%% generated `init/1` merges inherited fields into a subclass's actual
+%% state map. `all_field_names/1` walks the superclass chain instead.
 -spec fetch_instance_vars(atom()) -> list().
 fetch_instance_vars(ClassName) ->
-    case beamtalk_runtime_api:whereis_class(ClassName) of
-        undefined ->
-            [];
-        ClassPid ->
-            try
-                beamtalk_runtime_api:instance_variables(ClassPid)
-            catch
-                _:_ -> []
-            end
+    try
+        beamtalk_runtime_api:all_field_names(ClassName)
+    catch
+        _:_ -> []
     end.
 
 %% Reload a class file without REPL session state.

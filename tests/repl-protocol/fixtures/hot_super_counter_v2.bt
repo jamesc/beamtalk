@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload superclass — version 2 adds a new field 'step' (BT-3531)
+// Reloading this must reach live instances of subclasses too
+// (e.g. HotSubCounter), not just direct HotSuperCounter instances.
+
+Actor subclass: HotSuperCounter
+  state: value = 0
+  state: step = 5
+
+  increment => self.value := self.value + 1
+
+  getValue => ^self.value
+
+  getStep => ^self.step

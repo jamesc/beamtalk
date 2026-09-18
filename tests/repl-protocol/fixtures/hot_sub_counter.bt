@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload subclass of HotSuperCounter (BT-3531)
+// Used to verify inherited fields survive a subclass reload, and that a
+// superclass-only reload still reaches this subclass's live instances.
+
+HotSuperCounter subclass: HotSubCounter
+  state: logCount = 0
+
+  increment =>
+    self.logCount := self.logCount + 1
+    super increment
+
+  getLogCount => ^self.logCount
