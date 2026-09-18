@@ -16,10 +16,12 @@ Two parts, decided together because they are one rule seen from both sides.
   applications; most nilable slots in that corpus encode a resolution
   strategy in their `nil` and must not change. The pattern is real and
   general, and it is a judgement call rather than a demand from the corpus.
-  Scoped to `state:` in this ADR; `late classState:` is deferred (§1).
+  Applies to `state:` and `classState:`; the stdlib's three factory-set
+  singletons are the `classState:` evidence (§Context (e)).
   **Accept — B1, B2, B5 and B3 ship together as Part A's exemption (B1–B2
   alone would regress an early read to a raw `badkey`, §Implementation); B4
-  and B6–B10 stand on the two slots.**
+  and B6–B10 stand on the two instance slots and the three class-side
+  singletons.**
 
 **Part A needs an exemption, and the exemption is a language construct.**
 A lifecycle-assigned slot must be able to opt out of Part A's diagnostic.
@@ -52,14 +54,12 @@ attach a supervisor — must be declared nilable and nil-checked at every read,
 because ADR 0078's post-`initialize` check raises `UninitializedStateError`
 on any non-nilable typed slot still unset when `initialize` returns.
 
-The stdlib is poor evidence: its three nilable singletons
-(`transcript_stream.bt`, `beamtalk_interface.bt`, `workspace_interface.bt`)
-are injected by `beamtalk_workspace_bootstrap:bootstrap_singleton/3`
-(`:149-186`) with `erlang:monitor` and rebootstrap-on-death, and
-`retry_policy.bt`'s nilable field is a genuinely optional value. The evidence
-is the two real applications built on Beamtalk, both cited as real-world
-corpora by ADR 0067 — Exdura (a workflow engine) and Symphony (an agent
-orchestrator), surveyed at `exdura@d6b350e` / `symphony@d95ce02`.
+The evidence for instance slots is the two real applications built on
+Beamtalk, both cited as real-world corpora by ADR 0067 — Exdura (a workflow
+engine) and Symphony (an agent orchestrator), surveyed at `exdura@d6b350e` /
+`symphony@d95ce02`. The evidence for class-side slots is the stdlib's three
+singletons, (e) below. (`retry_policy.bt`'s nilable field is a genuinely
+optional value and is not evidence either way.)
 
 **(a) Every nilable resource slot is assigned by an explicit lifecycle method,
 and several are unset again.**
@@ -138,6 +138,36 @@ deliberately:
 `exdura_client.bt:144-155` does the same via `currentEngine` /
 `currentEventStore`. These stay ordinary methods, and they are why this ADR
 introduces no memoising slot kind.
+
+**(e) Every `classState:` slot in the stdlib is a factory-set singleton
+behind a nilable type it does not mean.** The two applications declare no
+`classState:` at all; the stdlib declares three, and all three are the same
+shape (`transcript_stream.bt:18-30`, `beamtalk_interface.bt:27-35`,
+`workspace_interface.bt:26-29`):
+
+```beamtalk
+typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
+  classState: current :: TranscriptStream | Nil = nil
+
+  class current -> TranscriptStream => self.current
+  class current: instance :: TranscriptStream -> TranscriptStream =>
+    self.current := instance
+  class resetCurrent -> Nil => self.current := nil
+```
+
+Set by a class-method factory (`current:`), cleared by `resetCurrent`, and
+re-set on process death by `beamtalk_workspace_bootstrap:bootstrap_singleton/3`
+(`:149-186`), which writes the class variable directly through
+`set_class_variable/2` and monitors the pid. `class current` already declares
+a non-nilable return type over a nilable slot. This is the instance-slot
+pattern of (a) on the class side, and it is three examples to (a)'s two.
+
+One caller depends on the current `nil`: `Object>>show:` and `Object>>cr`
+(`stdlib/src/object.bt:343`, `:355`) read
+`TranscriptStream current ifNotNil: [:t | t show: aValue]` so that output
+before bootstrap is a silent no-op, and `stdlib/test/show_cr_test.bt` pins
+that. So the slot can be `late`, but the `current` accessor must stay nilable
+and guard with `hasField:` (§Migration Path).
 
 `state: x :: T = <expr>` already permits an arbitrary **eager** initialiser
 (`gen_server/state.rs:36`, `:98`). The gap is not computing a value late; it
@@ -227,7 +257,7 @@ default is `nil` on an untyped class and a failure on a `typed` one.
 Give every slot a **declared story for how it becomes valid**, and check the
 consequences at compile time where they are provable.
 
-1. `late` as a declaration-level modifier on `state:` (`classState:` deferred, §1).
+1. `late` as a declaration-level modifier on `state:` and `classState:`.
 2. **Key absence**, not `nil` or a sentinel value, as the representation of
    an unassigned `late` slot.
 3. A **definite-assignment analysis** in `beamtalk-core` that reports
@@ -278,7 +308,7 @@ contextual keyword in this position only.
 | Declaration | `late` | Rationale |
 |---|---|---|
 | `late state:` (Actor) | **Yes** | The instance gen_server holds the slot |
-| `late classState:` (any class kind) | **Deferred** | Every mechanism below is instance-side: `hasField:`/`clearField:` dispatch on the object state map (`beamtalk_object_ops.erl:88-92` — on a class object that map is `#{}`), class-var reads go through `get_class_var` which answers `nil` for a missing key (`beamtalk_object_class.erl:1395`), and `ClassInfo.class_variables` is names only (`class_info.rs:171`). A class-side `late` needs its own read guard, presence test, clear, and metadata; not in this ADR |
+| `late classState:` (any class kind) | **Yes** | The class gen_server holds it (ADR 0036); ADR 0056 permits `classState:` on `native:` actors, which all three stdlib singletons are. Needs its own mechanism at each surface (§4i): the class-method read branch is a bare `maps:get` on the `ClassVars` map (`expressions.rs:526-537`), reflective reads go through `get_class_var`, which answers `nil` for a missing key (`beamtalk_object_class.erl:1395`), `hasField:`/`clearField:` dispatch on the object state map, which is `#{}` on a class object (`beamtalk_object_ops.erl:88-92`), and `ClassInfo.class_variables` is names only (`class_info.rs:171`) |
 | `late field:` (Value) | **Error** | A Value is fully constructed by `new`/`new:`/the keyword constructor and never mutated (ADR 0042); see §5 |
 | `late state:`/`field:` on `Object` | **Error** | Already an error — Object holds no instance data (ADR 0067) |
 | `late state:` on a `native:` Actor | **Error** | Already an error — ADR 0056 prohibits `state:` there |
@@ -489,6 +519,22 @@ shape value encodes kind, and B9 owns `beamtalk_shape_diff` and
 `(Name, State)` only (`beamtalk_reflection.erl:46-48`); keying on *declared*
 late means resolving the class from the tagged map and consulting
 `fieldKinds` metadata on every `fieldAt:`.
+
+**i. The class side is a parallel set of small pieces, not a shared one.**
+Inside a class method, `self.x` on a `classState:` slot compiles to a bare
+`maps:get` on the `ClassVars` variable (`expressions.rs:526-537`), so it gets
+the same `maps:find` guard as the instance branch, keyed on a
+`late_class_var_names()` that B5's metadata must supply for inherited and
+cross-file classes. `self hasField:` / `self clearField:` in a class method
+compile to `maps:is_key` / `maps:remove` on `ClassVars`, with the remove
+threaded through ADR 0110's class-var shadow write like any class-var
+assignment. From outside, `Cls hasField:` / `Cls clearField:` and `Cls
+fieldAt:` reach the class gen_server, which has `get_class_var` and
+`set_class_var` handle_calls (`beamtalk_object_class.erl:1395`, `:1397`) and
+needs `has_class_var`, `clear_class_var`, and a declared-`late` branch in
+`get_class_var`. Direct Erlang writes such as bootstrap's
+`set_class_variable/2` count as assignment, exactly as `spawnWith:` does for
+instance slots (§6).
 
 ### 5. Value classes: `late field:` is rejected
 
@@ -854,8 +900,10 @@ for cross-file ancestors — and the read guard depends on it (§4e). Plus a
 `behaviour.bt` declaration and an Erlang intrinsic, since `fieldNames` and
 `allFieldNames` are `@primitive "classFieldNames"` and
 `@primitive "classAllFieldNames"` (`behaviour.bt:225`, `:233`), a **sealed**
-family `fieldKinds` joins. Deferring `late classState:` (§1) is what keeps
-`class_variables` (`:171`, names only) out of this.
+family `fieldKinds` joins. And `class_variables` (`:171`) is `Vec<EcoString>`
+— names only, no types, no defaults — so `late classState:` on an inherited
+or cross-file class has no metadata to hang the kind off; that field grows to
+a structure carrying type, default and kind.
 
 ## Prior Art
 
@@ -1214,8 +1262,11 @@ read and two small reflective selectors, not a lowering.
   ~15 sibling state `maps:get` sites need auditing (§4a).
 - **Values constructed by deserialization cannot be checked** (§6), and
   `late` is not an escape hatch because §5 forbids it on a Value.
-- **Class kinds diverge**: `late` works on `state:` only — not `field:`
-  (§5) and, in this ADR, not `classState:` (§1). Defensible, still a wart.
+- **Class kinds diverge**: `late` works on `state:` and `classState:` but not
+  `field:` (§5). Defensible, still a wart to explain.
+- **The class side is a second implementation of each piece** — guard,
+  presence, clear, reflective branch (§4i) — because class variables live in
+  the class gen_server, not the object state map.
 - Four new diagnostics — three Errors (`late field:`, `late` without a type,
   `late` with a default) and one advisory (definite assignment), plus the §4d
   `terminate:` warning — all kept at parity across CLI, REPL, LSP and MCP.
@@ -1262,11 +1313,11 @@ have no runtime check to fall back on.
 
 | # | Work | Components | Size |
 |---|---|---|---|
-| B1 | `late` modifier: contextual keyword, two-token lookahead extending the single-token dispatch at `declarations.rs:553`, following the shape of the class-header loop at `:191-209`; `SlotKind` on `StateDeclaration`; unparse round-trip. The Errors: `late field:`, `late classState:` (deferred), `late` without a type annotation, `late` with a default, `late state:` on `native:`/`Object` | `beamtalk-core` (`source_analysis/parser/declarations.rs`, `ast/class.rs`, `unparse`) | **S** |
+| B1 | `late` modifier: contextual keyword, two-token lookahead extending the single-token dispatch at `declarations.rs:553`, following the shape of the class-header loop at `:191-209`; `SlotKind` on `StateDeclaration`; unparse round-trip. The Errors: `late field:`, `late` without a type annotation, `late` with a default, `late state:` on `native:`/`Object` | `beamtalk-core` (`source_analysis/parser/declarations.rs`, `ast/class.rs`, `unparse`) | **S** |
 | B2 | Exclude `late` slots from `generate_post_initialize_check` (its 2-arity `maps:get` would badkey) and from `init/1`'s state literal | `beamtalk-codegen` (`gen_server/callbacks.rs`, `gen_server/state.rs`) | **S** |
-| B3 | Guarded read: `maps:find` + the `'nil'` and absence arms in `generate_field_access` (`expressions.rs:519`), keeping it pure, reading the `late` set from B5's metadata; audit the ~15 sibling state `maps:get` sites; disable DirectParams/Hybrid field hoisting for `late` slots (`control_flow/loop_mode.rs:118`). **After B5** | `beamtalk-codegen` (`expressions.rs`, `control_flow/`) | **M** |
-| B4 | `hasField:` / `clearField:` on `Object` plus runtime intrinsics; `clearField:` codegen intrinsic mirroring `generate_self_field_at_put_open` through `ThreadedIr`; `hasField:` in the Value reflection arm list (`value_type_codegen.rs:4753`); `read_field/2`'s declared-`late` branch with its per-read metadata lookup | `beamtalk-stdlib`, `beamtalk-codegen` (`dispatch_codegen.rs`, `value_type_codegen.rs`), `beamtalk_runtime` (`beamtalk_reflection.erl`, `beamtalk_object_ops.erl`) | **M** |
-| B5 | `fieldKinds`/`allFieldKinds`: the `ClassInfo` third map, the `__beamtalk_meta` schema entry, the `behaviour.bt` declaration and Erlang intrinsic; LSP hover. **Before B3** | `beamtalk-core`, `beamtalk-codegen`, `beamtalk_runtime`, `beamtalk-stdlib`, `beamtalk-language-service` | **M** |
+| B3 | Guarded read: `maps:find` + the `'nil'` and absence arms in both branches of `generate_field_access` (`expressions.rs:519` instance, `:526` class-method on `ClassVars`), keeping it pure, reading the `late` sets from B5's metadata; audit the ~15 sibling state `maps:get` sites; disable DirectParams/Hybrid field hoisting for `late` slots (`control_flow/loop_mode.rs:118`). **After B5** | `beamtalk-codegen` (`expressions.rs`, `control_flow/`) | **M** |
+| B4 | `hasField:` / `clearField:` on `Object` plus runtime intrinsics; `clearField:` codegen intrinsic mirroring `generate_self_field_at_put_open` through `ThreadedIr`; `hasField:` in the Value reflection arm list (`value_type_codegen.rs:4753`); `read_field/2`'s declared-`late` branch with its per-read metadata lookup; class side (§4i): `self hasField:`/`clearField:` in class methods on `ClassVars` through the ADR 0110 shadow write, and `has_class_var`/`clear_class_var` handle_calls plus a declared-`late` branch in `get_class_var` | `beamtalk-stdlib`, `beamtalk-codegen` (`dispatch_codegen.rs`, `value_type_codegen.rs`), `beamtalk_runtime` (`beamtalk_reflection.erl`, `beamtalk_object_ops.erl`, `beamtalk_object_class.erl`) | **M** |
+| B5 | `fieldKinds`/`allFieldKinds`: the `ClassInfo` third map, the `__beamtalk_meta` schema entry, `class_variables` growing from `Vec<EcoString>` to a structure with type, default and kind, the `behaviour.bt` declaration and Erlang intrinsic; LSP hover. **Before B3** | `beamtalk-core`, `beamtalk-codegen`, `beamtalk_runtime`, `beamtalk-stdlib`, `beamtalk-language-service` | **M–L** |
 | B6 | The §4d `terminate:`/`handle_info` unguarded-read warning | `beamtalk-core` (`semantic_analysis`) | **S** |
 | B7 | Inspector: `InspectorField` `#lateSlot` / `value: #notAssigned` / `drillable: false`, the cross-surface wire form (`inspector.bt:262`) and `beamtalk_inspector:fieldsOf/1` | `beamtalk-stdlib`, `beamtalk_runtime` | **S** |
 | B8 | REPL-visible output: decide and confirm `printString` rendering for an unassigned slot — **gated on explicit user confirmation** per `CLAUDE.md` | `beamtalk_runtime` (`beamtalk_object_printer.erl`), `tests/repl-protocol` | **S**, gated |
@@ -1277,8 +1328,9 @@ have no runtime check to fall back on.
 and injected-`nil`), `hasField:`/`clearField:`, re-assignment after clearing,
 and `fieldKinds` go in `stdlib/test/*.bt` as BUnit `TestCase`s. Diagnostic
 text and severity are Rust unit tests plus LSP diagnostic-provider tests.
-Slot kinds surviving a class reload, and the eager↔`late` shape-change
-recheck, go in `tests/repl-protocol/cases/*.btscript`.
+`late classState:` on a REPL-defined class, slot kinds surviving a class
+reload, and the eager↔`late` shape-change recheck go in
+`tests/repl-protocol/cases/*.btscript`.
 
 **Recommended start:** A1, then B1, B2, B5, B3 as one unit (the exemption
 and its guard land together), then A3, then A2. B4 and the rest of Part B
@@ -1290,14 +1342,24 @@ No migration is required. `late` is additive, every existing declaration
 keeps its meaning and representation, and the definite-assignment finding is
 advisory (Warning/Hint, never Error by default).
 
-**The stdlib's nilable singletons must not be converted.**
+**The stdlib's three singletons convert, with the accessor kept nilable.**
 `transcript_stream.bt`, `beamtalk_interface.bt` and `workspace_interface.bt`
-have their singletons injected by
-`beamtalk_workspace_bootstrap:bootstrap_singleton/3` (`:149-186`), which
-monitors the process and rebootstraps on death. The slot is assigned from
-outside the class entirely, and `classState: current :: X | Nil = nil` is the
-honest declaration of a slot that may legitimately be `nil` between bootstrap
-attempts.
+become `late classState: current :: X`; `current:` is unchanged;
+`resetCurrent` becomes `self clearField: #current`; bootstrap's
+`set_class_variable/2` keeps writing the class variable directly and counts
+as assignment. The accessor stays nilable because `Object>>show:`/`cr`
+(`object.bt:343`, `:355`) and `show_cr_test.bt` rely on `nil` before
+bootstrap:
+
+```beamtalk
+  class current -> TranscriptStream | Nil =>
+    (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
+```
+
+What that buys is smaller than the instance case and should be said plainly:
+the slot can no longer hold `nil` and its type stops lying, but the public
+`current` keeps answering `nil` before bootstrap because a caller depends on
+it. The win is in the declaration and in `fieldKinds`, not at the call site.
 
 **In the applications, migration is narrow.** Most nilable slots in this
 corpus should stay exactly as they are:
@@ -1339,8 +1401,8 @@ encodes kind (§4g).
   classes require annotations),
   [ADR 0035](0035-field-based-reflection-api.md) (`fieldNames` / `fieldAt:`;
   `classState:`; "field" not "slot" as reflection vocabulary),
-  [ADR 0036](0036-full-metaclass-tower.md) (the class-side gen_server —
-  why `late classState:` needs its own mechanism and is deferred),
+  [ADR 0036](0036-full-metaclass-tower.md) (the class-side gen_server that
+  holds a `late classState:` slot — `get_class_var`/`set_class_var`, §4i),
   [ADR 0038](0038-subclass-classbuilder-protocol.md) (`ClassBuilder` — a
   reflective slot writer; `late` is source-only, §9),
   [ADR 0042](0042-immutable-value-objects-actor-mutable-state.md) (why a
