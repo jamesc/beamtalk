@@ -1236,8 +1236,13 @@ read and two small reflective selectors, not a lowering.
 
 Part A can be built first — A1–A5 do not depend on B1–B10 — but it is not
 complete without B1: until `late` parses, a lifecycle-assigned slot has no
-construct with which to opt out of the diagnostic. Ship A1–A5 and B1–B2
-together as the minimum.
+construct with which to opt out of the diagnostic. **The minimum shippable
+set is A1–A5 plus B1, B2, B5 and B3.** B1–B2 alone are not releasable: with
+`late` parsed and excluded from the post-`initialize` check but the read
+still an unguarded 2-arity `maps:get`, an early read of an unassigned `late`
+slot crashes with a raw `{badkey, Slot}` rather than the
+`UninitializedStateError` §3 specifies — a worse failure than the status quo
+`nil`. B3 needs B5's metadata, so both ship in the same release as B1–B2.
 
 ### Part A — definite assignment
 
@@ -1274,9 +1279,9 @@ text and severity are Rust unit tests plus LSP diagnostic-provider tests.
 Slot kinds surviving a class reload, and the eager↔`late` shape-change
 recheck, go in `tests/repl-protocol/cases/*.btscript`.
 
-**Recommended start:** A1, then B1 and B2 (so the exemption exists), then
-A3, then A2. For the rest of Part B the order is B5, B3, B4 — the metadata
-before the guard.
+**Recommended start:** A1, then B1, B2, B5, B3 as one unit (the exemption
+and its guard land together), then A3, then A2. B4 and the rest of Part B
+follow.
 
 ## Migration Path
 
