@@ -877,7 +877,7 @@ That means neither Part A's diagnostic nor `late` can reach it, and the
 reason is not slot kind but the missing type channel. A dynamic class also
 has no `__beamtalk_meta/0`: `classFieldNames/1` falls back to a
 `gen_server:call` and `classClassVarNames/1` answers `[]`
-(`beamtalk_behaviour_intrinsics.erl:435-469`).
+(`beamtalk_behaviour_intrinsics.erl:436-460`).
 
 The parity fix is B11: `ClassBuilder`'s field spec grows from a bare default
 to a structure carrying type, default and kind, with a `lateFields:` setter
@@ -889,6 +889,14 @@ declared-`late` branch answer for a dynamic class through the same
 lands, `fieldKinds` answers `#eager` for every field of a `ClassBuilder`
 class and `read_field/2` takes the plain `maps:get(…, nil)` path — a
 documented interim, not the decision.
+
+B11 is runtime and reflection parity only. Part A is a compile-time
+analysis over AST declarations, `ClassInfo`/`__beamtalk_meta` and literal
+construction maps at a statically resolved call site (§6); a class assembled
+at runtime through `Object classBuilder … register` has none of those, so
+its slots are never definite-assignment checked, however much typed metadata
+the class gen_server holds. That is the same limit as a Value built by
+deserialization (§6), and it is documented rather than worked around.
 
 The instance-vs-class `fieldNames` split is ADR 0035's design (`:73`), so
 `late` slots make an existing distinction visible. Documented so that
@@ -1277,7 +1285,8 @@ read and two small reflective selectors, not a lowering.
 - **`ClassBuilder` needs a typed field spec before it can carry `late`.**
   `fields:` is `#{name => default}` with no type today, so B11 is a protocol
   change to ADR 0038's builder, not just a new setter (§9). Until it lands,
-  a dynamic class has no `late` slots and no definite-assignment check.
+  a dynamic class has no `late` slots. It never gains the compile-time
+  definite-assignment check, with or without B11 (§9).
 - **The shared predicate changes runtime behaviour** for alias-typed and
   `UndefinedObject`-typed slots once it is reimplemented correctly (§7).
 - **Reads of a `late` slot cost `maps:find` rather than `maps:get`**, and
@@ -1345,7 +1354,7 @@ have no runtime check to fall back on.
 | B8 | REPL-visible output: decide and confirm `printString` rendering for an unassigned slot — **gated on explicit user confirmation** per `CLAUDE.md` | `beamtalk_runtime` (`beamtalk_object_printer.erl`), `tests/repl-protocol` | **S**, gated |
 | B9 | ADR 0123 reconcile `late` rows + the shared `(slot kind, present?, has default?) -> outcome` conformance fixture, the `allFieldNames`-keep-set invariant test, and slot kind in the shape store so an eager↔`late` flip is a `shape_change` that triggers recheck (§4g). Sequenced after ADR 0123's epic (§8) | `beamtalk_runtime`, `beamtalk_workspace` (`beamtalk_shape_diff.erl`, `beamtalk_workspace_shape_store.erl`), `beamtalk-codegen` | **M** |
 | B10 | Docs + tests: `beamtalk-language-features.md` leading with **"a nilable slot is not automatically a `late` candidate"** and the resolve-by-name counter-example (§Context (d)), then slot kinds, the read/raise rule, `hasField:`/`clearField:`, the `spawnWith:`-injection clause at `:2426`; `surface-parity.md`; BUnit tests; REPL-protocol e2e | docs, `stdlib/test`, `tests/repl-protocol` | **S** |
-| B11 | `ClassBuilder` parity (§9): field spec grows from `#{name => default}` to type + default + kind; `lateFields:` beside `fields:`; the class gen_server stores kinds; `fieldKinds`, the read guard's `late` set and `read_field/2` resolve them for a dynamic class via the existing `gen_server:call` fallback. Also gives dynamic classes typed slots, which Part A's check then covers | `beamtalk-stdlib` (`class_builder.bt`), `beamtalk_runtime` (`beamtalk_object_class.erl`, `beamtalk_behaviour_intrinsics.erl`, `beamtalk_reflection.erl`), `beamtalk-core` (`generated_builtins.rs`) | **M** |
+| B11 | `ClassBuilder` parity (§9): field spec grows from `#{name => default}` to type + default + kind; `lateFields:` beside `fields:`; the class gen_server stores kinds; `fieldKinds`, the read guard's `late` set and `read_field/2` resolve them for a dynamic class via the existing `gen_server:call` fallback. Runtime and reflection parity only: a dynamic class has no AST declaration and no statically resolvable construction site, so Part A's compile-time check stays out of reach for it (§9) | `beamtalk-stdlib` (`class_builder.bt`), `beamtalk_runtime` (`beamtalk_object_class.erl`, `beamtalk_behaviour_intrinsics.erl`, `beamtalk_reflection.erl`), `beamtalk-core` (`generated_builtins.rs`) | **M** |
 
 **Test placement** (per `CLAUDE.md`): `late` read/raise behaviour (absent
 and injected-`nil`), `hasField:`/`clearField:`, re-assignment after clearing,
