@@ -2212,21 +2212,20 @@ classRenameSelectorIfAbsent(Self, OldSelector, NewSelector, AbsentBlock) when
 %%====================================================================
 
 -doc """
-Return the class's declared shape version — the `'shape_version'` key in
-`__beamtalk_meta/0` (compiler-emitted from `shapeVersion: N`, ADR 0123 §1),
-defaulting to `1` when absent. Every class predating this ADR, and every
-dynamic class with no `__beamtalk_meta/0` at all, is implicitly at version
-1 — the same tolerant-degrade convention `meta_for_module/1`'s other
-callers use.
+Return the class's declared shape version — the compiled `shapeVersion: N`
+header clause or the `ClassBuilder shapeVersion:` builder keyword, default
+`1` (ADR 0123 §1). Reads the class gen_server's own `shape_version` field
+(`beamtalk_object_class:shape_version/1`), not `__beamtalk_meta/0`
+directly — same as `classDoc`/`classIsSealed`-shaped reflection above: the
+class process seeds it at registration from meta-then-ClassInfo (see
+`beamtalk_object_class:init/1`/`apply_class_info/2`), so this answers
+correctly for a compiled class *and* a `ClassBuilder`-registered dynamic one
+with no `__beamtalk_meta/0` at all.
 """.
 -spec classShapeVersion(#beamtalk_object{}) -> pos_integer().
 classShapeVersion(Self) ->
     ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name_safe(ClassPid),
-    case meta_for_module(Module) of
-        {ok, Meta} -> maps:get(shape_version, Meta, 1);
-        not_available -> 1
-    end.
+    beamtalk_object_class:shape_version(ClassPid).
 
 -doc """
 Run the whole `migrateFromVN:` chain from `FromVersion` to this class's

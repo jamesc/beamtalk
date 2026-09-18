@@ -9,6 +9,9 @@
 // Fixture: stdlib/test/fixtures/shape_version_money.bt (ShapeVersionMoney)
 
 TestCase subclass: ShapeVersionTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
 
   testShapeVersionDefaultsToOneWhenUndeclared =>
     // Object declares no shapeVersion: clause.
@@ -36,3 +39,17 @@ TestCase subclass: ShapeVersionTest
     current := #{#amount => 9.99, #currency => #EUR}
     migrated := ShapeVersionMoney migrateShape: current from: 2
     self assert: migrated equals: current
+
+  // ADR 0123 §1: `ClassBuilder shapeVersion:` — the programmatic
+  // counterpart, no compiled `.bt` source at all. `Behaviour >> shapeVersion`
+  // reads the class gen_server's own seeded field, not `__beamtalk_meta/0`
+  // (which a ClassBuilder-only class never exports), so this exercises a
+  // different code path than the compiled-class tests above.
+  testClassBuilderShapeVersionKeyword =>
+    Object classBuilder
+      name: #BT3537ShapeVersionBuilderClass;
+      superclass: Object;
+      shapeVersion: 3;
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3537ShapeVersionBuilderClass
+    self assert: self.cls shapeVersion equals: 3
