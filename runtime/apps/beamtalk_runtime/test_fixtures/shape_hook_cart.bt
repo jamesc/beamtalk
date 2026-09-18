@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3535 (ADR 0123 Phase 1 spike) regression fixture.
+//
+// Same v2 shape as tests/repl-protocol/fixtures/hot_shape_hook_cart_v2.bt: a
+// `total` field plus a class-side `migrateFromV1:` hook computing it from
+// `itemCount` (* 10) — a value the structural fallback's plain default (0)
+// could never produce. Used by beamtalk_hot_reload_tests.erl to exercise
+// beamtalk_hot_reload:code_change/3's migration-hook call site
+// (maybe_apply_migration_hook/3) directly, and via a live actor's
+// suspend/change_code/resume cycle.
+//
+// The hook reads/writes `old` via the Erlang FFI gateway (`maps:get/2`,
+// `maps:put/3`) rather than Dictionary's own `at:`/`at:put:` — a `Dictionary`
+// send on a value that isn't a compile-time-known literal falls through to
+// runtime dispatch (`Mod:dispatch/3`), which is `undef` for an
+// `@primitive`-only class like `Dictionary` (its methods are inlined at
+// compile time; there is no dispatch-table function generated for them).
+// That gap is pre-existing and out of BT-3535's scope (filed as BT-3541);
+// `maps:get/2` and `maps:put/3` sidestep it entirely.
+
+Actor subclass: ShapeHookCart
+  state: itemCount :: Integer = 0
+  state: total :: Integer = 0
+
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    Erlang maps
+      put: #total
+      value: ((Erlang maps get: #itemCount from: old) * 10)
+      in: old
+
+  addItem => self.itemCount := self.itemCount + 1
+
+  getItemCount => ^self.itemCount
+
+  getTotal => ^self.total

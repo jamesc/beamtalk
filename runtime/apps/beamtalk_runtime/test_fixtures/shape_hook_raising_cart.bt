@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3535 (ADR 0123 Phase 1 spike) regression fixture.
+//
+// A `migrateFromV1:` hook that always raises (`self error:`) — used by
+// beamtalk_hot_reload_tests.erl to prove a raising hook is not swallowed
+// by beamtalk_hot_reload:maybe_apply_migration_hook/3: it propagates
+// through code_change/3 into the existing BT-3534 suspend-on-failure path
+// (try_change_code/3), leaving the actor suspended with its state intact
+// rather than resumed on top of a partially-migrated map.
+
+Actor subclass: ShapeHookRaisingCart
+  state: itemCount :: Integer = 0
+  state: total :: Integer = 0
+
+  class migrateFromV1: _old :: Dictionary -> Dictionary =>
+    self error: "deliberate BT-3535 test failure"
+
+  addItem => self.itemCount := self.itemCount + 1
+
+  getItemCount => ^self.itemCount
+
+  getTotal => ^self.total

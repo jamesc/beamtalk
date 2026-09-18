@@ -234,6 +234,8 @@ field_migration_setup() ->
     ok = ensure_init_hook_counter_loaded(),
     ok = ensure_typed_field_counter_loaded(),
     ok = ensure_logging_counter_loaded(),
+    ok = ensure_shape_hook_cart_loaded(),
+    ok = ensure_shape_hook_raising_cart_loaded(),
     ok.
 
 field_migration_teardown(_) ->
@@ -269,7 +271,21 @@ field_migration_test_() ->
             {"read-before-seed: old '__shape_version__' survives the new default's seed (BT-3534)",
                 fun test_field_migration_read_before_seed_preserves_old_version/0},
             {"absent '__shape_version__' on old state reads as version 1 (BT-3534)",
-                fun test_field_migration_absent_shape_version_defaults_to_one/0}
+                fun test_field_migration_absent_shape_version_defaults_to_one/0},
+            {"migrateFromV1: hook runs via local_call/3 during code_change/3 (BT-3535)",
+                fun test_field_migration_hook_computes_total_via_local_call/0},
+            {"a class with no migrateFromV1: export is unaffected by the hook (BT-3535)",
+                fun test_field_migration_hook_absent_is_no_op/0},
+            {
+                "migrateFromV1: hook runs on a live actor's real suspend/change_code/resume "
+                "cycle, inspectable via sys:get_state (BT-3535)",
+                fun test_field_migration_hook_live_actor_sys_get_state/0
+            },
+            {
+                "a raising migrateFromV1: hook is not swallowed — it leaves the actor "
+                "suspended via BT-3534's existing suspend-on-failure path (BT-3535)",
+                fun test_field_migration_hook_raise_leaves_actor_suspended/0
+            }
         ]
     end}.
 
@@ -559,6 +575,105 @@ test_field_migration_absent_shape_version_defaults_to_one() ->
     ?assertEqual(1, maps:get('__shape_version__', NewState)).
 
 %%====================================================================
+%% Tests for the migrateFromV1: hook call site (ADR 0123 Phase 1 spike,
+%% BT-3535) — beamtalk_object_class:local_call/3 invoked from inside
+%% code_change/3, at the real production call site.
+%%====================================================================
+
+%% ShapeHookCart's class-side `migrateFromV1:` computes `total` from
+%% `itemCount` (* 10) — a value the structural fallback's plain default (0)
+%% could never produce. A pre-hook v1-shaped OldState (no `total` key)
+%% ending up with `total => 40` (not `0`) is direct evidence the hook ran,
+%% via local_call/3, at code_change/3's real call site — not a synthetic,
+%% standalone local_call/3 invocation.
+test_field_migration_hook_computes_total_via_local_call() ->
+    OldState = #{
+        '$beamtalk_class' => 'ShapeHookCart',
+        '__class_mod__' => 'bt@shape_hook_cart',
+        itemCount => 4
+    },
+    ?assertNot(maps:is_key(total, OldState)),
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, #{module => 'bt@shape_hook_cart'}
+    ),
+    ?assertEqual(4, maps:get(itemCount, NewState)),
+    ?assertEqual(40, maps:get(total, NewState)).
+
+%% A class that defines no migrateFromV1: (Counter) is unaffected by the
+%% hook lookup — maybe_apply_migration_hook/3's erlang:function_exported/3
+%% check is false, so the field dict passes through unchanged into the
+%% ordinary structural fold, same as before BT-3535.
+test_field_migration_hook_absent_is_no_op() ->
+    OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 9},
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, #{module => 'bt@counter'}
+    ),
+    ?assertEqual(9, maps:get(value, NewState)),
+    ?assertNot(maps:is_key(total, NewState)).
+
+%% Spawn → set state → reload → inspect via sys:get_state: the hook runs
+%% on a genuinely live actor's real suspend/change_code/resume cycle
+%% (beamtalk_hot_reload:trigger_code_change/3 — the same function
+%% beamtalk_repl_loader:hot_reload_class/2 calls for every live instance of
+%% a reloaded class), not a bare code_change/3 call bypassing sys. The
+%% instance already has `total => 0` from spawn/0's own defaults (this
+%% fixture's declared default) — ending up with `total => 30` after reload
+%% specifically proves the hook *overwrote* it via local_call/3, not merely
+%% left an already-correct default alone.
+test_field_migration_hook_live_actor_sys_get_state() ->
+    Object = 'bt@shape_hook_cart':spawn(),
+    Pid = element(4, Object),
+    ?assertEqual({ok, 1}, gen_server:call(Pid, {addItem, []})),
+    ?assertEqual({ok, 2}, gen_server:call(Pid, {addItem, []})),
+    ?assertEqual({ok, 3}, gen_server:call(Pid, {addItem, []})),
+    try
+        PreState = sys:get_state(Pid),
+        ?assertEqual(3, maps:get(itemCount, PreState)),
+        ?assertEqual(0, maps:get(total, PreState)),
+        {ok, 1, []} =
+            beamtalk_hot_reload:trigger_code_change(
+                'bt@shape_hook_cart', [Pid], #{module => 'bt@shape_hook_cart'}
+            ),
+        FinalState = sys:get_state(Pid),
+        ?assertEqual(3, maps:get(itemCount, FinalState)),
+        ?assertEqual(30, maps:get(total, FinalState))
+    after
+        gen_server:stop(Pid)
+    end.
+
+%% ShapeHookRaisingCart's migrateFromV1: always raises (`self error:`).
+%% maybe_apply_migration_hook/3 does not catch it — the raise propagates
+%% through code_change/3, and sys's own system_code_change/4 wrapper turns
+%% it into an {error, _} return from sys:change_code/4, which
+%% try_change_code/3 (BT-3534) already treats as "do not resume": the actor
+%% is left suspended, state intact, inspectable via sys:get_state/1. The
+%% migration hook gets this fail-closed behaviour for free, from the
+%% suspend-on-failure contract BT-3534 already built.
+test_field_migration_hook_raise_leaves_actor_suspended() ->
+    Object = 'bt@shape_hook_raising_cart':spawn(),
+    Pid = element(4, Object),
+    ?assertEqual({ok, 1}, gen_server:call(Pid, {addItem, []})),
+    try
+        {ok, 0, [{Pid, _Reason}]} =
+            beamtalk_hot_reload:trigger_code_change(
+                'bt@shape_hook_raising_cart', [Pid], #{module => 'bt@shape_hook_raising_cart'}
+            ),
+        ?assertEqual(
+            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+        ),
+        %% State is intact — unchanged from before the reload attempt, not
+        %% partially migrated (the hook raises before migrate_fields/2
+        %% returns anything, so nothing downstream of it ever ran).
+        SuspendedState = sys:get_state(Pid),
+        ?assertEqual(1, maps:get(itemCount, SuspendedState)),
+        ?assertEqual(0, maps:get(total, SuspendedState))
+    after
+        _ = (catch sys:resume(Pid)),
+        unlink(Pid),
+        gen_server:stop(Pid)
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -835,4 +950,51 @@ ensure_logging_counter_loaded() ->
             end;
         {error, Reason} ->
             error({logging_counter_module_not_found, Reason})
+    end.
+
+%% BT-3535 (ADR 0123 Phase 1 spike): ShapeHookCart exercises the
+%% migrateFromV1: hook call site in migrate_fields/2
+%% (maybe_apply_migration_hook/3).
+ensure_shape_hook_cart_loaded() ->
+    case code:ensure_loaded('bt@shape_hook_cart') of
+        {module, 'bt@shape_hook_cart'} ->
+            case beamtalk_class_registry:whereis_class('ShapeHookCart') of
+                undefined ->
+                    case erlang:function_exported('bt@shape_hook_cart', register_class, 0) of
+                        true ->
+                            'bt@shape_hook_cart':register_class(),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                _Pid ->
+                    ok
+            end;
+        {error, Reason} ->
+            error({shape_hook_cart_module_not_found, Reason})
+    end.
+
+%% BT-3535 (ADR 0123 Phase 1 spike): ShapeHookRaisingCart's migrateFromV1:
+%% always raises — exercises the suspend-on-failure interop (BT-3534).
+ensure_shape_hook_raising_cart_loaded() ->
+    case code:ensure_loaded('bt@shape_hook_raising_cart') of
+        {module, 'bt@shape_hook_raising_cart'} ->
+            case beamtalk_class_registry:whereis_class('ShapeHookRaisingCart') of
+                undefined ->
+                    case
+                        erlang:function_exported(
+                            'bt@shape_hook_raising_cart', register_class, 0
+                        )
+                    of
+                        true ->
+                            'bt@shape_hook_raising_cart':register_class(),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                _Pid ->
+                    ok
+            end;
+        {error, Reason} ->
+            error({shape_hook_raising_cart_module_not_found, Reason})
     end.
