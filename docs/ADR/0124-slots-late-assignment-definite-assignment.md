@@ -268,7 +268,9 @@ never stored, returned, or observed. So an absent key in a *live* actor state
 map would be genuinely new, and §2 has to carry that cost rather than borrow
 credibility from a comparison placeholder.
 
-**Reads that mutate state already exist.** ADR 0118 made every expression
+**Reads that mutate state already exist** — relevant only to the rejected
+memoising design, recorded because it is what made `lazy` look cheap before
+the lowering was priced (§4, §Alternatives). ADR 0118 made every expression
 in a state-threading context return `ThreadedValue { prelude, value }`, where
 the prelude may advance any versioned prefix. ADR 0122 unified the three
 storage families (`VersionPrefix::{State, ClassVars, SelfVt}`), and
@@ -289,6 +291,10 @@ class and a failure on a `typed` one.
   `fieldAt:put:`, `perform:`, `spawnWith:`, `ClassBuilder` (ADR 0038), and a
   hot-patched `initialize` (ADR 0082/0084). Static analysis in an open world
   (ADR 0100) is advisory; `UninitializedStateError` stays as the backstop.
+The next three bind only the **rejected** memoising design and are recorded
+because they are what priced it out (§Alternatives); `late` has no initialiser,
+so none of them constrains what is decided here.
+
 - **Value instances are plain maps with no owning process** (ADR 0042).
   There is nothing to memoise *into* without returning a new instance.
 - **State-threading codegen must go through `ThreadedIr`** and be covered by
@@ -840,6 +846,12 @@ resulting consistency test between the static check and the emitted runtime
 check becomes an ordinary unit test of one implementation
 (architecture-principles §7, delete-the-copy disposition).
 
+The crate boundary this relies on already exists — `crates/beamtalk-core`
+with its `semantic_analysis` module is in the tree as of this ADR's date, even
+though `docs/ADR/README.md` still records ADR 0117 as *Proposed*. So A1 is
+unblocked today; it is the ADR's recorded status that is stale, not the
+dependency.
+
 This is a hard requirement, not a preference. The diagnostic must appear in
 the LSP, and `just check-codegen-boundary` (`Justfile:666`, part of `just
 ci`) asserts via `cargo tree -i` that **`beamtalk-lsp` and `beamtalk-lint` do
@@ -871,7 +883,7 @@ ADR 0123's reconcile step 3 gains the `late` case it deferred to this ADR:
 **Premise: ADR 0123 is implemented before Part B starts.** Its epic is in
 flight — BT-3531, BT-3534 and BT-3535 have landed as of `main@80b8db4`, and
 `beamtalk_shape_migration` (BT-3536) is next — and this ADR assumes it
-completes first. So Phase B6 is **sequenced after ADR 0123, not blocked by
+completes first. So Phase B9 is **sequenced after ADR 0123, not blocked by
 it**, and the row above is an edit to `beamtalk_shape_migration`'s step 3 in
 whatever form BT-3536 lands it.
 
@@ -880,7 +892,7 @@ One finding needs re-measuring rather than inheriting. Against today's tree,
 `beamtalk_behaviour_intrinsics:classAllFieldNamesByName/1`, **not** from the
 defaults map — so the two `late` rows fall out with no change to
 `beamtalk_hot_reload`. That is a measurement of pre-0123 code; if 0123's
-later phases route reconcile through `beamtalk_shape_migration`, B6 must
+later phases route reconcile through `beamtalk_shape_migration`, B9 must
 re-measure it.
 
 Either way the invariant is what matters and is silently load-bearing:
@@ -978,8 +990,9 @@ cross-file ancestors. And `class_variables` (`:171`) is `Vec<EcoString>` —
 **names only, no types, no defaults** — so `late classState:` on an inherited
 or cross-file class has no metadata to hang the kind off, and that field must
 grow a structure. Plus a `behaviour.bt` declaration and an Erlang intrinsic,
-since `fieldNames`/`allFieldNames` are `@primitive "classFieldNames"`
-(`behaviour.bt:225`, `:233`).
+since `fieldNames` and `allFieldNames` are `@primitive "classFieldNames"`
+and `@primitive "classAllFieldNames"` respectively (`behaviour.bt:225`,
+`:233`).
 
 ## Prior Art
 
@@ -1276,9 +1289,11 @@ nothing: `state: x :: T = <expr>` already allows an eager initialiser, and
 §Context (d) shows some nilable slots must never change. Against: the `| Nil`
 widening is not a statement about the data, it is an escape from the
 post-`initialize` check, and it permanently defeats ADR 0107 nil-narrowing for
-every downstream reader of `self.proc`; Exdura additionally paid an extra slot
-for the resulting ambiguity. The deciding factor is that `late` costs one
-guarded read and two small reflective selectors, not a lowering.
+every downstream reader of `self.proc`. (An earlier revision added "and
+Exdura paid an extra slot for the resulting ambiguity" here; §Context (b)
+retracts that — the `supervised` flag selects a resolution strategy and is not
+a workaround for a missing representation.) The deciding factor is that `late`
+costs one guarded read and two small reflective selectors, not a lowering.
 
 ## Consequences
 
@@ -1469,18 +1484,19 @@ reconcile row and so requires a `shapeVersion:` bump.
   [ADR 0035](0035-field-based-reflection-api.md) (`fieldNames` / `fieldAt:`;
   `classState:`),
   [ADR 0036](0036-full-metaclass-tower.md) (the class-side gen_server that
-  memoises `lazy classState:`),
+  holds a `late classState:` slot),
   [ADR 0038](0038-subclass-classbuilder-protocol.md) (`ClassBuilder` — a
   reflective slot writer),
   [ADR 0042](0042-immutable-value-objects-actor-mutable-state.md) (why a
-  Value has no process to memoise into),
-  [ADR 0043](0043-sync-by-default-actor-messaging.md) (why an initialiser
-  must not synchronously message its own actor),
+  Value is never reassigned, hence §5's rejection of `late field:`),
+  [ADR 0043](0043-sync-by-default-actor-messaging.md) (self-sends bypass
+  gen_server — what the rejected `lazy` initialiser would and would not have
+  been able to do),
   [ADR 0056](0056-native-erlang-backed-actors.md) (`native:` actors — an
   opaque chain link, hence Hint),
   [ADR 0067](0067-separate-state-field-keywords-by-class-kind.md)
-  (`state:`/`field:`/`classState:`; the rebinding footgun memo-on-copy would
-  reintroduce),
+  (`state:`/`field:`/`classState:` — which declaration keywords `late` may
+  modify, §1; also the source of the two application corpora),
   [ADR 0078](0078-actor-initialize-inheritance.md) (the auto-chained
   `initialize` sequence and the runtime `UninitializedStateError` this ADR
   makes static),
