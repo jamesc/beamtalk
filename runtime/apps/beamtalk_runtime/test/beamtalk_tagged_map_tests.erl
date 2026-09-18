@@ -92,7 +92,23 @@ internal_fields_contains_expected_test() ->
     ?assert(lists:member('$beamtalk_class', Fields)),
     ?assert(lists:member('__class_mod__', Fields)),
     ?assert(lists:member('__methods__', Fields)),
-    ?assert(lists:member('__registry_pid__', Fields)).
+    ?assert(lists:member('__registry_pid__', Fields)),
+    %% BT-3534 (ADR 0123 Phase 0): the hot-reload shape version key.
+    ?assert(lists:member('__shape_version__', Fields)).
+
+%% BT-3534: user_field_keys/1 (the shared filter every reflection consumer
+%% — fieldNames, the object printer, the Inspector — goes through) must
+%% never surface '__shape_version__' as a user-visible field.
+user_field_keys_filters_shape_version_test() ->
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        '__class_mod__' => counter,
+        '__shape_version__' => 1,
+        value => 0
+    },
+    Keys = beamtalk_tagged_map:user_field_keys(State),
+    ?assert(lists:member(value, Keys)),
+    ?assertNot(lists:member('__shape_version__', Keys)).
 
 internal_fields_excludes_user_fields_test() ->
     Fields = beamtalk_tagged_map:internal_fields(),

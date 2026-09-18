@@ -80,6 +80,7 @@ module 'class_var_single_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
     end in
     let DefaultState = ~{
         '__class_mod__' => 'class_var_single_mutation'
+        , '__shape_version__' => 1
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of

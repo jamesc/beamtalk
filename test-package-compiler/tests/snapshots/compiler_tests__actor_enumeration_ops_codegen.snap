@@ -80,6 +80,7 @@ module 'actor_enumeration_ops' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
     end in
     let DefaultState = ~{
         '__class_mod__' => 'actor_enumeration_ops'
+        , '__shape_version__' => 1
         , 'total' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)

@@ -17,10 +17,14 @@ runtime.
 - Rewrites `__class__` → `$beamtalk_class` tag key for actors
   with legacy state maps.
 - Field migration — adds new fields with defaults, drops removed
-  fields (with log warning) when Extra contains `{NewInstanceVars, Module}`.
+  fields (with log warning) when Extra contains `#{module := Module}`
+  (ADR 0123 Phase 0, BT-3534). The flattened field list (inherited fields
+  included) is derived here, from the state's own `$beamtalk_class` tag —
+  the caller passes only what the state cannot tell you.
 
 **References:**
 - docs/beamtalk-ddd-model.md (Hot Reload Context, StateMigrator)
+- docs/ADR/0123-versioned-state-migration.md
 - http://erlang.org/doc/design_principles/appup_cookbook.html
 """.
 
@@ -43,26 +47,26 @@ version of a module.
 **Current Migrations:**
 - Rewrites `__class__` → `$beamtalk_class` for legacy actor state maps.
   Idempotent: already-migrated state is returned unchanged.
-- When Extra is `{NewInstanceVars, Module}`, migrates actor state
-  by calling the module's init to get new defaults, then merging.
+- When Extra is `#{module := Module}`, migrates actor state by calling
+  the module's init to get new defaults, then merging (ADR 0123 Phase 0,
+  BT-3534). `Extra` carries only the module — the flattened field list is
+  derived from the state's own class tag, not passed by the caller.
 """.
-%% @param OldVsn The old version (either {down, Vsn} or Vsn atom/term)
+%% @param OldVsn The old version (either {down, Vsn} or Vsn atom/term) — ignored;
+%%        the state's own '__shape_version__' is the source of truth (ADR 0123).
 %% @param State The current gen_server state
 %% @param Extra Application-specific upgrade data passed via sys:change_code/4
 %% @returns {ok, NewState} on success, or {error, Reason} on failure
 -spec code_change(OldVsn :: term(), State :: term(), Extra :: term()) ->
     {ok, NewState :: term()} | {error, Reason :: term()}.
-code_change(_OldVsn, State, {NewInstanceVars, Module}) when
-    is_map(State), is_list(NewInstanceVars), is_atom(Module)
-->
+code_change(_OldVsn, State, #{module := Module}) when is_map(State), is_atom(Module) ->
     %% Field migration during hot reload
     ?LOG_DEBUG("code_change: field migration", #{
         module => Module,
-        new_instance_vars => NewInstanceVars,
         domain => [beamtalk, runtime]
     }),
     MigratedState = maybe_migrate_class_key(State),
-    NewState = migrate_fields(MigratedState, NewInstanceVars, Module),
+    NewState = migrate_fields(MigratedState, Module),
     {ok, NewState};
 code_change(_OldVsn, State, _Extra) when is_map(State) ->
     ?LOG_DEBUG("code_change: class key migration check", #{domain => [beamtalk, runtime]}),
@@ -87,9 +91,11 @@ trigger_code_change(Module, Pids) ->
 -doc """
 Trigger code_change for a list of actor PIDs with Extra data.
 
-Extra can be `{NewInstanceVars, Module}` to enable field migration.
-Calls sys:change_code/4 for each actor PID. Failures are collected
-but do not prevent other actors from being upgraded.
+Extra can be `#{module := Module}` to enable field migration (ADR 0123
+Phase 0, BT-3534). Calls sys:change_code/4 for each actor PID. Failures
+are collected but do not prevent other actors from being upgraded — and,
+per BT-3534, a failed actor is left **suspended** rather than resumed
+onto new code with its old-shaped state (see `try_change_code/3`).
 """.
 -spec trigger_code_change(atom(), [pid()], term()) ->
     {ok, non_neg_integer(), [{pid(), term()}]}.
@@ -164,9 +170,31 @@ state — the 2-tuple, no-telemetry branch, so migration never fires
 - Adds new fields with their default values
 - Drops removed fields (with log warning)
 - Preserves internal keys present in new init defaults (e.g. __class_mod__)
+
+ADR 0123 Phase 0 (BT-3534): the flattened field list (inherited fields
+included) is derived here — from the class registry, via the state's own
+`$beamtalk_class` tag — rather than being passed by the caller; the old
+`{NewInstanceVars, Module}` `Extra` shape let the caller choose which list
+to pass, which was itself the cause of BT-3531's dropped-inherited-fields
+bug.
+
+**Read before seed.** `'__shape_version__'` is read from the *incoming*
+`OldState` before `BaseState` is seeded from the new init's defaults
+(which, as of BT-3534, also carry `'__shape_version__'` — always `1`
+today, since `shapeVersion:` itself is a later phase). Seeding first would
+stamp the new default's version in ahead of the read, losing the state's
+actual old version — the ordering a future migration chain (ADR 0123
+Phase 1/2) will need to run from the right `FromVersion`. Until that chain
+exists, the *old* version is restamped onto the migrated result unchanged:
+no migration has actually run, so nothing has earned advancing it.
 """.
--spec migrate_fields(map(), [atom()], atom()) -> map().
-migrate_fields(OldState, NewInstanceVars, Module) ->
+-spec migrate_fields(map(), atom()) -> map().
+migrate_fields(OldState, Module) ->
+    %% BT-3534: read-before-seed — capture the old version before any new
+    %% defaults are seeded into BaseState below. Absent means version 1.
+    OldShapeVersion = maps:get('__shape_version__', OldState, 1),
+    ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
+    NewInstanceVars = beamtalk_behaviour_intrinsics:classAllFieldNamesByName(ClassName),
     %% Get new default state by calling init with the skip-initialize flag,
     %% guaranteeing the plain {ok, Map} return regardless of whether the
     %% class defines `initialize` or has typed-no-default fields.
@@ -181,7 +209,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             %% Internal keys to always preserve from new defaults
             InternalKeys = beamtalk_tagged_map:internal_fields(),
             %% Start with internal keys from new defaults (updated method table etc.)
-            BaseState = lists:foldl(
+            BaseState0 = lists:foldl(
                 fun(Key, Acc) ->
                     % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(Key, NewDefaults) of
@@ -192,6 +220,9 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
                 #{},
                 InternalKeys
             ),
+            %% Read-before-seed (BT-3534): restamp the version read above,
+            %% not whatever the new init's defaults contributed.
+            BaseState = BaseState0#{'__shape_version__' => OldShapeVersion},
             %% Add new field defaults
             NewVarSet = sets:from_list(NewInstanceVars, [{version, 2}]),
             WithDefaults = lists:foldl(
@@ -222,7 +253,6 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
                 [] ->
                     ok;
                 _ ->
-                    ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
                     ?LOG_WARNING(
                         "Hot reload dropped fields",
                         #{class => ClassName, fields => Dropped, domain => [beamtalk, runtime]}
@@ -232,7 +262,6 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
         Other ->
             %% init returned an unexpected shape (or raised) — keep state
             %% unchanged, but this is not silent: log it.
-            ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
             ?LOG_WARNING(
                 "Hot reload field migration skipped: unexpected init/1 return",
                 #{
@@ -245,19 +274,38 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
             OldState
     end.
 
--doc "Try to trigger code_change for a single actor via sys:change_code/4.".
+-doc """
+Try to trigger code_change for a single actor via sys:change_code/4.
+
+**Suspend-on-failure** (ADR 0123 §3, BT-3534): only a *successful*
+`sys:change_code/4` resumes the actor. A pid whose `code_change` fails —
+returns `{error, _}`, or raises (`sys`'s own `system_code_change/4` wraps
+the callback in a bare catch, so a throw or exit becomes `{error, Reason}`
+before it ever reaches here) — is left suspended, state intact,
+`'__shape_version__'` unchanged; resuming it would run new code on top of
+its still-old-shaped state, the exact outcome this rule exists to
+prevent. `sys:get_state/1` still works for inspection while suspended.
+The next call here (the next `Cart reload`) re-suspends — `sys:suspend/1`
+is idempotent on an already-suspended pid — and retries the migration
+from the old version. A `sys:resume/1` failure after a *successful*
+`change_code` (e.g. the pid exits in the gap) is swallowed, same as
+before this change: it must not turn a successful migration into a
+reported failure.
+""".
 -spec try_change_code(pid(), atom(), term()) -> ok | {error, term()}.
 try_change_code(Pid, Module, Extra) ->
     try
         ok = sys:suspend(Pid),
-        try
-            sys:change_code(Pid, Module, undefined, Extra)
-        after
-            try
-                sys:resume(Pid)
-            catch
-                _:_ -> ok
-            end
+        case sys:change_code(Pid, Module, undefined, Extra) of
+            ok ->
+                try
+                    ok = sys:resume(Pid)
+                catch
+                    _:_ -> ok
+                end,
+                ok;
+            {error, _} = ChangeError ->
+                ChangeError
         end
     catch
         exit:{noproc, _} ->

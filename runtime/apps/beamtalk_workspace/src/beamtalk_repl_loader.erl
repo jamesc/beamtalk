@@ -1263,6 +1263,13 @@ extract_trailing_info(ClassInfo) ->
 %% ModuleName (that class's own BEAM module — the just-reloaded module for
 %% the reloaded class itself, or an unchanged descendant module when called
 %% from hot_reload_descendants/1).
+%%
+%% BT-3534: Extra is `#{module => ModuleName}` — the loader no longer
+%% computes a field list at all; the flattened field list (inherited
+%% fields included) is derived inside beamtalk_hot_reload from the live
+%% state's own class tag. The old `{IVars, ModuleName}` shape let the
+%% caller choose which list to pass, which was itself the cause of
+%% BT-3531's dropped-inherited-fields bug.
 -spec hot_reload_class(atom(), atom()) -> ok.
 hot_reload_class(ModuleName, ClassName) ->
     Pids =
@@ -1275,8 +1282,7 @@ hot_reload_class(ModuleName, ClassName) ->
         [] ->
             ok;
         _ ->
-            IVars = fetch_instance_vars(ClassName),
-            Extra = {IVars, ModuleName},
+            Extra = #{module => ModuleName},
             beamtalk_runtime_api:trigger_code_change(ModuleName, Pids, Extra)
     end.
 
@@ -1308,22 +1314,6 @@ safe_list_to_atom(List) ->
         list_to_existing_atom(List)
     catch
         error:badarg -> undefined
-    end.
-
-%% Fetch a class's full field list, including inherited fields, from the
-%% class registry.
-%%
-%% BT-3531: previously called `instance_variables/1`, which is this class's
-%% own declarations only — every inherited field then read as "removed" by
-%% `beamtalk_hot_reload:migrate_fields/3`'s dropped-field logic, even though
-%% generated `init/1` merges inherited fields into a subclass's actual
-%% state map. `all_field_names/1` walks the superclass chain instead.
--spec fetch_instance_vars(atom()) -> list().
-fetch_instance_vars(ClassName) ->
-    try
-        beamtalk_runtime_api:all_field_names(ClassName)
-    catch
-        _:_ -> []
     end.
 
 %% Reload a class file without REPL session state.

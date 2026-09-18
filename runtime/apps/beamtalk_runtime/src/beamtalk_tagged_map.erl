@@ -131,10 +131,24 @@ Returns the canonical list of internal field names in tagged maps.
 
 These fields are system metadata, not user-visible instance variables.
 Used by reflection methods like `fieldNames` to filter out internals.
+
+`'__shape_version__'` (ADR 0123 Phase 0, BT-3534) is the actor state's
+hot-reload shape version, written by generated `init/1`; absent means
+version 1. It never appears on a `Value` tagged map — `Value` instances
+have no process and are only ever re-created by new code, never migrated
+in place, so `beamtalk_class_instantiation:ancestor_compiled_defaults/1`
+(which derives `Value` defaults from `Module:new()`, not `Module:init/1`)
+never sees it in the first place.
 """.
 -spec internal_fields() -> [atom()].
 internal_fields() ->
-    ['$beamtalk_class', '__class_mod__', '__methods__', '__registry_pid__'].
+    [
+        '$beamtalk_class',
+        '__class_mod__',
+        '__methods__',
+        '__registry_pid__',
+        '__shape_version__'
+    ].
 
 -doc """
 Returns only user-visible field keys from a tagged map state.

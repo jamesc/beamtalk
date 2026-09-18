@@ -80,6 +80,7 @@ module 'actor_conditional_field_mutations' ['start_link'/1, 'start_link'/2, 'ini
     end in
     let DefaultState = ~{
         '__class_mod__' => 'actor_conditional_field_mutations'
+        , '__shape_version__' => 1
         , 'count' => 0
         , 'tag' => 'nil'
     }~

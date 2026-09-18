@@ -124,7 +124,10 @@ instantiation_test_() ->
             {"handle_new_generic selects new: selector for abstract class with args",
                 fun test_generic_new_abstract_with_args/0},
             {"handle_new_compiled falls back to new/0 when new/1 not exported",
-                fun test_new_compiled_map_without_new1/0}
+                fun test_new_compiled_map_without_new1/0},
+            %% ADR 0123 Phase 0 (BT-3534)
+            {"compiled Value class new/0 never carries '__shape_version__'",
+                fun test_compiled_value_new_excludes_shape_version/0}
         ]
     end}.
 
@@ -370,6 +373,19 @@ test_class_self_new_non_constructible() ->
         _,
         beamtalk_class_instantiation:class_self_new('Integer', 'bt@stdlib@integer', [])
     ).
+
+%% ADR 0123 Phase 0 (BT-3534): '__shape_version__' is a hot-reload-only
+%% concept, written by generated actor init/1 — never by a Value type's
+%% new/0. `ancestor_compiled_defaults/1` derives Value ancestor defaults
+%% with `maps:without(beamtalk_tagged_map:internal_fields(), Module:new())`;
+%% this exercises the same real, compiled path (a stdlib Value class,
+%% Dictionary) end to end rather than re-deriving the filter inline.
+test_compiled_value_new_excludes_shape_version() ->
+    code:ensure_loaded('bt@stdlib@dictionary'),
+    Instance = 'bt@stdlib@dictionary':new(),
+    ?assertNot(maps:is_key('__shape_version__', Instance)),
+    Defaults = maps:without(beamtalk_tagged_map:internal_fields(), Instance),
+    ?assertNot(maps:is_key('__shape_version__', Defaults)).
 
 %%====================================================================
 %% class_self_spawn tests

@@ -80,6 +80,7 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
     end in
     let DefaultState = ~{
         '__class_mod__' => 'empty_method_body'
+        , '__shape_version__' => 1
         , 'value' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)

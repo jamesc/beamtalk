@@ -66,6 +66,7 @@ impl CoreErlangGenerator {
     ///         <{'ok', ParentState}> when 'true' ->
     ///             let ChildFields = ~{
     ///                 '__class_mod__' => 'logging_counter',
+    ///                 '__shape_version__' => 1,
     ///                 'logCount' => 0
     ///             }~
     ///             in let MergedState = call 'maps':'merge'(ParentState, ChildFields)
@@ -83,6 +84,7 @@ impl CoreErlangGenerator {
     /// 'init'/1 = fun (InitArgs) ->
     ///     let DefaultState = ~{
     ///         '__class_mod__' => 'counter',
+    ///         '__shape_version__' => 1,
     ///         'value' => 0
     ///     }~
     ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
@@ -205,10 +207,7 @@ impl CoreErlangGenerator {
                                             INDENT,
                                             docvec![
                                                 line(),
-                                                docvec![
-                                                    "'__class_mod__' => ",
-                                                    leaf::atom(module_name.to_string()),
-                                                ],
+                                                Self::internal_state_prefix_doc(&module_name),
                                                 Document::Vec(own_state_fields),
                                             ]
                                         ),
@@ -267,7 +266,7 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                docvec!["'__class_mod__' => ", leaf::atom(module_name.to_string()),],
+                                Self::internal_state_prefix_doc(&module_name),
                                 Document::Vec(initial_state_fields),
                             ]
                         ),
@@ -285,6 +284,26 @@ impl CoreErlangGenerator {
             ];
             Ok(doc)
         }
+    }
+
+    /// The `'__class_mod__'` and `'__shape_version__' => 1` internal-key
+    /// pair, as map-literal entries (each after the first needs its own
+    /// leading `, `) — the prefix shared, byte for byte, by both `init/1`
+    /// code paths: the base-class `DefaultState` map and the subclass
+    /// `ChildFields` map both start every internal-key block with these
+    /// same two entries against the same `module_name`.
+    ///
+    /// `'__shape_version__'` is ADR 0123 Phase 0's (BT-3534) hot-reload
+    /// shape version; `shapeVersion:` itself is a later phase, so every
+    /// class is version 1 today.
+    fn internal_state_prefix_doc(module_name: &str) -> Document<'static> {
+        docvec![
+            "'__class_mod__' => ",
+            leaf::atom(module_name.to_owned()),
+            line(),
+            ", '__shape_version__' => ",
+            leaf::int_lit(1),
+        ]
     }
 
     /// ADR 0079: Generate the `$beamtalk_actor` process-dictionary
