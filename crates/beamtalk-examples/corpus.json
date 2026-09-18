@@ -26239,6 +26239,33 @@
       "explanation": "BT-893: Test fixture for class method self-sends (new/new:/spawn) Factory pattern: class methods that call self new: to create instances"
     },
     {
+      "id": "stdlib-test-fixtures-shape-version-money",
+      "title": "ShapeVersionMoney",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "ShapeVersionMoney",
+        "Value",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "migrateFromV1:",
+        "mutate",
+        "mutation",
+        "property",
+        "set",
+        "shape_version_money",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3537 (ADR 0123 §2 \"Money\" example): a Value-class shapeVersion:/\n// migrateFromVN: fixture, exercising Behaviour >> shapeVersion and\n// Behaviour >> migrateShape:from: on a class with no live process for its\n// instances.\n//\n// The hook reads/writes `old` via the Erlang FFI gateway (maps:get/2,\n// maps:put/3, maps:remove/2) rather than Dictionary at:/at:put:/removeKey:\n// sends — a Dictionary send on a non-literal value falls through to runtime\n// dispatch inside a migrateFromVN: hook (invoked via local_call/3), which is\n// undef for an @primitive-only class like Dictionary (BT-3541), the same\n// limitation `beamtalk_shape_migration_tests`' ShapeChainCart fixture works\n// around.\n\nValue subclass: ShapeVersionMoney\n  shapeVersion: 2\n  field: amount :: Float = 0.0\n  field: currency :: Symbol = #USD\n\n  /// v1 had only `cents` (an Integer); v2 replaces it with a Float `amount`.\n  class migrateFromV1: old :: Dictionary -> Dictionary =>\n    cents := Erlang maps get: #cents from: old\n    withAmount := Erlang maps put: #amount value: (cents / 100.0) in: old\n    Erlang maps remove: #cents from: withAmount",
+      "explanation": "BT-3537 (ADR 0123 §2 \"Money\" example): a Value-class shapeVersion:/ migrateFromVN: fixture, exercising Behaviour >> shapeVersion and Behaviour >> migrateShape:from: on a class with no live process for its instances.  The hook reads/writes `old` via the Erlang FFI gateway (maps:get/2, maps:put/3, maps:remove/2) rather than Dictionary at:/at:put:/removeKey: sends — a Dictionary send on a non-literal value falls through to runtime dispatch inside a migrateFromVN: hook (invoked via local_call/3), which is undef for an @primitive-only class like Dictionary (BT-3541), the same limitation `beamtalk_shape_migration_tests`' ShapeChainCart fixture works around."
+    },
+    {
       "id": "stdlib-test-fixtures-simple-proxy",
       "title": "SimpleProxy",
       "category": "stdlib-fixtures",
@@ -31444,6 +31471,36 @@
       ],
       "source": "// BT-3391: Tests that `setUp` correctly threads self.field := assignments to\n// the test method when it ends with an explicit trailing `self`, even after\n// an unrelated statement following the last field assignment.\n//\n// The `self.field := x` idiom (rather than `self withX:`) is what nearly\n// every test file actually uses for setUp (see stdlib/src/test_case.bt's\n// updated class doc comment). Adding any statement after the last field\n// assignment silently drops that field UNLESS setUp ends in a bare `self`\n// (or another `self.field := x` assignment) — see BT-3391's\n// `check_testcase_setup_drops_field_assignments` compile-time lint, which\n// warns when a `setUp` doesn't follow this rule.\n\nTestCase subclass: SetupTrailingStatementTest\n  field: first = 0\n  field: second = 0\n\n  setUp =>\n    self.first := 1\n    self.second := 2\n    _extra := 99  // unrelated trailing statement, deliberately unused\n    self  // required: carries the field mutations forward as self\n\n  testBothFieldsSurviveTrailingStatement =>\n    self assert: self.first equals: 1\n    self assert: self.second equals: 2",
       "explanation": "BT-3391: Tests that `setUp` correctly threads self.field := assignments to the test method when it ends with an explicit trailing `self`, even after an unrelated statement following the last field assignment.  The `self.field := x` idiom (rather than `self withX:`) is what nearly every test file actually uses for setUp (see stdlib/src/test_case.bt's updated class doc comment). Adding any statement after the last field assignment silently drops that field UNLESS setUp ends in a bare `self` (or another `self.field := x` assignment) — see BT-3391's `check_testcase_setup_drops_field_assignments` compile-time lint, which warns when a `setUp` doesn't follow this rule."
+    },
+    {
+      "id": "stdlib-test-shape-version-test",
+      "title": "ShapeVersionTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ShapeVersionTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "shape_version_test",
+        "subclassing",
+        "testDeclaredShapeVersion",
+        "testMigrateFromV1DirectCall",
+        "testMigrateShapeFromIsIdempotentAtCurrentVersion",
+        "testMigrateShapeFromRunsFullChainAndReconciles",
+        "testShapeVersionDefaultsToOneWhenUndeclared"
+      ],
+      "source": "// BT-3537 (ADR 0123 Phase 3): shapeVersion:/migrateFromVN: language surface —\n// Behaviour >> shapeVersion, Behaviour >> migrateShape:from: (the sealed\n// wrapper over beamtalk_shape_migration:migrate/3), and a real\n// migrateFromVN: hook on a Value class (no live process for its instances).\n//\n// Fixture: stdlib/test/fixtures/shape_version_money.bt (ShapeVersionMoney)\n\nTestCase subclass: ShapeVersionTest\n\n  testShapeVersionDefaultsToOneWhenUndeclared =>\n    // Object declares no shapeVersion: clause.\n    self assert: Object shapeVersion equals: 1\n\n  testDeclaredShapeVersion =>\n    self assert: ShapeVersionMoney shapeVersion equals: 2\n\n  testMigrateFromV1DirectCall =>\n    // migrateFromV1: is an ordinary class-side method — callable directly,\n    // no process needed (ADR 0123 §2's \"REPL-testable\" promise).\n    old := #{#cents => 250, #currency => #USD}\n    migrated := ShapeVersionMoney migrateFromV1: old\n    self assert: (migrated at: #amount) equals: 2.5\n    self deny: (migrated includesKey: #cents)\n\n  testMigrateShapeFromRunsFullChainAndReconciles =>\n    old := #{#cents => 500}\n    migrated := ShapeVersionMoney migrateShape: old from: 1\n    self assert: (migrated at: #amount) equals: 5.0\n    self assert: (migrated at: #currency) equals: #USD\n    self deny: (migrated includesKey: #cents)\n\n  testMigrateShapeFromIsIdempotentAtCurrentVersion =>\n    current := #{#amount => 9.99, #currency => #EUR}\n    migrated := ShapeVersionMoney migrateShape: current from: 2\n    self assert: migrated equals: current",
+      "explanation": "BT-3537 (ADR 0123 Phase 3): shapeVersion:/migrateFromVN: language surface — Behaviour >> shapeVersion, Behaviour >> migrateShape:from: (the sealed wrapper over beamtalk_shape_migration:migrate/3), and a real migrateFromVN: hook on a Value class (no live process for its instances).  Fixture: stdlib/test/fixtures/shape_version_money.bt (ShapeVersionMoney)"
     },
     {
       "id": "stdlib-test-show-cr-test",

@@ -374,6 +374,33 @@ abstract Object subclass: Behaviour
   /// ```
   sealed reload -> Behaviour => @primitive "classReload"
 
+  // === Shape versioning (ADR 0123) ===
+
+  /// Return this class's declared shape version — the `shapeVersion: N`
+  /// header clause, or `1` when absent (every class predating ADR 0123 is
+  /// implicitly at version 1).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Cart shapeVersion    // => 2 (if `shapeVersion: 2` is declared)
+  /// Counter shapeVersion // => 1 (no shapeVersion: clause)
+  /// ```
+  sealed shapeVersion -> Integer => @primitive "classShapeVersion"
+
+  /// Run the full `migrateFromVN:` chain from `aVersion` to this class's
+  /// current `shapeVersion`, then reconcile against its declared fields —
+  /// the same migration hot reload runs on `code_change/3`
+  /// (`beamtalk_shape_migration:migrate/3`), exposed so a migration chain
+  /// is testable at the REPL before any live instance depends on it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Cart migrateShape: #{#items => #(3, 4)} from: 1
+  ///   // => #{#items => #(3, 4), #total => 7}
+  /// ```
+  sealed migrateShape: fields :: Dictionary from: aVersion :: Integer -> Dictionary =>
+    @primitive "classMigrateShapeFrom"
+
   // === Live method editing (ADR 0082 Phase 1) ===
 
   /// Compile a method from a source body String and install it in this class,

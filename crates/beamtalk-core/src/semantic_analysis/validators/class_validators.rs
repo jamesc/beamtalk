@@ -20,6 +20,7 @@
 
 use crate::ast::{
     ClassKind, DeclaredKeyword, Expression, Identifier, MessageSelector, MethodDefinition, Module,
+    migrate_from_v_version,
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
@@ -1468,6 +1469,162 @@ fn check_expr_for_unsafe_field_mutation(
         | Expression::Error { .. }
         | Expression::ExpectDirective { .. }
         | Expression::Spread { .. } => {}
+    }
+}
+
+// ── ADR 0123: `shapeVersion:` / `migrateFromVN:` validation ─────────────────
+
+/// Compile-time checks for `shapeVersion:` and its `migrateFromVN:` chain
+/// (ADR 0123 §1–§2). The literal/duplicate rules for `shapeVersion:` itself
+/// are enforced by the parser (mirroring `handleScope:`'s own literal
+/// check, since the compiler must read the value without evaluating code);
+/// this validator covers what needs the class hierarchy or a method-body
+/// walk:
+///
+/// - `native:` classes reject `shapeVersion:`/`migrateFromVN:` outright —
+///   they have no generated `init/1`/`code_change/3` (ADR 0056).
+/// - A `migrateFromVN:` with `N >= shapeVersion` is an unreachable-migration
+///   warning (gaps are fine; only an at-or-past-current step is dead).
+/// - `migrateFromVN:` may not read or write a class variable: it runs
+///   outside the class process via `local_call/3`, which passes `nil` for
+///   `self` and discards any `{class_var_result, …}` mutation the method
+///   returns — a read would silently see `nil` and a write would be
+///   silently dropped (ADR 0123 §2).
+/// - `migrateFromVN:`'s return type, when annotated, must be `Dictionary`.
+pub(crate) fn check_shape_version_and_migrations(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let is_native = class.backing_module.is_some();
+
+        if is_native {
+            if let Some(sv) = &class.shape_version {
+                diagnostics.push(native_shape_clause_error(
+                    &class.name.name,
+                    "shapeVersion:",
+                    sv.span,
+                ));
+            }
+        }
+
+        let declared_version = class.effective_shape_version();
+        let class_var_names = hierarchy.class_variable_names(class.name.name.as_str());
+
+        for method in &class.class_methods {
+            let selector_text = method.selector.name();
+            let Some(n) = migrate_from_v_version(&selector_text) else {
+                continue;
+            };
+
+            if is_native {
+                diagnostics.push(native_shape_clause_error(
+                    &class.name.name,
+                    &selector_text,
+                    method.span,
+                ));
+                continue;
+            }
+
+            if n >= declared_version {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "`{selector_text}` is unreachable — `{}`'s shapeVersion is {declared_version}",
+                            class.name.name
+                        ),
+                        method.span,
+                    )
+                    .with_hint(format!(
+                        "Remove `{selector_text}` or bump `shapeVersion:` above {n}"
+                    ))
+                    .with_category(DiagnosticCategory::Type),
+                );
+            }
+
+            if !class_var_names.is_empty() {
+                check_migration_body_class_var_access(
+                    method,
+                    &class_var_names,
+                    &selector_text,
+                    diagnostics,
+                );
+            }
+
+            if let Some(rt) = &method.return_type {
+                if rt.type_name() != "Dictionary" {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            format!(
+                                "`{selector_text}` must return `Dictionary`, found `{}`",
+                                rt.type_name()
+                            ),
+                            method.span,
+                        )
+                        .with_category(DiagnosticCategory::Type),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A `shapeVersion:`/`migrateFromVN:` clause on a `native:` class — they
+/// compile to a facade with no generated `init/1`/`code_change/3` to carry
+/// a shape version at all (ADR 0056, ADR 0123 §3).
+fn native_shape_clause_error(class_name: &str, clause: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        format!(
+            "`{clause}` is not supported on native class `{class_name}` — native classes have \
+             no generated init/1 or code_change/3 (ADR 0056)"
+        ),
+        span,
+    )
+    .with_category(DiagnosticCategory::Type)
+}
+
+/// Walks a `migrateFromVN:` method's body for any `self.<classVar>` access
+/// (read or write — both reach `walk_expression` as a bare `FieldAccess`
+/// node, since a `self.field := …` write's target is itself one), pushing a
+/// compile error for each hit.
+fn check_migration_body_class_var_access(
+    method: &MethodDefinition,
+    class_var_names: &[EcoString],
+    selector_text: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |expr| {
+            let Expression::FieldAccess {
+                receiver,
+                field,
+                span,
+            } = expr
+            else {
+                return;
+            };
+            if !matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self") {
+                return;
+            }
+            if class_var_names
+                .iter()
+                .any(|cv| cv.as_str() == field.name.as_str())
+            {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "`{selector_text}` may not access class variables (`self.{}`); \
+                             migration methods run outside the class process, where class \
+                             variables are not available",
+                            field.name
+                        ),
+                        *span,
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+            }
+        });
     }
 }
 

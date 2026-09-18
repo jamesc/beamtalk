@@ -50,6 +50,8 @@ const TOWER_ZERO_ARG: &[&str] = &[
     "classReload",
     "classDoc",
     "classProtocols",
+    // ADR 0123 §1: declared shape version (default 1 read at the intrinsic).
+    "classShapeVersion",
     // --- Metaclass (`metaclassXxx`) ---
     "metaclassThisClass",
     "metaclassSuperclass",
@@ -148,12 +150,16 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")"
             ])
         }
-        // ADR 0114 Phase 3: renameSelector:to: — two Symbol
-        // arguments (old selector, new selector).
-        "classRenameSelector" => {
-            let old_sel = params.first()?;
-            let new_sel = params.get(1)?;
-            Some(intrinsic_self_arg2(selector, old_sel, new_sel))
+        // ADR 0114 Phase 3: renameSelector:to: — two Symbol arguments (old
+        // selector, new selector). ADR 0123 §3: migrateShape:from: — a
+        // Dictionary of raw fields plus the version they're at, wrapping
+        // the whole `beamtalk_shape_migration:migrate/3` chain + reconcile.
+        // Same two-positional-argument shape as classRenameSelector, so one
+        // arm covers both.
+        "classRenameSelector" | "classMigrateShapeFrom" => {
+            let arg1 = params.first()?;
+            let arg2 = params.get(1)?;
+            Some(intrinsic_self_arg2(selector, arg1, arg2))
         }
         // ADR 0114 Phase 3: renameSelector:to:ifAbsent: — old/new
         // selector Symbols plus the block, mirroring

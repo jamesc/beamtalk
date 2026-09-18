@@ -80,6 +80,7 @@ fn test_self_inside_method_no_error() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -169,6 +170,7 @@ fn test_unused_variable_in_method_warns() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -241,6 +243,7 @@ fn test_used_variable_no_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -306,6 +309,7 @@ fn test_underscore_prefixed_variable_no_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -373,6 +377,7 @@ fn test_unused_parameter_emits_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -442,6 +447,7 @@ fn test_unused_parameter_underscore_suppresses_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -512,6 +518,7 @@ fn test_used_parameter_no_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -586,6 +593,7 @@ fn test_unused_parameter_primitive_body_no_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -661,6 +669,7 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -733,6 +742,7 @@ fn test_unused_variable_in_class_method_warns() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -801,6 +811,7 @@ fn test_block_parameter_no_unused_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -871,6 +882,7 @@ fn test_pattern_variable_no_unused_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -944,6 +956,7 @@ fn test_unused_variable_in_nested_block_warns() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -1025,6 +1038,7 @@ fn test_variable_used_via_closure_no_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
