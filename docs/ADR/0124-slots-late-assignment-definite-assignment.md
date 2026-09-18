@@ -17,8 +17,9 @@ Two parts, decided together because they are one rule seen from both sides.
   strategy in their `nil` and must not change. The pattern is real and
   general, and it is a judgement call rather than a demand from the corpus.
   Scoped to `state:` in this ADR; `late classState:` is deferred (§1).
-  **Accept — B1 and B2 are required for Part A; B3–B10 stand on the two
-  slots.**
+  **Accept — B1, B2, B5 and B3 ship together as Part A's exemption (B1–B2
+  alone would regress an early read to a raw `badkey`, §Implementation); B4
+  and B6–B10 stand on the two slots.**
 
 **Part A needs an exemption, and the exemption is a language construct.**
 A lifecycle-assigned slot must be able to opt out of Part A's diagnostic.
