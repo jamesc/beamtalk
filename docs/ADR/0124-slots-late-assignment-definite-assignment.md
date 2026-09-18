@@ -162,12 +162,19 @@ re-set on process death by `beamtalk_workspace_bootstrap:bootstrap_singleton/3`
 a non-nilable return type over a nilable slot. This is the instance-slot
 pattern of (a) on the class side, and it is three examples to (a)'s two.
 
-One caller depends on the current `nil`: `Object>>show:` and `Object>>cr`
-(`stdlib/src/object.bt:343`, `:355`) read
+All three accessors are relied on to answer `nil` before bootstrap.
+`Object>>show:` and `Object>>cr` (`stdlib/src/object.bt:343`, `:355`) read
 `TranscriptStream current ifNotNil: [:t | t show: aValue]` so that output
-before bootstrap is a silent no-op, and `stdlib/test/show_cr_test.bt` pins
-that. So the slot can be `late`, but the `current` accessor must stay nilable
-and guard with `hasField:` (§Migration Path).
+before bootstrap is a silent no-op, pinned by `stdlib/test/show_cr_test.bt`;
+and `stdlib/test/class_variables_singleton_test.bt:11-16` asserts
+`BeamtalkInterface current`, `TranscriptStream current` and
+`WorkspaceInterface current` all equal `nil` in the un-bootstrapped BUnit
+context. `BeamtalkInterface current` and `WorkspaceInterface current` are
+bare `self.current` reads with no guard anywhere today. So the slots can be
+`late`, but all three `current` accessors must stay nilable and guard with
+`hasField:` (§Migration Path); converting a slot without rewriting its
+accessor would raise `UninitializedStateError` where those tests expect
+`nil`.
 
 `state: x :: T = <expr>` already permits an arbitrary **eager** initialiser
 (`gen_server/state.rs:36`, `:98`). The gap is not computing a value late; it
@@ -1363,18 +1370,27 @@ advisory (Warning/Hint, never Error by default).
 become `late classState: current :: X`; `current:` is unchanged;
 `resetCurrent` becomes `self clearField: #current`; bootstrap's
 `set_class_variable/2` keeps writing the class variable directly and counts
-as assignment. The accessor stays nilable because `Object>>show:`/`cr`
-(`object.bt:343`, `:355`) and `show_cr_test.bt` rely on `nil` before
-bootstrap:
+as assignment. **All three `current` accessors are rewritten** to stay
+nilable, because `Object>>show:`/`cr` (`object.bt:343`, `:355`),
+`show_cr_test.bt` and `class_variables_singleton_test.bt:11-16` rely on
+`nil` before bootstrap for all three classes, and two of the three getters
+(`BeamtalkInterface`, `WorkspaceInterface`) are bare `self.current` reads
+today with no guard at all:
 
 ```beamtalk
+  // transcript_stream.bt, beamtalk_interface.bt, workspace_interface.bt alike
   class current -> TranscriptStream | Nil =>
     (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
 ```
 
+Converting the slot without the accessor rewrite is a regression: the getter
+raises `UninitializedStateError` where those tests expect `nil`. The three
+conversions are one change each, slot plus getter, and
+`class_variables_singleton_test.bt` is the test that catches a partial one.
+
 What that buys is smaller than the instance case and should be said plainly:
 the slot can no longer hold `nil` and its type stops lying, but the public
-`current` keeps answering `nil` before bootstrap because a caller depends on
+`current` keeps answering `nil` before bootstrap because callers depend on
 it. The win is in the declaration and in `fieldKinds`, not at the call site.
 
 **In the applications, migration is narrow.** Most nilable slots in this
