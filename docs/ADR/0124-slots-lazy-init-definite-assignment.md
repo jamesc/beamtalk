@@ -84,7 +84,7 @@ s.type_annotation.is_some()
 `is_nilable_type` (`:619`) and `is_nilable_type_name` (`:806`) are
 codegen-local. That predicate is a *semantic* property of a declaration, and
 a compile-time check needs the identical answer — so its current home is the
-wrong layer (see Decision §6).
+wrong layer (see Decision §7).
 
 **Slot defaults.** An eager initialiser is an arbitrary expression compiled
 into `init/1`'s state map literal (`gen_server/state.rs:36`, `:98`); a slot
@@ -168,7 +168,7 @@ Actor subclass: ReportBuilder
 ```
 
 `rows` is supplied at `spawnWith:` and not written afterwards, which is what
-makes `index` safe to memoise — see §3e.
+makes `index` safe to memoise — see §4.
 
 ```beamtalk
 sealed Object subclass: Registry
@@ -195,7 +195,7 @@ annotation and with `@expect`:
 |---|---|---|
 | `lazy state:` (Actor) | **Yes** | The instance gen_server memoises the value |
 | `lazy classState:` (any class kind) | **Yes** | The class gen_server memoises it (ADR 0036 metaclass tower) |
-| `lazy field:` (Value) | **Error** | No owning process; see §4 |
+| `lazy field:` (Value) | **Error** | No owning process; see §5 |
 | `lazy state:`/`field:` on `Object` | **Error** | Already an error — Object holds no instance data (ADR 0067) |
 | `lazy state:` on a `native:` Actor | **Error** | Already an error — ADR 0056 prohibits `state:` there outright, so no new rule is needed |
 | `lazy classState:` on a `native:` Actor | **Yes** | ADR 0056 permits `classState:`; the class-side gen_server is compiler-generated even for native actors |
@@ -336,7 +336,7 @@ ReportBuilder fieldKinds               // => #{#rows => #eager, #index => #lazy}
 b fieldAt: #index                     // => #{#a => #{#id => #a, #n => 1}}
 ```
 
-### 3e. Staleness is the author's problem, and the compiler says so
+### 4. Hazards: staleness, and reading a lazy slot in `terminate:`
 
 A memoised value derived from other slots goes stale when those slots
 change. Every language with lazy properties has this hazard, and it is the
@@ -373,7 +373,40 @@ subclass could assign the slot invisibly, not strong enough to be an Error.
 A derived value over mutable inputs should be a method — recomputation is the
 correct semantics there, and `lazy` is the wrong tool.
 
-### 4. Value classes: `lazy field:` is rejected
+**The same analysis catches a second, sharper hazard: `terminate:`.** The
+documented cleanup idiom reads the slot it is closing:
+
+```beamtalk
+Actor subclass: ResourceActor
+  lazy state: handle :: Resource = Resource open
+
+  terminate: reason :: Symbol -> Nil =>
+    self.handle close
+//  ^ warning: 'terminate:' reads the lazy slot 'handle'. If it was never
+//    computed, shutdown will run 'Resource open' in order to close it.
+//    Guard with 'respondsTo:'-style presence, or make cleanup conditional.
+```
+
+Forcing an initialiser *during shutdown* — acquiring a resource so it can
+immediately be released — is a bug in every case, and `terminate:` is exactly
+where an author will write it, because the pre-`lazy` idiom (`self.handle
+isNil ifFalse: [self.handle close]`) is in the language guide. Same warning
+category, same walk, one extra rule: warn on any lazy-slot read reachable
+from `terminate:`.
+
+Both warnings and the §6 definite-assignment finding read the *same*
+per-class structure — the lazy-slot set, each initialiser's `self.<slot>`
+dependencies, and per-method slot reads and writes. They are three questions
+over one analysis, not three analyses, which is why they are affordable
+together.
+
+**Supervisor restarts recompute.** A restarted actor gets a fresh state map
+with its lazy slots absent, so initialisers run again on first read. That is
+the correct behaviour — a restart is meant to rebuild derived state — and it
+is worth stating because it differs from an eager slot, whose initialiser
+runs in `init/1` on every start either way.
+
+### 5. Value classes: `lazy field:` is rejected
 
 A Value instance is an immutable map with no owning process (ADR 0042), so
 there is nowhere to memoise. The two ways to force it through were both
@@ -402,13 +435,13 @@ So the diagnostic for `lazy field:` names the method form as the fix. An
 author who genuinely needs memoisation on value-shaped data wants an Actor,
 and the error's hint says so.
 
-### 5. Definite-assignment analysis
+### 6. Definite-assignment analysis
 
 A new semantic-analysis pass in `beamtalk-core` reports at compile time what
 ADR 0078's check reports at spawn time.
 
 **Which slots it covers** — the identical predicate the runtime uses,
-unchanged and now shared (§6): annotated, no default, type does not admit
+unchanged and now shared (§7): annotated, no default, type does not admit
 `Nil`, **and not `lazy`**. So:
 
 | Declaration | Requires assignment? |
@@ -475,7 +508,7 @@ analysis is just the compiler checking the story.
 **The runtime check is retained.** This ADR adds a static signal; it does
 not remove the backstop.
 
-### 6. Single source of truth for the predicate
+### 7. Single source of truth for the predicate
 
 The "requires definite assignment" predicate currently lives in
 `beamtalk-codegen` (`callbacks.rs:619`, `:709`, `:723`, `:806`). The static
@@ -485,18 +518,26 @@ semantic analysis and `inherited_typed_no_default_fields` calls it. No copy,
 no "mirrors" comment — this is the shared-leaf-module pattern applied in its
 simplest form (`docs/development/architecture-principles.md` §6), and the
 resulting consistency test between the static check and the emitted runtime
-check becomes an ordinary unit test of one implementation (§7,
-delete-the-copy disposition).
+check becomes an ordinary unit test of one implementation
+(architecture-principles §7, delete-the-copy disposition).
+
+This is a hard requirement, not a preference. The diagnostic must appear in
+the LSP, and `just check-codegen-boundary` (`Justfile:666`, part of `just
+ci`) asserts via `cargo tree -i` that **`beamtalk-lsp` and `beamtalk-lint` do
+not depend on `beamtalk-codegen` at all**. So a definite-assignment check that
+read the predicate from its current home could not be surfaced by the LSP
+without breaking CI. Leaving a copy behind in codegen would pass the boundary
+check and fail the duplication rule; moving it satisfies both.
 
 One rule genuinely does cross the Rust/Erlang boundary and therefore needs
-enforcement rather than a comment: **the absent-key reconcile table** (§7),
+enforcement rather than a comment: **the absent-key reconcile table**,
 which `beamtalk-codegen` and `beamtalk_shape_migration`/`beamtalk_hot_reload`
 must agree on. It gets a shared conformance fixture — a table of
 `(slot kind, key present?, has default?) -> outcome` that drives both the
-Rust golden test and the Erlang EUnit test, per §7's
-"boundary you cannot delete" rule.
+Rust golden test and the Erlang EUnit test, per architecture-principles
+§7's "boundary you cannot delete" rule.
 
-### 7. Interaction with ADR 0123 (migration, serialisation, distribution)
+### 8. Interaction with ADR 0123 (migration, serialisation, distribution)
 
 ADR 0123's reconcile step 3 gains the lazy case it deferred to this ADR:
 
@@ -525,7 +566,7 @@ ADR 0123's reconcile step 3 gains the lazy case it deferred to this ADR:
   must not be persisted — and that is already ADR 0103's `handleScope:`
   mechanism's job, not a new one this ADR invents.
 
-### 8. Reflection, inspector, LSP — the force / no-force split
+### 9. Reflection, inspector, LSP — the force / no-force split
 
 The operator-facing rule that constrains the design: **observation must not
 run user code.**
@@ -546,6 +587,37 @@ not-yet-computed slot as such, with `drillable: false` until it holds a
 value. `fieldAt:` is the opposite case — the caller asked for the value, so
 it computes and memoises, which is why the two are split rather than given
 one policy.
+
+**Making `fieldAt:` force is not free, and this is what it costs.** Today
+`fieldAt:` is a generic runtime map read —
+`beamtalk_reflection:read_field/2` is `maps:get(Name, State, nil)`
+(`beamtalk_reflection.erl:47`) — dispatched by
+`beamtalk_object_ops:dispatch('fieldAt:', …)`, which returns `State`
+*unchanged* (`beamtalk_object_ops.erl:108`). So without new machinery an
+absent lazy slot would answer `nil` through reflection: indistinguishable
+from a computed `nil`, never memoised. Three small changes fix it, each on an
+existing precedent:
+
+1. **Codegen emits `force_field/2`** on any class with lazy slots:
+   `force_field(Name, State) -> {Value, State1}`. It is the §3 lowering
+   addressed by name at runtime rather than statically, so it shares the
+   lowering rather than duplicating it.
+2. **`read_field/2` gains a lazy branch**, resolving the owning module from
+   the `'__class_mod__'` key already in the state map. The branch must be
+   keyed on *"declared lazy"*, not merely *"key absent"* — `read_field/2`
+   defaults a missing key to `nil`, so a typo'd field name is also absent,
+   and forcing on absence alone would try to run an initialiser for a slot
+   that does not exist.
+3. **The `'fieldAt:'` dispatch arm threads state**, returning
+   `{reply, Value, State1}`. The `'fieldAt:put:'` arm immediately below it
+   already has exactly this shape, so this is a one-line change to match a
+   sibling.
+
+The alternative — `fieldAt:` **raises** on a not-yet-computed lazy slot
+instead of forcing — costs nothing to build and is honest, but it breaks the
+generic `fieldNames`-then-`fieldAt:` iteration that tooling relies on, and it
+makes `object fieldAt: #x` behave differently from the getter that reads
+`self.x`. Reflection equivalence is worth the three changes above.
 
 `fieldKinds`, not `slotKinds`: ADR 0035 deliberately unified the reflection
 API on `field`-prefixed selectors (`fieldNames`, `fieldAt:`, `allFieldNames`,
@@ -570,7 +642,7 @@ surfaces, not just the compiler.
 | **Squeak/Pharo `ClassBuilder`** | Match instance variables by name on recompile, default the rest | Already Beamtalk's hot-reload behaviour (ADR 0123); this ADR adds the lazy row to its table |
 | **Kotlin** | `by lazy { }` with `LazyThreadSafetyMode`; `lateinit var` throwing `UninitializedPropertyAccessException` | **Rejected the thread-safety knob** — the gen_server makes it meaningless. `lateinit` is close to our typed-no-default slot, and its "throws on early read" is ADR 0078's `UninitializedStateError`; we add the static check Kotlin deliberately does not have |
 | **Scala** | `lazy val`, thread-safe via a double-checked-locking bitmap | Confirms the BEAM advantage: no bitmap, no `@volatile`, no initialisation-order hazard |
-| **Swift** | `lazy var` on a stored property; **cannot be `let`**; on a struct the getter is `mutating`, so it is unusable through a `let`; separately, two-phase definite initialisation proves every stored property is set before `self` escapes | **Decisive for §4** — this is precisely `lazy field:` on a Value. Swift's DI is the model for §5, but Swift can make it an *error* because it has no reflective writers and no hot reload; we cannot (ADR 0100) |
+| **Swift** | `lazy var` on a stored property; **cannot be `let`**; on a struct the getter is `mutating`, so it is unusable through a `let`; separately, two-phase definite initialisation proves every stored property is set before `self` escapes | **Decisive for §5** — this is precisely `lazy field:` on a Value. Swift's DI is the model for §6, but Swift can make it an *error* because it has no reflective writers and no hot reload; we cannot (ADR 0100) |
 | **C#** | `Lazy<T>` as a library type | Rejected: a wrapper type leaks into the slot's declared type, so every reader writes `.Value` |
 | **Erlang/Elixir** | No lazy fields. Idioms: `maps:get/3` with a default, `Map.get_lazy/3`, or an `Agent` | Confirms there is nothing to be compatible *with*, and that the generated state map stays an ordinary map an Erlang caller can read |
 
@@ -857,7 +929,7 @@ The static check is additive.
   idempotent-by-construction, and this is observable behaviour authors must
   know about.
 - **A memoised lazy slot goes stale** when the slots its initialiser reads
-  are written afterwards. The §3e warning catches the class-local case; a
+  are written afterwards. The §4 warning catches the class-local case; a
   subclass writing an inherited slot is not caught, and there is no
   invalidation primitive.
 - **`lazy` moves work from spawn to an arbitrary later message**, shifting
@@ -879,9 +951,12 @@ The static check is additive.
   slot is supplied by `spawnWith:` from outside the compilation unit.
   `@expect definite_assignment` is the escape hatch, and every escape hatch
   is friction.
-- Four new diagnostics (`lazy field:`, lazy-without-initialiser, initialiser
-  cycle, stale lazy slot) plus the definite-assignment finding, and one new
-  reflective selector — all to keep at parity across CLI, REPL, LSP, and MCP.
+- Six new diagnostics — three Errors (`lazy field:`,
+  lazy-without-initialiser, initialiser cycle) and three advisories (stale
+  lazy slot, lazy read in `terminate:`, definite assignment) — plus one new
+  reflective selector, all to keep at parity across CLI, REPL, LSP, and MCP.
+  The three advisories share one per-class analysis, but six findings is
+  still a real documentation and false-positive surface.
 
 ### Neutral
 - `lazy` becomes a contextual keyword in declaration position. It is not
@@ -909,9 +984,9 @@ prerequisites; 3–5 are parallelisable after 2.
 | 0 | **Napkin: prove a lazy read passes `verify()`.** Hand-write the `ThreadedStmt` sequence for one lazy `state:` read on one actor — `maps:is_key` guard, both arms, the `maps:put` in the computing arm — and confirm `ThreadedIr::verify()` accepts it with balanced `State` versions, that it renders to compilable Core Erlang, and that `just verify-threaded-ir` stays green. **If this fails, the "no new storage family" claim is wrong and §3 needs redesigning before anything else is built.** No parser work, no diagnostics, one fixture | `beamtalk-codegen` (`threaded_ir/`) | **S** |
 | 1 | `lazy` modifier: lexer contextual keyword, `parse_state_declaration` prefix, `SlotKind` on `StateDeclaration`, unparse round-trip. The three rejection Errors: `lazy field:`, lazy-without-initialiser, `lazy` on `Object` | `beamtalk-core` (`source_analysis/parser/declarations.rs`, `ast/class.rs`, `unparse`) | **S** |
 | 2 | Move the definite-assignment predicate (`is_nilable_type`, annotated ∧ no-default ∧ non-nilable ∧ not-lazy) down into `beamtalk-core`; `inherited_typed_no_default_fields` calls it; **exclude lazy slots from `generate_post_initialize_check`** (its `maps:get/2` would `badkey` on an absent key) | `beamtalk-core` (`semantic_analysis`), `beamtalk-codegen` (`gen_server/callbacks.rs`) | **S** |
-| 3 | Lazy read lowering: an ADR 0118 `ThreadedValue` prelude on `VersionPrefix::State`, then `ClassVars` for `lazy classState:`; lazy slots omitted from `init/1`'s state literal; `verify()` coverage; `just verify-threaded-ir` over the stdlib + bootstrap corpus. Plus the initialiser dependency graph, which both the cycle Error and the §3e `StaleLazySlot` warning read | `beamtalk-codegen` (`threaded_ir/`, `gen_server/state.rs`), `beamtalk-core` (dependency graph, cycle check, staleness check) | **M** |
+| 3 | Lazy read lowering: an ADR 0118 `ThreadedValue` prelude on `VersionPrefix::State`, then `ClassVars` for `lazy classState:`; lazy slots omitted from `init/1`'s state literal; `verify()` coverage; `just verify-threaded-ir` over the stdlib + bootstrap corpus. Plus the initialiser dependency graph, which both the cycle Error and the §4 `StaleLazySlot` warning read | `beamtalk-codegen` (`threaded_ir/`, `gen_server/state.rs`), `beamtalk-core` (dependency graph, cycle check, staleness check) | **M** |
 | 4 | Definite-assignment analysis: branch-aware dataflow over the ADR 0078 flattened `initialize` chain; `DiagnosticCategory::DefiniteAssignment`; `@expect definite_assignment`; `[diagnostics]` escalation; parity across build/LSP/REPL/MCP | `beamtalk-core` (`semantic_analysis`), `beamtalk-language-service`, `beamtalk-cli` | **M** |
-| 5 | Reflection and tooling: `fieldKinds`; `fieldAt:` forces; `InspectorField` `#lazySlot` + `drillable: false`; inspector and `sys:get_state` do **not** force; LSP hover shows `lazy` and when the initialiser runs | `beamtalk-stdlib`, `beamtalk_runtime`, `beamtalk-language-service` | **S** |
+| 5 | Reflection and tooling: `fieldKinds`; generated `force_field/2`; `read_field/2`'s declared-lazy branch; the `'fieldAt:'` dispatch arm threading state; `InspectorField` `#lazySlot` + `drillable: false`; inspector and `sys:get_state` do **not** force; LSP hover shows `lazy` and when the initialiser runs | `beamtalk-codegen`, `beamtalk_runtime` (`beamtalk_reflection.erl`, `beamtalk_object_ops.erl`), `beamtalk-stdlib`, `beamtalk-language-service` | **M** |
 | 6 | ADR 0123 reconcile lazy row in `beamtalk_shape_migration`/`beamtalk_hot_reload`; the shared `(slot kind, present?, has default?) -> outcome` conformance fixture driving both the Rust golden test and the Erlang EUnit test | `beamtalk_runtime`, `beamtalk-codegen` | **S** |
 | 7 | Docs and tests: `docs/beamtalk-language-features.md` (slot kinds, the force/no-force table, once-per-successful-computation, staleness and when to prefer a method, the BEAM-is-the-lock note), `docs/development/surface-parity.md`, BUnit tests in `stdlib/test/*.bt`, REPL-protocol e2e in `tests/repl-protocol/cases/` | docs, `stdlib/test`, `tests/repl-protocol` | **S** |
 
