@@ -20,6 +20,17 @@ rejected alternative.
   if read before assignment. No initialiser expression, so **reading never
   writes** — which is what keeps it small.
 
+  **Part B's evidence is two slots**, and that is the main thing a reviewer
+  should weigh. Successive passes over Exdura and Symphony narrowed it from
+  "many nilable slots" to two genuine candidates (§Context (a)); most nilable
+  slots in that corpus encode a *resolution strategy* in their `nil` and
+  should not change. The pattern behind those two is real and general — a
+  resource acquired by an explicit lifecycle call, whose declared type is
+  non-nilable in truth — and the cost is now low enough (one guarded read,
+  two reflective selectors, no lowering) that it is worth doing on two
+  examples. But it is a judgement call, not a demand from the corpus, and
+  **Part A is where the clear value is.**
+
 The two are the same idea at two ends: Part A checks the slots that must be
 valid after `initialize`, Part B declares the ones that legitimately are not
 yet. A slot is `late` exactly when Part A's diagnostic would otherwise be
@@ -67,11 +78,21 @@ becomes valid**. Three gaps follow from that omission:
    **(a) Every nilable resource slot is assigned by an explicit lifecycle
    method, and several are unset again.**
 
-   | Slot | Assigned | Unset |
-   |---|---|---|
-   | `symphony/codex_client.bt` `proc :: Subprocess \| Nil` | `launch` (`:97`) | `stopProcess` (`:71`) |
-   | `exdura/exdura_client.bt` `supervisor`, `httpServer` | lifecycle calls (`:170`, `:190`) | — |
-   | `exdura/exdura_http_server.bt` `httpServer` | in `initialize` (`:256`) | `destroy` |
+   | Slot | Assigned | Unset | A `late` candidate? |
+   |---|---|---|---|
+   | `symphony/codex_client.bt` `proc :: Subprocess \| Nil` | `launch` (`:97`) | `stopProcess` (`:71`) | **Yes** — a running client always has one; `nil` is purely "not launched" |
+   | `exdura/exdura_http_server.bt` `httpServer` | in `initialize` (`:256`) | `destroy` | **Yes** — `nil` is purely absence |
+   | `exdura/exdura_client.bt` `supervisor` | `setSupervisor:` (`:170`) | — | **No** — `nil` means "standalone mode" and selects a resolution strategy (`:144-155`); see (b) |
+   | `exdura/exdura_client.bt` `httpServer` | lifecycle (`:190`) | — | **No** — genuinely optional per its own doc ("nil unless started with an `#http` config") |
+   | `exdura/workflow_engine.bt` `eventStore`, `activityPool` | — | — | **No** — `nil` means "resolve by name"; see (b) and (d) |
+
+   **The honest size of the evidence: two slots.** Three passes over this
+   corpus each narrowed it — first from "none" to "many", then from "many" to
+   "some", and now, after PR review pushed on the `supervised` claim, to two
+   slots across two classes. They are genuine, and the pattern they share is
+   real and general (a resource acquired by an explicit lifecycle call, whose
+   declared type is non-nilable in truth), but Part B should be judged on two
+   examples, not on the slot count in the survey.
 
    ```beamtalk
    typed Actor subclass: CodexClient
@@ -91,9 +112,10 @@ becomes valid**. Three gaps follow from that omission:
    every later `self.proc readLine:` / `writeLine:` / `close` a read of a
    nilable type.
 
-   **(b) `nil` is overloaded, and an author already paid for it.** Exdura's
-   engine (`exdura/src/workflow/workflow_engine.bt:20-26`) carries an **extra
-   slot whose only job is to disambiguate `nil`**:
+   **(b) `nil` is overloaded — but in this corpus it is overloaded with
+   *mode*, which `late` does not fix.** Exdura's engine
+   (`exdura/src/workflow/workflow_engine.bt:20-26`) carries an extra slot
+   that disambiguates `nil`:
 
    ```beamtalk
    typed Actor subclass: WorkflowEngine
@@ -106,11 +128,41 @@ becomes valid**. Three gaps follow from that omission:
      state: supervised :: Boolean = false
    ```
 
-   "Not yet wired" and "legitimately none" are different states, `nil` cannot
-   express both, and the cost was a third slot plus a four-line comment. This
-   is the strongest evidence in the ADR, and it is evidence for the
-   **representation** (§2) rather than for any particular initialisation
-   mechanism.
+   An earlier revision of this ADR called that the strongest evidence in the
+   document and claimed `late` would retire the `supervised` flag. **Reading
+   the resolvers shows that was wrong**, and PR review was right to push on
+   it. `eventStore` (`:983`) is:
+
+   ```beamtalk
+     eventStore -> EventStore =>
+       self.eventStore match: [
+         nil -> (EventStore named: #eventStore) unwrap;
+         s -> s
+       ]
+   ```
+
+   `nil` there means **"resolve by name, freshly, every call"** — the comment
+   says so explicitly, "rather than caching the lookup, means a
+   `rest_for_one` restart of EventStore is picked up automatically" — and it
+   never consults `supervised` at all. `currentActivityPool` (`:1005`) does
+   consult it, but only to choose between *two* resolve-time behaviours
+   ("resolve by name" vs "genuinely no pool"). So `supervised` is not a
+   workaround for a missing representation; it is a flag selecting a
+   **resolution strategy**, and `late` does not retire it: a `late … | Nil`
+   slot offers absent / `nil` / value, while `activityPool` needs to
+   distinguish two different meanings *of absence*.
+
+   The same is true of `exdura_client.bt`'s `supervisor` (`:144-155`): nil
+   means "standalone, use the direct refs", a set value means "supervised,
+   resolve by name". The nil is load-bearing logic, not a gap.
+
+   What survives from this example is narrower and still worth having:
+   `nil` demonstrably ends up carrying structural meaning when authors have
+   nowhere else to put it. That supports §2's rule — `nil` should not be the
+   representation for "unassigned" — but §2 stands on its own ground (`nil`
+   is *already* the compiler's "no value supplied", twice over), not on this
+   example. **The corpus does not supply independent validation for §2, and
+   this ADR no longer claims it does.**
 
    **(c) There is no memoise-on-first-read anywhere.** Across 148 `.bt` files
    in both applications, the classic `ifNil: [self.x := …]` lazy idiom occurs
@@ -318,15 +370,20 @@ check. This is the one place `late` is stricter than the plain form.
 **A default is forbidden.** `late state: x :: Integer = 0` is an Error — a
 slot with a default is never unset, so `late` is meaningless on it.
 
-**`| Nil` is still allowed, and means something distinct.**
-`late state: activityPool :: ActivityWorkerPool | Nil` gives three states,
-which is exactly what Exdura's `supervised` flag was faking:
+**`| Nil` is still allowed, and means something distinct.** A
+`late state: x :: T | Nil` slot has three states rather than two:
 
 | State | Meaning | Test |
 |---|---|---|
-| absent | not wired yet | `(self hasField: #activityPool) not` |
-| `nil` | legitimately none — the standalone case | `self.activityPool isNil` |
-| a value | wired | — |
+| absent | not assigned yet | `(self hasField: #x) not` |
+| `nil` | assigned, and legitimately empty | `self.x isNil` |
+| a value | assigned | — |
+
+This is useful where "never set" and "set to nothing" are different facts —
+a cache that has been explicitly emptied versus never populated. It is *not*
+a general replacement for a mode flag: if absence itself needs to carry two
+meanings, as in Exdura's `activityPool` (§Context (b)), three states are not
+enough and an explicit flag remains the right answer.
 
 ### 2. Representation: the key is absent until assigned
 
@@ -1217,8 +1274,9 @@ guarded read and two small reflective selectors, not a lowering.
   trigger, so the inspector, `sys:get_state`, `observer` and `recon` are
   side-effect-free by construction rather than by rule (§9).
 - Three states become expressible on a `late … | Nil` slot (absent / `nil` /
-  a value), which retires the extra `supervised :: Boolean` disambiguation
-  slot Exdura had to invent (§Context (b)).
+  a value). Note this does **not** retire Exdura's `supervised` flag — that
+  flag distinguishes two meanings *of absence*, which three states cannot
+  express (§Context (b)).
 - Part A gives Values a definite-assignment check where **none exists today**
   — `generate_post_initialize_check` is Actor-only (`callbacks.rs:857`), so a
   typed-no-default `field:` is currently unenforced behind a non-nilable type
@@ -1347,16 +1405,18 @@ slot is assigned from outside the class entirely, and `classState: current ::
 X | Nil = nil` is the honest declaration of a slot that may legitimately be
 `nil` between bootstrap attempts.
 
-**In the applications, migration is real but selective**, and the selection
-matters more than the mechanics:
+**In the applications, migration is narrow**, and the selection matters far
+more than the mechanics — most nilable slots in this corpus should stay
+exactly as they are:
 
 | Class | Verdict |
 |---|---|
 | `symphony/codex_client.bt` `proc` | **Convert.** `late state: proc :: Subprocess`; `launch` unchanged; `stopProcess`'s `isNil` guard becomes `hasField:` and its `:= nil` becomes `clearField:` |
-| `exdura/exdura_client.bt` `supervisor`, `httpServer` | **Convert** — set once by a lifecycle call, read via nil-guards today |
 | `exdura/exdura_http_server.bt` `httpServer` | **Convert**, with `destroy` using `clearField:` |
-| `exdura/workflow_engine.bt` `eventStore`, `activityPool` | **Convert to `late … \| Nil`** and delete the `supervised :: Boolean` flag; absent now means "not wired", `nil` means "standalone, no pool" (§1) |
-| `exdura/timer_manager.bt` `engine`, `eventStore`; `exdura_client.bt` `currentEngine`/`currentEventStore` | **Do not convert.** They resolve by name on every read so a `rest_for_one` restart is picked up; they are methods and should stay methods |
+| `exdura/exdura_client.bt` `supervisor` | **Do not convert.** `nil` means "standalone mode" and selects a resolution strategy in `currentEngine`/`currentEventStore` (`:144-155`). Convertible in principle — the discriminator would become `hasField:` — but the `\| Nil` is semantically honest here, so the change buys nothing |
+| `exdura/exdura_client.bt` `httpServer` | **Do not convert.** Genuinely optional: "nil unless ExduraWorker was started with an `#http` config" |
+| `exdura/workflow_engine.bt` `eventStore`, `activityPool` | **Do not convert**, and **the `supervised` flag stays.** `nil` means "resolve by name on every call" so a `rest_for_one` restart is picked up (`:976-987`); `activityPool` additionally needs two meanings of absence, which `late … \| Nil` cannot express (§Context (b)) |
+| `exdura/timer_manager.bt` `engine`, `eventStore`; `exdura_client.bt` `currentEngine`/`currentEventStore` | **Do not convert.** Same resolve-by-name-per-read reason; they are methods and should stay methods |
 | `symphony`/`exdura` error and DTO `field:`s (`workspace_error`, `linear_error`, `issue`, `activity_outcome`, `retry_snapshot_entry`, …) | **Not candidates.** Optional data where `nil` is meaningful, and §5 forbids `late field:` on a Value |
 | `exdura/stored_snapshot.bt` `state :: ReplaySnapshot` | **Not a candidate** — a Value built by deserialization. Either default it or widen to `\| Nil` to make the unverified state honest (§6) |
 
