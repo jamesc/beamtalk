@@ -91,11 +91,6 @@ main([]) ->
         %% init/1 branch).
         "init_hook_counter",
         "typed_field_counter",
-        %% BT-3535 (ADR 0123 Phase 1 spike) - a class-side migrateFromV1:
-        %% hook, for beamtalk_hot_reload's migration-hook call site, and a
-        %% sibling whose hook always raises (suspend-on-failure interop).
-        "shape_hook_cart",
-        "shape_hook_raising_cart",
         %% BT-3536 (ADR 0123 Phase 2) - beamtalk_shape_migration:migrate/3
         %% (a real two-step v1->v2->v3 chain, meck'd shape_version/
         %% shape_migrations meta) and pack/1's tier walk: a nested Value
