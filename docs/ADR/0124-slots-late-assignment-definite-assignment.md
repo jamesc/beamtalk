@@ -846,11 +846,9 @@ resulting consistency test between the static check and the emitted runtime
 check becomes an ordinary unit test of one implementation
 (architecture-principles §7, delete-the-copy disposition).
 
-The crate boundary this relies on already exists — `crates/beamtalk-core`
-with its `semantic_analysis` module is in the tree as of this ADR's date, even
-though `docs/ADR/README.md` still records ADR 0117 as *Proposed*. So A1 is
-unblocked today; it is the ADR's recorded status that is stale, not the
-dependency.
+The crate boundary this relies on already exists: ADR 0117 is Implemented,
+and `crates/beamtalk-core` with its `semantic_analysis` module is in the tree,
+so A1 is unblocked today.
 
 This is a hard requirement, not a preference. The diagnostic must appear in
 the LSP, and `just check-codegen-boundary` (`Justfile:666`, part of `just

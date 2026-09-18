@@ -143,7 +143,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0114](0114-class-and-method-rename.md) | Class and Method Rename in the Live Workspace | Accepted | 2026-08-25 |
 | [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Implemented | 2026-08-20 |
 | [0116](0116-number-on-the-left-arithmetic-coercion.md) | Double-Dispatch Coercion for Number-on-the-Left Arithmetic | Accepted | 2026-08-25 |
-| [0117](0117-beamtalk-core-crate-split.md) | Splitting `beamtalk-core` into Sub-Crates | Proposed | 2026-08-30 |
+| [0117](0117-beamtalk-core-crate-split.md) | Splitting `beamtalk-core` into Sub-Crates | Implemented | 2026-08-30 |
 | [0118](0118-expression-level-state-threading-preludes.md) | Expression-Level State Threading via ThreadedIr Preludes | Accepted | 2026-09-03 |
 | [0119](0119-class-module-name-resolution-registry.md) | Class-Name↔Module-Name Resolution Registry | Accepted | 2026-09-05 |
 | [0120](0120-value-type-self-threading-scope.md) | Value-Type `Self` Threading — Patch the Remaining Gaps, or Generalize `ThreadedIr`'s Storage Families? | Implemented | 2026-09-09 |
