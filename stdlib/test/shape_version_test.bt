@@ -46,8 +46,7 @@ TestCase subclass: ShapeVersionTest
   // (which a ClassBuilder-only class never exports), so this exercises a
   // different code path than the compiled-class tests above.
   testClassBuilderShapeVersionKeyword =>
-    Object classBuilder
-      name: #BT3537ShapeVersionBuilderClass;
+    Object classBuilder name: #BT3537ShapeVersionBuilderClass;
       superclass: Object;
       shapeVersion: 3;
       register
