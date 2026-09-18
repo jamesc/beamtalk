@@ -1,7 +1,7 @@
 # ADR 0124: Slots — Late Assignment and Definite Assignment
 
 ## Status
-Proposed (2026-09-18)
+Accepted (2026-09-18)
 
 Two parts, decided together because they are one rule seen from both sides.
 
@@ -111,8 +111,8 @@ EventStore is picked up automatically" — and never consults `supervised`.
 `currentActivityPool` (`:1005`) consults it to choose between two resolve-time
 behaviours ("resolve by name" vs "genuinely no pool"). So `supervised` is a
 flag selecting a **resolution strategy**, and `late` does not retire it: a
-`late … | Nil` slot offers absent / `nil` / value, while `activityPool` needs
-two meanings *of absence*. `exdura_client.bt`'s `supervisor` (`:144-155`) is
+`late` slot offers absent / value, while `activityPool` needs two meanings
+*of absence*. `exdura_client.bt`'s `supervisor` (`:144-155`) is
 the same: `nil` means "standalone, use the direct refs", a value means
 "supervised, resolve by name". The `nil` is load-bearing logic, not a gap.
 
@@ -335,22 +335,14 @@ check.
 **A default is forbidden.** `late state: x :: Integer = 0` is an Error — a
 slot with a default is never unset.
 
-**`| Nil` is allowed and means something distinct.** A
-`late state: x :: T | Nil` slot has three states:
-
-| State | Meaning | Test |
-|---|---|---|
-| absent | not assigned yet | `(self hasField: #x) not` |
-| `nil` | assigned, and legitimately empty | `self.x isNil` |
-| a value | assigned | — |
-
-Useful where "never set" and "set to nothing" are different facts — a cache
-explicitly emptied versus never populated. Two limits: no slot in the
-surveyed corpus uses this form (both candidates are plain
-`late state: x :: T`), so it rests on argument rather than example and is the
-part of §1 to cut if a smaller surface is wanted; and it is not a replacement
-for a mode flag — where absence itself carries two meanings, as in Exdura's
-`activityPool` (§Context (b)), an explicit flag remains right.
+**A nilable type is forbidden.** `late state: x :: T | Nil` is an Error: a
+slot whose type admits `nil` is never in the state `late` describes, since
+`nil` is already a value it can hold, and ADR 0078's check never applied to
+it. The message says to drop `late` or make the type non-nilable. So a `late`
+slot has exactly two states, absent and assigned, and its declared type is
+always non-nilable. Where absence itself must carry two meanings, as in
+Exdura's `activityPool` (§Context (b)), an explicit flag remains right;
+`late` does not express that and does not try to.
 
 ### 2. Representation: the key is absent until assigned
 
@@ -372,7 +364,7 @@ A `late` slot's key is **not present** in the state map until assigned. Not
   absent key.
 
 `nil` keeps its present meaning — the value of an unannotated, undefaulted
-slot — and is free to mean "legitimately none" on a `late … | Nil` slot.
+slot — and is never a value a `late` slot can hold.
 
 ### 3. Read and write semantics
 
@@ -382,7 +374,7 @@ A read of a `late` slot compiles to a guarded map read:
 
 ```text
 case maps:find(Slot, State) of
-  {ok, 'nil'} -> <raise uninitialized_state_error>   % non-nilable late only
+  {ok, 'nil'} -> <raise uninitialized_state_error>
   {ok, V}     -> V
   'error'     -> <raise uninitialized_state_error, naming the slot and class>
 end
@@ -398,8 +390,7 @@ reader the type checker has told to skip narrowing. So the guard keeps ADR
 0078's nil test and adds the absence test. **`late` does not make a
 non-nilable declared type sound** — the open-world writers above still
 exist — it makes the violation raise at the read, naming the slot, instead
-of surfacing as a `does_not_understand` on `nil` somewhere else. On a
-`late … | Nil` slot the `'nil'` arm is omitted.
+of surfacing as a `does_not_understand` on `nil` somewhere else.
 
 `generate_field_access` (`expressions.rs:519`) stays pure — it returns
 `Result<Document<'static>>` with no prelude channel — because the guard
@@ -1247,9 +1238,9 @@ read and two small reflective selectors, not a lowering.
 - **Observation cannot execute user code** — no initialiser, so the
   inspector, `sys:get_state`, `observer` and `recon` are side-effect-free by
   construction (§9).
-- Three states become expressible on a `late … | Nil` slot. This does not
-  retire Exdura's `supervised` flag, which distinguishes two meanings of
-  absence (§Context (b)).
+- A `late` slot has exactly two states, absent and assigned, and its type is
+  always non-nilable. This does not retire Exdura's `supervised` flag, which
+  distinguishes two meanings of absence (§Context (b)).
 - Part A gives Values a definite-assignment check where none exists —
   `generate_post_initialize_check` is Actor-only (`callbacks.rs:857`).
 - Part A reports once per class at the canonical factory construction site,
@@ -1305,9 +1296,10 @@ read and two small reflective selectors, not a lowering.
 - **The class side is a second implementation of each piece** — guard,
   presence, clear, reflective branch (§4i) — because class variables live in
   the class gen_server, not the object state map.
-- Four new diagnostics — three Errors (`late field:`, `late` without a type,
-  `late` with a default) and one advisory (definite assignment), plus the §4d
-  `terminate:` warning — all kept at parity across CLI, REPL, LSP and MCP.
+- Five new diagnostics — four Errors (`late field:`, `late` without a type,
+  `late` on a nilable type, `late` with a default) and one advisory (definite
+  assignment), plus the §4d `terminate:` warning — all kept at parity across
+  CLI, REPL, LSP and MCP.
 
 ### Neutral
 - `late` is a contextual keyword in declaration position only. It is unused
@@ -1352,7 +1344,7 @@ have no runtime check to fall back on.
 
 | # | Work | Components | Size |
 |---|---|---|---|
-| B1 | `late` modifier: contextual keyword, two-token lookahead extending the single-token dispatch at `declarations.rs:553`, following the shape of the class-header loop at `:191-209`; `SlotKind` on `StateDeclaration`; unparse round-trip. The Errors: `late field:`, `late` without a type annotation, `late` with a default, `late state:` on `native:`/`Object` | `beamtalk-core` (`source_analysis/parser/declarations.rs`, `ast/class.rs`, `unparse`) | **S** |
+| B1 | `late` modifier: contextual keyword, two-token lookahead extending the single-token dispatch at `declarations.rs:553`, following the shape of the class-header loop at `:191-209`; `SlotKind` on `StateDeclaration`; unparse round-trip. The Errors: `late field:`, `late` without a type annotation, `late` on a nilable type, `late` with a default, `late state:` on `native:`/`Object` | `beamtalk-core` (`source_analysis/parser/declarations.rs`, `ast/class.rs`, `unparse`) | **S** |
 | B2 | Exclude `late` slots from `generate_post_initialize_check` (its 2-arity `maps:get` would badkey) and from `init/1`'s state literal | `beamtalk-codegen` (`gen_server/callbacks.rs`, `gen_server/state.rs`) | **S** |
 | B3 | Guarded read: `maps:find` + the `'nil'` and absence arms in both branches of `generate_field_access` (`expressions.rs:519` instance, `:526` class-method on `ClassVars`), keeping it pure, reading the `late` sets from B5's metadata; audit the ~15 sibling state `maps:get` sites; disable DirectParams/Hybrid field hoisting for `late` slots (`control_flow/loop_mode.rs:118`). **After B5** | `beamtalk-codegen` (`expressions.rs`, `control_flow/`) | **M** |
 | B4 | `hasField:` / `clearField:` on `Object` plus runtime intrinsics; `clearField:` codegen intrinsic mirroring `generate_self_field_at_put_open` through `ThreadedIr`; `hasField:` in the Value reflection arm list (`value_type_codegen.rs:4753`); `read_field/2`'s declared-`late` branch with its per-read metadata lookup; class side (§4i): `self hasField:`/`clearField:` in class methods on `ClassVars` through the ADR 0110 shadow write, and `has_class_var`/`clear_class_var` handle_calls plus a declared-`late` branch in `get_class_var` | `beamtalk-stdlib`, `beamtalk-codegen` (`dispatch_codegen.rs`, `value_type_codegen.rs`), `beamtalk_runtime` (`beamtalk_reflection.erl`, `beamtalk_object_ops.erl`, `beamtalk_object_class.erl`) | **M** |
@@ -1419,7 +1411,7 @@ corpus should stay exactly as they are:
 | `exdura/exdura_http_server.bt` `httpServer` | **Convert**, with `destroy` using `clearField:` |
 | `exdura/exdura_client.bt` `supervisor` | **Do not convert.** `nil` means "standalone mode" and selects a resolution strategy in `currentEngine`/`currentEventStore` (`:144-155`). The `\| Nil` is semantically honest |
 | `exdura/exdura_client.bt` `httpServer` | **Do not convert.** Genuinely optional: "nil unless ExduraWorker was started with an `#http` config" |
-| `exdura/workflow_engine.bt` `eventStore`, `activityPool` | **Do not convert**, and **the `supervised` flag stays.** `nil` means "resolve by name on every call" so a `rest_for_one` restart is picked up (`:976-987`); `activityPool` needs two meanings of absence, which `late … \| Nil` cannot express (§Context (b)) |
+| `exdura/workflow_engine.bt` `eventStore`, `activityPool` | **Do not convert**, and **the `supervised` flag stays.** `nil` means "resolve by name on every call" so a `rest_for_one` restart is picked up (`:976-987`); `activityPool` needs two meanings of absence, which `late` cannot express (§Context (b)) |
 | `exdura/timer_manager.bt` `engine`, `eventStore`; `exdura_client.bt` `currentEngine`/`currentEventStore` | **Do not convert.** Resolve-by-name-per-read; they are methods and stay methods |
 | `symphony`/`exdura` error and DTO `field:`s (`workspace_error`, `linear_error`, `issue`, `activity_outcome`, `retry_snapshot_entry`, …) | **Not candidates.** Optional data where `nil` is meaningful, and §5 forbids `late field:` on a Value |
 | `exdura/stored_snapshot.bt` `state :: ReplaySnapshot` | **Not a candidate** — a Value built by deserialization. Default it or widen to `\| Nil` (§6) |
