@@ -150,6 +150,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0121](0121-lone-ok-error-atom-specs-as-result.md) | Lone `ok`/`error` Atom Return Specs Map to `Result` in FFI Type Inference | Accepted | 2026-09-14 |
 | [0122](0122-threaded-ir-storage-family-generalization-scope.md) | Unify `ThreadedIr` Storage-Family Threading | Implemented | 2026-09-16 |
 | [0123](0123-versioned-state-migration.md) | Versioned State Migration as a Language Surface (`shapeVersion:` + `migrateFromVN:`) | Accepted | 2026-09-17 |
+| [0124](0124-slots-lazy-init-definite-assignment.md) | Slots — Lazy Initialisation and Definite Assignment | Proposed | 2026-09-18 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
