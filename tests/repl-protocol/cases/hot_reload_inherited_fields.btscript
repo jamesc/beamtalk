@@ -1,0 +1,73 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E regression test for BT-3531: two related hot-reload field-migration
+// gaps for class hierarchies, both causing silent data loss:
+//
+// 1. The field list passed to migration used to be local-only
+//    (instance_variables/1), so a subclass reload dropped its own
+//    inherited fields (treated as "removed").
+// 2. Reloading a superclass never touched live subclass instances, so a
+//    field added to the superclass never reached them.
+//
+// HotSubCounter subclasses HotSuperCounter (inherits `value`, adds
+// `logCount`). This reloads HotSubCounter itself (inherited field must
+// survive) and then reloads HotSuperCounter alone (its new field must
+// still reach the live HotSubCounter instance).
+
+// ---------------------------------------------------------------------------
+// Load superclass + subclass, spawn a subclass instance
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_super_counter.bt
+// => Loaded: HotSuperCounter
+
+:load tests/repl-protocol/fixtures/hot_sub_counter.bt
+// => Loaded: HotSubCounter
+
+hsc := HotSubCounter spawn
+// => Actor(HotSubCounter, _)
+
+hsc increment
+// => 1
+
+hsc increment
+// => 2
+
+hsc getValue
+// => 2
+
+hsc getLogCount
+// => 2
+
+// ---------------------------------------------------------------------------
+// Reload the subclass itself — the inherited field 'value' must survive,
+// not be dropped as an unrecognized/removed field (gap 1)
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_sub_counter.bt
+// => Loaded: HotSubCounter
+
+hsc getValue
+// => 2
+
+hsc getLogCount
+// => 2
+
+// ---------------------------------------------------------------------------
+// Reload the SUPERCLASS only — v2 adds a new field 'step'. The live
+// HotSubCounter instance must still be reached and gain the new field
+// (gap 2), while its own fields stay intact.
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_super_counter_v2.bt
+// => Loaded: HotSuperCounter
+
+hsc getValue
+// => 2
+
+hsc getLogCount
+// => 2
+
+hsc getStep
+// => 5

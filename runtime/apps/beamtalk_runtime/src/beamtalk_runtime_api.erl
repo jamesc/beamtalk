@@ -51,6 +51,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     local_class_methods/1,
     local_instance_methods/1,
     instance_variables/1,
+    all_field_names/1,
     superclass/1
 ]).
 
@@ -272,6 +273,18 @@ local_instance_methods(Pid) ->
 -spec instance_variables(pid()) -> [atom()].
 instance_variables(Pid) ->
     beamtalk_object_class:instance_variables(Pid).
+
+-doc """
+Return all field names for a class, including inherited ones, by class
+name — no live instance or class pid required. Delegates to
+`beamtalk_behaviour_intrinsics:classAllFieldNamesByName/1`.
+
+BT-3531: the reconcile source for hot-reload field migration, which needs
+the flattened field set of a class it only has a `ClassName` atom for.
+""".
+-spec all_field_names(atom()) -> [atom()].
+all_field_names(ClassName) ->
+    beamtalk_behaviour_intrinsics:classAllFieldNamesByName(ClassName).
 
 -spec superclass(pid()) -> atom() | none.
 superclass(Pid) ->

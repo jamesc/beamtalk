@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload superclass — initial version (BT-3531)
+// Used by hot_reload_inherited_fields.btscript to verify that reloading a
+// superclass reaches live instances of its subclasses too.
+
+Actor subclass: HotSuperCounter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+
+  getValue => ^self.value

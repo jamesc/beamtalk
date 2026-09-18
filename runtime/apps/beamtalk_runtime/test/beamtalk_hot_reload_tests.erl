@@ -233,6 +233,7 @@ field_migration_setup() ->
     ok = ensure_counter_loaded(),
     ok = ensure_init_hook_counter_loaded(),
     ok = ensure_typed_field_counter_loaded(),
+    ok = ensure_logging_counter_loaded(),
     ok.
 
 field_migration_teardown(_) ->
@@ -256,7 +257,13 @@ field_migration_test_() ->
             {"does not fire lifecycle start telemetry during migration (BT-3532)",
                 fun test_field_migration_initialize_class_no_telemetry/0},
             {"logs a warning when init/1 returns an unexpected shape (BT-3532)",
-                fun test_field_migration_unexpected_init_return_logs_warning/0}
+                fun test_field_migration_unexpected_init_return_logs_warning/0},
+            {"subclass reload preserves an inherited field's value (BT-3531)",
+                fun test_field_migration_subclass_preserves_inherited_field_value/0},
+            {"superclass reload adds a new defaulted field to a live subclass instance (BT-3531)",
+                fun test_field_migration_subclass_gains_ancestor_field/0},
+            {"no dropped-fields warning for inherited fields (BT-3531)",
+                fun test_field_migration_subclass_no_dropped_fields_warning/0}
         ]
     end}.
 
@@ -458,6 +465,76 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         logger:set_primary_config(level, error)
     end.
 
+%% BT-3531: LoggingCounter (Counter subclass, adds `logCount`) — before the
+%% fix, migrate_fields/3 was handed only LoggingCounter's own declared
+%% fields (via instance_variables/1), so Counter's inherited `value` was
+%% never in NewInstanceVars and got treated as a removed field, dropping
+%% its live value. Using the flattened field list (all_field_names/1) must
+%% keep it.
+test_field_migration_subclass_preserves_inherited_field_value() ->
+    NewInstanceVars = beamtalk_runtime_api:all_field_names('LoggingCounter'),
+    ?assertEqual(['logCount', 'value'], lists:sort(NewInstanceVars)),
+    OldState = #{
+        '$beamtalk_class' => 'LoggingCounter',
+        '__class_mod__' => 'bt@logging_counter',
+        value => 7,
+        logCount => 3
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@logging_counter'}
+    ),
+    ?assertEqual(7, maps:get(value, NewState)),
+    ?assertEqual(3, maps:get(logCount, NewState)).
+
+%% BT-3531: simulates a superclass reload reaching a live subclass instance
+%% — LoggingCounter's flattened field list already includes Counter's
+%% `value`; an instance predating that field (as if Counter had just
+%% gained it) must have it added with its default, not silently skipped.
+test_field_migration_subclass_gains_ancestor_field() ->
+    NewInstanceVars = beamtalk_runtime_api:all_field_names('LoggingCounter'),
+    OldState = #{
+        '$beamtalk_class' => 'LoggingCounter',
+        '__class_mod__' => 'bt@logging_counter',
+        logCount => 9
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, {NewInstanceVars, 'bt@logging_counter'}
+    ),
+    ?assertEqual(9, maps:get(logCount, NewState)),
+    ?assertEqual(0, maps:get(value, NewState)).
+
+%% BT-3531: with the flattened field list, an inherited field is never
+%% misclassified as "removed" — no "Hot reload dropped fields" warning for
+%% `value` when migrating a LoggingCounter instance.
+test_field_migration_subclass_no_dropped_fields_warning() ->
+    logger:set_primary_config(level, all),
+    HandlerId = bt_3531_hot_reload_dropped_fields_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all
+    }),
+    try
+        NewInstanceVars = beamtalk_runtime_api:all_field_names('LoggingCounter'),
+        OldState = #{
+            '$beamtalk_class' => 'LoggingCounter',
+            '__class_mod__' => 'bt@logging_counter',
+            value => 1,
+            logCount => 2
+        },
+        {ok, _NewState} = beamtalk_hot_reload:code_change(
+            v1, OldState, {NewInstanceVars, 'bt@logging_counter'}
+        ),
+        receive
+            {log_event, #{msg := {string, "Hot reload dropped fields"}}} ->
+                ?assert(false)
+        after 200 ->
+            ok
+        end
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
+    end.
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -643,4 +720,26 @@ ensure_typed_field_counter_loaded() ->
             end;
         {error, Reason} ->
             error({typed_field_counter_module_not_found, Reason})
+    end.
+
+%% BT-3531: LoggingCounter (Counter subclass, BT-108 fixture) exercises
+%% inherited-field flattening in migrate_fields/3. Requires Counter already
+%% registered (ensure_counter_loaded/0 runs first in field_migration_setup/0).
+ensure_logging_counter_loaded() ->
+    case code:ensure_loaded('bt@logging_counter') of
+        {module, 'bt@logging_counter'} ->
+            case beamtalk_class_registry:whereis_class('LoggingCounter') of
+                undefined ->
+                    case erlang:function_exported('bt@logging_counter', register_class, 0) of
+                        true ->
+                            'bt@logging_counter':register_class(),
+                            ok;
+                        false ->
+                            ok
+                    end;
+                _Pid ->
+                    ok
+            end;
+        {error, Reason} ->
+            error({logging_counter_module_not_found, Reason})
     end.
