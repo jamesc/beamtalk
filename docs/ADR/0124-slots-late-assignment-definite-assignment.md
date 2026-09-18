@@ -395,11 +395,15 @@ It is not `nil`, and not a reserved sentinel value.
 
 - The presence test is `maps:is_key/2`. No assigned value — including `nil`,
   `false`, or `'__absent__'` itself — can be mistaken for "unassigned".
-- This is the one decision with independent real-world support: Exdura's
-  `WorkflowEngine` carries a whole extra `supervised :: Boolean` slot for no
-  purpose but to tell "not yet resolved" from "legitimately absent"
-  (§Context (b)). Key absence expresses that natively, so the workaround
-  stops being necessary.
+- **The ground for this is compiler-internal, not corpus evidence.** `nil` is
+  *already* the representation for "no value supplied" in two places —
+  `state.rs:36` emits `'nil'` for a defaultless slot, and ADR 0078's check
+  reads `'nil'` as unassigned — so a third structural meaning could not be
+  told apart from either. An earlier revision cited Exdura's
+  `supervised :: Boolean` flag as independent real-world support for this;
+  §Context (b) retracts that, because the flag selects a *resolution
+  strategy* rather than working around a missing representation. The
+  argument here does not depend on it.
 - `beamtalk_actor:init/1` validates only `'$beamtalk_class'` and
   `'__methods__'` (`beamtalk_actor.erl:1582`), so a missing *user* slot key
   breaks no existing invariant.
@@ -703,7 +707,7 @@ So the construction sites to check on a Value are:
 
 | Site | Verdict |
 |---|---|
-| `Cls new` (bare) | supplies nothing, so **every** typed-no-default non-nilable field is unassigned. The strongest case in the ADR — nothing can intervene between `new` and the result |
+| `Cls new` (bare) | supplies nothing, so **every** typed-no-default non-nilable field is unassigned. The highest-certainty finding in the ADR — nothing can intervene between `new` and the result |
 | `Cls new: #{…}` (literal map) | check keys, exactly as for `spawnWith:` |
 | `Cls field1: v1 field2: v2` (auto-generated keyword constructor) | **always satisfies** — it requires every field by construction (ADR 0042). No check needed, and worth stating so implementers do not add one |
 | `Cls new: someMap` (non-literal) | no evidence, report nothing |
@@ -1146,9 +1150,10 @@ The fixed-shape argument is real and this ADR takes the cost. It loses on a
 correctness point no ergonomics offsets: `nil` is *already* the compiler's
 representation for "no value supplied" (`state.rs:36` emits `'nil'` for a
 defaultless slot; ADR 0078's check reads `'nil'` as unassigned), so a third
-meaning cannot be distinguished from either. Exdura paid for exactly this
-with an extra `supervised :: Boolean` slot (§Context (b)) — the strongest
-single piece of evidence in the ADR, and it is evidence against this option.
+meaning cannot be distinguished from either. That argument is
+compiler-internal and needs no corpus support — an earlier revision claimed
+Exdura's `supervised :: Boolean` flag as exactly that support, and
+§Context (b) retracts it.
 
 ### Tension points
 
@@ -1185,9 +1190,9 @@ Rejected: keywords would grow as the product of modifier × slot keyword, and
 a `lateField:` token would exist only to be rejected. Steelmanned above.
 
 ### `nil` as the unassigned sentinel
-Rejected: `nil` already means "no value supplied" in two places, and Exdura
-paid for that ambiguity with an extra `supervised :: Boolean` slot.
-Steelmanned above.
+Rejected: `nil` already means "no value supplied" in two places
+(`state.rs:36`, ADR 0078's check), so a third structural meaning is
+indistinguishable from both. Steelmanned above.
 
 ### A reserved `'__unset__'` sentinel value instead of key absence
 Keeps every key present, answering the fixed-state-map-shape objection, while
