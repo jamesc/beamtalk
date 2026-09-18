@@ -809,21 +809,32 @@ ADR 0123's reconcile step 3 gains the `late` case it deferred here:
 | **`late`** | **present** | **kept** |
 | **`late`** | **absent** | **stays absent** |
 
-**Premise: ADR 0123 is implemented before Part B starts.** BT-3531, BT-3534
-and BT-3535 have landed as of `main@80b8db4`; `beamtalk_shape_migration`
-(BT-3536) is next. Phase B9 is sequenced after it, and the rows above are an
-edit to step 3 in whatever form BT-3536 lands.
+**Where reconcile lives.** ADR 0123's runtime leaf has landed:
+`beamtalk_shape_migration:migrate/3` (BT-3536, on `main` at `1e6780f`) owns
+reconcile, and `beamtalk_hot_reload` delegates to it (`beamtalk_hot_reload.erl:210`);
+the earlier `migrate_fields/2` no longer exists. `reconcile/5`
+(`beamtalk_shape_migration.erl:147`) takes its keep set from
+`beamtalk_behaviour_intrinsics:classAllFieldNamesByName/1`, its has-default
+map from `classAllFieldHasDefaultByName/1`, and its default values from
+`Module:init(#{'__skip_initialize__' => true})`; `reconcile_declared/6`
+(`:164`) then walks the declared list: present → kept; absent with a default
+→ that default; absent with no default → `nil` on an untyped class and
+`{error, {typed_field_unset, Field}}` on a `typed` one.
 
-Against today's tree, `beamtalk_hot_reload:migrate_fields/2` (`:192-250`)
-derives its keep set from
-`beamtalk_behaviour_intrinsics:classAllFieldNamesByName/1`, not from the
-defaults map, so the two `late` rows fall out with no change there. If 0123
-routes reconcile through `beamtalk_shape_migration`, B9 re-measures. The
-invariant that matters either way: **declared-but-absent `late` slots must
-stay in `allFieldNames`.** A keep set derived from `init/1` defaults (where
-`late` slots are absent by design) would drop an assigned `late` value on
-reload with a spurious "Hot reload dropped fields" warning. Needs an explicit
-invariant test wherever reconcile lives.
+So the two `late` rows above do **not** fall out for free. A `late` slot is
+absent from the migrated dictionary, absent from `init/1`'s defaults (B2
+excludes it from the literal) and has no default, so today's walk reaches the
+no-default branch and fails the migration of every `typed` class with an
+unassigned `late` slot. B9 adds the `late` case to `reconcile_declared/6`
+before that branch — absent and declared `late` → stays absent — keyed on a
+`classAllFieldKindsByName/1` intrinsic beside the two it already calls
+(B5). The keep set already comes from `allFieldNames`, so an *assigned*
+`late` value survives today; the invariant that **declared-but-absent `late`
+slots stay in `allFieldNames`** still gets an explicit test, because the
+`init/1`-derived defaults map is exactly where a future refactor could
+mistakenly source the keep set from. The remaining ADR 0123 phases
+(BT-3537 language surface, BT-3538 reload findings) touch the same modules,
+so B9 is sequenced after them.
 
 - `migrateFromVN:` hooks see a `Dictionary` in which an unassigned `late`
   slot is not a key. ADR 0123 already instructs hooks to read possibly-absent
@@ -1352,7 +1363,7 @@ have no runtime check to fall back on.
 | B6 | The §4d `terminate:`/`handle_info` unguarded-read warning | `beamtalk-core` (`semantic_analysis`) | **S** |
 | B7 | Inspector: `InspectorField` `#lateSlot` / `value: #notAssigned` / `drillable: false`, the cross-surface wire form (`inspector.bt:262`) and `beamtalk_inspector:fieldsOf/1` | `beamtalk-stdlib`, `beamtalk_runtime` | **S** |
 | B8 | REPL-visible output: decide and confirm `printString` rendering for an unassigned slot — **gated on explicit user confirmation** per `CLAUDE.md` | `beamtalk_runtime` (`beamtalk_object_printer.erl`), `tests/repl-protocol` | **S**, gated |
-| B9 | ADR 0123 reconcile `late` rows + the shared `(slot kind, present?, has default?) -> outcome` conformance fixture, the `allFieldNames`-keep-set invariant test, and slot kind in the shape store so an eager↔`late` flip is a `shape_change` that triggers recheck (§4g). Sequenced after ADR 0123's epic (§8) | `beamtalk_runtime`, `beamtalk_workspace` (`beamtalk_shape_diff.erl`, `beamtalk_workspace_shape_store.erl`), `beamtalk-codegen` | **M** |
+| B9 | The `late` case in `beamtalk_shape_migration:reconcile_declared/6` (absent and declared `late` → stays absent, before the typed-no-default failure) on a `classAllFieldKindsByName/1` intrinsic; the shared `(slot kind, present?, has default?) -> outcome` conformance fixture; the `allFieldNames`-keep-set invariant test; slot kind in the shape store so an eager↔`late` flip is a `shape_change` that triggers recheck (§4g). Sequenced after BT-3537/BT-3538 (§8) | `beamtalk_runtime` (`beamtalk_shape_migration.erl`, `beamtalk_behaviour_intrinsics.erl`), `beamtalk_workspace` (`beamtalk_shape_diff.erl`, `beamtalk_workspace_shape_store.erl`), `beamtalk-codegen` | **M** |
 | B10 | Docs + tests: `beamtalk-language-features.md` leading with **"a nilable slot is not automatically a `late` candidate"** and the resolve-by-name counter-example (§Context (d)), then slot kinds, the read/raise rule, `hasField:`/`clearField:`, the `spawnWith:`-injection clause at `:2426`; `surface-parity.md`; BUnit tests; REPL-protocol e2e | docs, `stdlib/test`, `tests/repl-protocol` | **S** |
 | B11 | `ClassBuilder` parity (§9): field spec grows from `#{name => default}` to type + default + kind; `lateFields:` beside `fields:`; the class gen_server stores kinds; `fieldKinds`, the read guard's `late` set and `read_field/2` resolve them for a dynamic class via the existing `gen_server:call` fallback. Runtime and reflection parity only: a dynamic class has no AST declaration and no statically resolvable construction site, so Part A's compile-time check stays out of reach for it (§9) | `beamtalk-stdlib` (`class_builder.bt`), `beamtalk_runtime` (`beamtalk_object_class.erl`, `beamtalk_behaviour_intrinsics.erl`, `beamtalk_reflection.erl`), `beamtalk-core` (`generated_builtins.rs`) | **M** |
 
