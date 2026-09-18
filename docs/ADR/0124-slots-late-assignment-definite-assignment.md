@@ -18,13 +18,13 @@ Two parts, decided together because they are one rule seen from both sides.
   general, and it is a judgement call rather than a demand from the corpus.
   Scoped to `state:` in this ADR; `late classState:` is deferred (§1).
 
-**If Part B is not pursued**, Part A still needs an exemption for
-lifecycle-assigned slots, and `@expect uninitialized_state` on the
-declaration is that fallback (§Alternatives). It gives the non-nilable
-declared type and the exemption for one clause of work; it does not give the
-loud raise at the read, and it makes the declared type a claim the checker
-believes with nothing enforcing it. Part B is the difference between those
-two.
+**Part A needs an exemption, and the exemption is a language construct.**
+A lifecycle-assigned slot must be able to opt out of Part A's diagnostic. The
+project's rule is to prefer language constructs over annotations, so that
+opt-out is `late` — a declaration that says what the slot *is* — and not an
+`@expect` category that says which warning to silence (§Alternatives). That
+makes Part B load-bearing for Part A rather than optional: without `late`,
+Part A's only exemption would be an annotation.
 
 Part A checks the slots that must be valid after `initialize`; Part B declares
 the ones that legitimately are not yet. A slot is `late` exactly when Part A's
@@ -677,12 +677,14 @@ provided the bare-`new` row's override check above is in place, since an
 Error with a known false-positive class and no backstop is worse than a
 Warning. That asymmetry belongs in the docs.
 
-Suppression is `@expect definite_assignment` on the declaration.
-`StateDeclaration.expect` exists (`ast/class.rs:520`) and `class_variables`
-shares the type (`:174`), so the carrier is free; an unknown `@expect`
-category is a parse error, so this needs a new `ExpectCategory` variant plus
-its `from_name` entry (`ast/expression.rs`) and unparse name
-(`unparse/mod.rs`), alongside the new `DiagnosticCategory`.
+**No `@expect` category is added for this diagnostic.** The exemption is
+the language construct `late`: a slot that is legitimately unassigned after
+`initialize` says so in its declaration, and the diagnostic reads it. The
+three fixes the diagnostic offers — supply it at the construction site, give
+it a default, or declare it `late` — are all constructs, and each changes
+what the program means rather than which warning is shown. Per-project
+severity is still ADR 0100 Rule 3's `[diagnostics]` table, which is
+configuration, not source annotation.
 
 **Supplying a `late` slot at `spawnWith:` counts as assigned.** `init/1`
 merges with the caller winning — `maps:merge(DefaultState, InitArgs)`
@@ -854,7 +856,7 @@ family `fieldKinds` joins. Deferring `late classState:` (§1) is what keeps
 |---|---|---|
 | **Kotlin** | `lateinit var` — a non-null property assigned after construction, throwing `UninitializedPropertyAccessException` on early read; separately `by lazy { }` | **The model for §1.** Adopted wholesale: non-null declared type, deferred assignment, defined error on early read. Two additions: `hasField:` as a first-class presence test (Kotlin's `::x.isInitialized` is reflection-flavoured), and `clearField:` to un-initialise, which Symphony's relaunch requires. `by lazy` rejected (§Alternatives) |
 | **Swift** | Two-phase definite initialisation proves every stored property is set before `self` escapes; `lazy var`, which cannot be `let` and needs a `mutating` getter on a struct | The model for §6. Swift makes it an *error* because it has no reflective writers and no hot reload; Beamtalk cannot (ADR 0100). Its `lazy var`-on-a-struct wall parallels §5's rejection of `late field:` |
-| **C#** | `required` members (C# 11) — every constructor path or object initialiser must set them; nullable reference types with `!` | `required` is Part A's construction-site check by another name and validates reporting at the construction site. `!`-style per-read suppression rejected; `@expect definite_assignment` on the declaration is the Beamtalk form |
+| **C#** | `required` members (C# 11) — every constructor path or object initialiser must set them; nullable reference types with `!` | `required` is Part A's construction-site check by another name and validates reporting at the construction site. `!`-style per-read suppression rejected; `late` on the declaration is the Beamtalk form, a construct rather than an assertion |
 | **Newspeak** | Slots accessed exclusively via messages; `lazy s = expr.` computes the initialiser on first getter run | Rejected: no memoise-on-read demand (§Context (c)), and its `nil`-based storage recomputes forever when the value is `nil`. Newspeak has no `late` analogue |
 | **Pharo** | `Slot` metaobjects — `LazySlot`, `InitializedSlot`, `ComputedSlot` | **Adopted the vocabulary, not the mechanism.** `fieldKinds` answering `#eager`/`#late` is the reflectable-slot-kind idea; user-definable metaobjects rejected below |
 | **Squeak/Pharo `ClassBuilder`** | Match instance variables by name on recompile, default the rest | Already Beamtalk's hot-reload behaviour (ADR 0123); this ADR adds two `late` rows (§8) |
@@ -1072,20 +1074,21 @@ factory pattern means the cheap version already covers the common case.
 
 ### `@expect uninitialized_state` on the declaration as the exemption
 The smallest design that serves Part A. `StateDeclaration.expect` exists
-(`ast/class.rs:520`), `parse_pending_declaration_expect` already runs before
-member dispatch (`declarations.rs:499`), and Part A adds an `ExpectCategory`
-anyway, so `state: proc :: Subprocess @expect uninitialized_state` gives the
+(`ast/class.rs:520`) and `parse_pending_declaration_expect` already runs
+before member dispatch (`declarations.rs:499`), so
+`state: proc :: Subprocess @expect uninitialized_state` gives the
 non-nilable declared type and exemption from ADR 0078's check for one clause
 in `inherited_typed_no_default_fields`. No keyword, no `maps:find`, no
 reconcile rows, no `fieldKinds`, no inspector kind, no printer change, no
-`hasField:`/`clearField:` — the existing `isNil` guard and `:= nil` keep
-working. **It is the fallback if Part B is not pursued**, and the trade is
-stated plainly: reading too early answers `nil` and fails as a
-`does_not_understand` somewhere else, exactly as today; `nil` keeps carrying
-structural meaning; and the declared type becomes a claim the checker
-believes with nothing behind it — the §3 nil-injection problem with no read
-guard at all. Rejected as the primary design because that last point is the
-lie this ADR exists to remove, formalised as a declaration.
+`hasField:`/`clearField:`. Rejected on two grounds. First, it is an
+annotation where a construct is available: `@expect` names a diagnostic to
+silence, while `late` states a fact about the slot that the compiler,
+runtime, reflection and inspector all act on, and this project prefers
+constructs to annotations wherever one can be had. Second, it is unsound in
+a way `late` is not: reading too early answers `nil` and fails as a
+`does_not_understand` somewhere else, `nil` keeps carrying structural
+meaning, and the declared type becomes a claim the checker believes with
+nothing behind it — the §3 nil-injection problem with no read guard at all.
 
 ### A `Cell(T)` library value
 `state: proc :: Cell(Subprocess) = Cell empty`, with `value` raising when
@@ -1223,8 +1226,10 @@ read and two small reflective selectors, not a lowering.
 
 ## Implementation
 
-Part A is shippable independently of Part B; the only coupling is the
-`not late` clause in the shared predicate (§7).
+Part A can be built first — A1–A5 do not depend on B1–B10 — but it is not
+complete without B1: until `late` parses, a lifecycle-assigned slot has no
+construct with which to opt out of the diagnostic. Ship A1–A5 and B1–B2
+together as the minimum.
 
 ### Part A — definite assignment
 
@@ -1233,7 +1238,7 @@ Part A is shippable independently of Part B; the only coupling is the
 | A1 | Reimplement the predicate (annotated ∧ no-default ∧ non-nilable) in `beamtalk-core` on `WellKnownClass::is_nil_class` + `AliasRegistry`; `inherited_typed_no_default_fields` calls it; delete the codegen copy; fixture for the alias-typed / `UndefinedObject`-typed slots whose runtime behaviour changes (§7) | `beamtalk-core` (`semantic_analysis`), `beamtalk-codegen` (`gen_server/callbacks.rs`), `stdlib/test/fixtures` | **M** |
 | A2 | Actor construction-site check: extend `check_spawn_with_map_keys` (`validation.rs:2356`) with the unassigned-slot predicate; a call-site hook for bare `spawn`; the per-class "`initialize` definitely assigns" summary in `__beamtalk_meta`/`ClassInfo` and its composition across the ADR 0078 flattened chain, branch-aware (§6); bare-`new`-resolves-to-default check shared with A3 | `beamtalk-core` (`semantic_analysis`), `beamtalk-codegen` (`__beamtalk_meta` emission) | **L** |
 | A3 | Value construction-site check: `new` (bare), `new:` with a literal map, and the auto-generated keyword constructor as always-satisfying (§6). No `initialize` chain to walk | `beamtalk-core` (`semantic_analysis`) | **S** |
-| A4 | `DiagnosticCategory::DefiniteAssignment`; new `ExpectCategory` variant + `from_name` + unparse name; `[diagnostics]` escalation; parity across build/LSP/REPL/MCP (ADR 0100 Rule 3, `surface-parity.md`) | `beamtalk-core`, `beamtalk-language-service`, `beamtalk-cli` | **S** |
+| A4 | `DiagnosticCategory::DefiniteAssignment`; `[diagnostics]` escalation; parity across build/LSP/REPL/MCP (ADR 0100 Rule 3, `surface-parity.md`). No `@expect` category — `late` is the exemption (§6) | `beamtalk-core`, `beamtalk-language-service`, `beamtalk-cli` | **S** |
 | A5 | Docs + tests: the Actor-vs-Value asymmetry (no runtime backstop on Values) and the deserialization limit; `uninitialized_state_actor.bt` / `non_typed_uninitialized_state_actor.bt` gain compile-time expectations; a Value fixture for the `new`-with-typed-no-default case | docs, `crates/**/tests`, `stdlib/test` | **S** |
 
 A1 is unblocked and independent. A3 is worth doing early, because Values
@@ -1261,8 +1266,9 @@ text and severity are Rust unit tests plus LSP diagnostic-provider tests.
 Slot kinds surviving a class reload, and the eager↔`late` shape-change
 recheck, go in `tests/repl-protocol/cases/*.btscript`.
 
-**Recommended start:** A1, then A3, then A2. For Part B the order is B1,
-B2, B5, B3, B4 — the metadata before the guard.
+**Recommended start:** A1, then B1 and B2 (so the exemption exists), then
+A3, then A2. For the rest of Part B the order is B5, B3, B4 — the metadata
+before the guard.
 
 ## Migration Path
 
