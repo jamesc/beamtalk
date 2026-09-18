@@ -59,3 +59,11 @@ TestCase subclass: RenameToTest
 
   testRenameRefusesStdlibClassObject =>
     self should: [Object renameTo: #Thing] raise: #runtime_error
+
+  // Dependency-class refusal (ADR 0114 § Refusal vs flushability): a compiled
+  // .bt fixture class has its source file recorded but no project_path is
+  // configured in BUnit mode, so it classifies as "dependency:" and is refused
+  // before any memory mutation — covering the uncovered branch in
+  // ensure_class_renamable/2 and dependency_rename_refusal_error/2.
+  testRenameRefusesDependencyClass =>
+    self should: [Counter renameTo: #CounterRenamed] raise: #runtime_error
