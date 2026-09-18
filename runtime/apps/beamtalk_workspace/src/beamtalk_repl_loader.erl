@@ -533,9 +533,18 @@ a class hierarchy's live subclass instances carry the superclass's fields
 too (generated `init/1` merges them in), so a field change on the
 superclass must reach them even though the descendant's own module wasn't
 recompiled.
+
+When a single reloaded file defines a class together with one of its own
+subclasses, that subclass is already handled directly by this loop's own
+`Classes` entry — `ReloadedNames` lets `hot_reload_descendants/2` skip it
+there instead of migrating it a second time.
 """.
 -spec trigger_hot_reload(atom(), [map()]) -> ok.
 trigger_hot_reload(ModuleName, Classes) ->
+    ReloadedNames = sets:from_list(
+        [N || ClassMap <- Classes, (N = resolve_class_name(ClassMap)) =/= undefined],
+        [{version, 2}]
+    ),
     lists:foreach(
         fun(ClassMap) ->
             case resolve_class_name(ClassMap) of
@@ -543,7 +552,7 @@ trigger_hot_reload(ModuleName, Classes) ->
                     ok;
                 ClassName ->
                     hot_reload_class(ModuleName, ClassName),
-                    hot_reload_descendants(ClassName)
+                    hot_reload_descendants(ClassName, ReloadedNames)
             end
         end,
         Classes
@@ -554,17 +563,42 @@ trigger_hot_reload(ModuleName, Classes) ->
 BT-3531: hot-reload every loaded descendant of ClassName, each against its
 own (unchanged) module — only the field set being reconciled changed,
 via the ancestor's field addition/removal, not the descendant's code.
+
+Skips any descendant in `ReloadedNames` — it already has (or will get) its
+own direct `hot_reload_class/2` call from `trigger_hot_reload/2`'s own loop
+over `Classes`, so reaching it again here would double the
+suspend/change_code/resume cycle for the same instances.
+
+`whereis_class/1` and `module_name/1` are two independent calls with a gap
+between them — if a descendant's class process exits in that gap
+(concurrent removal/rename from another session, or an untrappable `kill`
+before `terminate/2` runs), `module_name/1` raises `exit({noproc, _})`.
+Since this runs before `activate_module/4`'s workspace bookkeeping steps
+and the new module code is already loaded by this point, an uncaught
+crash here would abort the whole reload half-applied — so a vanished
+descendant is skipped, same as `undefined` above, mirroring the
+`catch error:badarg -> []` guard `hot_reload_class/2` already applies to
+`all_instances/1` for the same class of transient race.
 """.
--spec hot_reload_descendants(atom()) -> ok.
-hot_reload_descendants(ClassName) ->
+-spec hot_reload_descendants(atom(), sets:set(atom())) -> ok.
+hot_reload_descendants(ClassName, ReloadedNames) ->
     lists:foreach(
         fun(Descendant) ->
-            case beamtalk_runtime_api:whereis_class(Descendant) of
-                undefined ->
+            case sets:is_element(Descendant, ReloadedNames) of
+                true ->
                     ok;
-                ClassPid ->
-                    DescendantModule = beamtalk_runtime_api:module_name(ClassPid),
-                    hot_reload_class(DescendantModule, Descendant)
+                false ->
+                    case beamtalk_runtime_api:whereis_class(Descendant) of
+                        undefined ->
+                            ok;
+                        ClassPid ->
+                            try
+                                DescendantModule = beamtalk_runtime_api:module_name(ClassPid),
+                                hot_reload_class(DescendantModule, Descendant)
+                            catch
+                                exit:{noproc, _} -> ok
+                            end
+                    end
             end
         end,
         beamtalk_class_registry:all_subclasses(ClassName)
