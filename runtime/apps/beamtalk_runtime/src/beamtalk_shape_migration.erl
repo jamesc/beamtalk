@@ -170,15 +170,34 @@ reconcile_declared([Field | Rest], Acc, ChainedFields, Defaults, HasDefaultMap, 
         error ->
             case maps:get(Field, HasDefaultMap, false) of
                 true ->
-                    Default = maps:get(Field, Defaults, nil),
-                    reconcile_declared(
-                        Rest,
-                        Acc#{Field => Default},
-                        ChainedFields,
-                        Defaults,
-                        HasDefaultMap,
-                        IsTyped
-                    );
+                    case maps:find(Field, Defaults) of
+                        {ok, Default} ->
+                            reconcile_declared(
+                                Rest,
+                                Acc#{Field => Default},
+                                ChainedFields,
+                                Defaults,
+                                HasDefaultMap,
+                                IsTyped
+                            );
+                        error when IsTyped ->
+                            %% Declares a default, but safe_init_defaults/2
+                            %% couldn't compute it (init/1 degraded to #{})
+                            %% — on a typed class this may not silently
+                            %% fall back to nil, same as the no-default
+                            %% case below (ADR 0123 § Runtime contract: a
+                            %% migration may not leave a typed slot unset).
+                            {error, {typed_field_unset, Field}};
+                        error ->
+                            reconcile_declared(
+                                Rest,
+                                Acc#{Field => nil},
+                                ChainedFields,
+                                Defaults,
+                                HasDefaultMap,
+                                IsTyped
+                            )
+                    end;
                 false when IsTyped ->
                     {error, {typed_field_unset, Field}};
                 false ->

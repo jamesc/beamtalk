@@ -61,6 +61,8 @@ shape_migration_test_() ->
             {"idempotent when From =:= To", fun test_migrate_idempotent_when_current/0},
             {"typed field left unset by the chain fails the migration",
                 fun test_migrate_typed_field_unset_fails/0},
+            {"typed field with a declared default still fails when init/1 is unavailable",
+                fun test_migrate_typed_field_with_default_fails_when_init_unavailable/0},
             {"undeclared field is dropped with a warning",
                 fun test_migrate_drops_undeclared_field/0},
             {"pack/1 rejects a SendableRef (Actor-typed) field",
@@ -161,6 +163,31 @@ test_migrate_typed_field_unset_fails() ->
         },
         Reason
     ).
+
+%% Review finding (BT-3536 PR): a typed field that *declares* a default is
+%% not exempt from the "may not leave a typed slot unset" rule when the
+%% real default can't actually be computed. TypedFieldCounter's
+%% `value :: Integer = 0` has a declared default; `label` is supplied so
+%% only `value` is missing, and init/1 is meck'd unavailable so
+%% safe_init_defaults/2 degrades to `#{}` — silently defaulting `value` to
+%% `nil` here would defeat the typed-slot invariant just as surely as the
+%% no-default case above.
+test_migrate_typed_field_with_default_fails_when_init_unavailable() ->
+    meck:new('bt@typed_field_counter', [passthrough]),
+    meck:expect('bt@typed_field_counter', init, fun(_Args) -> {error, boom} end),
+    try
+        {error, Reason} = beamtalk_shape_migration:migrate(
+            'TypedFieldCounter', 1, #{label => <<"x">>}
+        ),
+        ?assertMatch(
+            #beamtalk_error{
+                kind = shape_migration_failed, class = 'TypedFieldCounter', selector = value
+            },
+            Reason
+        )
+    after
+        meck:unload('bt@typed_field_counter')
+    end.
 
 test_migrate_drops_undeclared_field() ->
     Fields = #{itemCount => 1, total => 0, tag => <<"none">>, ghost => true},
