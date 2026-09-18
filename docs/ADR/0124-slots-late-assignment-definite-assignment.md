@@ -17,14 +17,20 @@ Two parts, decided together because they are one rule seen from both sides.
   strategy in their `nil` and must not change. The pattern is real and
   general, and it is a judgement call rather than a demand from the corpus.
   Scoped to `state:` in this ADR; `late classState:` is deferred (§1).
+  **Accept — B1 and B2 are required for Part A; B3–B10 stand on the two
+  slots.**
 
 **Part A needs an exemption, and the exemption is a language construct.**
-A lifecycle-assigned slot must be able to opt out of Part A's diagnostic. The
-project's rule is to prefer language constructs over annotations, so that
-opt-out is `late` — a declaration that says what the slot *is* — and not an
-`@expect` category that says which warning to silence (§Alternatives). That
-makes Part B load-bearing for Part A rather than optional: without `late`,
-Part A's only exemption would be an annotation.
+A lifecycle-assigned slot must be able to opt out of Part A's diagnostic.
+**This ADR adopts the position that where a language construct can express
+the fact, it is preferred to an annotation that silences a diagnostic.** The
+precedent is that every existing class and slot modifier — `sealed`,
+`abstract`, `typed`, `internal`, and ADR 0067's `state:`/`field:`/
+`classState:` — is a keyword, not a pragma. So the opt-out is `late`, a
+declaration that says what the slot *is*, and not an `@expect` category that
+says which warning to silence (§Alternatives). That makes Part B
+load-bearing for Part A rather than optional: without `late`, Part A's only
+exemption would be an annotation.
 
 Part A checks the slots that must be valid after `initialize`; Part B declares
 the ones that legitimately are not yet. A slot is `late` exactly when Part A's
@@ -1083,8 +1089,10 @@ reconcile rows, no `fieldKinds`, no inspector kind, no printer change, no
 `hasField:`/`clearField:`. Rejected on two grounds. First, it is an
 annotation where a construct is available: `@expect` names a diagnostic to
 silence, while `late` states a fact about the slot that the compiler,
-runtime, reflection and inspector all act on, and this project prefers
-constructs to annotations wherever one can be had. Second, it is unsound in
+runtime, reflection and inspector all act on. This ADR adopts the position
+(§Status) that a construct is preferred wherever one can express the fact,
+following the precedent that every existing class and slot modifier is a
+keyword. Second, it is unsound in
 a way `late` is not: reading too early answers `nil` and fails as a
 `does_not_understand` somewhere else, `nil` keeps carrying structural
 meaning, and the declared type becomes a claim the checker believes with
