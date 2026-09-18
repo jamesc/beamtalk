@@ -113,7 +113,18 @@
       "Bash(git rev-parse:*)",
       "Bash(git show:*)",
       "Bash(git worktree:*)",
-      "Bash(rustfmt:*)"
+      "Bash(rustfmt:*)",
+      "mcp__Linear__save_comment",
+      "mcp__Linear__save_diff_comment",
+      "mcp__Linear__save_document",
+      "mcp__Linear__save_issue",
+      "mcp__Linear__save_issue_label",
+      "mcp__Linear__save_milestone",
+      "mcp__Linear__save_project",
+      "mcp__Linear__save_project_label",
+      "mcp__Linear__save_release",
+      "mcp__Linear__save_release_note",
+      "mcp__Linear__save_status_update"
     ]
   }
 }
