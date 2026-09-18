@@ -20,8 +20,10 @@ rejected alternative.
   type is usually non-nilable — that is the point, since the `| Nil` such
   slots carry today is an escape from the check rather than a claim about the
   data — but `late … | Nil` is permitted and gives three states
-  (absent / `nil` / a value; §1). No initialiser expression, so **reading
-  never writes**, which is what keeps it small.
+  (absent / `nil` / a value; §1). **That three-state form is reasoned from
+  first principles, not evidenced:** no slot in the surveyed corpus uses it,
+  and both conversion candidates drop `| Nil` entirely. No initialiser
+  expression, so **reading never writes**, which is what keeps it small.
 
   **Part B's evidence is two slots**, and that is the main thing a reviewer
   should weigh. Successive passes over Exdura and Symphony narrowed it from
@@ -383,10 +385,23 @@ slot with a default is never unset, so `late` is meaningless on it.
 | a value | assigned | — |
 
 This is useful where "never set" and "set to nothing" are different facts —
-a cache that has been explicitly emptied versus never populated. It is *not*
-a general replacement for a mode flag: if absence itself needs to carry two
-meanings, as in Exdura's `activityPool` (§Context (b)), three states are not
-enough and an explicit flag remains the right answer.
+a cache that has been explicitly emptied versus never populated.
+
+**Two honest caveats.** First, this form is **design-reasoned, not
+corpus-evidenced**: neither conversion candidate in §Context (a) uses it
+(`proc` and `httpServer` are both plain `late state: x :: T`), so unlike the
+base `late` case it rests on argument rather than on an example. Given how
+strictly the rest of this ADR weighs evidence, it should be read as the
+weaker half of §1 and would be a reasonable thing to cut if a reviewer wants
+the surface smaller. Second, it is *not* a general replacement for a mode
+flag: if absence itself must carry two meanings, as in Exdura's
+`activityPool` (§Context (b)), three states are not enough and an explicit
+flag remains the right answer.
+
+The "declare a non-nilable type" framing above is therefore the *typical*
+case rather than the only one — `| Nil` on a `late` slot is a deliberate
+statement that empty is a real value, not the escape-hatch widening this ADR
+exists to remove.
 
 ### 2. Representation: the key is absent until assigned
 
