@@ -80,6 +80,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
     end in
     let DefaultState = ~{
         '__class_mod__' => 'nlr_matching_token_actor'
+        , '__shape_version__' => 1
         , 'n' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)

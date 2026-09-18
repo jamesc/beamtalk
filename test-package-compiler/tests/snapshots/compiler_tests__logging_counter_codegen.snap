@@ -85,6 +85,7 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
             %% Merge parent state with the fields declared by this class
             let ChildFields = ~{
                 '__class_mod__' => 'logging_counter'
+                , '__shape_version__' => 1
                 , 'logCount' => 0
             }~
             in let MergedState = call 'maps':'merge'(ParentState, ChildFields)

@@ -79,6 +79,7 @@ module 'binary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
     end in
     let DefaultState = ~{
         '__class_mod__' => 'binary_operators'
+        , '__shape_version__' => 1
         , 'x' => 10
         , 'y' => 3
     }~

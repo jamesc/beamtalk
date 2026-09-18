@@ -79,6 +79,7 @@ module 'unicode_string_literals' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
     end in
     let DefaultState = ~{
         '__class_mod__' => 'unicode_string_literals'
+        , '__shape_version__' => 1
         , 'cafe' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<195>(8,1,'integer',['unsigned'|['big']]),#<169>(8,1,'integer',['unsigned'|['big']])}#
         , 'japanese' => #{#<230>(8,1,'integer',['unsigned'|['big']]),#<151>(8,1,'integer',['unsigned'|['big']]),#<165>(8,1,'integer',['unsigned'|['big']]),#<230>(8,1,'integer',['unsigned'|['big']]),#<156>(8,1,'integer',['unsigned'|['big']]),#<172>(8,1,'integer',['unsigned'|['big']]),#<232>(8,1,'integer',['unsigned'|['big']]),#<170>(8,1,'integer',['unsigned'|['big']]),#<158>(8,1,'integer',['unsigned'|['big']])}#
         , 'emoji' => #{#<240>(8,1,'integer',['unsigned'|['big']]),#<159>(8,1,'integer',['unsigned'|['big']]),#<142>(8,1,'integer',['unsigned'|['big']]),#<137>(8,1,'integer',['unsigned'|['big']])}#

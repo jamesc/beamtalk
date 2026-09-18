@@ -79,6 +79,7 @@ module 'future_string_interpolation' ['start_link'/1, 'start_link'/2, 'init'/1, 
     end in
     let DefaultState = ~{
         '__class_mod__' => 'future_string_interpolation'
+        , '__shape_version__' => 1
         , 'name' => #{#<65>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#
         , 'age' => 25
         , 'firstName' => #{#<66>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']])}#

@@ -79,6 +79,7 @@ module 'character_literals' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_c
     end in
     let DefaultState = ~{
         '__class_mod__' => 'character_literals'
+        , '__shape_version__' => 1
         , 'letterA' => 65
         , 'letterZ' => 122
         , 'digit' => 48

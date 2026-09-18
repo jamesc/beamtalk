@@ -161,6 +161,47 @@ fn test_init_parent_actor_subclass_calls_parent_init() {
     );
 }
 
+/// BT-3534 (ADR 0123 Phase 0): every generated actor `init/1` must stamp
+/// `'__shape_version__' => 1` into its default state — the base-class
+/// `DefaultState` map, alongside `'__class_mod__'`. `shapeVersion:` itself
+/// is a later phase, so every class is version 1 today; this test pins the
+/// key/value pair the generator must emit regardless.
+#[test]
+fn test_init_base_actor_writes_shape_version_one() {
+    let src = concat!(
+        "Actor subclass: Counter\n", //
+        "  state: value = 0\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+
+    assert!(
+        code.contains("'__shape_version__' => 1"),
+        "init/1's DefaultState must stamp '__shape_version__' => 1. Got:\n{code}"
+    );
+}
+
+/// BT-3534: the same stamp must appear in a subclass's `ChildFields` map
+/// (the parent-init path), not just the base-class `DefaultState` map.
+#[test]
+fn test_init_subclass_actor_writes_shape_version_one() {
+    let src = concat!(
+        "Counter subclass: LoggingCounter\n",
+        "  state: logCount = 0\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("logging_counter"))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("'__shape_version__' => 1"),
+        "init/1's ChildFields must stamp '__shape_version__' => 1. Got:\n{code}"
+    );
+}
+
 // ── Type-annotation codegen coverage ─────────────────────────────────────────
 //
 // Target: gen_server/callbacks.rs — is_nilable_type Union branch,

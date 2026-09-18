@@ -186,6 +186,40 @@ fn test_generate_value_type_module_includes_class_name() {
     );
 }
 
+/// BT-3534 (ADR 0123 Phase 0): `'__shape_version__'` is a hot-reload-only
+/// concept — it is written by generated actor `init/1`
+/// (`gen_server/callbacks.rs`) and never by a Value type's `new/0`, which
+/// this module generates. A `Value` has no process and is never migrated
+/// in place (Values are only ever re-created by new code), so
+/// `beamtalk_class_instantiation:ancestor_compiled_defaults/1` — which
+/// derives `Value` defaults from `Module:new()` — must never see this key
+/// on a compiled Value's default map. Asserting it directly on the
+/// generated source (rather than only at the Erlang runtime layer) pins
+/// the invariant to its actual cause: this generator simply never emits it.
+#[test]
+fn test_generate_value_type_module_never_emits_shape_version_key() {
+    let class = make_value_class("Point", &["x", "y"]);
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: Vec::new(),
+        span: s(),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let mut generator = CoreErlangGenerator::new("point");
+    let doc = generator.generate_value_type_module(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("__shape_version__"),
+        "Value type codegen must never emit the actor-only hot-reload \
+         shape version key. Got: {output}"
+    );
+}
+
 /// ADR 0119 step 0: `is_known_stdlib_type` must agree with
 /// `ClassHierarchy::with_builtins()` — every real built-in class name
 /// registered there (via `generated_builtins.rs::is_generated_builtin_class`,

@@ -80,6 +80,7 @@ module 'initializing_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
     end in
     let DefaultState = ~{
         '__class_mod__' => 'initializing_counter'
+        , '__shape_version__' => 1
         , 'value' => 0
         , 'initialized' => 'false'
     }~

@@ -82,6 +82,7 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
     end in
     let DefaultState = ~{
         '__class_mod__' => 'class_methods'
+        , '__shape_version__' => 1
         , 'count' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)

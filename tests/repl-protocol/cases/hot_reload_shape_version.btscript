@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E regression test for BT-3534 (ADR 0123 Phase 0): generated init/1 now
+// stamps an internal '__shape_version__' key into actor state, and the
+// hot-reload driver's Extra contract shrank from {NewInstanceVars, Module}
+// to #{module => Module} (the flattened field list is now derived inside
+// beamtalk_hot_reload itself, from the live instance's own class tag,
+// rather than being computed by the caller and threaded through).
+//
+// This exercises the whole rewired path end-to-end: a live actor survives
+// a reload that adds a field, and '__shape_version__' — despite now being
+// present on every actor's state map — never leaks out through the
+// instance-side `fieldNames` reflection selector (beamtalk_tagged_map's
+// internal_fields() filter, shared by every reflection/printer/inspector
+// consumer).
+
+// ---------------------------------------------------------------------------
+// Load initial version and spawn an actor
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter.bt
+// => Loaded: HotCounter
+
+hc := HotCounter spawn
+// => Actor(HotCounter, _)
+
+hc increment
+// => 1
+
+// '__shape_version__' is an internal key — it must never appear in the
+// user-visible field list, even though generated init/1 now writes it.
+hc fieldNames size
+// => 1
+
+hc fieldNames includes: #__shape_version__
+// => false
+
+// ---------------------------------------------------------------------------
+// Reload with v2: adds new field 'step' — exercises the new
+// #{module => Module} Extra contract and the internally-derived flattened
+// field list end-to-end.
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter_v2.bt
+// => Loaded: HotCounter
+
+// Existing value survives the reload.
+hc getValue
+// => 1
+
+// New field 'step' gets its default value on the live instance.
+hc getStep
+// => 5
+
+// Still exactly the two user-declared fields — '__shape_version__' still
+// does not leak, after a reload as well as after the initial spawn.
+hc fieldNames size
+// => 2
+
+hc fieldNames includes: #__shape_version__
+// => false

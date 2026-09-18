@@ -202,7 +202,7 @@ trigger_code_change_multiple_dead_pids_test() ->
 %%====================================================================
 
 trigger_code_change_3_empty_pids_test() ->
-    Extra = {[field1, field2], some_module},
+    Extra = #{module => some_module},
     {ok, Upgraded, Failures} = beamtalk_hot_reload:trigger_code_change(
         test_module, [], Extra
     ),
@@ -217,14 +217,14 @@ trigger_code_change_3_dead_pid_test() ->
     after 1000 ->
         error(timeout_waiting_for_dead_pid)
     end,
-    Extra = {[field1], some_module},
+    Extra = #{module => some_module},
     {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(
         test_module, [DeadPid], Extra
     ),
     ?assertEqual(1, length(Failures)).
 
 %%====================================================================
-%% Tests for code_change/3 with field migration ({NewInstanceVars, Module})
+%% Tests for code_change/3 with field migration (#{module => Module})
 %%====================================================================
 
 field_migration_setup() ->
@@ -263,20 +263,21 @@ field_migration_test_() ->
             {"superclass reload adds a new defaulted field to a live subclass instance (BT-3531)",
                 fun test_field_migration_subclass_gains_ancestor_field/0},
             {"no dropped-fields warning for inherited fields (BT-3531)",
-                fun test_field_migration_subclass_no_dropped_fields_warning/0}
+                fun test_field_migration_subclass_no_dropped_fields_warning/0},
+            {"init/1 stamps '__shape_version__' => 1 into migrated state (BT-3534)",
+                fun test_field_migration_stamps_shape_version/0},
+            {"read-before-seed: old '__shape_version__' survives the new default's seed (BT-3534)",
+                fun test_field_migration_read_before_seed_preserves_old_version/0},
+            {"absent '__shape_version__' on old state reads as version 1 (BT-3534)",
+                fun test_field_migration_absent_shape_version_defaults_to_one/0}
         ]
     end}.
 
 test_field_migration_adds_new_fields() ->
     OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 42},
-    {ok, Defaults} = 'bt@counter':init(#{}),
-    NewInstanceVars = [
-        K
-     || K <- maps:keys(Defaults),
-        not lists:member(K, beamtalk_tagged_map:internal_fields())
-    ],
+    {ok, Defaults} = 'bt@counter':init(#{'__skip_initialize__' => true}),
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@counter'}
+        v1, OldState, #{module => 'bt@counter'}
     ),
     %% Old value should be preserved
     ?assertEqual(42, maps:get(value, NewState)),
@@ -284,15 +285,10 @@ test_field_migration_adds_new_fields() ->
     ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
 
 test_field_migration_with_legacy_class_key() ->
-    {ok, Defaults} = 'bt@counter':init(#{}),
-    NewInstanceVars = [
-        K
-     || K <- maps:keys(Defaults),
-        not lists:member(K, beamtalk_tagged_map:internal_fields())
-    ],
+    {ok, Defaults} = 'bt@counter':init(#{'__skip_initialize__' => true}),
     OldState = #{'__class__' => 'Counter', '__class_mod__' => 'bt@counter', value => 10},
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@counter'}
+        v1, OldState, #{module => 'bt@counter'}
     ),
     %% Legacy __class__ key should be removed (migrated by maybe_migrate_class_key)
     ?assertNot(maps:is_key('__class__', NewState)),
@@ -304,37 +300,26 @@ test_field_migration_with_legacy_class_key() ->
 test_field_migration_init_failure_preserves_state() ->
     OldState = #{'$beamtalk_class' => 'Fake', value => 99},
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {[value, extra], nonexistent_module}
+        v1, OldState, #{module => nonexistent_module}
     ),
     ?assertEqual(OldState, NewState).
 
 test_field_migration_drops_removed_fields() ->
-    {ok, Defaults} = 'bt@counter':init(#{}),
-    NewInstanceVars = [
-        K
-     || K <- maps:keys(Defaults),
-        not lists:member(K, beamtalk_tagged_map:internal_fields())
-    ],
     OldState = maps:merge(
         #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 5},
         #{obsolete_field => <<"should be dropped">>}
     ),
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@counter'}
+        v1, OldState, #{module => 'bt@counter'}
     ),
     ?assertNot(maps:is_key(obsolete_field, NewState)),
     ?assertEqual(5, maps:get(value, NewState)).
 
 test_field_migration_preserves_internal_keys() ->
-    {ok, Defaults} = 'bt@counter':init(#{}),
-    NewInstanceVars = [
-        K
-     || K <- maps:keys(Defaults),
-        not lists:member(K, beamtalk_tagged_map:internal_fields())
-    ],
+    {ok, Defaults} = 'bt@counter':init(#{'__skip_initialize__' => true}),
     OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => old_mod, value => 1},
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@counter'}
+        v1, OldState, #{module => 'bt@counter'}
     ),
     ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
 
@@ -345,20 +330,18 @@ test_field_migration_preserves_internal_keys() ->
 %% OldState unchanged — 'label' would never be added. Simulate reloading
 %% into a version that added 'label' by omitting it from OldState.
 test_field_migration_initialize_class_adds_new_field() ->
-    {ok, Defaults} = 'bt@init_hook_counter':init(#{'__skip_initialize__' => true}),
-    NewInstanceVars = [
-        K
-     || K <- maps:keys(Defaults),
-        not lists:member(K, beamtalk_tagged_map:internal_fields())
-    ],
-    ?assert(lists:member(label, NewInstanceVars)),
+    %% BT-3534: migrate_fields/2 now derives the flattened field list itself
+    %% (from the class registry, via OldState's own class tag) rather than
+    %% having it passed in Extra — this sanity-checks the registry agrees
+    %% 'label' is there, independent of what migrate_fields does with it.
+    ?assert(lists:member(label, beamtalk_runtime_api:all_field_names('InitHookCounter'))),
     OldState = #{
         '$beamtalk_class' => 'InitHookCounter',
         '__class_mod__' => 'bt@init_hook_counter',
         value => 7
     },
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@init_hook_counter'}
+        v1, OldState, #{module => 'bt@init_hook_counter'}
     ),
     %% Old value preserved.
     ?assertEqual(7, maps:get(value, NewState)),
@@ -371,20 +354,14 @@ test_field_migration_initialize_class_adds_new_field() ->
 %% selects the same guarded init/1 branch as a class with `initialize`,
 %% so this must be fixed independently of the `initialize` case above.
 test_field_migration_typed_no_default_class_adds_new_field() ->
-    {ok, Defaults} = 'bt@typed_field_counter':init(#{'__skip_initialize__' => true}),
-    NewInstanceVars = [
-        K
-     || K <- maps:keys(Defaults),
-        not lists:member(K, beamtalk_tagged_map:internal_fields())
-    ],
-    ?assert(lists:member(label, NewInstanceVars)),
+    ?assert(lists:member(label, beamtalk_runtime_api:all_field_names('TypedFieldCounter'))),
     OldState = #{
         '$beamtalk_class' => 'TypedFieldCounter',
         '__class_mod__' => 'bt@typed_field_counter',
         value => 3
     },
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@typed_field_counter'}
+        v1, OldState, #{module => 'bt@typed_field_counter'}
     ),
     ?assertEqual(3, maps:get(value, NewState)),
     ?assertEqual(nil, maps:get(label, NewState)).
@@ -404,19 +381,13 @@ test_field_migration_initialize_class_no_telemetry() ->
         #{dest => self()}
     ),
     try
-        {ok, Defaults} = 'bt@init_hook_counter':init(#{'__skip_initialize__' => true}),
-        NewInstanceVars = [
-            K
-         || K <- maps:keys(Defaults),
-            not lists:member(K, beamtalk_tagged_map:internal_fields())
-        ],
         OldState = #{
             '$beamtalk_class' => 'InitHookCounter',
             '__class_mod__' => 'bt@init_hook_counter',
             value => 1
         },
         {ok, _NewState} = beamtalk_hot_reload:code_change(
-            v1, OldState, {NewInstanceVars, 'bt@init_hook_counter'}
+            v1, OldState, #{module => 'bt@init_hook_counter'}
         ),
         receive
             {telemetry_event, _, _, _} ->
@@ -446,7 +417,7 @@ test_field_migration_unexpected_init_return_logs_warning() ->
     try
         OldState = #{'$beamtalk_class' => 'Weird', value => 3},
         {ok, NewState} = beamtalk_hot_reload:code_change(
-            v1, OldState, {[value], beamtalk_hot_reload_bad_init_test_helper}
+            v1, OldState, #{module => beamtalk_hot_reload_bad_init_test_helper}
         ),
         %% State is kept unchanged, same as any other init-not-usable case.
         ?assertEqual(OldState, NewState),
@@ -471,9 +442,15 @@ test_field_migration_unexpected_init_return_logs_warning() ->
 %% never in NewInstanceVars and got treated as a removed field, dropping
 %% its live value. Using the flattened field list (all_field_names/1) must
 %% keep it.
+%%
+%% BT-3534: migrate_fields/2 now derives this flattened list itself from
+%% the registry (via OldState's own class tag) rather than having it
+%% handed in Extra — the sanity-check assertion below independently
+%% confirms the registry still agrees, decoupled from what Extra carries.
 test_field_migration_subclass_preserves_inherited_field_value() ->
-    NewInstanceVars = beamtalk_runtime_api:all_field_names('LoggingCounter'),
-    ?assertEqual(['logCount', 'value'], lists:sort(NewInstanceVars)),
+    ?assertEqual(
+        ['logCount', 'value'], lists:sort(beamtalk_runtime_api:all_field_names('LoggingCounter'))
+    ),
     OldState = #{
         '$beamtalk_class' => 'LoggingCounter',
         '__class_mod__' => 'bt@logging_counter',
@@ -481,7 +458,7 @@ test_field_migration_subclass_preserves_inherited_field_value() ->
         logCount => 3
     },
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@logging_counter'}
+        v1, OldState, #{module => 'bt@logging_counter'}
     ),
     ?assertEqual(7, maps:get(value, NewState)),
     ?assertEqual(3, maps:get(logCount, NewState)).
@@ -491,14 +468,13 @@ test_field_migration_subclass_preserves_inherited_field_value() ->
 %% `value`; an instance predating that field (as if Counter had just
 %% gained it) must have it added with its default, not silently skipped.
 test_field_migration_subclass_gains_ancestor_field() ->
-    NewInstanceVars = beamtalk_runtime_api:all_field_names('LoggingCounter'),
     OldState = #{
         '$beamtalk_class' => 'LoggingCounter',
         '__class_mod__' => 'bt@logging_counter',
         logCount => 9
     },
     {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, {NewInstanceVars, 'bt@logging_counter'}
+        v1, OldState, #{module => 'bt@logging_counter'}
     ),
     ?assertEqual(9, maps:get(logCount, NewState)),
     ?assertEqual(0, maps:get(value, NewState)).
@@ -514,7 +490,6 @@ test_field_migration_subclass_no_dropped_fields_warning() ->
         level => all
     }),
     try
-        NewInstanceVars = beamtalk_runtime_api:all_field_names('LoggingCounter'),
         OldState = #{
             '$beamtalk_class' => 'LoggingCounter',
             '__class_mod__' => 'bt@logging_counter',
@@ -522,7 +497,7 @@ test_field_migration_subclass_no_dropped_fields_warning() ->
             logCount => 2
         },
         {ok, _NewState} = beamtalk_hot_reload:code_change(
-            v1, OldState, {NewInstanceVars, 'bt@logging_counter'}
+            v1, OldState, #{module => 'bt@logging_counter'}
         ),
         receive
             {log_event, #{msg := {string, "Hot reload dropped fields"}}} ->
@@ -536,6 +511,54 @@ test_field_migration_subclass_no_dropped_fields_warning() ->
     end.
 
 %%====================================================================
+%% Tests for '__shape_version__' tracking (ADR 0123 Phase 0, BT-3534)
+%%====================================================================
+
+%% Generated init/1 now stamps '__shape_version__' => 1 into its defaults
+%% (shapeVersion: itself is a later phase, so every class is version 1
+%% today) — migrate_fields/2 must carry that stamp through into the
+%% migrated state, as an internal key (never surfaced by user_field_keys/1).
+test_field_migration_stamps_shape_version() ->
+    OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 42},
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, #{module => 'bt@counter'}
+    ),
+    ?assertEqual(1, maps:get('__shape_version__', NewState)),
+    ?assertNot(lists:member('__shape_version__', beamtalk_tagged_map:user_field_keys(NewState))).
+
+%% Read-before-seed (BT-3534): migrate_fields/2 seeds BaseState from the
+%% new init's defaults — which, as of this change, also carry
+%% '__shape_version__' => 1 — before overlaying the old state. An old
+%% instance whose own '__shape_version__' is not 1 (simulated directly
+%% here, since nothing produces a value other than 1 yet — shapeVersion:
+%% is a later phase) must keep *its own* version in the migrated result,
+%% not the new default's, proving the old value is read before the new
+%% default's seed overwrites it.
+test_field_migration_read_before_seed_preserves_old_version() ->
+    OldState = #{
+        '$beamtalk_class' => 'Counter',
+        '__class_mod__' => 'bt@counter',
+        '__shape_version__' => 7,
+        value => 42
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, #{module => 'bt@counter'}
+    ),
+    ?assertEqual(7, maps:get('__shape_version__', NewState)),
+    ?assertEqual(42, maps:get(value, NewState)).
+
+%% Absent '__shape_version__' on the old state (a pre-BT-3534 instance,
+%% migrated before generated init/1 started writing this key) reads as
+%% version 1, not `undefined` or a crash.
+test_field_migration_absent_shape_version_defaults_to_one() ->
+    OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 5},
+    ?assertNot(maps:is_key('__shape_version__', OldState)),
+    {ok, NewState} = beamtalk_hot_reload:code_change(
+        v1, OldState, #{module => 'bt@counter'}
+    ),
+    ?assertEqual(1, maps:get('__shape_version__', NewState)).
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -543,12 +566,14 @@ test_field_migration_subclass_no_dropped_fields_warning() ->
 %% trigger_code_change — live actor success and error branches
 %%====================================================================
 
-%% Minimal gen_server for testing sys:change_code/4 success paths.
+%% Minimal gen_server for testing sys:change_code/4 success and
+%% suspend-on-failure (BT-3534) paths.
 init(State) -> {ok, State}.
 handle_call(_Msg, _From, State) -> {reply, ok, State}.
 handle_cast({set, New}, _State) -> {noreply, New};
 handle_cast(_, State) -> {noreply, State}.
 code_change(_OldVsn, _State, {crash, Reason}) -> exit(Reason);
+code_change(_OldVsn, _State, {fail, Reason}) -> {error, Reason};
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 trigger_code_change_live_actor_success_test() ->
@@ -615,16 +640,84 @@ try_change_code_crash_produces_exception_failure_test() ->
         %% ruling out those two specific catch clauses — this verifies the
         %% Class:Error catch-all path produced a non-empty failure record.
         ?assertNotEqual(noproc, Reason),
-        ?assertNotEqual(timeout, Reason)
+        ?assertNotEqual(timeout, Reason),
+        %% BT-3534 suspend-on-failure: the pid is alive but left suspended,
+        %% not resumed onto new code with its old-shaped state.
+        ?assertEqual(
+            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+        )
     after
         %% Process may have already been killed by the exit; guard teardown.
+        %% sys:resume/1 is a no-op on a process that was never suspended and
+        %% harmless to call again here regardless of which branch above ran.
         case is_process_alive(Pid) of
             true ->
+                _ = (catch sys:resume(Pid)),
                 unlink(Pid),
                 gen_server:stop(Pid);
             false ->
                 ok
         end
+    end.
+
+%%====================================================================
+%% Tests for suspend-on-failure (ADR 0123 §3, BT-3534)
+%%====================================================================
+
+%% try_change_code/3's `after`-block used to unconditionally sys:resume/1
+%% regardless of whether sys:change_code/4 succeeded — resuming the actor
+%% onto new code sitting on top of its still-old-shaped state. Only a
+%% *successful* change_code may resume the pid now; a failed one leaves it
+%% suspended, state intact, inspectable via sys:get_state/1.
+try_change_code_failure_leaves_actor_suspended_and_inspectable_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        {ok, 0, Failures} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, boom}),
+        %% sys's system_code_change/4 wraps ANY non-{ok, State} callback
+        %% return (including an explicit {error, _}) in its own {error, _}
+        %% before returning from sys:change_code/4 — so the reported
+        %% failure reason is {error, boom}, not the bare boom the callback
+        %% returned.
+        ?assertEqual([{Pid, {error, boom}}], Failures),
+        ?assertEqual(
+            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+        ),
+        %% sys:get_state/1 still works on a suspended process — state is
+        %% intact, not lost, not reset.
+        ?assertEqual(#{v => 1}, sys:get_state(Pid))
+    after
+        _ = (catch sys:resume(Pid)),
+        unlink(Pid),
+        gen_server:stop(Pid)
+    end.
+
+%% A second `Cart reload` after a suspended failure must successfully
+%% re-suspend (sys:suspend/1 is idempotent on an already-suspended pid —
+%% not an "already suspended" error) and, once the hook is fixed, resume
+%% the actor on success.
+try_change_code_retry_after_fix_resumes_and_succeeds_test() ->
+    {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+    try
+        %% sys wraps the callback's {error, boom} return in its own
+        %% {error, _} before returning — see the sibling test above.
+        {ok, 0, [{Pid, {error, boom}}]} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {fail, boom}),
+        ?assertEqual(
+            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+        ),
+        %% Retry with corrected Extra ("the author fixes the hook") — the
+        %% pid is re-suspended (idempotent) and, on success, resumed.
+        {ok, 1, []} =
+            beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], normal_extra),
+        ?assertEqual(
+            running, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+        ),
+        %% Genuinely responsive again, not merely reported so.
+        ?assertEqual(ok, gen_server:call(Pid, ping))
+    after
+        unlink(Pid),
+        gen_server:stop(Pid)
     end.
 
 %%====================================================================
@@ -634,10 +727,10 @@ try_change_code_crash_produces_exception_failure_test() ->
 field_migration_with_non_map_state_falls_through_test() ->
     %% The field-migration code_change head only matches when
     %% State is a map. A non-map state falls through to the generic head
-    %% and is returned unchanged even when Extra is a {NewVars, Module} tuple.
+    %% and is returned unchanged even when Extra is a #{module := _} map.
     State = [1, 2, 3],
     {ok, NewState} =
-        beamtalk_hot_reload:code_change(v1, State, {[a, b], some_module}),
+        beamtalk_hot_reload:code_change(v1, State, #{module => some_module}),
     ?assertEqual(State, NewState).
 
 %%====================================================================
@@ -653,7 +746,7 @@ field_migration_init_throws_returns_old_state_test() ->
     %% pick a module whose init/1 either does not exist or crashes on #{}.
     {ok, NewState} =
         beamtalk_hot_reload:code_change(
-            v1, OldState, {[value], lists}
+            v1, OldState, #{module => lists}
         ),
     ?assertEqual(OldState, NewState).
 
