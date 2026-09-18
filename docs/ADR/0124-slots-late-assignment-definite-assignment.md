@@ -12,12 +12,12 @@ Two parts, decided together because they are one rule seen from both sides.
 - **Part B — `late` slots (§1–§5, §8, §9).** A slot exempt from ADR 0078's
   post-`initialize` check, absent until assigned, raising the existing
   `UninitializedStateError` if read first. Reading never writes, so it needs
-  no state-threading lowering. **Its evidence is two slots** in the surveyed
-  applications; most nilable slots in that corpus encode a resolution
-  strategy in their `nil` and must not change. The pattern is real and
-  general, and it is a judgement call rather than a demand from the corpus.
-  Applies to `state:` and `classState:`; the stdlib's three factory-set
-  singletons are the `classState:` evidence (§Context (e)).
+  no state-threading lowering. **Its evidence is two instance slots** in
+  the surveyed applications (most nilable slots there encode a resolution
+  strategy in their `nil` and must not change) **and three class-side
+  singletons** in the stdlib, every `classState:` it declares (§Context (e)).
+  The pattern is real and general, and it is a judgement call rather than a
+  demand from the corpus. Applies to `state:` and `classState:`.
   **Accept — B1, B2, B5 and B3 ship together as Part A's exemption (B1–B2
   alone would regress an early read to a raw `badkey`, §Implementation); B4
   and B6–B10 stand on the two instance slots and the three class-side
@@ -156,11 +156,18 @@ typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
 ```
 
 Set by a class-method factory (`current:`), cleared by `resetCurrent`, and
-re-set on process death by `beamtalk_workspace_bootstrap:bootstrap_singleton/3`
-(`:149-186`), which writes the class variable directly through
-`set_class_variable/2` and monitors the pid. `class current` already declares
-a non-nilable return type over a nilable slot. This is the instance-slot
-pattern of (a) on the class side, and it is three examples to (a)'s two.
+set again by workspace bootstrap writing the class variable directly through
+`set_class_variable/2`. The three differ in kind, which matters for §1:
+`TranscriptStream` is a `native:` Actor whose singleton is a registered
+process, wired by `bootstrap_singleton/3` (`:149-172`) with an
+`erlang:monitor` and re-wired on death; `BeamtalkInterface` and
+`WorkspaceInterface` are `sealed typed Object subclass:`es
+(`beamtalk_interface.bt:20`, `workspace_interface.bt:19`) whose singleton is
+a tagged-map instance created by `Module:new()` in
+`bootstrap_value_singleton/3` (`:174`), with no process and no monitor.
+`class current` already declares a non-nilable return type over a nilable
+slot in all three. This is the instance-slot pattern of (a) on the class
+side, and it is three examples to (a)'s two.
 
 All three accessors are relied on to answer `nil` before bootstrap.
 `Object>>show:` and `Object>>cr` (`stdlib/src/object.bt:343`, `:355`) read
@@ -315,7 +322,7 @@ contextual keyword in this position only.
 | Declaration | `late` | Rationale |
 |---|---|---|
 | `late state:` (Actor) | **Yes** | The instance gen_server holds the slot |
-| `late classState:` (any class kind) | **Yes** | The class gen_server holds it (ADR 0036); ADR 0056 permits `classState:` on `native:` actors, which all three stdlib singletons are. Needs its own mechanism at each surface (§4i): the class-method read branch is a bare `maps:get` on the `ClassVars` map (`expressions.rs:526-537`), reflective reads go through `get_class_var`, which answers `nil` for a missing key (`beamtalk_object_class.erl:1395`), `hasField:`/`clearField:` dispatch on the object state map, which is `#{}` on a class object (`beamtalk_object_ops.erl:88-92`), and `ClassInfo.class_variables` is names only (`class_info.rs:171`) |
+| `late classState:` (any class kind) | **Yes** | The class gen_server holds it whatever the kind (ADR 0036) — the three stdlib singletons are one `native:` Actor, where ADR 0056 permits `classState:`, and two `Object` subclasses, where `classState:` is the only slot kind ADR 0067 allows. Needs its own mechanism at each surface (§4i): the class-method read branch is a bare `maps:get` on the `ClassVars` map (`expressions.rs:526-537`), reflective reads go through `get_class_var`, which answers `nil` for a missing key (`beamtalk_object_class.erl:1395`), `hasField:`/`clearField:` dispatch on the object state map, which is `#{}` on a class object (`beamtalk_object_ops.erl:88-92`), and `ClassInfo.class_variables` is names only (`class_info.rs:171`) |
 | `late field:` (Value) | **Error** | A Value is fully constructed by `new`/`new:`/the keyword constructor and never mutated (ADR 0042); see §5 |
 | `late state:`/`field:` on `Object` | **Error** | Already an error — Object holds no instance data (ADR 0067) |
 | `late state:` on a `native:` Actor | **Error** | Already an error — ADR 0056 prohibits `state:` there |
@@ -1309,7 +1316,8 @@ read and two small reflective selectors, not a lowering.
 - `nil` semantics are unchanged.
 - No `.bt` source changes are required in the stdlib. Every existing
   declaration keeps its meaning, and the definite-assignment finding is
-  advisory.
+  advisory. The three singleton conversions in §Migration Path are optional
+  follow-ups, each slot plus getter.
 - `beamtalk_actor:init/1` validates only internal keys
   (`beamtalk_actor.erl:1582`), so an absent `late` slot needs no change
   there. Its "Actor started" log line reports `state_keys`, which will omit
