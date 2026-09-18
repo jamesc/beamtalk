@@ -22,5 +22,8 @@ Value subclass: ShapeVersionMoney
   /// v1 had only `cents` (an Integer); v2 replaces it with a Float `amount`.
   class migrateFromV1: old :: Dictionary -> Dictionary =>
     cents := Erlang maps get: #cents from: old
-    withAmount := Erlang maps put: #amount value: (cents / 100.0) in: old
+    withAmount := Erlang maps
+      put: #amount
+      value: (cents / 100.0)
+      in: old
     Erlang maps remove: #cents from: withAmount
