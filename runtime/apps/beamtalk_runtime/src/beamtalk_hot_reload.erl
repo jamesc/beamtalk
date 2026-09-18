@@ -21,6 +21,16 @@ runtime.
   (ADR 0123 Phase 0, BT-3534). The flattened field list (inherited fields
   included) is derived here, from the state's own `$beamtalk_class` tag —
   the caller passes only what the state cannot tell you.
+- **Migration hook spike** (ADR 0123 Phase 1, BT-3535): if the reloading
+  module exports a class-side `migrateFromV1:`, it is invoked via
+  `beamtalk_object_class:local_call/3` — in the migrating process, against
+  the module `code:load_binary/3` has *just* swapped in — on the raw old
+  field dictionary, before the structural fallback above reconciles it.
+  This is a temporary, hand-wired call site proving the one mechanism
+  ADR 0123 Phase 2's general chain (`beamtalk_shape_migration`) rests on;
+  it has no `shapeVersion:`, no chain beyond a single `migrateFromV1:`
+  step, and no validators. Phase 2 replaces it outright. See
+  `maybe_apply_migration_hook/3`.
 
 **References:**
 - docs/beamtalk-ddd-model.md (Hot Reload Context, StateMigrator)
@@ -236,8 +246,13 @@ migrate_fields(OldState, Module) ->
                 BaseState,
                 NewInstanceVars
             ),
-            %% Overlay old state values (existing values win)
-            OldInstanceVars = maps:without(InternalKeys, OldState),
+            %% Overlay old state values (existing values win).
+            %% BT-3535 (ADR 0123 Phase 1 spike): run the migration hook, if
+            %% the reloading module defines one, before the structural
+            %% fold below reconciles the raw old fields against the new
+            %% declared shape — see maybe_apply_migration_hook/3.
+            RawOldInstanceVars = maps:without(InternalKeys, OldState),
+            OldInstanceVars = maybe_apply_migration_hook(ClassName, Module, RawOldInstanceVars),
             {Kept, Dropped} = maps:fold(
                 fun(Key, Value, {KeepAcc, DropAcc}) ->
                     case sets:is_element(Key, NewVarSet) of
@@ -272,6 +287,62 @@ migrate_fields(OldState, Module) ->
                 }
             ),
             OldState
+    end.
+
+-doc """
+BT-3535 (ADR 0123 Phase 1 spike): run a class's `migrateFromV1:` hook, if
+it defines one, against the raw old field dictionary.
+
+Proves the one mechanism ADR 0123's Phase 2 general migration chain rests
+on: `beamtalk_object_class:local_call/3` invoked **from inside**
+`code_change/3`, while the reloading class's own module is mid-reload.
+`code:load_binary/3` has already replaced `Module` by the time
+`code_change/3` runs (`beamtalk_repl_loader:activate_module/4` loads before
+`trigger_hot_reload/2` fires), so `local_call/3`'s own `code:ensure_loaded/1`
++ `erlang:function_exported/3` resolve against the **new** module — confirmed
+by `tests/repl-protocol/cases/hot_reload_shape_hook.btscript`, where v1 has
+no hook at all and v2's hook computes a value the structural fallback's
+plain default could never produce.
+
+Unconditional and single-step, on purpose: no `shapeVersion:`, no chain
+beyond this one selector, no validators — Phase 2's
+`beamtalk_shape_migration` replaces this outright. A class with no such
+export is untouched (`OldFields` unchanged). A hook that raises is **not**
+caught here: it propagates through `code_change/3` into `try_change_code/3`,
+which already leaves a failed pid suspended with its state intact (BT-3534)
+— the existing suspend-on-failure contract, exercised for free.
+""".
+-spec maybe_apply_migration_hook(atom(), atom(), map()) -> map().
+maybe_apply_migration_hook(ClassName, Module, OldFields) ->
+    HookFunName = beamtalk_class_dispatch:class_method_fun_name('migrateFromV1:'),
+    code:ensure_loaded(Module),
+    case erlang:function_exported(Module, HookFunName, 3) of
+        true ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    OldFields;
+                ClassPid ->
+                    ClassObj = beamtalk_class_registry:class_object_from_pid(ClassPid),
+                    case
+                        beamtalk_object_class:local_call(ClassObj, 'migrateFromV1:', [OldFields])
+                    of
+                        NewFields when is_map(NewFields) ->
+                            NewFields;
+                        Other ->
+                            ?LOG_WARNING(
+                                "migrateFromV1: hook returned a non-map value; ignoring",
+                                #{
+                                    class => ClassName,
+                                    module => Module,
+                                    returned => Other,
+                                    domain => [beamtalk, runtime]
+                                }
+                            ),
+                            OldFields
+                    end
+            end;
+        false ->
+            OldFields
     end.
 
 -doc """

@@ -90,7 +90,12 @@ main([]) ->
         %% typed-no-default field (either alone triggers the same guarded
         %% init/1 branch).
         "init_hook_counter",
-        "typed_field_counter"
+        "typed_field_counter",
+        %% BT-3535 (ADR 0123 Phase 1 spike) - a class-side migrateFromV1:
+        %% hook, for beamtalk_hot_reload's migration-hook call site, and a
+        %% sibling whose hook always raises (suspend-on-failure interop).
+        "shape_hook_cart",
+        "shape_hook_raising_cart"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,
