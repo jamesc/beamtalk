@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3536 (ADR 0123 Phase 2) regression fixture: a Sendable-tier Actor with
+// a nested Value field (`origin :: ShapePoint`) and a builtin-tagged-map
+// field (`history :: Array`) — exercises beamtalk_shape_migration:pack/1's
+// recursive Value packing (`origin` gains its own nested envelope) and the
+// builtin-tagged-map pass-through rule (`history`'s `Array` stays a raw
+// term, unversioned) in the same instance.
+
+typed Actor subclass: ShapeBox
+  state: origin :: ShapePoint
+  state: history :: Array
+  state: label :: String = "box"

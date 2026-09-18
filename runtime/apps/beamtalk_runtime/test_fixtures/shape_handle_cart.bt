@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3536 (ADR 0123 Phase 2) regression fixture: an Actor with a field
+// typed as a `handleScope:`-declared Object (`handle :: ShapeHandleBox`,
+// see shape_handle_box.bt) — exercises
+// beamtalk_shape_migration:pack/1's `not_serialisable` rejection of a
+// `HandleScoped` field.
+
+typed Actor subclass: ShapeHandleCart
+  state: handle :: ShapeHandleBox
+  state: label :: String = "cart"

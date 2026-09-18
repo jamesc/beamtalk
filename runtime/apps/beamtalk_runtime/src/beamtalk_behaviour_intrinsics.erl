@@ -32,6 +32,8 @@ that the Behaviour/Class libraries can rely on.
 | classFieldNames/1           | Field names from class gen_server state                   |
 | classAllFieldNames/1        | Combined field names via superclass chain                 |
 | classAllFieldNamesByName/1  | Same as classAllFieldNames/1, by ClassName (no instance needed) |
+| classAllFieldTypesByName/1  | Flattened field name -> declared type atom (ADR 0123 Phase 2) |
+| classAllFieldHasDefaultByName/1 | Flattened field name -> has-default boolean (ADR 0123 Phase 2) |
 | classClassVarNames/1        | Class-side field names (class variables) from class meta   |
 | classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
@@ -67,6 +69,10 @@ that the Behaviour/Class libraries can rely on.
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
+    %% ADR 0123 Phase 2 (BT-3536): flattened per-field declared metadata,
+    %% for beamtalk_shape_migration's reconcile and pack/1 tier walk.
+    classAllFieldTypesByName/1,
+    classAllFieldHasDefaultByName/1,
     %% class-side field (class variable) reflection
     classClassVarNames/1,
     classAllClassVarNames/1,
@@ -383,6 +389,67 @@ classAllFieldNamesByName(ClassName) ->
             {cont, IVars ++ Acc}
         end,
         []
+    ).
+
+-doc """
+Return the flattened field name → declared type atom map, including
+inherited fields (ADR 0123 Phase 2, BT-3536).
+
+Reuses `walk_hierarchy/3` — the same superclass-chain walk
+`classAllFieldNamesByName/1` uses — reading each level's own `'field_types'`
+key from `__beamtalk_meta/0` (`class_meta.rs`'s `meta_field_types_map`,
+`'none'` for an untyped field). `beamtalk_shape_migration:pack/1` walks this
+to grade each field's sendability tier before packing.
+
+On a conflict (a field name declared at more than one hierarchy level, which
+should not happen in practice), the more-derived class's entry wins — merge
+order mirrors `classAllFieldNamesByName/1`'s "ancestor precedes subclass"
+walk, with the accumulator (already-visited, more-derived levels) taking
+precedence in `maps:merge/2`. Dynamic classes with no `__beamtalk_meta/0`
+contribute no entries at their level (same `not_available` degrade as
+`classFieldNames/1`); returns `#{}` for an unregistered class.
+""".
+-spec classAllFieldTypesByName(atom()) -> #{atom() => atom()}.
+classAllFieldTypesByName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            FieldTypes =
+                case meta_for_module(Module) of
+                    {ok, Meta} -> maps:get(field_types, Meta, #{});
+                    not_available -> #{}
+                end,
+            {cont, maps:merge(FieldTypes, Acc)}
+        end,
+        #{}
+    ).
+
+-doc """
+Return the flattened field name → has-default boolean map, including
+inherited fields (ADR 0123 Phase 2, BT-3536).
+
+Same walk and merge-precedence rule as `classAllFieldTypesByName/1`, reading
+each level's `'field_has_default'` key (`class_meta.rs`'s
+`meta_field_has_default_map`). `beamtalk_shape_migration`'s reconcile step
+uses this to tell "declared with no default" (fails on a `typed` class if
+still absent after the chain) from "declared with a default" (falls back to
+`Module:init/1`'s default) without needing the AST.
+""".
+-spec classAllFieldHasDefaultByName(atom()) -> #{atom() => boolean()}.
+classAllFieldHasDefaultByName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            HasDefault =
+                case meta_for_module(Module) of
+                    {ok, Meta} -> maps:get(field_has_default, Meta, #{});
+                    not_available -> #{}
+                end,
+            {cont, maps:merge(HasDefault, Acc)}
+        end,
+        #{}
     ).
 
 -doc """
