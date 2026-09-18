@@ -14,6 +14,10 @@ driving issue bundles. They are not equally ready:
   the current corpus that needs it (§Context), and the lowering's blast radius
   is much larger than first estimated (§4). **Recommend Deferred** until the
   four open items in §4 are closed, or splitting Part B into its own ADR.
+  Note that ADR 0123's epic completing does **not** lift this: it unblocks
+  only the migration phase (B6, §8). None of the four open items —
+  re-entrancy, the lowering choice, `terminate:`/`handle_info` discarding
+  state, or the watcher notification on a read — is affected by it.
 
 Part A does not depend on Part B. The only coupling is one clause in a shared
 predicate (§7), statable as a forward-compatibility note.
@@ -86,7 +90,7 @@ becomes valid**. Three gaps follow from that omission:
 ### Current state
 
 **The runtime predicate.** `generate_post_initialize_check`
-(`crates/beamtalk-codegen/src/core_erlang/gen_server/callbacks.rs:470`)
+(`crates/beamtalk-codegen/src/core_erlang/gen_server/callbacks.rs:474`)
 emits, per qualifying slot, a `maps:get(Slot, InitNewState)` and a `case`
 on `'nil'`. Qualifying is decided by `inherited_typed_no_default_fields`
 (`:709`) walking the flattened superclass chain, with the per-slot test
@@ -722,23 +726,34 @@ ADR 0123's reconcile step 3 gains the lazy case it deferred to this ADR:
 | **lazy** | **present** | **kept** — the memoised value survives the reload |
 | **lazy** | **absent** | **stays absent** — recomputed on next read |
 
-**Sequencing caveat, which Part B's Phase 6 depends on.** ADR 0123 is
-*Accepted*, not Implemented: `beamtalk_shape_migration` does not exist
-(zero hits repo-wide), and only its `'__shape_version__'` stamping has landed
-(`beamtalk_hot_reload.erl:181`, always `1` today). So the rows below are a
-contract for ADR 0123's later phases, and Phase 6 is **blocked**, not merely
-sequenced.
+**Premise: ADR 0123 is implemented before Part B starts.** Its
+implementation is in flight — BT-3531, BT-3534 and BT-3535 have landed as of
+`main@80b8db4`, and `beamtalk_shape_migration` (BT-3536) is next — and this
+ADR assumes the epic completes first. So Phase B6 is **sequenced after ADR
+0123, not blocked by it**, and the rows below are a change to real code
+rather than a contract against code that does not exist.
 
-The good news, verified: `beamtalk_hot_reload:migrate_fields/2` (`:192-250`)
-derives its keep set from
-`beamtalk_behaviour_intrinsics:classAllFieldNamesByName/1`, **not** from the
-defaults map — so "lazy present → kept / lazy absent → stays absent" already
-falls out with *no change to `beamtalk_hot_reload`*. That makes it silently
-load-bearing that declared-but-absent lazy slots stay in `allFieldNames`: if
-a future change derived the keep set from the `init/1` defaults (where lazy
-slots are absent by design), every memoised lazy value would be dropped on
-reload with a spurious "Hot reload dropped fields" warning. This needs an
-explicit invariant and a test.
+Two consequences of taking that premise rather than today's tree:
+
+- **The reconcile row is an edit to `beamtalk_shape_migration`'s step 3**, in
+  whatever form BT-3536 lands it, not a request for a hook that has yet to be
+  designed. B6 should read that module as built and add the lazy case to it.
+- **One finding below needs re-verifying against the finished epic, not
+  assumed.** Measured against today's tree,
+  `beamtalk_hot_reload:migrate_fields/2` (`:192-250`) derives its keep set
+  from `beamtalk_behaviour_intrinsics:classAllFieldNamesByName/1`, **not**
+  from the defaults map — so "lazy present → kept / lazy absent → stays
+  absent" falls out with *no change to `beamtalk_hot_reload`*. That is a
+  measurement of pre-0123 code. If ADR 0123's later phases route reconcile
+  through `beamtalk_shape_migration` instead, the no-change finding may not
+  survive, so **B6 must re-measure it rather than inherit it from this ADR**.
+
+Either way the underlying invariant is what matters and is silently
+load-bearing: declared-but-absent lazy slots must stay in `allFieldNames`. If
+any implementation derives the keep set from the `init/1` defaults (where
+lazy slots are absent by design), every memoised lazy value is dropped on
+reload with a spurious "Hot reload dropped fields" warning. That needs an
+explicit invariant and a test wherever reconcile ends up living.
 
 - `migrateFromVN:` hooks see a `Dictionary` in which a not-yet-computed lazy
   slot is simply **not a key**. ADR 0123 already instructs hooks to read
@@ -1184,8 +1199,9 @@ The static check is additive.
   `State` threading carries it (`analysis.rs:259` threads `State`
   unconditionally); for `lazy classState:` it does not (§4c).
 - ADR 0123's deferred "absent → declared initialiser policy" is closed with
-  one new reconcile row, and `beamtalk_hot_reload` needs **no change at all**
-  (§8).
+  one new reconcile row (§8). On today's pre-0123 tree that needs no change to
+  `beamtalk_hot_reload` at all; once ADR 0123's epic lands, B6 re-measures
+  rather than assumes that.
 - The auto-generated Value keyword constructor and `new:` key validation are
   untouched: `compute_auto_slot_methods` returns `None` for non-Value kinds
   (`value_accessors.rs:63`) and §5 rejects `lazy field:`.
@@ -1285,7 +1301,7 @@ representation, so it carries none of Part B's risk.
 | B3 | Lazy read lowering. Under the transparent design this means auditing the ~15 state `maps:get` sites (§4a), giving `generate_field_access` a prelude channel, disabling DirectParams/Hybrid hoisting for lazy slots (§4b), extending `is_family_mutation` to treat a lazy `classState:` read as a `ClassVars` mutation (§4c), and the ADR 0110 shadow write (§4d). Under the generated-reader design it is one generated function plus one dispatch arm. Also: lazy slots omitted from `init/1`'s state literal; a `VerifyError` or explicit rule for `terminate:`/`handle_info` (§4, item 3) | `beamtalk-codegen` (`threaded_ir/`, `control_flow/`, `expressions.rs`, `gen_server/state.rs`) | **L–XL** (transparent) / **M** (generated reader) |
 | B4 | Reflection and tooling: `fieldKinds`/`allFieldKinds` incl. the `ClassInfo` third map, the `__beamtalk_meta` schema entry, and `class_variables` growing from `Vec<EcoString>` to a structure; `behaviour.bt` declaration + Erlang intrinsic; generated `force_field/2`; `read_field/2`'s declared-lazy branch; the `'fieldAt:'` dispatch arm threading state; `InspectorField` `#lazySlot` / `value: #notComputed` / `drillable: false` plus the wire form and `beamtalk_inspector:fieldsOf/1`; LSP hover | `beamtalk-codegen`, `beamtalk-core`, `beamtalk_runtime`, `beamtalk-stdlib`, `beamtalk-language-service` | **M–L** |
 | B5 | REPL-visible output: decide and confirm `printString` rendering for an unforced lazy slot (§9) — **gated on explicit user confirmation** per `CLAUDE.md` | `beamtalk_runtime` (`beamtalk_object_printer.erl`), `tests/repl-protocol` | **S**, gated |
-| B6 | ADR 0123 reconcile lazy row + the shared `(slot kind, present?, has default?) -> outcome` conformance fixture. **Blocked:** `beamtalk_shape_migration` does not exist and only ADR 0123's `'__shape_version__'` stamping has landed (§8). Includes the `allFieldNames`-keep-set invariant test | `beamtalk_runtime`, `beamtalk-codegen` | **S**, blocked |
+| B6 | ADR 0123 reconcile lazy row + the shared `(slot kind, present?, has default?) -> outcome` conformance fixture. **Sequenced after ADR 0123's epic**, which is assumed complete before Part B starts (§8) — read `beamtalk_shape_migration` as built and add the lazy case to its reconcile. Re-measure the "`beamtalk_hot_reload` needs no change" finding against the finished epic rather than inheriting it from §8. Includes the `allFieldNames`-keep-set invariant test | `beamtalk_runtime`, `beamtalk-codegen` | **S** |
 | B7 | Docs + tests: `beamtalk-language-features.md` (slot kinds, the force/no-force table, once-per-successful-computation, **initialisers must be idempotent**, the `spawnWith:`-injection clause at `:2426`, restart semantics), `surface-parity.md`, BUnit tests in `stdlib/test/*.bt`, REPL-protocol e2e | docs, `stdlib/test`, `tests/repl-protocol` | **S** |
 
 **Test placement** (per `CLAUDE.md`): lazy-slot behaviour, memoisation,
