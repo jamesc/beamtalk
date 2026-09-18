@@ -14,11 +14,14 @@ rejected alternative.
   construction site for a slot that is declared, non-nilable, defaulted
   nowhere, and assigned by no `initialize` in the chain. Small, low-risk,
   entirely in `beamtalk-core`.
-- **Part B — `late` slots (§1–§5, §8, §9).** A slot with a **non-nilable
-  declared type** that is exempt from ADR 0078's post-`initialize` check,
-  absent until assigned, and raises the existing `UninitializedStateError`
-  if read before assignment. No initialiser expression, so **reading never
-  writes** — which is what keeps it small.
+- **Part B — `late` slots (§1–§5, §8, §9).** A slot that is **exempt from ADR
+  0078's post-`initialize` check**, absent until assigned, and raises the
+  existing `UninitializedStateError` if read before assignment. Its declared
+  type is usually non-nilable — that is the point, since the `| Nil` such
+  slots carry today is an escape from the check rather than a claim about the
+  data — but `late … | Nil` is permitted and gives three states
+  (absent / `nil` / a value; §1). No initialiser expression, so **reading
+  never writes**, which is what keeps it small.
 
   **Part B's evidence is two slots**, and that is the main thing a reviewer
   should weigh. Successive passes over Exdura and Symphony narrowed it from
@@ -434,7 +437,7 @@ returns `Result<Document<'static>>` with no prelude channel — because the
 guard produces a value and never a new state. Consequently **none** of the
 following applies to `late` slots: ADR 0118 preludes, `ThreadedIr` state
 threading, the `ClassVars` mutation detector (`analysis.rs:253`), ADR 0110's
-shadow write, loop-hoisting interference (`loop_mode.rs:110`), or a
+shadow write, loop-hoisting interference (`loop_mode.rs:118`), or a
 `terminate:`/`handle_info` returned-state problem. Those were all
 consequences of *reading* being a mutation, which `late` does not make it.
 
@@ -520,7 +523,7 @@ sibling state `maps:get` sites (`blocks.rs:494,504,613,745,769,788`;
 same badkey exposure, but **not** re-architecting for a prelude channel.
 
 **b. Loop hoisting must not pre-extract a `late` slot.**
-`hybrid_readonly_field_params` (`loop_mode.rs:110`) substitutes a field's
+`hybrid_readonly_field_params` (`loop_mode.rs:118`) substitutes a field's
 value before the letrec instead of emitting a read. For a `late` slot that
 converts "raises when read inside the body" into "raises before the loop,
 even if the body never runs". DirectParams/Hybrid hoisting must fall back to
@@ -1368,7 +1371,7 @@ second in value, because Values have no runtime check to fall back on.
 |---|---|---|---|
 | B1 | `late` modifier: contextual keyword, two-token lookahead extending the single-token dispatch at `declarations.rs:553` and reusing the modifier-loop shape at `:192-208`; `SlotKind` on `StateDeclaration`; unparse round-trip. The Errors: `late field:`, `late` without a type annotation, `late` with a default, `late state:` on `native:`/`Object` | `beamtalk-core` (`source_analysis/parser/declarations.rs`, `ast/class.rs`, `unparse`) | **S** |
 | B2 | Exclude `late` slots from `generate_post_initialize_check` (its 2-arity `maps:get` would badkey) and from `init/1`'s state literal | `beamtalk-codegen` (`gen_server/callbacks.rs`, `gen_server/state.rs`) | **S** |
-| B3 | Guarded read: `maps:find` + the `uninitialized_state_error` arm in `generate_field_access` (`expressions.rs:519`), keeping it pure; audit the ~15 sibling state `maps:get` sites; disable DirectParams/Hybrid field hoisting for `late` slots (`loop_mode.rs:110`) | `beamtalk-codegen` (`expressions.rs`, `control_flow/`) | **M** |
+| B3 | Guarded read: `maps:find` + the `uninitialized_state_error` arm in `generate_field_access` (`expressions.rs:519`), keeping it pure; audit the ~15 sibling state `maps:get` sites; disable DirectParams/Hybrid field hoisting for `late` slots (`loop_mode.rs:118`) | `beamtalk-codegen` (`expressions.rs`, `control_flow/`) | **M** |
 | B4 | `hasField:` / `clearField:` on `Object` plus their runtime intrinsics; `read_field/2`'s declared-`late` branch, keyed on declared-late rather than key-absence | `beamtalk-stdlib`, `beamtalk_runtime` (`beamtalk_reflection.erl`, `beamtalk_object_ops.erl`) | **S** |
 | B5 | `fieldKinds`/`allFieldKinds`: the `ClassInfo` third map, the `__beamtalk_meta` schema entry, `class_variables` growing from `Vec<EcoString>` to a structure, the `behaviour.bt` declaration and Erlang intrinsic; LSP hover | `beamtalk-core`, `beamtalk-codegen`, `beamtalk_runtime`, `beamtalk-stdlib`, `beamtalk-language-service` | **M–L** |
 | B6 | The §4d `terminate:`/`handle_info` unguarded-read warning | `beamtalk-core` (`semantic_analysis`) | **S** |
