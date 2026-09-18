@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3536 (ADR 0123 Phase 2) regression fixture: a minimal Actor, referenced
+// as an Actor-typed field by shape_hazard_cart.bt to exercise
+// beamtalk_shape_migration:pack/1's `SendableRef` rejection. A dedicated
+// fixture rather than reusing another suite's Actor class — this test file
+// registers it lazily on first use, same as every other fixture this test
+// file owns, with no ordering dependency on when some other test suite
+// happens to register a shared class.
+
+Actor subclass: ShapeHazardWorker
+  state: busy :: Boolean = false

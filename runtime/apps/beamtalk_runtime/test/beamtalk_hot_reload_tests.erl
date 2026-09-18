@@ -10,6 +10,7 @@ EUnit tests for beamtalk_hot_reload module.
 Tests hot code reloading, actor migration, and module replacement.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %% gen_server callbacks for a minimal test actor used to exercise
 %% trigger_code_change/2,3 success paths via sys:change_code/4.
@@ -234,8 +235,6 @@ field_migration_setup() ->
     ok = ensure_init_hook_counter_loaded(),
     ok = ensure_typed_field_counter_loaded(),
     ok = ensure_logging_counter_loaded(),
-    ok = ensure_shape_hook_cart_loaded(),
-    ok = ensure_shape_hook_raising_cart_loaded(),
     ok.
 
 field_migration_teardown(_) ->
@@ -271,26 +270,7 @@ field_migration_test_() ->
             {"read-before-seed: old '__shape_version__' survives the new default's seed (BT-3534)",
                 fun test_field_migration_read_before_seed_preserves_old_version/0},
             {"absent '__shape_version__' on old state reads as version 1 (BT-3534)",
-                fun test_field_migration_absent_shape_version_defaults_to_one/0},
-            {"migrateFromV1: hook runs via local_call/3 during code_change/3 (BT-3535)",
-                fun test_field_migration_hook_computes_total_via_local_call/0},
-            {"a class with no migrateFromV1: export is unaffected by the hook (BT-3535)",
-                fun test_field_migration_hook_absent_is_no_op/0},
-            {
-                "a class exporting migrateFromV1: with no registered class actor "
-                "degrades the whole reload to no declared fields (BT-3535)",
-                fun test_field_migration_hook_no_class_actor_is_no_op/0
-            },
-            {
-                "migrateFromV1: hook runs on a live actor's real suspend/change_code/resume "
-                "cycle, inspectable via sys:get_state (BT-3535)",
-                fun test_field_migration_hook_live_actor_sys_get_state/0
-            },
-            {
-                "a raising migrateFromV1: hook is not swallowed — it leaves the actor "
-                "suspended via BT-3534's existing suspend-on-failure path (BT-3535)",
-                fun test_field_migration_hook_raise_leaves_actor_suspended/0
-            }
+                fun test_field_migration_absent_shape_version_defaults_to_one/0}
         ]
     end}.
 
@@ -318,12 +298,24 @@ test_field_migration_with_legacy_class_key() ->
     %% Internal keys come from new defaults
     ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
 
+%% ADR 0123 Phase 2 (BT-3536): field migration now delegates to
+%% beamtalk_shape_migration:migrate/3, which resolves its Module from Class
+%% via beamtalk_class_metadata:lookup_module/1 — the class registry, not
+%% Extra's Module directly (see the moduledoc). 'Fake' was never a real
+%% registered class (this test predates any registry lookup at all — the
+%% pre-ADR-0123-Phase-2 code took Module from Extra and never consulted the
+%% registry), so this is now a `class_not_found` failure rather than a
+%% silent "init unusable, keep state unchanged" degrade: a live actor
+%% tagged with an unregistered class is a genuinely exceptional state, and
+%% failing loudly (suspend-on-failure, BT-3534) is the correct outcome, not
+%% a corner case worth preserving. `beamtalk_shape_migration_tests` covers
+%% the "init/1 unusable" degrade directly, against a real registered class.
 test_field_migration_init_failure_preserves_state() ->
     OldState = #{'$beamtalk_class' => 'Fake', value => 99},
-    {ok, NewState} = beamtalk_hot_reload:code_change(
+    {error, Reason} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => nonexistent_module}
     ),
-    ?assertEqual(OldState, NewState).
+    ?assertMatch(#beamtalk_error{kind = class_not_found, class = 'Fake'}, Reason).
 
 test_field_migration_drops_removed_fields() ->
     OldState = maps:merge(
@@ -374,6 +366,16 @@ test_field_migration_initialize_class_adds_new_field() ->
 %% `initialize` method — chain_has_typed_no_default alone (ADR 0078)
 %% selects the same guarded init/1 branch as a class with `initialize`,
 %% so this must be fixed independently of the `initialize` case above.
+%%
+%% ADR 0123 Phase 2 (BT-3536) supersedes this test's original expectation:
+%% beamtalk_shape_migration's reconcile step now fails a migration that
+%% would leave a typed-no-default field unset, rather than silently
+%% defaulting it to nil (the same promise ADR 0078's post-`initialize`
+%% check already makes at spawn time — a migration may not leave a typed
+%% slot unset). `label` is absent from OldState and has no declared
+%% default, so this reload now fails and the actor stays suspended
+%% (BT-3534's suspend-on-failure), instead of silently gaining
+%% `label => nil`.
 test_field_migration_typed_no_default_class_adds_new_field() ->
     ?assert(lists:member(label, beamtalk_runtime_api:all_field_names('TypedFieldCounter'))),
     OldState = #{
@@ -381,11 +383,15 @@ test_field_migration_typed_no_default_class_adds_new_field() ->
         '__class_mod__' => 'bt@typed_field_counter',
         value => 3
     },
-    {ok, NewState} = beamtalk_hot_reload:code_change(
+    {error, Reason} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => 'bt@typed_field_counter'}
     ),
-    ?assertEqual(3, maps:get(value, NewState)),
-    ?assertEqual(nil, maps:get(label, NewState)).
+    ?assertMatch(
+        #beamtalk_error{
+            kind = shape_migration_failed, class = 'TypedFieldCounter', selector = label
+        },
+        Reason
+    ).
 
 %% BT-3532: migration must never fire lifecycle start telemetry — that's
 %% only for real actor spawns, and firing it during a code_change would
@@ -420,10 +426,22 @@ test_field_migration_initialize_class_no_telemetry() ->
         telemetry:detach(HandlerId)
     end.
 
-%% BT-3532: an init/1 return that is still not {ok, Map} (module loaded,
-%% no exception, just an unexpected shape) must be logged at ?LOG_WARNING
-%% with the class and the actual returned shape — not silently treated as
-%% "keep old state".
+%% BT-3532, updated for ADR 0123 Phase 2 (BT-3536): an init/1 return that is
+%% still not {ok, Map} (module loaded, no exception, just an unexpected
+%% shape) must be logged at ?LOG_WARNING — not silently treated as "keep old
+%% state" without a trace. Field migration now delegates to
+%% beamtalk_shape_migration:migrate/3, which resolves Module from Class via
+%% the class registry (see test_field_migration_init_failure_preserves_state
+%% above), so this uses a real registered class ('Counter') with its
+%% init/1 meck'd to misbehave, rather than 'Weird' — a class name that was
+%% never actually registered and predates that registry lookup.
+%%
+%% Two call sites independently attempt Module:init(#{'__skip_initialize__'
+%% => true}) and degrade on a bad return: beamtalk_shape_migration's
+%% reconcile-default lookup, and this module's seed_internal_keys/4 — both
+%% log a ?LOG_WARNING naming 'bt@counter' and the bad return, and both fall
+%% back to "keep what we had", so the overall migration still succeeds with
+%% state unchanged.
 test_field_migration_unexpected_init_return_logs_warning() ->
     %% test/sys.config pins the primary logger level to `error` to keep CI
     %% output clean, which would otherwise drop this ?LOG_WARNING before it
@@ -435,26 +453,44 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         config => #{parent => self()},
         level => all
     }),
+    meck:new('bt@counter', [passthrough]),
+    meck:expect('bt@counter', init, fun(_Args) -> {error, not_a_state_map} end),
     try
-        OldState = #{'$beamtalk_class' => 'Weird', value => 3},
+        OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 3},
         {ok, NewState} = beamtalk_hot_reload:code_change(
-            v1, OldState, #{module => beamtalk_hot_reload_bad_init_test_helper}
+            v1, OldState, #{module => 'bt@counter'}
         ),
-        %% State is kept unchanged, same as any other init-not-usable case.
-        ?assertEqual(OldState, NewState),
-        receive
-            {log_event, #{level := warning, meta := Meta}} ->
-                ?assertEqual('Weird', maps:get(class, Meta, undefined)),
-                ?assertEqual(
-                    beamtalk_hot_reload_bad_init_test_helper, maps:get(module, Meta, undefined)
-                ),
-                ?assertEqual({error, not_a_state_map}, maps:get(returned, Meta, undefined))
-        after 1000 ->
-            ?assert(false)
-        end
+        %% Migration still succeeds (value was already present in ChainedFields,
+        %% so the failed init/1 defaults were never actually needed) and stamps
+        %% '__shape_version__' the same as any other successful migration.
+        ?assertEqual(1, maps:get('__shape_version__', NewState)),
+        ?assertEqual(OldState, maps:remove('__shape_version__', NewState)),
+        ?assert(
+            receive_bad_init_warning('bt@counter', {error, not_a_state_map}, 5)
+        )
     after
+        meck:unload('bt@counter'),
         logger:remove_handler(HandlerId),
         logger:set_primary_config(level, error)
+    end.
+
+%% Drains up to N pending {log_event, ...} messages looking for a `warning`
+%% naming Module and Returned — either seed_internal_keys/4's or
+%% beamtalk_shape_migration:safe_init_defaults/2's warning matches.
+receive_bad_init_warning(_Module, _Returned, 0) ->
+    false;
+receive_bad_init_warning(Module, Returned, N) ->
+    receive
+        {log_event, #{level := warning, meta := Meta}} ->
+            case
+                maps:get(module, Meta, undefined) =:= Module andalso
+                    maps:get(returned, Meta, undefined) =:= Returned
+            of
+                true -> true;
+                false -> receive_bad_init_warning(Module, Returned, N - 1)
+            end
+    after 1000 ->
+        false
     end.
 
 %% BT-3531: LoggingCounter (Counter subclass, adds `logCount`) — before the
@@ -578,143 +614,6 @@ test_field_migration_absent_shape_version_defaults_to_one() ->
         v1, OldState, #{module => 'bt@counter'}
     ),
     ?assertEqual(1, maps:get('__shape_version__', NewState)).
-
-%%====================================================================
-%% Tests for the migrateFromV1: hook call site (ADR 0123 Phase 1 spike,
-%% BT-3535) — beamtalk_object_class:local_call/3 invoked from inside
-%% code_change/3, at the real production call site.
-%%====================================================================
-
-%% ShapeHookCart's class-side `migrateFromV1:` computes `total` from
-%% `itemCount` (* 10) — a value the structural fallback's plain default (0)
-%% could never produce. A pre-hook v1-shaped OldState (no `total` key)
-%% ending up with `total => 40` (not `0`) is direct evidence the hook ran,
-%% via local_call/3, at code_change/3's real call site — not a synthetic,
-%% standalone local_call/3 invocation.
-test_field_migration_hook_computes_total_via_local_call() ->
-    OldState = #{
-        '$beamtalk_class' => 'ShapeHookCart',
-        '__class_mod__' => 'bt@shape_hook_cart',
-        itemCount => 4
-    },
-    ?assertNot(maps:is_key(total, OldState)),
-    {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, #{module => 'bt@shape_hook_cart'}
-    ),
-    ?assertEqual(4, maps:get(itemCount, NewState)),
-    ?assertEqual(40, maps:get(total, NewState)).
-
-%% A class that defines no migrateFromV1: (Counter) is unaffected by the
-%% hook lookup — maybe_apply_migration_hook/3's erlang:function_exported/3
-%% check is false, so the field dict passes through unchanged into the
-%% ordinary structural fold, same as before BT-3535.
-test_field_migration_hook_absent_is_no_op() ->
-    OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 9},
-    {ok, NewState} = beamtalk_hot_reload:code_change(
-        v1, OldState, #{module => 'bt@counter'}
-    ),
-    ?assertEqual(9, maps:get(value, NewState)),
-    ?assertNot(maps:is_key(total, NewState)).
-
-%% The `whereis_class(ClassName) =:= undefined` branch of
-%% maybe_apply_migration_hook/3 — the class module exports migrateFromV1:
-%% (function_exported/3 is true), but the class has no registered class
-%% actor to local_call/3 through. Mocks whereis_class/1 (meck, passthrough,
-%% per the beamtalk_class_monitor_tests convention) to force `undefined`
-%% for ShapeHookCart specifically, leaving every other class's lookup
-%% untouched.
-%%
-%% `whereis_class/1` is not just the hook's own lookup: migrate_fields/2's
-%% NewInstanceVars also resolves via `classAllFieldNamesByName/1` ->
-%% `walk_hierarchy/3`, which calls the very same `whereis_class/1` and
-%% returns `[]` the moment it comes back `undefined` (beamtalk_behaviour_
-%% intrinsics.erl). So with no registered class actor, the *whole* reload
-%% degrades to "no declared fields" — not just the migration hook — and
-%% `itemCount` is dropped like every other field, hook or no hook. That is
-%% the real, already-existing behavior this test pins down; it is not
-%% independent of maybe_apply_migration_hook/3's own no-op.
-test_field_migration_hook_no_class_actor_is_no_op() ->
-    meck:new(beamtalk_class_registry, [passthrough]),
-    meck:expect(beamtalk_class_registry, whereis_class, fun
-        ('ShapeHookCart') -> undefined;
-        (ClassName) -> meck:passthrough([ClassName])
-    end),
-    try
-        OldState = #{
-            '$beamtalk_class' => 'ShapeHookCart',
-            '__class_mod__' => 'bt@shape_hook_cart',
-            itemCount => 4
-        },
-        {ok, NewState} = beamtalk_hot_reload:code_change(
-            v1, OldState, #{module => 'bt@shape_hook_cart'}
-        ),
-        ?assertNot(maps:is_key(itemCount, NewState)),
-        ?assertNot(maps:is_key(total, NewState))
-    after
-        meck:unload(beamtalk_class_registry)
-    end.
-
-%% Spawn → set state → reload → inspect via sys:get_state: the hook runs
-%% on a genuinely live actor's real suspend/change_code/resume cycle
-%% (beamtalk_hot_reload:trigger_code_change/3 — the same function
-%% beamtalk_repl_loader:hot_reload_class/2 calls for every live instance of
-%% a reloaded class), not a bare code_change/3 call bypassing sys. The
-%% instance already has `total => 0` from spawn/0's own defaults (this
-%% fixture's declared default) — ending up with `total => 30` after reload
-%% specifically proves the hook *overwrote* it via local_call/3, not merely
-%% left an already-correct default alone.
-test_field_migration_hook_live_actor_sys_get_state() ->
-    Object = 'bt@shape_hook_cart':spawn(),
-    Pid = element(4, Object),
-    ?assertEqual({ok, 1}, gen_server:call(Pid, {addItem, []})),
-    ?assertEqual({ok, 2}, gen_server:call(Pid, {addItem, []})),
-    ?assertEqual({ok, 3}, gen_server:call(Pid, {addItem, []})),
-    try
-        PreState = sys:get_state(Pid),
-        ?assertEqual(3, maps:get(itemCount, PreState)),
-        ?assertEqual(0, maps:get(total, PreState)),
-        {ok, 1, []} =
-            beamtalk_hot_reload:trigger_code_change(
-                'bt@shape_hook_cart', [Pid], #{module => 'bt@shape_hook_cart'}
-            ),
-        FinalState = sys:get_state(Pid),
-        ?assertEqual(3, maps:get(itemCount, FinalState)),
-        ?assertEqual(30, maps:get(total, FinalState))
-    after
-        gen_server:stop(Pid)
-    end.
-
-%% ShapeHookRaisingCart's migrateFromV1: always raises (`self error:`).
-%% maybe_apply_migration_hook/3 does not catch it — the raise propagates
-%% through code_change/3, and sys's own system_code_change/4 wrapper turns
-%% it into an {error, _} return from sys:change_code/4, which
-%% try_change_code/3 (BT-3534) already treats as "do not resume": the actor
-%% is left suspended, state intact, inspectable via sys:get_state/1. The
-%% migration hook gets this fail-closed behaviour for free, from the
-%% suspend-on-failure contract BT-3534 already built.
-test_field_migration_hook_raise_leaves_actor_suspended() ->
-    Object = 'bt@shape_hook_raising_cart':spawn(),
-    Pid = element(4, Object),
-    ?assertEqual({ok, 1}, gen_server:call(Pid, {addItem, []})),
-    try
-        {ok, 0, [{Pid, _Reason}]} =
-            beamtalk_hot_reload:trigger_code_change(
-                'bt@shape_hook_raising_cart', [Pid], #{module => 'bt@shape_hook_raising_cart'}
-            ),
-        ?assertEqual(
-            suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
-        ),
-        %% State is intact — unchanged from before the reload attempt, not
-        %% partially migrated (the hook raises before migrate_fields/2
-        %% returns anything, so nothing downstream of it ever ran).
-        SuspendedState = sys:get_state(Pid),
-        ?assertEqual(1, maps:get(itemCount, SuspendedState)),
-        ?assertEqual(0, maps:get(total, SuspendedState))
-    after
-        _ = (catch sys:resume(Pid)),
-        unlink(Pid),
-        gen_server:stop(Pid)
-    end.
 
 %%====================================================================
 %% Helpers
@@ -895,18 +794,17 @@ field_migration_with_non_map_state_falls_through_test() ->
 %% init failure exception — covers init_error catch branch (line 105 of src)
 %%====================================================================
 
+%% ADR 0123 Phase 2 (BT-3536): 'X' was never a real registered class either
+%% (see test_field_migration_init_failure_preserves_state's comment above) —
+%% Class resolution now fails before Module:init/1 is ever reached, so this
+%% is a class_not_found failure, same as that sibling test.
 field_migration_init_throws_returns_old_state_test() ->
-    %% When Module:init/1 throws any exception (not just returns
-    %% an error tuple), migrate_fields catches it and returns OldState.
-    %% Using an atom that is a loaded module but whose init/1 throws.
     OldState = #{'$beamtalk_class' => 'X', value => 99},
-    %% gen_server:init/1 is not exported as a plain init/1 on arbitrary modules;
-    %% pick a module whose init/1 either does not exist or crashes on #{}.
-    {ok, NewState} =
+    {error, Reason} =
         beamtalk_hot_reload:code_change(
             v1, OldState, #{module => lists}
         ),
-    ?assertEqual(OldState, NewState).
+    ?assertMatch(#beamtalk_error{kind = class_not_found, class = 'X'}, Reason).
 
 %%====================================================================
 %% Helpers
@@ -993,51 +891,4 @@ ensure_logging_counter_loaded() ->
             end;
         {error, Reason} ->
             error({logging_counter_module_not_found, Reason})
-    end.
-
-%% BT-3535 (ADR 0123 Phase 1 spike): ShapeHookCart exercises the
-%% migrateFromV1: hook call site in migrate_fields/2
-%% (maybe_apply_migration_hook/3).
-ensure_shape_hook_cart_loaded() ->
-    case code:ensure_loaded('bt@shape_hook_cart') of
-        {module, 'bt@shape_hook_cart'} ->
-            case beamtalk_class_registry:whereis_class('ShapeHookCart') of
-                undefined ->
-                    case erlang:function_exported('bt@shape_hook_cart', register_class, 0) of
-                        true ->
-                            'bt@shape_hook_cart':register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({shape_hook_cart_module_not_found, Reason})
-    end.
-
-%% BT-3535 (ADR 0123 Phase 1 spike): ShapeHookRaisingCart's migrateFromV1:
-%% always raises — exercises the suspend-on-failure interop (BT-3534).
-ensure_shape_hook_raising_cart_loaded() ->
-    case code:ensure_loaded('bt@shape_hook_raising_cart') of
-        {module, 'bt@shape_hook_raising_cart'} ->
-            case beamtalk_class_registry:whereis_class('ShapeHookRaisingCart') of
-                undefined ->
-                    case
-                        erlang:function_exported(
-                            'bt@shape_hook_raising_cart', register_class, 0
-                        )
-                    of
-                        true ->
-                            'bt@shape_hook_raising_cart':register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({shape_hook_raising_cart_module_not_found, Reason})
     end.

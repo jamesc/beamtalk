@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3536 (ADR 0123 Phase 2) regression fixture: a plain Sendable-tier
+// Value, used as a nested field of shape_box.bt to exercise
+// beamtalk_shape_migration:pack/1's recursive Value-field packing and
+// unpack/1's matching recursive unpack.
+
+typed Value subclass: ShapePoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0
