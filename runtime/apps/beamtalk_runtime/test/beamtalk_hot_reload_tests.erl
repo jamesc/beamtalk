@@ -481,8 +481,11 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         {ok, NewState} = beamtalk_hot_reload:code_change(
             v1, OldState, #{module => 'bt@counter'}
         ),
-        %% State is kept unchanged, same as any other init-not-usable case.
-        ?assertEqual(OldState, NewState),
+        %% Migration still succeeds (value was already present in ChainedFields,
+        %% so the failed init/1 defaults were never actually needed) and stamps
+        %% '__shape_version__' the same as any other successful migration.
+        ?assertEqual(1, maps:get('__shape_version__', NewState)),
+        ?assertEqual(OldState, maps:remove('__shape_version__', NewState)),
         ?assert(
             receive_bad_init_warning('bt@counter', {error, not_a_state_map}, 5)
         )
