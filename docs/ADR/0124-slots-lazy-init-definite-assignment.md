@@ -10,14 +10,16 @@ driving issue bundles. They are not equally ready:
   `beamtalk-core`, and it addresses the evidenced pain. **Recommend
   accepting and implementing now.**
 - **Part B — lazy slots (§1–§5, §8, §9).** The design below is complete and
-  the representation decision (§2) is sound, but review found no call site in
-  the current corpus that needs it (§Context), and the lowering's blast radius
-  is much larger than first estimated (§4). **Recommend Deferred** until the
-  four open items in §4 are closed, or splitting Part B into its own ADR.
-  Note that ADR 0123's epic completing does **not** lift this: it unblocks
-  only the migration phase (B6, §8). None of the four open items —
-  re-entrancy, the lowering choice, `terminate:`/`handle_info` discarding
-  state, or the watcher notification on a read — is affected by it.
+  the representation decision (§2) is well supported — Exdura and Symphony
+  supply real evidence for it (§Context). **Recommend Deferred**
+  nonetheless, until the six open items in §4 are closed, or splitting Part B
+  into its own ADR. The reason is not absence of demand: it is that the real
+  call sites, once examined, add two requirements the design does not meet —
+  invalidation back to the absent state, and an initialiser that can answer a
+  `Result` — on top of a lowering whose blast radius is much larger than
+  first estimated (§4). Note that ADR 0123's epic completing does **not**
+  lift this either: it unblocks only the migration phase (B6, §8), and none
+  of the six open items is affected by it.
 
 Part A does not depend on Part B. The only coupling is one clause in a shared
 predicate (§7), statable as a forward-compatibility note.
@@ -35,28 +37,86 @@ becomes valid**. Three gaps follow from that omission:
    construction cannot run at `init/1` time, has to be declared nilable and
    nil-checked at every read.
 
-   **The honest state of the evidence: no call site in the current corpus
-   needs this.** Three candidates were examined and all three are
-   unsuitable, which matters more than the pattern count:
+   The Beamtalk stdlib itself is poor evidence for this: its three nilable
+   singletons (`transcript_stream.bt`, `beamtalk_interface.bt`,
+   `workspace_interface.bt`) are injected by
+   `beamtalk_workspace_bootstrap:bootstrap_singleton/3` (`:149-186`) with
+   `erlang:monitor` and rebootstrap-on-death, which no initialiser can
+   reproduce, and `retry_policy.bt`'s nilable field is a genuinely optional
+   user-supplied value. **The evidence is in the two real applications built
+   on Beamtalk** — Exdura (a workflow engine) and Symphony (an agent
+   orchestrator), both already cited as real-world corpora by ADR 0067.
 
-   | Candidate | Why it cannot take the fix |
-   |---|---|
-   | `stdlib/src/transcript_stream.bt:17` | `typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream` — a `native:` Actor (ADR 0056), and its singleton is a *registered process*, not a constructed value |
-   | `stdlib/src/beamtalk_interface.bt:27` | `classState: current :: BeamtalkInterface \| Nil = nil`, but the singleton is injected externally by `beamtalk_workspace_bootstrap:bootstrap_singleton/3` (`:149-186`), which also `erlang:monitor`s it and rebootstraps on death. A lazy initialiser cannot reproduce that |
-   | `stdlib/src/workspace_interface.bt:26` | Same bootstrap-injected shape |
-   | `stdlib/src/retry_policy.bt:107` | `typed Value subclass:` — §5 of this ADR *forbids* `lazy` on a Value `field:`. And `maximumInterval` is a genuinely optional user-supplied field, so its `nil` is meaningful, not a workaround |
+   It splits three ways, and the third way is the most important:
 
-   All three nilable singletons widen a declared type to `| Nil` — which does
-   defeat ADR 0107's nil narrowing for every downstream reader — but they do
-   it to describe *external injection*, not deferred construction. `lazy`
-   would not fix them.
+   **(a) A genuine late-initialised resource.** Symphony's codex client
+   (`symphony/src/codex/codex_client.bt`):
+
+   ```beamtalk
+   typed Actor subclass: CodexClient
+     state: proc :: Subprocess | Nil = nil
+     ...
+     launch -> Result(Nil, CodexError) =>
+       procResult := [
+         Subprocess open: "/bin/bash" args: #("-lc", self.config codexCommand)
+           dir: self.workspacePath
+       ] on: Error do: [:e | ^Result error: (CodexError notFound: e message)]
+       ...
+       self.proc := procResult unwrap
+   ```
+
+   `proc` is `nil` until `launch` runs, and `self.proc` is then read
+   throughout (`readLine:`, `writeLine:`, `exitCode`). This is the shape
+   `lazy` is for — and §4 shows why this exact class is *also* what defers
+   Part B.
+
+   **(b) `nil` overloaded to mean two different things.** Exdura's engine
+   (`exdura/src/workflow/workflow_engine.bt:20-26`) carries an **extra slot
+   whose only job is to disambiguate `nil`**:
+
+   ```beamtalk
+   typed Actor subclass: WorkflowEngine
+     state: eventStore :: EventStore | Nil = nil
+     state: activityPool :: ActivityWorkerPool | Nil = nil
+     /// Set via `withArgs: #{#supervised => true}` on the ExduraSupervisor
+     /// child spec. Distinguishes a nil `activityPool` that means "look it
+     /// up by name, the supervisor's ActivityWorkerPool is up somewhere"
+     /// from the legitimate standalone case (`withStore:`, no pool at all).
+     state: supervised :: Boolean = false
+   ```
+
+   That comment is this ADR's §2 argument, written independently by an
+   application author who had to invent a workaround for it. "Not yet
+   resolved" and "legitimately absent" are different states, `nil` cannot
+   express both, and the cost of conflating them was a third slot plus a
+   four-line comment explaining it. **This is the strongest evidence in the
+   ADR, and it is evidence for the representation (§2) rather than for
+   `lazy` itself.**
+
+   **(c) Deliberate non-memoisation, where `lazy` would be a bug.** The same
+   two codebases resolve some slots by name on *every* read, on purpose.
+   Exdura's timer manager (`exdura/src/timer/timer_manager.bt:15-20`):
+
+   ```beamtalk
+     /// (ADR 0079) instead of passing live refs, since neither exists yet
+     /// when the child spec is built. `engine`/`eventStore` below resolve
+     /// fresh by name in that case, so a `rest_for_one` restart of either is
+     /// picked up automatically instead of leaving a nil/stale field.
+     state: engine :: WorkflowEngine | Nil = nil
+     state: eventStore :: EventStore | Nil = nil
+   ```
+
+   and `exdura_client.bt:144-155` does the same via `currentEngine` /
+   `currentEventStore`. Memoising these would defeat supervisor restart
+   recovery — the staleness hazard of §4, in production, already understood
+   and deliberately avoided. So a meaningful share of the nilable slots that
+   *look* like lazy-init candidates must never become lazy slots, and the
+   feature needs to be documented with that distinction up front.
 
    Note also that `state: x :: T = <expr>` **already** permits an arbitrary
    eager initialiser (`gen_server/state.rs:36`, `:98`). So `lazy` buys only
-   (a) deferring work off the spawn path and (b) construction that *cannot*
-   run during `init/1` — and this ADR cannot produce a current (b) case. Part
-   B is therefore a forward-looking feature for resource-holding actors the
-   codebase does not yet have, and should be judged as one.
+   (a) deferring work off the spawn path and (b) construction that cannot run
+   during `init/1` — and case (a) above is a real instance of both.
 
 2. **Definite assignment is enforced only at runtime.** ADR 0078 added a
    post-`initialize` check: after the auto-chained `initialize` sequence, any
@@ -268,7 +328,12 @@ Consequences, all of which fall out rather than needing new machinery:
 
 - The presence test is `maps:is_key/2`. No computed value — including `nil`,
   `false`, or `'__absent__'` itself — can be mistaken for "not computed".
-  This is the wart Newspeak's `nil`-based lazy slots have and we do not.
+  This is the wart Newspeak's `nil`-based lazy slots have and we do not. It
+  is also the one decision here with independent real-world support:
+  Exdura's `WorkflowEngine` carries a whole extra `supervised :: Boolean`
+  slot for no purpose but to tell "not yet resolved" apart from
+  "legitimately absent" (§Context (b)). Key absence expresses that
+  distinction natively, so the workaround stops being necessary.
 - `beamtalk_actor:changed_state_keys/2` already reads a missing key as
   `'__absent__'`, so the watch and telemetry paths need no change.
 - `sys:get_state`, `observer`, and `recon` show a map with the key missing.
@@ -386,12 +451,13 @@ b fieldNames                          // => #(#rows, #index) — only after forc
 //                                       an unforced `index` is absent (§9)
 ```
 
-### 4. What the lowering actually costs — four open items
+### 4. What the lowering actually costs — six open items
 
 An earlier draft of this ADR claimed the existing detectors and emitters
 would carry lazy reads "without per-construct work". Review disproved that on
-four counts. These are the reasons Part B is **Deferred**, not obstacles that
-are merely noted.
+four counts, and reading the real call sites in §Context added two more.
+These are the reasons Part B is **Deferred**, not obstacles that are merely
+noted.
 
 **a. `generate_field_access` is pure, and there are ~15 other `maps:get`
 sites.** `generate_field_access`
@@ -476,13 +542,26 @@ generated reader where there is currently none rather than changing one.
    keeps its side effects, and loses the memo. Worse, the documented cleanup
    idiom reads the slot it closes:
 
+   This is not hypothetical — Symphony's codex client does exactly it
+   (`symphony/src/codex/codex_client.bt:63-73`):
+
    ```beamtalk
-   Actor subclass: ResourceActor
-     lazy state: conn :: Object = (Erlang my_driver) connect: self.url
-     terminate: reason :: Symbol -> Nil => self.conn close
+     terminate: _reason :: Object -> Nil => self stopProcess
+
+     stopProcess -> Nil =>
+       self.proc isNil
+         ifFalse: [
+           self.proc close
+           self.proc stop
+           self.proc := nil
+         ]
    ```
 
-   An unforced `conn` is **opened during shutdown in order to be closed**.
+   The `isNil` guard makes this safe today, and it is safe *because `nil` is
+   the sentinel*. Convert `proc` to a lazy slot under §2 and `self.proc` on
+   an absent key **forces the initialiser** — so shutting the actor down
+   would run `Subprocess open: "/bin/bash"` in order to close it, then
+   discard the memo, since `terminate/2` drops the returned state.
    ADR 0111 forbids an ad-hoc `debug_assert!` at a new state-threading site,
    so this needs either a `VerifyError` or an explicit rule that lazy reads
    are forbidden in these callbacks.
@@ -493,6 +572,26 @@ generated reader where there is currently none rather than changing one.
    watch and telemetry *code* needs no change; the *behaviour* does, and it
    directly undercuts §9's rule that observation must not perturb a running
    system.
+5. **Invalidation turns out to be required, not optional.** This ADR declines
+   to add an invalidation primitive (below) on the grounds that no use case
+   demanded one. The `stopProcess` code in item 3 *is* that use case: the
+   slot is cleared with `self.proc := nil` so the process can be relaunched.
+   Under §2 an assignment of `nil` **memoises `nil`** instead of returning
+   the slot to absent, so the next read answers `nil` rather than
+   relaunching — the lazy slot becomes one-shot. Converting this class needs
+   a way back to the absent state, which is a new surface
+   (`self invalidateSlot: #proc`) and a third answer to "what states can a
+   slot be in".
+6. **A `Result`-returning initialiser has nowhere to go.** Symphony's
+   `launch` answers `Result(Nil, CodexError)` and its callers depend on that
+   (`launchResult isError ifTrue: [^launchResult]`,
+   `codex_client.bt:178-179`). A lazy initialiser's value *is* the slot's
+   value, so it cannot both answer a `Result` for the caller to handle and
+   store a `Subprocess`. §3b makes a failing initialiser propagate the raise
+   and leave the slot absent, converting a typed, handled error into an
+   exception at an arbitrary read site — against the project's own rule that
+   public APIs use structured errors. This needs an answer before a
+   resource-acquiring lazy initialiser is idiomatic.
 
 **Staleness and idempotence remain author obligations, not diagnostics.** An
 earlier draft proposed a `StaleLazySlot` warning — "collect the `self.<slot>`
@@ -1161,15 +1260,20 @@ is five extra characters in the declared type and one `ifNil:` per read, and
 `UninitializedStateError` does catch the unassigned-slot bug — at spawn time,
 which for an actor started under a supervisor is usually immediate and loud.
 
-**For Part B this alternative is stronger than the first draft admitted, and
-review moved it from "rejected" to "not yet beaten".** Context shows no
-current call site needs lazy init; `state: x :: T = <expr>` already allows an
-arbitrary eager initialiser; and §4 prices the lowering at L–XL. The three
-nilable singletons do widen a type to `| Nil` and so do permanently defeat
-ADR 0107's narrowing for downstream readers — but they do it to describe
-*external injection*, which `lazy` cannot replace. Doing nothing about lazy
-slots until a real call site appears is a defensible position, and it is why
-Part B is Deferred rather than Accepted.
+**For Part B this is now a genuine contest rather than a formality.** In
+favour of doing nothing: `state: x :: T = <expr>` already allows an arbitrary
+eager initialiser, §4 prices the lowering at L–XL, and a large share of the
+nilable slots in Exdura and Symphony must *never* become lazy (§Context (c)) —
+so the feature's addressable share of its own motivating pattern is smaller
+than it first looks. Against: the `supervised` flag in
+`workflow_engine.bt` is a real, documented workaround for a representation
+gap, and `codex_client.bt`'s `proc` is a real late-init resource. The
+status quo costs a widened type (defeating ADR 0107 narrowing for every
+downstream reader), a nil-guard per read, and occasionally an extra slot.
+
+The balance is why Part B is **Deferred rather than Rejected**: the need is
+established, the design is not finished (§4 items 5 and 6 came directly from
+reading that real code).
 
 **For Part A it is rejected.** The definite-assignment signal is a strictly
 additive diagnostic over machinery that already exists — the ADR 0078 chain
@@ -1241,7 +1345,14 @@ The static check is additive.
   process-dictionary shadow write (§4d).
 - **Phase 3 is L–XL**, touching a pure `generate_field_access`, ~15 other
   state `maps:get` sites, and the loop-hoisting optimisations (§4a, §4b).
-  This is the ADR's largest cost and the main reason Part B is Deferred.
+  This is the ADR's largest single cost.
+- **The design does not yet meet its own motivating call sites.** Symphony's
+  codex client needs invalidation back to absent and an initialiser that can
+  answer a `Result` (§4 items 5, 6); neither is in this design. Together with
+  Phase 3's cost, this is why Part B is Deferred.
+- **A nilable slot is not automatically a lazy candidate**, and getting that
+  wrong breaks supervisor-restart recovery (§Context (c)). The feature ships
+  with a real footgun that only documentation guards.
 - **`lazy` moves work from spawn to an arbitrary later message**, shifting
   where latency spikes and crashes appear.
 - **Every read of a lazy slot pays a `maps:is_key/2`, not just the first**,
@@ -1302,7 +1413,7 @@ representation, so it carries none of Part B's risk.
 | B4 | Reflection and tooling: `fieldKinds`/`allFieldKinds` incl. the `ClassInfo` third map, the `__beamtalk_meta` schema entry, and `class_variables` growing from `Vec<EcoString>` to a structure; `behaviour.bt` declaration + Erlang intrinsic; generated `force_field/2`; `read_field/2`'s declared-lazy branch; the `'fieldAt:'` dispatch arm threading state; `InspectorField` `#lazySlot` / `value: #notComputed` / `drillable: false` plus the wire form and `beamtalk_inspector:fieldsOf/1`; LSP hover | `beamtalk-codegen`, `beamtalk-core`, `beamtalk_runtime`, `beamtalk-stdlib`, `beamtalk-language-service` | **M–L** |
 | B5 | REPL-visible output: decide and confirm `printString` rendering for an unforced lazy slot (§9) — **gated on explicit user confirmation** per `CLAUDE.md` | `beamtalk_runtime` (`beamtalk_object_printer.erl`), `tests/repl-protocol` | **S**, gated |
 | B6 | ADR 0123 reconcile lazy row + the shared `(slot kind, present?, has default?) -> outcome` conformance fixture. **Sequenced after ADR 0123's epic**, which is assumed complete before Part B starts (§8) — read `beamtalk_shape_migration` as built and add the lazy case to its reconcile. Re-measure the "`beamtalk_hot_reload` needs no change" finding against the finished epic rather than inheriting it from §8. Includes the `allFieldNames`-keep-set invariant test | `beamtalk_runtime`, `beamtalk-codegen` | **S** |
-| B7 | Docs + tests: `beamtalk-language-features.md` (slot kinds, the force/no-force table, once-per-successful-computation, **initialisers must be idempotent**, the `spawnWith:`-injection clause at `:2426`, restart semantics), `surface-parity.md`, BUnit tests in `stdlib/test/*.bt`, REPL-protocol e2e | docs, `stdlib/test`, `tests/repl-protocol` | **S** |
+| B7 | Docs + tests: `beamtalk-language-features.md` — leading with **"a nilable slot is not automatically a lazy candidate"** and the resolve-by-name counter-example (§Context (c)), then slot kinds, the force/no-force table, once-per-successful-computation, **initialisers must be idempotent**, the `spawnWith:`-injection clause at `:2426`, restart semantics; plus `surface-parity.md`, BUnit tests in `stdlib/test/*.bt`, REPL-protocol e2e | docs, `stdlib/test`, `tests/repl-protocol` | **S** |
 
 **Test placement** (per `CLAUDE.md`): lazy-slot behaviour, memoisation,
 initialiser failure-and-retry, and `fieldKinds` go in `stdlib/test/*.bt` as
@@ -1341,10 +1452,24 @@ three nilable singletons are injected by
 monitors the process and rebootstraps on death; a lazy initialiser cannot
 reproduce that. **They must not be converted.**
 
-So there is no migration to offer, which is the same finding as Context: the
-current corpus has no lazy-init call site. Converting a slot **between eager
-and lazy** would change its ADR 0123 reconcile row and so require a
-`shapeVersion:` bump — relevant to future code, not to any existing code.
+**In the applications, migration is real but selective**, and the selection
+matters more than the mechanics. Of the nilable slots surveyed across Exdura
+and Symphony (§Context):
+
+| Class | Verdict |
+|---|---|
+| `symphony/codex_client.bt` `proc` | A genuine candidate, blocked on §4 items 5 and 6 (needs invalidation; `launch` answers a `Result`) |
+| `exdura/exdura_client.bt` `supervisor`, `httpServer` | Candidates — set once by a lifecycle call, read via nil-guards |
+| `exdura/workflow_engine.bt` `eventStore`, `activityPool` | Convert **with** the `supervised` flag removed; that flag exists only to disambiguate `nil` (§2) |
+| `exdura/timer_manager.bt` `engine`, `eventStore`; `exdura_client.bt` `currentEngine`/`currentEventStore` | **Must not convert.** They resolve by name on every read so a `rest_for_one` supervisor restart is picked up; memoising is a bug |
+| `symphony` / `exdura` error and DTO `field:`s (`workspace_error`, `linear_error`, `issue`, `activity_outcome`, …) | **Not candidates.** Optional data, where `nil` is a meaningful value, and §5 forbids `lazy field:` on a Value anyway |
+
+The docs (B7) must lead with that last-but-one row: a nilable slot is *not*
+automatically a lazy-slot candidate, and the distinguishing question is
+whether a stale memo would be wrong.
+
+Converting a slot **between eager and lazy** changes its ADR 0123 reconcile
+row and so requires a `shapeVersion:` bump.
 
 ## References
 - Related issues: [BT-3525](https://linear.app/beamtalk/issue/BT-3525)
@@ -1409,6 +1534,15 @@ and lazy** would change its ADR 0123 reconcile row and so require a
   `docs/development/architecture-principles.md` §6 (shared-leaf-module
   pattern) and §7 (consistency-test disposition),
   `docs/development/surface-parity.md`
+- Application corpora surveyed for evidence (§Context), both cited as
+  real-world Beamtalk projects by ADR 0067:
+  [jamesc/beamtalk-exdura](https://github.com/jamesc/beamtalk-exdura)
+  (workflow engine — `event_store.bt`, `exdura_client.bt`,
+  `workflow_engine.bt`, `timer_manager.bt`, `exdura_http_server.bt`) and
+  [jamesc/beamtalk-symphony](https://github.com/jamesc/beamtalk-symphony)
+  (agent orchestrator — `codex/codex_client.bt`, `orchestrator.bt`,
+  `workflow/workflow_watcher.bt`). Surveyed at `exdura@d6b350e` /
+  `symphony@d95ce02`.
 - Prior art: [Newspeak lazy slots](https://groups.google.com/g/newspeaklanguage/c/IQsw31ze-IU)
   and the [Newspeak specification](https://newspeaklanguage.org/spec/newspeak-spec.pdf);
   [Pharo ComputedSlots](https://astares.blogspot.com/2019/03/computedslots-in-pharo.html);
