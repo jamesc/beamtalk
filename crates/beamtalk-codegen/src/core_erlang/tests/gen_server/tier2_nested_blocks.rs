@@ -45,6 +45,46 @@ fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
 }
 
 #[test]
+fn test_nested_foldl_class_reference_send_buried_in_conditional_is_compile_error() {
+    // BT-3530: the same "self-send buried inside a conditional, not a bare
+    // top-level statement, inside a `Foldl*` nested inside another `Foldl*`"
+    // shape as `test_nested_foldl_self_send_buried_in_conditional_is_compile_error`
+    // above, but spelled `ClassName foo` (`NestedFoldClassRefCondMutation
+    // bump`) instead of `self bump`. A BARE top-level `ClassName`-spelled
+    // send is already caught correctly by `find_class_var_mutating_stmt`
+    // (it goes through `is_class_method_self_send`, which has treated both
+    // spellings identically since ADR 0118 phase 5b) — the blind spot is
+    // specifically in `nested_loop_lost_class_var_mutation`'s recursive
+    // `Foldl` fallback, which must match `Foldl*`'s own real
+    // `threads_class_vars` gate (`block_analysis::analyze_block(body).has_self_sends`,
+    // genuinely recursive, unlike Letrec's). That fallback filtered
+    // `self_send_selectors` directly, which only ever records a bare
+    // `self`-receiver send, so a `ClassName`-spelled send buried in a
+    // conditional was invisible to it and the mutation silently compiled
+    // away — the exact same blind spot BT-3529 already fixed at
+    // `check_no_unsafe_class_method_self_sends`'s call sites, via
+    // `block_analysis::same_class_reference_send_selectors`. Must be
+    // rejected identically to the `self bump`-spelled shape.
+    let src = "Value subclass: NestedFoldClassRefCondMutation\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDo: aList =>\n    outerSeen := 0\n    aList\n      do: [:x |\n        total := 0\n        aList\n          do: [:y |\n            (y >= 0) ifTrue: [NestedFoldClassRefCondMutation bump]\n            total := total + 1\n          ]\n        outerSeen := outerSeen + 1\n      ]\n    self.runs";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedfoldclassrefcondmutation").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "'NestedFoldClassRefCondMutation bump'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a ClassName-spelled \
+             same-class send buried in a conditional inside a do: nested inside \
+             another do:. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
 fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     // A same-class self-send buried inside an
     // `ifTrue:` conditional (NOT a bare top-level statement) within an

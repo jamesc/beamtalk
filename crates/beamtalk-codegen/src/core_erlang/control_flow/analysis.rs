@@ -837,6 +837,15 @@ impl CoreErlangGenerator {
     ///   to `BodyKind::Letrec`), so it is already unconditionally rejected by
     ///   `reject_class_var_field_assignment` at any depth.
     ///
+    /// BT-3530: the `Foldl*` gate's own diagnostic-message fallback below
+    /// must mirror that same recursive reach for a same-class send spelled
+    /// `ClassName foo` (as opposed to `self foo`) — `self_send_selectors`
+    /// only ever records a bare `self`-receiver send, so a `ClassName`-spelled
+    /// mutation reached this predicate's `Some(body)` match but fell through
+    /// to `None` unrejected. Closed via `block_analysis::same_class_reference_send_selectors`,
+    /// the same BT-3529/BT-3522 helper, rather than a second copy of the
+    /// same-class-send detection.
+    ///
     /// This is a detection-only predicate, deliberately separate from
     /// `ThreadingPlan::threads_class_vars`, which stays scoped to the OUTER
     /// body's own top-level statements (see that field's doc comment)
@@ -895,6 +904,21 @@ impl CoreErlangGenerator {
             // only the message.
             if let Some(selector) = analysis.self_send_selectors.iter().min() {
                 return Some(format!("'self {selector}'"));
+            }
+            // BT-3530: `self_send_selectors` only ever records a bare
+            // `self`-receiver send (`beamtalk_core::semantic_analysis::block_facts::analyze_expression`),
+            // so a same-class send spelled `ClassName foo` — the exact same
+            // same-class, same-activation call `is_class_method_self_send`
+            // treats identically to `self foo` — was invisible to the check
+            // above, silently skipping this rejection instead of catching
+            // the lost mutation at compile time. Same blind spot BT-3529
+            // already fixed at `check_no_unsafe_class_method_self_sends`'s
+            // call sites; reuse the same helper rather than a second copy.
+            let class_name = self.class_name();
+            let class_reference_sends =
+                block_analysis::same_class_reference_send_selectors(&body.body, &class_name);
+            if let Some(selector) = class_reference_sends.iter().min() {
+                return Some(format!("'{class_name} {selector}'"));
             }
         }
         None
