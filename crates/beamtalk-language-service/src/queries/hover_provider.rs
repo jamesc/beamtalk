@@ -30,7 +30,7 @@ use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
 use crate::{HoverInfo, Position};
 use beamtalk_core::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
-    StateDeclaration, declared_shape_migrations,
+    SlotKind, StateDeclaration, declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
@@ -492,14 +492,24 @@ fn shape_chain_line(target: u32, migrations: &[(u32, ecow::EcoString)]) -> Strin
 }
 
 fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
+    // ADR 0124 §1/§9 (BT-3550): `late` precedes the name in the declaration
+    // as written (same position rule `unparse_state_declaration_inner` uses
+    // for the full-declaration formatter), so hover must show it too — a
+    // `late` slot's "legitimately unassigned after initialize" contract is
+    // exactly what a reader hovering the declaration needs to see.
+    let late_prefix = if state.slot_kind == SlotKind::Late {
+        "late "
+    } else {
+        ""
+    };
     let title = if let Some(ty) = &state.type_annotation {
         format!(
-            "`{} :: {}`",
+            "`{late_prefix}{} :: {}`",
             state.name.name,
             beamtalk_core::unparse::unparse_type_annotation_display(ty)
         )
     } else {
-        format!("`{}`", state.name.name)
+        format!("`{late_prefix}{}`", state.name.name)
     };
     let mut hover = HoverInfo::new(title, state.name.span);
 
@@ -512,7 +522,12 @@ fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
     {
         doc_parts.push(doc.to_string());
     }
-    doc_parts.push("_state variable_".to_string());
+    let variable_label = if state.slot_kind == SlotKind::Late {
+        "_late state variable_"
+    } else {
+        "_state variable_"
+    };
+    doc_parts.push(variable_label.to_string());
     hover = hover.with_documentation(doc_parts.join("\n\n"));
     hover
 }
@@ -2199,6 +2214,40 @@ mod tests {
                 .unwrap_or_default()
                 .contains("state variable"),
             "Should show state variable label, got: {:?}",
+            hover.documentation
+        );
+    }
+
+    #[test]
+    fn hover_on_late_state_declaration_name() {
+        // BT-3550 (ADR 0124 §9): hover on a `late` declaration must show
+        // `late` — it changes the slot's contract (legitimately unassigned
+        // after `initialize`), so hiding it would show a plain, misleading
+        // `proc :: Subprocess` declaration.
+        let source =
+            "Actor subclass: CodexClient\n  late state: proc :: Subprocess\n  launch => self.proc";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("proc ::").unwrap();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+
+        assert!(hover.is_some(), "Should hover late state declaration name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("`late proc :: Subprocess`"),
+            "Should show `late` before the name, got: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("late state variable"),
+            "Should show the late state variable label, got: {:?}",
             hover.documentation
         );
     }

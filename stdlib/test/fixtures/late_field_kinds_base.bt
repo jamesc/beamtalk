@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3550: Fixture for `Behaviour>>fieldKinds` / `allFieldKinds` BUnit
+// coverage (ADR 0124 §9/B5b). One `late` instance slot and one ordinary
+// (eager) one, on a plain `Actor subclass:` — mirrors the `CodexClient`
+// shape from docs/beamtalk-language-features.md's `late` Slots section,
+// without that example's `typed`/`Subprocess` dependencies. No instance of
+// this class is ever spawned; field_kinds_test.bt only exercises
+// class-level reflection (`fieldKinds`/`allFieldKinds`), which never reads
+// `proc`'s (unassigned) value.
+//
+// See fixtures/late_field_kinds_sub.bt for the subclass fixture used to
+// test that an inherited `late` slot appears in `allFieldKinds` but not in
+// the subclass's own (local-only) `fieldKinds`.
+
+Actor subclass: LateFieldKindsBase
+  late state: proc :: Integer
+  state: nextId :: Integer = 0

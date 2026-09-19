@@ -34,6 +34,9 @@ that the Behaviour/Class libraries can rely on.
 | classAllFieldNamesByName/1  | Same as classAllFieldNames/1, by ClassName (no instance needed) |
 | classAllFieldTypesByName/1  | Flattened field name -> declared type atom (ADR 0123 Phase 2) |
 | classAllFieldHasDefaultByName/1 | Flattened field name -> has-default boolean (ADR 0123 Phase 2) |
+| classFieldKinds/1            | Field name -> eager/late kind, local only (ADR 0124 §9/B5b) |
+| classAllFieldKinds/1         | Combined field name -> eager/late kind via superclass chain (ADR 0124 §9/B5b) |
+| classAllFieldKindsByName/1   | Same as classAllFieldKinds/1, by ClassName (ADR 0124 §9/B5b)  |
 | classClassVarNames/1        | Class-side field names (class variables) from class meta   |
 | classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
@@ -75,6 +78,10 @@ that the Behaviour/Class libraries can rely on.
     %% for beamtalk_shape_migration's reconcile and pack/1 tier walk.
     classAllFieldTypesByName/1,
     classAllFieldHasDefaultByName/1,
+    %% ADR 0124 §9/B5b (BT-3550): field name -> eager|late kind reflection
+    classFieldKinds/1,
+    classAllFieldKinds/1,
+    classAllFieldKindsByName/1,
     %% class-side field (class variable) reflection
     classClassVarNames/1,
     classAllClassVarNames/1,
@@ -457,14 +464,86 @@ classAllFieldHasDefaultByName(ClassName) ->
         #{}
     ).
 
-%% ADR 0124 §1/B5a: `__beamtalk_meta/0` now also carries `'field_kinds'`
-%% (instance `state:`) and `'class_field_kinds'` (class-side `classState:`)
-%% — per-field maps of `eager | late`, alongside `'field_types'` and
-%% `'field_has_default'` above (`class_meta.rs`'s `meta_field_kinds_map`).
-%% No reader here yet: the flattened `classAllFieldKindsByName/1` intrinsic
-%% and its walk-hierarchy merge (mirroring `classAllFieldTypesByName/1`
-%% above) land in B5b (BT-3550), which also adds the `fieldKinds`/
-%% `allFieldKinds` `behaviour.bt` selectors that call it.
+-doc """
+Return the field name -> kind (`'eager'` | `'late'`) map declared in this
+class (not inherited).
+
+Backs `@primitive "classFieldKinds"` (`Behaviour>>fieldKinds`, ADR 0124 §9/B5b)
+— the instance-side counterpart to `classFieldNames/1`, reading B5a's
+`'field_kinds'` key from `__beamtalk_meta/0` instead of walking the AST.
+Instance side only: a class-side (`classState:`) kind map is deliberately
+*not* exposed under this name — an instance slot and a class var can share
+a name, so folding both into one dictionary would be ambiguous (ADR 0124
+§9's B10 documentation pass records the split; `classVarNames/1` is the
+existing precedent for keeping class-side reflection under its own
+selector rather than merging it into the instance-side one).
+
+Dynamic classes built via `beamtalk_class_builder` carry no static meta,
+so they answer `'eager'` for every field they report — ClassBuilder has no
+`late`-slot concept — via the same `gen_server:call(ClassPid,
+instance_variables)` fallback `classFieldNames/1` uses.
+""".
+-spec classFieldKinds(#beamtalk_object{}) -> #{atom() => eager | late}.
+classFieldKinds(Self) ->
+    ClassPid = erlang:element(4, Self),
+    Module = beamtalk_object_class:module_name_safe(ClassPid),
+    case meta_for_module(Module) of
+        {ok, Meta} ->
+            maps:get(field_kinds, Meta, #{});
+        not_available ->
+            Fields = gen_server:call(ClassPid, instance_variables),
+            maps:from_list([{F, eager} || F <- Fields])
+    end.
+
+-doc """
+Return the flattened field name -> kind (`'eager'` | `'late'`) map,
+including inherited fields (ADR 0124 §9/B5b).
+
+Backs `@primitive "classAllFieldKinds"` (`Behaviour>>allFieldKinds`) — the
+instance-side counterpart to `classAllFieldNames/1`. Delegates to
+`classAllFieldKindsByName/1` for the actual hierarchy walk.
+""".
+-spec classAllFieldKinds(#beamtalk_object{}) -> #{atom() => eager | late}.
+classAllFieldKinds(Self) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    classAllFieldKindsByName(ClassName).
+
+-doc """
+Same as `classAllFieldKinds/1`, taking a class name directly instead of an
+instance's class object — mirrors `classAllFieldNamesByName/1` /
+`classAllFieldTypesByName/1`'s "by name" siblings, for callers (B9's
+hot-reload keep set) that only have a `ClassName` atom.
+
+Reuses `walk_hierarchy/3` — the same superclass-chain walk
+`classAllFieldTypesByName/1` uses — reading each level's own `'field_kinds'`
+key from `__beamtalk_meta/0`. Same merge-precedence rule: on a conflict (a
+field redeclared at more than one hierarchy level), the more-derived
+class's entry wins.
+
+A dynamic level with no `__beamtalk_meta/0` (ClassBuilder-built) contributes
+`'eager'` for every field *it* reports, via that level's own
+`gen_server:call(ClassPid, instance_variables)` fallback — same degrade as
+`classFieldKinds/1`. Returns `#{}` for an unregistered class.
+""".
+-spec classAllFieldKindsByName(atom()) -> #{atom() => eager | late}.
+classAllFieldKindsByName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            FieldKinds =
+                case meta_for_module(Module) of
+                    {ok, Meta} ->
+                        maps:get(field_kinds, Meta, #{});
+                    not_available ->
+                        Fields = gen_server:call(CPid, instance_variables),
+                        maps:from_list([{F, eager} || F <- Fields])
+                end,
+            {cont, maps:merge(FieldKinds, Acc)}
+        end,
+        #{}
+    ).
 
 -doc """
 Test whether the selector is defined locally in this class.

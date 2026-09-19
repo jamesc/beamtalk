@@ -43,6 +43,9 @@ const TOWER_ZERO_ARG: &[&str] = &[
     "classAllInstVarNames",
     "classFieldNames",
     "classAllFieldNames",
+    // ADR 0124 §9/B5b (BT-3550): field name -> eager|late kind reflection.
+    "classFieldKinds",
+    "classAllFieldKinds",
     "classClassVarNames",
     "classAllClassVarNames",
     "classRemoveFromSystem",
