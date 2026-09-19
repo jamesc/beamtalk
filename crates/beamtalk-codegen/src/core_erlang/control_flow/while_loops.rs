@@ -626,6 +626,21 @@ impl CoreErlangGenerator {
         // a method parameter's own gensym'd `Args`-pattern binding).
         let initial_direct_args = plan.initial_direct_args(self);
 
+        // BT-3562: also captured BEFORE `generate_letrec_body_ir` resets
+        // `state_version`/starts rendering `in_loop_body` as `StateAcc*` —
+        // this direct-params loop's `letrec` fun binds no `StateAcc`
+        // accumulator parameter at all (only `param_names` above), but a
+        // bare mid-body field READ (`self.field` with no matching write —
+        // `select_direct_params` guarantees no field WRITE occurs in this
+        // body) still needs some name for the actor's state map. The
+        // pre-loop name is still a real, lexically-in-scope variable from
+        // the loop's own `letrec` closure, and stays correct for every
+        // iteration since nothing here ever mutates it. See
+        // `LoopMode::direct_params_outer_state_var`'s doc comment.
+        let prev_direct_params_outer_state_var =
+            self.loop_mode.direct_params_outer_state_var.take();
+        self.loop_mode.direct_params_outer_state_var = Some(self.current_state_var());
+
         let cond_var = self.fresh_temp_var("CondFun");
 
         self.push_scope();
@@ -664,6 +679,7 @@ impl CoreErlangGenerator {
         };
 
         let (body_stmts, frame) = self.generate_letrec_body_ir(body, plan)?;
+        self.loop_mode.direct_params_outer_state_var = prev_direct_params_outer_state_var;
 
         // Build exit StateAcc using the CURRENT iteration's param names.
         let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);

@@ -465,7 +465,17 @@ impl CoreErlangGenerator {
         // Body — set in_direct_params_loop so nested list ops skip StateAcc repack.
         let prev_direct_params_loop = self.loop_mode.in_direct_params_loop;
         self.loop_mode.in_direct_params_loop = true;
+        // BT-3562: capture the real pre-loop state variable name so a bare
+        // mid-body field read resolves to it instead of an unbound
+        // `StateAcc` — this loop's `letrec` fun binds no `StateAcc`
+        // accumulator parameter (only `param_names` above). See
+        // `LoopMode::direct_params_outer_state_var`'s doc comment (the
+        // identical `generate_while_loop_direct` fix this mirrors).
+        let prev_direct_params_outer_state_var =
+            self.loop_mode.direct_params_outer_state_var.take();
+        self.loop_mode.direct_params_outer_state_var = Some(self.current_state_var());
         let (body_stmts, ir_frame) = self.generate_letrec_body_ir(body, plan)?;
+        self.loop_mode.direct_params_outer_state_var = prev_direct_params_outer_state_var;
         self.loop_mode.in_direct_params_loop = prev_direct_params_loop;
 
         // Build exit StateAcc using the INITIAL param names (current iteration values).
