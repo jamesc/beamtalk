@@ -12,7 +12,7 @@
 // stdlib/test/fixtures/shape_version_dict_send.bt) sends Dictionary
 // at:/at:put:/removeKey: directly to its `old` parameter instead of
 // routing around them via the Erlang FFI gateway (ShapeVersionMoney's own
-// workaround) — a dynamically-dispatched send the compiler cannot
+// BT-3541 workaround) — a dynamically-dispatched send the compiler cannot
 // statically resolve, which used to raise `undef` for an @primitive-only
 // class like Dictionary. No longer reproduces (every value-type class,
 // @primitive-only or not, compiles a real `dispatch/3`), but this test
