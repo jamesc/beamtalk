@@ -69,6 +69,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 declared_keyword: DeclaredKeyword::default(),
+                slot_kind: beamtalk_core::ast::SlotKind::default(),
                 span: Span::new(0, 0),
             },
             StateDeclaration {
@@ -79,6 +80,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 declared_keyword: DeclaredKeyword::default(),
+                slot_kind: beamtalk_core::ast::SlotKind::default(),
                 span: Span::new(0, 0),
             },
         ],

@@ -246,6 +246,32 @@ mod tests {
         assert!(diagnostics[0].message.contains("my_mod"));
     }
 
+    /// ADR 0124 B1: `late state:` on a `native:` actor hits the same
+    /// "cannot declare state fields" error as an eager one — `late` doesn't
+    /// exempt it, since a native actor's state is owned by its backing
+    /// `gen_server`, not the Beamtalk class, regardless of slot kind.
+    #[test]
+    fn native_actor_late_state_field_is_error() {
+        let src = "typed Actor subclass: MyActor native: my_mod\n  late state: proc :: Subprocess\n  increment => self delegate";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut diagnostics = Vec::new();
+        check_native_state_fields(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for late state: on native actor, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("cannot declare state fields")
+        );
+    }
+
     /// Native actor with multiple state: fields → one error per field.
     #[test]
     fn native_actor_multiple_state_fields_multiple_errors() {

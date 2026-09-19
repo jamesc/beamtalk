@@ -12,8 +12,8 @@ use crate::ast::{
     ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition,
     MethodKind, MethodModifiers, NativeDeclaration, ParameterDefinition, ProtocolDefinition,
-    ProtocolMethodSignature, ShapeVersionDeclaration, StandaloneMethodDefinition, StateDeclaration,
-    TypeAliasDefinition, TypeAnnotation, TypeParamDecl,
+    ProtocolMethodSignature, ShapeVersionDeclaration, SlotKind, StandaloneMethodDefinition,
+    StateDeclaration, TypeAliasDefinition, TypeAnnotation, TypeParamDecl,
 };
 use crate::source_analysis::{Span, TokenKind};
 use ecow::EcoString;
@@ -165,6 +165,46 @@ impl Parser {
                 .with_hint("Replace `:` with `::`"),
         );
         self.advance(); // consume legacy `:`
+    }
+
+    // ========================================================================
+    // `late` modifier lookahead (ADR 0124 §1)
+    // ========================================================================
+    //
+    // The modifier precedes the declaration keyword (`late state: proc :: Subprocess`),
+    // matching the class-header modifier position (the `abstract|sealed|typed|internal`
+    // loop at `:205-221`). That loop is header-only; there is no member-level
+    // modifier loop, so this reuses its shape, not its code — a plain
+    // two-token lookahead extending the single-token dispatch below. `late`
+    // is unused as a word anywhere in the stdlib's `.bt` sources, so it is a
+    // contextual keyword only in this position; elsewhere (`late := 1`, a
+    // method named `late`) it parses as an ordinary identifier/selector.
+
+    /// `true` if the current token is `late` immediately followed by
+    /// `state:` or `field:`.
+    fn is_at_late_state_or_field_keyword(&self) -> bool {
+        matches!(self.current_kind(), TokenKind::Identifier(name) if name == "late")
+            && self.peek_at(1).is_some_and(is_state_or_field_keyword)
+    }
+
+    /// `true` if the current token is `late` immediately followed by
+    /// `classState:`.
+    fn is_at_late_class_state_keyword(&self) -> bool {
+        matches!(self.current_kind(), TokenKind::Identifier(name) if name == "late")
+            && self.peek_at(1).is_some_and(is_class_state_keyword)
+    }
+
+    /// `true` if the current token is the `late` modifier immediately
+    /// followed by any state-like declaration keyword
+    /// (`state:`/`field:`/`classState:`). Single source for the combined
+    /// check so [`Parser::is_at_member_boundary`],
+    /// [`Parser::current_token_could_start_a_declaration`] and
+    /// [`Parser::parse_method_body`]'s exit condition can't drift from the
+    /// dispatch in [`Parser::parse_class_body`] or from each other — mirrors
+    /// [`is_state_like_declaration_keyword`]'s own single-source role for the
+    /// unmodified keywords.
+    fn is_at_late_modifier(&self) -> bool {
+        self.is_at_late_state_or_field_keyword() || self.is_at_late_class_state_keyword()
     }
 
     // ========================================================================
@@ -656,8 +696,15 @@ impl Parser {
         {
             let pending = self.parse_pending_declaration_expect();
 
-            // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
-            if is_state_or_field_keyword(self.current_kind()) {
+            // Check for state/field declaration: `state: fieldName ...` or
+            // `field: fieldName ...`, optionally preceded by the `late`
+            // modifier (ADR 0124 §1) — `parse_state_declaration` consumes
+            // `late` itself so its own leading-comment/doc-comment collection
+            // (which must run while `late`, not `state:`/`field:`, is still
+            // current) sees it.
+            if is_state_or_field_keyword(self.current_kind())
+                || self.is_at_late_state_or_field_keyword()
+            {
                 if let Some(mut state_decl) = self.parse_state_declaration() {
                     pending.apply_to(
                         &mut state_decl.expect,
@@ -668,7 +715,9 @@ impl Parser {
                 }
             }
             // Check for class variable declaration: `classState: varName ...`
-            else if is_class_state_keyword(self.current_kind()) {
+            else if is_class_state_keyword(self.current_kind())
+                || self.is_at_late_class_state_keyword()
+            {
                 if let Some(mut classvar_decl) = self.parse_classvar_declaration() {
                     pending.apply_to(
                         &mut classvar_decl.expect,
@@ -1161,6 +1210,7 @@ impl Parser {
     /// left over from a malformed `@expect`.
     fn current_token_could_start_a_declaration(&self) -> bool {
         is_state_like_declaration_keyword(self.current_kind())
+            || self.is_at_late_modifier()
             || is_handle_scope_keyword(self.current_kind())
             || is_shape_version_keyword(self.current_kind())
             || self.is_at_method_definition()
@@ -1322,6 +1372,17 @@ impl Parser {
         let doc_comment = self.collect_doc_comment();
         let mut comments = self.collect_comment_attachment();
 
+        // ADR 0124 §1: `late state: x :: T` / `late field: x :: T` — consumed
+        // here (not by the dispatch loop) so the doc-comment/leading-comment
+        // collection above, which reads the *current* token's leading trivia,
+        // still sees `late`'s trivia rather than `state:`/`field:`'s (empty).
+        let slot_kind = if self.is_at_late_state_or_field_keyword() {
+            self.advance(); // consume `late`
+            SlotKind::Late
+        } else {
+            SlotKind::Eager
+        };
+
         // Determine which keyword was used and consume it
         let declared_keyword = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
         {
@@ -1379,6 +1440,7 @@ impl Parser {
             type_annotation,
             default_value,
             declared_keyword,
+            slot_kind,
             expect: None,
             comments,
             doc_comment,
@@ -1393,10 +1455,20 @@ impl Parser {
     /// - `classState: varName = defaultValue`
     /// - `classState: varName :: TypeName`
     /// - `classState: varName :: TypeName = defaultValue`
+    /// - `late classState: varName :: TypeName` (ADR 0124 §1)
     fn parse_classvar_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
         let mut comments = self.collect_comment_attachment();
+
+        // ADR 0124 §1: consumed here, not by the dispatch loop — see the
+        // matching comment in `parse_state_declaration`.
+        let slot_kind = if self.is_at_late_class_state_keyword() {
+            self.advance(); // consume `late`
+            SlotKind::Late
+        } else {
+            SlotKind::Eager
+        };
 
         // Consume `classState:`
         if !is_class_state_keyword(self.current_kind()) {
@@ -1444,6 +1516,7 @@ impl Parser {
             type_annotation,
             default_value,
             declared_keyword: DeclaredKeyword::State,
+            slot_kind,
             expect: None,
             comments,
             doc_comment,
@@ -1921,6 +1994,7 @@ impl Parser {
             || self.is_at_method_definition()
             || self.is_at_standalone_method_definition()
             || is_state_like_declaration_keyword(self.current_kind())
+            || self.is_at_late_modifier()
     }
 
     /// `is_at_type_alias_definition()`, gated by the same indentation guard
@@ -2012,6 +2086,7 @@ impl Parser {
             && !self.is_at_declaration_level_expect()
             && !self.is_at_standalone_method_definition()
             && !is_state_like_declaration_keyword(self.current_kind())
+            && !self.is_at_late_modifier()
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;

@@ -264,6 +264,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: beamtalk_core::ast::SlotKind::default(),
             span: s,
         }],
         methods: vec![],

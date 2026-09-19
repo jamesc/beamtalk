@@ -46,6 +46,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: crate::ast::SlotKind::default(),
             span: test_span(),
         }],
         methods: vec![MethodDefinition {

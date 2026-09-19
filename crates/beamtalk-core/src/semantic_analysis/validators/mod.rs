@@ -8,6 +8,7 @@
 //! This module contains validation checks that run after the main analysis
 //! pipeline. Validators are organized by concern:
 //! - `class_validators` — class-hierarchy-dependent checks
+//! - `late_slot_validators` — `late` slot declaration checks (ADR 0124 §1, §5)
 //! - `lint_validators` — code quality lints
 //! - `supervision_validators` — OTP supervision policy checks
 //! - `match_validators` — pattern match exhaustiveness
@@ -16,6 +17,7 @@
 //! - `reserved_name_validators` — reserved internal-namespace name checks
 
 mod class_validators;
+mod late_slot_validators;
 mod lint_validators;
 mod match_validators;
 mod native_validators;
@@ -36,6 +38,7 @@ pub(crate) use class_validators::{
     check_shape_version_and_migrations, check_value_nil_return, check_value_slot_assignment,
     check_value_slot_case_collision,
 };
+pub(crate) use late_slot_validators::check_late_slot_declarations;
 // `pub`, not `pub(crate)`: the standalone `beamtalk-lint`
 // crate's `effect_free_statement` pass calls this directly.
 pub use lint_validators::check_effect_free_statements;

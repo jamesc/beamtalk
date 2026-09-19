@@ -25,6 +25,7 @@ fn make_value_class(name: &str, slots: &[&str]) -> ClassDefinition {
             comments: beamtalk_core::ast::CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: beamtalk_core::ast::SlotKind::default(),
             span: s(),
         })
         .collect();

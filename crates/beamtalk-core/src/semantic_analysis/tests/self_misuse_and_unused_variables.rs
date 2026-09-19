@@ -52,6 +52,7 @@ fn test_self_inside_method_no_error() {
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: crate::ast::SlotKind::default(),
             span: test_span(),
         }],
         methods: vec![MethodDefinition {
@@ -128,6 +129,7 @@ fn test_unused_variable_in_method_warns() {
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: crate::ast::SlotKind::default(),
             span: test_span(),
         }],
         methods: vec![MethodDefinition {

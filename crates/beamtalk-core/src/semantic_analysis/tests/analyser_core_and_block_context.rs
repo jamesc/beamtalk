@@ -398,6 +398,7 @@ fn test_self_available_in_method_bodies() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         declared_keyword: DeclaredKeyword::default(),
+        slot_kind: crate::ast::SlotKind::default(),
         span: test_span(),
     };
 

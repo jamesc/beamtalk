@@ -36,6 +36,7 @@ fn slot(name: &str, ty: Option<&str>) -> AstStateDeclaration {
         comments: beamtalk_core::ast::CommentAttachment::default(),
         doc_comment: None,
         declared_keyword: DeclaredKeyword::default(),
+        slot_kind: beamtalk_core::ast::SlotKind::default(),
         span: s(),
     }
 }

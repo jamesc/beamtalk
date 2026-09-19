@@ -571,6 +571,24 @@ impl DeclaredKeyword {
     }
 }
 
+/// Whether a slot is eagerly initialised or declared `late` (ADR 0124 §1).
+///
+/// `late` is a declaration-level modifier on `state:`/`classState:` marking a
+/// slot that is legitimately unassigned after `initialize` — absent from the
+/// state map until assigned, and exempt from ADR 0078's post-`initialize`
+/// check. This is the parser/AST half only (ADR 0124 B1); codegen and
+/// runtime do not yet consult it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SlotKind {
+    /// The default: initialised eagerly (a declared default, or `nil` for an
+    /// untyped/undefaulted slot) and present in the state map from spawn.
+    #[default]
+    Eager,
+    /// Declared `late`: legitimately unassigned after `initialize`, absent
+    /// from the state map until explicitly assigned.
+    Late,
+}
+
 /// A state (instance variable) declaration.
 ///
 /// Example: `state: value :: Integer = 0`
@@ -584,6 +602,10 @@ pub struct StateDeclaration {
     pub default_value: Option<Expression>,
     /// Which keyword was used in source (`state:` or `field:`).
     pub declared_keyword: DeclaredKeyword,
+    /// Whether this slot is `late` (ADR 0124 §1). Defaults to
+    /// [`SlotKind::Eager`] for every declaration that doesn't use the
+    /// modifier.
+    pub slot_kind: SlotKind,
     /// Optional `@expect` directive attached to this declaration.
     ///
     /// When present, diagnostics matching any of these categories that fire
@@ -611,6 +633,7 @@ impl StateDeclaration {
             type_annotation: None,
             default_value: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: SlotKind::default(),
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -626,6 +649,7 @@ impl StateDeclaration {
             type_annotation: Some(type_annotation),
             default_value: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: SlotKind::default(),
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -641,6 +665,7 @@ impl StateDeclaration {
             type_annotation: None,
             default_value: Some(default_value),
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: SlotKind::default(),
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -661,6 +686,7 @@ impl StateDeclaration {
             type_annotation: Some(type_annotation),
             default_value: Some(default_value),
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: SlotKind::default(),
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,

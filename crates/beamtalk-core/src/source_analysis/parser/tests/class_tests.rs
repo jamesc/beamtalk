@@ -1872,6 +1872,151 @@ fn parse_state_with_type_annotation() {
     assert!(state.default_value.is_some());
 }
 
+// ========================================================================
+// `late` modifier tests (ADR 0124 §1, B1)
+// ========================================================================
+
+#[test]
+fn parse_late_state_declaration() {
+    let module = parse_ok(
+        "typed Actor subclass: CodexClient
+  late state: proc :: Subprocess
+
+  launch => self.proc",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.state.len(), 1);
+    let state = &class.state[0];
+    assert_eq!(state.name.name, "proc");
+    assert_eq!(state.slot_kind, crate::ast::SlotKind::Late);
+    assert!(state.type_annotation.is_some());
+    assert!(state.default_value.is_none());
+}
+
+#[test]
+fn parse_late_classvar_declaration() {
+    let module = parse_ok(
+        "typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
+  late classState: current :: TranscriptStream
+
+  class current => self.current",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.class_variables.len(), 1);
+    let var = &class.class_variables[0];
+    assert_eq!(var.name.name, "current");
+    assert_eq!(var.slot_kind, crate::ast::SlotKind::Late);
+}
+
+#[test]
+fn eager_state_declaration_has_eager_slot_kind() {
+    let module = parse_ok(
+        "Actor subclass: Counter
+  state: value = 0",
+    );
+    assert_eq!(
+        module.classes[0].state[0].slot_kind,
+        crate::ast::SlotKind::Eager
+    );
+}
+
+#[test]
+fn late_preserves_doc_comment_and_leading_comment() {
+    let module = parse_ok(
+        "typed Actor subclass: CodexClient
+  // a plain comment
+  /// A running client's process.
+  late state: proc :: Subprocess
+
+  launch => self.proc",
+    );
+    let state = &module.classes[0].state[0];
+    assert_eq!(
+        state.doc_comment.as_deref(),
+        Some("A running client's process."),
+        "doc comment attached to `late` should still attach to the declaration"
+    );
+    assert!(
+        !state.comments.leading.is_empty(),
+        "plain leading comment attached to `late` should still attach to the declaration"
+    );
+}
+
+#[test]
+fn late_outside_declaration_position_is_ordinary_identifier() {
+    // `late := 1` — `late` used as an ordinary local variable, not the modifier.
+    let module = parse_ok("late := 1");
+    assert_eq!(module.expressions.len(), 1);
+    match &module.expressions[0].expression {
+        Expression::Assignment { target, .. } => match target.as_ref() {
+            Expression::Identifier(id) => assert_eq!(id.name, "late"),
+            other => panic!("expected identifier target, got {other:?}"),
+        },
+        other => panic!("expected assignment, got {other:?}"),
+    }
+}
+
+#[test]
+fn late_as_method_selector_is_ordinary_method() {
+    let module = parse_ok(
+        "Object subclass: Foo
+  late => 42",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.state.len(), 0);
+    assert_eq!(class.methods.len(), 1);
+    assert_eq!(class.methods[0].selector.name(), "late");
+}
+
+#[test]
+fn declaration_level_expect_before_late_state_attaches_to_it() {
+    // `parse_pending_declaration_expect` runs before the `late` lookahead in
+    // `parse_class_body`'s dispatch, so a declaration-level `@expect` above a
+    // `late state:` must attach to the state declaration, not get swallowed
+    // or left dangling — mirrors
+    // `declaration_level_expect_after_prior_method_attaches_to_next_method`.
+    let module = parse_ok(
+        "typed Actor subclass: CodexClient
+  first => 1
+  @expect type
+  late state: proc :: Subprocess
+
+  launch => self.proc",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.state.len(), 1);
+    let state = &class.state[0];
+    assert_eq!(state.slot_kind, crate::ast::SlotKind::Late);
+    assert!(
+        state.expect.is_some(),
+        "the `@expect` must attach to the following `late state:` declaration"
+    );
+}
+
+#[test]
+fn late_lookahead_unaffected_by_comment_before_keyword() {
+    // `late`/`state:` are separate tokens; a `//` comment between them is
+    // trivia on the `state:` token and must not defeat the two-token
+    // lookahead (`peek_at` walks tokens, not trivia).
+    let module = parse_ok(
+        "typed Actor subclass: CodexClient
+  late
+  // still the proc slot
+  state: proc :: Subprocess
+
+  launch => self.proc",
+    );
+    assert_eq!(module.classes[0].state.len(), 1);
+    assert_eq!(
+        module.classes[0].state[0].slot_kind,
+        crate::ast::SlotKind::Late
+    );
+}
+
 #[test]
 fn legacy_colon_state_annotation_produces_error_and_parses_type() {
     // Legacy `state: name : String` (single colon) must NOT be silently dropped.

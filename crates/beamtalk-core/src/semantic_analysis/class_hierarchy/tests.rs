@@ -408,6 +408,7 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: crate::ast::SlotKind::default(),
             span: test_span(),
         }],
         methods: vec![MethodDefinition {
@@ -3120,6 +3121,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         default_value: None,
         type_annotation: None,
         declared_keyword: crate::ast::DeclaredKeyword::Field,
+        slot_kind: crate::ast::SlotKind::default(),
         expect: None,
         comments: crate::ast::CommentAttachment::default(),
         doc_comment: None,

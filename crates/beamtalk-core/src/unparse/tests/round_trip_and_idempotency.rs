@@ -158,6 +158,43 @@ fn idempotent_class_definition() {
     assert_idempotent("Actor subclass: Counter\n  state: value = 0\n\n  getValue => self.value\n");
 }
 
+// --- `late` modifier (ADR 0124 §1) ---
+
+#[test]
+fn idempotent_late_state_declaration() {
+    assert_idempotent(
+        "typed Actor subclass: CodexClient\n  late state: proc :: Subprocess\n\n  launch => self.proc\n",
+    );
+}
+
+#[test]
+fn idempotent_late_class_state_declaration() {
+    assert_idempotent(
+        "typed Actor subclass: TranscriptStream\n  late classState: current :: TranscriptStream\n\n  class current => self.current\n",
+    );
+}
+
+#[test]
+fn round_trip_late_state_slot_kind() {
+    let source = "typed Actor subclass: CodexClient\n  late state: proc :: Subprocess\n  state: nextId :: Integer\n";
+    let module = parse_source(source);
+    let unparsed = unparse_module(&module);
+    let module2 = parse_source(&unparsed);
+    let class = &module2.classes[0];
+    assert_eq!(class.state.len(), 2);
+    assert_eq!(
+        class.state[0].slot_kind,
+        crate::ast::SlotKind::Late,
+        "unparsed:\n{unparsed}"
+    );
+    assert_eq!(class.state[0].name.name, "proc");
+    assert_eq!(
+        class.state[1].slot_kind,
+        crate::ast::SlotKind::Eager,
+        "unparsed:\n{unparsed}"
+    );
+}
+
 // --- Blank line round-trip ---
 
 #[test]

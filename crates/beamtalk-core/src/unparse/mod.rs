@@ -42,8 +42,8 @@ use crate::ast::{
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
     MatchArm, MessageSelector, MethodDefinition, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration,
-    StringSegment, TypeAliasDefinition, TypeAnnotation,
+    ProtocolDefinition, ProtocolMethodSignature, SlotKind, StandaloneMethodDefinition,
+    StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
 use crate::source_analysis::{Severity, lex_with_eof, parse, parse_method};
 use beamtalk_cerl_doc::docvec;
@@ -1173,8 +1173,14 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     } else {
         state.declared_keyword.as_str()
     };
-    let mut decl: Vec<Document<'static>> =
-        vec![Document::Str(keyword), leaf::ident(&state.name.name)];
+    let mut decl: Vec<Document<'static>> = Vec::new();
+    // ADR 0124 §1: `late` precedes the declaration keyword, matching the
+    // class-header modifier position.
+    if state.slot_kind == SlotKind::Late {
+        decl.push(Document::Str("late "));
+    }
+    decl.push(Document::Str(keyword));
+    decl.push(leaf::ident(&state.name.name));
 
     if let Some(ty) = &state.type_annotation {
         decl.push(Document::Str(" :: "));
