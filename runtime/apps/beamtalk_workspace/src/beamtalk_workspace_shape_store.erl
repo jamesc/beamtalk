@@ -132,7 +132,7 @@ moduledoc already declined for the same complexity/benefit tradeoff.
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -ifdef(TEST).
--export([read_shape_from_meta/1, read_generation_from_meta/1]).
+-export([read_shape_from_meta/1, read_generation_from_meta/1, ancestor_field_types/1]).
 -endif.
 
 -export_type([shape/0, maybe_shape/0, generation/0, maybe_generation/0]).
@@ -325,22 +325,25 @@ Like `read_shape_from_meta/1` (reused directly for the `shape` field — the
 `capture`/`prime` handlers below call this, not `read_shape_from_meta/1`
 itself, which is why that function stays reachable in a production build),
 but returns the full `generation()`: the flattened `shape()`, the
-un-flattened `own_shape()` (this class's own `field_types` only — see the
-moduledoc/`beamtalk_shape_diff:generation/0`'s doc for why a pre-save
-precheck needs both), and `'shape_version'` (default `1`, BT-3537) /
-`'shape_migrations'` (default `#{}}`). `undefined` under the exact same
-conditions `read_shape_from_meta/1` degrades under (they share
-`read_own_meta/1`).
+un-flattened `own_shape()` (this class's own `field_types` only), the
+un-flattened `ancestor_shape()` (BT-3560: every ancestor's own `field_types`,
+none of this class's own — see the moduledoc/`beamtalk_shape_diff:
+generation/0`'s doc for why a pre-save precheck needs `ancestor_shape`
+captured directly rather than derived from `shape`/`own_shape`), and
+`'shape_version'` (default `1`, BT-3537) / `'shape_migrations'` (default
+`#{}}`). `undefined` under the exact same conditions `read_shape_from_meta/1`
+degrades under (they share `read_own_meta/1`).
 """.
 -spec read_generation_from_meta(binary()) -> maybe_generation().
 read_generation_from_meta(ClassNameBin) ->
     case read_own_meta(ClassNameBin) of
         undefined ->
             undefined;
-        {ok, _ClassAtom, Meta} ->
+        {ok, ClassAtom, Meta} ->
             #{
                 shape => read_shape_from_meta(ClassNameBin),
                 own_shape => normalize_field_types(maps:get(field_types, Meta, #{})),
+                ancestor_shape => normalize_field_types(ancestor_field_types(ClassAtom)),
                 version => maps:get(shape_version, Meta, 1),
                 migrations => maps:get(shape_migrations, Meta, #{})
             }
@@ -348,21 +351,37 @@ read_generation_from_meta(ClassNameBin) ->
 
 -doc """
 `ClassAtom`'s own `field_types` (from its already-read `OwnMeta`) merged with
-every ancestor's own `field_types`, walked via `beamtalk_class_metadata`
-(module + superclass, ETS-resident) — see the moduledoc's "Flattened shape"
-section for why this does not reuse
-`beamtalk_behaviour_intrinsics:classAllFieldTypesByName/1`. Values are still
-raw atoms at this point (`field_type_to_binary/1` normalises after); the
+every ancestor's own `field_types` (`ancestor_field_types/1`) — the
 closer-to-`ClassAtom` level always wins a same-named-field conflict, via
-`maps:merge/2`'s "second argument wins" rule applied ancestor-first.
+`maps:merge/2`'s "second argument wins" rule with `OwnFieldTypes` as the
+second argument.
 """.
 -spec flattened_field_types(atom(), map()) -> #{atom() => atom()}.
 flattened_field_types(ClassAtom, OwnMeta) ->
     OwnFieldTypes = maps:get(field_types, OwnMeta, #{}),
+    maps:merge(ancestor_field_types(ClassAtom), OwnFieldTypes).
+
+-doc """
+`ClassAtom`'s ancestor-only `field_types` contribution (BT-3560): every
+ancestor's own `field_types`, walked via `beamtalk_class_metadata` (module +
+superclass, ETS-resident) and merged closer-ancestor-wins — but, unlike
+`flattened_field_types/2`, **never** folding in `ClassAtom`'s own fields. This
+is what a pre-save precheck (`beamtalk_repl_loader:precheck_class_shape/2`)
+needs to recompute a *pending* edit's flattened shape without re-walking the
+ancestor chain: the ancestor contribution alone, which a same-class edit
+cannot itself have changed, kept separate from `own_shape` rather than folded
+into `shape` and later subtracted back out — a subtraction that is lossy for
+a shadowed ancestor field (see `beamtalk_shape_diff:generation/0`'s doc). See
+the moduledoc's "Flattened shape" section for why this walk does not reuse
+`beamtalk_behaviour_intrinsics:classAllFieldTypesByName/1`. Values are still
+raw atoms at this point (`field_type_to_binary/1` normalises after).
+""".
+-spec ancestor_field_types(atom()) -> #{atom() => atom()}.
+ancestor_field_types(ClassAtom) ->
     case beamtalk_class_metadata:lookup_superclass(ClassAtom) of
-        {ok, none} -> OwnFieldTypes;
-        {ok, Super} -> merge_ancestor_field_types(Super, OwnFieldTypes);
-        not_found -> OwnFieldTypes
+        {ok, none} -> #{};
+        {ok, Super} -> merge_ancestor_field_types(Super, #{});
+        not_found -> #{}
     end.
 
 -doc """
