@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3550: Subclass fixture for `Behaviour>>fieldKinds`/`allFieldKinds`
+// BUnit coverage (ADR 0124 §9/B5b). Declares its own eager field only, no
+// `late` slot of its own — `allFieldKinds` must still surface the
+// inherited `late` slot from `LateFieldKindsBase` (fixtures/
+// late_field_kinds_base.bt), while `fieldKinds` (local-only) must not.
+
+LateFieldKindsBase subclass: LateFieldKindsSub
+  state: extra :: Integer = 0
