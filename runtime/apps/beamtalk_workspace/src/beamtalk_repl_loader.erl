@@ -81,6 +81,9 @@ Extracted from beamtalk_repl_eval.
     %% one production site that commits a live alias (re)definition.
     spawn_alias_change_recheck/1,
     precheck_method/4,
+    %% ADR 0123 §4 (BT-3538): the class-body-level sibling of
+    %% precheck_method/4 — see its own doc for why the mechanism differs.
+    precheck_class_shape/2,
     %% The Cockpit section-authoring write path
     %% (`beamtalk_repl_ops_load:save_section/5`) needs the same "which `.bt`
     %% file backs this class, and is it inside the project (safe to write)"
@@ -1270,6 +1273,18 @@ extract_trailing_info(ClassInfo) ->
 %% state's own class tag. The old `{IVars, ModuleName}` shape let the
 %% caller choose which list to pass, which was itself the cause of
 %% BT-3531's dropped-inherited-fields bug.
+%%
+%% BT-3538 (ADR 0123 §4 row 5): when `trigger_code_change/3` leaves any
+%% instance suspended, publishes an `instances_suspended` reload finding
+%% (`beamtalk_shape_diff:suspended_finding/3`) synchronously, right here —
+%% not deferred through `beamtalk_workspace_shape_recheck_worker`'s async
+%% queue like the field/version findings (`maybe_trigger_shape_recheck_for_class/1`)
+%% are, since this applies uniformly to a directly-reloaded class *and* every
+%% descendant `hot_reload_descendants/2` reconciles (neither of which is
+%% primed/captured in the shape store for a descendant, which never has its
+%% own module recompiled) and needs no shape/version diff to report — it is
+%% purely "did any live instance of this class end up suspended", which
+%% `trigger_code_change/3`'s own return already answers.
 -spec hot_reload_class(atom(), atom()) -> ok.
 hot_reload_class(ModuleName, ClassName) ->
     Pids =
@@ -1283,7 +1298,62 @@ hot_reload_class(ModuleName, ClassName) ->
             ok;
         _ ->
             Extra = #{module => ModuleName},
-            beamtalk_runtime_api:trigger_code_change(ModuleName, Pids, Extra)
+            {ok, Upgraded, Failures} = beamtalk_runtime_api:trigger_code_change(
+                ModuleName, Pids, Extra
+            ),
+            publish_suspended_finding(ModuleName, ClassName, Upgraded, Failures)
+    end.
+
+%% Best-effort publish of the `instances_suspended` finding (ADR 0123 §4 row
+%% 5) for `ClassName` through the existing reload-findings channel. Reads
+%% the just-installed `ToVersion` directly off `ModuleName`'s own meta
+%% (cheap, already-loaded local call) rather than the shape store, since
+%% this runs for descendants too, which the shape store never primes/captures
+%% (their own module is not recompiled by this reload — see
+%% `hot_reload_class/2`'s doc). Never raises: any internal failure is logged
+%% and swallowed — this is advisory plumbing on the reload's own response
+%% path, never a gate on the reload having already succeeded.
+-spec publish_suspended_finding(atom(), atom(), non_neg_integer(), [{pid(), term()}]) -> ok.
+publish_suspended_finding(_ModuleName, _ClassName, _Upgraded, []) ->
+    ok;
+publish_suspended_finding(ModuleName, ClassName, Upgraded, Failures) ->
+    try
+        ClassNameBin = atom_to_binary(ClassName, utf8),
+        ToVersion = read_installed_shape_version(ModuleName),
+        Outcome = #{migrated => Upgraded, suspended => Failures},
+        Findings = beamtalk_shape_diff:suspended_finding(ClassNameBin, ToVersion, Outcome),
+        publish_reload_findings(ClassNameBin, Findings)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to publish suspended-instances finding (reload unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassName,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+%% `ModuleName`'s currently-installed 'shape_version' (default 1, BT-3537's
+%% "no shapeVersion: clause declared" convention) — tolerant of a module with
+%% no `__beamtalk_meta/0` at all (a dynamic/legacy class), same degrade
+%% `beamtalk_workspace_shape_store:read_own_meta/1` uses.
+-spec read_installed_shape_version(atom()) -> pos_integer().
+read_installed_shape_version(ModuleName) ->
+    case erlang:function_exported(ModuleName, '__beamtalk_meta', 0) of
+        true ->
+            try ModuleName:'__beamtalk_meta'() of
+                Meta when is_map(Meta) -> maps:get(shape_version, Meta, 1);
+                _ -> 1
+            catch
+                _:_ -> 1
+            end;
+        false ->
+            1
     end.
 
 %% Resolve a class name atom from a class map entry.
@@ -1777,6 +1847,198 @@ no_pending_change_result() ->
         not_checked_owners => [],
         not_verified_owners => []
     }.
+
+-doc """
+Pre-save advisory (ADR 0105 Phase 3, ADR 0123 §4 BT-3538): compile a pending
+**full class-body** edit and report the "dropped/retyped without a
+`shapeVersion:` bump" and version-drift findings
+(`beamtalk_shape_diff:reload_findings/4`) it would produce **without
+installing** — the class-body-level sibling of `precheck_method/4`, which
+only ever sees a single method.
+
+## Why this cannot reuse `precheck_method/4`'s mechanism
+
+A method precheck reads its pending signature straight off the compiler
+port's structured response (`return_type`/`param_types` fields on a
+`method_definition` result) — no bytecode ever needs loading. A **class**
+compile's structured response carries only `name`/`superclass` per class
+(`beamtalk_repl_compiler:compile_file/4`'s spec); `field_types`/
+`'shape_version'`/`'shape_migrations'` are Rust `class_meta.rs` codegen,
+readable only from a compiled module's own `__beamtalk_meta/0` — which
+requires *some* module to call it on. This compiles `PendingSource` under a
+**fixed** throwaway module name (`precheck_temp_module_name/0` — never the
+class's real module, and never a fresh atom minted per call; see that
+function's doc for why a per-call unique atom would leak) via
+`beamtalk_compiler:compile/2` + `compile_core_erlang/1` directly (not
+`beamtalk_repl_compiler:compile_file/4`, which also calls
+`register_alias_xref_for_classes/3` in `replace` mode keyed to the class's
+*real* name — a real, if advisory-only, side effect this read-only precheck
+must not have), `code:load_binary/3`s the result under that fixed throwaway
+atom just long enough to call its `__beamtalk_meta/0`, then `code:purge/1` +
+`code:delete/1`s it — the real class's own module is never touched,
+`code:load_binary/3` enforces the loaded name matches the binary's own
+compiled-in module attribute (confirmed: a mismatch is `{error, badfile}`),
+so there is no way to "peek" at a compile's meta by loading it under any
+other name — the throwaway module name is not optional plumbing, it is the
+only way to load without installing. Reusing the *same* fixed name across
+calls requires serialising them — see `pending_reload_findings/3`'s
+`global:trans/3` critical section.
+
+## Scope
+
+Only the field-diff/version-drift findings (`reload_findings/4`) apply
+pre-save — `instances_suspended` (row 5) reports a migration that already
+ran, which cannot have happened yet for an edit that has not installed.
+Returns `{ok, []}` (not an error) when `ClassNameBin` has no previous
+generation recorded this session (nothing to compare against, mirrors
+`beamtalk_shape_diff:diff/2`'s own "no baseline" `no_op` rule) or when the
+pending source fails to compile — a `{compile_error, ...}` from this
+advisory-only precheck is swallowed to `{ok, []}` rather than surfaced as a
+blocking error, since a syntactically-broken pending edit already gets its
+own diagnostics from the editor's live parse-diagnostics op
+(`beamtalk_repl_ops_dev:diagnostics_for/2`) — this precheck adding a second,
+differently-worded compile-failure report would be redundant, not helpful.
+""".
+-spec precheck_class_shape(binary(), binary()) ->
+    {ok, [beamtalk_shape_diff:reload_finding()]}.
+precheck_class_shape(ClassNameBin, PendingSource) ->
+    case beamtalk_workspace_shape_store:previous(ClassNameBin) of
+        undefined ->
+            {ok, []};
+        PrevGen ->
+            {ok, precheck_class_shape_against(ClassNameBin, PrevGen, PendingSource)}
+    end.
+
+-spec precheck_class_shape_against(binary(), beamtalk_shape_diff:generation(), binary()) ->
+    [beamtalk_shape_diff:reload_finding()].
+precheck_class_shape_against(ClassNameBin, PrevGen, PendingSource) ->
+    try
+        SourceBin = unicode:characters_to_binary(PendingSource),
+        Options = beamtalk_repl_compiler:apply_module_name_override(
+            beamtalk_repl_compiler:build_class_indexes(), precheck_temp_module_name()
+        ),
+        case beamtalk_compiler:compile(SourceBin, Options) of
+            {ok, #{core_erlang := CoreErlang}} ->
+                pending_reload_findings(ClassNameBin, PrevGen, CoreErlang);
+            _NotAClassDefinitionOrError ->
+                []
+        end
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Pre-save shape precheck failed (advisory only, no findings reported)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            []
+    end.
+
+%% A single **fixed** atom, reused by every precheck call — deliberately NOT
+%% a fresh `unique_integer`-suffixed atom per call: Erlang atoms are never
+%% garbage collected, so a per-call atom would leak one atom into the (~1M
+%% entry) atom table on every precheck, permanently, for the lifetime of the
+%% node — a genuine DoS surface for a function meant to be called on every
+%% pending edit an editor wants pre-save feedback on (thousands of calls in
+%% an ordinary session). Reusing one fixed name is safe *only* because every
+%% caller reaches it exclusively through `pending_reload_findings/3`'s
+%% `global:trans/3` critical section below, which serialises the
+%% compile-under-this-name / load / read-meta / purge sequence against every
+%% other concurrent precheck on this node — see that function's doc.
+-spec precheck_temp_module_name() -> binary().
+precheck_temp_module_name() ->
+    <<"beamtalk_precheck_scratch">>.
+
+%% Compile `CoreErlang` to bytecode, load it under the fixed
+%% `precheck_temp_module_name/0` atom just long enough to read its
+%% `__beamtalk_meta/0`, purge/delete it unconditionally (the `after` clause),
+%% and diff the resulting *pending* generation against `PrevGen`. `PrevGen`'s
+%% `own_shape` — this class's own, un-flattened field set as of the last real
+%% capture — is subtracted from `PrevGen`'s flattened `shape` to recover just
+%% the ancestor contribution (which this same-class edit cannot itself have
+%% changed), then the pending edit's own field types are merged on top:
+%% exactly `beamtalk_workspace_shape_store`'s own ancestor-then-own-class
+%% merge precedence, without re-walking the ancestor chain (see
+%% `beamtalk_shape_diff:generation/0`'s doc).
+%%
+%% **`global:trans/3` critical section.** The fixed module name
+%% (`precheck_temp_module_name/0`) means two concurrent precheck calls — two
+%% different REPL sessions, or an editor firing several prechecks in flight —
+%% would otherwise race to `code:load_binary/3` the *same* atom with two
+%% different `Binary`s, and one call's `__beamtalk_meta/0` read could land on
+%% the *other* call's pending source. `global:trans/3` (an ordinary local
+%% mutex when the node isn't distributed — it needs no other node) serialises
+%% the whole compile-to-BEAM / load / read / purge sequence per node, so this
+%% function's own local retry (`Handle`, arity-4) never needs to fire in
+%% practice — the lock has no contention timeout, it simply queues. A slow
+%% precheck under heavy concurrent load therefore queues behind others rather
+%% than corrupting one, matching this precheck's own "advisory, best-effort"
+%% character: a queued-and-slightly-late precheck is a worse latency, never
+%% a wrong answer.
+-spec pending_reload_findings(binary(), beamtalk_shape_diff:generation(), binary()) ->
+    [beamtalk_shape_diff:reload_finding()].
+pending_reload_findings(ClassNameBin, PrevGen, CoreErlang) ->
+    global:trans(
+        {?MODULE, precheck_temp_module_name()},
+        fun() -> pending_reload_findings_locked(ClassNameBin, PrevGen, CoreErlang) end
+    ).
+
+-spec pending_reload_findings_locked(binary(), beamtalk_shape_diff:generation(), binary()) ->
+    [beamtalk_shape_diff:reload_finding()].
+pending_reload_findings_locked(ClassNameBin, PrevGen, CoreErlang) ->
+    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+        {ok, _CompiledMod, Binary} ->
+            TempModuleAtom = binary_to_atom(precheck_temp_module_name(), utf8),
+            case code:load_binary(TempModuleAtom, "beamtalk_precheck", Binary) of
+                {module, TempModuleAtom} ->
+                    try
+                        pending_findings_from_temp_module(ClassNameBin, PrevGen, TempModuleAtom)
+                    after
+                        code:purge(TempModuleAtom),
+                        code:delete(TempModuleAtom)
+                    end;
+                {error, _} ->
+                    []
+            end;
+        {error, _} ->
+            []
+    end.
+
+-spec pending_findings_from_temp_module(binary(), beamtalk_shape_diff:generation(), atom()) ->
+    [beamtalk_shape_diff:reload_finding()].
+pending_findings_from_temp_module(ClassNameBin, PrevGen, TempModuleAtom) ->
+    case erlang:function_exported(TempModuleAtom, '__beamtalk_meta', 0) of
+        false ->
+            [];
+        true ->
+            Meta = TempModuleAtom:'__beamtalk_meta'(),
+            #{shape := PrevShape, own_shape := PrevOwnShape} = PrevGen,
+            AncestorOnlyShape = maps:without(maps:keys(PrevOwnShape), PrevShape),
+            PendingOwnFieldTypes = maps:get(field_types, Meta, #{}),
+            PendingOwnShape = maps:fold(
+                fun(FieldAtom, TypeAtom, Acc) ->
+                    Acc#{
+                        atom_to_binary(FieldAtom, utf8) =>
+                            beamtalk_workspace_shape_store:field_type_to_binary(TypeAtom)
+                    }
+                end,
+                #{},
+                PendingOwnFieldTypes
+            ),
+            PendingShape = maps:merge(AncestorOnlyShape, PendingOwnShape),
+            NewGen = #{
+                shape => PendingShape,
+                own_shape => PendingOwnShape,
+                version => maps:get(shape_version, Meta, 1),
+                migrations => maps:get(shape_migrations, Meta, #{})
+            },
+            DiffResult = beamtalk_shape_diff:diff(PrevShape, PendingShape),
+            beamtalk_shape_diff:reload_findings(ClassNameBin, PrevGen, NewGen, DiffResult)
+    end.
 
 -doc """
 Remove a live method from a class by recompiling the class without it.
@@ -4520,8 +4782,19 @@ maybe_trigger_shape_recheck(Classes) ->
 maybe_trigger_shape_recheck_for_class(#{name := Name}) ->
     ClassNameBin = normalize_class_source_key(Name),
     try
-        {_Prev, {Classification, FieldChanges}} =
-            beamtalk_workspace_shape_store:capture(ClassNameBin),
+        {Prev, NewGen, DiffResult} = beamtalk_workspace_shape_store:capture(ClassNameBin),
+        {Classification, FieldChanges} = DiffResult,
+        %% ADR 0123 §4 rows 1-4 (BT-3538): joins the field-level diff with
+        %% the previous/new generation's 'shape_version'/'shape_migrations'
+        %% — independent of `Classification`, since a version-only finding
+        %% (bumped-without-migration, version-decreased) can fire with no
+        %% field change at all. Row 5 (instances_suspended) is published
+        %% separately and synchronously from `hot_reload_class/2`, which
+        %% runs before this worker call and needs no shape/version diff.
+        ReloadFindings = beamtalk_shape_diff:reload_findings(
+            ClassNameBin, Prev, NewGen, DiffResult
+        ),
+        publish_reload_findings(ClassNameBin, ReloadFindings),
         case Classification of
             no_op ->
                 ok;
@@ -4543,6 +4816,42 @@ maybe_trigger_shape_recheck_for_class(#{name := Name}) ->
             ),
             ok
     end.
+
+-doc """
+Publish `Findings` (ADR 0123 §4, BT-3538: `beamtalk_shape_diff:reload_finding()`)
+through the `reload_check` channel's `'ShapeReloadFindingsCompleted'`
+announcement — a genuinely distinct event from `'ReloadCheckCompleted'`
+(`publish_shape_recheck_outcome/3`'s ADR 0105 xref-dependent-caller
+findings), not a repurposing of it: the two finding types have different
+schemas (`class`/`kind`/`fields`/`migrated`/`suspended`/`pids` vs.
+`owner`/`selector`/`classification`/`sites`) and different subjects (this
+reload's *own class and its live instances*, not a caller class broken by
+the change) — see `beamtalk_ws_handler`'s `'ShapeReloadFindingsCompleted'`
+clause for the wire encoding, and `beamtalk_repl_subscriptions:
+announcement_classes/1` for why it rides the same `reload_check` stream
+without a new subscription. A no-op when `Findings` is empty — unlike
+`publish_shape_recheck_outcome/3`, there is no store-clearing signal to
+carry on an empty list (findings here are one-shot advisory notices, not a
+per-owner replaceable snapshot).
+""".
+-spec publish_reload_findings(binary(), [beamtalk_shape_diff:reload_finding()]) -> ok.
+publish_reload_findings(_ClassNameBin, []) ->
+    ok;
+publish_reload_findings(ClassNameBin, Findings) ->
+    ?LOG_INFO(
+        "Shape reload findings",
+        #{
+            class => ClassNameBin,
+            finding_count => length(Findings),
+            kinds => lists:usort([maps:get(kind, F) || F <- Findings]),
+            domain => [beamtalk, runtime]
+        }
+    ),
+    beamtalk_announcements:system_announce('ShapeReloadFindingsCompleted', #{
+        class => ClassNameBin,
+        findings => Findings
+    }),
+    ok.
 
 -doc """
 Publish a shape re-check's outcome — mirrors `maybe_run_recheck/4`'s

@@ -52,7 +52,7 @@ corrected to workspace-local scope).
 | `classes` | `ClassLoaded`, `ClassRemoved` | `{beamtalk_announcement, SubRef, Class, Handler, Event}` |
 | `bindings` | `BindingChanged` | `{beamtalk_announcement, SubRef, 'BindingChanged', Handler, Event}` |
 | `flush` | `FlushCompleted` | `{beamtalk_announcement, SubRef, 'FlushCompleted', Handler, Event}` |
-| `reload_check` | `ReloadCheckCompleted` | `{beamtalk_announcement, SubRef, 'ReloadCheckCompleted', Handler, Event}` |
+| `reload_check` | `ReloadCheckCompleted`, `ShapeReloadFindingsCompleted` (ADR 0123 §4, BT-3538) | `{beamtalk_announcement, SubRef, 'ReloadCheckCompleted' \| 'ShapeReloadFindingsCompleted', Handler, Event}` |
 
 `Class` is the *announced* class atom; `Event` is the typed announcement payload
 (a tagged map, e.g. `#{'$beamtalk_class' => 'ActorSpawned', actorClass => …,
@@ -216,7 +216,12 @@ announcement_classes(actors) -> ['ActorSpawned', 'ActorStopped'];
 announcement_classes(classes) -> ['ClassLoaded', 'ClassRemoved'];
 announcement_classes(bindings) -> ['BindingChanged'];
 announcement_classes(flush) -> ['FlushCompleted'];
-announcement_classes(reload_check) -> ['ReloadCheckCompleted'].
+%% ADR 0123 §4 (BT-3538): 'ShapeReloadFindingsCompleted' rides the same
+%% `reload_check` stream as 'ReloadCheckCompleted' — a distinct announcement
+%% class (a different finding schema; see
+%% `beamtalk_repl_loader:publish_reload_findings/2`'s doc), not a second
+%% subscription a client would have to know to ask for separately.
+announcement_classes(reload_check) -> ['ReloadCheckCompleted', 'ShapeReloadFindingsCompleted'].
 
 -doc """
 Register `Pid` on the SystemAnnouncer bus for every announcement class of

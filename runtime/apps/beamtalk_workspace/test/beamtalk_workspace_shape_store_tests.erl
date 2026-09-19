@@ -4,7 +4,8 @@
 -module(beamtalk_workspace_shape_store_tests).
 
 -moduledoc """
-Unit tests for beamtalk_workspace_shape_store (ADR 0105 Phase 2).
+Unit tests for beamtalk_workspace_shape_store (ADR 0105 Phase 2, ADR 0123
+Phase 4 BT-3538).
 
 Covers:
 - prime/1's "seed once" laziness (does not overwrite an existing entry)
@@ -20,6 +21,11 @@ Covers:
   beamtalk_shape_store_fixture
 - field_type_to_binary/1's Dynamic-sentinel normalisation (exercised
   indirectly through read_shape_from_meta/1, since it is not exported)
+- BT-3538: read_shape_from_meta/1 flattens a two-level hierarchy (a
+  subclass's own field plus its superclass's, via
+  beamtalk_shape_store_superclass_fixture/beamtalk_shape_store_subclass_fixture)
+- BT-3538: read_generation_from_meta/1 and capture/1 carry
+  'shape_version'/'shape_migrations' alongside the flattened shape
 
 The end-to-end thread from a real class-body reload
 (`beamtalk_repl_loader:load_class_module/3` et al.) through to a
@@ -60,7 +66,8 @@ store_test_() ->
         fun capture_without_prime_is_always_no_op/1,
         fun previous_does_not_mutate_store/1,
         fun clear_resets_the_session/1,
-        fun different_classes_are_independent/1
+        fun different_classes_are_independent/1,
+        fun capture_carries_shape_version_and_migrations/1
     ]}.
 
 %%====================================================================
@@ -84,11 +91,18 @@ capture_without_prime_is_always_no_op(_Pid) ->
         'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor', undefined
     ),
     try
-        {Prev, DiffResult} = beamtalk_workspace_shape_store:capture(<<"ShapeFixtureClass">>),
+        {Prev, NewGen, DiffResult} = beamtalk_workspace_shape_store:capture(
+            <<"ShapeFixtureClass">>
+        ),
+        ExpectedGen = #{
+            shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            version => 1,
+            migrations => #{}
+        },
         [
-            ?_assertEqual(
-                #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>}, Prev
-            ),
+            ?_assertEqual(ExpectedGen, Prev),
+            ?_assertEqual(ExpectedGen, NewGen),
             ?_assertEqual({no_op, []}, DiffResult)
         ]
     after
@@ -106,13 +120,58 @@ previous_does_not_mutate_store(_Pid) ->
         ok = beamtalk_workspace_shape_store:prime(<<"ShapeFixtureClass">>),
         P1 = beamtalk_workspace_shape_store:previous(<<"ShapeFixtureClass">>),
         P2 = beamtalk_workspace_shape_store:previous(<<"ShapeFixtureClass">>),
-        Expected = #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+        Expected = #{
+            shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            version => 1,
+            migrations => #{}
+        },
         [
             ?_assertEqual(Expected, P1),
             ?_assertEqual(Expected, P2)
         ]
     after
         ets:delete(?TABLE, 'ShapeFixtureClass')
+    end.
+
+%% BT-3538: capture/1's returned generations carry the class's own
+%% 'shape_version'/'shape_migrations', not just its flattened shape — a
+%% subclass generation reload (old undeclared v1 -> new declared v2) is
+%% classified shape_change (name added) with the version visible on both
+%% the previous and new generation.
+capture_carries_shape_version_and_migrations(_Pid) ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSubclass',
+        beamtalk_shape_store_fixture,
+        [name],
+        'ShapeFixtureSuperclass',
+        undefined
+    ),
+    try
+        %% prime/1 seeds from the (undeclared-version) plain fixture module
+        %% first, simulating "before this reload installed the versioned
+        %% module" — then re-point the row at the versioned fixture module
+        %% and capture/1, simulating the post-install read.
+        ok = beamtalk_workspace_shape_store:prime(<<"ShapeFixtureSubclass">>),
+        ok = beamtalk_class_metadata:insert(
+            'ShapeFixtureSubclass',
+            beamtalk_shape_store_subclass_fixture,
+            [name],
+            'ShapeFixtureSuperclass',
+            undefined
+        ),
+        {Prev, NewGen, _DiffResult} = beamtalk_workspace_shape_store:capture(
+            <<"ShapeFixtureSubclass">>
+        ),
+        [
+            ?_assertEqual(1, maps:get(version, Prev)),
+            ?_assertEqual(#{}, maps:get(migrations, Prev)),
+            ?_assertEqual(2, maps:get(version, NewGen)),
+            ?_assertEqual(#{1 => 'migrateFromV1:'}, maps:get(migrations, NewGen))
+        ]
+    after
+        ets:delete(?TABLE, 'ShapeFixtureSubclass')
     end.
 
 %% clear/0 drops every recorded generation — the next prime/1 re-seeds as if
@@ -186,3 +245,132 @@ read_shape_reads_field_types_from_meta_test() ->
     after
         ets:delete(?TABLE, 'ShapeFixtureClass')
     end.
+
+%%====================================================================
+%% Flattened shape (ADR 0123 Phase 4, BT-3538)
+%%====================================================================
+
+%% A subclass declaring only `name` still reads its superclass's `count`/
+%% `taxRate` — the whole point of flattening: a superclass-only field change
+%% must surface on a concrete subclass's diff even though the subclass's own
+%% module was not recompiled.
+read_shape_flattens_superclass_fields_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSuperclass',
+        beamtalk_shape_store_superclass_fixture,
+        [count, taxRate],
+        none,
+        undefined
+    ),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSubclass',
+        beamtalk_shape_store_subclass_fixture,
+        [name],
+        'ShapeFixtureSuperclass',
+        undefined
+    ),
+    try
+        ?assertEqual(
+            #{
+                <<"count">> => <<"Integer">>,
+                <<"taxRate">> => <<"Float">>,
+                <<"name">> => <<"Dynamic">>
+            },
+            beamtalk_workspace_shape_store:read_shape_from_meta(<<"ShapeFixtureSubclass">>)
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureSubclass'),
+        ets:delete(?TABLE, 'ShapeFixtureSuperclass')
+    end.
+
+%% An ancestor that fails to resolve (unregistered) contributes nothing at
+%% its level rather than degrading the whole flatten to undefined — the
+%% subclass's own fields still come back.
+read_shape_degrades_gracefully_for_unresolvable_ancestor_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSubclass',
+        beamtalk_shape_store_subclass_fixture,
+        [name],
+        'ShapeFixtureSuperclass',
+        undefined
+    ),
+    try
+        ?assertEqual(
+            #{<<"name">> => <<"Dynamic">>},
+            beamtalk_workspace_shape_store:read_shape_from_meta(<<"ShapeFixtureSubclass">>)
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureSubclass')
+    end.
+
+%%====================================================================
+%% read_generation_from_meta/1 (exported for TEST, BT-3538)
+%%====================================================================
+
+%% A class declaring no shapeVersion:/migrateFromVN: reads generation
+%% defaults 1/#{}.
+read_generation_defaults_undeclared_version_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor', undefined
+    ),
+    try
+        ?assertEqual(
+            #{
+                shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+                own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+                version => 1,
+                migrations => #{}
+            },
+            beamtalk_workspace_shape_store:read_generation_from_meta(<<"ShapeFixtureClass">>)
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureClass')
+    end.
+
+%% A class declaring shapeVersion: 2 with a migrateFromV1: entry reads both
+%% through, alongside its (flattened) shape.
+read_generation_reads_declared_version_and_migrations_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSuperclass',
+        beamtalk_shape_store_superclass_fixture,
+        [count, taxRate],
+        none,
+        undefined
+    ),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSubclass',
+        beamtalk_shape_store_subclass_fixture,
+        [name],
+        'ShapeFixtureSuperclass',
+        undefined
+    ),
+    try
+        ?assertEqual(
+            #{
+                shape => #{
+                    <<"count">> => <<"Integer">>,
+                    <<"taxRate">> => <<"Float">>,
+                    <<"name">> => <<"Dynamic">>
+                },
+                own_shape => #{<<"name">> => <<"Dynamic">>},
+                version => 2,
+                migrations => #{1 => 'migrateFromV1:'}
+            },
+            beamtalk_workspace_shape_store:read_generation_from_meta(<<"ShapeFixtureSubclass">>)
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureSubclass'),
+        ets:delete(?TABLE, 'ShapeFixtureSuperclass')
+    end.
+
+%% Unregistered class: read_generation_from_meta/1 degrades to undefined,
+%% same as read_shape_from_meta/1.
+read_generation_degrades_to_undefined_for_unregistered_class_test() ->
+    ?assertEqual(
+        undefined,
+        beamtalk_workspace_shape_store:read_generation_from_meta(<<"NeverSeenClassXyz">>)
+    ).
