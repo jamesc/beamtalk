@@ -3875,6 +3875,242 @@ to xref, so a proxy-wrapped caller can go unflagged — see
 [ADR 0115](ADR/0115-xref-receiver-type-key.md) for the full mechanism,
 severity rules, and accepted gaps.
 
+### Shape Versioning (ADR 0123)
+
+Reload's structural fallback (add a defaulted field, drop a removed one,
+matching by name) handles additive changes for free — it always has. What it
+cannot express is a **rename**, a **retype**, or a field **derived** from
+others: dropping one field and adding another loses data instead of
+transforming it. `shapeVersion:` and `migrateFromVN:` are the two additions
+that let a class author say, in ordinary Beamtalk, how a live instance's
+state gets from one shape to the next — the same problem hot reload,
+persistence, and cross-node distribution all share, solved once.
+
+#### `shapeVersion:` — declaring a version
+
+A class declares its shape version with a **class-header clause**, on its
+own line before any `state:`/`field:` lines — the same position
+`handleScope:` occupies:
+
+```beamtalk
+Actor subclass: Cart
+  shapeVersion: 2
+  state: items :: List = #()
+  state: total :: Integer = 0
+```
+
+- The argument is a **positive integer literal** — the compiler must read it
+  without evaluating code.
+- **Absent means `shapeVersion: 1`.** Every class that predates this feature
+  is implicitly at version 1; nothing in an existing corpus needs to change.
+- At most one `shapeVersion:` per class, and it is **not inherited**:
+  versions and migration chains are per **concrete** class, over the
+  flattened (inherited-fields-included) field set — because that is what an
+  instance's actual state map holds. A subclass's chain is only the
+  `migrateFromVN:` methods *it* defines; to reuse an ancestor's step, call it
+  explicitly (`Base migrateFromV1: old`).
+- `Cart shapeVersion` reads it back (`Behaviour >> shapeVersion`, sealed,
+  defaults to `1` when undeclared):
+
+```beamtalk
+Cart shapeVersion
+// => 2
+
+Counter shapeVersion    // no shapeVersion: clause declared
+// => 1
+```
+
+- `native:` classes cannot declare `shapeVersion:` (or `migrateFromVN:`) at
+  all — they compile to a facade with no generated `init/1`/`code_change/3`
+  to carry a version (ADR 0056); the compiler rejects it.
+
+#### `class migrateFromVN:` — one method per step
+
+A migration from shape *N* to shape *N+1* is a **class-side method**,
+`migrateFromVN:`, taking the old fields as a `Dictionary` and returning the
+new fields as a `Dictionary`:
+
+```beamtalk
+Actor subclass: Cart
+  shapeVersion: 2
+  state: items :: List = #()
+  state: total :: Integer = 0
+
+  /// v1 had only `items`; v2 caches their sum.
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    old at: #total put: (old at: #items) sum
+```
+
+A rename the structural fallback cannot express (it would drop `owner` and
+default `ownerName` instead of carrying the value across):
+
+```beamtalk
+Actor subclass: Account
+  shapeVersion: 3
+  state: balance :: Integer = 0
+  state: ownerName :: String = ""
+
+  class migrateFromV2: old :: Dictionary -> Dictionary =>
+    (old at: #ownerName put: (old at: #owner)) removeKey: #owner
+```
+
+A `Value`, retyping a field (integer cents → float amount) and adding one:
+
+```beamtalk
+Value subclass: Money
+  shapeVersion: 2
+  field: amount :: Float = 0.0
+  field: currency :: Symbol = #USD
+
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    (old at: #amount put: (old at: #cents) / 100.0) removeKey: #cents
+```
+
+Rules, all checked statically:
+
+- Recognised only on the **class side**, with exactly one parameter; `N`
+  must be a positive integer.
+- A method with `N ≥ shapeVersion` is a **warning** — unreachable, since the
+  chain never runs a step at or past the current version:
+
+  ```beamtalk
+  Actor subclass: Cart
+    shapeVersion: 2
+    class migrateFromV7: old => old
+  // ⚠️ warning: `migrateFromV7:` is unreachable — Cart's shapeVersion is 2
+  ```
+
+- **Gaps are fine.** A missing step is a no-op on the dictionary — the
+  structural fallback runs once, after the *whole* chain, against the final
+  declared shape. Consequently a hook sees the **raw** dictionary left by the
+  hooks before it, and a key introduced at an earlier un-hooked step may be
+  absent: guard with `at:ifAbsent:` / `includesKey:` when reading such a key.
+- **No class-variable access** — a compile error, not a style rule. A
+  migration runs outside the class process (see below), where `self.x` would
+  silently read `nil` and a write would be silently dropped; the validator
+  refuses both before that contract is ever reached:
+
+  ```beamtalk
+  Actor subclass: Cart
+    shapeVersion: 2
+    classState: taxRate = 0.2
+    class migrateFromV1: old => old at: #tax put: (old at: #total) * self.taxRate
+  // ⛔ error: `migrateFromV1:` may not access class variables (`self.taxRate`);
+  //    migration methods run outside the class process, where class
+  //    variables are not available
+  ```
+
+- The return type, when annotated, must be `Dictionary`.
+- A declaration error is likewise static:
+
+  ```beamtalk
+  Actor subclass: Cart
+    shapeVersion: "two"
+  // ⛔ error: 'shapeVersion:' expects a positive integer literal (got a non-positive value)
+
+  Actor subclass: Cart
+    shapeVersion: 2
+    shapeVersion: 3
+  // ⛔ error: duplicate shapeVersion: declaration (already 2)
+  ```
+
+**Ordinary sends are allowed inside a hook, so a migration is not pure** — it
+just needs no process context (no live instance, no class process), which is
+what makes it callable standalone at the REPL, before any instance depends
+on it:
+
+```beamtalk
+Cart migrateFromV1: #{#items => #(3, 4)}
+// => #{#items => #(3, 4), #total => 7}
+
+Cart migrateShape: #{#items => #(3, 4)} from: 1     // whole chain + reconcile
+// => #{#items => #(3, 4), #total => 7}
+```
+
+`migrateShape:from:` (sealed, `Behaviour >> migrateShape:from:`) runs the
+**full** chain from a given version to the class's current `shapeVersion`,
+then reconciles against the declared fields — the identical operation a
+reload performs, exposed for standalone testing. It is idempotent at the
+current version (`migrateShape:from:` with `aVersion = shapeVersion` runs
+reconcile only, unchanged):
+
+```beamtalk
+Cart migrateShape: #{#items => #(3, 4), #total => 7} from: 2
+// => #{#items => #(3, 4), #total => 7}     // already current — unchanged
+```
+
+#### Chain and reconcile semantics
+
+For a reload (or any `migrateShape:from:` call) from version `V` to the
+class's current `T`:
+
+1. For each `K` in `V, V+1, …, T-1`: if a `migrateFromVK:` exists, apply it
+   to the running dictionary; otherwise that step is a no-op.
+2. **Reconcile** against the declared field list (the flattened one,
+   inherited fields included). A declared field present in the dictionary is
+   kept; absent gets its declared default; absent with no default is `nil`
+   on an untyped class and a **failure** on a `typed` one (a migration may
+   not leave a typed slot unset, same rule ADR 0078 enforces after
+   `initialize`). An undeclared key is dropped with a warning.
+3. Downgrading (`T < V`) runs reconcile only — `migrateToVN:` downgrade
+   hooks are reserved, not defined.
+
+Every live actor's state map carries one internal key,
+`'__shape_version__'`, written by `init/1` (absent means `1`) and updated to
+the class's current version on a successful migration — never visible
+through `fieldNames`, `printString`, the Inspector, or any other
+reflection surface, exactly like every other internal key.
+
+#### Suspend on failure, not resume-on-old-state or kill
+
+If a `migrateFromVN:` hook raises, the actor is **left suspended** — not
+resumed with its old-shaped state under the new code (which is what the
+structural-only fallback used to do), and not killed:
+
+```beamtalk
+Cart reload
+// => Cart
+⛔ reload: 1 instance of Cart left suspended — migrateFromV1: raised
+   does_not_understand: List>>summ (Cart class >> migrateFromV1:, cart.bt:9)
+   state intact at v1; fix the hook and `Cart reload` again, or `Workspace actorAt: kill`
+```
+
+The suspended instance's state is intact and inspectable — but not through
+an ordinary message send: `anActor inspect` (see
+[Navigable Inspector](#navigable-inspector-adr-0095)) is itself a send, so
+it lands in the actor's mailbox like any other and cannot be answered while
+suspended. `sys:get_state`/`sys:get_status` are OTP **debug** messages, not
+`gen_server` calls — they bypass the mailbox entirely, which is what makes a
+suspended actor's state genuinely readable (via the Erlang FFI gateway, or
+external tools — `observer`, `recon`). Fixing the hook and reloading again
+**re-suspends idempotently** and, on success, resumes the actor at the new
+shape:
+
+```beamtalk
+Cart reload            // migrateFromV1: still raises
+// => Cart
+Erlang maps get: #items from: (Erlang sys get_state: cart pid)
+// => #(3, 4)     // state survives, still v1-shaped — an ordinary send to
+                   // `cart` would time out instead; `sys:get_state` bypasses
+                   // the mailbox
+
+// ... fix the hook, save ...
+
+Cart reload             // migrateFromV1: now succeeds
+// => Cart
+cart getTotal            // now answers on the new shape
+// => 7
+```
+
+A synchronous caller blocked on the suspended actor simply times out with
+the usual structured timeout error until the author fixes the hook (or kills
+the instance) — the actor never silently continues on a wrong-shaped map,
+and nothing is lost in the meantime. See
+[ADR 0123](ADR/0123-versioned-state-migration.md) for the full design,
+including the runtime-only versioned envelope (`pack/1`/`unpack/1`) that the
+persistence and distribution ADRs will consume — not yet exposed as a
+Beamtalk-callable method — and the reload-time tooling findings (§4).
+
 ---
 
 ## Extension Methods (Open Classes)

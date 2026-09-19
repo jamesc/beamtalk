@@ -1,7 +1,8 @@
 # ADR 0123: Versioned State Migration as a Language Surface
 
 ## Status
-Accepted (2026-09-17)
+Implemented (2026-09-19) — via Epic BT-3533 (Phases 0–5,
+BT-3531…BT-3540).
 
 ## Context
 
@@ -1019,7 +1020,7 @@ reuse; an ADR 0113-style hard gate on lossy reloads.
 | 4 | [BT-3539](https://linear.app/beamtalk/issue/BT-3539) | LSP completion + hover for the migration chain | S | BT-3537 |
 | 5 | [BT-3540](https://linear.app/beamtalk/issue/BT-3540) | Docs + REPL-protocol e2e | S | BT-3538, BT-3539 |
 
-**Status:** Planned. Recommended start: BT-3531 / BT-3532 (unblocked, `agent-ready`).
+All nine issues shipped; the epic is closed.
 
 ## References
 - Related issues: [BT-3524](https://linear.app/beamtalk/issue/BT-3524)

@@ -3,8 +3,17 @@
 
 // Hot reload counter - version 2 with modified increment (adds 10)
 // and new field 'step'
+//
+// BT-3540 (ADR 0123 Phase 5): declares `shapeVersion: 2` with no
+// `migrateFromV1:` hook — the "purely structural step" of the v1 -> v2 -> v3
+// chain exercised by hot_reload_shape_migration_chain.btscript. Adding
+// `step` with no hook is exactly what the structural fallback already
+// covers (BT-3534's hot_reload_shape_version.btscript), now under a real
+// declared version bump instead of the implicit-v1-to-implicit-v1 case that
+// test uses.
 
 Actor subclass: HotCounter
+  shapeVersion: 2
   state: value = 0
   state: step = 5
 
