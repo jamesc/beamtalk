@@ -576,8 +576,11 @@ impl DeclaredKeyword {
 /// `late` is a declaration-level modifier on `state:`/`classState:` marking a
 /// slot that is legitimately unassigned after `initialize` — absent from the
 /// state map until assigned, and exempt from ADR 0078's post-`initialize`
-/// check. This is the parser/AST half only (ADR 0124 B1); codegen and
-/// runtime do not yet consult it.
+/// check. This is the parser/AST half (ADR 0124 B1); the exemption itself is
+/// `semantic_analysis::requires_definite_assignment` (ADR 0124 A1), which
+/// `beamtalk-codegen`'s post-`initialize` field check now calls. The state
+/// map/`init/1` literal itself does not yet exclude `late` slots (ADR 0124
+/// B2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SlotKind {
     /// The default: initialised eagerly (a declared default, or `nil` for an

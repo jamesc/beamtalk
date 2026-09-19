@@ -228,9 +228,11 @@ fn test_init_actor_with_declared_shape_version_writes_real_value() {
 
 // ── Type-annotation codegen coverage ─────────────────────────────────────────
 //
-// Target: gen_server/callbacks.rs — is_nilable_type Union branch,
-// type_annotation_display Singleton/Generic/FalseOr/SelfType/SelfClass/ClassOf
-// variants, user_defined_initialize_chain fallback when class_hierarchy is None,
+// Target: gen_server/callbacks.rs — the shared
+// `beamtalk_core::semantic_analysis::requires_definite_assignment`'s Union
+// nilability (ADR 0124 §7 A1), type_annotation_display
+// Singleton/Generic/FalseOr/SelfType/SelfClass/ClassOf variants,
+// user_defined_initialize_chain fallback when class_hierarchy is None,
 // and inherited_typed_no_default_fields fallback.
 // (Function names rather than line numbers so these references don't drift as
 // callbacks.rs evolves.)
@@ -238,8 +240,8 @@ fn test_init_actor_with_declared_shape_version_writes_real_value() {
 // Strategy:
 // - Tests 1-6: generate_module with actor having one typed-no-default field per
 //   TypeAnnotation variant; coverage comes from the hierarchy path in
-//   inherited_typed_no_default_fields that calls is_nilable_type and
-//   type_annotation_display.
+//   inherited_typed_no_default_fields that calls
+//   requires_definite_assignment and type_annotation_display.
 // - Tests 7-15: direct CoreErlangGenerator unit tests (class_hierarchy = None)
 //   to exercise the no-hierarchy fallback paths in both functions.
 
@@ -294,7 +296,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
 
 #[test]
 fn test_actor_typed_union_nil_field_is_nilable() {
-    // is_nilable_type Union branch: Union([Integer, Nil]) is nilable.
+    // requires_definite_assignment Union branch: Union([Integer, Nil]) is nilable.
     // The field is excluded from typed-no-default so no initialize continuation emitted.
     let s = Span::new(0, 0);
     let union_nil = TypeAnnotation::union(
@@ -327,7 +329,7 @@ fn test_actor_typed_union_nil_field_is_nilable() {
 
 #[test]
 fn test_actor_typed_union_non_nil_field_triggers_validation() {
-    // is_nilable_type Union branch: Union([Integer, String]) is not nilable → included.
+    // requires_definite_assignment Union branch: Union([Integer, String]) is not nilable → included.
     // type_annotation_display Union branch also exercised.
     let s = Span::new(0, 0);
     let union_no_nil = TypeAnnotation::union(
@@ -745,25 +747,30 @@ fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
 
 // ── Cross-file ancestor ClassInfo path ───────────────────────────────────────
 //
-// Target: gen_server/callbacks.rs — `is_nilable_type_name` and the ClassInfo
-// branch of `inherited_typed_no_default_fields` (the `else if let Some(info)
-// = hierarchy.get_class(&name)` arm).  Reached only when an ancestor class is
-// absent from the current module's AST but present in the pre-loaded
-// ClassHierarchy (BEAM metadata / cross-file compilation).
+// Target: gen_server/callbacks.rs — the ClassInfo branch of
+// `inherited_typed_no_default_fields` (the `else if let Some(info) =
+// hierarchy.get_class(&name)` arm), which now delegates nilability to
+// `beamtalk_core::semantic_analysis::is_nilable_type_name` (ADR 0124 §7 A1).
+// Reached only when an ancestor class is absent from the current module's
+// AST but present in the pre-loaded ClassHierarchy (BEAM metadata /
+// cross-file compilation).
 
-/// Exercises `is_nilable_type_name()` via the `ClassInfo` path in
-/// `inherited_typed_no_default_fields()`.
+/// Exercises the shared `is_nilable_type_name()` predicate via the
+/// `ClassInfo` path in `inherited_typed_no_default_fields()`.
 ///
 /// A cross-file ancestor is injected via `CodegenOptions::with_class_hierarchy`.
-/// Its typed-no-default fields exercise every branch of `is_nilable_type_name`:
+/// Its typed-no-default fields exercise several nilability shapes:
 ///
-/// - `nilField :: Nil`          → `type_name == "Nil"` returns true → excluded
-/// - `nilUnionField :: Integer | Nil` → union `split(" | ").any(…)` → excluded
-/// - `reqField :: Integer`       → neither branch → included → validation fires
+/// - `nilField :: Nil`                        → excluded (bare `Nil`)
+/// - `nilUnionField :: Integer | Nil`          → excluded (union member)
+/// - `undefinedObjectField :: String | UndefinedObject` → excluded (ADR 0124
+///   §7: the canonical nil class, not just the `Nil` spelling — the bug the
+///   old codegen-local `is_nilable_type_name` had)
+/// - `reqField :: Integer`                     → included → validation fires
 ///
 /// The validation output for `reqField` confirms the `ClassInfo` loop ran.
-/// The absence of `nilField` / `nilUnionField` in the output confirms the
-/// nilability guards work correctly.
+/// The absence of the nilable fields in the output confirms the nilability
+/// guards work correctly.
 #[test]
 fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
@@ -784,6 +791,7 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
         state: vec![
             ecow::EcoString::from("nilField"),
             ecow::EcoString::from("nilUnionField"),
+            ecow::EcoString::from("undefinedObjectField"),
             ecow::EcoString::from("reqField"),
         ],
         state_types: {
@@ -799,6 +807,12 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
                 ),
             );
             m.insert(
+                ecow::EcoString::from("undefinedObjectField"),
+                beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::parse(
+                    "String | UndefinedObject",
+                ),
+            );
+            m.insert(
                 ecow::EcoString::from("reqField"),
                 beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::parse("Integer"),
             );
@@ -808,6 +822,7 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
             let mut m = HashMap::new();
             m.insert(ecow::EcoString::from("nilField"), false);
             m.insert(ecow::EcoString::from("nilUnionField"), false);
+            m.insert(ecow::EcoString::from("undefinedObjectField"), false);
             m.insert(ecow::EcoString::from("reqField"), false);
             m
         },
@@ -841,16 +856,23 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
         "Non-nilable field 'reqField' must appear in the validation error hint. Got:\n{code}"
     );
 
-    // nilField :: Nil — excluded by `type_name == "Nil"` branch of is_nilable_type_name.
+    // nilField :: Nil — excluded by is_nilable_type_name.
     assert!(
         !code.contains("'nilField'"),
         "Nil-typed field must be excluded by is_nilable_type_name. Got:\n{code}"
     );
 
-    // nilUnionField :: Integer | Nil — excluded by the union-split branch.
+    // nilUnionField :: Integer | Nil — excluded (union member is nilable).
     assert!(
         !code.contains("'nilUnionField'"),
         "Integer|Nil union field must be excluded by is_nilable_type_name. Got:\n{code}"
+    );
+
+    // undefinedObjectField :: String | UndefinedObject — excluded (ADR 0124
+    // §7: UndefinedObject is the canonical nil class, not just `Nil`).
+    assert!(
+        !code.contains("'undefinedObjectField'"),
+        "String|UndefinedObject union field must be excluded by is_nilable_type_name. Got:\n{code}"
     );
 
     // Because BaseActor ≠ Actor/Object (has_parent_init=true) AND reqField is a

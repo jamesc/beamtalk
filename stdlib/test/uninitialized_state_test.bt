@@ -6,6 +6,11 @@
 // Fixtures:
 //   stdlib/test/fixtures/typed_no_default_actor.bt   (properly initializes)
 //   stdlib/test/fixtures/uninitialized_state_actor.bt (forgets to initialize)
+//
+// Also covers BT-3546 (ADR 0124 §7 A1) — the reimplemented, alias-aware
+// definite-assignment predicate:
+//   stdlib/test/fixtures/json_value_state_actor.bt (alias-typed, expands to nilable)
+//   stdlib/test/fixtures/undefined_object_union_state_actor.bt (UndefinedObject spelling)
 
 TestCase subclass: UninitializedStateTest
 
@@ -41,4 +46,28 @@ TestCase subclass: UninitializedStateTest
 
   testNilAllowedFieldOtherStateWorks =>
     a := NilAllowedStateActor spawn
+    self assert: a getCount equals: 1
+
+  // === BT-3546 (ADR 0124 §7 A1): alias-typed field expanding to nilable ===
+  // `type LocalJsonValue = Nil | Boolean | Integer | Float | String | List |
+  // Dictionary` (mirroring `stdlib/src/json.bt`'s `JsonValue`) — a
+  // defaultless `state: value :: LocalJsonValue` must spawn without raising,
+  // since the alias resolves to a union containing `Nil`.
+  testAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>
+    a := JsonValueStateActor spawn
+    self assert: a getValue equals: nil
+
+  testAliasTypedNilableFieldOtherStateWorks =>
+    a := JsonValueStateActor spawn
+    self assert: a getCount equals: 1
+
+  // === BT-3546 (ADR 0124 §7 A1): UndefinedObject spelling, not just Nil ===
+  // `String | UndefinedObject` must spawn without raising — UndefinedObject
+  // is the canonical nil class, not only the `Nil` keyword spelling.
+  testUndefinedObjectUnionFieldLeftNilSpawnsSuccessfully =>
+    a := UndefinedObjectUnionStateActor spawn
+    self assert: a getLabel equals: nil
+
+  testUndefinedObjectUnionFieldOtherStateWorks =>
+    a := UndefinedObjectUnionStateActor spawn
     self assert: a getCount equals: 1

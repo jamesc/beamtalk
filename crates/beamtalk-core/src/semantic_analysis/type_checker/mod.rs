@@ -76,7 +76,9 @@ pub use native_types::{
     is_specs_line, is_specs_result_error, is_specs_result_ok, load_native_declarations,
     map_type_name, parse_specs_line,
 };
-pub(in crate::semantic_analysis) use type_resolver::resolve_type_annotation;
+pub(in crate::semantic_analysis) use type_resolver::{
+    resolve_declared_type, resolve_type_annotation,
+};
 pub(in crate::semantic_analysis) use types::is_generic_type_param;
 pub use types::{DynamicReason, InferredType, TypeProvenance};
 

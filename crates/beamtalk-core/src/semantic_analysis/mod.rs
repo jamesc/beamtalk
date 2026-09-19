@@ -27,6 +27,7 @@ pub mod class_hierarchy;
 pub mod class_kind_writeback;
 pub mod class_module_registry;
 pub mod collision_checker;
+pub mod definite_assignment;
 pub mod error;
 pub mod facts;
 pub mod lowering;
@@ -65,6 +66,9 @@ pub use class_module_registry::{
 pub use collision_checker::{
     DepInfo, DependencyRegistry, build_dependency_registry, build_dependency_registry_with_graph,
     check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
+};
+pub use definite_assignment::{
+    is_nilable_type_annotation, is_nilable_type_name, requires_definite_assignment,
 };
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
