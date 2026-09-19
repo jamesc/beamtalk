@@ -30,6 +30,10 @@ Covers:
   never folding in the class's own fields (the accessor
   read_generation_from_meta/1's ancestor_shape now uses, replacing a
   precheck-side derivation that was lossy for a shadowed field)
+- BT-3556 (ADR 0124 Section 9/B9): a shape() value is {DeclaredType, Kind},
+  not a bare type — normalize_shape/2's zip of field_types/field_kinds,
+  ancestor_field_kinds/1's flattening, and the eager-default for a field/
+  level with no field_kinds meta at all
 
 The end-to-end thread from a real class-body reload
 (`beamtalk_repl_loader:load_class_module/3` et al.) through to a
@@ -41,6 +45,10 @@ store's own API contract in isolation.
 -include_lib("eunit/include/eunit.hrl").
 
 -define(TABLE, beamtalk_class_metadata).
+
+%% A shape() value, eager kind — every fixture module in this file declares
+%% no `field_kinds` meta, so normalize_shape/2 always defaults to eager.
+e(TypeBin) -> {TypeBin, <<"eager">>}.
 
 %%====================================================================
 %% Fixtures
@@ -99,8 +107,8 @@ capture_without_prime_is_always_no_op(_Pid) ->
             <<"ShapeFixtureClass">>
         ),
         ExpectedGen = #{
-            shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
-            own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            shape => #{<<"count">> => e(<<"Integer">>), <<"name">> => e(<<"Dynamic">>)},
+            own_shape => #{<<"count">> => e(<<"Integer">>), <<"name">> => e(<<"Dynamic">>)},
             ancestor_shape => #{},
             version => 1,
             migrations => #{}
@@ -126,8 +134,8 @@ previous_does_not_mutate_store(_Pid) ->
         P1 = beamtalk_workspace_shape_store:previous(<<"ShapeFixtureClass">>),
         P2 = beamtalk_workspace_shape_store:previous(<<"ShapeFixtureClass">>),
         Expected = #{
-            shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
-            own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            shape => #{<<"count">> => e(<<"Integer">>), <<"name">> => e(<<"Dynamic">>)},
+            own_shape => #{<<"count">> => e(<<"Integer">>), <<"name">> => e(<<"Dynamic">>)},
             ancestor_shape => #{},
             version => 1,
             migrations => #{}
@@ -245,7 +253,7 @@ read_shape_reads_field_types_from_meta_test() ->
     ),
     try
         ?assertEqual(
-            #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            #{<<"count">> => e(<<"Integer">>), <<"name">> => e(<<"Dynamic">>)},
             beamtalk_workspace_shape_store:read_shape_from_meta(<<"ShapeFixtureClass">>)
         )
     after
@@ -279,9 +287,9 @@ read_shape_flattens_superclass_fields_test() ->
     try
         ?assertEqual(
             #{
-                <<"count">> => <<"Integer">>,
-                <<"taxRate">> => <<"Float">>,
-                <<"name">> => <<"Dynamic">>
+                <<"count">> => e(<<"Integer">>),
+                <<"taxRate">> => e(<<"Float">>),
+                <<"name">> => e(<<"Dynamic">>)
             },
             beamtalk_workspace_shape_store:read_shape_from_meta(<<"ShapeFixtureSubclass">>)
         )
@@ -304,7 +312,7 @@ read_shape_degrades_gracefully_for_unresolvable_ancestor_test() ->
     ),
     try
         ?assertEqual(
-            #{<<"name">> => <<"Dynamic">>},
+            #{<<"name">> => e(<<"Dynamic">>)},
             beamtalk_workspace_shape_store:read_shape_from_meta(<<"ShapeFixtureSubclass">>)
         )
     after
@@ -325,8 +333,8 @@ read_generation_defaults_undeclared_version_test() ->
     try
         ?assertEqual(
             #{
-                shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
-                own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+                shape => #{<<"count">> => e(<<"Integer">>), <<"name">> => e(<<"Dynamic">>)},
+                own_shape => #{<<"count">> => e(<<"Integer">>), <<"name">> => e(<<"Dynamic">>)},
                 ancestor_shape => #{},
                 version => 1,
                 migrations => #{}
@@ -359,14 +367,14 @@ read_generation_reads_declared_version_and_migrations_test() ->
         ?assertEqual(
             #{
                 shape => #{
-                    <<"count">> => <<"Integer">>,
-                    <<"taxRate">> => <<"Float">>,
-                    <<"name">> => <<"Dynamic">>
+                    <<"count">> => e(<<"Integer">>),
+                    <<"taxRate">> => e(<<"Float">>),
+                    <<"name">> => e(<<"Dynamic">>)
                 },
-                own_shape => #{<<"name">> => <<"Dynamic">>},
+                own_shape => #{<<"name">> => e(<<"Dynamic">>)},
                 ancestor_shape => #{
-                    <<"count">> => <<"Integer">>,
-                    <<"taxRate">> => <<"Float">>
+                    <<"count">> => e(<<"Integer">>),
+                    <<"taxRate">> => e(<<"Float">>)
                 },
                 version => 2,
                 migrations => #{1 => 'migrateFromV1:'}
@@ -439,4 +447,81 @@ ancestor_field_types_is_only_the_ancestor_contribution_test() ->
     after
         ets:delete(?TABLE, 'ShapeFixtureSubclass'),
         ets:delete(?TABLE, 'ShapeFixtureSuperclass')
+    end.
+
+%%====================================================================
+%% Kind alongside type (ADR 0124 Section 9/B9, BT-3556)
+%%====================================================================
+
+%% read_shape_from_meta/1 zips field_kinds into shape()'s {Type, Kind}
+%% values: `proc` (declared `late`) reads back {<<"String">>, <<"late">>};
+%% `label` (no field_kinds entry at all) defaults to {<<"String">>,
+%% <<"eager">>}.
+read_shape_encodes_kind_from_field_kinds_meta_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureLateClass',
+        beamtalk_shape_store_late_fixture,
+        [proc, label],
+        'Actor',
+        undefined
+    ),
+    try
+        ?assertEqual(
+            #{<<"proc">> => {<<"String">>, <<"late">>}, <<"label">> => e(<<"String">>)},
+            beamtalk_workspace_shape_store:read_shape_from_meta(<<"ShapeFixtureLateClass">>)
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureLateClass')
+    end.
+
+%% read_generation_from_meta/1's own_shape carries the same kind-encoded
+%% values as read_shape_from_meta/1 (this fixture has no superclass fields,
+%% so shape and own_shape coincide).
+read_generation_encodes_kind_in_own_shape_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureLateClass',
+        beamtalk_shape_store_late_fixture,
+        [proc, label],
+        'Actor',
+        undefined
+    ),
+    try
+        #{shape := Shape, own_shape := OwnShape} =
+            beamtalk_workspace_shape_store:read_generation_from_meta(<<"ShapeFixtureLateClass">>),
+        Expected = #{<<"proc">> => {<<"String">>, <<"late">>}, <<"label">> => e(<<"String">>)},
+        ?assertEqual(Expected, Shape),
+        ?assertEqual(Expected, OwnShape)
+    after
+        ets:delete(?TABLE, 'ShapeFixtureLateClass')
+    end.
+
+%% A subclass with no field_kinds of its own still inherits its ancestor's
+%% `late` kind through the flattened shape — mirrors
+%% read_shape_flattens_superclass_fields_test/0 for the type half.
+read_shape_flattens_ancestor_field_kinds_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureLateClass', beamtalk_shape_store_late_fixture, [proc, label], none, undefined
+    ),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureLateSubclass',
+        beamtalk_shape_store_subclass_fixture,
+        [name],
+        'ShapeFixtureLateClass',
+        undefined
+    ),
+    try
+        ?assertEqual(
+            #{
+                <<"proc">> => {<<"String">>, <<"late">>},
+                <<"label">> => e(<<"String">>),
+                <<"name">> => e(<<"Dynamic">>)
+            },
+            beamtalk_workspace_shape_store:read_shape_from_meta(<<"ShapeFixtureLateSubclass">>)
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureLateSubclass'),
+        ets:delete(?TABLE, 'ShapeFixtureLateClass')
     end.

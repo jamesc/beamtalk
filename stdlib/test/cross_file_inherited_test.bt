@@ -24,13 +24,22 @@ TestCase subclass: CrossFileInheritedTest
   // Negative: cross-file parent's `initialize` forgets its own typed-no-default
   // field; child has no `initialize`. Post-initialize must raise even though
   // the parent's AST is absent from the child's compilation unit.
+  //
+  // BT-1948 (ADR 0124 §6 A2b): the same gap is now a compile-time Warning
+  // too, at this exact construction site — `@expect all` acknowledges the
+  // diagnostic these tests deliberately trigger, since it has no dedicated
+  // `@expect` category by design (ADR 0124 §6: supply/default/widen/`late`
+  // are the only accepted fixes for real code).
   testCrossFileParentForgetsFieldRaises =>
+    @expect all
     self should: [CrossFileChildOfForgetful spawn] raise: #instantiation_error
 
   testCrossFileErrorNamesOwningParentClass =>
+    @expect all
     hint := [CrossFileChildOfForgetful spawn] on: Exception do: [:e | e hint]
     self assert: (hint includesSubstring: "CrossFileParentForgets")
 
   testCrossFileErrorMentionsFieldName =>
+    @expect all
     hint := [CrossFileChildOfForgetful spawn] on: Exception do: [:e | e hint]
     self assert: (hint includesSubstring: "required")

@@ -1135,7 +1135,16 @@ accessor_selectors({added, _Name}) ->
 accessor_selectors({removed, Name}) ->
     field_accessor_atoms(Name);
 accessor_selectors({retyped, Name, _OldType, _NewType}) ->
-    field_accessor_atoms(Name).
+    field_accessor_atoms(Name);
+accessor_selectors({kind_changed, _Name, _OldKind, _NewKind}) ->
+    %% ADR 0124 §9/B9: an eager<->late flip alone changes nothing about the
+    %% field's declared type, so the getter/`with*:` setter's own return/
+    %% param type is unaffected — nothing for a caller of those selectors
+    %% to have gotten wrong. `spawnWith:` (unconditionally included by
+    %% shape_dependent_selectors/1 for every field change) already covers
+    %% the one thing a kind flip *does* change: whether a constructor call
+    %% needs to supply this key.
+    [].
 
 -doc """
 The getter (unary, the field name itself) and `with*:` setter selector atoms
@@ -1572,7 +1581,10 @@ field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}, AmbiguousWith
     OtherNamesBin = retyped_names_bin(AmbiguousWith),
     <<"state field `", Name/binary, "` retyped by the reload of ", ClassNameBin/binary, " (",
         OldType/binary, " -> ", NewType/binary,
-        "); ambiguous: could also be caused by the retyping of ", OtherNamesBin/binary>>.
+        "); ambiguous: could also be caused by the retyping of ", OtherNamesBin/binary>>;
+field_change_note(ClassNameBin, {kind_changed, Name, OldKind, NewKind}, _AmbiguousWith) ->
+    <<"state field `", Name/binary, "` changed from ", OldKind/binary, " to ", NewKind/binary,
+        " by the reload of ", ClassNameBin/binary>>.
 
 -spec retyped_names_bin([shape_field_change()]) -> binary().
 retyped_names_bin(FieldChanges) ->

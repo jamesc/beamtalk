@@ -76,13 +76,19 @@ Chain semantics (ADR 0123 § Runtime contract):
 3. Run `beamtalk_shape_chain:migrate/4` from `FromVersion` to `ToVersion`.
    `ToVersion =< FromVersion` (downgrade or already-current) runs no steps.
 4. Reconcile the chain's result against the flattened declared field list:
-   a declared field present is kept; absent falls back to
-   `Module:init(#{'__skip_initialize__' => true})`'s default when the field
-   declares one; absent with no default is `nil` on an untyped class and a
-   `shape_migration_failed` error on a `typed` one (a migration may not
-   leave a typed slot unset — the same promise ADR 0078's post-`initialize`
-   check makes at spawn time); an undeclared key is dropped with a
-   `?LOG_WARNING`.
+   a declared field present is kept, regardless of kind; absent falls back
+   to `Module:init(#{'__skip_initialize__' => true})`'s default when the
+   field declares one; absent with no default is `nil` on an untyped class
+   and a `shape_migration_failed` error on a `typed` one (a migration may
+   not leave a typed slot unset — the same promise ADR 0078's post-
+   `initialize` check makes at spawn time) — **except** a `late` field
+   (`classAllFieldKindsByName/1`, ADR 0124 §8/B9), which is never defaulted
+   or failed when absent: it simply **stays absent** from the reconciled
+   map, on both a `typed` and an untyped class (a `late` field can declare
+   no default in the first place — `docs/beamtalk-language-features.md`'s
+   `late` Slots section — so this check runs before the typed-no-default
+   failure above, not as a fallback from it). An undeclared key is dropped
+   with a `?LOG_WARNING`.
 """.
 -spec migrate(Class :: atom(), FromVersion :: pos_integer(), Fields :: map()) ->
     {ok, NewFields :: map(), ToVersion :: pos_integer()} | {error, #beamtalk_error{}}.
@@ -279,8 +285,13 @@ reconcile(Class, Module, Meta, ChainedFields, ToVersion) ->
     IsTyped = maps:get(is_typed, Meta, false),
     DeclaredFields = beamtalk_behaviour_intrinsics:classAllFieldNamesByName(Class),
     HasDefaultMap = beamtalk_behaviour_intrinsics:classAllFieldHasDefaultByName(Class),
+    KindsMap = beamtalk_behaviour_intrinsics:classAllFieldKindsByName(Class),
     Defaults = safe_init_defaults(Class, Module),
-    case reconcile_declared(DeclaredFields, #{}, ChainedFields, Defaults, HasDefaultMap, IsTyped) of
+    case
+        reconcile_declared(
+            DeclaredFields, #{}, ChainedFields, Defaults, HasDefaultMap, KindsMap, IsTyped
+        )
+    of
         {ok, Kept} ->
             log_dropped_fields(Class, DeclaredFields, ChainedFields),
             {ok, Kept, ToVersion};
@@ -288,54 +299,103 @@ reconcile(Class, Module, Meta, ChainedFields, ToVersion) ->
             {error, reconcile_error(Class, Reason)}
     end.
 
--spec reconcile_declared([atom()], map(), map(), map(), map(), boolean()) ->
+-doc """
+Walk `DeclaredFields`, keeping/defaulting/failing each one against
+`ChainedFields` (ADR 0123 § Runtime contract, extended by ADR 0124 §8/B9 for
+`late` — see `migrate/3`'s moduledoc step 4).
+
+A field present in `ChainedFields` is always kept, regardless of `KindsMap`
+— a `late` slot that *was* assigned before this migration ran stays
+assigned. A field absent from `ChainedFields` whose `KindsMap` entry is
+`late` (default `eager` when absent from the map — a class predating B5a's
+`field_kinds` meta, or a field `classAllFieldKindsByName/1`'s dynamic-class
+fallback reports) is left absent from `Acc` entirely: no `nil`, no
+`typed_field_unset` error, checked **before** the has-default/`IsTyped`
+branches below — a `late` field cannot declare a default in the first
+place (parse-time rejected, `docs/beamtalk-language-features.md`'s `late`
+Slots section), so `HasDefaultMap`'s entry for it is always `false` and
+would otherwise fall straight into the `typed_field_unset` branch on a
+`typed` class.
+""".
+-spec reconcile_declared([atom()], map(), map(), map(), map(), map(), boolean()) ->
     {ok, map()} | {error, {typed_field_unset, atom()}}.
-reconcile_declared([], Acc, _ChainedFields, _Defaults, _HasDefaultMap, _IsTyped) ->
+reconcile_declared([], Acc, _ChainedFields, _Defaults, _HasDefaultMap, _KindsMap, _IsTyped) ->
     {ok, Acc};
-reconcile_declared([Field | Rest], Acc, ChainedFields, Defaults, HasDefaultMap, IsTyped) ->
+reconcile_declared(
+    [Field | Rest], Acc, ChainedFields, Defaults, HasDefaultMap, KindsMap, IsTyped
+) ->
     case maps:find(Field, ChainedFields) of
         {ok, Value} ->
             reconcile_declared(
-                Rest, Acc#{Field => Value}, ChainedFields, Defaults, HasDefaultMap, IsTyped
+                Rest,
+                Acc#{Field => Value},
+                ChainedFields,
+                Defaults,
+                HasDefaultMap,
+                KindsMap,
+                IsTyped
             );
         error ->
-            case maps:get(Field, HasDefaultMap, false) of
-                true ->
-                    case maps:find(Field, Defaults) of
-                        {ok, Default} ->
-                            reconcile_declared(
-                                Rest,
-                                Acc#{Field => Default},
-                                ChainedFields,
-                                Defaults,
-                                HasDefaultMap,
-                                IsTyped
-                            );
-                        error when IsTyped ->
-                            %% Declares a default, but safe_init_defaults/2
-                            %% couldn't compute it (init/1 degraded to #{})
-                            %% — on a typed class this may not silently
-                            %% fall back to nil, same as the no-default
-                            %% case below (ADR 0123 § Runtime contract: a
-                            %% migration may not leave a typed slot unset).
-                            {error, {typed_field_unset, Field}};
-                        error ->
-                            reconcile_declared(
-                                Rest,
-                                Acc#{Field => nil},
-                                ChainedFields,
-                                Defaults,
-                                HasDefaultMap,
-                                IsTyped
-                            )
-                    end;
-                false when IsTyped ->
-                    {error, {typed_field_unset, Field}};
-                false ->
+            case maps:get(Field, KindsMap, eager) of
+                late ->
+                    %% ADR 0124 §8/B9: absent + late stays absent, whether
+                    %% or not the class is typed — never nil, never a
+                    %% typed_field_unset failure.
                     reconcile_declared(
-                        Rest, Acc#{Field => nil}, ChainedFields, Defaults, HasDefaultMap, IsTyped
+                        Rest, Acc, ChainedFields, Defaults, HasDefaultMap, KindsMap, IsTyped
+                    );
+                eager ->
+                    reconcile_declared_eager_absent(
+                        Field, Rest, Acc, ChainedFields, Defaults, HasDefaultMap, KindsMap, IsTyped
                     )
             end
+    end.
+
+-spec reconcile_declared_eager_absent(
+    atom(), [atom()], map(), map(), map(), map(), map(), boolean()
+) ->
+    {ok, map()} | {error, {typed_field_unset, atom()}}.
+reconcile_declared_eager_absent(
+    Field, Rest, Acc, ChainedFields, Defaults, HasDefaultMap, KindsMap, IsTyped
+) ->
+    case maps:get(Field, HasDefaultMap, false) of
+        true ->
+            case maps:find(Field, Defaults) of
+                {ok, Default} ->
+                    reconcile_declared(
+                        Rest,
+                        Acc#{Field => Default},
+                        ChainedFields,
+                        Defaults,
+                        HasDefaultMap,
+                        KindsMap,
+                        IsTyped
+                    );
+                error when IsTyped ->
+                    %% Declares a default, but safe_init_defaults/2
+                    %% couldn't compute it (init/1 degraded to #{})
+                    %% — on a typed class this may not silently
+                    %% fall back to nil, same as the no-default
+                    %% case below (ADR 0123 § Runtime contract: a
+                    %% migration may not leave a typed slot unset).
+                    {error, {typed_field_unset, Field}};
+                error ->
+                    reconcile_declared(
+                        Rest,
+                        Acc#{Field => nil},
+                        ChainedFields,
+                        Defaults,
+                        HasDefaultMap,
+                        KindsMap,
+                        IsTyped
+                    )
+            end;
+        false when IsTyped ->
+            {error, {typed_field_unset, Field}};
+        false ->
+            reconcile_declared(
+                Rest, Acc#{Field => nil}, ChainedFields, Defaults, HasDefaultMap, KindsMap, IsTyped
+            )
     end.
 
 -doc """

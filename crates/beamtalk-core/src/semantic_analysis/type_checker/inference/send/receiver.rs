@@ -359,6 +359,15 @@ impl TypeChecker {
                 span,
                 hierarchy,
             );
+            // ADR 0124 §6 (A2b, BT-1948): `C spawn` / `C spawnWith: #{...}`
+            // Actor construction-site definite-assignment check.
+            self.check_actor_construction_definite_assignment(
+                class_name,
+                &selector_name,
+                arguments,
+                span,
+                hierarchy,
+            );
             return self.check_class_side_send(
                 class_name,
                 &selector_name,
@@ -420,6 +429,16 @@ impl TypeChecker {
             // ADR 0124 §6/§7 (A3+A4): type-driven `cls new`/`cls new:
             // #{...}` Value construction-site definite-assignment check.
             self.check_value_construction_definite_assignment(
+                meta_class,
+                &selector_name,
+                arguments,
+                span,
+                hierarchy,
+            );
+            // ADR 0124 §6 (A2b, BT-1948): type-driven `cls spawn`/`cls
+            // spawnWith: #{...}` Actor construction-site
+            // definite-assignment check.
+            self.check_actor_construction_definite_assignment(
                 meta_class,
                 &selector_name,
                 arguments,
@@ -496,6 +515,16 @@ impl TypeChecker {
                     // the canonical class-method factory site (e.g.
                     // `WorkflowHandle class for:client:`).
                     self.check_value_construction_definite_assignment(
+                        class_name,
+                        &selector_name,
+                        arguments,
+                        span,
+                        hierarchy,
+                    );
+                    // ADR 0124 §6 (A2b, BT-1948): `self spawn` Actor
+                    // construction-site definite-assignment check — spawning
+                    // a sibling actor from a class-method factory.
+                    self.check_actor_construction_definite_assignment(
                         class_name,
                         &selector_name,
                         arguments,
