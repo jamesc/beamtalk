@@ -12,7 +12,7 @@
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
-use beamtalk_core::ast::{ClassDefinition, Module, TypeAnnotation};
+use beamtalk_core::ast::{ClassDefinition, Module};
 
 /// ADR 0078: Identifies a single class's `initialize` method in the
 /// auto-chained dispatch sequence emitted by `generate_handle_continue`.
@@ -626,17 +626,6 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Returns true if the type annotation includes `Nil` (making nil a valid value).
-    fn is_nilable_type(ta: Option<&TypeAnnotation>) -> bool {
-        match ta {
-            Some(TypeAnnotation::Simple(id)) => id.name == "Nil",
-            Some(TypeAnnotation::Union { types, .. }) => {
-                types.iter().any(|t| Self::is_nilable_type(Some(t)))
-            }
-            _ => false,
-        }
-    }
-
     /// ADR 0078: Returns the list of user-defined initializers to run
     /// for a class, parent-first.
     ///
@@ -732,9 +721,10 @@ impl CoreErlangGenerator {
                     c.state
                         .iter()
                         .filter(|s| {
-                            s.type_annotation.is_some()
-                                && s.default_value.is_none()
-                                && !Self::is_nilable_type(s.type_annotation.as_ref())
+                            beamtalk_core::semantic_analysis::requires_definite_assignment(
+                                s,
+                                &self.alias_registry,
+                            )
                         })
                         .map(|s| InheritedTypedField {
                             owning_class: c.name.name.to_string(),
@@ -763,10 +753,10 @@ impl CoreErlangGenerator {
             }
             if let Some(class) = module.classes.iter().find(|c| c.name.name == name) {
                 for s in &class.state {
-                    if s.type_annotation.is_some()
-                        && s.default_value.is_none()
-                        && !Self::is_nilable_type(s.type_annotation.as_ref())
-                    {
+                    if beamtalk_core::semantic_analysis::requires_definite_assignment(
+                        s,
+                        &self.alias_registry,
+                    ) {
                         out.push(InheritedTypedField {
                             owning_class: class.name.name.to_string(),
                             field_name: s.name.name.to_string(),
@@ -796,7 +786,10 @@ impl CoreErlangGenerator {
                         continue;
                     }
                     let type_name = type_name.to_string();
-                    if Self::is_nilable_type_name(&type_name) {
+                    if beamtalk_core::semantic_analysis::is_nilable_type_name(
+                        &type_name,
+                        &self.alias_registry,
+                    ) {
                         continue;
                     }
                     out.push(InheritedTypedField {
@@ -808,19 +801,6 @@ impl CoreErlangGenerator {
             }
         }
         out
-    }
-
-    /// String form of [`Self::is_nilable_type`] for cross-file
-    /// ancestors whose types come from `ClassInfo.state_types` rather than
-    /// a parsed `TypeAnnotation`. Matches the AST path: a type is nilable if
-    /// it is `Nil` itself or a top-level union that contains `Nil`.
-    fn is_nilable_type_name(type_name: &str) -> bool {
-        if type_name == "Nil" {
-            return true;
-        }
-        // Top-level union: `"A | B | Nil"`. `type_name()` emits `" | "` as
-        // the separator (see `TypeAnnotation::type_name` in `ast/expression.rs`).
-        type_name.split(" | ").any(|t| t.trim() == "Nil")
     }
 
     /// Generates the `handle_continue/2` callback.
@@ -1805,89 +1785,16 @@ mod tests {
         }
     }
 
-    // --- is_nilable_type ---
-
-    #[test]
-    fn is_nilable_type_none_returns_false() {
-        assert!(!CoreErlangGenerator::is_nilable_type(None));
-    }
-
-    #[test]
-    fn is_nilable_type_simple_nil_returns_true() {
-        let ta = simple_ta("Nil");
-        assert!(CoreErlangGenerator::is_nilable_type(Some(&ta)));
-    }
-
-    #[test]
-    fn is_nilable_type_simple_non_nil_returns_false() {
-        let ta = simple_ta("Integer");
-        assert!(!CoreErlangGenerator::is_nilable_type(Some(&ta)));
-    }
-
-    #[test]
-    fn is_nilable_type_union_containing_nil_returns_true() {
-        let ta = union_ta(vec![simple_ta("Integer"), simple_ta("Nil")]);
-        assert!(CoreErlangGenerator::is_nilable_type(Some(&ta)));
-    }
-
-    #[test]
-    fn is_nilable_type_union_without_nil_returns_false() {
-        let ta = union_ta(vec![simple_ta("Integer"), simple_ta("String")]);
-        assert!(!CoreErlangGenerator::is_nilable_type(Some(&ta)));
-    }
-
-    #[test]
-    fn is_nilable_type_union_with_nested_union_containing_nil_returns_true() {
-        // Nil inside a nested Union member — is_nilable_type recurses into union members
-        let inner_union = union_ta(vec![simple_ta("String"), simple_ta("Nil")]);
-        let ta = union_ta(vec![simple_ta("Integer"), inner_union]);
-        assert!(CoreErlangGenerator::is_nilable_type(Some(&ta)));
-    }
-
-    #[test]
-    fn is_nilable_type_falseor_returns_false() {
-        let ta = TypeAnnotation::FalseOr {
-            inner: Box::new(simple_ta("Integer")),
-            span: s(),
-        };
-        assert!(!CoreErlangGenerator::is_nilable_type(Some(&ta)));
-    }
-
-    // --- is_nilable_type_name ---
-
-    #[test]
-    fn is_nilable_type_name_nil_returns_true() {
-        assert!(CoreErlangGenerator::is_nilable_type_name("Nil"));
-    }
-
-    #[test]
-    fn is_nilable_type_name_non_nil_returns_false() {
-        assert!(!CoreErlangGenerator::is_nilable_type_name("Integer"));
-    }
-
-    #[test]
-    fn is_nilable_type_name_union_containing_nil_returns_true() {
-        assert!(CoreErlangGenerator::is_nilable_type_name("Integer | Nil"));
-    }
-
-    #[test]
-    fn is_nilable_type_name_union_without_nil_returns_false() {
-        assert!(!CoreErlangGenerator::is_nilable_type_name(
-            "Integer | String"
-        ));
-    }
-
-    #[test]
-    fn is_nilable_type_name_multi_segment_union_with_nil() {
-        assert!(CoreErlangGenerator::is_nilable_type_name(
-            "Integer | String | Nil"
-        ));
-    }
-
-    #[test]
-    fn is_nilable_type_name_near_miss_nilable_returns_false() {
-        assert!(!CoreErlangGenerator::is_nilable_type_name("Nilable"));
-    }
+    // Nilability itself (ADR 0124 §7 A1) is now a `beamtalk-core` predicate —
+    // `beamtalk_core::semantic_analysis::requires_definite_assignment` /
+    // `is_nilable_type_name`, unit-tested directly in
+    // `crates/beamtalk-core/src/semantic_analysis/definite_assignment.rs`
+    // (plain non-nilable, `| Nil`, `| UndefinedObject`, alias-to-nilable,
+    // alias-to-non-nilable, intersection, negation, `late`). What remains
+    // here is codegen's own wiring: `inherited_typed_no_default_fields`
+    // actually calls the shared predicate for both the AST path and the
+    // cross-file `ClassInfo` path — see the `inherited_typed_no_default_fields`
+    // tests below.
 
     // --- user_defined_initialize_chain (no-hierarchy fallback) ---
 
@@ -1964,6 +1871,24 @@ mod tests {
     #[test]
     fn inherited_typed_no_default_fields_nilable_type_skipped() {
         let field = StateDeclaration::with_type(id("opt_val"), simple_ta("Nil"), s());
+        let class = ClassDefinition::new(id("MyActor"), id("Actor"), vec![field], Vec::new(), s());
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class);
+        let fields = generator.inherited_typed_no_default_fields(&module, "MyActor");
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn inherited_typed_no_default_fields_undefined_object_union_skipped() {
+        // ADR 0124 §7 A1: the previous codegen-local predicate only matched
+        // the literal `Nil` spelling, so `T | UndefinedObject` (the canonical
+        // nil class) was wrongly treated as non-nilable. The shared
+        // `beamtalk-core` predicate this now delegates to recognises both.
+        let field = StateDeclaration::with_type(
+            id("opt_val"),
+            union_ta(vec![simple_ta("String"), simple_ta("UndefinedObject")]),
+            s(),
+        );
         let class = ClassDefinition::new(id("MyActor"), id("Actor"), vec![field], Vec::new(), s());
         let generator = CoreErlangGenerator::new("my_actor");
         let module = module_with_class(class);

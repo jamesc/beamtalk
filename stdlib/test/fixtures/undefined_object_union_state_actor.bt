@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// UndefinedObjectUnionStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)
+//
+// A typed-no-default state field spelled with the canonical nil class
+// (`UndefinedObject`) rather than the `Nil` keyword. Before BT-3546, the
+// definite-assignment predicate matched only the literal `TypeAnnotation::
+// Simple("Nil")` spelling, so `String | UndefinedObject` was (wrongly)
+// reported non-nilable and this actor raised `UninitializedStateError` at
+// spawn. Should spawn successfully and leave `label` unset (`nil`).
+
+typed Actor subclass: UndefinedObjectUnionStateActor
+  state: label :: String | UndefinedObject
+  state: count :: Integer = 0
+
+  initialize -> Integer =>
+    // Deliberately does NOT set self.label — UndefinedObject is the
+    // canonical nil class, so nil is a legitimate value here.
+    self.count := 1
+
+  getLabel -> String | UndefinedObject => self.label
+
+  getCount -> Integer => self.count

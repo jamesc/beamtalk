@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// JsonValueStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)
+//
+// A typed-no-default state field whose type is an ADR 0108 alias that
+// expands to a union containing `Nil` — mirroring `stdlib/src/json.bt`'s
+// `type JsonValue = Nil | Boolean | Integer | Float | String | List |
+// Dictionary`. Declared locally (rather than referencing the real stdlib
+// `JsonValue`) because `beamtalk test`'s fixture/test-file compilation does
+// not yet pre-load same-package `stdlib/src` type aliases the way it
+// pre-loads `ClassInfo` — a separate, pre-existing gap in the `test`
+// pipeline (only `beamtalk build` extracts project-wide `AliasInfo` via
+// `collect_project_protocol_and_alias_infos`) filed as a follow-up rather
+// than fixed here; the alias-resolution behaviour under test is identical
+// either way, since `AliasRegistry` treats same-file and same-package
+// aliases through the same lookup.
+//
+// Before BT-3546, the definite-assignment predicate did not resolve
+// aliases, so `LocalJsonValue` was (wrongly) reported non-nilable and this
+// actor raised `UninitializedStateError` at spawn even though `Nil` is a
+// member of the alias's expansion. Should spawn successfully and leave
+// `value` unset (`nil`).
+
+type LocalJsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary
+
+typed Actor subclass: JsonValueStateActor
+  state: value :: LocalJsonValue
+  state: count :: Integer = 0
+
+  initialize -> Integer =>
+    // Deliberately does NOT set self.value — LocalJsonValue expands to
+    // include Nil, so nil is a legitimate value here.
+    self.count := 1
+
+  getValue -> LocalJsonValue => self.value
+
+  getCount -> Integer => self.count
