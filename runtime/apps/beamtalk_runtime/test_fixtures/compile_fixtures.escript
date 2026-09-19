@@ -110,7 +110,13 @@ main([]) ->
         %% absent from init/1's state literal (not `nil`), so the actor
         %% spawns without UninitializedStateError and sys:get_state/1 shows
         %% no key for it until spawnWith: supplies one.
-        "late_slot_actor"
+        "late_slot_actor",
+        %% BT-3556 (ADR 0124 Section 8/B9) - reconcile_declared/7's `late`
+        %% case: a typed and an untyped class each with one `late` (no
+        %% default) and one eager-with-default field.
+        "typed_late_slot_actor",
+        "untyped_late_slot_actor",
+        "untyped_field_counter"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

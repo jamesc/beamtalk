@@ -2516,6 +2516,8 @@ mod tests {
                 state_types: HashMap::new(),
                 state_has_default: HashMap::new(),
                 state_kinds: HashMap::new(),
+                initialize_assigns: std::collections::BTreeSet::new(),
+                has_dynamic_field_writer: false,
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -2562,6 +2564,8 @@ mod tests {
                 state_types: HashMap::new(),
                 state_has_default: HashMap::new(),
                 state_kinds: HashMap::new(),
+                initialize_assigns: std::collections::BTreeSet::new(),
+                has_dynamic_field_writer: false,
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -2608,6 +2612,8 @@ mod tests {
                 state_types: HashMap::new(),
                 state_has_default: HashMap::new(),
                 state_kinds: HashMap::new(),
+                initialize_assigns: std::collections::BTreeSet::new(),
+                has_dynamic_field_writer: false,
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -2647,6 +2653,8 @@ mod tests {
                 state_types: HashMap::new(),
                 state_has_default: HashMap::new(),
                 state_kinds: HashMap::new(),
+                initialize_assigns: std::collections::BTreeSet::new(),
+                has_dynamic_field_writer: false,
                 methods: vec![
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),
@@ -2726,6 +2734,8 @@ mod tests {
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2788,6 +2798,8 @@ mod tests {
                 state_types: HashMap::new(),
                 state_has_default: HashMap::new(),
                 state_kinds: HashMap::new(),
+                initialize_assigns: std::collections::BTreeSet::new(),
+                has_dynamic_field_writer: false,
                 methods: vec![
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),

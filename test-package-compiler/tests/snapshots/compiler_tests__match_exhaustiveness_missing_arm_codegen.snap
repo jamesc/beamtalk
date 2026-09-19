@@ -113,6 +113,7 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -146,6 +147,7 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

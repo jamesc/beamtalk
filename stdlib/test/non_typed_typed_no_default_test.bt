@@ -24,24 +24,35 @@ TestCase subclass: NonTypedTypedNoDefaultTest
     self assert: a bump equals: 2
 
   // === Failure: field left nil still raises, without the `typed` keyword ===
+  //
+  // BT-1948 (ADR 0124 §6 A2b): `NonTypedUninitializedStateActor spawn` now
+  // ALSO warns at compile time (the point of BT-1948, and not gated on
+  // `typed` any more than the runtime check is) — `@expect all`
+  // acknowledges the diagnostic these tests deliberately trigger, since it
+  // has no dedicated `@expect` category by design (ADR 0124 §6:
+  // supply/default/widen/`late` are the only accepted fixes for real code).
   testUninitializedFieldRaisesErrorWithoutTypedKeyword =>
+    @expect all
     self should: [
       NonTypedUninitializedStateActor spawn
     ] raise: #instantiation_error
 
   testUninitializedErrorContainsClassName =>
+    @expect all
     result := [
       NonTypedUninitializedStateActor spawn
     ] on: Exception do: [:e | e message]
     self assert: (result includesSubstring: "NonTypedUninitializedStateActor")
 
   testUninitializedErrorHintContainsFieldName =>
+    @expect all
     result := [
       NonTypedUninitializedStateActor spawn
     ] on: Exception do: [:e | e hint]
     self assert: (result includesSubstring: "count")
 
   testUninitializedErrorHintContainsTypeName =>
+    @expect all
     result := [
       NonTypedUninitializedStateActor spawn
     ] on: Exception do: [:e | e hint]

@@ -626,6 +626,15 @@ struct ClassMeta {
     /// field (field name → kind). Populated for every declared state field,
     /// mirroring `state_has_default`.
     state_kinds: Vec<(String, beamtalk_core::ast::SlotKind)>,
+    /// Slots this class's own `initialize` method definitely assigns (ADR
+    /// 0124 A2a) — a must-analysis over the method body, computed by
+    /// [`beamtalk_core::semantic_analysis::analyze_initialize_assigns`].
+    /// Empty when the class declares no `initialize`.
+    initialize_assigns: Vec<String>,
+    /// `true` when some instance method sends `fieldAt:put:` or `perform:`
+    /// anywhere in its body (ADR 0124 §6, BT-1948) — computed by
+    /// [`beamtalk_core::semantic_analysis::has_dynamic_field_writer`].
+    has_dynamic_field_writer: bool,
     /// Instance method signatures.
     methods: Vec<MethodMeta>,
     /// Class-side method signatures.
@@ -1130,6 +1139,7 @@ fn is_protocol_only_file(path: &Utf8Path) -> Result<bool> {
 /// Parses the full class definition to extract the class name, superclass,
 /// flags, state declarations, and method signatures. Each stdlib file
 /// contains exactly one class definition.
+#[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to ClassMeta's fields
 fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMeta> {
     let source = fs::read_to_string(path)
         .into_diagnostic()
@@ -1181,6 +1191,28 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .iter()
         .map(|s| (s.name.name.to_string(), s.slot_kind))
         .collect();
+
+    // ADR 0124 A2a: this class's own `initialize` definitely-assigned slot
+    // summary, sorted (the must-analysis returns a BTreeSet, so this is
+    // already deterministic) for stable regeneration.
+    let initialize_assigns = class
+        .methods
+        .iter()
+        .find(|m| {
+            m.kind == beamtalk_core::ast::MethodKind::Primary && m.selector.name() == "initialize"
+        })
+        .map(|m| {
+            beamtalk_core::semantic_analysis::analyze_initialize_assigns(&m.body)
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // BT-1948 (ADR 0124 §6): whether any instance method dynamically writes
+    // a slot via `fieldAt:put:`/`perform:` — see the `ClassMeta` field doc.
+    let has_dynamic_field_writer =
+        beamtalk_core::semantic_analysis::has_dynamic_field_writer(&class.methods);
 
     let class_variables = class
         .class_variables
@@ -1240,6 +1272,8 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         state_types,
         state_has_default,
         state_kinds,
+        initialize_assigns,
+        has_dynamic_field_writer,
         methods,
         class_methods,
         class_variables,
@@ -1513,7 +1547,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) 
          use super::super::{ClassInfo, ClassVarInfo, DeclaredType, MethodInfo, SuperclassTypeArg};\n\
          use crate::ast::{MethodKind, SlotKind};\n\
          use ecow::EcoString;\n\
-         use std::collections::HashMap;\n\
+         use std::collections::{BTreeSet, HashMap};\n\
          \n",
     );
 
@@ -1715,6 +1749,30 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         }
         code.push_str("]),\n");
     }
+
+    // initialize_assigns (ADR 0124 A2a): this class's own `initialize`
+    // definitely-assigned slot summary — a `BTreeSet` so entries are already
+    // sorted, keeping regeneration deterministic.
+    if meta.initialize_assigns.is_empty() {
+        code.push_str("            initialize_assigns: BTreeSet::new(),\n");
+    } else {
+        code.push_str("            initialize_assigns: BTreeSet::from([");
+        for (i, field) in meta.initialize_assigns.iter().enumerate() {
+            if i > 0 {
+                code.push_str(", ");
+            }
+            let _ = write!(code, "\"{field}\".into()");
+        }
+        code.push_str("]),\n");
+    }
+
+    // has_dynamic_field_writer (ADR 0124 §6, BT-1948): whether any instance
+    // method sends `fieldAt:put:`/`perform:` anywhere in its body.
+    let _ = writeln!(
+        code,
+        "            has_dynamic_field_writer: {},",
+        meta.has_dynamic_field_writer
+    );
 
     // Instance methods
     generate_method_list(code, "methods", &meta.methods, &meta.class_name);
@@ -2692,6 +2750,8 @@ mod tests {
             state_types: vec![],
             state_has_default: vec![],
             state_kinds: vec![],
+            initialize_assigns: vec![],
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodMeta {
                     selector: "increment".to_string(),
@@ -2751,6 +2811,9 @@ mod tests {
         assert!(code.contains("selector: \"default\".into()"));
         // ADR 0103: the generated ClassInfo carries the handle_scope field.
         assert!(code.contains("handle_scope: None"));
+        // ADR 0124 A2a: no `initialize` in this fixture's methods, so the
+        // definitely-assigned summary is empty.
+        assert!(code.contains("initialize_assigns: BTreeSet::new()"));
     }
 
     #[test]
@@ -2778,6 +2841,8 @@ mod tests {
             state_types: vec![],
             state_has_default: vec![],
             state_kinds: vec![],
+            initialize_assigns: vec![],
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2882,6 +2947,8 @@ mod tests {
                 state_types: vec![],
                 state_has_default: vec![],
                 state_kinds: vec![],
+                initialize_assigns: vec![],
+                has_dynamic_field_writer: false,
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -2902,6 +2969,8 @@ mod tests {
                 state_types: vec![],
                 state_has_default: vec![],
                 state_kinds: vec![],
+                initialize_assigns: vec![],
+                has_dynamic_field_writer: false,
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -3596,6 +3665,34 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_class_metadata_initialize_assigns_populated() {
+        // ADR 0124 A2a: extract_class_metadata computes the class's own
+        // `initialize` definitely-assigned slot summary from its AST body.
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("logger.bt");
+        fs::write(
+            &file,
+            "Actor subclass: StdlibLogger\n  \
+             state: log :: String = \"\"\n  \
+             initialize => self.log := self.log ++ \"A\"\n",
+        )
+        .unwrap();
+
+        let meta = extract_class_metadata(&file, "bt@stdlib@stdlib_logger").unwrap();
+        assert_eq!(meta.initialize_assigns, vec!["log".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_class_metadata_no_initialize_leaves_assigns_empty() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("plain.bt");
+        fs::write(&file, "Object subclass: StdlibPlain\n  noop => nil\n").unwrap();
+
+        let meta = extract_class_metadata(&file, "bt@stdlib@stdlib_plain").unwrap();
+        assert!(meta.initialize_assigns.is_empty());
+    }
+
+    #[test]
     fn test_extract_class_metadata_timer_marks_spawning_class_methods() {
         let (_temp, dir) = temp_utf8_dir();
         let file = dir.join("timer.bt");
@@ -3841,6 +3938,8 @@ mod tests {
                 ("first".to_string(), beamtalk_core::ast::SlotKind::Eager),
                 ("second".to_string(), beamtalk_core::ast::SlotKind::Late),
             ],
+            initialize_assigns: vec!["first".to_string()],
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![
@@ -3874,6 +3973,7 @@ mod tests {
         assert!(code.contains(
             r#"state_kinds: HashMap::from([("first".into(), SlotKind::Eager), ("second".into(), SlotKind::Late)])"#
         ));
+        assert!(code.contains(r#"initialize_assigns: BTreeSet::from(["first".into()])"#));
         assert!(code.contains(
             r#"class_variables: vec![ClassVarInfo { name: "counterA".into(), ty: Some(DeclaredType::simple("Integer")), has_default: true, kind: SlotKind::Eager }, ClassVarInfo { name: "counterB".into(), ty: None, has_default: false, kind: SlotKind::Late }]"#
         ));

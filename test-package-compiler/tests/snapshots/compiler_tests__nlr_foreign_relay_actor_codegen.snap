@@ -365,6 +365,7 @@ in apply '__nlr_body'/0 ()
       'field_has_default' => ~{'n' => 'true'}~,
       'field_kinds' => ~{'n' => 'eager'}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'applyBlock:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'findOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -402,6 +403,7 @@ in apply '__nlr_body'/0 ()
       'field_has_default' => ~{'n' => 'true'}~,
       'field_kinds' => ~{'n' => 'eager'}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'applyBlock:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'findOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~,

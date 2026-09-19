@@ -356,6 +356,7 @@ catch <_NlrCls12, _NlrErr13, _NlrStk14> ->
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{'total' => 'eager'}~,
+      'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'helper:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'mutateThenRelay' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -393,6 +394,7 @@ catch <_NlrCls12, _NlrErr13, _NlrStk14> ->
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{'total' => 'eager'}~,
+      'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'helper:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'mutateThenRelay' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~,

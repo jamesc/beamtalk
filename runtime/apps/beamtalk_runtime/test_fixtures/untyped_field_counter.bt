@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3556 shared conformance fixture: the "eager, no default, untyped
+// class" row of the reconcile_declared/7 decision table (fields_kind_reconcile
+// _conformance.json) — an absent eager field with no default falls back to
+// `nil` on an untyped class (never a `typed_field_unset` failure, that's
+// typed_field_counter.bt's `label`).
+
+Actor subclass: UntypedFieldCounter
+  state: label :: String
+
+  getLabel => ^self.label

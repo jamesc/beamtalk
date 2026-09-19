@@ -41,18 +41,27 @@ TestCase subclass: InheritedInitializeTest
     self assert: a getLabel equals: "parent-initialized"
 
   // === Parent forgets its own typed-no-default field ===
+  //
+  // BT-1948 (ADR 0124 §6 A2b): `InheritedInitializeParentForgets spawn` now
+  // ALSO warns at compile time (the point of BT-1948) — `@expect all`
+  // acknowledges the diagnostic these tests deliberately trigger, since it
+  // has no dedicated `@expect` category by design (ADR 0124 §6:
+  // supply/default/widen/`late` are the only accepted fixes for real code).
   testParentForgetsOwnFieldRaisesError =>
+    @expect all
     self should: [
       InheritedInitializeParentForgets spawn
     ] raise: #instantiation_error
 
   testForgottenFieldErrorMentionsFieldName =>
+    @expect all
     hint := [
       InheritedInitializeParentForgets spawn
     ] on: Exception do: [:e | e hint]
     self assert: (hint includesSubstring: "missing")
 
   testForgottenFieldErrorNamesOwningClass =>
+    @expect all
     hint := [
       InheritedInitializeParentForgets spawn
     ] on: Exception do: [:e | e hint]

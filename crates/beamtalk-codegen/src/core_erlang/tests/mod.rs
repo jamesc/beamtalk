@@ -15,6 +15,9 @@
 //!   cross-boundary ADR 0110 shadow-write key conformance fixture, asserted
 //!   against `runtime/apps/beamtalk_runtime/include/beamtalk.hrl` and the
 //!   `beamtalk_class_dispatch_tests.erl` `EUnit` suite
+//! - [`late_reconcile_conformance`] — ADR 0124 §8/B9 (BT-3556): the
+//!   cross-boundary `late`-slot reconcile decision-table fixture, asserted
+//!   against `beamtalk_shape_migration_tests.erl`
 //! - [`recv_type`] — ADR 0115 Phase 2: the xref `recv_type`
 //!   write-path fixture matrix (typed/protocol/dynamic/union/native/alias
 //!   locals, `Meta{C}`, self-send, FFI receiver)
@@ -167,6 +170,7 @@ mod control_flow;
 mod dispatch;
 mod expressions;
 mod gen_server;
+mod late_reconcile_conformance;
 mod nlr;
 mod primitives;
 mod recv_type;

@@ -9,10 +9,10 @@
 
 use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, SlotKind};
 use ecow::EcoString;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use super::ClassHierarchy;
-use super::class_info::MethodInfo;
+use super::class_info::{InitializeAssignsSummary, MethodInfo};
 use super::declared_type::DeclaredType;
 
 impl ClassHierarchy {
@@ -645,9 +645,20 @@ impl ClassHierarchy {
 
     /// Returns all state (instance variable) names for a class,
     /// including inherited state from the superclass chain.
+    ///
+    /// A field a subclass shadows (redeclares under the same name) appears
+    /// only once, at its most-derived occurrence — one field name is one
+    /// storage slot per instance regardless of how many ancestors in the
+    /// chain redeclare it, and every by-name query (`state_field_type`,
+    /// `state_field_kind`, `state_field_has_default`) already resolves a
+    /// shadowed name to that same most-derived declaration. Without this,
+    /// a caller that emits one diagnostic per name returned here (e.g.
+    /// [`TypeChecker::check_value_construction_definite_assignment`]) would
+    /// double-report a shadowed field.
     #[must_use]
     pub fn all_state(&self, class_name: &str) -> Vec<EcoString> {
         let mut state = Vec::new();
+        let mut seen_names = HashSet::new();
         let mut visited = HashSet::new();
         let mut current = Some(class_name.to_string());
         while let Some(name) = current {
@@ -655,7 +666,11 @@ impl ClassHierarchy {
                 break;
             }
             if let Some(info) = self.classes.get(name.as_str()) {
-                state.extend(info.state.iter().cloned());
+                for field in &info.state {
+                    if seen_names.insert(field.clone()) {
+                        state.push(field.clone());
+                    }
+                }
                 current = info
                     .superclass
                     .as_ref()
@@ -696,6 +711,45 @@ impl ClassHierarchy {
             }
         }
         None
+    }
+
+    /// Returns whether a state field carries an explicit default value,
+    /// walking the superclass chain to find the declaring class — the same
+    /// shadowing rule as [`Self::state_field_type`]/[`Self::state_field_kind`]:
+    /// a subclass redeclaring a field is the field's owner.
+    ///
+    /// Missing metadata for a known field (an older cross-file
+    /// `__beamtalk_meta/0` predating `state_has_default`) degrades to `true`
+    /// — conservative, so stale metadata never produces a false
+    /// definite-assignment diagnostic — mirroring
+    /// `beamtalk-codegen`'s `inherited_typed_no_default_fields` cross-file
+    /// arm (ADR 0124 §6, §7). An unknown class/field also degrades to `true`
+    /// for the same reason.
+    #[must_use]
+    pub fn state_field_has_default(&self, class_name: &str, field_name: &str) -> bool {
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                if info.state.iter().any(|s| s == field_name) {
+                    return info
+                        .state_has_default
+                        .get(field_name)
+                        .copied()
+                        .unwrap_or(true);
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        true
     }
 
     /// Returns the slot kind (`#eager` | `#late`, ADR 0124 §1) for a state
@@ -761,6 +815,61 @@ impl ClassHierarchy {
             }
         }
         SlotKind::Eager
+    }
+
+    /// Composed "`initialize` definitely assigns" summary for a class,
+    /// flattened parent-first over the ADR 0078 chain (ADR 0124 A2a) —
+    /// unions each chain link's own [`ClassInfo::initialize_assigns`], the
+    /// same walk [`Self::superclass_chain`]-based accessors already use and
+    /// the same composition `inherited_typed_no_default_fields`
+    /// (`beamtalk-codegen`) already performs for `state_has_default`.
+    ///
+    /// Union, not intersection: each class's own summary only covers what
+    /// *its own* `initialize` assigns, but ADR 0078 auto-chains every
+    /// ancestor's `initialize` to run, parent-first, before the leaf's own —
+    /// so a slot an ancestor definitely assigns is definitely assigned by the
+    /// time the whole chain finishes, regardless of the leaf.
+    ///
+    /// [`InitializeAssignsSummary::incomplete`] is set when a `native:`
+    /// ancestor (ADR 0056 — its slots belong to a backing `gen_server` with
+    /// no `initialize` AST to analyse) appears anywhere in the chain, or the
+    /// chain has a missing link (see [`Self::has_cross_file_parent`]) — both
+    /// mean `assigned` may be missing slots a caller would otherwise expect,
+    /// not merely that nothing is assigned.
+    #[must_use]
+    pub fn all_initialize_assigns(&self, class_name: &str) -> InitializeAssignsSummary {
+        let mut ordered: Vec<EcoString> = self
+            .superclass_chain(class_name)
+            .into_iter()
+            .rev()
+            .collect();
+        ordered.push(EcoString::from(class_name));
+
+        let mut assigned = BTreeSet::new();
+        let mut incomplete = self.has_cross_file_parent(class_name);
+        let mut has_dynamic_writer = false;
+        for name in &ordered {
+            if matches!(name.as_str(), "Actor" | "Object" | "ProtoObject") {
+                continue;
+            }
+            let Some(info) = self.classes.get(name.as_str()) else {
+                incomplete = true;
+                continue;
+            };
+            if info.is_native {
+                incomplete = true;
+            }
+            if info.has_dynamic_field_writer {
+                has_dynamic_writer = true;
+            }
+            assigned.extend(info.initialize_assigns.iter().cloned());
+        }
+
+        InitializeAssignsSummary {
+            assigned,
+            incomplete,
+            has_dynamic_writer,
+        }
     }
 
     /// Synthesizes auto-generated slot methods for a `Value subclass:` class

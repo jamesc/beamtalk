@@ -1021,6 +1021,16 @@ shape_dependent_selectors_dedupes_test() ->
     ]),
     ?assertEqual(lists:usort(Selectors), Selectors).
 
+%% ADR 0124 §9/B9: a kind_changed entry contributes nothing beyond the
+%% unconditional `spawnWith:` — an eager<->late flip alone changes no
+%% accessor's declared type, so there is no getter/`with*:` setter selector
+%% to add.
+shape_dependent_selectors_kind_changed_field_adds_no_accessor_test() ->
+    Selectors = beamtalk_recheck:shape_dependent_selectors([
+        {kind_changed, <<"proc">>, <<"eager">>, <<"late">>}
+    ]),
+    ?assertEqual(['spawnWith:'], Selectors).
+
 %% Pure helper — with_star_selector/1 (mirrors the Rust naming authority).
 
 with_star_selector_test_() ->
@@ -1206,6 +1216,15 @@ field_change_note_retyped_with_ambiguous_candidates_renders_all_names_test() ->
                 {retyped, <<"label">>, <<"String">>, <<"Symbol">>},
                 {retyped, <<"flag">>, <<"Boolean">>, <<"Symbol">>}
             ]
+        )
+    ).
+
+%% ADR 0124 §9/B9.
+field_change_note_kind_changed_names_the_field_and_both_kinds_test() ->
+    ?assertEqual(
+        <<"state field `proc` changed from eager to late by the reload of ReCheckCounter">>,
+        beamtalk_recheck:field_change_note(
+            <<"ReCheckCounter">>, {kind_changed, <<"proc">>, <<"eager">>, <<"late">>}, []
         )
     ).
 

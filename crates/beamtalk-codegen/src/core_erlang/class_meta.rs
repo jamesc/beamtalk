@@ -235,6 +235,15 @@ impl CoreErlangGenerator {
         let field_kinds_doc = Self::meta_field_kinds_map(&class.state);
         let class_field_kinds_doc = Self::meta_field_kinds_map(&class.class_variables);
 
+        // initialize_assigns (ADR 0124 A2a): this class's own `initialize`
+        // definitely-assigned slot summary — a must-analysis
+        // (`beamtalk-core`'s `analyze_initialize_assigns`), not the flattened
+        // chain (that composition happens on read, via `ClassHierarchy::
+        // all_initialize_assigns`, exactly as `state_has_default`'s flattened
+        // read happens in `inherited_typed_no_default_fields`). Empty when
+        // the class declares no `initialize`.
+        let initialize_assigns_doc = Self::meta_initialize_assigns_list(class);
+
         // Compute auto-slot methods once and share across method_info / class_method_info
         let auto = compute_auto_slot_methods(class);
         let method_info_doc = Self::meta_method_info_map(&Self::meta_instance_method_entries(
@@ -341,6 +350,8 @@ impl CoreErlangGenerator {
             field_kinds_doc,
             ",\n      'class_field_kinds' => ",
             class_field_kinds_doc,
+            ",\n      'initialize_assigns' => ",
+            initialize_assigns_doc,
             ",\n      'method_info' => ",
             method_info_doc,
             ",\n      'class_method_info' => ",
@@ -497,6 +508,35 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str("}~"));
         Document::Vec(parts)
+    }
+
+    /// Builds the `'initialize_assigns'` list for `__beamtalk_meta/0` (ADR
+    /// 0124 A2a): the atom names of the slots this class's own `initialize`
+    /// method definitely assigns, per
+    /// [`beamtalk_core::semantic_analysis::analyze_initialize_assigns`]'s
+    /// must-analysis over the method body.
+    ///
+    /// This is the class's *own* summary, not the flattened ADR 0078 chain —
+    /// cross-file consumers compose it parent-first via
+    /// `ClassHierarchy::all_initialize_assigns` the same way `state_has_default`
+    /// is composed by `inherited_typed_no_default_fields`.
+    ///
+    /// Example: an `initialize` that unconditionally assigns `socket` →
+    /// `['socket']`. A class with no `initialize` → `[]`.
+    pub(super) fn meta_initialize_assigns_list(class: &ClassDefinition) -> Document<'static> {
+        let Some(initialize) = class
+            .methods
+            .iter()
+            .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "initialize")
+        else {
+            return Self::meta_atom_list(&[]);
+        };
+        let assigns: Vec<String> =
+            beamtalk_core::semantic_analysis::analyze_initialize_assigns(&initialize.body)
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
+        Self::meta_atom_list(&assigns)
     }
 
     /// Builds a Core Erlang map of field name → declared type atom or `'none'`.

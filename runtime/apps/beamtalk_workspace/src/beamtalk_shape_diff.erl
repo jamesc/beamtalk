@@ -44,12 +44,18 @@ caller.
     reload_finding/0
 ]).
 
-%% A class's declared shape: `state:`/`field:` slot name -> declared type
-%% name, rendered the same way the class hierarchy and `__beamtalk_meta/0`
-%% do (`TypeAnnotation:type_name/0` on the compiler side). An untyped slot is
-%% the `<<"Dynamic">>` sentinel, never omitted, so two shapes are always
-%% directly comparable field-by-field.
--type shape() :: #{binary() => binary()}.
+%% A class's declared shape: `state:`/`field:` slot name -> `{DeclaredType,
+%% Kind}`, rendered the same way the class hierarchy and `__beamtalk_meta/0`
+%% do (`TypeAnnotation:type_name/0` for `DeclaredType` on the compiler side;
+%% `Kind` is `<<"eager">>` or `<<"late">>`, ADR 0124 §9/B5b). An untyped slot's
+%% `DeclaredType` is the `<<"Dynamic">>` sentinel, never omitted, and `Kind`
+%% is never omitted either (a class predating `field_kinds` meta, or a
+%% dynamic/ClassBuilder-built level, normalises to `<<"eager">>` for every
+%% field it reports — `beamtalk_workspace_shape_store:normalize_shape/2`) —
+%% so two shapes are always directly comparable field-by-field, on both type
+%% and kind (ADR 0124 §9/B9: an eager<->late flip must classify as a
+%% `shape_change` the same way a retype does).
+-type shape() :: #{binary() => {DeclaredType :: binary(), Kind :: binary()}}.
 
 %% `undefined` marks "no generation recorded yet" — the seed state before any
 %% class-body reload this session, or an unresolvable original (nothing to
@@ -60,7 +66,8 @@ caller.
 -type field_change() ::
     {added, binary()}
     | {removed, binary()}
-    | {retyped, binary(), binary(), binary()}.
+    | {retyped, binary(), binary(), binary()}
+    | {kind_changed, binary(), binary(), binary()}.
 
 -type classification() :: shape_change | no_op.
 
@@ -151,9 +158,12 @@ Classify the change from `Old` (generation N-1) to `New` (generation N).
 - `Old =:= New` (structural equality — including both empty maps, a class
   with no state at all) — `{no_op, []}`.
 - Anything else — `{shape_change, FieldChanges}`, where `FieldChanges` lists
-  every slot present in one shape but not the other (`added`/`removed`) or
-  present in both with a different declared type (`retyped`), in no
-  particular order.
+  every slot present in one shape but not the other (`added`/`removed`), or
+  present in both with a different declared type (`retyped`), or present in
+  both with a different `Kind` — eager <-> late (`kind_changed`, ADR 0124
+  §9/B9) — in no particular order. A slot retyped **and** kind-flipped in
+  the same reload produces both a `retyped` and a `kind_changed` entry for
+  it.
 """.
 -spec diff(maybe_shape(), maybe_shape()) -> diff_result().
 diff(undefined, _New) ->
@@ -165,17 +175,46 @@ diff(Old, New) when Old =:= New ->
 diff(Old, New) ->
     Added = [{added, K} || K <- maps:keys(New), not maps:is_key(K, Old)],
     Removed = [{removed, K} || K <- maps:keys(Old), not maps:is_key(K, New)],
-    Retyped = [
-        {retyped, K, maps:get(K, Old), maps:get(K, New)}
-     || K <- maps:keys(Old), maps:is_key(K, New), maps:get(K, Old) =/= maps:get(K, New)
-    ],
-    {shape_change, Added ++ Removed ++ Retyped}.
+    Common = [K || K <- maps:keys(Old), maps:is_key(K, New)],
+    {Retyped, KindChanged} = changed_fields(Old, New, Common),
+    {shape_change, Added ++ Removed ++ Retyped ++ KindChanged}.
+
+-doc """
+For every slot name in `Common` (present in both `Old` and `New`), compare
+its `{DeclaredType, Kind}` pair on each side and bucket the difference:
+a changed `DeclaredType` produces a `retyped` entry, a changed `Kind`
+produces a `kind_changed` entry, independently — a slot can produce both,
+one, or neither. Folded once over `Common` rather than two separate list
+comprehensions so each slot's pair is only looked up once per side.
+""".
+-spec changed_fields(shape(), shape(), [binary()]) -> {[field_change()], [field_change()]}.
+changed_fields(Old, New, Common) ->
+    lists:foldr(
+        fun(K, {RetypedAcc, KindAcc}) ->
+            {OldType, OldKind} = maps:get(K, Old),
+            {NewType, NewKind} = maps:get(K, New),
+            RetypedAcc1 =
+                case OldType =/= NewType of
+                    true -> [{retyped, K, OldType, NewType} | RetypedAcc];
+                    false -> RetypedAcc
+                end,
+            KindAcc1 =
+                case OldKind =/= NewKind of
+                    true -> [{kind_changed, K, OldKind, NewKind} | KindAcc];
+                    false -> KindAcc
+                end,
+            {RetypedAcc1, KindAcc1}
+        end,
+        {[], []},
+        Common
+    ).
 
 -doc "The slot name a `field_change()` is about, regardless of its kind.".
 -spec field_name(field_change()) -> binary().
 field_name({added, Name}) -> Name;
 field_name({removed, Name}) -> Name;
-field_name({retyped, Name, _OldType, _NewType}) -> Name.
+field_name({retyped, Name, _OldType, _NewType}) -> Name;
+field_name({kind_changed, Name, _OldKind, _NewKind}) -> Name.
 
 %%====================================================================
 %% reload_findings/4, suspended_finding/3 (ADR 0123 §4, BT-3538)
@@ -389,9 +428,15 @@ version_decreased_finding(ClassNameBin, FromVersion, ToVersion) when ToVersion <
 version_decreased_finding(_ClassNameBin, _FromVersion, _ToVersion) ->
     [].
 
+%% `kind_changed` counts as a `dropped_without_bump`-eligible change too
+%% (ADR 0124 §9/B9): an eager<->late flip changes what reconcile does with
+%% an absent key on the *next* reload exactly as a retype changes what a
+%% present value means, so it deserves the same "shape changed but
+%% shapeVersion is still N" warning when the version wasn't bumped.
 -spec is_removed_or_retyped(field_change()) -> boolean().
 is_removed_or_retyped({removed, _}) -> true;
 is_removed_or_retyped({retyped, _, _, _}) -> true;
+is_removed_or_retyped({kind_changed, _, _, _}) -> true;
 is_removed_or_retyped({added, _}) -> false.
 
 -spec is_added(field_change()) -> boolean().

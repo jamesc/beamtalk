@@ -9,6 +9,7 @@ use crate::ast::{
 };
 use crate::semantic_analysis::test_helpers::test_span;
 use crate::source_analysis::Span;
+use std::collections::BTreeSet;
 // --- Value object method tests ---
 #[test]
 fn method_info_can_override_non_sealed() {
@@ -942,6 +943,8 @@ fn cycle_detection_in_superclass_chain() {
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![builtin_method("methodA", 0, "A")],
             class_methods: vec![],
             class_variables: vec![],
@@ -968,6 +971,8 @@ fn cycle_detection_in_superclass_chain() {
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![builtin_method("methodB", 0, "B")],
             class_methods: vec![],
             class_variables: vec![],
@@ -2295,6 +2300,8 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: EcoString::from("value"),
             arity: 0,
@@ -2340,6 +2347,8 @@ fn add_from_beam_meta_preserves_existing_entries() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: EcoString::from("increment"),
             arity: 0,
@@ -2376,6 +2385,8 @@ fn add_from_beam_meta_preserves_existing_entries() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: EcoString::from("old_method"),
             arity: 0,
@@ -2420,6 +2431,8 @@ fn add_from_beam_meta_skips_builtins() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2504,6 +2517,8 @@ fn stamp_package_does_not_overwrite_existing_package() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2561,6 +2576,8 @@ fn stamp_package_on_infos_does_not_overwrite_existing_package() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2596,6 +2613,8 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -3167,6 +3186,8 @@ fn cross_file_value_sub_subclass_finds_new() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -3250,6 +3271,8 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
             (EcoString::from("proc"), crate::ast::SlotKind::Late),
             (EcoString::from("id"), crate::ast::SlotKind::Eager),
         ]),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![
@@ -3300,4 +3323,200 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
         h.state_field_kind("B", "doesNotExist"),
         crate::ast::SlotKind::Eager
     );
+}
+
+// --- ADR 0124 A2a: all_initialize_assigns tests ---
+
+/// Cross-file test (acceptance criterion): parent `A` (a different file,
+/// injected via `add_from_beam_meta`) assigns `socket` in its own
+/// `initialize`; child `B` (this file) declares nothing of its own.
+/// `all_initialize_assigns("B")` must contain `socket` even though `A`'s AST
+/// is not present in this compilation — only its `__beamtalk_meta`-sourced
+/// `ClassInfo::initialize_assigns` summary is.
+#[test]
+fn cross_file_all_initialize_assigns_includes_parent_summary() {
+    let module = Module {
+        classes: vec![make_user_class("B", "A")],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        span: test_span(),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+        panic!("build should succeed");
+    };
+
+    let a_info = ClassInfo {
+        surface_incomplete: false,
+        name: EcoString::from("A"),
+        superclass: Some(EcoString::from("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![EcoString::from("socket")],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
+        initialize_assigns: BTreeSet::from([EcoString::from("socket")]),
+        has_dynamic_field_writer: false,
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    h.add_from_beam_meta(vec![a_info]);
+
+    let summary = h.all_initialize_assigns("B");
+    assert!(
+        summary.assigned.contains("socket"),
+        "B's flattened summary should include A's own initialize_assigns entry"
+    );
+    assert!(
+        !summary.incomplete,
+        "a fully-resolved chain (no native ancestor, no missing link) should not be incomplete"
+    );
+}
+
+/// A class whose own `initialize` assigns a slot reports it directly (no
+/// ancestor involved).
+#[test]
+fn all_initialize_assigns_includes_own_summary() {
+    let mut class = make_user_class("Standalone", "Object");
+    class.methods.push(MethodDefinition::new(
+        crate::ast::MessageSelector::Unary("initialize".into()),
+        vec![],
+        vec![],
+        test_span(),
+    ));
+    // Directly seed ClassInfo's initialize_assigns rather than parsing a
+    // real body — this test is about the flattening accessor, not the
+    // must-analysis itself (covered by `initialize_assigns.rs`'s own tests).
+    let module = Module {
+        classes: vec![class],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        span: test_span(),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+        panic!("build should succeed");
+    };
+    // Overwrite the AST-derived (empty-body) summary with a non-empty one,
+    // simulating a class whose real `initialize` assigns `value`.
+    if let Some(info) = h.classes_mut().get_mut("Standalone") {
+        info.initialize_assigns = BTreeSet::from([EcoString::from("value")]);
+    }
+
+    let summary = h.all_initialize_assigns("Standalone");
+    assert_eq!(summary.assigned, BTreeSet::from([EcoString::from("value")]));
+    assert!(!summary.incomplete);
+}
+
+/// A `native:` ancestor anywhere in the chain marks the summary incomplete
+/// (ADR 0056 — its slots belong to a backing `gen_server`, no `initialize`
+/// AST to analyse), not merely empty — and `incomplete` is independent of
+/// `assigned`: a slot the leaf's own `initialize` genuinely assigns still
+/// shows up alongside the incomplete flag, rather than the flag suppressing
+/// or replacing the (partial) answer.
+#[test]
+fn all_initialize_assigns_native_ancestor_marks_incomplete() {
+    let module = Module {
+        classes: vec![make_user_class("Child", "NativeParent")],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        span: test_span(),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+        panic!("build should succeed");
+    };
+    // Give Child its own definitely-assigned slot so this test can prove
+    // `incomplete` doesn't come at the cost of losing `assigned` data.
+    if let Some(info) = h.classes_mut().get_mut("Child") {
+        info.initialize_assigns = BTreeSet::from([EcoString::from("own")]);
+    }
+
+    let native_info = ClassInfo {
+        surface_incomplete: false,
+        name: EcoString::from("NativeParent"),
+        superclass: Some(EcoString::from("Actor")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: true,
+        handle_scope: None,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
+        initialize_assigns: BTreeSet::new(),
+        has_dynamic_field_writer: false,
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    h.add_from_beam_meta(vec![native_info]);
+
+    let summary = h.all_initialize_assigns("Child");
+    assert!(
+        summary.incomplete,
+        "a native: ancestor in the chain must mark the summary incomplete"
+    );
+    assert!(
+        summary.assigned.contains("own"),
+        "incomplete must not suppress a slot the leaf's own initialize genuinely assigns"
+    );
+}
+
+/// A missing chain link (an ancestor absent from the hierarchy entirely —
+/// not injected via `add_from_beam_meta` at all) also marks the summary
+/// incomplete, distinct from a merely-empty result.
+#[test]
+fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
+    let module = Module {
+        classes: vec![make_user_class("Orphan", "UnknownAncestor")],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        span: test_span(),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let (Ok(h), _) = ClassHierarchy::build(&module) else {
+        panic!("build should succeed");
+    };
+
+    let summary = h.all_initialize_assigns("Orphan");
+    assert!(
+        summary.incomplete,
+        "an unresolved ancestor (missing from the hierarchy) must mark the summary incomplete"
+    );
+    assert!(summary.assigned.is_empty());
 }

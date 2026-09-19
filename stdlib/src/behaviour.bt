@@ -232,6 +232,32 @@ abstract Object subclass: Behaviour
   /// ```
   sealed allFieldNames -> List(Symbol) => @primitive "classAllFieldNames"
 
+  /// Return the field name -> kind (`#eager` | `#late`) map declared in this
+  /// class (not inherited).
+  ///
+  /// Instance side only — the class-side (`classState:`) counterpart is
+  /// deliberately not folded into this dictionary, since an instance slot
+  /// and a class var can share a name (ADR 0124 §9). A dynamic class built
+  /// via `ClassBuilder` answers `#eager` for every field it reports; it has
+  /// no `late`-slot concept.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter fieldKinds   // => #{#value => #eager}
+  /// ```
+  sealed fieldKinds -> Dictionary(Symbol, Symbol) =>
+    @primitive "classFieldKinds"
+
+  /// Return the flattened field name -> kind (`#eager` | `#late`) map,
+  /// including inherited fields.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter allFieldKinds   // => #{#value => #eager}
+  /// ```
+  sealed allFieldKinds -> Dictionary(Symbol, Symbol) =>
+    @primitive "classAllFieldKinds"
+
   /// Return the class-side field (class variable) names declared in this class.
   ///
   /// These are the slots declared with `classState:` (the class-side counterpart

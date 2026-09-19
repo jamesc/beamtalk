@@ -133,6 +133,7 @@ fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
         "sendability" => DiagnosticCategory::Sendability,
         "native-declaration-location" => DiagnosticCategory::NativeDeclarationLocation,
         "file-class-name-mismatch" => DiagnosticCategory::FileClassNameMismatch,
+        "definite-assignment" => DiagnosticCategory::DefiniteAssignment,
         _ => return None,
     })
 }
@@ -160,6 +161,7 @@ const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
     "sendability",
     "native-declaration-location",
     "file-class-name-mismatch",
+    "definite-assignment",
 ];
 
 /// Return a human-readable TOML type name for error messages.
@@ -993,6 +995,7 @@ inheritance = "error"
 sendability = "hint"
 native-declaration-location = "error"
 file-class-name-mismatch = "error"
+definite-assignment = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
@@ -1003,6 +1006,10 @@ file-class-name-mismatch = "error"
         );
         assert_eq!(
             table[&DiagnosticCategory::Inheritance],
+            DiagnosticSeverityOverride::Error
+        );
+        assert_eq!(
+            table[&DiagnosticCategory::DefiniteAssignment],
             DiagnosticSeverityOverride::Error
         );
     }
@@ -1128,6 +1135,24 @@ dnu = "error"
         let mut table = DiagnosticsTable::new();
         table.insert(DiagnosticCategory::Dnu, DiagnosticSeverityOverride::Error);
         let result = apply_diagnostics_table(diags, &table);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn apply_diagnostics_table_escalates_definite_assignment_warning_to_error() {
+        // ADR 0124 §6: a Value-heavy codebase can escalate the Warning-tier
+        // definite-assignment advisory to a hard Error via `[diagnostics]`
+        // (the same generic Rule 3 escalation every category gets — no
+        // per-category wiring needed beyond the category existing).
+        let mut diag = Diagnostic::warning("test definite assignment", Span::new(0, 1));
+        diag.category = Some(DiagnosticCategory::DefiniteAssignment);
+        let mut table = DiagnosticsTable::new();
+        table.insert(
+            DiagnosticCategory::DefiniteAssignment,
+            DiagnosticSeverityOverride::Error,
+        );
+        let result = apply_diagnostics_table(vec![diag], &table);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, Severity::Error);
     }

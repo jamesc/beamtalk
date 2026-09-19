@@ -8,7 +8,7 @@
 
 use crate::ast::{ClassDefinition, ClassKind, Expression, MethodKind, SlotKind};
 use ecow::EcoString;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use super::{ClassHierarchy, DeclaredType};
 
@@ -199,6 +199,36 @@ pub struct ClassInfo {
     /// cross-file metadata) are treated as [`SlotKind::Eager`] by readers —
     /// see [`ClassHierarchy::state_field_kind`].
     pub state_kinds: HashMap<EcoString, SlotKind>,
+    /// Slots this class's *own* `initialize` method definitely assigns —
+    /// a must-analysis (intersection over branches/completions, ADR 0124
+    /// A2a) over the method body, computed by
+    /// [`crate::semantic_analysis::analyze_initialize_assigns`]. Empty when
+    /// the class declares no `initialize`.
+    ///
+    /// This is a per-class summary, not the flattened chain: use
+    /// [`ClassHierarchy::all_initialize_assigns`](super::ClassHierarchy::all_initialize_assigns)
+    /// to compose it parent-first across the ADR 0078 inheritance chain the
+    /// same way [`Self::state_has_default`] is composed by
+    /// `inherited_typed_no_default_fields` (`beamtalk-codegen`).
+    pub initialize_assigns: BTreeSet<EcoString>,
+    /// `true` when some instance method on this class (any method, not only
+    /// `initialize`) sends `fieldAt:put:` or `perform:` anywhere in its
+    /// body — computed by
+    /// [`crate::semantic_analysis::has_dynamic_field_writer`] over the
+    /// class's own [`crate::ast::MethodDefinition`]s (ADR 0124 §6), both
+    /// here and by `beamtalk-cli`'s `build_stdlib` for generated-builtin
+    /// `ClassInfo`s (mirroring how [`Self::initialize_assigns`] is
+    /// computed in both places). `false` only for cross-file metadata that
+    /// predates this field (`#[serde(default)]`) or arrives through a wire
+    /// format that doesn't carry it (`beamtalk-compiler-port`'s
+    /// cross-package `__beamtalk_meta` decode) — a conservative
+    /// under-approximation there, not a source of false positives:
+    /// [`super::ClassHierarchy::all_initialize_assigns`]'s
+    /// `has_dynamic_writer` only *demotes* BT-1948's construction-site
+    /// finding from Warning to Hint, it never suppresses it, so missing
+    /// this signal costs confidence, not correctness.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub has_dynamic_field_writer: bool,
     /// Methods defined directly on this class (instance-side).
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
@@ -225,6 +255,38 @@ pub struct ClassInfo {
     ///
     /// **References:** ADR 0068 Challenge 4
     pub superclass_type_args: Vec<SuperclassTypeArg>,
+}
+
+/// The composed "`initialize` definitely assigns" summary for a class,
+/// flattened parent-first over the ADR 0078 inheritance chain (ADR 0124
+/// A2a) — see [`super::ClassHierarchy::all_initialize_assigns`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InitializeAssignsSummary {
+    /// Slots definitely assigned by *some* class's own `initialize` in the
+    /// chain (the union of every chain link's own [`ClassInfo::initialize_assigns`] —
+    /// safe to union rather than intersect, because ADR 0078 auto-chains
+    /// every ancestor's `initialize` to run, parent-first, before the leaf's
+    /// own, so an ancestor's assignment is guaranteed present by the time the
+    /// chain finishes regardless of what the leaf's own `initialize` does).
+    pub assigned: BTreeSet<EcoString>,
+    /// `true` when the chain could not be fully resolved: a `native:`
+    /// ancestor (ADR 0056, whose slots are owned by its backing `gen_server`
+    /// and carry no `initialize` AST to analyse) or a missing chain link (an
+    /// ancestor absent from this [`ClassHierarchy`] entirely — see
+    /// [`super::ClassHierarchy::has_cross_file_parent`]) makes `assigned`
+    /// potentially incomplete rather than merely empty. Callers that need to
+    /// distinguish "genuinely assigns nothing" from "can't fully tell" read
+    /// this flag rather than treating an empty `assigned` as the answer.
+    pub incomplete: bool,
+    /// `true` when *any* class in the chain (the leaf or an ancestor) has
+    /// its own [`ClassInfo::has_dynamic_field_writer`] set — a
+    /// `fieldAt:put:`/`perform:` write anywhere in that class's methods
+    /// (ADR 0124 §6, BT-1948). An ancestor's dynamic write is just as
+    /// capable of assigning a slot outside this must-analysis's view as the
+    /// leaf's own, so BT-1948's construction-site check reads this
+    /// chain-wide flag — not [`ClassInfo::has_dynamic_field_writer`]
+    /// directly — to decide whether to demote its finding to Hint.
+    pub has_dynamic_writer: bool,
 }
 
 impl ClassInfo {
@@ -324,6 +386,15 @@ impl ClassInfo {
                 .iter()
                 .map(|s| (s.name.name.clone(), s.slot_kind))
                 .collect(),
+            initialize_assigns: class
+                .methods
+                .iter()
+                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "initialize")
+                .map(|m| crate::semantic_analysis::analyze_initialize_assigns(&m.body))
+                .unwrap_or_default(),
+            has_dynamic_field_writer: crate::semantic_analysis::has_dynamic_field_writer(
+                &class.methods,
+            ),
             methods: instance_methods,
             class_methods,
             class_variables: class
