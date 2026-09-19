@@ -444,6 +444,17 @@ fn shape_chain_summary(class: &ClassDefinition) -> Option<String> {
     ))
 }
 
+/// Upper bound on the number of steps [`shape_chain_line`] renders
+/// individually. `shapeVersion:` is parsed as any positive `u32` literal
+/// (`declarations.rs`'s `parse_optional_shape_version` checks only
+/// `value > 0` and that it fits `u32`, no upper bound) — with no cap here, a
+/// stray or malicious `shapeVersion: 4000000000` would make hover try to
+/// build a multi-gigabyte string (and blow well past this module's own
+/// documented <50ms budget) the moment the class name or its `shapeVersion:`
+/// clause is hovered. No real class has anywhere near this many shape
+/// versions, so the cap never truncates realistic chains.
+const MAX_RENDERED_CHAIN_STEPS: u32 = 200;
+
 /// Renders the migration chain from `v1` to `target`, walking each step and
 /// naming its `migrateFromVN:` hook when `migrations` declares one for that
 /// step, or noting "structural fallback" for a gap — the same semantics
@@ -451,6 +462,15 @@ fn shape_chain_summary(class: &ClassDefinition) -> Option<String> {
 /// a step with no hook is a no-op on the dictionary, reconciled against the
 /// final declared shape at the end of the chain.
 fn shape_chain_line(target: u32, migrations: &[(u32, ecow::EcoString)]) -> String {
+    if target > MAX_RENDERED_CHAIN_STEPS {
+        // See MAX_RENDERED_CHAIN_STEPS: bail out before the per-step loop
+        // below ever runs, rather than truncating a partially-built string.
+        return format!(
+            "**Shape chain:** v1 → … → v{target} (current) — {} steps ({} with a declared migrateFromVN: hook), too long to render in full",
+            target - 1,
+            migrations.len()
+        );
+    }
     let mut segments = vec!["v1".to_string()];
     for from in 1..target {
         let to = from + 1;
@@ -2596,6 +2616,44 @@ mod tests {
             "gaps on both sides of the one declared hook should each read as structural fallback: {}",
             hover.contents
         );
+    }
+
+    #[test]
+    fn shape_chain_line_caps_pathologically_large_shape_version() {
+        // A `shapeVersion:` far beyond any real class (the parser only
+        // checks `value > 0` and that it fits `u32` — no upper bound) must
+        // not make this build a multi-gigabyte string or iterate billions
+        // of times; it should bail out to the capped summary instead. This
+        // calls the renderer directly (rather than through a parsed source
+        // string) so the test itself stays fast regardless of the cap.
+        let huge = MAX_RENDERED_CHAIN_STEPS + 1;
+        let migrations = vec![(1u32, ecow::EcoString::from("migrateFromV1:"))];
+        let line = shape_chain_line(huge, &migrations);
+        assert!(
+            line.contains("too long to render in full"),
+            "expected the capped summary form, got: {line}"
+        );
+        assert!(
+            line.contains(&format!("v{huge}")),
+            "capped summary should still name the current version: {line}"
+        );
+        assert!(
+            !line.contains("structural fallback"),
+            "capped summary must not enumerate individual steps: {line}"
+        );
+    }
+
+    #[test]
+    fn shape_chain_line_at_the_cap_still_renders_in_full() {
+        // One step below the cap: still the full per-step rendering, not
+        // the capped summary — confirms the boundary is exact.
+        let migrations: Vec<(u32, ecow::EcoString)> = Vec::new();
+        let line = shape_chain_line(MAX_RENDERED_CHAIN_STEPS, &migrations);
+        assert!(
+            !line.contains("too long to render in full"),
+            "a chain exactly at the cap should still render step-by-step: {line}"
+        );
+        assert!(line.contains("structural fallback"));
     }
 
     // --- Chain resolution hover tests ---
