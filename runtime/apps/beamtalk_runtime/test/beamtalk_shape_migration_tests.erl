@@ -57,6 +57,7 @@ setup() ->
     ok = ensure_fixture_loaded(shape_hazard_worker, 'ShapeHazardWorker'),
     ok = ensure_fixture_loaded(shape_hazard_cart, 'ShapeHazardCart'),
     ok = ensure_fixture_loaded(shape_handle_cart, 'ShapeHandleCart'),
+    ok = ensure_fixture_loaded(shape_plain_object, 'ShapePlainObject'),
     ok.
 
 teardown(_) ->
@@ -84,6 +85,14 @@ shape_migration_test_() ->
                 fun test_migrate_drops_undeclared_field/0},
             {"a migrateFromV* class method absent from shape_migrations warns (ADR 0123 §2)",
                 fun test_migrate_warns_when_class_method_outside_shape_migrations_table/0},
+            {"migrate/4 with skip_stray_warning => true suppresses the warning (BT-3543)",
+                fun test_migrate_skip_stray_warning_suppresses_warning/0},
+            {"check_stray_migrations/1 warns directly, independent of migrate (BT-3543)",
+                fun test_check_stray_migrations_warns_directly/0},
+            {"field_tier/1 matches the shared compile-time conformance corpus (BT-3542)",
+                fun test_sendability_tier_conformance_matches_shared_corpus/0},
+            {"field_tier/1 does not compose a generic annotation's type_args (BT-3542)",
+                fun test_field_tier_does_not_compose_generic_type_args/0},
             {"pack/1 rejects a SendableRef (Actor-typed) field",
                 fun test_pack_rejects_sendable_ref_field/0},
             {"pack/1 rejects a HandleScoped field", fun test_pack_rejects_handle_scoped_field/0},
@@ -265,6 +274,53 @@ test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
         logger:set_primary_config(level, error)
     end.
 
+%% BT-3543: the same scenario as
+%% test_migrate_warns_when_class_method_outside_shape_migrations_table/0, but
+%% via migrate/4 with skip_stray_warning => true — the per-instance hot-reload
+%% call path (beamtalk_hot_reload:migrate_state/3) — which must not warn,
+%% since beamtalk_repl_loader:hot_reload_class/2 already ran the check once
+%% for the class before fanning out to instances.
+test_migrate_skip_stray_warning_suppresses_warning() ->
+    logger:set_primary_config(level, all),
+    HandlerId = bt_3543_skip_stray_warning_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all
+    }),
+    try
+        with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
+            {ok, _NewFields, ToVersion} =
+                beamtalk_shape_migration:migrate('ShapeChainCart', 1, #{itemCount => 2}, #{
+                    skip_stray_warning => true
+                }),
+            ?assertEqual(3, ToVersion),
+            ?assertNot(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 2))
+        end)
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
+    end.
+
+%% BT-3543: check_stray_migrations/1 is the once-per-reload call site
+%% (beamtalk_repl_loader:hot_reload_class/2) — it must still warn on its own,
+%% with no migrate/3-4 call at all.
+test_check_stray_migrations_warns_directly() ->
+    logger:set_primary_config(level, all),
+    HandlerId = bt_3543_check_stray_migrations_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all
+    }),
+    try
+        with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
+            ok = beamtalk_shape_migration:check_stray_migrations('ShapeChainCart'),
+            ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 5))
+        end)
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
+    end.
+
 %% Drains up to N pending {log_event, ...} messages looking for the
 %% stray-migration warning naming Class and Selector.
 receive_stray_migration_warning(_Class, _Selector, 0) ->
@@ -282,6 +338,58 @@ receive_stray_migration_warning(Class, Selector, N) ->
     after 1000 ->
         false
     end.
+
+%%====================================================================
+%% field_tier/1 — cross-boundary sendability conformance (BT-3542)
+%%====================================================================
+
+%% BT-3542: field_tier/1's kind-based branches (`ClassMeta`'s `kind`/
+%% `handle_scope` keys) necessarily re-derive the same core mapping the
+%% compile-time checker's kind-based fallback
+%% (`sendability.rs`'s `tier_of_known`) already encodes — the two cannot
+%% literally share code across the Rust/Erlang boundary (ADR 0123
+%% commissions this walk as new work, not a port). This corpus is the
+%% single source of truth both are pinned to; the Rust side asserts the
+%% identical cases in
+%% `sendability::tests::runtime_field_tier_kind_mapping_matches_compile_time_base_tier`.
+test_sendability_tier_conformance_matches_shared_corpus() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "sendability_tier_conformance.json"
+    ]),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            ClassNameBin = maps:get(<<"class_name">>, Case),
+            ExpectedBin = maps:get(<<"erlang_field_tier">>, Case),
+            Why = maps:get(<<"why">>, Case, <<>>),
+            ClassName = binary_to_existing_atom(ClassNameBin, utf8),
+            Expected = binary_to_existing_atom(ExpectedBin, utf8),
+            ?assertEqual(
+                Expected,
+                beamtalk_shape_migration:field_tier(ClassName),
+                {corpus_mismatch, ClassName, Why}
+            )
+        end,
+        Cases
+    ).
+
+%% BT-3542 acceptance criterion 3: pins the documented scope gap down as a
+%% regression, rather than only a doc comment — `List(Port)` grades on
+%% `List`'s own kind (`value_nested`, a `Collection` → `Value`) here, not
+%% `Port`'s `handle_scoped` hazard the compile-time checker's generic
+%% `type_args` composition would produce (see
+%% `sendability.rs::tests::generic_collection_composes_element_tier`, the
+%% compile-time counterpart that DOES compose). If this starts asserting
+%% `handle_scoped`, field_tier/1 gained generic composition — update this
+%% test (and the field_tier/1 doc) deliberately rather than treating it as
+%% a stale assertion to relax.
+test_field_tier_does_not_compose_generic_type_args() ->
+    ?assertEqual(value_nested, beamtalk_shape_migration:field_tier('List(Port)')).
 
 %%====================================================================
 %% pack/1 — Sendable-tier walk

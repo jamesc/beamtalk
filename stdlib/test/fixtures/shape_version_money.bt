@@ -8,11 +8,11 @@
 //
 // The hook reads/writes `old` via the Erlang FFI gateway (maps:get/2,
 // maps:put/3, maps:remove/2) rather than Dictionary at:/at:put:/removeKey:
-// sends — a Dictionary send on a non-literal value falls through to runtime
-// dispatch inside a migrateFromVN: hook (invoked via local_call/3), which is
-// undef for an @primitive-only class like Dictionary (BT-3541), the same
-// limitation `beamtalk_shape_migration_tests`' ShapeChainCart fixture works
-// around.
+// sends, the same style `beamtalk_shape_migration_tests`' ShapeChainCart
+// fixture uses — both predate BT-3541's fix (dynamic dispatch to a
+// Dictionary value inside a migrateFromVN: hook, invoked via local_call/3,
+// used to raise `undef`; see shape_version_dict_send.bt's
+// ShapeVersionDictSend for the same hook using direct Dictionary sends).
 
 Value subclass: ShapeVersionMoney
   shapeVersion: 2

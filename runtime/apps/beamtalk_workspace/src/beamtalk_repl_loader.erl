@@ -1267,12 +1267,15 @@ extract_trailing_info(ClassInfo) ->
 %% the reloaded class itself, or an unchanged descendant module when called
 %% from hot_reload_descendants/1).
 %%
-%% BT-3534: Extra is `#{module => ModuleName}` — the loader no longer
+%% BT-3534: Extra carries `module => ModuleName` — the loader no longer
 %% computes a field list at all; the flattened field list (inherited
 %% fields included) is derived inside beamtalk_hot_reload from the live
 %% state's own class tag. The old `{IVars, ModuleName}` shape let the
 %% caller choose which list to pass, which was itself the cause of
 %% BT-3531's dropped-inherited-fields bug.
+%%
+%% BT-3543: Extra also carries `skip_stray_warning => true`, since this
+%% function already ran that check once for ClassName below.
 %%
 %% BT-3538 (ADR 0123 §4 row 5): when `trigger_code_change/3` leaves any
 %% instance suspended, publishes an `instances_suspended` reload finding
@@ -1297,7 +1300,12 @@ hot_reload_class(ModuleName, ClassName) ->
         [] ->
             ok;
         _ ->
-            Extra = #{module => ModuleName},
+            %% BT-3543: the stray-migration-outside-table check only depends
+            %% on ClassName, never on an instance — run it once here rather
+            %% than once per pid inside code_change/3 (skip_stray_warning
+            %% tells the per-instance path below not to repeat it).
+            beamtalk_shape_migration:check_stray_migrations(ClassName),
+            Extra = #{module => ModuleName, skip_stray_warning => true},
             {ok, Upgraded, Failures} = beamtalk_runtime_api:trigger_code_change(
                 ModuleName, Pids, Extra
             ),

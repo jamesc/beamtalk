@@ -7,6 +7,16 @@
 // migrateFromVN: hook on a Value class (no live process for its instances).
 //
 // Fixture: stdlib/test/fixtures/shape_version_money.bt (ShapeVersionMoney)
+//
+// BT-3541 regression: ShapeVersionDictSend's migrateFromV1: (fixture:
+// stdlib/test/fixtures/shape_version_dict_send.bt) sends Dictionary
+// at:/at:put:/removeKey: directly to its `old` parameter instead of
+// routing around them via the Erlang FFI gateway (ShapeVersionMoney's own
+// BT-3541 workaround) — a dynamically-dispatched send the compiler cannot
+// statically resolve, which used to raise `undef` for an @primitive-only
+// class like Dictionary. No longer reproduces (every value-type class,
+// @primitive-only or not, compiles a real `dispatch/3`), but this test
+// pins the behaviour down so it can't silently regress.
 
 TestCase subclass: ShapeVersionTest
   field: cls = nil
@@ -39,6 +49,15 @@ TestCase subclass: ShapeVersionTest
     current := #{#amount => 9.99, #currency => #EUR}
     migrated := ShapeVersionMoney migrateShape: current from: 2
     self assert: migrated equals: current
+
+  testMigrateShapeFromRunsRealChainWithDirectDictionarySends =>
+    // BT-3541: old at:/at:put:/removeKey: sent directly (see fixture
+    // comment) — through the real migrateShape:from: chain, i.e. via
+    // local_call/3, not a direct migrateFromV1: call like the test above.
+    old := #{#cents => 500}
+    migrated := ShapeVersionDictSend migrateShape: old from: 1
+    self assert: (migrated at: #amount) equals: 5.0
+    self deny: (migrated includesKey: #cents)
 
   // ADR 0123 §1: `ClassBuilder shapeVersion:` — the programmatic
   // counterpart, no compiled `.bt` source at all. `Behaviour >> shapeVersion`
