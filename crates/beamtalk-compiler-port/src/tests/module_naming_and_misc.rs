@@ -159,7 +159,7 @@ fn parse_class_hierarchy_skips_builtins() {
         (atom("field_types"), Term::from(Map::from([]))),
         (atom("method_info"), Term::from(Map::from([]))),
         (atom("class_method_info"), Term::from(Map::from([]))),
-        (atom("class_variables"), Term::from(List::from(vec![]))),
+        (atom("class_fields"), Term::from(List::from(vec![]))),
     ]);
     let term = Term::from(Map::from([(atom("Integer"), Term::from(meta_map))]));
     let classes = parse_class_hierarchy_from_term(&term);

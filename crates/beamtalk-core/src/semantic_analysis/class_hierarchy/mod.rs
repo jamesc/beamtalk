@@ -25,7 +25,9 @@ mod hierarchy_queries;
 mod method_resolution;
 #[cfg(test)]
 mod tests;
-pub use class_info::{ClassInfo, MethodInfo, SuperclassTypeArg, format_default_value};
+pub use class_info::{
+    ClassInfo, ClassVarInfo, MethodInfo, SuperclassTypeArg, format_default_value,
+};
 pub use declared_type::DeclaredType;
 /// Per-class selector index: maps class name → (selector → method vec position).
 type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
@@ -244,6 +246,7 @@ impl ClassHierarchy {
                     state: vec![],
                     state_types: HashMap::new(),
                     state_has_default: HashMap::new(),
+                    state_kinds: HashMap::new(),
                     methods: vec![],
                     class_methods,
                     class_variables: vec![],
@@ -434,6 +437,7 @@ impl ClassHierarchy {
                         state: Vec::new(),
                         state_types: HashMap::new(),
                         state_has_default: HashMap::new(),
+                        state_kinds: HashMap::new(),
                         methods: Vec::new(),
                         class_methods: Vec::new(),
                         class_variables: Vec::new(),

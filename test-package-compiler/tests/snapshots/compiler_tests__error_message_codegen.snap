@@ -344,6 +344,8 @@ module 'error_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'type_params' => [],
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'doError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'errorWithVariable' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -379,6 +381,8 @@ module 'error_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'type_params' => [],
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'doError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'errorWithVariable' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~,

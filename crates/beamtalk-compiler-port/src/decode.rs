@@ -220,6 +220,37 @@ pub(crate) fn term_to_atom_bool_map(
     }
 }
 
+/// Deserialize an atom→`SlotKind` map (for `field_kinds`/`class_field_kinds`,
+/// ADR 0124 §1/B5a — `meta_field_kinds_map`, beamtalk-codegen).
+///
+/// An unrecognised value (anything but the atom `'late'`) degrades to
+/// [`SlotKind::Eager`] — the pre-ADR-0124 default every slot had, and the
+/// same "missing metadata means eager" convention `state_field_kind`/
+/// `class_variable_kind` (beamtalk-core) fall back to when the map itself is
+/// absent (an older BEAM artifact predating this key).
+pub(crate) fn term_to_slot_kind_map(
+    term: &Term,
+) -> std::collections::HashMap<ecow::EcoString, beamtalk_core::ast::SlotKind> {
+    use beamtalk_core::ast::SlotKind;
+
+    match term {
+        Term::Map(m) => m
+            .map
+            .iter()
+            .filter_map(|(k, v)| {
+                let key = term_to_atom(k)?;
+                let kind = if term_to_atom(v).as_deref() == Some("late") {
+                    SlotKind::Late
+                } else {
+                    SlotKind::Eager
+                };
+                Some((ecow::EcoString::from(key.as_str()), kind))
+            })
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    }
+}
+
 /// Parse method infos from a `method_info` or `class_method_info` ETF map.
 ///
 /// Each entry: `selector_atom => #{arity => int, param_types => [atom...], return_type => atom}`.
@@ -320,9 +351,40 @@ pub(crate) fn parse_class_info_from_meta_term(
     let state_has_default = map_get(m, "field_has_default")
         .map(term_to_atom_bool_map)
         .unwrap_or_default();
-    let class_variables = map_get(m, "class_variables")
-        .map(term_to_atom_list)
+    // ADR 0124 §1/B5a: field_kinds — missing key (older BEAM artifact
+    // predating `late`) degrades every field to SlotKind::Eager via
+    // `term_to_slot_kind_map`'s own empty-map default.
+    let state_kinds = map_get(m, "field_kinds")
+        .map(term_to_slot_kind_map)
         .unwrap_or_default();
+    // Class variables: name list from `class_fields` (the key codegen
+    // actually emits — `meta_atom_list(&class.class_variables...)` in
+    // `class_meta.rs`), paired with per-name slot kind from
+    // `class_field_kinds`. There is no wire representation yet for a class
+    // variable's declared type or default-value presence (only instance
+    // `field_types`/`field_has_default` exist), so those degrade to
+    // `None`/`false` for a cross-file class — the same "AST-less metadata is
+    // best-effort" contract `state_types`/`state_has_default` already have
+    // for fields absent from their maps.
+    let class_field_kinds = map_get(m, "class_field_kinds")
+        .map(term_to_slot_kind_map)
+        .unwrap_or_default();
+    let class_variables = map_get(m, "class_fields")
+        .map(term_to_atom_list)
+        .unwrap_or_default()
+        .into_iter()
+        .map(
+            |name| beamtalk_core::semantic_analysis::class_hierarchy::ClassVarInfo {
+                kind: class_field_kinds
+                    .get(&name)
+                    .copied()
+                    .unwrap_or(beamtalk_core::ast::SlotKind::Eager),
+                name,
+                ty: None,
+                has_default: false,
+            },
+        )
+        .collect();
 
     let methods = parse_method_infos_from_map(m, "method_info", class_name);
     let class_methods = parse_method_infos_from_map(m, "class_method_info", class_name);
@@ -358,6 +420,7 @@ pub(crate) fn parse_class_info_from_meta_term(
         state,
         state_types,
         state_has_default,
+        state_kinds,
         methods,
         class_methods,
         class_variables,

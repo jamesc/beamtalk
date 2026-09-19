@@ -31,7 +31,7 @@ fn compile_expression_accepts_class_hierarchy_key() {
         (atom("field_types"), Term::from(Map::from([]))),
         (atom("method_info"), Term::from(method_info)),
         (atom("class_method_info"), Term::from(Map::from([]))),
-        (atom("class_variables"), Term::from(List::from(vec![]))),
+        (atom("class_fields"), Term::from(List::from(vec![]))),
     ]);
     let class_hierarchy_term = Term::from(Map::from([(atom("Counter"), Term::from(counter_meta))]));
 
@@ -292,10 +292,7 @@ fn null_timer_class_info_term() -> Term {
             ])),
         ),
         (atom("class_method_info"), Term::from(Map::from([]))),
-        (
-            atom("class_variables"),
-            Term::from(eetf::List::from(vec![])),
-        ),
+        (atom("class_fields"), Term::from(eetf::List::from(vec![]))),
     ]))
 }
 

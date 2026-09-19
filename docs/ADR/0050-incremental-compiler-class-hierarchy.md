@@ -80,6 +80,11 @@ Module:'__beamtalk_meta'() ->
         fields            => [count],
         field_types       => #{count => 'Integer'},
 
+        %% ADR 0124 §1/B5a: per-field slot kind (`eager` | `late`),
+        %% instance-side and class-side respectively
+        field_kinds       => #{count => eager},
+        class_field_kinds => #{},
+
         %% Backward-compatible tuple-list (kept through Phase 4 for existing consumers)
         methods           => [{increment, 1}, {value, 0}],
         class_methods     => [{new, 0}],

@@ -33,6 +33,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![MethodInfo {
             selector: "consume:".into(),
             arity: 1,

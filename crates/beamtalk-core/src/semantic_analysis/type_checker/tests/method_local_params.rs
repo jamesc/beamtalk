@@ -30,6 +30,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: eco_string("processResult:"),

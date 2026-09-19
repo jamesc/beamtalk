@@ -131,6 +131,8 @@ let _InitMap2 = call 'maps':'new'() in let _Packed3 = call 'maps':'put'('__local
       'type_params' => [],
       'field_types' => ~{'total' => 'none'}~,
       'field_has_default' => ~{'total' => 'true'}~,
+      'field_kinds' => ~{'total' => 'eager'}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -162,6 +164,8 @@ let _InitMap2 = call 'maps':'new'() in let _Packed3 = call 'maps':'put'('__local
       'type_params' => [],
       'field_types' => ~{'total' => 'none'}~,
       'field_has_default' => ~{'total' => 'true'}~,
+      'field_kinds' => ~{'total' => 'eager'}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~

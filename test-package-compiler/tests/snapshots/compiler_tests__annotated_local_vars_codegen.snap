@@ -122,6 +122,8 @@ call 'maps':'get'('eventId', Self)
       'type_params' => [],
       'field_types' => ~{'eventId' => 'Integer'}~,
       'field_has_default' => ~{'eventId' => 'true'}~,
+      'field_kinds' => ~{'eventId' => 'eager'}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -164,6 +166,8 @@ call 'maps':'get'('eventId', Self)
       'type_params' => [],
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'simpleAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'parametricAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => {'generic', 'Result', ['Integer', 'Error']}, 'is_sealed' => 'false', 'visibility' => 'public'}~, 'unionAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -196,6 +200,8 @@ call 'maps':'get'('eventId', Self)
       'type_params' => [],
       'field_types' => ~{'eventId' => 'Integer'}~,
       'field_has_default' => ~{'eventId' => 'true'}~,
+      'field_kinds' => ~{'eventId' => 'eager'}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~

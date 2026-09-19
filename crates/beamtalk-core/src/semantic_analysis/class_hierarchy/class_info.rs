@@ -6,11 +6,41 @@
 //! Contains `MethodInfo`, `SuperclassTypeArg`, and `ClassInfo` — the value objects
 //! that describe classes and methods in the static hierarchy.
 
-use crate::ast::{ClassDefinition, ClassKind, Expression, MethodKind};
+use crate::ast::{ClassDefinition, ClassKind, Expression, MethodKind, SlotKind};
 use ecow::EcoString;
 use std::collections::HashMap;
 
 use super::{ClassHierarchy, DeclaredType};
+
+/// Information about a class variable (`classState:` declaration, ADR 0067).
+///
+/// The class-side counterpart to a `state:` field's `state_types`/
+/// `state_has_default`/`state_kinds` entries on [`ClassInfo`] — but class
+/// variables have no per-name-keyed maps to hang extra data off (there is no
+/// existing `class_variable_types` map to extend), so this carries name,
+/// type, default-presence and slot kind together in one structure (ADR 0124
+/// B5a). Populated for local classes from the AST's `class_variables:
+/// Vec<StateDeclaration>`. For cross-file classes only `name` and `kind` are
+/// recoverable today, from `__beamtalk_meta/0`'s `class_fields` (name list)
+/// and `class_field_kinds` (name → `eager`/`late`) keys — `ty`/`has_default`
+/// degrade to `None`/`false` because there is no `class_field_types`/
+/// `class_field_has_default` wire representation yet (only the instance-side
+/// `field_types`/`field_has_default` exist); see
+/// `parse_class_info_from_meta_term` (beamtalk-compiler-port).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ClassVarInfo {
+    /// The class variable name.
+    pub name: EcoString,
+    /// Declared type annotation, if any.
+    pub ty: Option<DeclaredType>,
+    /// Whether this class variable carries an explicit default value.
+    pub has_default: bool,
+    /// Whether this class variable is `late` (ADR 0124 §1). Defaults to
+    /// [`SlotKind::Eager`] for every declaration that doesn't use the
+    /// modifier.
+    pub kind: SlotKind,
+}
 
 /// Information about a method in the hierarchy.
 ///
@@ -163,12 +193,19 @@ pub struct ClassInfo {
     /// fields (for post-initialize validation in `gen_server` codegen) even
     /// when the defining class's AST is not present in the current compilation.
     pub state_has_default: HashMap<EcoString, bool>,
+    /// Slot kind (`#eager` | `#late`, ADR 0124 §1) for each declared state
+    /// field (field name → kind). Populated for every declared state field,
+    /// mirroring `state_has_default`. Fields absent from this map (older
+    /// cross-file metadata) are treated as [`SlotKind::Eager`] by readers —
+    /// see [`ClassHierarchy::state_field_kind`].
+    pub state_kinds: HashMap<EcoString, SlotKind>,
     /// Methods defined directly on this class (instance-side).
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
     pub class_methods: Vec<MethodInfo>,
-    /// Class variable names (declared with `classState:`).
-    pub class_variables: Vec<EcoString>,
+    /// Class variables (declared with `classState:`) — name, declared type,
+    /// default-value presence and slot kind (ADR 0124 B5a).
+    pub class_variables: Vec<ClassVarInfo>,
     /// Type parameters for generic classes (e.g., `["T", "E"]` for `Result(T, E)`).
     ///
     /// Empty for non-generic classes.
@@ -282,12 +319,22 @@ impl ClassInfo {
                 .iter()
                 .map(|s| (s.name.name.clone(), s.default_value.is_some()))
                 .collect(),
+            state_kinds: class
+                .state
+                .iter()
+                .map(|s| (s.name.name.clone(), s.slot_kind))
+                .collect(),
             methods: instance_methods,
             class_methods,
             class_variables: class
                 .class_variables
                 .iter()
-                .map(|cv| cv.name.name.clone())
+                .map(|cv| ClassVarInfo {
+                    name: cv.name.name.clone(),
+                    ty: cv.type_annotation.as_ref().map(DeclaredType::from),
+                    has_default: cv.default_value.is_some(),
+                    kind: cv.slot_kind,
+                })
                 .collect(),
             type_params: class
                 .type_params

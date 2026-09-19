@@ -7,7 +7,7 @@
 //! questions about class relationships (is-actor, is-value, is-typed, etc.)
 //! and aggregate inherited state/class-variable information.
 
-use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module};
+use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, SlotKind};
 use ecow::EcoString;
 use std::collections::HashSet;
 
@@ -631,7 +631,7 @@ impl ClassHierarchy {
                 break;
             }
             if let Some(info) = self.classes.get(name.as_str()) {
-                vars.extend(info.class_variables.iter().cloned());
+                vars.extend(info.class_variables.iter().map(|cv| cv.name.clone()));
                 current = info
                     .superclass
                     .as_ref()
@@ -696,6 +696,71 @@ impl ClassHierarchy {
             }
         }
         None
+    }
+
+    /// Returns the slot kind (`#eager` | `#late`, ADR 0124 §1) for a state
+    /// field, walking the superclass chain to find inherited fields.
+    ///
+    /// Mirrors [`Self::state_field_type`]'s shadowing rule: a subclass
+    /// redeclaring a field is the field's owner, so the walk stops at the
+    /// first class that declares the field, not the first class with a
+    /// `state_kinds` entry for it. Missing metadata (an older cross-file
+    /// `__beamtalk_meta/0` predating this key, or an unknown class/field)
+    /// degrades to [`SlotKind::Eager`] — the pre-ADR-0124 behaviour every
+    /// slot had.
+    #[must_use]
+    pub fn state_field_kind(&self, class_name: &str, field_name: &str) -> SlotKind {
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                if info.state.iter().any(|s| s == field_name) {
+                    return info
+                        .state_kinds
+                        .get(field_name)
+                        .copied()
+                        .unwrap_or(SlotKind::Eager);
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        SlotKind::Eager
+    }
+
+    /// Returns the slot kind (`#eager` | `#late`, ADR 0124 §1) for a class
+    /// variable (`classState:` declaration), walking the superclass chain.
+    ///
+    /// Class-side counterpart to [`Self::state_field_kind`]; same shadowing
+    /// and missing-metadata-degrades-to-`#eager` rules.
+    #[must_use]
+    pub fn class_variable_kind(&self, class_name: &str, var_name: &str) -> SlotKind {
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                if let Some(cv) = info.class_variables.iter().find(|cv| cv.name == var_name) {
+                    return cv.kind;
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        SlotKind::Eager
     }
 
     /// Synthesizes auto-generated slot methods for a `Value subclass:` class

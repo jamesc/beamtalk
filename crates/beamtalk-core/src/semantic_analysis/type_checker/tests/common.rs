@@ -436,6 +436,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             m
         },
         state_has_default: std::collections::HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![
             MethodInfo {
                 selector: eco_string("unwrap"),
