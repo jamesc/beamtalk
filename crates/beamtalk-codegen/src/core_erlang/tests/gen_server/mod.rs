@@ -20,6 +20,8 @@
 //!   `methodXref`/`stateVarXref` metadata
 //! - [`actor_init_and_field_validation`] — actor initialize chaining and
 //!   typed-field-without-default validation
+//! - [`late_field_read`] — ADR 0124 §3/B3: the guarded `maps:find` read for
+//!   a `late` slot, instance and class-method branches
 //! - [`dispatch_and_lifecycle`] — `gen_server` lifecycle callbacks and
 //!   dispatch-structure codegen
 //! - [`tier2_nested_blocks`] — Tier 2 stateful nested-block bodies
@@ -86,6 +88,7 @@ mod class_registration;
 mod class_var_shadow_writes;
 mod dispatch_and_lifecycle;
 mod extensions;
+mod late_field_read;
 mod native_facade;
 mod protocol_and_xref_metadata;
 mod state_threading_loops;

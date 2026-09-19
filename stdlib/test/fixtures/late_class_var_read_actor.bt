@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LateClassVarReadActor — test fixture for BT-3549 (ADR 0124 §3/B3)
+//
+// Class-side counterpart to LateFieldReadActor: a `late classState:` var,
+// read from a class method, must guard the same way as an instance `late
+// state:` field — `self.current` in a class method compiles to a guarded
+// `maps:find` against `ClassVars` (`generate_field_access`'s class-method
+// branch, `expressions.rs:526-537`).
+//
+// Stays unassigned for the whole test run — a class variable's `ClassVars`
+// map is owned by the class's own long-lived gen_server process, not reset
+// between test methods the way a fresh `spawn` gives each instance test its
+// own state. See `late_class_var_assigned_actor.bt` for the "assign then
+// read" counterpart, kept as a separate class so the two tests can't
+// interfere with each other's order.
+
+typed Actor subclass: LateClassVarReadActor
+  late classState: current :: Integer
+  classState: total :: Integer = 0
+
+  class getCurrent -> Integer => self.current
+
+  class getTotal -> Integer => self.total

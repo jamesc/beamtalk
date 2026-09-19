@@ -3255,7 +3255,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
         class_variables: vec![
             ClassVarInfo {
                 name: EcoString::from("current"),
-                ty: None,
+                ty: Some(DeclaredType::simple("TranscriptStream")),
                 has_default: false,
                 kind: crate::ast::SlotKind::Late,
             },
@@ -3300,4 +3300,17 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
         h.state_field_kind("B", "doesNotExist"),
         crate::ast::SlotKind::Eager
     );
+    // ADR 0124 B3: the guarded read's hint names the declared type, walked
+    // the same way as the kind.
+    assert_eq!(
+        h.class_variable_type("B", "current"),
+        Some(DeclaredType::simple("TranscriptStream")),
+        "B should report A's late class variable's declared type"
+    );
+    assert_eq!(
+        h.class_variable_type("B", "total"),
+        None,
+        "an untyped class variable has no declared type"
+    );
+    assert_eq!(h.class_variable_type("B", "doesNotExist"), None);
 }

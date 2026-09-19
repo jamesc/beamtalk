@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LateClassVarAssignedActor — test fixture for BT-3549 (ADR 0124 §3/B3)
+//
+// The "assign then read" counterpart to `late_class_var_read_actor.bt`'s
+// LateClassVarReadActor — kept as its own class so the two tests, run
+// against the same long-lived class gen_server process across the whole
+// test file, can't observe each other's writes.
+
+typed Actor subclass: LateClassVarAssignedActor
+  late classState: current :: Integer
+
+  class getCurrent -> Integer => self.current
+
+  class setCurrent: value :: Integer -> Integer => self.current := value

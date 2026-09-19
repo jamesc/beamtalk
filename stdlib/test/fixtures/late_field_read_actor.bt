@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LateFieldReadActor — test fixture for BT-3549 (ADR 0124 §3/B3)
+//
+// Exercises the guarded `late` slot read (`maps:find` + the `'nil'` and
+// absence arms, `generate_field_access`): a read before assignment and a
+// `nil` injected via `spawnWith:` both raise `UninitializedStateError`;
+// a read after assignment answers the value; a `late` read inside a
+// `whileTrue:` body whose condition is false from the start never runs
+// the body and so never raises.
+
+typed Actor subclass: LateFieldReadActor
+  late state: proc :: Integer
+  state: count :: Integer = 0
+
+  getProc -> Integer => self.proc
+
+  setProc: value :: Integer -> Integer => self.proc := value
+
+  getCount -> Integer => self.count
+
+  // A `late` read inside a loop whose condition never lets the body run —
+  // must not raise, since the body itself never executes. Driven by a
+  // parameter rather than a mutated local counter: a `whileTrue:` loop that
+  // threads a mutated local alongside any field read (eager or `late`) hits
+  // a separate, pre-existing codegen gap unrelated to `late` (tracked as a
+  // follow-up, not part of this issue).
+  pumpWhile: shouldRun :: Boolean -> Nil =>
+    [shouldRun] whileTrue: [self.proc]
+    nil
