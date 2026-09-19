@@ -448,7 +448,17 @@ impl ThreadingPlan {
         };
         let context = generator.context;
         let threaded_locals = generator.compute_threaded_locals_for_loop(body, condition);
-        let initial_state_var = generator.current_state_var();
+        // BT-3562 follow-up: `current_field_read_state_var()`, not the raw
+        // `current_state_var()` — when this plan is built for a loop nested
+        // inside an outer non-hybrid direct-params loop, `in_loop_body` is
+        // already `true` here, so the raw accessor would derive a bogus
+        // `StateAcc*` name for `initial_state_var` (used by
+        // `generate_exit_stateacc`'s exit-arm rebuild, among others)
+        // instead of chaining through the outer loop's own already-captured
+        // (and still valid) variable. Identical to every other
+        // `current_state_var()` call site this issue already fixed; falls
+        // through to the exact same value as before outside that one case.
+        let initial_state_var = generator.current_field_read_state_var();
 
         // Pre-analyze body once — reused across all strategy decisions.
         let body_analysis = block_analysis::analyze_block(body);

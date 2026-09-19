@@ -471,9 +471,25 @@ impl CoreErlangGenerator {
         // accumulator parameter (only `param_names` above). See
         // `LoopMode::direct_params_outer_state_var`'s doc comment (the
         // identical `generate_while_loop_direct` fix this mirrors).
+        //
+        // Reuses the OUTER loop's own already-captured variable when nested
+        // inside another non-hybrid direct-params loop, rather than
+        // re-deriving one via the raw `current_state_var()` — by this point
+        // `in_loop_body` is already `true`, so a fresh derivation would
+        // produce a bogus `StateAcc*` name one level deeper.
+        // `current_field_read_state_var()` cannot be used directly here: it
+        // reads `direct_params_outer_state_var` itself, which `.take()`
+        // just cleared to `None` — read the outer value via
+        // `prev_direct_params_outer_state_var` instead, before it's
+        // overwritten below (mirrors the identical
+        // `generate_while_loop_direct` fix).
         let prev_direct_params_outer_state_var =
             self.loop_mode.direct_params_outer_state_var.take();
-        self.loop_mode.direct_params_outer_state_var = Some(self.current_state_var());
+        self.loop_mode.direct_params_outer_state_var = Some(
+            prev_direct_params_outer_state_var
+                .clone()
+                .unwrap_or_else(|| self.current_state_var()),
+        );
         let (body_stmts, ir_frame) = self.generate_letrec_body_ir(body, plan)?;
         self.loop_mode.direct_params_outer_state_var = prev_direct_params_outer_state_var;
         self.loop_mode.in_direct_params_loop = prev_direct_params_loop;

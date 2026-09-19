@@ -1004,3 +1004,40 @@ fn bt3562_hybrid_bare_field_read_in_while_loop_compiles() {
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc("bt3562_hybrid_bare_field_read", &code);
 }
+
+#[test]
+fn bt3562_plain_bare_field_read_in_nested_while_loop_compiles() {
+    // BT-3562 follow-up (PR #3960 review): a plain direct-params
+    // `whileTrue:` nested inside ANOTHER plain direct-params `whileTrue:`,
+    // with the bare, discarded `self.proc` read inside the INNER loop. No
+    // field write anywhere in this method, so both loops select
+    // direct-params mode and neither `letrec` fun ever binds a `StateAcc`
+    // parameter.
+    //
+    // The outer loop's own `generate_while_loop_direct` call captures
+    // `LoopMode::direct_params_outer_state_var` BEFORE entering the inner
+    // loop's body — by the time the inner loop makes its own capture,
+    // `in_loop_body` is already `true` (set by the outer loop's own
+    // `with_branch_context`), so a naive `current_state_var()` capture
+    // would re-derive a bogus `StateAccN` name one level deeper instead of
+    // reusing the outer loop's own already-captured (and still valid)
+    // variable — the exact unbound-`StateAcc` defect this issue fixes, just
+    // nested. Both capture sites now go through
+    // `current_field_read_state_var()`, which returns the already-captured
+    // outer value when one exists.
+    let src = "typed Actor subclass: CodexClient\n  state: proc :: Integer = 0\n\n  pump: limit =>\n    i := 0\n    [i < limit] whileTrue: [\n      j := 0\n      [j < limit] whileTrue: [\n        self.proc\n        j := j + 1\n      ]\n      i := i + 1\n    ]\n    nil\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3562_plain_bare_field_read_nested").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert!(
+        !code.contains("StateAcc)"),
+        "neither loop's letrec fun binds a StateAcc parameter — the inner \
+         loop's bare field read must reference the real captured state \
+         variable, not `maps:get('proc', StateAcc)`. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt3562_plain_bare_field_read_nested", &code);
+}
