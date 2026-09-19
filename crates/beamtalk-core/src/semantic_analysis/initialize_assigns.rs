@@ -199,16 +199,17 @@ fn analyze_expr(expr: &Expression, current: &BTreeSet<EcoString>) -> FlowResult 
 /// Analyzes a `Cascade` (`receiver msg1; msg2; ...`). A cascade is not one of
 /// ADR 0124 §6's named control constructs, so it gets the same conservative
 /// generic treatment [`analyze_message_send`]'s fallback gives an ordinary
-/// send's arguments (mirrored here rather than shared, since a cascade has no
-/// single selector to special-case on): the receiver runs once — unless it is
-/// itself a bare block literal (e.g. `[...] value; value`, cascading directly
-/// onto a block value), which gets the same "may not run" treatment as any
-/// other block-valued receiver — and then every cascaded message's arguments
-/// are threaded in source order, with each block-literal argument treated as
-/// "may not run" (its own assignments discarded, but any early `^` inside it
-/// still harvested as a real completion path — the block may be invoked
-/// later by whatever the cascaded selector does, and a non-local return fires
-/// back through `initialize` regardless of who invokes it).
+/// send's arguments — [`thread_receiver_and_args`] is the shared helper both
+/// call, so this isn't a second hand-copied implementation of that logic:
+/// the receiver runs once — unless it is itself a bare block literal (e.g.
+/// `[...] value; value`, cascading directly onto a block value), which gets
+/// the same "may not run" treatment as any other block-valued receiver —
+/// and then every cascaded message's arguments are threaded in source
+/// order, with each block-literal argument treated as "may not run" (its
+/// own assignments discarded, but any early `^` inside it still harvested
+/// as a real completion path — the block may be invoked later by whatever
+/// the cascaded selector does, and a non-local return fires back through
+/// `initialize` regardless of who invokes it).
 ///
 /// Getting this right matters even though nothing upstream reads
 /// `initialize_assigns` as a diagnostic yet (BT-1948): a block argument's
@@ -219,6 +220,34 @@ fn analyze_expr(expr: &Expression, current: &BTreeSet<EcoString>) -> FlowResult 
 fn analyze_cascade(
     receiver: &Expression,
     messages: &[CascadeMessage],
+    current: &BTreeSet<EcoString>,
+) -> FlowResult {
+    thread_receiver_and_args(
+        receiver,
+        messages.iter().flat_map(|m| m.arguments.iter()),
+        current,
+    )
+}
+
+/// Shared generic "thread a receiver, then every argument in order" walk,
+/// used by both [`analyze_message_send`]'s fallback (for an ordinary send's
+/// `arguments`) and [`analyze_cascade`] (for every cascaded message's
+/// arguments, flattened into one sequence) — a single implementation
+/// rather than two copies of the same logic (CLAUDE.md's
+/// no-duplicate-implementations rule).
+///
+/// The receiver runs inline UNLESS it is itself a bare block literal (e.g.
+/// `whileTrue:`/`whileFalse:`'s condition block, `ensure:`'s protected body,
+/// a cascade's `[...] value; value` receiver, or any other selector taking a
+/// block receiver) — such a block is not guaranteed to run exactly once, so
+/// it gets the same "may not run" treatment as a block-valued argument
+/// (loops, `do:`/`collect:`/etc., `on:do:`'s handler handled separately):
+/// early returns are harvested, but its own assignments are discarded. Each
+/// subsequent argument gets the identical block-valued treatment; a
+/// non-block argument threads `acc` normally and can itself diverge.
+fn thread_receiver_and_args<'a>(
+    receiver: &Expression,
+    args: impl Iterator<Item = &'a Expression>,
     current: &BTreeSet<EcoString>,
 ) -> FlowResult {
     let (mut acc, mut diverging) = if let Expression::Block(block) = receiver {
@@ -235,23 +264,21 @@ fn analyze_cascade(
         (after, recv_result.diverging)
     };
 
-    for message in messages {
-        for arg in &message.arguments {
-            if let Expression::Block(block) = arg {
-                let branch_result = analyze_block_body(block, &acc);
-                diverging.extend(branch_result.diverging);
-                // Discard branch_result.fallthrough — not guaranteed to run.
-            } else {
-                let arg_result = analyze_expr(arg, &acc);
-                diverging.extend(arg_result.diverging);
-                match arg_result.fallthrough {
-                    Some(set) => acc = set,
-                    None => {
-                        return FlowResult {
-                            fallthrough: None,
-                            diverging,
-                        };
-                    }
+    for arg in args {
+        if let Expression::Block(block) = arg {
+            let branch_result = analyze_block_body(block, &acc);
+            diverging.extend(branch_result.diverging);
+            // Discard branch_result.fallthrough — not guaranteed to run.
+        } else {
+            let arg_result = analyze_expr(arg, &acc);
+            diverging.extend(arg_result.diverging);
+            match arg_result.fallthrough {
+                Some(set) => acc = set,
+                None => {
+                    return FlowResult {
+                        fallthrough: None,
+                        diverging,
+                    };
                 }
             }
         }
@@ -401,52 +428,12 @@ fn analyze_message_send(
         }
     }
 
-    // Generic fallback: the receiver runs inline UNLESS it is itself a bare
-    // block literal (e.g. `whileTrue:`/`whileFalse:`'s condition block,
-    // `ensure:`'s protected body, or any other selector taking a block
-    // receiver) — such a block is not guaranteed to run exactly once, so it
-    // gets the same "may not run" treatment as a block-valued argument
-    // (loops, `do:`/`collect:`/etc., `on:do:`'s handler already handled
-    // above): early returns are harvested, but its own assignments are
-    // discarded.
-    let (mut acc, mut diverging) = if let Expression::Block(block) = receiver {
-        let branch_result = analyze_block_body(block, current);
-        (current.clone(), branch_result.diverging)
-    } else {
-        let recv_result = analyze_expr(receiver, current);
-        let Some(after) = recv_result.fallthrough else {
-            return FlowResult {
-                fallthrough: None,
-                diverging: recv_result.diverging,
-            };
-        };
-        (after, recv_result.diverging)
-    };
-
-    for arg in arguments {
-        if let Expression::Block(block) = arg {
-            let branch_result = analyze_block_body(block, &acc);
-            diverging.extend(branch_result.diverging);
-            // Discard branch_result.fallthrough — not guaranteed to run.
-        } else {
-            let arg_result = analyze_expr(arg, &acc);
-            diverging.extend(arg_result.diverging);
-            match arg_result.fallthrough {
-                Some(set) => acc = set,
-                None => {
-                    return FlowResult {
-                        fallthrough: None,
-                        diverging,
-                    };
-                }
-            }
-        }
-    }
-
-    FlowResult {
-        fallthrough: Some(acc),
-        diverging,
-    }
+    // Generic fallback (see `thread_receiver_and_args`'s doc comment for the
+    // block-may-not-run treatment it applies to the receiver and to every
+    // argument): early returns anywhere in a block-valued receiver or
+    // argument are harvested, but its own assignments are discarded, since
+    // none of these are guaranteed to run.
+    thread_receiver_and_args(receiver, arguments.iter(), current)
 }
 
 #[cfg(test)]
@@ -555,6 +542,10 @@ mod tests {
             arguments,
             span(),
         )
+    }
+
+    fn cascade_unary_message(selector: &str) -> CascadeMessage {
+        CascadeMessage::new(MessageSelector::Unary(selector.into()), vec![], span())
     }
 
     fn cascade(receiver: Expression, messages: Vec<CascadeMessage>) -> Expression {
@@ -807,6 +798,36 @@ mod tests {
             result,
             set(&["x"]),
             "a cascade with no block arguments must not block an assignment after it"
+        );
+    }
+
+    #[test]
+    fn cascade_with_block_literal_receiver_is_not_definite_but_harvests_early_return() {
+        // [self.x := nil. ^nil] value; value. self.y := nil.
+        //
+        // A bare block literal can itself be a cascade's receiver (e.g.
+        // invoking it more than once via `value`). It gets the same
+        // "may not run" treatment as any other block-valued receiver: `x`
+        // (assigned inside the block) is not definite, but the `^` inside it
+        // is still a real completion path that must be intersected against
+        // `y` (assigned after the cascade) — so neither ends up definite.
+        let receiver_block =
+            Expression::Block(block(vec![assign_field("x", nil_lit()), ret(nil_lit())]));
+        let result = assigns(vec![
+            cascade(
+                receiver_block,
+                vec![
+                    cascade_unary_message("value"),
+                    cascade_unary_message("value"),
+                ],
+            ),
+            assign_field("y", nil_lit()),
+        ]);
+        assert!(
+            result.is_empty(),
+            "a block-literal cascade receiver's own assignment must not be definite, and its \
+             early return must still be harvested as a completion that skips the following \
+             assignment"
         );
     }
 
