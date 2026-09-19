@@ -22232,19 +22232,22 @@
         "<",
         "DescendingPair",
         "Value",
+        "constructor",
+        "create",
         "descending_pair",
         "extends",
         "field",
         "inherit",
         "inheritance",
         "instance variable",
+        "instantiate",
         "key",
         "member",
         "property",
         "subclassing",
         "value"
       ],
-      "source": "// BT-2710 follow-up fixture: a value type with an OBJECT-typed field\n// (`key :: DescendingInt`) that it compares on. Because `key`'s declared type is\n// a user value-type, `self.key < other key` must route through the runtime\n// `is_object` guard and dispatch to `DescendingInt>><` — NOT take a bare\n// `erlang:'<'` that would silently term-order the inner tagged map.\n\nValue subclass: DescendingPair\n  field: key :: DescendingInt\n\n  /// The object-typed sort key.\n  key -> DescendingInt => self.key\n\n  /// Compare by the (descending-ordered) key. `self.key` is object-typed, so\n  /// this dispatches to `DescendingInt>><`.\n  < other :: DescendingPair -> Boolean => self.key < other key",
+      "source": "// BT-2710 follow-up fixture: a value type with an OBJECT-typed field\n// (`key :: DescendingInt`) that it compares on. Because `key`'s declared type is\n// a user value-type, `self.key < other key` must route through the runtime\n// `is_object` guard and dispatch to `DescendingInt>><` — NOT take a bare\n// `erlang:'<'` that would silently term-order the inner tagged map.\n\nValue subclass: DescendingPair\n  field: key :: DescendingInt = DescendingInt new\n\n  /// The object-typed sort key.\n  key -> DescendingInt => self.key\n\n  /// Compare by the (descending-ordered) key. `self.key` is object-typed, so\n  /// this dispatches to `DescendingInt>><`.\n  < other :: DescendingPair -> Boolean => self.key < other key",
       "explanation": "BT-2710 follow-up fixture: a value type with an OBJECT-typed field (`key :: DescendingInt`) that it compares on. Because `key`'s declared type is a user value-type, `self.key < other key` must route through the runtime `is_object` guard and dispatch to `DescendingInt>><` — NOT take a bare `erlang:'<'` that would silently term-order the inner tagged map."
     },
     {

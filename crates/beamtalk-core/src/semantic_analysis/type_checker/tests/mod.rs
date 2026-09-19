@@ -71,4 +71,5 @@ mod type_alias_exhaustiveness;
 mod typed_class;
 mod union_types;
 mod unions_checking;
+mod value_construction_definite_assignment;
 mod with_timeout_transparency;

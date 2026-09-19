@@ -2437,6 +2437,176 @@ impl TypeChecker {
         }
     }
 
+    /// Definite-assignment check at a Value construction site (ADR 0124 §6,
+    /// §7, Implementation A3+A4): `Cls new` or a literal-map `Cls new:
+    /// #{...}` that leaves a declared, no-default, non-nilable, non-`late`
+    /// field unassigned.
+    ///
+    /// Values have no runtime post-`initialize` check at all —
+    /// `generate_post_initialize_check` is wired only from
+    /// `generate_handle_continue` (Actor-only) — so this static check is the
+    /// *only* one a Value's typed-no-default fields ever get. Reuses the A1
+    /// predicate via
+    /// [`crate::semantic_analysis::requires_definite_assignment_for_declared_type`]
+    /// (the `ClassHierarchy`-level sibling of
+    /// [`crate::semantic_analysis::requires_definite_assignment`]) over
+    /// [`ClassHierarchy::all_state`], so an inherited unassigned field is
+    /// reported with the same rules as a directly-declared one.
+    ///
+    /// Called from the same three class-side-send call sites as
+    /// [`Self::check_spawn_with_map_keys`] (`inference/send/receiver.rs`) —
+    /// a syntactic `Cls new`, a `Meta`-typed receiver (`aClassVar new`), and
+    /// a class method's own `self new: #{...}` factory call — so the
+    /// canonical "class-method factory is the construction site" pattern
+    /// (ADR 0124 §6, e.g. `WorkflowHandle class for:client:`) is covered the
+    /// same way the `spawnWith:` key check already covers it.
+    ///
+    /// Fires only when:
+    /// - `selector` is `new` (arity 0) or `new:` (arity 1) and `class_name`
+    ///   is a Value subclass ([`ClassHierarchy::is_value_subclass`]) known to
+    ///   the hierarchy.
+    /// - Neither `class_name` nor any ancestor defines its own class-side
+    ///   `new`/`new:` (checked per selector) — when it does, the send
+    ///   doesn't resolve to the auto-generated constructor this check
+    ///   assumes (ADR 0124 §6's "only when `new` resolves to the
+    ///   auto-generated default" carve-out; applied to `new:` too since an
+    ///   overridden `class new:` may do anything with its argument —
+    ///   `stdlib/src/duration.bt:31`/`date_time.bt:41` ignore it entirely).
+    /// - For `new:`, the argument is a *literal* map (a non-literal `new:
+    ///   someMap` is no evidence, reported nothing — same boundary as
+    ///   [`Self::spawn_with_map_pairs`]).
+    ///
+    /// Never fires for the auto-generated keyword constructor (a different
+    /// selector entirely — it supplies every field by construction, ADR
+    /// 0042) or for an untyped/defaulted/`late` field.
+    ///
+    /// Severity is Warning when the ancestor chain is fully known (no
+    /// cross-file-unresolved or parse-error-degraded ancestor) and no
+    /// ancestor is `native:`; Hint otherwise — ADR 0124 §6's severity table
+    /// ("chain incomplete ... => Hint").
+    pub(super) fn check_value_construction_definite_assignment(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        arguments: &[Expression],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if selector != "new" && selector != "new:" {
+            return;
+        }
+        if class_name == "self" || class_name == "super" {
+            return;
+        }
+        if !hierarchy.has_class(class_name) || !hierarchy.is_value_subclass(class_name) {
+            return;
+        }
+        // Only when this selector resolves to the auto-generated
+        // constructor — see this function's doc comment.
+        if Self::value_new_selector_is_overridden(hierarchy, class_name, selector) {
+            return;
+        }
+
+        // For `new:`, only a literal map is evidence; anything else
+        // (including no argument at all, which can't parse as `new:`) is
+        // silently skipped.
+        let pairs: &[crate::ast::MapPair] = if selector == "new:" {
+            match arguments.first() {
+                Some(Expression::MapLiteral { pairs, .. }) => pairs,
+                _ => return,
+            }
+        } else {
+            &[]
+        };
+        let supplied: std::collections::HashSet<&str> = pairs
+            .iter()
+            .filter_map(|pair| match &pair.key {
+                Expression::Literal(Literal::Symbol(sym), _) => Some(sym.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        let empty_registry = AliasRegistry::new();
+        let aliases = self.alias_registry.as_ref().unwrap_or(&empty_registry);
+
+        // Confidence: a fully-known, locally-visible ancestor chain with no
+        // `native:` ancestor is a Warning; anything less certain is a Hint.
+        let chain_known = !hierarchy.has_cross_file_parent(class_name)
+            && !hierarchy.has_incomplete_surface_in_chain(class_name);
+        let has_native_ancestor = hierarchy.is_native(class_name)
+            || hierarchy
+                .superclass_chain(class_name)
+                .iter()
+                .any(|ancestor| hierarchy.is_native(ancestor));
+        let confident = chain_known && !has_native_ancestor;
+
+        for field_name in hierarchy.all_state(class_name) {
+            if supplied.contains(field_name.as_str()) {
+                continue;
+            }
+            let Some(ty) = hierarchy.state_field_type(class_name, &field_name) else {
+                continue; // Untyped — defaults to `nil`, no check (ADR 0124 §6).
+            };
+            let has_default = hierarchy.state_field_has_default(class_name, &field_name);
+            let slot_kind = hierarchy.state_field_kind(class_name, &field_name);
+            if !crate::semantic_analysis::requires_definite_assignment_for_declared_type(
+                &ty,
+                has_default,
+                slot_kind,
+                aliases,
+            ) {
+                continue;
+            }
+            let type_display = ty.to_string();
+            let message = format!(
+                "`{class_name}` declares `{field_name} :: {type_display}` with no default, and `{class_name} {selector}` supplies no `{field_name}` — the constructed instance would hold `nil` there despite its non-nilable declared type"
+            );
+            let hint = format!(
+                "Supply `{field_name}` at the construction site, give the field a default value, or widen its type to `{type_display} | Nil`"
+            );
+            let diagnostic = if confident {
+                Diagnostic::warning(message, span)
+            } else {
+                Diagnostic::hint(message, span)
+            }
+            .with_hint(hint)
+            .with_category(DiagnosticCategory::DefiniteAssignment);
+            self.diagnostics.push(diagnostic);
+        }
+    }
+
+    /// `true` if `class_name` or an ancestor **strictly between it and
+    /// `Value`** defines its own class-side method named `selector` — i.e.
+    /// `selector` does not resolve to the auto-generated Value constructor
+    /// [`Self::check_value_construction_definite_assignment`] assumes.
+    ///
+    /// `Value` itself carries the real, sealed, source-backed `new`/`new:`
+    /// methods every Value subclass inherits (`stdlib/src/value.bt`) — *that*
+    /// definition **is** the auto-generated default this check assumes, not
+    /// an override of it, so the ancestor walk stops there rather than
+    /// treating every Value subclass as having an "overridden" constructor.
+    /// A native Value subclass genuinely overriding `new:` (e.g.
+    /// `stdlib/src/duration.bt:31`, `date_time.bt:41`) is caught by the walk
+    /// stopping *before* `Value`, not after.
+    fn value_new_selector_is_overridden(
+        hierarchy: &ClassHierarchy,
+        class_name: &str,
+        selector: &str,
+    ) -> bool {
+        if hierarchy.has_own_class_method(class_name, selector) {
+            return true;
+        }
+        for ancestor in hierarchy.superclass_chain(class_name) {
+            if ancestor.as_str() == "Value" {
+                break;
+            }
+            if hierarchy.has_own_class_method(&ancestor, selector) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Check a `spawnWith:` literal value against a declared slot type
     /// (ADR 0104 Phase 2).
     ///

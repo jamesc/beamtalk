@@ -74,6 +74,33 @@ pub fn requires_definite_assignment(decl: &StateDeclaration, aliases: &AliasRegi
     }
 }
 
+/// [`requires_definite_assignment`] for a caller that only has
+/// `ClassHierarchy`/`ClassInfo`-level data — a resolved
+/// [`crate::semantic_analysis::class_hierarchy::DeclaredType`], an explicit
+/// has-default flag, and a [`SlotKind`] — rather than an AST
+/// [`StateDeclaration`]. This is the shape `ClassHierarchy::all_state`
+/// walks across cross-file ancestors expose (`state_field_type`,
+/// `state_field_has_default`, `state_field_kind`), which have no AST to hand
+/// for a superclass compiled in another file.
+///
+/// Used by ADR 0124 §6/§7's Implementation A3/A4 (the Value
+/// construction-site definite-assignment check, `TypeChecker::check_value_construction_definite_assignment`)
+/// so the construction-site check and the declaration-site
+/// [`requires_definite_assignment`] share one predicate rather than
+/// re-deriving the same "no default, not late, not nilable" rule twice.
+#[must_use]
+pub fn requires_definite_assignment_for_declared_type(
+    ty: &DeclaredType,
+    has_default: bool,
+    slot_kind: SlotKind,
+    aliases: &AliasRegistry,
+) -> bool {
+    if slot_kind == SlotKind::Late || has_default {
+        return false;
+    }
+    !is_nilable_declared_type(ty, aliases)
+}
+
 /// `true` if `annotation` admits `nil` once ADR 0108 aliases and ADR 0102
 /// intersection/negation operators are resolved — see the module doc.
 #[must_use]
@@ -323,5 +350,66 @@ mod tests {
             &registry
         ));
         assert!(!requires_definite_assignment(&d, &registry));
+    }
+
+    // ── requires_definite_assignment_for_declared_type ────────────────────
+
+    #[test]
+    fn declared_type_plain_non_nilable_no_default_eager_requires_assignment() {
+        let registry = AliasRegistry::new();
+        assert!(requires_definite_assignment_for_declared_type(
+            &DeclaredType::simple("Integer"),
+            false,
+            SlotKind::Eager,
+            &registry
+        ));
+    }
+
+    #[test]
+    fn declared_type_with_default_does_not_require_assignment() {
+        let registry = AliasRegistry::new();
+        assert!(!requires_definite_assignment_for_declared_type(
+            &DeclaredType::simple("Integer"),
+            true,
+            SlotKind::Eager,
+            &registry
+        ));
+    }
+
+    #[test]
+    fn declared_type_late_does_not_require_assignment_even_without_default() {
+        let registry = AliasRegistry::new();
+        assert!(!requires_definite_assignment_for_declared_type(
+            &DeclaredType::simple("Integer"),
+            false,
+            SlotKind::Late,
+            &registry
+        ));
+    }
+
+    #[test]
+    fn declared_type_nilable_union_does_not_require_assignment() {
+        let registry = AliasRegistry::new();
+        let ty = DeclaredType::union(vec![
+            DeclaredType::simple("Integer"),
+            DeclaredType::simple("Nil"),
+        ]);
+        assert!(!requires_definite_assignment_for_declared_type(
+            &ty,
+            false,
+            SlotKind::Eager,
+            &registry
+        ));
+    }
+
+    #[test]
+    fn declared_type_alias_to_nilable_does_not_require_assignment() {
+        let registry = registry_with_alias("JsonValue", union(&["Nil", "Boolean", "Integer"]));
+        assert!(!requires_definite_assignment_for_declared_type(
+            &DeclaredType::simple("JsonValue"),
+            false,
+            SlotKind::Eager,
+            &registry
+        ));
     }
 }

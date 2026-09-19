@@ -774,15 +774,14 @@ impl CoreErlangGenerator {
                     let Some(type_name) = info.state_types.get(field_name) else {
                         continue; // untyped field — not a typed-no-default
                     };
-                    // Missing default-info entry (e.g., older BEAM artifact) is
-                    // conservatively treated as "has default" so we don't raise
-                    // spurious UninitializedStateError on stale metadata.
-                    let has_default = info
-                        .state_has_default
-                        .get(field_name)
-                        .copied()
-                        .unwrap_or(true);
-                    if has_default {
+                    // `ClassHierarchy::state_field_has_default` conservatively
+                    // treats a missing default-info entry (e.g., older BEAM
+                    // artifact) as "has default" so we don't raise a spurious
+                    // UninitializedStateError on stale metadata — see its doc
+                    // comment for the shared degradation rule this and
+                    // `TypeChecker::check_value_construction_definite_assignment`
+                    // both rely on.
+                    if hierarchy.state_field_has_default(&name, field_name) {
                         continue;
                     }
                     let type_name = type_name.to_string();

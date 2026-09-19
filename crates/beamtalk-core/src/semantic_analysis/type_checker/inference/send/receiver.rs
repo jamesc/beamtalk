@@ -350,6 +350,15 @@ impl TypeChecker {
             );
             // ADR 0104 Phase 2: `C spawnWith: #{...}` literal-map key check.
             self.check_spawn_with_map_keys(class_name, &selector_name, arguments, hierarchy);
+            // ADR 0124 §6/§7 (A3+A4): `C new` / `C new: #{...}` Value
+            // construction-site definite-assignment check.
+            self.check_value_construction_definite_assignment(
+                class_name,
+                &selector_name,
+                arguments,
+                span,
+                hierarchy,
+            );
             return self.check_class_side_send(
                 class_name,
                 &selector_name,
@@ -408,6 +417,15 @@ impl TypeChecker {
             // ADR 0104 Phase 2: type-driven `cls spawnWith: #{...}`
             // (receiver typed `Meta{C}`) literal-map key check.
             self.check_spawn_with_map_keys(meta_class, &selector_name, arguments, hierarchy);
+            // ADR 0124 §6/§7 (A3+A4): type-driven `cls new`/`cls new:
+            // #{...}` Value construction-site definite-assignment check.
+            self.check_value_construction_definite_assignment(
+                meta_class,
+                &selector_name,
+                arguments,
+                span,
+                hierarchy,
+            );
             let class_side =
                 self.check_class_side_send(meta_class, &selector_name, span, hierarchy, &arg_types);
             // ADR 0083: when no class-side method on `C` defined the result, a
@@ -471,6 +489,17 @@ impl TypeChecker {
                         class_name,
                         &selector_name,
                         arguments,
+                        hierarchy,
+                    );
+                    // ADR 0124 §6/§7 (A3+A4): `self new`/`self new: #{...}`
+                    // Value construction-site definite-assignment check —
+                    // the canonical class-method factory site (e.g.
+                    // `WorkflowHandle class for:client:`).
+                    self.check_value_construction_definite_assignment(
+                        class_name,
+                        &selector_name,
+                        arguments,
+                        span,
                         hierarchy,
                     );
                     return self.check_class_side_send(
