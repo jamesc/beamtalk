@@ -1443,6 +1443,17 @@ BT-3549 (B3), BT-3550 (B5b), BT-3551 (B4), BT-3552 (A3+A4), BT-3553 (A2a),
 BT-1948 (A2b, repurposed), BT-3554 (A5), BT-3555 (B6), BT-3556 (B9),
 BT-3557 (B8, `needs-spec` until the `printString` rendering is confirmed),
 BT-3558 (B10), BT-3559 (stdlib singleton conversions)
+**Splits made at planning time**, so each issue is S or M: A2 became
+**A2a** (BT-3553, the per-class "`initialize` definitely assigns" must-analysis
+and its composition across the chain via `__beamtalk_meta`/`ClassInfo`) and
+**A2b** (BT-1948, the Actor construction-site check over `spawn` and literal
+`spawnWith:` that consumes it); B5 became **B5a** (BT-3547, the slot-kind
+metadata: `ClassInfo` third map, `__beamtalk_meta` entry, `class_variables`
+structure) and **B5b** (BT-3550, the `fieldKinds`/`allFieldKinds` selectors,
+`classAllFieldKindsByName/1` and LSP hover). B3's "after B5" (§4e) means
+**after B5a**: the guarded read needs the metadata, not the selectors. A3 and
+A4 were folded into one issue (BT-3552), since the first check to emit the
+diagnostic category defines it.
 **Not planned:** B7 (inspector `#lateSlot`), B11 (`ClassBuilder` parity) —
 by decision, remain future work
 **Status:** Planned
@@ -1455,9 +1466,12 @@ by decision, remain future work
   initialiser policy"), [BT-3527](https://linear.app/beamtalk/issue/BT-3527)
   (distribution — `late` slots crossing a node boundary); historical
   [BT-1947](https://linear.app/beamtalk/issue/BT-1947) /
+  [BT-1948](https://linear.app/beamtalk/issue/BT-1948) /
   [BT-1949](https://linear.app/beamtalk/issue/BT-1949) /
   [BT-1951](https://linear.app/beamtalk/issue/BT-1951) (typed-no-default
-  slots and the runtime check),
+  slots and the runtime check; BT-1948 was the original definite-assignment
+  issue, blocked on the escape-hatch question this ADR resolves, and is
+  repurposed as A2b),
   [BT-2881](https://linear.app/beamtalk/issue/BT-2881) (the check is not
   gated on `typed`)
 - Related ADRs:
