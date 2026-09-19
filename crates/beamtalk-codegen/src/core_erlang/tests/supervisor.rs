@@ -27,6 +27,7 @@ fn make_static_supervisor_module() -> Module {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -64,6 +65,7 @@ fn make_dynamic_supervisor_module() -> Module {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -324,6 +326,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -409,6 +412,7 @@ fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_typ
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -506,6 +510,7 @@ fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     // No `type_aliases` of its own — the module only references the name.
@@ -607,6 +612,7 @@ fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     // No `type_aliases` of its own — the module only references the name.

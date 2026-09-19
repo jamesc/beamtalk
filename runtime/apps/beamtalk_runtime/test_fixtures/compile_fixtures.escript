@@ -90,7 +90,19 @@ main([]) ->
         %% typed-no-default field (either alone triggers the same guarded
         %% init/1 branch).
         "init_hook_counter",
-        "typed_field_counter"
+        "typed_field_counter",
+        %% BT-3536 (ADR 0123 Phase 2) - beamtalk_shape_migration:migrate/3
+        %% (a real two-step v1->v2->v3 chain, meck'd shape_version/
+        %% shape_migrations meta) and pack/1's tier walk: a nested Value
+        %% field + a builtin Array field (success path), a SendableRef
+        %% field, and a HandleScoped field (both rejected).
+        "shape_chain_cart",
+        "shape_point",
+        "shape_box",
+        "shape_handle_box",
+        "shape_hazard_worker",
+        "shape_hazard_cart",
+        "shape_handle_cart"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

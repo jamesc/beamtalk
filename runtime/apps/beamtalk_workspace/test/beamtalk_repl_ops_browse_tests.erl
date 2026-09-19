@@ -1007,6 +1007,27 @@ class_definition_text_sealed_typed_test() ->
         <<"sealed typed Value subclass: MetricsTable\n  field: x :: Integer = 0">>, Definition
     ).
 
+%% ADR 0123 §1 (BT-3537): a declared `shapeVersion:` round-trips through the
+%% flush skeleton, on its own line right after the header — same canonical
+%% placement the Rust unparser uses.
+class_definition_text_shape_version_test() ->
+    State = [#{<<"name">> => <<"itemCount">>, <<"default">> => <<"0">>, <<"type">> => null}],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Cart', 'Actor', State, false, false, false, #{kind => actor, shape_version => 2}
+    ),
+    ?assertEqual(
+        <<"Actor subclass: Cart\n  shapeVersion: 2\n  state: itemCount = 0">>, Definition
+    ).
+
+%% Absent `shape_version` (the vast majority of classes, and every class
+%% predating ADR 0123) must not emit the clause at all.
+class_definition_text_no_shape_version_omits_clause_test() ->
+    State = [#{<<"name">> => <<"count">>, <<"default">> => <<"0">>, <<"type">> => null}],
+    Definition = beamtalk_repl_ops_browse:class_definition_text(
+        'Counter', 'Actor', State, false, false, false, #{kind => actor}
+    ),
+    ?assertEqual(<<"Actor subclass: Counter\n  state: count = 0">>, Definition).
+
 class_definition_text_abstract_typed_test() ->
     State = [],
     Definition = beamtalk_repl_ops_browse:class_definition_text(

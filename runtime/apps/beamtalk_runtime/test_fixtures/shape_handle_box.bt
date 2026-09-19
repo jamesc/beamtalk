@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3536 (ADR 0123 Phase 2) regression fixture: an Object subclass
+// declaring `handleScope: #process` (ADR 0103) — the HandleScoped hazard
+// type used by shape_handle_cart.bt to exercise
+// beamtalk_shape_migration:pack/1's `not_serialisable` rejection.
+
+typed Object subclass: ShapeHandleBox
+  handleScope: #process

@@ -289,6 +289,7 @@ pub(super) fn counter_class_with_typed_state(
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     }
 }
@@ -353,6 +354,7 @@ pub(super) fn make_class_with_methods(
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     }
 }

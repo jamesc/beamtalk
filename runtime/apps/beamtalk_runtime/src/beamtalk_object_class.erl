@@ -47,6 +47,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     is_abstract/1,
     is_internal/1,
     is_constructible/1,
+    shape_version/1,
     class_name/1,
     module_name/1,
     module_name_safe/1,
@@ -126,7 +127,13 @@ and join the `beamtalk_classes` pg group for enumeration.
     %% Class method doc comments
     class_method_docs = #{} :: #{selector() => binary()},
     %% ADR 0071 Phase 5: Class visibility (internal vs public)
-    is_internal = false :: boolean()
+    is_internal = false :: boolean(),
+    %% ADR 0123 §1: declared shapeVersion: N (default 1) — same
+    %% Meta-then-ClassInfo-then-existing precedence every other reflected
+    %% field here uses, so a ClassBuilder `shapeVersion:` (ClassInfo, no
+    %% compiled meta) and a compiled `shapeVersion:` header clause (Meta)
+    %% both answer correctly from the same `shape_version/1` accessor.
+    shape_version = 1 :: pos_integer()
 }).
 
 %%====================================================================
@@ -622,6 +629,16 @@ instance_variables(ClassPid) ->
 is_sealed(ClassPid) ->
     gen_server:call(ClassPid, is_sealed).
 
+-doc """
+Return the class's declared shape version (ADR 0123 §1) — the compiled
+`shapeVersion: N` header clause or the `ClassBuilder shapeVersion:` builder
+keyword, default `1`. Backs `Behaviour >> shapeVersion`
+(`beamtalk_behaviour_intrinsics:classShapeVersion/1`).
+""".
+-spec shape_version(pid()) -> pos_integer().
+shape_version(ClassPid) ->
+    gen_server:call(ClassPid, shape_version).
+
 -doc "Check if a class is typed (all fields and methods require type annotations).".
 -spec is_typed(pid()) -> boolean().
 is_typed(ClassPid) ->
@@ -800,7 +817,8 @@ init({ClassName, ClassInfo}) ->
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{}),
         class_method_docs = maps:get(class_method_docs, ClassInfo, #{}),
-        is_internal = IsInternal
+        is_internal = IsInternal,
+        shape_version = maps:get(shape_version, Meta, maps:get(shape_version, ClassInfo, 1))
     },
 
     %% Seed the live classVars snapshot with the declared defaults
@@ -1327,6 +1345,8 @@ handle_call(field_defaults, _From, #class_state{field_defaults = Defaults} = Sta
     {reply, Defaults, State};
 handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
     {reply, Sealed, State};
+handle_call(shape_version, _From, #class_state{shape_version = ShapeVersion} = State) ->
+    {reply, ShapeVersion, State};
 handle_call(is_typed, _From, #class_state{is_typed = Typed} = State) ->
     {reply, Typed, State};
 handle_call(is_internal, _From, #class_state{is_internal = Internal} = State) ->
@@ -2154,5 +2174,8 @@ apply_class_info(State, ClassInfo) ->
         class_method_docs = maps:get(
             class_method_docs, ClassInfo, State#class_state.class_method_docs
         ),
-        is_internal = NewIsInternal
+        is_internal = NewIsInternal,
+        shape_version = maps:get(
+            shape_version, Meta, maps:get(shape_version, ClassInfo, State#class_state.shape_version)
+        )
     }.

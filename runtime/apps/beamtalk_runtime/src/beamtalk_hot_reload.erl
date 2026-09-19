@@ -16,11 +16,19 @@ runtime.
 **Current Migrations:**
 - Rewrites `__class__` → `$beamtalk_class` tag key for actors
   with legacy state maps.
-- Field migration — adds new fields with defaults, drops removed
-  fields (with log warning) when Extra contains `#{module := Module}`
-  (ADR 0123 Phase 0, BT-3534). The flattened field list (inherited fields
-  included) is derived here, from the state's own `$beamtalk_class` tag —
-  the caller passes only what the state cannot tell you.
+- Field migration — when Extra contains `#{module := Module}`, delegates to
+  `beamtalk_shape_migration:migrate/3` (ADR 0123 Phase 2, BT-3536): runs the
+  class's migration chain (if any `'shape_migrations'` are declared — none
+  are, until Phase 3 ships the `shapeVersion:`/`migrateFromVN:` language
+  surface) and reconciles the result against the **flattened** declared
+  field list (inherited fields included, BT-3531), defaulting from
+  `Module:init(#{'__skip_initialize__' => true})` (BT-3532). This module's
+  own job is narrower now: read `'__shape_version__'` from the *old* state
+  before any new default seeds it (`migrate_state/2`'s read-before-seed,
+  BT-3534), strip/re-attach the internal keys `beamtalk_shape_migration`
+  never sees, and let a migration failure propagate as `{error, _}` so
+  `try_change_code/3`'s existing suspend-on-failure path (BT-3534) catches
+  it — unchanged from before this delegation.
 
 **References:**
 - docs/beamtalk-ddd-model.md (Hot Reload Context, StateMigrator)
@@ -66,8 +74,12 @@ code_change(_OldVsn, State, #{module := Module}) when is_map(State), is_atom(Mod
         domain => [beamtalk, runtime]
     }),
     MigratedState = maybe_migrate_class_key(State),
-    NewState = migrate_fields(MigratedState, Module),
-    {ok, NewState};
+    case migrate_state(MigratedState, Module) of
+        {ok, NewState} ->
+            {ok, NewState};
+        {error, Reason} ->
+            {error, Reason}
+    end;
 code_change(_OldVsn, State, _Extra) when is_map(State) ->
     ?LOG_DEBUG("code_change: class key migration check", #{domain => [beamtalk, runtime]}),
     {ok, maybe_migrate_class_key(State)};
@@ -161,43 +173,62 @@ maybe_migrate_class_key(State) ->
     end.
 
 -doc """
-Migrate actor state fields during hot reload.
-
-Calls the module's init(#{'__skip_initialize__' => true}) to get default
-state — the 2-tuple, no-telemetry branch, so migration never fires
-`initialize` or lifecycle start telemetry — then:
-- Preserves all existing field values from old state
-- Adds new fields with their default values
-- Drops removed fields (with log warning)
-- Preserves internal keys present in new init defaults (e.g. __class_mod__)
-
-ADR 0123 Phase 0 (BT-3534): the flattened field list (inherited fields
-included) is derived here — from the class registry, via the state's own
-`$beamtalk_class` tag — rather than being passed by the caller; the old
-`{NewInstanceVars, Module}` `Extra` shape let the caller choose which list
-to pass, which was itself the cause of BT-3531's dropped-inherited-fields
-bug.
+Migrate actor state during hot reload by delegating to
+`beamtalk_shape_migration:migrate/3` (ADR 0123 Phase 2, BT-3536).
 
 **Read before seed.** `'__shape_version__'` is read from the *incoming*
-`OldState` before `BaseState` is seeded from the new init's defaults
-(which, as of BT-3534, also carry `'__shape_version__'` — always `1`
-today, since `shapeVersion:` itself is a later phase). Seeding first would
-stamp the new default's version in ahead of the read, losing the state's
-actual old version — the ordering a future migration chain (ADR 0123
-Phase 1/2) will need to run from the right `FromVersion`. Until that chain
-exists, the *old* version is restamped onto the migrated result unchanged:
-no migration has actually run, so nothing has earned advancing it.
+`OldState` before anything from the new module's defaults can overwrite it
+— the ordering BT-3534 established, still required now that the version
+feeds `migrate/3`'s `FromVersion` argument (rather than just being
+restamped unchanged).
+
+Strips the internal keys (`beamtalk_tagged_map:internal_fields/0`) before
+calling `beamtalk_shape_migration:migrate/3` — its `Fields` contract is user
+fields only, no `'$beamtalk_class'`/`'__methods__'`/etc. — and re-attaches
+them from `Module:init(#{'__skip_initialize__' => true})`'s own defaults on
+success, the same "internal keys come from the new module" rule
+`migrate_fields/2` (this function's ADR 0123 Phase 0/1 predecessor) used,
+finally overlaying `migrate/3`'s returned `ToVersion` as the new
+`'__shape_version__'`.
+
+A migration failure (a raising `migrateFromVN:` hook, or a typed field left
+unset — see `beamtalk_shape_migration:migrate/3`) returns `{error, _}`
+unchanged: `code_change/3`'s caller, `try_change_code/3`, already treats any
+non-`{ok, _}` return as "leave this pid suspended, state intact" (BT-3534) —
+the same suspend-on-failure contract the migration hook napkin spike
+(BT-3535) exercised, generalised here to the whole chain.
 """.
--spec migrate_fields(map(), atom()) -> map().
-migrate_fields(OldState, Module) ->
-    %% BT-3534: read-before-seed — capture the old version before any new
-    %% defaults are seeded into BaseState below. Absent means version 1.
+-spec migrate_state(map(), atom()) -> {ok, map()} | {error, term()}.
+migrate_state(OldState, Module) ->
+    %% BT-3534/BT-3536: read-before-seed — capture the old version before
+    %% anything below can seed a different one. Absent means version 1.
     OldShapeVersion = maps:get('__shape_version__', OldState, 1),
     ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
-    NewInstanceVars = beamtalk_behaviour_intrinsics:classAllFieldNamesByName(ClassName),
-    %% Get new default state by calling init with the skip-initialize flag,
-    %% guaranteeing the plain {ok, Map} return regardless of whether the
-    %% class defines `initialize` or has typed-no-default fields.
+    InternalKeys = beamtalk_tagged_map:internal_fields(),
+    OldInternalKeys = maps:with(InternalKeys, OldState),
+    UserFields = maps:without(InternalKeys, OldState),
+    case beamtalk_shape_migration:migrate(ClassName, OldShapeVersion, UserFields) of
+        {ok, NewFields, NewShapeVersion} ->
+            BaseState = seed_internal_keys(ClassName, Module, InternalKeys, OldInternalKeys),
+            {ok, maps:merge(BaseState, NewFields#{'__shape_version__' => NewShapeVersion})};
+        {error, _BeamtalkError} = Err ->
+            Err
+    end.
+
+-doc """
+Seed the internal keys (`'$beamtalk_class'`, `'__class_mod__'`,
+`'__methods__'`, `'__registry_pid__'`) from the freshly reloaded module's own
+`init(#{'__skip_initialize__' => true})` defaults — the updated method
+table, in particular, must come from the *new* code, never carried over from
+old state. Falls back to `FallbackKeys` (the incoming state's own internal
+keys, unchanged) when `init/1` is not usable — the same "keep what we had"
+degrade the pre-BT-3536 `migrate_fields/3` fell back to wholesale, now
+scoped to just the internal keys since `beamtalk_shape_migration`'s own
+reconcile step degrades the user fields independently — with a
+`?LOG_WARNING` naming the returned shape.
+""".
+-spec seed_internal_keys(atom(), atom(), [atom()], map()) -> map().
+seed_internal_keys(ClassName, Module, InternalKeys, FallbackKeys) ->
     case
         try
             Module:init(#{'__skip_initialize__' => true})
@@ -206,10 +237,7 @@ migrate_fields(OldState, Module) ->
         end
     of
         {ok, NewDefaults} when is_map(NewDefaults) ->
-            %% Internal keys to always preserve from new defaults
-            InternalKeys = beamtalk_tagged_map:internal_fields(),
-            %% Start with internal keys from new defaults (updated method table etc.)
-            BaseState0 = lists:foldl(
+            lists:foldl(
                 fun(Key, Acc) ->
                     % elp:fixme W0032 maps:find with complex branch logic
                     case maps:find(Key, NewDefaults) of
@@ -219,51 +247,10 @@ migrate_fields(OldState, Module) ->
                 end,
                 #{},
                 InternalKeys
-            ),
-            %% Read-before-seed (BT-3534): restamp the version read above,
-            %% not whatever the new init's defaults contributed.
-            BaseState = BaseState0#{'__shape_version__' => OldShapeVersion},
-            %% Add new field defaults
-            NewVarSet = sets:from_list(NewInstanceVars, [{version, 2}]),
-            WithDefaults = lists:foldl(
-                fun(Var, Acc) ->
-                    % elp:fixme W0032 maps:find with complex branch logic
-                    case maps:find(Var, NewDefaults) of
-                        {ok, Default} -> Acc#{Var => Default};
-                        error -> Acc
-                    end
-                end,
-                BaseState,
-                NewInstanceVars
-            ),
-            %% Overlay old state values (existing values win)
-            OldInstanceVars = maps:without(InternalKeys, OldState),
-            {Kept, Dropped} = maps:fold(
-                fun(Key, Value, {KeepAcc, DropAcc}) ->
-                    case sets:is_element(Key, NewVarSet) of
-                        true -> {KeepAcc#{Key => Value}, DropAcc};
-                        false -> {KeepAcc, [Key | DropAcc]}
-                    end
-                end,
-                {WithDefaults, []},
-                OldInstanceVars
-            ),
-            %% Log warning for dropped fields
-            case Dropped of
-                [] ->
-                    ok;
-                _ ->
-                    ?LOG_WARNING(
-                        "Hot reload dropped fields",
-                        #{class => ClassName, fields => Dropped, domain => [beamtalk, runtime]}
-                    )
-            end,
-            Kept;
+            );
         Other ->
-            %% init returned an unexpected shape (or raised) — keep state
-            %% unchanged, but this is not silent: log it.
             ?LOG_WARNING(
-                "Hot reload field migration skipped: unexpected init/1 return",
+                "Hot reload: unexpected init/1 return while seeding internal keys",
                 #{
                     class => ClassName,
                     module => Module,
@@ -271,7 +258,7 @@ migrate_fields(OldState, Module) ->
                     domain => [beamtalk, runtime]
                 }
             ),
-            OldState
+            FallbackKeys
     end.
 
 -doc """

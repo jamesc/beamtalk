@@ -32,6 +32,8 @@ that the Behaviour/Class libraries can rely on.
 | classFieldNames/1           | Field names from class gen_server state                   |
 | classAllFieldNames/1        | Combined field names via superclass chain                 |
 | classAllFieldNamesByName/1  | Same as classAllFieldNames/1, by ClassName (no instance needed) |
+| classAllFieldTypesByName/1  | Flattened field name -> declared type atom (ADR 0123 Phase 2) |
+| classAllFieldHasDefaultByName/1 | Flattened field name -> has-default boolean (ADR 0123 Phase 2) |
 | classClassVarNames/1        | Class-side field names (class variables) from class meta   |
 | classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
@@ -50,6 +52,8 @@ that the Behaviour/Class libraries can rely on.
 | classRenameTo/2             | Rename the class + rewrite reference sites (ADR 0114 Phase 2) |
 | classRenameSelector/3       | Rename a selector + rewrite safe self/super sites (ADR 0114 Phase 3) |
 | classRenameSelectorIfAbsent/4 | Rename a selector, running a fallback block if absent (ADR 0114 Phase 3) |
+| classShapeVersion/1         | Declared shapeVersion: N from class meta, default 1 (ADR 0123 §1) |
+| classMigrateShapeFrom/3     | Run the migrateFromVN: chain + reconcile (ADR 0123 §3, wraps beamtalk_shape_migration:migrate/3) |
 """.
 
 -include("beamtalk.hrl").
@@ -67,6 +71,10 @@ that the Behaviour/Class libraries can rely on.
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
+    %% ADR 0123 Phase 2 (BT-3536): flattened per-field declared metadata,
+    %% for beamtalk_shape_migration's reconcile and pack/1 tier walk.
+    classAllFieldTypesByName/1,
+    classAllFieldHasDefaultByName/1,
     %% class-side field (class variable) reflection
     classClassVarNames/1,
     classAllClassVarNames/1,
@@ -108,6 +116,9 @@ that the Behaviour/Class libraries can rely on.
     %% ADR 0114 Phase 3: method rename primitives
     classRenameSelector/3,
     classRenameSelectorIfAbsent/4,
+    %% ADR 0123 §1/§3: shape versioning
+    classShapeVersion/1,
+    classMigrateShapeFrom/3,
     %% ADR 0079: exposed for cross-module hierarchy checks
     walk_hierarchy/3,
     %% ADR 0114 Phase 4: `Workspace changes revert:`'s
@@ -383,6 +394,67 @@ classAllFieldNamesByName(ClassName) ->
             {cont, IVars ++ Acc}
         end,
         []
+    ).
+
+-doc """
+Return the flattened field name → declared type atom map, including
+inherited fields (ADR 0123 Phase 2, BT-3536).
+
+Reuses `walk_hierarchy/3` — the same superclass-chain walk
+`classAllFieldNamesByName/1` uses — reading each level's own `'field_types'`
+key from `__beamtalk_meta/0` (`class_meta.rs`'s `meta_field_types_map`,
+`'none'` for an untyped field). `beamtalk_shape_migration:pack/1` walks this
+to grade each field's sendability tier before packing.
+
+On a conflict (a field name declared at more than one hierarchy level, which
+should not happen in practice), the more-derived class's entry wins — merge
+order mirrors `classAllFieldNamesByName/1`'s "ancestor precedes subclass"
+walk, with the accumulator (already-visited, more-derived levels) taking
+precedence in `maps:merge/2`. Dynamic classes with no `__beamtalk_meta/0`
+contribute no entries at their level (same `not_available` degrade as
+`classFieldNames/1`); returns `#{}` for an unregistered class.
+""".
+-spec classAllFieldTypesByName(atom()) -> #{atom() => atom()}.
+classAllFieldTypesByName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            FieldTypes =
+                case meta_for_module(Module) of
+                    {ok, Meta} -> maps:get(field_types, Meta, #{});
+                    not_available -> #{}
+                end,
+            {cont, maps:merge(FieldTypes, Acc)}
+        end,
+        #{}
+    ).
+
+-doc """
+Return the flattened field name → has-default boolean map, including
+inherited fields (ADR 0123 Phase 2, BT-3536).
+
+Same walk and merge-precedence rule as `classAllFieldTypesByName/1`, reading
+each level's `'field_has_default'` key (`class_meta.rs`'s
+`meta_field_has_default_map`). `beamtalk_shape_migration`'s reconcile step
+uses this to tell "declared with no default" (fails on a `typed` class if
+still absent after the chain) from "declared with a default" (falls back to
+`Module:init/1`'s default) without needing the AST.
+""".
+-spec classAllFieldHasDefaultByName(atom()) -> #{atom() => boolean()}.
+classAllFieldHasDefaultByName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            HasDefault =
+                case meta_for_module(Module) of
+                    {ok, Meta} -> maps:get(field_has_default, Meta, #{});
+                    not_available -> #{}
+                end,
+            {cont, maps:merge(HasDefault, Acc)}
+        end,
+        #{}
     ).
 
 -doc """
@@ -2133,6 +2205,46 @@ classRenameSelectorIfAbsent(Self, OldSelector, NewSelector, AbsentBlock) when
     case rename_selector(Self, OldSelector, NewSelector) of
         renamed -> Self;
         absent -> AbsentBlock()
+    end.
+
+%%====================================================================
+%% ADR 0123 §1/§3: Shape versioning
+%%====================================================================
+
+-doc """
+Return the class's declared shape version — the compiled `shapeVersion: N`
+header clause or the `ClassBuilder shapeVersion:` builder keyword, default
+`1` (ADR 0123 §1). Reads the class gen_server's own `shape_version` field
+(`beamtalk_object_class:shape_version/1`), not `__beamtalk_meta/0`
+directly — same as `classDoc`/`classIsSealed`-shaped reflection above: the
+class process seeds it at registration from meta-then-ClassInfo (see
+`beamtalk_object_class:init/1`/`apply_class_info/2`), so this answers
+correctly for a compiled class *and* a `ClassBuilder`-registered dynamic one
+with no `__beamtalk_meta/0` at all.
+""".
+-spec classShapeVersion(#beamtalk_object{}) -> pos_integer().
+classShapeVersion(Self) ->
+    ClassPid = erlang:element(4, Self),
+    beamtalk_object_class:shape_version(ClassPid).
+
+-doc """
+Run the whole `migrateFromVN:` chain from `FromVersion` to this class's
+current `shapeVersion`, then reconcile against its declared fields — the
+Beamtalk surface (`Behaviour >> migrateShape:from:`, ADR 0123 §3) of
+`beamtalk_shape_migration:migrate/3`, the exact call `code_change/3` makes
+on hot reload, so a chain is testable at the REPL before any live instance
+depends on it. Raises the underlying `#beamtalk_error{}` (`class_not_found`
+or `shape_migration_failed`) on failure.
+""".
+-spec classMigrateShapeFrom(#beamtalk_object{}, map(), pos_integer()) -> map().
+classMigrateShapeFrom(Self, Fields, FromVersion) when
+    is_map(Fields), is_integer(FromVersion), FromVersion > 0
+->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    case beamtalk_shape_migration:migrate(ClassName, FromVersion, Fields) of
+        {ok, NewFields, _ToVersion} -> NewFields;
+        {error, Err} -> beamtalk_error:raise(Err)
     end.
 
 %% Shared resolution + rename for classRenameSelector/3 and

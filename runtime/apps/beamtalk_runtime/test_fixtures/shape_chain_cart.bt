@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3536 (ADR 0123 Phase 2) regression fixture: beamtalk_shape_migration_tests
+// exercises a genuine v1 -> v2 -> v3 chain (two real class-side hooks, invoked
+// via local_call/3) through migrate/3. The tests meck this module's
+// `__beamtalk_meta/0` to control the `'shape_version'`/`'shape_migrations'`
+// keys per test case (gaps, downgrade, idempotency, the fun-outside-table
+// warning), so this fixture deliberately keeps `shapeVersion:` at its
+// implicit default (1) rather than declaring `shapeVersion: 3` for real —
+// several tests (e.g. "meta absent", "drops undeclared field") rely on the
+// *real* (unmocked) meta resolving `FromVersion (1) >= ToVersion` so the
+// chain runs no steps outside a meck'd scenario. BT-3537 (ADR 0123 Phase 3)
+// consequently flags both hooks below as unreachable at compile time
+// (`shapeVersion: 1`, but `migrateFromV1:`/`migrateFromV2:` target `N >= 1`)
+// — expected and harmless for this fixture, not a real bug: see above.
+//
+// Hooks read/write `old` via the Erlang FFI gateway (`maps:get/2`,
+// `maps:put/3`) — a `Dictionary` send on a non-literal value falls through
+// to runtime dispatch, which is `undef` for an `@primitive`-only class like
+// `Dictionary` (BT-3541).
+
+Actor subclass: ShapeChainCart
+  state: itemCount :: Integer = 0
+  state: total :: Integer = 0
+  state: tag :: String = "none"
+
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    Erlang maps
+      put: #total
+      value: ((Erlang maps get: #itemCount from: old) * 10)
+      in: old
+
+  class migrateFromV2: old :: Dictionary -> Dictionary =>
+    Erlang maps
+      put: #tag
+      value: "migrated"
+      in: old
+
+  addItem => self.itemCount := self.itemCount + 1
+
+  getItemCount => ^self.itemCount
+
+  getTotal => ^self.total
+
+  getTag => ^self.tag

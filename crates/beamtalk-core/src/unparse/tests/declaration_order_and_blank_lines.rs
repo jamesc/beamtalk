@@ -129,6 +129,46 @@ fn handle_scope_with_native_and_header_trailing_comment_round_trip() {
     assert_identity(source);
 }
 
+// --- `shapeVersion:` unparse emission (ADR 0123 §1) ---
+
+#[test]
+fn shape_version_round_trip() {
+    // The unparser must emit `shapeVersion:` so a class
+    // declaring it round-trips. Canonical style (mirroring `handleScope:`,
+    // ADR 0103) puts the clause on its own indented line following the
+    // header.
+    let source = concat!(
+        "Actor subclass: Cart\n",
+        "  shapeVersion: 2\n",
+        "  state: items = #()\n",
+    );
+    assert_identity(source);
+}
+
+#[test]
+fn shape_version_with_state_and_methods_round_trip() {
+    let source = concat!(
+        "Actor subclass: Cart\n",
+        "  shapeVersion: 2\n",
+        "  state: items :: List = #()\n",
+        "\n",
+        "  itemCount => items size\n",
+    );
+    assert_identity(source);
+}
+
+#[test]
+fn shape_version_and_handle_scope_round_trip() {
+    // Both header clauses present — parsed in either order, the unparser
+    // emits `handleScope:` then `shapeVersion:` canonically.
+    let source = concat!(
+        "Object subclass: Both\n",
+        "  handleScope: #process\n",
+        "  shapeVersion: 3\n",
+    );
+    assert_identity(source);
+}
+
 // --- Regression: `type` alias sandwiched between a class's doc
 // comment and the class itself must not lose the class's doc comment. ---
 

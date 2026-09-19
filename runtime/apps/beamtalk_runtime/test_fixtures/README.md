@@ -23,6 +23,8 @@ runtime/apps/beamtalk_runtime/test_fixtures/
 ├── bif_fallback_test_case.bt  # Real TestCase subclass for the BIF-fallback path (BT-3251)
 ├── init_hook_counter.bt # Actor with `initialize`, for hot-reload field migration (BT-3532)
 ├── typed_field_counter.bt # Actor with typed-no-default field, for hot-reload field migration (BT-3532)
+├── shape_hook_cart.bt   # Class-side migrateFromV1: hook (BT-3535, ADR 0123 Phase 1 spike)
+├── shape_hook_raising_cart.bt # migrateFromV1: hook that always raises (BT-3535)
 └── README.md           # This file
 ```
 
@@ -175,6 +177,35 @@ A `typed` actor with a typed-no-default field and no `initialize` method —
 proves the same generated-`init/1` guarded branch as `init_hook_counter.bt`
 is selected by a typed-no-default field alone (ADR 0078's
 `chain_has_typed_no_default`), independent of `initialize`.
+
+### shape_hook_cart.bt (BT-3535)
+
+**Source:** `runtime/apps/beamtalk_runtime/test_fixtures/shape_hook_cart.bt`
+**Purpose:** ADR 0123 Phase 1 spike — migration-hook regression fixture
+
+An actor with a class-side `migrateFromV1:` method, computing `total` from
+`itemCount` (`* 10`) — a value `beamtalk_hot_reload`'s structural fallback's
+plain default (`0`) could never produce. Used by
+`beamtalk_hot_reload_tests.erl` to prove `beamtalk_hot_reload:code_change/3`
+invokes the hook via `beamtalk_object_class:local_call/3`
+(`maybe_apply_migration_hook/3`) — both via a direct `code_change/3` call
+with a hand-built pre-migration state, and via a live actor's real
+suspend/change_code/resume cycle (`sys:get_state/1` afterward). The
+new-vs-old module code question this fixture alone can't answer (it is
+loaded once, never swapped) is answered by the real two-version `:load`
+reload in `tests/repl-protocol/cases/hot_reload_shape_hook.btscript`.
+
+### shape_hook_raising_cart.bt (BT-3535)
+
+**Source:** `runtime/apps/beamtalk_runtime/test_fixtures/shape_hook_raising_cart.bt`
+**Purpose:** ADR 0123 Phase 1 spike — migration-hook failure regression fixture
+
+A sibling of `shape_hook_cart.bt` whose `migrateFromV1:` always raises
+(`self error:`). Proves `maybe_apply_migration_hook/3` does not swallow a
+raising hook: it propagates through `code_change/3` into the existing
+BT-3534 suspend-on-failure path (`try_change_code/3`), leaving the actor
+suspended with its state intact rather than resumed on top of a
+partially-migrated map.
 
 ## References
 

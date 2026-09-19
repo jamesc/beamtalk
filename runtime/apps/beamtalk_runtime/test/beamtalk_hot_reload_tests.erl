@@ -10,6 +10,7 @@ EUnit tests for beamtalk_hot_reload module.
 Tests hot code reloading, actor migration, and module replacement.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %% gen_server callbacks for a minimal test actor used to exercise
 %% trigger_code_change/2,3 success paths via sys:change_code/4.
@@ -297,12 +298,24 @@ test_field_migration_with_legacy_class_key() ->
     %% Internal keys come from new defaults
     ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
 
+%% ADR 0123 Phase 2 (BT-3536): field migration now delegates to
+%% beamtalk_shape_migration:migrate/3, which resolves its Module from Class
+%% via beamtalk_class_metadata:lookup_module/1 — the class registry, not
+%% Extra's Module directly (see the moduledoc). 'Fake' was never a real
+%% registered class (this test predates any registry lookup at all — the
+%% pre-ADR-0123-Phase-2 code took Module from Extra and never consulted the
+%% registry), so this is now a `class_not_found` failure rather than a
+%% silent "init unusable, keep state unchanged" degrade: a live actor
+%% tagged with an unregistered class is a genuinely exceptional state, and
+%% failing loudly (suspend-on-failure, BT-3534) is the correct outcome, not
+%% a corner case worth preserving. `beamtalk_shape_migration_tests` covers
+%% the "init/1 unusable" degrade directly, against a real registered class.
 test_field_migration_init_failure_preserves_state() ->
     OldState = #{'$beamtalk_class' => 'Fake', value => 99},
-    {ok, NewState} = beamtalk_hot_reload:code_change(
+    {error, Reason} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => nonexistent_module}
     ),
-    ?assertEqual(OldState, NewState).
+    ?assertMatch(#beamtalk_error{kind = class_not_found, class = 'Fake'}, Reason).
 
 test_field_migration_drops_removed_fields() ->
     OldState = maps:merge(
@@ -353,6 +366,16 @@ test_field_migration_initialize_class_adds_new_field() ->
 %% `initialize` method — chain_has_typed_no_default alone (ADR 0078)
 %% selects the same guarded init/1 branch as a class with `initialize`,
 %% so this must be fixed independently of the `initialize` case above.
+%%
+%% ADR 0123 Phase 2 (BT-3536) supersedes this test's original expectation:
+%% beamtalk_shape_migration's reconcile step now fails a migration that
+%% would leave a typed-no-default field unset, rather than silently
+%% defaulting it to nil (the same promise ADR 0078's post-`initialize`
+%% check already makes at spawn time — a migration may not leave a typed
+%% slot unset). `label` is absent from OldState and has no declared
+%% default, so this reload now fails and the actor stays suspended
+%% (BT-3534's suspend-on-failure), instead of silently gaining
+%% `label => nil`.
 test_field_migration_typed_no_default_class_adds_new_field() ->
     ?assert(lists:member(label, beamtalk_runtime_api:all_field_names('TypedFieldCounter'))),
     OldState = #{
@@ -360,11 +383,15 @@ test_field_migration_typed_no_default_class_adds_new_field() ->
         '__class_mod__' => 'bt@typed_field_counter',
         value => 3
     },
-    {ok, NewState} = beamtalk_hot_reload:code_change(
+    {error, Reason} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => 'bt@typed_field_counter'}
     ),
-    ?assertEqual(3, maps:get(value, NewState)),
-    ?assertEqual(nil, maps:get(label, NewState)).
+    ?assertMatch(
+        #beamtalk_error{
+            kind = shape_migration_failed, class = 'TypedFieldCounter', selector = label
+        },
+        Reason
+    ).
 
 %% BT-3532: migration must never fire lifecycle start telemetry — that's
 %% only for real actor spawns, and firing it during a code_change would
@@ -399,10 +426,22 @@ test_field_migration_initialize_class_no_telemetry() ->
         telemetry:detach(HandlerId)
     end.
 
-%% BT-3532: an init/1 return that is still not {ok, Map} (module loaded,
-%% no exception, just an unexpected shape) must be logged at ?LOG_WARNING
-%% with the class and the actual returned shape — not silently treated as
-%% "keep old state".
+%% BT-3532, updated for ADR 0123 Phase 2 (BT-3536): an init/1 return that is
+%% still not {ok, Map} (module loaded, no exception, just an unexpected
+%% shape) must be logged at ?LOG_WARNING — not silently treated as "keep old
+%% state" without a trace. Field migration now delegates to
+%% beamtalk_shape_migration:migrate/3, which resolves Module from Class via
+%% the class registry (see test_field_migration_init_failure_preserves_state
+%% above), so this uses a real registered class ('Counter') with its
+%% init/1 meck'd to misbehave, rather than 'Weird' — a class name that was
+%% never actually registered and predates that registry lookup.
+%%
+%% Two call sites independently attempt Module:init(#{'__skip_initialize__'
+%% => true}) and degrade on a bad return: beamtalk_shape_migration's
+%% reconcile-default lookup, and this module's seed_internal_keys/4 — both
+%% log a ?LOG_WARNING naming 'bt@counter' and the bad return, and both fall
+%% back to "keep what we had", so the overall migration still succeeds with
+%% state unchanged.
 test_field_migration_unexpected_init_return_logs_warning() ->
     %% test/sys.config pins the primary logger level to `error` to keep CI
     %% output clean, which would otherwise drop this ?LOG_WARNING before it
@@ -414,26 +453,44 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         config => #{parent => self()},
         level => all
     }),
+    meck:new('bt@counter', [passthrough]),
+    meck:expect('bt@counter', init, fun(_Args) -> {error, not_a_state_map} end),
     try
-        OldState = #{'$beamtalk_class' => 'Weird', value => 3},
+        OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 3},
         {ok, NewState} = beamtalk_hot_reload:code_change(
-            v1, OldState, #{module => beamtalk_hot_reload_bad_init_test_helper}
+            v1, OldState, #{module => 'bt@counter'}
         ),
-        %% State is kept unchanged, same as any other init-not-usable case.
-        ?assertEqual(OldState, NewState),
-        receive
-            {log_event, #{level := warning, meta := Meta}} ->
-                ?assertEqual('Weird', maps:get(class, Meta, undefined)),
-                ?assertEqual(
-                    beamtalk_hot_reload_bad_init_test_helper, maps:get(module, Meta, undefined)
-                ),
-                ?assertEqual({error, not_a_state_map}, maps:get(returned, Meta, undefined))
-        after 1000 ->
-            ?assert(false)
-        end
+        %% Migration still succeeds (value was already present in ChainedFields,
+        %% so the failed init/1 defaults were never actually needed) and stamps
+        %% '__shape_version__' the same as any other successful migration.
+        ?assertEqual(1, maps:get('__shape_version__', NewState)),
+        ?assertEqual(OldState, maps:remove('__shape_version__', NewState)),
+        ?assert(
+            receive_bad_init_warning('bt@counter', {error, not_a_state_map}, 5)
+        )
     after
+        meck:unload('bt@counter'),
         logger:remove_handler(HandlerId),
         logger:set_primary_config(level, error)
+    end.
+
+%% Drains up to N pending {log_event, ...} messages looking for a `warning`
+%% naming Module and Returned — either seed_internal_keys/4's or
+%% beamtalk_shape_migration:safe_init_defaults/2's warning matches.
+receive_bad_init_warning(_Module, _Returned, 0) ->
+    false;
+receive_bad_init_warning(Module, Returned, N) ->
+    receive
+        {log_event, #{level := warning, meta := Meta}} ->
+            case
+                maps:get(module, Meta, undefined) =:= Module andalso
+                    maps:get(returned, Meta, undefined) =:= Returned
+            of
+                true -> true;
+                false -> receive_bad_init_warning(Module, Returned, N - 1)
+            end
+    after 1000 ->
+        false
     end.
 
 %% BT-3531: LoggingCounter (Counter subclass, adds `logCount`) — before the
@@ -737,18 +794,17 @@ field_migration_with_non_map_state_falls_through_test() ->
 %% init failure exception — covers init_error catch branch (line 105 of src)
 %%====================================================================
 
+%% ADR 0123 Phase 2 (BT-3536): 'X' was never a real registered class either
+%% (see test_field_migration_init_failure_preserves_state's comment above) —
+%% Class resolution now fails before Module:init/1 is ever reached, so this
+%% is a class_not_found failure, same as that sibling test.
 field_migration_init_throws_returns_old_state_test() ->
-    %% When Module:init/1 throws any exception (not just returns
-    %% an error tuple), migrate_fields catches it and returns OldState.
-    %% Using an atom that is a loaded module but whose init/1 throws.
     OldState = #{'$beamtalk_class' => 'X', value => 99},
-    %% gen_server:init/1 is not exported as a plain init/1 on arbitrary modules;
-    %% pick a module whose init/1 either does not exist or crashes on #{}.
-    {ok, NewState} =
+    {error, Reason} =
         beamtalk_hot_reload:code_change(
             v1, OldState, #{module => lists}
         ),
-    ?assertEqual(OldState, NewState).
+    ?assertMatch(#beamtalk_error{kind = class_not_found, class = 'X'}, Reason).
 
 %%====================================================================
 %% Helpers

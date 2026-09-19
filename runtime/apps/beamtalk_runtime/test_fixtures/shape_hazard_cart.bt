@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3536 (ADR 0123 Phase 2) regression fixture: an Actor with a field
+// typed as another Actor class (`worker :: ShapeHazardWorker`, see
+// shape_hazard_worker.bt) — exercises beamtalk_shape_migration:pack/1's
+// `not_serialisable` rejection of a `SendableRef` field (a live process
+// reference has no meaningful on-disk/wire shape).
+
+typed Actor subclass: ShapeHazardCart
+  state: worker :: ShapeHazardWorker
+  state: label :: String = "cart"

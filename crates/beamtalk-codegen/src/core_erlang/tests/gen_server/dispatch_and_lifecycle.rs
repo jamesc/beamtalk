@@ -242,6 +242,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -338,6 +339,7 @@ fn actor_class_def(
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     }
 }

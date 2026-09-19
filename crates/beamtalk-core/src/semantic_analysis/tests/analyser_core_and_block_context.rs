@@ -421,6 +421,7 @@ fn test_self_available_in_method_bodies() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 

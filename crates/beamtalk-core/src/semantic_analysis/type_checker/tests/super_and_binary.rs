@@ -45,6 +45,7 @@ fn test_super_infers_parent_class_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     };
 
@@ -89,6 +90,7 @@ fn test_super_infers_parent_class_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     };
 
@@ -142,6 +144,7 @@ fn test_super_unknown_selector_warns() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     };
 
@@ -182,6 +185,7 @@ fn test_super_unknown_selector_warns() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     };
 

@@ -846,42 +846,43 @@ find_and_invoke_super_method(ServerRef, Superclass, Selector, Args, State) ->
 
 **Domain Services:**
 - `CodeLoader`: Loads new BEAM bytecode
-- `StateMigrator`: Executes code_change/3 callbacks (implemented in `beamtalk_hot_reload`)
+- `StateMigrator`: Executes code_change/3 callbacks (implemented in `beamtalk_hot_reload`); delegates field migration to `ShapeMigrator` (ADR 0123 Phase 2, BT-3536)
 - `InstanceUpgrader`: Triggers sys:change_code/4 for instances
+- `ShapeChainRunner`: Pure leaf — runs a class's declared `migrateFromVN:` chain over a field dictionary, given a migrations table, a version pair, and an invoker fun (implemented in `beamtalk_shape_chain`; no registry, no meta, no process — shared by hot reload and, later, persistence/distribution, ADR 0123 §3)
+- `ShapeMigrator`: Resolves a class's module and migration table from `__beamtalk_meta`, runs `ShapeChainRunner` via `beamtalk_object_class:local_call/3`, reconciles the result against the flattened declared fields, and builds/reads the versioned `{beamtalk_shape, Class, ShapeVersion, Fields}` envelope (`pack/1`/`unpack/1`) that persistence and distribution (BT-3527) consume (implemented in `beamtalk_shape_migration`)
 
 **Key Patterns:**
 - **Two-Version Coexistence:** Old and new code both loaded
 - **Lazy Upgrade:** Processes upgrade on next fully-qualified call
 - **code_change/3 Callback:** OTP's state migration mechanism
-- **Automatic Field Migration:** Add defaults, preserve unknowns
+- **Automatic Field Migration:** Add defaults, preserve unknowns — implemented via `beamtalk_shape_migration:migrate/3`'s reconcile step (`beamtalk_hot_reload:code_change/3` delegates to it)
+- **Versioned State Migration (ADR 0123):** A class's live state carries `'__shape_version__'`; `code_change/3` reads it from the *old* state (read-before-seed), runs the declared `migrateFromVN:` chain (gaps are no-ops — only the final declared shape is known), then reconciles against the flattened field list. A failed migration leaves the instance **suspended**, state intact, rather than resumed onto new code with an old-shaped map (BT-3534's suspend-on-failure).
 
 **Example Domain Logic:**
 
 ```erlang
 %% Domain service: beamtalk_hot_reload
-%% Centralizes code_change/3 callback logic for all gen_server behaviors
-code_change(OldVsn, OldState, Extra) ->
-    %% Current implementation: preserve state unchanged
-    %% Future: automatic field migration as shown below
-    {ok, OldState}.
-
-%% Future implementation (when field defaults are stored in class registry):
-%% code_change(OldVsn, OldState, Extra) ->
-%%     %% Get new field defaults from class metadata
-%%     Class = maps:get('__class__', OldState),
-%%     {ok, ClassInfo} = beamtalk_classes:lookup(Class),
-%%     DefaultFields = maps:get(default_fields, ClassInfo),
-%%     
-%%     %% Merge: new defaults + existing fields (existing take precedence)
-%%     NewState = maps:merge(DefaultFields, OldState),
-%%     
-%%     %% Call user-defined migration if present
-%%     case maps:find('__migrate__', maps:get('__methods__', NewState, #{})) of
-%%         {ok, MigrateFun} ->
-%%             {ok, MigrateFun(OldVsn, NewState, Extra)};
-%%         error ->
-%%             {ok, NewState}
-%%     end.
+%% Centralizes code_change/3 callback logic for all gen_server behaviors.
+%% Field migration (the "automatic field migration" pattern above) delegates
+%% to beamtalk_shape_migration:migrate/3 — see that module's moduledoc for
+%% the chain/reconcile contract this only sketches.
+code_change(_OldVsn, State, #{module := Module}) when is_map(State) ->
+    %% '__shape_version__' is read from the *incoming* State — the
+    %% state's own version is the source of truth, not OldVsn (which lets
+    %% the same chain run for persistence, where there is no OldVsn at all).
+    OldShapeVersion = maps:get('__shape_version__', State, 1),
+    Class = beamtalk_tagged_map:class_of(State, unknown),
+    UserFields = maps:without(beamtalk_tagged_map:internal_fields(), State),
+    case beamtalk_shape_migration:migrate(Class, OldShapeVersion, UserFields) of
+        {ok, NewFields, NewShapeVersion} ->
+            %% re-attach internal keys from Module's fresh init/1 defaults,
+            %% stamp NewShapeVersion — see beamtalk_hot_reload:migrate_state/2
+            {ok, reassemble(Module, NewFields, NewShapeVersion)};
+        {error, BeamtalkError} ->
+            %% try_change_code/3 treats this as "leave the pid suspended,
+            %% state intact" — never resumed onto new code with old state.
+            {error, BeamtalkError}
+    end.
 ```
 
 ### Workspace Context

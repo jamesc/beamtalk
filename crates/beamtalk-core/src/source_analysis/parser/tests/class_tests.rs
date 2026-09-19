@@ -218,6 +218,123 @@ fn parse_handle_scope_on_new_line_prefers_header_over_scope_comment_when_both_pr
     );
 }
 
+// ========================================================================
+// shapeVersion: keyword tests (ADR 0123 §1)
+// ========================================================================
+
+#[test]
+fn parse_shape_version_stores_value() {
+    let module = parse_ok(
+        "Actor subclass: Cart
+  shapeVersion: 2
+  state: items = #()",
+    );
+    let class = &module.classes[0];
+    assert_eq!(
+        class.shape_version.map(|sv| sv.version),
+        Some(2),
+        "expected shapeVersion: 2 to be parsed"
+    );
+    assert_eq!(class.effective_shape_version(), 2);
+}
+
+#[test]
+fn parse_no_shape_version_leaves_field_none() {
+    let module = parse_ok("Actor subclass: Plain");
+    assert_eq!(module.classes[0].shape_version, None);
+    assert_eq!(
+        module.classes[0].effective_shape_version(),
+        1,
+        "absent shapeVersion: defaults to 1"
+    );
+}
+
+#[test]
+fn parse_shape_version_and_handle_scope_either_order() {
+    let module = parse_ok(
+        "Object subclass: Both
+  handleScope: #process
+  shapeVersion: 3",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.shape_version.map(|sv| sv.version), Some(3));
+    assert_eq!(
+        class.handle_scope.as_ref().map(|id| id.name.as_str()),
+        Some("process")
+    );
+
+    let module2 = parse_ok(
+        "Object subclass: Both2
+  shapeVersion: 4
+  handleScope: #node",
+    );
+    let class2 = &module2.classes[0];
+    assert_eq!(class2.shape_version.map(|sv| sv.version), Some(4));
+    assert_eq!(
+        class2.handle_scope.as_ref().map(|id| id.name.as_str()),
+        Some("node")
+    );
+}
+
+#[test]
+fn parse_shape_version_non_literal_emits_error() {
+    let diagnostics = parse_err(
+        "Actor subclass: Cart
+  shapeVersion: \"two\"",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("positive integer literal")),
+        "Expected error for non-literal shapeVersion, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_shape_version_zero_emits_error() {
+    let diagnostics = parse_err(
+        "Actor subclass: Cart
+  shapeVersion: 0",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("positive integer literal")),
+        "Expected error for shapeVersion: 0, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_shape_version_duplicate_emits_error() {
+    let diagnostics = parse_err(
+        "Actor subclass: Cart
+  shapeVersion: 2
+  shapeVersion: 3",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("duplicate shapeVersion:")
+                && d.message.contains("already 2")),
+        "Expected a duplicate-declaration error, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_shape_version_misplaced_after_state_emits_error() {
+    let diagnostics = parse_err(
+        "Actor subclass: Cart
+  state: items = #()
+  shapeVersion: 2",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("must appear in the class header")),
+        "Expected a targeted error for misplaced shapeVersion:, got: {diagnostics:?}"
+    );
+}
+
 #[test]
 fn parse_native_keyword_missing_module_name_emits_error() {
     let diagnostics = parse_err("Actor subclass: Foo native:");

@@ -35,6 +35,7 @@ fn counter_actor(state: Vec<StateDeclaration>) -> ClassDefinition {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     }
 }
@@ -62,6 +63,7 @@ fn widget_value(state: Vec<StateDeclaration>) -> ClassDefinition {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     }
 }
