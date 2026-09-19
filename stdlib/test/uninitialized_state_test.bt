@@ -24,18 +24,28 @@ TestCase subclass: UninitializedStateTest
     self assert: a getCount equals: 0
 
   // === Failure: typed-no-default field left nil ===
+  //
+  // BT-1948 (ADR 0124 §6 A2b): `UninitializedStateActor spawn` now ALSO
+  // warns at compile time (the point of BT-1948) — `@expect all`
+  // acknowledges the diagnostic these tests deliberately trigger, since it
+  // has no dedicated `@expect` category by design (ADR 0124 §6:
+  // supply/default/widen/`late` are the only accepted fixes for real code).
   testUninitializedTypedFieldRaisesError =>
+    @expect all
     self should: [UninitializedStateActor spawn] raise: #instantiation_error
 
   testUninitializedErrorContainsClassName =>
+    @expect all
     result := [UninitializedStateActor spawn] on: Exception do: [:e | e message]
     self assert: (result includesSubstring: "UninitializedStateActor")
 
   testUninitializedErrorHintContainsFieldName =>
+    @expect all
     result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]
     self assert: (result includesSubstring: "connection")
 
   testUninitializedErrorHintContainsTypeName =>
+    @expect all
     result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]
     self assert: (result includesSubstring: "String")
 
@@ -53,11 +63,21 @@ TestCase subclass: UninitializedStateTest
   // Dictionary` (mirroring `stdlib/src/json.bt`'s `JsonValue`) — a
   // defaultless `state: value :: LocalJsonValue` must spawn without raising,
   // since the alias resolves to a union containing `Nil`.
+  //
+  // BT-1948 (ADR 0124 §6 A2b): the `beamtalk test` pipeline does not
+  // pre-load cross-file `AliasRegistry` entries (this fixture's own header
+  // comment documents the pre-existing gap; `beamtalk build` resolves
+  // `LocalJsonValue` correctly), so the construction-site check here sees
+  // `value :: LocalJsonValue` as an unresolved, non-nilable name and warns —
+  // a false positive from that gap, not from the field's real (nilable)
+  // type. `@expect all` until the gap is closed (BT-3564).
   testAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>
+    @expect all
     a := JsonValueStateActor spawn
     self assert: a getValue equals: nil
 
   testAliasTypedNilableFieldOtherStateWorks =>
+    @expect all
     a := JsonValueStateActor spawn
     self assert: a getCount equals: 1
 

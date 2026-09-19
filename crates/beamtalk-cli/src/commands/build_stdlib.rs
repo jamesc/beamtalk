@@ -631,6 +631,10 @@ struct ClassMeta {
     /// [`beamtalk_core::semantic_analysis::analyze_initialize_assigns`].
     /// Empty when the class declares no `initialize`.
     initialize_assigns: Vec<String>,
+    /// `true` when some instance method sends `fieldAt:put:` or `perform:`
+    /// anywhere in its body (ADR 0124 §6, BT-1948) — computed by
+    /// [`beamtalk_core::semantic_analysis::has_dynamic_field_writer`].
+    has_dynamic_field_writer: bool,
     /// Instance method signatures.
     methods: Vec<MethodMeta>,
     /// Class-side method signatures.
@@ -1205,6 +1209,11 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         })
         .unwrap_or_default();
 
+    // BT-1948 (ADR 0124 §6): whether any instance method dynamically writes
+    // a slot via `fieldAt:put:`/`perform:` — see the `ClassMeta` field doc.
+    let has_dynamic_field_writer =
+        beamtalk_core::semantic_analysis::has_dynamic_field_writer(&class.methods);
+
     let class_variables = class
         .class_variables
         .iter()
@@ -1264,6 +1273,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         state_has_default,
         state_kinds,
         initialize_assigns,
+        has_dynamic_field_writer,
         methods,
         class_methods,
         class_variables,
@@ -1755,6 +1765,14 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         }
         code.push_str("]),\n");
     }
+
+    // has_dynamic_field_writer (ADR 0124 §6, BT-1948): whether any instance
+    // method sends `fieldAt:put:`/`perform:` anywhere in its body.
+    let _ = writeln!(
+        code,
+        "            has_dynamic_field_writer: {},",
+        meta.has_dynamic_field_writer
+    );
 
     // Instance methods
     generate_method_list(code, "methods", &meta.methods, &meta.class_name);
@@ -2733,6 +2751,7 @@ mod tests {
             state_has_default: vec![],
             state_kinds: vec![],
             initialize_assigns: vec![],
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodMeta {
                     selector: "increment".to_string(),
@@ -2823,6 +2842,7 @@ mod tests {
             state_has_default: vec![],
             state_kinds: vec![],
             initialize_assigns: vec![],
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2928,6 +2948,7 @@ mod tests {
                 state_has_default: vec![],
                 state_kinds: vec![],
                 initialize_assigns: vec![],
+                has_dynamic_field_writer: false,
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -2949,6 +2970,7 @@ mod tests {
                 state_has_default: vec![],
                 state_kinds: vec![],
                 initialize_assigns: vec![],
+                has_dynamic_field_writer: false,
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -3917,6 +3939,7 @@ mod tests {
                 ("second".to_string(), beamtalk_core::ast::SlotKind::Late),
             ],
             initialize_assigns: vec!["first".to_string()],
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![

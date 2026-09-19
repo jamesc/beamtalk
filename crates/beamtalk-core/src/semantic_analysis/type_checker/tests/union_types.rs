@@ -573,6 +573,7 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

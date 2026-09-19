@@ -211,6 +211,24 @@ pub struct ClassInfo {
     /// same way [`Self::state_has_default`] is composed by
     /// `inherited_typed_no_default_fields` (`beamtalk-codegen`).
     pub initialize_assigns: BTreeSet<EcoString>,
+    /// `true` when some instance method on this class (any method, not only
+    /// `initialize`) sends `fieldAt:put:` or `perform:` anywhere in its
+    /// body — computed by
+    /// [`crate::semantic_analysis::has_dynamic_field_writer`] over the
+    /// class's own [`crate::ast::MethodDefinition`]s (ADR 0124 §6), both
+    /// here and by `beamtalk-cli`'s `build_stdlib` for generated-builtin
+    /// `ClassInfo`s (mirroring how [`Self::initialize_assigns`] is
+    /// computed in both places). `false` only for cross-file metadata that
+    /// predates this field (`#[serde(default)]`) or arrives through a wire
+    /// format that doesn't carry it (`beamtalk-compiler-port`'s
+    /// cross-package `__beamtalk_meta` decode) — a conservative
+    /// under-approximation there, not a source of false positives:
+    /// [`super::ClassHierarchy::all_initialize_assigns`]'s
+    /// `has_dynamic_writer` only *demotes* BT-1948's construction-site
+    /// finding from Warning to Hint, it never suppresses it, so missing
+    /// this signal costs confidence, not correctness.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub has_dynamic_field_writer: bool,
     /// Methods defined directly on this class (instance-side).
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
@@ -260,6 +278,15 @@ pub struct InitializeAssignsSummary {
     /// distinguish "genuinely assigns nothing" from "can't fully tell" read
     /// this flag rather than treating an empty `assigned` as the answer.
     pub incomplete: bool,
+    /// `true` when *any* class in the chain (the leaf or an ancestor) has
+    /// its own [`ClassInfo::has_dynamic_field_writer`] set — a
+    /// `fieldAt:put:`/`perform:` write anywhere in that class's methods
+    /// (ADR 0124 §6, BT-1948). An ancestor's dynamic write is just as
+    /// capable of assigning a slot outside this must-analysis's view as the
+    /// leaf's own, so BT-1948's construction-site check reads this
+    /// chain-wide flag — not [`ClassInfo::has_dynamic_field_writer`]
+    /// directly — to decide whether to demote its finding to Hint.
+    pub has_dynamic_writer: bool,
 }
 
 impl ClassInfo {
@@ -365,6 +392,9 @@ impl ClassInfo {
                 .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "initialize")
                 .map(|m| crate::semantic_analysis::analyze_initialize_assigns(&m.body))
                 .unwrap_or_default(),
+            has_dynamic_field_writer: crate::semantic_analysis::has_dynamic_field_writer(
+                &class.methods,
+            ),
             methods: instance_methods,
             class_methods,
             class_variables: class

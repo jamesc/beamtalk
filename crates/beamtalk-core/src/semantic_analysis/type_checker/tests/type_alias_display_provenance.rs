@@ -557,6 +557,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
             state_has_default: std::collections::HashMap::new(),
             state_kinds: std::collections::HashMap::new(),
             initialize_assigns: std::collections::BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -581,6 +582,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
             state_has_default: std::collections::HashMap::new(),
             state_kinds: std::collections::HashMap::new(),
             initialize_assigns: std::collections::BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![MethodInfo {
                 selector: "accept:".into(),
                 arity: 1,
@@ -678,6 +680,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
         state_has_default: std::collections::HashMap::new(),
         state_kinds: std::collections::HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "restart:".into(),
             arity: 1,

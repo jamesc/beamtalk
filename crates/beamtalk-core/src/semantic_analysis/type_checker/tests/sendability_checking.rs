@@ -35,6 +35,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "consume:".into(),
             arity: 1,
