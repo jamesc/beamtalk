@@ -317,6 +317,77 @@ fn test_late_state_and_classstate_emit_field_kinds_in_meta() {
 }
 
 #[test]
+fn test_late_state_omitted_from_init_state_literal() {
+    // BT-3548 (ADR 0124 §2/B2): a defaultless `late state:` field's key
+    // must be entirely absent from init/1's `DefaultState` literal — not
+    // present as `'proc' => 'nil'` — so it starts absent from the actor's
+    // state map. An ordinary eager field alongside it (`id`) still gets its
+    // default emitted as usual.
+    let src = concat!(
+        "typed Actor subclass: CodexClient\n",
+        "  late state: proc :: Subprocess\n",
+        "  state: id :: Integer = 0\n\n",
+        "  launch => self.proc\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("codex_client"))
+        .expect("codegen should succeed");
+
+    let default_state = code
+        .split("let DefaultState = ~{")
+        .nth(1)
+        .expect("init/1 must emit a DefaultState map literal")
+        .split("}~")
+        .next()
+        .expect("DefaultState map literal must close with }~");
+
+    assert!(
+        !default_state.contains("'proc'"),
+        "Unassigned `late` slot 'proc' must be absent from DefaultState entirely. Got DefaultState body:\n{default_state}"
+    );
+    assert!(
+        default_state.contains("'id' => 0"),
+        "Eager field 'id' must still get its default in DefaultState. Got DefaultState body:\n{default_state}"
+    );
+}
+
+#[test]
+fn test_late_classstate_omitted_from_classstate_map() {
+    // BT-3548 (ADR 0124 §2/B2): a defaultless `late classState:` slot is
+    // likewise omitted from the class-side `'classState'` map in
+    // `_BuilderState` — the class-side counterpart of the instance-side
+    // omission above.
+    let src = concat!(
+        "typed Actor subclass: CodexClient\n",
+        "  late classState: current :: CodexClient\n",
+        "  classState: total :: Integer = 0\n\n",
+        "  class launch => self.current\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("codex_client"))
+        .expect("codegen should succeed");
+
+    let class_state = code
+        .split("'classState' => ~{")
+        .nth(1)
+        .expect("_BuilderState must emit a 'classState' map literal")
+        .split("}~")
+        .next()
+        .expect("classState map literal must close with }~");
+
+    assert!(
+        !class_state.contains("'current'"),
+        "Unassigned `late classState:` slot 'current' must be absent from the classState map entirely. Got classState body:\n{class_state}"
+    );
+    assert!(
+        class_state.contains("'total' => 0"),
+        "Eager class var 'total' must still get its default in the classState map. Got classState body:\n{class_state}"
+    );
+}
+
+#[test]
 fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
     // A class with no state/classState declarations still emits the
     // 'field_kinds'/'class_field_kinds' keys (empty maps), matching

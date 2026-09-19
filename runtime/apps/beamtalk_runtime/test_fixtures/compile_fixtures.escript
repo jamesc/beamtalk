@@ -105,7 +105,12 @@ main([]) ->
         "shape_handle_cart",
         %% BT-3542 - field_tier/1's cross-boundary sendability tier
         %% conformance corpus: the "bare Object" row (no handleScope:).
-        "shape_plain_object"
+        "shape_plain_object",
+        %% BT-3548 (ADR 0124 B2) - a defaultless `late state:` slot must be
+        %% absent from init/1's state literal (not `nil`), so the actor
+        %% spawns without UninitializedStateError and sys:get_state/1 shows
+        %% no key for it until spawnWith: supplies one.
+        "late_slot_actor"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,
