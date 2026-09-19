@@ -28,7 +28,14 @@ use crate::source_analysis::Span;
 use crate::source_analysis::method_span::MethodSide;
 
 /// Returns the repository root (`CARGO_MANIFEST_DIR/../..`).
-pub(super) fn repo_root() -> PathBuf {
+///
+/// `pub(crate)` (rather than `pub(super)` like most of this module) because
+/// `semantic_analysis::type_checker::sendability`'s BT-3542 conformance test
+/// also needs the repo root to locate a corpus fixture, crossing the
+/// `source_analysis`/`semantic_analysis` boundary the same way
+/// `enumerate_methods` above already does for `unparse` — see this module's
+/// doc for why a second copy of this computation is not the fix.
+pub(crate) fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("crates/")

@@ -628,12 +628,7 @@ mod tests {
     /// could itself drift from what the Erlang side actually compiles.
     #[test]
     fn runtime_field_tier_kind_mapping_matches_compile_time_base_tier() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
-            .to_path_buf();
+        let repo_root = crate::source_analysis::corpus_test_support::repo_root();
         let corpus_path = repo_root
             .join("runtime/apps/beamtalk_runtime/test/fixtures/sendability_tier_conformance.json");
         let raw = std::fs::read_to_string(&corpus_path)
