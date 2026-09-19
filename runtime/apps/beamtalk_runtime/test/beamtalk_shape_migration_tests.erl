@@ -74,6 +74,10 @@ shape_migration_test_() ->
                 fun test_migrate_drops_undeclared_field/0},
             {"a migrateFromV* class method absent from shape_migrations warns (ADR 0123 §2)",
                 fun test_migrate_warns_when_class_method_outside_shape_migrations_table/0},
+            {"migrate/4 with skip_stray_warning => true suppresses the warning (BT-3543)",
+                fun test_migrate_skip_stray_warning_suppresses_warning/0},
+            {"check_stray_migrations/1 warns directly, independent of migrate (BT-3543)",
+                fun test_check_stray_migrations_warns_directly/0},
             {"pack/1 rejects a SendableRef (Actor-typed) field",
                 fun test_pack_rejects_sendable_ref_field/0},
             {"pack/1 rejects a HandleScoped field", fun test_pack_rejects_handle_scoped_field/0},
@@ -228,6 +232,53 @@ test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
             %% `tag`, it does not run the stray method.
             ?assertEqual(20, maps:get(total, NewFields)),
             ?assertEqual(<<"none">>, maps:get(tag, NewFields)),
+            ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 5))
+        end)
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
+    end.
+
+%% BT-3543: the same scenario as
+%% test_migrate_warns_when_class_method_outside_shape_migrations_table/0, but
+%% via migrate/4 with skip_stray_warning => true — the per-instance hot-reload
+%% call path (beamtalk_hot_reload:migrate_state/3) — which must not warn,
+%% since beamtalk_repl_loader:hot_reload_class/2 already ran the check once
+%% for the class before fanning out to instances.
+test_migrate_skip_stray_warning_suppresses_warning() ->
+    logger:set_primary_config(level, all),
+    HandlerId = bt_3543_skip_stray_warning_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all
+    }),
+    try
+        with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
+            {ok, _NewFields, ToVersion} =
+                beamtalk_shape_migration:migrate('ShapeChainCart', 1, #{itemCount => 2}, #{
+                    skip_stray_warning => true
+                }),
+            ?assertEqual(3, ToVersion),
+            ?assertNot(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 2))
+        end)
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
+    end.
+
+%% BT-3543: check_stray_migrations/1 is the once-per-reload call site
+%% (beamtalk_repl_loader:hot_reload_class/2) — it must still warn on its own,
+%% with no migrate/3-4 call at all.
+test_check_stray_migrations_warns_directly() ->
+    logger:set_primary_config(level, all),
+    HandlerId = bt_3543_check_stray_migrations_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all
+    }),
+    try
+        with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
+            ok = beamtalk_shape_migration:check_stray_migrations('ShapeChainCart'),
             ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 5))
         end)
     after
