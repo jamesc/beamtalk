@@ -29,3 +29,17 @@ typed Actor subclass: LateFieldReadActor
   pumpWhile: shouldRun :: Boolean -> Nil =>
     [shouldRun] whileTrue: [self.proc]
     nil
+
+  // A `late` field *mutated* inside a `whileTrue:` loop body (ADR 0124
+  // §4e/B3): eligible for Hybrid mode by shape (a field mutation, no
+  // self-sends), so this exercises `select_hybrid_params`'s `late`
+  // exclusion — without it, Hybrid's pre-extraction preamble would
+  // `badkey`-crash on the very first iteration.
+  pumpAndSetProc: limit :: Integer -> Integer =>
+    i := 0
+    [i < limit]
+      whileTrue: [
+        self.proc := i
+        i := i + 1
+      ]
+    self.proc

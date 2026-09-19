@@ -56,6 +56,15 @@ TestCase subclass: LateFieldReadTest
     result := a pumpWhile: false
     self assert: result equals: nil
 
+  testLateFieldMutatedInsideLoopDoesNotCrashAndAnswersFinalValue =>
+    // A `late` field mutated inside a `whileTrue:` body must not select
+    // Hybrid mode's pre-extraction (ADR §4e/B3) — it must run to
+    // completion and answer the final assigned value, not badkey-crash on
+    // the first iteration.
+    a := LateFieldReadActor spawn
+    result := a pumpAndSetProc: 5
+    self assert: result equals: 4
+
   // === Class-side `late classState:` ===
   testClassReadBeforeAssignRaisesUninitializedStateError =>
     self should: [
