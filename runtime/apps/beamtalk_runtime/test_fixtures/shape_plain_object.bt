@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3542 regression fixture: a plain Object subclass with no
+// `handleScope:` declaration — the "bare Object" row of the sendability
+// tier conformance corpus
+// (runtime/apps/beamtalk_runtime/test/fixtures/sendability_tier_conformance.json).
+// Represents the one deliberate divergence between the compile-time tier
+// lattice (silent, `Tier::Unknown`) and the runtime `pack/1` walk
+// (`passthrough`, allowed through as an opaque unversioned term) — see the
+// corpus entry's own `why` and `beamtalk_shape_migration.erl`'s
+// `field_tier/1` doc.
+
+Object subclass: ShapePlainObject
+  label -> String => "plain"

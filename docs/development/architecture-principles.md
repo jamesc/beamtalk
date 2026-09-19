@@ -624,7 +624,7 @@ Tests that assert "these two independent implementations produce the same result
 
 | Situation | Disposition | Example |
 |---|---|---|
-| Two implementations in different languages, compiled/reviewed separately, that must agree on wire format or behavior | **Keep** — this is the permanent boundary the test exists to guard | `beamtalk-surface-drift` (CLI/REPL/MCP/LSP), `beamtalk-parity-tests` (cross-process parity), the Rust↔Erlang conformance fixtures from BT-3080/BT-3081/BT-3085/BT-3090 |
+| Two implementations in different languages, compiled/reviewed separately, that must agree on wire format or behavior | **Keep** — this is the permanent boundary the test exists to guard | `beamtalk-surface-drift` (CLI/REPL/MCP/LSP), `beamtalk-parity-tests` (cross-process parity), the Rust↔Erlang conformance fixtures from BT-3080/BT-3081/BT-3085/BT-3090, and BT-3542 (`sendability.rs`'s kind-based tier fallback vs. `beamtalk_shape_migration:field_tier/1`'s `pack/1` walk — both pinned to `runtime/apps/beamtalk_runtime/test/fixtures/sendability_tier_conformance.json`) |
 | Two Rust (or two Erlang) implementations of the same rule, previously duplicated, now being consolidated into one | **Convert** to a golden test (fixed input → fixed expected output) once the duplicate is deleted; delete the re-implementation the test used for comparison | `crates/beamtalk-workspace/tests/cross_crate_consistency.rs` — see below |
 | A hand-written "simulated compiler output" fixture that stands in for real compiled output | **Migrate** the fixture onto compiled/generated output so drift fails at build time instead of needing a human to update the simulation | `beamtalk_codegen_simulation_tests.erl`'s simulated-state sections; precedent in BT-239 |
 

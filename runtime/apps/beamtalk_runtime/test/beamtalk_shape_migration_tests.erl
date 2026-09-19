@@ -47,6 +47,7 @@ setup() ->
     ok = ensure_fixture_loaded(shape_hazard_worker, 'ShapeHazardWorker'),
     ok = ensure_fixture_loaded(shape_hazard_cart, 'ShapeHazardCart'),
     ok = ensure_fixture_loaded(shape_handle_cart, 'ShapeHandleCart'),
+    ok = ensure_fixture_loaded(shape_plain_object, 'ShapePlainObject'),
     ok.
 
 teardown(_) ->
@@ -78,6 +79,10 @@ shape_migration_test_() ->
                 fun test_migrate_skip_stray_warning_suppresses_warning/0},
             {"check_stray_migrations/1 warns directly, independent of migrate (BT-3543)",
                 fun test_check_stray_migrations_warns_directly/0},
+            {"field_tier/1 matches the shared compile-time conformance corpus (BT-3542)",
+                fun test_sendability_tier_conformance_matches_shared_corpus/0},
+            {"field_tier/1 does not compose a generic annotation's type_args (BT-3542)",
+                fun test_field_tier_does_not_compose_generic_type_args/0},
             {"pack/1 rejects a SendableRef (Actor-typed) field",
                 fun test_pack_rejects_sendable_ref_field/0},
             {"pack/1 rejects a HandleScoped field", fun test_pack_rejects_handle_scoped_field/0},
@@ -303,6 +308,58 @@ receive_stray_migration_warning(Class, Selector, N) ->
     after 1000 ->
         false
     end.
+
+%%====================================================================
+%% field_tier/1 — cross-boundary sendability conformance (BT-3542)
+%%====================================================================
+
+%% BT-3542: field_tier/1's kind-based branches (`ClassMeta`'s `kind`/
+%% `handle_scope` keys) necessarily re-derive the same core mapping the
+%% compile-time checker's kind-based fallback
+%% (`sendability.rs`'s `tier_of_known`) already encodes — the two cannot
+%% literally share code across the Rust/Erlang boundary (ADR 0123
+%% commissions this walk as new work, not a port). This corpus is the
+%% single source of truth both are pinned to; the Rust side asserts the
+%% identical cases in
+%% `sendability::tests::runtime_field_tier_kind_mapping_matches_compile_time_base_tier`.
+test_sendability_tier_conformance_matches_shared_corpus() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "sendability_tier_conformance.json"
+    ]),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            ClassNameBin = maps:get(<<"class_name">>, Case),
+            ExpectedBin = maps:get(<<"erlang_field_tier">>, Case),
+            Why = maps:get(<<"why">>, Case, <<>>),
+            ClassName = binary_to_existing_atom(ClassNameBin, utf8),
+            Expected = binary_to_existing_atom(ExpectedBin, utf8),
+            ?assertEqual(
+                Expected,
+                beamtalk_shape_migration:field_tier(ClassName),
+                {corpus_mismatch, ClassName, Why}
+            )
+        end,
+        Cases
+    ).
+
+%% BT-3542 acceptance criterion 3: pins the documented scope gap down as a
+%% regression, rather than only a doc comment — `List(Port)` grades on
+%% `List`'s own kind (`value_nested`, a `Collection` → `Value`) here, not
+%% `Port`'s `handle_scoped` hazard the compile-time checker's generic
+%% `type_args` composition would produce (see
+%% `sendability.rs::tests::generic_collection_composes_element_tier`, the
+%% compile-time counterpart that DOES compose). If this starts asserting
+%% `handle_scoped`, field_tier/1 gained generic composition — update this
+%% test (and the field_tier/1 doc) deliberately rather than treating it as
+%% a stale assertion to relax.
+test_field_tier_does_not_compose_generic_type_args() ->
+    ?assertEqual(value_nested, beamtalk_shape_migration:field_tier('List(Port)')).
 
 %%====================================================================
 %% pack/1 — Sendable-tier walk

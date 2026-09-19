@@ -102,7 +102,10 @@ main([]) ->
         "shape_handle_box",
         "shape_hazard_worker",
         "shape_hazard_cart",
-        "shape_handle_cart"
+        "shape_handle_cart",
+        %% BT-3542 - field_tier/1's cross-boundary sendability tier
+        %% conformance corpus: the "bare Object" row (no handleScope:).
+        "shape_plain_object"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

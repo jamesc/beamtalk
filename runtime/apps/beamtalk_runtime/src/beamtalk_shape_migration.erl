@@ -39,7 +39,7 @@ from `beamtalk_shape_chain:migrate/4`, wrapped here as
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1]).
+-export([migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1, field_tier/1]).
 
 -export_type([envelope/0]).
 
@@ -499,17 +499,41 @@ pack_field_value(value_nested, Value, Depth) when is_map(Value) ->
 pack_field_value(_Tier, Value, _Depth) ->
     {ok, Value}.
 
-%% Grade a declared field type's sendability tier — a small runtime
-%% counterpart to the compile-time lattice
-%% (`beamtalk-core/src/semantic_analysis/type_checker/sendability.rs`,
-%% ADR 0103), scoped to what pack/1 needs: whether the class kind a field's
-%% *declared* type resolves to blocks packing (`Actor` / a `handleScope:`
-%% `Object`) or asks for recursive versioning (`Value`, excluding the
-%% builtin passthrough set). A generic annotation's type arguments
-%% (`List(Port)`) are not composed here — only the head type name is graded,
-%% a known simplification versus the compile-time checker's full
-%% composition; deferred alongside this module's other Phase 2 scoping
-%% choices (ADR 0123 § Consequences).
+-doc """
+Grade a declared field type's sendability tier — a small runtime
+counterpart to the compile-time lattice
+(`beamtalk-core/src/semantic_analysis/type_checker/sendability.rs`,
+ADR 0103), scoped to what `pack/1` needs: whether the class kind a field's
+*declared* type resolves to blocks packing (`Actor` / a `handleScope:`
+`Object`) or asks for recursive versioning (`Value`, excluding the builtin
+passthrough set).
+
+**BT-3542 (cross-boundary conformance):** the two implementations cannot
+literally share code across the Rust/Erlang boundary (ADR 0123 commissions
+this walk as new work, not a port of the Rust lattice), so this module's
+class-kind-based branches below are pinned against
+`runtime/apps/beamtalk_runtime/test/fixtures/sendability_tier_conformance.json`
+— a corpus shared with `sendability.rs`'s own
+`runtime_field_tier_kind_mapping_matches_compile_time_base_tier` test — by
+`beamtalk_shape_migration_tests`'s
+`sendability_tier_conformance_matches_shared_corpus_test/0`. A future kind
+added to either side's `case` (or a change to the `Object`/`handleScope:`
+precedence) that isn't reflected in the corpus fails one or both of those
+tests, catching the drift this function alone cannot prevent. Exported for
+that test's direct use.
+
+**Known, deliberate scope gaps versus the compile-time lattice** (both
+recorded as corpus entries or their own regression coverage, not just this
+comment, per BT-3542):
+1. A generic annotation's type arguments (`List(Port)`) are not composed
+   here — only the head type name is graded. Deferred alongside this
+   module's other Phase 2 scoping choices (ADR 0123 § Consequences); see
+   `field_tier_does_not_compose_generic_type_args_test/0`.
+2. An `Object` with no `handleScope:` declaration grades `Unknown` at
+   compile time (silent, ADR 0100 advisory-only) but `passthrough` here
+   (allowed through `pack/1` as an opaque unversioned term) — the
+   corpus's `ShapePlainObject` entry.
+""".
 -spec field_tier(atom()) -> sendable_ref | handle_scoped | value_nested | passthrough.
 field_tier(none) ->
     passthrough;

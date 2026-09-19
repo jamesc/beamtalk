@@ -611,6 +611,71 @@ mod tests {
         assert_eq!(tier_of(&known("Wrapper"), &h, None), Tier::Unknown);
     }
 
+    /// BT-3542: this checker's kind-based fallback (the `match kind { ... }`
+    /// in `tier_of_known`) necessarily re-derives the same core mapping the
+    /// runtime's `beamtalk_shape_migration:field_tier/1`
+    /// (`runtime/apps/beamtalk_runtime/src/beamtalk_shape_migration.erl`)
+    /// already encodes for `pack/1`'s sendability walk — the two cannot
+    /// literally share code across the Rust/Erlang boundary (ADR 0123
+    /// commissions the runtime walk as new work, not a port of this
+    /// lattice). This corpus is the single source of truth both are pinned
+    /// to; the Erlang side asserts the identical cases in
+    /// `beamtalk_shape_migration_tests:test_sendability_tier_conformance_matches_shared_corpus/0`.
+    /// Each case's `source_fixture` is a real compiled runtime test
+    /// fixture (not a fixture private to this test) — reading it here
+    /// keeps the class declaration itself as the one shared source of
+    /// truth, rather than a second, hand-copied Beamtalk snippet that
+    /// could itself drift from what the Erlang side actually compiles.
+    #[test]
+    fn runtime_field_tier_kind_mapping_matches_compile_time_base_tier() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        let corpus_path = repo_root
+            .join("runtime/apps/beamtalk_runtime/test/fixtures/sendability_tier_conformance.json");
+        let raw = std::fs::read_to_string(&corpus_path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", corpus_path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let class_name = case["class_name"].as_str().expect("case.class_name");
+            let source_fixture = case["source_fixture"]
+                .as_str()
+                .expect("case.source_fixture");
+            let expected_category = case["rust_tier"].as_str().expect("case.rust_tier");
+            let why = case["why"].as_str().unwrap_or("");
+
+            let fixture_path = repo_root.join(source_fixture);
+            let source = std::fs::read_to_string(&fixture_path)
+                .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
+            let tokens = crate::source_analysis::lex_with_eof(&source);
+            let (module, parse_diags) = crate::source_analysis::parse(tokens);
+            assert!(
+                parse_diags.is_empty(),
+                "fixture {source_fixture} failed to parse: {parse_diags:?}"
+            );
+            let hierarchy = ClassHierarchy::build(&module)
+                .0
+                .unwrap_or_else(|e| panic!("build ClassHierarchy for {source_fixture}: {e:?}"));
+
+            let tier = tier_of(&known(class_name), &hierarchy, None);
+            let actual_category = match tier {
+                Tier::Sendable => "Sendable",
+                Tier::SendableRef => "SendableRef",
+                Tier::HandleScoped(_) => "HandleScoped",
+                Tier::Unknown => "Unknown",
+            };
+            assert_eq!(
+                actual_category, expected_category,
+                "corpus mismatch for {class_name} ({why})"
+            );
+        }
+    }
+
     #[test]
     fn join_takes_weakest() {
         assert_eq!(Tier::Sendable.join(Tier::SendableRef), Tier::SendableRef);

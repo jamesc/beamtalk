@@ -1,0 +1,30 @@
+[
+  {
+    "class_name": "ShapeHazardWorker",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/shape_hazard_worker.bt",
+    "rust_tier": "SendableRef",
+    "erlang_field_tier": "sendable_ref",
+    "why": "Actor kind. Both sides reject packing (ADR 0103 SendableRef): the compile-time checker's kind-based fallback (tier_of_known, ClassKind::Actor arm) and the runtime walk (field_tier/1, kind =:= actor arm) agree."
+  },
+  {
+    "class_name": "ShapeHandleBox",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/shape_handle_box.bt",
+    "rust_tier": "HandleScoped",
+    "erlang_field_tier": "handle_scoped",
+    "why": "Object kind declaring handleScope: #process. Both sides reject packing (ADR 0103 HandleScoped): the compile-time checker's kind-based fallback (tier_of_known, ClassKind::Object arm with a resolved handle_scope) and the runtime walk (field_tier/1, kind =:= object with a handle_scope key present) agree."
+  },
+  {
+    "class_name": "ShapePoint",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/shape_point.bt",
+    "rust_tier": "Sendable",
+    "erlang_field_tier": "value_nested",
+    "why": "Value kind, no hazardous fields. Both sides treat this as packable, under each side's own vocabulary for 'packable': Rust's tier_of_known composes the Value's fields eagerly and returns a single terminal Tier::Sendable, while the runtime field_tier/1 returns value_nested — an instruction to pack/1's caller to recurse into the instance's own fields, not a terminal answer itself. Both mean 'not rejected here.'"
+  },
+  {
+    "class_name": "ShapePlainObject",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/shape_plain_object.bt",
+    "rust_tier": "Unknown",
+    "erlang_field_tier": "passthrough",
+    "why": "DELIBERATE DIVERGENCE (BT-3542): an Object subclass declaring neither handleScope: nor any other classification. The compile-time checker is silent about it (Tier::Unknown, ADR 0100 advisory-only — nothing to warn about, since it has no compile-time opinion). The runtime walk conservatively ALLOWS it through pack/1 as an opaque, unversioned term (passthrough) since it carries no known hazard. This is an intentional asymmetry, not a bug: pack/1 must make a binary allow/reject decision at runtime, while the compile-time checker is free to abstain. See beamtalk_shape_migration.erl's field_tier/1 doc and beamtalk_shape_migration_tests.erl's sendability tier conformance test."
+  }
+]
