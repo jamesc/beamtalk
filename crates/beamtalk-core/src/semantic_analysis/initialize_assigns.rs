@@ -41,7 +41,9 @@
 //! Self-sends are opaque — this analysis never traces into another method's
 //! body (that is BT-1948's documented Hint tier, out of this issue's scope).
 
-use crate::ast::{Expression, ExpressionStatement, MatchArm, MessageSelector, Pattern};
+use crate::ast::{
+    CascadeMessage, Expression, ExpressionStatement, MatchArm, MessageSelector, Pattern,
+};
 use crate::semantic_analysis::block_facts::is_self_reference;
 use ecow::EcoString;
 use std::collections::BTreeSet;
@@ -178,15 +180,86 @@ fn analyze_expr(expr: &Expression, current: &BTreeSet<EcoString>) -> FlowResult 
             ..
         } => analyze_message_send(receiver, selector, arguments, current),
 
+        Expression::Cascade {
+            receiver, messages, ..
+        } => analyze_cascade(receiver, messages, current),
+
         // Every other expression kind (identifiers, literals, field reads,
-        // class references, cascades, collection literals, destructuring of
-        // *local* bindings, an un-invoked block literal used as a value,
-        // etc.) has no effect on which `self` slots are definitely assigned,
-        // and always falls through.
+        // class references, collection literals, destructuring of *local*
+        // bindings, an un-invoked block literal used as a value, etc.) has no
+        // effect on which `self` slots are definitely assigned, and always
+        // falls through.
         _ => FlowResult {
             fallthrough: Some(current.clone()),
             diverging: Vec::new(),
         },
+    }
+}
+
+/// Analyzes a `Cascade` (`receiver msg1; msg2; ...`). A cascade is not one of
+/// ADR 0124 §6's named control constructs, so it gets the same conservative
+/// generic treatment [`analyze_message_send`]'s fallback gives an ordinary
+/// send's arguments (mirrored here rather than shared, since a cascade has no
+/// single selector to special-case on): the receiver runs once — unless it is
+/// itself a bare block literal (e.g. `[...] value; value`, cascading directly
+/// onto a block value), which gets the same "may not run" treatment as any
+/// other block-valued receiver — and then every cascaded message's arguments
+/// are threaded in source order, with each block-literal argument treated as
+/// "may not run" (its own assignments discarded, but any early `^` inside it
+/// still harvested as a real completion path — the block may be invoked
+/// later by whatever the cascaded selector does, and a non-local return fires
+/// back through `initialize` regardless of who invokes it).
+///
+/// Getting this right matters even though nothing upstream reads
+/// `initialize_assigns` as a diagnostic yet (BT-1948): a block argument's
+/// `^` is a real divergent completion, and dropping it here (as the
+/// catch-all fallback used to) would make [`intersect_all`] see one fewer
+/// completion than actually exists — silently over-approximating what's
+/// "definite".
+fn analyze_cascade(
+    receiver: &Expression,
+    messages: &[CascadeMessage],
+    current: &BTreeSet<EcoString>,
+) -> FlowResult {
+    let (mut acc, mut diverging) = if let Expression::Block(block) = receiver {
+        let branch_result = analyze_block_body(block, current);
+        (current.clone(), branch_result.diverging)
+    } else {
+        let recv_result = analyze_expr(receiver, current);
+        let Some(after) = recv_result.fallthrough else {
+            return FlowResult {
+                fallthrough: None,
+                diverging: recv_result.diverging,
+            };
+        };
+        (after, recv_result.diverging)
+    };
+
+    for message in messages {
+        for arg in &message.arguments {
+            if let Expression::Block(block) = arg {
+                let branch_result = analyze_block_body(block, &acc);
+                diverging.extend(branch_result.diverging);
+                // Discard branch_result.fallthrough — not guaranteed to run.
+            } else {
+                let arg_result = analyze_expr(arg, &acc);
+                diverging.extend(arg_result.diverging);
+                match arg_result.fallthrough {
+                    Some(set) => acc = set,
+                    None => {
+                        return FlowResult {
+                            fallthrough: None,
+                            diverging,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    FlowResult {
+        fallthrough: Some(acc),
+        diverging,
     }
 }
 
@@ -476,6 +549,22 @@ mod tests {
         }
     }
 
+    fn cascade_message(selector: &str, arguments: Vec<Expression>) -> CascadeMessage {
+        CascadeMessage::new(
+            MessageSelector::Keyword(vec![KeywordPart::new(selector, span())]),
+            arguments,
+            span(),
+        )
+    }
+
+    fn cascade(receiver: Expression, messages: Vec<CascadeMessage>) -> Expression {
+        Expression::Cascade {
+            receiver: Box::new(receiver),
+            messages,
+            span: span(),
+        }
+    }
+
     fn while_true(cond_body: Vec<Expression>, loop_body: Vec<Expression>) -> Expression {
         Expression::MessageSend {
             receiver: Box::new(Expression::Block(block(cond_body))),
@@ -656,6 +745,69 @@ mod tests {
     fn no_initialize_body_assigns_nothing() {
         let result = assigns(vec![]);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn early_return_inside_cascade_block_argument_is_not_definite() {
+        // self log: "x"; onFailure: [^nil]. self.x := nil.
+        //
+        // `onFailure:` is an ordinary cascaded keyword message, not one of
+        // ADR 0124 §6's named control constructs — but its block-literal
+        // argument may still be invoked by whatever `onFailure:` does, and if
+        // it is, the `^nil` inside it fires a non-local return back through
+        // `initialize` *before* `self.x := nil` ever runs. That's a real
+        // completion path the must-analysis has to see, even though the
+        // cascade's own "effect" (a message send whose result is discarded)
+        // has no direct bearing on any slot.
+        let result = assigns(vec![
+            cascade(
+                self_expr(),
+                vec![
+                    cascade_message(
+                        "log:",
+                        vec![Expression::Literal(Literal::String("x".into()), span())],
+                    ),
+                    cascade_message(
+                        "onFailure:",
+                        vec![Expression::Block(block(vec![ret(nil_lit())]))],
+                    ),
+                ],
+            ),
+            assign_field("x", nil_lit()),
+        ]);
+        assert!(
+            result.is_empty(),
+            "an early return inside a cascaded message's block argument must not be dropped — \
+             it is a real completion path that skips the assignment following the cascade"
+        );
+    }
+
+    #[test]
+    fn cascade_with_no_block_arguments_has_no_effect_on_assignment() {
+        // self log: "x"; log: "y". self.x := nil.
+        // A cascade with no block-valued arguments at all still falls
+        // through normally and doesn't spuriously affect the definite set.
+        let result = assigns(vec![
+            cascade(
+                self_expr(),
+                vec![
+                    cascade_message(
+                        "log:",
+                        vec![Expression::Literal(Literal::String("x".into()), span())],
+                    ),
+                    cascade_message(
+                        "log:",
+                        vec![Expression::Literal(Literal::String("y".into()), span())],
+                    ),
+                ],
+            ),
+            assign_field("x", nil_lit()),
+        ]);
+        assert_eq!(
+            result,
+            set(&["x"]),
+            "a cascade with no block arguments must not block an assignment after it"
+        );
     }
 
     #[test]
