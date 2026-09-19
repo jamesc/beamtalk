@@ -1745,8 +1745,7 @@ fn generate_alias_sources_section(code: &mut String, alias_sources: &[String]) {
     );
 
     for text in alias_sources {
-        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
-        let _ = writeln!(code, "        \"{escaped}\",");
+        let _ = writeln!(code, "        {},", rust_str_lit(text));
     }
     code.push_str("    ]\n}\n");
 }
@@ -1840,7 +1839,12 @@ fn declared_type_to_rust_expr(dt: &DeclaredType) -> String {
 /// argument to a `DeclaredType` compact constructor (`impl Into<EcoString>`
 /// parameters accept a bare `&str` literal directly).
 fn rust_str_lit(s: &str) -> String {
-    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped = s
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t");
     format!("\"{escaped}\"")
 }
 
@@ -1866,8 +1870,7 @@ fn generate_method_list(
     let _ = writeln!(code, "            {field_name}: vec![");
     for m in methods {
         let kind = m.kind.to_rust_expr();
-        // Escape backslashes and quotes in selector for Rust string literals
-        let selector = m.selector.replace('\\', "\\\\").replace('"', "\\\"");
+        let selector = rust_str_lit(&m.selector);
         let return_type_expr = match &m.return_type {
             Some(t) => format!("Some({})", declared_type_to_rust_expr(t)),
             None => "None".to_string(),
@@ -1886,20 +1889,12 @@ fn generate_method_list(
             format!("vec![{}]", parts.join(", "))
         };
         let doc_expr = match &m.doc {
-            Some(doc) => {
-                let escaped = doc
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\r', "\\r")
-                    .replace('\n', "\\n")
-                    .replace('\t', "\\t");
-                format!("Some(\"{escaped}\".into())")
-            }
+            Some(doc) => format!("Some({}.into())", rust_str_lit(doc)),
             None => "None".to_string(),
         };
         let _ = writeln!(
             code,
-            "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
+            "                MethodInfo {{ selector: {selector}.into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
              is_internal: {internal}, spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr} }},",
