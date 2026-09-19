@@ -29,6 +29,8 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

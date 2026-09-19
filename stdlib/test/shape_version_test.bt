@@ -71,3 +71,25 @@ TestCase subclass: ShapeVersionTest
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT3537ShapeVersionBuilderClass
     self assert: self.cls shapeVersion equals: 3
+
+  // BT-3556 (ADR 0124 Section 8/B9): fixture: shape_version_late_slot.bt
+  // (ShapeVersionLateSlot). A declared-but-never-assigned `late` slot
+  // (`proc`) is absent from `old`, not `nil` and not a reconcile failure —
+  // it simply stays absent from the migrated dictionary; `flag` (an
+  // ordinary eager field with a default) is unaffected.
+  testMigrateShapeFromLeavesAnAbsentLateSlotAbsent =>
+    migrated := ShapeVersionLateSlot migrateShape: #{} from: 1
+    self deny: (migrated includesKey: #proc)
+    self assert: (migrated at: #flag) equals: "absent"
+
+  // The `migrateFromV1:` hook reads `proc` (the `late` slot) with
+  // `at:ifAbsent:` — the acceptance-criteria pin that a `late` slot's
+  // absence needs no new hook contract, just the same guard any other
+  // possibly-absent key already needs. This exercises the *present*
+  // branch of that same `at:ifAbsent:` read, through the real chain
+  // (`local_call/3`), not a direct `migrateFromV1:` call.
+  testMigrateShapeFromKeepsAPresentLateSlotAndRunsTheHookOverIt =>
+    old := #{#proc => "/bin/bash"}
+    migrated := ShapeVersionLateSlot migrateShape: old from: 1
+    self assert: (migrated at: #proc) equals: "/bin/bash"
+    self assert: (migrated at: #flag) equals: "/bin/bash"

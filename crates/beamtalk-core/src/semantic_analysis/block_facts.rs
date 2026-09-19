@@ -637,7 +637,12 @@ fn collect_pattern_bindings(
 }
 
 /// Returns true if the expression is a reference to `self`.
-fn is_self_reference(expr: &Expression) -> bool {
+///
+/// `pub(crate)`: also used by [`crate::semantic_analysis::initialize_assigns`]'s
+/// must-analysis (ADR 0124 A2a) — same "is this receiver `self`" question this
+/// may-analysis already answers, imported rather than redefined (CLAUDE.md's
+/// no-duplicate-implementations rule).
+pub(crate) fn is_self_reference(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
 

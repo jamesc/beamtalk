@@ -8,7 +8,7 @@
 // `erlang:'<'` that would silently term-order the inner tagged map.
 
 Value subclass: DescendingPair
-  field: key :: DescendingInt
+  field: key :: DescendingInt = DescendingInt new
 
   /// The object-typed sort key.
   key -> DescendingInt => self.key

@@ -29,6 +29,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("first"),
@@ -90,6 +92,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("append:"),
             arity: 1,
@@ -199,6 +203,8 @@ fn generic_inheritance_concrete_superclass_type_arg() {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -305,6 +311,8 @@ fn generic_inheritance_multi_level_composition() {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -398,6 +406,8 @@ fn type_param_bounds_conforming_type_no_warning() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -468,6 +478,8 @@ fn type_param_bounds_non_conforming_type_warns() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -569,6 +581,8 @@ fn type_param_bounds_dynamic_skipped() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -626,6 +640,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         },
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("value"),
             arity: 0,
@@ -677,6 +693,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         },
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("value"),
@@ -727,6 +745,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -752,6 +772,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("printBox:"),
@@ -909,6 +931,8 @@ fn variance_covariant_non_conforming_rejected() {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -1184,6 +1208,8 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: "get:".into(),

@@ -357,6 +357,17 @@ pub(crate) fn parse_class_info_from_meta_term(
     let state_kinds = map_get(m, "field_kinds")
         .map(term_to_slot_kind_map)
         .unwrap_or_default();
+    // ADR 0124 A2a: initialize_assigns — this class's own `initialize`
+    // definitely-assigned slot summary (`meta_initialize_assigns_list`,
+    // beamtalk-codegen). Missing key (older BEAM artifact predating this
+    // key) degrades to the empty set, same "AST-less metadata is best-effort"
+    // contract every other meta-derived field on `ClassInfo` already has.
+    let initialize_assigns: std::collections::BTreeSet<ecow::EcoString> =
+        map_get(m, "initialize_assigns")
+            .map(term_to_atom_list)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
     // Class variables: name list from `class_fields` (the key codegen
     // actually emits — `meta_atom_list(&class.class_variables...)` in
     // `class_meta.rs`), paired with per-name slot kind from
@@ -421,6 +432,16 @@ pub(crate) fn parse_class_info_from_meta_term(
         state_types,
         state_has_default,
         state_kinds,
+        initialize_assigns,
+        // BT-1948 (ADR 0124 §6): the `fieldAt:put:`/`perform:` dynamic-writer
+        // scan (`beamtalk_core::semantic_analysis::has_dynamic_field_writer`)
+        // is not part of `__beamtalk_meta`'s wire format — cross-package
+        // construction-site confidence is already the documented gap ADR
+        // 0100 WS3 (cross-package metadata) leaves open, same as
+        // `is_native` above. `false` here only ever costs confidence
+        // (Warning where a Hint would be more honest), never correctness —
+        // see `ClassInfo::has_dynamic_field_writer`'s doc.
+        has_dynamic_field_writer: false,
         methods,
         class_methods,
         class_variables,

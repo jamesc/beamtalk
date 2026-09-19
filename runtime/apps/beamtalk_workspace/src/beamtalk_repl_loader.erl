@@ -2027,15 +2027,9 @@ pending_findings_from_temp_module(ClassNameBin, PrevGen, TempModuleAtom) ->
             Meta = TempModuleAtom:'__beamtalk_meta'(),
             #{shape := PrevShape, ancestor_shape := AncestorOnlyShape} = PrevGen,
             PendingOwnFieldTypes = maps:get(field_types, Meta, #{}),
-            PendingOwnShape = maps:fold(
-                fun(FieldAtom, TypeAtom, Acc) ->
-                    Acc#{
-                        atom_to_binary(FieldAtom, utf8) =>
-                            beamtalk_workspace_shape_store:field_type_to_binary(TypeAtom)
-                    }
-                end,
-                #{},
-                PendingOwnFieldTypes
+            PendingOwnFieldKinds = maps:get(field_kinds, Meta, #{}),
+            PendingOwnShape = beamtalk_workspace_shape_store:normalize_shape(
+                PendingOwnFieldTypes, PendingOwnFieldKinds
             ),
             PendingShape = maps:merge(AncestorOnlyShape, PendingOwnShape),
             NewGen = #{

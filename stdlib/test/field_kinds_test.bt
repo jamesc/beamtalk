@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3550 (ADR 0124 §9/B5b): `Behaviour>>fieldKinds` / `allFieldKinds` —
+// reflects B5a's `field_kinds` meta (BT-3547) as a `Dictionary(Symbol,
+// Symbol)` of `#eager` | `#late`. Instance side only: `classVarNames` /
+// `allClassVarNames` already own class-side (`classState:`) reflection, so
+// folding class-side kinds into this same dictionary would be ambiguous
+// whenever an instance slot and a class var share a name (ADR 0124 §9's
+// B10 documentation pass records the split).
+//
+// Fixtures: `LateFieldKindsBase` (`late state: proc`, eager `state:
+// nextId`) and `LateFieldKindsSub` (subclass adding its own eager `extra`,
+// no `late` of its own) — see fixtures/late_field_kinds_base.bt and
+// fixtures/late_field_kinds_sub.bt.
+
+TestCase subclass: FieldKindsTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  testFieldKindsReportsLocalLateAndEager =>
+    self assert: LateFieldKindsBase fieldKinds equals: #{
+      #proc => #late,
+      #nextId => #eager
+    }
+
+  testAllFieldKindsMatchesFieldKindsWhenNoSuperclassFields =>
+    self assert: LateFieldKindsBase allFieldKinds equals: #{
+      #proc => #late,
+      #nextId => #eager
+    }
+
+  testSubclassFieldKindsExcludesInheritedLate =>
+    self assert: LateFieldKindsSub fieldKinds equals: #{#extra => #eager}
+    self deny: (LateFieldKindsSub fieldKinds includesKey: #proc)
+
+  testSubclassAllFieldKindsIncludesInheritedLate =>
+    kinds := LateFieldKindsSub allFieldKinds
+    self assert: (kinds at: #proc) equals: #late
+    self assert: (kinds at: #nextId) equals: #eager
+    self assert: (kinds at: #extra) equals: #eager
+
+  // A ClassBuilder-built class carries no static `__beamtalk_meta/0` at all
+  // — every field it reports answers `#eager` (ClassBuilder has no
+  // `late`-slot concept), via `classFieldKinds/1`'s `not_available`
+  // fallback onto the same `gen_server:call(ClassPid, instance_variables)`
+  // path `classFieldNames/1` already uses for dynamic classes.
+  testClassBuilderClassAnswersEagerForEveryField =>
+    Object classBuilder name: #BT3550FieldKindsFallback;
+      superclass: Object;
+      fields: #{#count => 0};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3550FieldKindsFallback
+    self assert: self.cls fieldKinds equals: #{#count => #eager}

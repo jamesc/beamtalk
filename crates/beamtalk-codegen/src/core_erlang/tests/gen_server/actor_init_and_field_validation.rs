@@ -827,6 +827,8 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
             m
         },
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -945,6 +947,8 @@ fn test_cross_file_ancestor_late_field_excluded_from_validation() {
             m.insert(ecow::EcoString::from("reqField"), SlotKind::Eager);
             m
         },
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

@@ -191,6 +191,8 @@ fn cross_file_inherited_late_field_read_is_guarded() {
             );
             m
         },
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

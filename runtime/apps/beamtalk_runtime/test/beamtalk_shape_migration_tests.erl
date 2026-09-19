@@ -58,6 +58,9 @@ setup() ->
     ok = ensure_fixture_loaded(shape_hazard_cart, 'ShapeHazardCart'),
     ok = ensure_fixture_loaded(shape_handle_cart, 'ShapeHandleCart'),
     ok = ensure_fixture_loaded(shape_plain_object, 'ShapePlainObject'),
+    ok = ensure_fixture_loaded(typed_late_slot_actor, 'TypedLateSlotActor'),
+    ok = ensure_fixture_loaded(untyped_late_slot_actor, 'UntypedLateSlotActor'),
+    ok = ensure_fixture_loaded(untyped_field_counter, 'UntypedFieldCounter'),
     ok.
 
 teardown(_) ->
@@ -83,6 +86,19 @@ shape_migration_test_() ->
                 fun test_migrate_typed_field_with_default_fails_when_init_unavailable/0},
             {"undeclared field is dropped with a warning",
                 fun test_migrate_drops_undeclared_field/0},
+            {"absent late field stays absent on a typed class (ADR 0124 Section 8/B9)",
+                fun test_migrate_typed_late_field_absent_stays_absent/0},
+            {"absent late field stays absent on an untyped class (ADR 0124 Section 8/B9)",
+                fun test_migrate_untyped_late_field_absent_stays_absent/0},
+            {"present late field is kept regardless of kind (ADR 0124 Section 8/B9)",
+                fun test_migrate_late_field_present_is_kept/0},
+            {"declared-but-absent late slot stays in the keep set (allFieldNames invariant)",
+                fun test_late_field_stays_in_all_field_names_even_when_unassigned/0},
+            {
+                "reconcile_declared/7's (kind, key present?, has default?, typed?) decision "
+                "table matches the shared conformance corpus (BT-3556)",
+                fun test_late_reconcile_conformance_matches_shared_corpus/0
+            },
             {"a migrateFromV* class method absent from shape_migrations warns (ADR 0123 §2)",
                 fun test_migrate_warns_when_class_method_outside_shape_migrations_table/0},
             {"migrate/4 with skip_stray_warning => true suppresses the warning (BT-3543)",
@@ -242,6 +258,109 @@ test_migrate_drops_undeclared_field() ->
     {ok, NewFields, _ToVersion} = beamtalk_shape_migration:migrate('ShapeChainCart', 1, Fields),
     ?assertNot(maps:is_key(ghost, NewFields)),
     ?assertEqual(1, maps:get(itemCount, NewFields)).
+
+%%====================================================================
+%% `late` reconcile (ADR 0124 Section 8/B9, BT-3556)
+%%====================================================================
+
+%% TypedFieldCounter-shaped failure (a typed, no-default field left unset by
+%% the chain) would fail here too if `proc`'s `late` kind were not consulted
+%% before the typed-no-default branch — this is the regression that
+%% `reconcile_declared/7`'s kind check guards.
+test_migrate_typed_late_field_absent_stays_absent() ->
+    {ok, NewFields, ToVersion} = beamtalk_shape_migration:migrate('TypedLateSlotActor', 1, #{}),
+    ?assertEqual(1, ToVersion),
+    ?assertNot(maps:is_key(proc, NewFields)),
+    ?assertEqual(<<"unset">>, maps:get(label, NewFields)).
+
+test_migrate_untyped_late_field_absent_stays_absent() ->
+    {ok, NewFields, ToVersion} = beamtalk_shape_migration:migrate('UntypedLateSlotActor', 1, #{}),
+    ?assertEqual(1, ToVersion),
+    ?assertNot(maps:is_key(proc, NewFields)),
+    ?assertEqual(<<"unset">>, maps:get(label, NewFields)).
+
+%% A `late` slot that *was* assigned before this migration ran is kept as-is
+%% — the "present -> kept" branch never even consults KindsMap.
+test_migrate_late_field_present_is_kept() ->
+    {ok, NewFields, _ToVersion} = beamtalk_shape_migration:migrate(
+        'TypedLateSlotActor', 1, #{proc => <<"/bin/bash">>}
+    ),
+    ?assertEqual(<<"/bin/bash">>, maps:get(proc, NewFields)),
+    ?assertEqual(<<"unset">>, maps:get(label, NewFields)).
+
+%% Regression guard for the acceptance-criteria invariant: a declared-but-
+%% never-assigned `late` slot still shows up in `allFieldNames`/the keep
+%% set reconcile walks (`classAllFieldNamesByName/1`) — a regression that
+%% instead derived the keep set from `init/1`'s defaults (which never
+%% mentions `proc`, since a `late` field can declare none) would drop it
+%% from the declared-field walk entirely and this would fail.
+test_late_field_stays_in_all_field_names_even_when_unassigned() ->
+    DeclaredFields = beamtalk_behaviour_intrinsics:classAllFieldNamesByName('TypedLateSlotActor'),
+    ?assert(lists:member(proc, DeclaredFields)),
+    ?assert(lists:member(label, DeclaredFields)).
+
+%% BT-3556 (ADR 0124 §8/B9): the shared Rust/Erlang conformance fixture
+%% (`late_reconcile_conformance.json`) pins `reconcile_declared/7`'s
+%% `(slot kind, key present?, has default?, typed?) -> outcome` decision
+%% table — the "boundary you cannot delete"
+%% (`docs/development/architecture-principles.md` §7) between this module's
+%% Erlang implementation and the Rust side's compiled `field_kinds`/
+%% `field_has_default`/`is_typed` meta emission it reads. Each row drives a
+%% real `migrate/3` call against a real compiled fixture class (never a
+%% hand-built map standing in for one), so a drift in either side's meta
+%% emission or this reconcile logic fails here. The Rust side asserts each
+%% row's fixture compiles to the declared `kind`/`has_default`/`is_typed`
+%% meta in
+%% `core_erlang::tests::late_reconcile_conformance::rust_meta_matches_shared_corpus`.
+test_late_reconcile_conformance_matches_shared_corpus() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "late_reconcile_conformance.json"
+    ]),
+    ?assert(length(Cases) > 0),
+    lists:foreach(fun assert_late_reconcile_case/1, Cases).
+
+assert_late_reconcile_case(Case) ->
+    ClassName = binary_to_existing_atom(maps:get(<<"class_name">>, Case), utf8),
+    FieldName = binary_to_existing_atom(maps:get(<<"field_name">>, Case), utf8),
+    Outcome = maps:get(<<"outcome">>, Case),
+    Why = maps:get(<<"why">>, Case, <<>>),
+    KeyPresent = maps:get(<<"key_present">>, Case),
+    Fields =
+        case KeyPresent of
+            true -> #{FieldName => maps:get(<<"present_value">>, Case)};
+            false -> #{}
+        end,
+    Result = beamtalk_shape_migration:migrate(ClassName, 1, Fields),
+    assert_late_reconcile_outcome(Outcome, FieldName, Case, Result, Why).
+
+assert_late_reconcile_outcome(<<"kept">>, FieldName, Case, Result, Why) ->
+    {ok, NewFields, _ToVersion} = Result,
+    ?assertEqual(
+        maps:get(<<"present_value">>, Case), maps:get(FieldName, NewFields), {Why, FieldName}
+    );
+assert_late_reconcile_outcome(<<"default">>, FieldName, Case, Result, Why) ->
+    {ok, NewFields, _ToVersion} = Result,
+    ?assertEqual(
+        maps:get(<<"default_value">>, Case), maps:get(FieldName, NewFields), {Why, FieldName}
+    );
+assert_late_reconcile_outcome(<<"nil">>, FieldName, _Case, Result, Why) ->
+    {ok, NewFields, _ToVersion} = Result,
+    ?assertEqual(nil, maps:get(FieldName, NewFields), {Why, FieldName});
+assert_late_reconcile_outcome(<<"absent">>, FieldName, _Case, Result, Why) ->
+    {ok, NewFields, _ToVersion} = Result,
+    ?assertNot(maps:is_key(FieldName, NewFields), {Why, FieldName});
+assert_late_reconcile_outcome(<<"typed_field_unset_error">>, FieldName, _Case, Result, Why) ->
+    {error, Reason} = Result,
+    ?assertMatch(
+        #beamtalk_error{kind = shape_migration_failed, selector = FieldName},
+        Reason,
+        {Why, FieldName}
+    ).
 
 %% ADR 0123 §2: `ShapeChainCart`'s `migrateFromV2:` is a real, installed
 %% class-side method (see the fixture), but this scenario's meck'd
