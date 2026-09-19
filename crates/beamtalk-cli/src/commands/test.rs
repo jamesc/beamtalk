@@ -1047,8 +1047,13 @@ fn initialize_pipeline(
         .map(|(root, pkg)| (root.clone(), pkg.name.clone()))
         .collect();
 
-    let (pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos, all_alias_infos) =
-        build_merged_class_indexes(&discovered_packages);
+    let (
+        pkg_class_indexes,
+        class_module_index,
+        class_superclass_index,
+        all_class_infos,
+        all_alias_infos,
+    ) = build_merged_class_indexes(&discovered_packages);
 
     Ok(TestPipeline {
         test_path,
