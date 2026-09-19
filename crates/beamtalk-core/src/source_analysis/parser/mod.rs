@@ -623,6 +623,12 @@ pub enum DiagnosticCategory {
     /// File name doesn't agree with its declared class name under Erlang
     /// module-name case-folding — breaks self-dispatch codegen.
     FileClassNameMismatch,
+    /// Definite-assignment advisory (ADR 0124 §6, §7) — a construction site
+    /// (`Cls new`, a literal-map `Cls new: #{...}`) leaves a declared,
+    /// no-default, non-nilable, non-`late` field unassigned. No `@expect`
+    /// category suppresses this one by design (ADR 0124 §6): the exemption
+    /// is the language construct `late`, not an annotation.
+    DefiniteAssignment,
 }
 
 /// A secondary note attached to a diagnostic.

@@ -69,6 +69,7 @@ pub use collision_checker::{
 };
 pub use definite_assignment::{
     is_nilable_type_annotation, is_nilable_type_name, requires_definite_assignment,
+    requires_definite_assignment_for_declared_type,
 };
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};

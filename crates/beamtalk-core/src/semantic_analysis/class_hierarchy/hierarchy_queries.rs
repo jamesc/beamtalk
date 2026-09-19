@@ -645,9 +645,20 @@ impl ClassHierarchy {
 
     /// Returns all state (instance variable) names for a class,
     /// including inherited state from the superclass chain.
+    ///
+    /// A field a subclass shadows (redeclares under the same name) appears
+    /// only once, at its most-derived occurrence — one field name is one
+    /// storage slot per instance regardless of how many ancestors in the
+    /// chain redeclare it, and every by-name query (`state_field_type`,
+    /// `state_field_kind`, `state_field_has_default`) already resolves a
+    /// shadowed name to that same most-derived declaration. Without this,
+    /// a caller that emits one diagnostic per name returned here (e.g.
+    /// [`TypeChecker::check_value_construction_definite_assignment`]) would
+    /// double-report a shadowed field.
     #[must_use]
     pub fn all_state(&self, class_name: &str) -> Vec<EcoString> {
         let mut state = Vec::new();
+        let mut seen_names = HashSet::new();
         let mut visited = HashSet::new();
         let mut current = Some(class_name.to_string());
         while let Some(name) = current {
@@ -655,7 +666,11 @@ impl ClassHierarchy {
                 break;
             }
             if let Some(info) = self.classes.get(name.as_str()) {
-                state.extend(info.state.iter().cloned());
+                for field in &info.state {
+                    if seen_names.insert(field.clone()) {
+                        state.push(field.clone());
+                    }
+                }
                 current = info
                     .superclass
                     .as_ref()
@@ -696,6 +711,45 @@ impl ClassHierarchy {
             }
         }
         None
+    }
+
+    /// Returns whether a state field carries an explicit default value,
+    /// walking the superclass chain to find the declaring class — the same
+    /// shadowing rule as [`Self::state_field_type`]/[`Self::state_field_kind`]:
+    /// a subclass redeclaring a field is the field's owner.
+    ///
+    /// Missing metadata for a known field (an older cross-file
+    /// `__beamtalk_meta/0` predating `state_has_default`) degrades to `true`
+    /// — conservative, so stale metadata never produces a false
+    /// definite-assignment diagnostic — mirroring
+    /// `beamtalk-codegen`'s `inherited_typed_no_default_fields` cross-file
+    /// arm (ADR 0124 §6, §7). An unknown class/field also degrades to `true`
+    /// for the same reason.
+    #[must_use]
+    pub fn state_field_has_default(&self, class_name: &str, field_name: &str) -> bool {
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                if info.state.iter().any(|s| s == field_name) {
+                    return info
+                        .state_has_default
+                        .get(field_name)
+                        .copied()
+                        .unwrap_or(true);
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        true
     }
 
     /// Returns the slot kind (`#eager` | `#late`, ADR 0124 §1) for a state
