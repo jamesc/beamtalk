@@ -743,7 +743,10 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
                         <<"LoaderShapePrecheckCounter">>
                     ),
                     ?assertEqual(
-                        #{<<"count">> => <<"Integer">>, <<"name">> => <<"String">>},
+                        #{
+                            <<"count">> => {<<"Integer">>, <<"eager">>},
+                            <<"name">> => {<<"String">>, <<"eager">>}
+                        },
                         maps:get(shape, Prev)
                     )
                 end)

@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3556 (ADR 0124 Section 8/B9) regression fixture: a `typed` Actor with a
+// `late` slot (no default, absent from a migration's chained dictionary
+// stays absent rather than failing reconcile the way an ordinary
+// typed-no-default field would) alongside an ordinary eager field with a
+// default, so beamtalk_shape_migration_tests can exercise both branches of
+// reconcile_declared/7 against one class: `label` (eager, has a default,
+// used when absent) and `proc` (late, no default, stays absent when absent).
+
+typed Actor subclass: TypedLateSlotActor
+  late state: proc :: String
+  state: label :: String = "unset"
+
+  getLabel -> String => self.label

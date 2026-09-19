@@ -105,7 +105,13 @@ main([]) ->
         "shape_handle_cart",
         %% BT-3542 - field_tier/1's cross-boundary sendability tier
         %% conformance corpus: the "bare Object" row (no handleScope:).
-        "shape_plain_object"
+        "shape_plain_object",
+        %% BT-3556 (ADR 0124 Section 8/B9) - reconcile_declared/7's `late`
+        %% case: a typed and an untyped class each with one `late` (no
+        %% default) and one eager-with-default field.
+        "typed_late_slot_actor",
+        "untyped_late_slot_actor",
+        "untyped_field_counter"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

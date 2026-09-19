@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3556 (ADR 0124 Section 8/B9) regression fixture: an *untyped* Actor
+// with a `late` slot — `late` needs no `typed` class to be legal, only a
+// type annotation on the slot itself (docs/beamtalk-language-features.md's
+// `late` Slots section). Paired with typed_late_slot_actor.bt to pin that
+// "absent + late stays absent" holds on both a typed and an untyped class,
+// not just the typed one the old typed-no-default failure already covered.
+
+Actor subclass: UntypedLateSlotActor
+  late state: proc :: String
+  state: label :: String = "unset"
+
+  getLabel => ^self.label

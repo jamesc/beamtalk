@@ -1,0 +1,94 @@
+[
+  {
+    "class_name": "TypedFieldCounter",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/typed_field_counter.bt",
+    "field_name": "label",
+    "kind": "eager",
+    "has_default": false,
+    "is_typed": true,
+    "key_present": false,
+    "outcome": "typed_field_unset_error",
+    "why": "eager + absent + no default + typed: reconcile_declared/7 fails with {error, {typed_field_unset, label}} — a migration may not leave a typed slot unset (ADR 0123 § Runtime contract), and this is the failure a `late` slot must NOT hit (ADR 0124 §8/B9)."
+  },
+  {
+    "class_name": "UntypedFieldCounter",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/untyped_field_counter.bt",
+    "field_name": "label",
+    "kind": "eager",
+    "has_default": false,
+    "is_typed": false,
+    "key_present": false,
+    "outcome": "nil",
+    "why": "eager + absent + no default + untyped: reconcile_declared/7 fills nil — the untyped counterpart of the typed_field_unset_error row above."
+  },
+  {
+    "class_name": "TypedLateSlotActor",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/typed_late_slot_actor.bt",
+    "field_name": "label",
+    "kind": "eager",
+    "has_default": true,
+    "is_typed": true,
+    "key_present": false,
+    "outcome": "default",
+    "default_value": "unset",
+    "why": "eager + absent + has a default + typed: reconcile_declared/7 fills the class's own init/1 default, regardless of IsTyped — kind is eager, so the late check never applies."
+  },
+  {
+    "class_name": "UntypedLateSlotActor",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/untyped_late_slot_actor.bt",
+    "field_name": "label",
+    "kind": "eager",
+    "has_default": true,
+    "is_typed": false,
+    "key_present": false,
+    "outcome": "default",
+    "default_value": "unset",
+    "why": "eager + absent + has a default + untyped: same default-fill outcome as the typed row above — IsTyped only matters once has_default is false."
+  },
+  {
+    "class_name": "TypedLateSlotActor",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/typed_late_slot_actor.bt",
+    "field_name": "proc",
+    "kind": "late",
+    "has_default": false,
+    "is_typed": true,
+    "key_present": false,
+    "outcome": "absent",
+    "why": "late + absent + typed: THE new row (ADR 0124 §8/B9, BT-3556) — reconcile_declared/7 leaves `proc` absent from the reconciled map entirely, checked before the typed-no-default failure the eager row above hits. `late` cannot declare a default (parse-time rejected), so has_default is always false for a late field."
+  },
+  {
+    "class_name": "UntypedLateSlotActor",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/untyped_late_slot_actor.bt",
+    "field_name": "proc",
+    "kind": "late",
+    "has_default": false,
+    "is_typed": false,
+    "key_present": false,
+    "outcome": "absent",
+    "why": "late + absent + untyped: the other new row — stays absent the same way regardless of IsTyped, pinning that the kind check is not merely a typed-class special case."
+  },
+  {
+    "class_name": "TypedLateSlotActor",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/typed_late_slot_actor.bt",
+    "field_name": "proc",
+    "kind": "late",
+    "has_default": false,
+    "is_typed": true,
+    "key_present": true,
+    "outcome": "kept",
+    "present_value": "/bin/bash",
+    "why": "late + present: kept as-is, regardless of kind — a `late` slot that was already assigned before this migration ran is untouched (the \"present -> kept\" branch never consults KindsMap at all)."
+  },
+  {
+    "class_name": "TypedFieldCounter",
+    "source_fixture": "runtime/apps/beamtalk_runtime/test_fixtures/typed_field_counter.bt",
+    "field_name": "label",
+    "kind": "eager",
+    "has_default": false,
+    "is_typed": true,
+    "key_present": true,
+    "outcome": "kept",
+    "present_value": "present-value",
+    "why": "eager + present: kept as-is — the ordinary case every other row's \"absent\" variant is contrasted against."
+  }
+]
