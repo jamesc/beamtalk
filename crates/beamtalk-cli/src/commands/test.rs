@@ -34,6 +34,17 @@ use super::util;
 /// Per-package class module indexes: package root → (`class_module_index`, `class_superclass_index`).
 type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<String, String>)>;
 
+/// [`build_merged_class_indexes`]'s return: per-package indexes, the merged
+/// class-name→module-name/superclass-name indexes, and the merged
+/// `ClassInfo`/`AliasInfo` collections.
+type MergedClassIndexes = (
+    PkgClassIndexes,
+    HashMap<String, String>,
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+);
+
 // ──────────────────────────────────────────────────────────────────────────
 // Test discovery from AST
 // ──────────────────────────────────────────────────────────────────────────
@@ -932,13 +943,7 @@ fn discover_packages_with_manifests(
 /// Returns `(pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos, all_alias_infos)`.
 fn build_merged_class_indexes(
     discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
-) -> (
-    PkgClassIndexes,
-    HashMap<String, String>,
-    HashMap<String, String>,
-    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-) {
+) -> MergedClassIndexes {
     let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
