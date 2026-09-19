@@ -189,6 +189,14 @@ pub struct ClassDefinition {
     /// no declaration (they stay tier `Unknown`, silent). Only meaningful on
     /// `Object`-kind classes.
     pub handle_scope: Option<Identifier>,
+    /// Declared shape version (ADR 0123, `shapeVersion: N`).
+    ///
+    /// Set by the parser when a class-header `shapeVersion:` clause appears,
+    /// parsed on the same header-clause path as `handle_scope`
+    /// (`parse_optional_shape_version`, mirroring `parse_optional_handle_scope`).
+    /// `None` means the class is at the implicit default, shape version `1`
+    /// — every class predating this ADR keeps compiling unchanged.
+    pub shape_version: Option<ShapeVersionDeclaration>,
     /// Type parameters for generic classes (e.g., `T`, `E` in `Result(T, E)`).
     ///
     /// Empty for non-generic classes. Populated by the parser when parenthesized
@@ -236,6 +244,7 @@ impl ClassDefinition {
             doc_comment: None,
             backing_module: None,
             handle_scope: None,
+            shape_version: None,
             span,
         }
     }
@@ -273,6 +282,7 @@ impl ClassDefinition {
             doc_comment: None,
             backing_module: None,
             handle_scope: None,
+            shape_version: None,
             span,
         }
     }
@@ -282,6 +292,49 @@ impl ClassDefinition {
     pub fn superclass_name(&self) -> &str {
         self.superclass.as_ref().map_or("none", |s| s.name.as_str())
     }
+
+    /// The class's effective shape version (ADR 0123): the declared
+    /// `shapeVersion:` value, or the implicit default `1` when absent.
+    #[must_use]
+    pub fn effective_shape_version(&self) -> u32 {
+        self.shape_version.as_ref().map_or(1, |sv| sv.version)
+    }
+}
+
+/// A declared `shapeVersion: N` header clause (ADR 0123 §1).
+///
+/// Mirrors [`Identifier`]'s role for `handle_scope`: `version` is the parsed
+/// positive-integer value, `span` points at the integer literal for
+/// diagnostics (the duplicate/unreachable-migration errors and warnings).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShapeVersionDeclaration {
+    /// The declared version number (a positive integer literal in source).
+    pub version: u32,
+    /// Source location of the integer literal.
+    pub span: Span,
+}
+
+/// Parses a `migrateFromVN:` selector's `N` (ADR 0123 §2) — the single
+/// naming-convention parser `beamtalk_shape_migration`'s fun-outside-table
+/// warning also needs to match, so both sides of the Rust/Erlang boundary
+/// recognize exactly the same selector shape. Recognizes only a bare
+/// single-keyword-part selector: passing the full concatenated selector text
+/// (`MessageSelector::name()`) means a multi-part selector like
+/// `migrateFromV1:extra:` naturally fails (the digits-only check below sees
+/// the `:extra:` tail) without a separate arity check.
+///
+/// Returns `None` for anything that doesn't match `migrateFromV<N>:` where
+/// `N` is a positive integer with no extra characters — including
+/// `migrateFromV:` (no digits) and `migrateFromV0:` (not positive).
+#[must_use]
+pub fn migrate_from_v_version(selector_text: &str) -> Option<u32> {
+    let digits = selector_text
+        .strip_prefix("migrateFromV")
+        .and_then(|rest| rest.strip_suffix(':'))?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u32>().ok().filter(|&n| n > 0)
 }
 
 /// A standalone method definition (Tonel-style).
@@ -590,5 +643,50 @@ impl StateDeclaration {
             doc_comment: None,
             span,
         }
+    }
+}
+
+#[cfg(test)]
+mod migrate_from_v_version_tests {
+    use super::migrate_from_v_version;
+
+    #[test]
+    fn recognizes_valid_single_digit() {
+        assert_eq!(migrate_from_v_version("migrateFromV1:"), Some(1));
+        assert_eq!(migrate_from_v_version("migrateFromV7:"), Some(7));
+    }
+
+    #[test]
+    fn recognizes_multi_digit() {
+        assert_eq!(migrate_from_v_version("migrateFromV12:"), Some(12));
+    }
+
+    #[test]
+    fn rejects_zero() {
+        assert_eq!(migrate_from_v_version("migrateFromV0:"), None);
+    }
+
+    #[test]
+    fn rejects_missing_digits() {
+        assert_eq!(migrate_from_v_version("migrateFromV:"), None);
+    }
+
+    #[test]
+    fn rejects_missing_colon() {
+        assert_eq!(migrate_from_v_version("migrateFromV1"), None);
+    }
+
+    #[test]
+    fn rejects_multi_keyword_selector() {
+        // A second keyword part surfaces as trailing non-digit text after
+        // stripping the `migrateFromV` prefix and `:` suffix, so a
+        // multi-part selector is never mistaken for a migration step.
+        assert_eq!(migrate_from_v_version("migrateFromV1:extra:"), None);
+    }
+
+    #[test]
+    fn rejects_unrelated_selector() {
+        assert_eq!(migrate_from_v_version("migrateTo:"), None);
+        assert_eq!(migrate_from_v_version("initialize"), None);
     }
 }

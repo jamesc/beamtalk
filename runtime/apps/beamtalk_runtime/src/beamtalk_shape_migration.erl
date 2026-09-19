@@ -86,6 +86,7 @@ migrate(Class, FromVersion, Fields) when
             ToVersion = maps:get(shape_version, Meta, 1),
             Migrations = maps:get(shape_migrations, Meta, #{}),
             maybe_log_downgrade(Class, FromVersion, ToVersion),
+            warn_migrations_outside_table(Class, Migrations),
             Invoke = fun(Selector, Dict) -> invoke_hook(Class, Selector, Dict) end,
             case
                 beamtalk_shape_chain:migrate(Migrations, {FromVersion, ToVersion}, Fields, Invoke)
@@ -118,6 +119,77 @@ maybe_log_downgrade(Class, FromVersion, ToVersion) when ToVersion < FromVersion 
     );
 maybe_log_downgrade(_Class, _FromVersion, _ToVersion) ->
     ok.
+
+-doc """
+Warn when a class-method fun whose selector matches `migrateFromV*` is
+installed on `Class` but absent from `Migrations` (the compiler-emitted
+`'shape_migrations'` table) — the **one place** this module inspects a
+selector's *name* (ADR 0123 §2). Every other decision here reads the table,
+never a selector spelling: a migration installed by a path that recompiles
+the class (`Cart class >> migrateFromV1: …`, `compile:source:`) regenerates
+`__beamtalk_meta` and lands in the table; one installed as a bare fun with
+no recompile (`ClassBuilder addClassMethod:body:` after `register`, or any
+future fun-only patch path) is invisible to the table *and* to
+`local_call/3`, and does not run — this only makes that silent gap visible.
+Never fails the migration itself; a lookup failure degrades to no warning,
+the same tolerant-degrade convention `read_meta/1` uses.
+""".
+-spec warn_migrations_outside_table(atom(), map()) -> ok.
+warn_migrations_outside_table(Class, Migrations) ->
+    TableSelectors = sets:from_list(maps:values(Migrations), [{version, 2}]),
+    try
+        case beamtalk_class_registry:whereis_class(Class) of
+            undefined ->
+                ok;
+            ClassPid ->
+                Stray = [
+                    S
+                 || S <- beamtalk_object_class:local_class_methods(ClassPid),
+                    is_migrate_from_v_selector(S),
+                    not sets:is_element(S, TableSelectors)
+                ],
+                log_stray_migrations(Class, Stray)
+        end
+    catch
+        _:_ -> ok
+    end.
+
+-spec log_stray_migrations(atom(), [atom()]) -> ok.
+log_stray_migrations(_Class, []) ->
+    ok;
+log_stray_migrations(Class, Stray) ->
+    ?LOG_WARNING(
+        "migrateFromV* class method installed outside the shape_migrations "
+        "table — it will not run in the migration chain until the class is "
+        "recompiled",
+        #{class => Class, selectors => Stray, domain => [beamtalk, runtime]}
+    ).
+
+-doc """
+`true` for an atom spelled `migrateFromV<N>:` where `N` is one or more
+digits — the same selector shape
+`beamtalk_core::ast::migrate_from_v_version` (Rust) recognizes for meta
+emission, re-derived here in Erlang rather than shared because this is
+advisory only (see moduledoc): a mismatch between the two costs a missed or
+spurious warning, never a wrong migration result, so it does not need the
+shared-leaf-module machinery a correctness-critical rule would.
+""".
+-spec is_migrate_from_v_selector(atom()) -> boolean().
+is_migrate_from_v_selector(Selector) ->
+    Str = atom_to_list(Selector),
+    Prefix = "migrateFromV",
+    case lists:prefix(Prefix, Str) of
+        true ->
+            Rest = lists:nthtail(length(Prefix), Str),
+            case lists:reverse(Rest) of
+                [$: | RevDigits] when RevDigits =/= [] ->
+                    lists:all(fun(C) -> C >= $0 andalso C =< $9 end, RevDigits);
+                _ ->
+                    false
+            end;
+        false ->
+            false
+    end.
 
 -doc """
 Invoke a chain step's hook (`migrateFromVN:`, per the migrations table) via
@@ -208,19 +280,39 @@ reconcile_declared([Field | Rest], Acc, ChainedFields, Defaults, HasDefaultMap, 
     end.
 
 -doc """
-Fetch `Module:init(#{'__skip_initialize__' => true})`'s defaults — the
-2-tuple, no-telemetry branch (ADR 0123 Current state ¶5) — for reconcile's
-"declared field has a default" case.
+Fetch declared-field defaults for reconcile's "declared field has a default"
+case — `Module:init(#{'__skip_initialize__' => true})`'s defaults (the
+2-tuple, no-telemetry branch, ADR 0123 Current state ¶5) for an Actor/Object
+class, or `Module:new/0`'s fields (stripped of internal keys) for a `Value`
+class, which has no `init/1` at all (ADR 0123 §3: Values have no live
+process and are never versioned in-memory, but reconcile still needs their
+declared defaults — `beamtalk_class_instantiation:ancestor_compiled_defaults/1`
+is the same "call the compiled constructor, strip internal fields" derivation
+the class-instantiation default-collection walk already uses for a compiled
+ancestor).
 
 Degrades to `#{}` (every has-default field then falls back to `nil`, and a
-warning is logged) rather than failing the whole migration: an `init/1` that
-cannot run is the same "not usable right now" condition
+warning is logged) rather than failing the whole migration: a constructor
+that cannot run is the same "not usable right now" condition
 `beamtalk_hot_reload`'s pre-Phase-2 `migrate_fields/3` already tolerated —
 losing the actual default values is a lesser harm than aborting or
 suspending a migration whose chain steps already ran successfully.
 """.
 -spec safe_init_defaults(atom(), atom()) -> map().
 safe_init_defaults(Class, Module) ->
+    case erlang:function_exported(Module, init, 1) of
+        true -> safe_actor_init_defaults(Class, Module);
+        false -> safe_value_new_defaults(Class, Module)
+    end.
+
+-spec safe_value_new_defaults(atom(), atom()) -> map().
+safe_value_new_defaults(_Class, Module) ->
+    %% ancestor_compiled_defaults/1 already degrades to #{} internally
+    %% (its own try/catch, logged at ?LOG_DEBUG) — no second layer needed.
+    beamtalk_class_instantiation:ancestor_compiled_defaults(Module).
+
+-spec safe_actor_init_defaults(atom(), atom()) -> map().
+safe_actor_init_defaults(Class, Module) ->
     try Module:init(#{'__skip_initialize__' => true}) of
         {ok, Map} when is_map(Map) ->
             Map;

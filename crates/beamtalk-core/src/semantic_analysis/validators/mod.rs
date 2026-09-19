@@ -33,7 +33,8 @@ pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_field_mutation_in_closure, check_actor_new_usage,
     check_cast_on_value_type, check_class_variable_access, check_data_keyword_class_kind,
     check_handle_scope_on_object, check_new_field_names, check_object_new_usage,
-    check_value_nil_return, check_value_slot_assignment, check_value_slot_case_collision,
+    check_shape_version_and_migrations, check_value_nil_return, check_value_slot_assignment,
+    check_value_slot_case_collision,
 };
 // `pub`, not `pub(crate)`: the standalone `beamtalk-lint`
 // crate's `effect_free_statement` pass calls this directly.

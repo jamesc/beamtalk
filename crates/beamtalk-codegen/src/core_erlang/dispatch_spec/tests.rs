@@ -40,6 +40,7 @@ fn class_with_methods(methods: Vec<MethodDefinition>) -> ClassDefinition {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: s(),
     }
 }
