@@ -26,6 +26,10 @@ Covers:
   beamtalk_shape_store_superclass_fixture/beamtalk_shape_store_subclass_fixture)
 - BT-3538: read_generation_from_meta/1 and capture/1 carry
   'shape_version'/'shape_migrations' alongside the flattened shape
+- BT-3560: ancestor_field_types/1 returns only the ancestor contribution,
+  never folding in the class's own fields (the accessor
+  read_generation_from_meta/1's ancestor_shape now uses, replacing a
+  precheck-side derivation that was lossy for a shadowed field)
 
 The end-to-end thread from a real class-body reload
 (`beamtalk_repl_loader:load_class_module/3` et al.) through to a
@@ -97,6 +101,7 @@ capture_without_prime_is_always_no_op(_Pid) ->
         ExpectedGen = #{
             shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
             own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            ancestor_shape => #{},
             version => 1,
             migrations => #{}
         },
@@ -123,6 +128,7 @@ previous_does_not_mutate_store(_Pid) ->
         Expected = #{
             shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
             own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+            ancestor_shape => #{},
             version => 1,
             migrations => #{}
         },
@@ -321,6 +327,7 @@ read_generation_defaults_undeclared_version_test() ->
             #{
                 shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
                 own_shape => #{<<"count">> => <<"Integer">>, <<"name">> => <<"Dynamic">>},
+                ancestor_shape => #{},
                 version => 1,
                 migrations => #{}
             },
@@ -357,6 +364,10 @@ read_generation_reads_declared_version_and_migrations_test() ->
                     <<"name">> => <<"Dynamic">>
                 },
                 own_shape => #{<<"name">> => <<"Dynamic">>},
+                ancestor_shape => #{
+                    <<"count">> => <<"Integer">>,
+                    <<"taxRate">> => <<"Float">>
+                },
                 version => 2,
                 migrations => #{1 => 'migrateFromV1:'}
             },
@@ -374,3 +385,58 @@ read_generation_degrades_to_undefined_for_unregistered_class_test() ->
         undefined,
         beamtalk_workspace_shape_store:read_generation_from_meta(<<"NeverSeenClassXyz">>)
     ).
+
+%%====================================================================
+%% ancestor_field_types/1 (exported for TEST, BT-3560)
+%%====================================================================
+
+%% A root class (no superclass) contributes no ancestor fields at all.
+ancestor_field_types_is_empty_for_a_root_class_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSuperclass',
+        beamtalk_shape_store_superclass_fixture,
+        [count, taxRate],
+        none,
+        undefined
+    ),
+    try
+        ?assertEqual(
+            #{},
+            beamtalk_workspace_shape_store:ancestor_field_types('ShapeFixtureSuperclass')
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureSuperclass')
+    end.
+
+%% A subclass's ancestor_field_types/1 is *only* the superclass's own fields
+%% (`count`/`taxRate`) — never folding in the subclass's own `name`, unlike
+%% flattened_field_types/2 (exercised indirectly above via
+%% read_shape_from_meta/1). This is the accessor precheck_class_shape/2 now
+%% relies on directly instead of deriving it by subtracting own_shape back
+%% out of a flattened shape (BT-3560 — lossy for a shadowed field).
+ancestor_field_types_is_only_the_ancestor_contribution_test() ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSuperclass',
+        beamtalk_shape_store_superclass_fixture,
+        [count, taxRate],
+        none,
+        undefined
+    ),
+    ok = beamtalk_class_metadata:insert(
+        'ShapeFixtureSubclass',
+        beamtalk_shape_store_subclass_fixture,
+        [name],
+        'ShapeFixtureSuperclass',
+        undefined
+    ),
+    try
+        ?assertEqual(
+            #{count => 'Integer', taxRate => 'Float'},
+            beamtalk_workspace_shape_store:ancestor_field_types('ShapeFixtureSubclass')
+        )
+    after
+        ets:delete(?TABLE, 'ShapeFixtureSubclass'),
+        ets:delete(?TABLE, 'ShapeFixtureSuperclass')
+    end.

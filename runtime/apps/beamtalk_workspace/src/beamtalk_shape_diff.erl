@@ -78,11 +78,20 @@ caller.
 %% just this class's own `field_types`, no ancestors — kept alongside `shape`
 %% so a pre-save precheck (`beamtalk_repl_loader:precheck_class_shape/2`,
 %% ADR 0105 Phase 3) can recompute a *pending* edit's flattened shape without
-%% re-walking the ancestor chain: `shape` minus `own_shape`'s keys is exactly
-%% the ancestor contribution, which a same-class edit never changes.
+%% re-walking the ancestor chain. `ancestor_shape` is the ancestor-only
+%% counterpart, captured directly by `beamtalk_workspace_shape_store`'s own
+%% ancestor walk (BT-3560) rather than derived as `shape` minus `own_shape`'s
+%% keys: that subtraction is lossy whenever a class's own field *shadows* a
+%% same-named ancestor field, since `shape` (a flat map) only keeps one value
+%% per field name and the shadowed ancestor value is already gone from it by
+%% the time `own_shape` is in hand. A precheck that derived it that way would
+%% report a false `dropped_without_bump` for a pending edit that merely
+%% removes such a shadowing override — the field is still covered by the
+%% (now-visible-again) ancestor, but the subtraction can't tell.
 -type generation() :: #{
     shape := shape(),
     own_shape := shape(),
+    ancestor_shape := shape(),
     version := pos_integer(),
     migrations := #{pos_integer() => atom()}
 }.

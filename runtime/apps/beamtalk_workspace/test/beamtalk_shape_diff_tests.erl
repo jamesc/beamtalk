@@ -105,7 +105,13 @@ field_name_test_() ->
 %%====================================================================
 
 gen(Shape, Version, Migrations) ->
-    #{shape => Shape, own_shape => Shape, version => Version, migrations => Migrations}.
+    #{
+        shape => Shape,
+        own_shape => Shape,
+        ancestor_shape => #{},
+        version => Version,
+        migrations => Migrations
+    }.
 
 %% No previous generation at all — nothing to compare a version against, so
 %% reload_findings/4 degrades to [] rather than manufacture a finding from

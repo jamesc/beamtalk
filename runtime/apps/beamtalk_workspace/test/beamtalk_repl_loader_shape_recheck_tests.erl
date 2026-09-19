@@ -846,3 +846,55 @@ precheck_class_shape_with_no_baseline_reports_nothing_test_() ->
             ?assertEqual([], Findings)
         end)
     end}.
+
+%% BT-3560 regression: a subclass shadows an ancestor's same-named,
+%% same-typed field (`count`). A pending edit drops the subclass's own
+%% override, reverting to purely inherited — the field is still covered by
+%% the ancestor, so this must report [], never a false `dropped_without_bump`.
+%% Before the fix, the precheck derived the ancestor contribution by
+%% subtracting the subclass's *previous* own-field keys back out of its
+%% flattened shape (`maps:without(maps:keys(PrevOwnShape), PrevShape)`) — but
+%% a flattened shape only keeps one value per field name, so once the
+%% subclass's own `count` shadowed the ancestor's, the ancestor's `count`
+%% contribution was invisible to that subtraction and got wrongly reported as
+%% dropped.
+precheck_class_shape_does_not_false_positive_on_shadowed_ancestor_field_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    SuperPath = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_ancestor_super_~p.bt", [UniqueId])
+                    ),
+                    SubPath = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_ancestor_sub_~p.bt", [UniqueId])
+                    ),
+                    SuperSource =
+                        <<
+                            "Actor subclass: LoaderShapeAncestorSuper\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    %% The subclass shadows the ancestor's `count` field with
+                    %% its own — same name, same declared type.
+                    SubSource =
+                        <<
+                            "LoaderShapeAncestorSuper subclass: LoaderShapeAncestorSub\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    ok = file:write_file(SuperPath, SuperSource),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(SuperPath, state0()),
+                    ok = file:write_file(SubPath, SubSource),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(SubPath, State1),
+
+                    %% Pending edit: drop the subclass's own `count` override
+                    %% entirely — never installed via handle_load/2.
+                    PendingSource =
+                        <<"LoaderShapeAncestorSuper subclass: LoaderShapeAncestorSub\n">>,
+                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                        <<"LoaderShapeAncestorSub">>, PendingSource
+                    ),
+                    ?assertEqual([], Findings)
+                end)
+            ]
+        end}}.

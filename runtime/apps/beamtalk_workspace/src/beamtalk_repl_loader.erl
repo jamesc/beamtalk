@@ -1957,13 +1957,14 @@ precheck_temp_module_name() ->
 %% `precheck_temp_module_name/0` atom just long enough to read its
 %% `__beamtalk_meta/0`, purge/delete it unconditionally (the `after` clause),
 %% and diff the resulting *pending* generation against `PrevGen`. `PrevGen`'s
-%% `own_shape` — this class's own, un-flattened field set as of the last real
-%% capture — is subtracted from `PrevGen`'s flattened `shape` to recover just
-%% the ancestor contribution (which this same-class edit cannot itself have
-%% changed), then the pending edit's own field types are merged on top:
-%% exactly `beamtalk_workspace_shape_store`'s own ancestor-then-own-class
-%% merge precedence, without re-walking the ancestor chain (see
-%% `beamtalk_shape_diff:generation/0`'s doc).
+%% `ancestor_shape` (BT-3560) — captured directly by
+%% `beamtalk_workspace_shape_store`, never derived by subtracting `own_shape`
+%% back out of the flattened `shape` (lossy whenever a field is shadowed —
+%% see `beamtalk_shape_diff:generation/0`'s doc) — is the ancestor
+%% contribution (which this same-class edit cannot itself have changed); the
+%% pending edit's own field types are merged on top of it: exactly
+%% `beamtalk_workspace_shape_store`'s own ancestor-then-own-class merge
+%% precedence, without re-walking the ancestor chain.
 %%
 %% **`global:trans/3` critical section.** The fixed module name
 %% (`precheck_temp_module_name/0`) means two concurrent precheck calls — two
@@ -2016,8 +2017,7 @@ pending_findings_from_temp_module(ClassNameBin, PrevGen, TempModuleAtom) ->
             [];
         true ->
             Meta = TempModuleAtom:'__beamtalk_meta'(),
-            #{shape := PrevShape, own_shape := PrevOwnShape} = PrevGen,
-            AncestorOnlyShape = maps:without(maps:keys(PrevOwnShape), PrevShape),
+            #{shape := PrevShape, ancestor_shape := AncestorOnlyShape} = PrevGen,
             PendingOwnFieldTypes = maps:get(field_types, Meta, #{}),
             PendingOwnShape = maps:fold(
                 fun(FieldAtom, TypeAtom, Acc) ->
@@ -2033,6 +2033,7 @@ pending_findings_from_temp_module(ClassNameBin, PrevGen, TempModuleAtom) ->
             NewGen = #{
                 shape => PendingShape,
                 own_shape => PendingOwnShape,
+                ancestor_shape => AncestorOnlyShape,
                 version => maps:get(shape_version, Meta, 1),
                 migrations => maps:get(shape_migrations, Meta, #{})
             },
