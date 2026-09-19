@@ -35,6 +35,7 @@ fn price_band_class_info_with_lo_type(
         state: vec![ecow::EcoString::from("lo")],
         state_types,
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

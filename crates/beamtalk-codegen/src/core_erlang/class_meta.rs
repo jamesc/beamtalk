@@ -22,7 +22,7 @@ use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
-    ClassDefinition, ClassKind, MethodDefinition, MethodKind, Module, StateDeclaration,
+    ClassDefinition, ClassKind, MethodDefinition, MethodKind, Module, SlotKind, StateDeclaration,
     TypeParamDecl, declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
@@ -226,6 +226,15 @@ impl CoreErlangGenerator {
         // without the AST (post-initialize validation in gen_server codegen).
         let field_has_default_doc = Self::meta_field_has_default_map(&class.state);
 
+        // field_kinds / class_field_kinds (ADR 0124 §1/B5a): map of field
+        // name → 'eager' | 'late', for instance state and class-side state
+        // respectively. The guarded read (B3) and cross-file `ClassInfo`
+        // population (`beamtalk-core`'s `parse_class_info_from_meta_term`)
+        // read these so an inherited or cross-file `late` slot is known
+        // without the declaring class's AST.
+        let field_kinds_doc = Self::meta_field_kinds_map(&class.state);
+        let class_field_kinds_doc = Self::meta_field_kinds_map(&class.class_variables);
+
         // Compute auto-slot methods once and share across method_info / class_method_info
         let auto = compute_auto_slot_methods(class);
         let method_info_doc = Self::meta_method_info_map(&Self::meta_instance_method_entries(
@@ -328,6 +337,10 @@ impl CoreErlangGenerator {
             field_types_doc,
             ",\n      'field_has_default' => ",
             field_has_default_doc,
+            ",\n      'field_kinds' => ",
+            field_kinds_doc,
+            ",\n      'class_field_kinds' => ",
+            class_field_kinds_doc,
             ",\n      'method_info' => ",
             method_info_doc,
             ",\n      'class_method_info' => ",
@@ -446,6 +459,41 @@ impl CoreErlangGenerator {
                 Document::Str("'false'")
             };
             parts.push(docvec![leaf::atom(s.name.name.to_string()), " => ", flag,]);
+        }
+        parts.push(Document::Str("}~"));
+        Document::Vec(parts)
+    }
+
+    /// Builds a field-kinds map for `__beamtalk_meta/0` (ADR 0124 §1/B5a):
+    /// `'eager'` for every ordinary declaration, `'late'` for a `late
+    /// state:`/`late classState:` slot.
+    ///
+    /// Example: `[StateDecl{name: "proc", slot_kind: Late}]` → `~{'proc' => 'late'}~`
+    /// Empty slice → `~{}~`
+    ///
+    /// Used for both the `'field_kinds'` key (instance `state:`, `class.state`)
+    /// and the `'class_field_kinds'` key (class-side `classState:`,
+    /// `class.class_variables`) — same per-declaration shape, so one emitter
+    /// serves both call sites (`build_meta_map_doc_with_extra`).
+    pub(super) fn meta_field_kinds_map(state: &[StateDeclaration]) -> Document<'static> {
+        if state.is_empty() {
+            return Document::Str("~{}~");
+        }
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("~{"));
+        for (i, s) in state.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            let kind_doc: Document<'static> = match s.slot_kind {
+                SlotKind::Eager => Document::Str("'eager'"),
+                SlotKind::Late => Document::Str("'late'"),
+            };
+            parts.push(docvec![
+                leaf::atom(s.name.name.to_string()),
+                " => ",
+                kind_doc,
+            ]);
         }
         parts.push(Document::Str("}~"));
         Document::Vec(parts)

@@ -163,7 +163,7 @@ fn parse_class_hierarchy_from_term_roundtrip() {
         (atom("field_types"), Term::from(field_types_map)),
         (atom("method_info"), Term::from(method_info_map)),
         (atom("class_method_info"), Term::from(class_method_info_map)),
-        (atom("class_variables"), Term::from(List::from(vec![]))),
+        (atom("class_fields"), Term::from(List::from(vec![]))),
     ]);
 
     let class_hierarchy_term = Term::from(Map::from([(atom("counter"), Term::from(meta_map))]));
@@ -194,6 +194,100 @@ fn parse_class_hierarchy_from_term_roundtrip() {
     assert_eq!(info.class_methods.len(), 1);
     assert_eq!(info.class_methods[0].selector.as_str(), "new");
     assert_eq!(info.class_methods[0].arity, 0);
+}
+
+/// ADR 0124 §1/B5a: `'field_kinds'` and `'class_field_kinds'`
+/// (`class_meta.rs`'s `meta_field_kinds_map`) must survive the ETF
+/// `__beamtalk_meta/0` boundary into `ClassInfo.state_kinds` and
+/// `ClassInfo.class_variables[].kind` — the cross-file half of the guarded
+/// read (B3): a `late` slot declared in a class whose AST is not in the
+/// current compilation is only visible through this metadata.
+#[test]
+fn field_kinds_and_class_field_kinds_survive_etf_meta() {
+    use beamtalk_core::ast::SlotKind;
+    use eetf::{FixInteger, List};
+
+    let field_types_map = Map::from([(atom("proc"), atom("Subprocess"))]);
+    let field_kinds_map = Map::from([(atom("proc"), atom("late")), (atom("id"), atom("eager"))]);
+    let class_field_kinds_map = Map::from([(atom("current"), atom("late"))]);
+
+    let meta_map = Map::from([
+        (atom("class"), atom("codexClient")),
+        (atom("superclass"), atom("Actor")),
+        (atom("meta_version"), Term::from(FixInteger::from(2))),
+        (atom("is_sealed"), atom("false")),
+        (atom("is_abstract"), atom("false")),
+        (atom("is_value"), atom("false")),
+        (atom("is_typed"), atom("true")),
+        (
+            atom("fields"),
+            Term::from(List::from(vec![atom("proc"), atom("id")])),
+        ),
+        (atom("field_types"), Term::from(field_types_map)),
+        (atom("field_kinds"), Term::from(field_kinds_map)),
+        (atom("method_info"), Term::from(Map::from([]))),
+        (atom("class_method_info"), Term::from(Map::from([]))),
+        (
+            atom("class_fields"),
+            Term::from(List::from(vec![atom("current")])),
+        ),
+        (atom("class_field_kinds"), Term::from(class_field_kinds_map)),
+    ]);
+
+    let class_hierarchy_term = Term::from(Map::from([(atom("codexClient"), Term::from(meta_map))]));
+    let classes = parse_class_hierarchy_from_term(&class_hierarchy_term);
+    assert_eq!(classes.len(), 1, "Should parse one class");
+
+    let info = &classes[0];
+    assert_eq!(
+        info.state_kinds.get("proc").copied(),
+        Some(SlotKind::Late),
+        "late instance field must decode as SlotKind::Late"
+    );
+    assert_eq!(
+        info.state_kinds.get("id").copied(),
+        Some(SlotKind::Eager),
+        "ordinary instance field must decode as SlotKind::Eager"
+    );
+    assert_eq!(info.class_variables.len(), 1);
+    assert_eq!(info.class_variables[0].name.as_str(), "current");
+    assert_eq!(
+        info.class_variables[0].kind,
+        SlotKind::Late,
+        "late class variable must decode as SlotKind::Late"
+    );
+}
+
+/// A field absent from `'field_kinds'` (an older BEAM artifact compiled
+/// before ADR 0124) must degrade to `SlotKind::Eager` — the pre-existing
+/// behaviour every slot had — never panic or leave the map empty for a
+/// declared field.
+#[test]
+fn missing_field_kinds_key_degrades_to_eager() {
+    use eetf::List;
+
+    let meta_map = Map::from([
+        (atom("class"), atom("legacy")),
+        (atom("superclass"), atom("Object")),
+        (atom("is_sealed"), atom("false")),
+        (atom("is_abstract"), atom("false")),
+        (atom("is_value"), atom("false")),
+        (atom("is_typed"), atom("false")),
+        (atom("fields"), Term::from(List::from(vec![atom("value")]))),
+        (atom("field_types"), Term::from(Map::from([]))),
+        (atom("method_info"), Term::from(Map::from([]))),
+        (atom("class_method_info"), Term::from(Map::from([]))),
+        (atom("class_fields"), Term::from(List::from(vec![]))),
+    ]);
+
+    let class_hierarchy_term = Term::from(Map::from([(atom("legacy"), Term::from(meta_map))]));
+    let classes = parse_class_hierarchy_from_term(&class_hierarchy_term);
+    let info = &classes[0];
+    assert!(
+        info.state_kinds.is_empty(),
+        "no field_kinds key means no entries — readers fall back to Eager \
+             (see ClassHierarchy::state_field_kind)"
+    );
 }
 
 /// A generic return type — the `{'generic', Base, [Params]}`
@@ -255,7 +349,7 @@ fn generic_return_type_survives_etf_meta() {
         (atom("field_types"), Term::from(Map::from([]))),
         (atom("method_info"), Term::from(method_info_map)),
         (atom("class_method_info"), Term::from(Map::from([]))),
-        (atom("class_variables"), Term::from(List::from(vec![]))),
+        (atom("class_fields"), Term::from(List::from(vec![]))),
     ]);
 
     let class_hierarchy_term = Term::from(Map::from([(atom("box"), Term::from(meta_map))]));
@@ -318,7 +412,7 @@ fn self_type_return_survives_etf_meta() {
         (atom("field_types"), Term::from(Map::from([]))),
         (atom("method_info"), Term::from(method_info_map)),
         (atom("class_method_info"), Term::from(Map::from([]))),
-        (atom("class_variables"), Term::from(List::from(vec![]))),
+        (atom("class_fields"), Term::from(List::from(vec![]))),
     ]);
 
     let class_hierarchy_term = Term::from(Map::from([(atom("box"), Term::from(meta_map))]));

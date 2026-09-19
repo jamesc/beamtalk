@@ -941,6 +941,7 @@ fn cycle_detection_in_superclass_chain() {
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
             methods: vec![builtin_method("methodA", 0, "A")],
             class_methods: vec![],
             class_variables: vec![],
@@ -966,6 +967,7 @@ fn cycle_detection_in_superclass_chain() {
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
             methods: vec![builtin_method("methodB", 0, "B")],
             class_methods: vec![],
             class_variables: vec![],
@@ -2292,6 +2294,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![MethodInfo {
             selector: EcoString::from("value"),
             arity: 0,
@@ -2336,6 +2339,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![MethodInfo {
             selector: EcoString::from("increment"),
             arity: 0,
@@ -2371,6 +2375,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![MethodInfo {
             selector: EcoString::from("old_method"),
             arity: 0,
@@ -2414,6 +2419,7 @@ fn add_from_beam_meta_skips_builtins() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2497,6 +2503,7 @@ fn stamp_package_does_not_overwrite_existing_package() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2553,6 +2560,7 @@ fn stamp_package_on_infos_does_not_overwrite_existing_package() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -2587,6 +2595,7 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -3157,6 +3166,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         state: vec![EcoString::from("x")],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -3191,4 +3201,103 @@ fn cross_file_value_sub_subclass_finds_new() {
         "find_class_method('Child', 'new:') should find new: on Value via Base"
     );
     assert_eq!(result.unwrap().defined_in.as_str(), "Value");
+}
+
+/// ADR 0124 §1/B5a cross-file test: class `B` (this file) subclasses `A`
+/// (a different file, injected via `add_from_beam_meta` the way a
+/// cross-package/prior-compiled ancestor is), where `A` declares
+/// `late state: proc` and `late classState: current` alongside an
+/// ordinary eager field/class-variable of each kind. `ClassInfo` for `B`
+/// must report both kinds through the flattened
+/// `state_field_kind`/`class_variable_kind` accessors — the metadata B3's
+/// guarded read depends on — without `A`'s AST being present in this
+/// compilation.
+#[test]
+fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
+    let module = Module {
+        classes: vec![make_user_class("B", "A")],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        native_declarations: Vec::new(),
+        expressions: vec![],
+        span: test_span(),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+        panic!("build should succeed");
+    };
+
+    // Inject cross-file A: `late state: proc`, `state: id`,
+    // `late classState: current`, `classState: total`.
+    let a_info = ClassInfo {
+        surface_incomplete: false,
+        name: EcoString::from("A"),
+        superclass: Some(EcoString::from("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: true,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![EcoString::from("proc"), EcoString::from("id")],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        state_kinds: HashMap::from([
+            (EcoString::from("proc"), crate::ast::SlotKind::Late),
+            (EcoString::from("id"), crate::ast::SlotKind::Eager),
+        ]),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![
+            ClassVarInfo {
+                name: EcoString::from("current"),
+                ty: None,
+                has_default: false,
+                kind: crate::ast::SlotKind::Late,
+            },
+            ClassVarInfo {
+                name: EcoString::from("total"),
+                ty: None,
+                has_default: true,
+                kind: crate::ast::SlotKind::Eager,
+            },
+        ],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    h.add_from_beam_meta(vec![a_info]);
+
+    // B declares no state/class-variables of its own (make_user_class's
+    // "count" state field is irrelevant here) — both kinds must be found
+    // by walking B → A.
+    assert_eq!(
+        h.state_field_kind("B", "proc"),
+        crate::ast::SlotKind::Late,
+        "B should report A's late instance field as SlotKind::Late"
+    );
+    assert_eq!(
+        h.state_field_kind("B", "id"),
+        crate::ast::SlotKind::Eager,
+        "B should report A's ordinary instance field as SlotKind::Eager"
+    );
+    assert_eq!(
+        h.class_variable_kind("B", "current"),
+        crate::ast::SlotKind::Late,
+        "B should report A's late class variable as SlotKind::Late"
+    );
+    assert_eq!(
+        h.class_variable_kind("B", "total"),
+        crate::ast::SlotKind::Eager,
+        "B should report A's ordinary class variable as SlotKind::Eager"
+    );
+    // An unknown field degrades to Eager rather than panicking.
+    assert_eq!(
+        h.state_field_kind("B", "doesNotExist"),
+        crate::ast::SlotKind::Eager
+    );
 }

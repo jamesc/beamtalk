@@ -307,6 +307,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![MethodInfo {
             selector: eco_string("doesNotUnderstand:args:"),
             arity: 2,
@@ -351,6 +352,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![MethodInfo {
             selector: eco_string("spawn:"),

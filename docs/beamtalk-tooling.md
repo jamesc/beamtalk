@@ -158,6 +158,12 @@ Module:'__beamtalk_meta'() ->
         is_value          => false,
         fields            => [count],
         field_types       => #{count => 'Integer'},
+        field_has_default => #{count => true},
+        %% ADR 0124 §1/B5a: per-field slot kind (`#eager` | `#late`),
+        %% instance-side and class-side (`classState:`) respectively.
+        field_kinds       => #{count => eager},
+        class_fields      => [],
+        class_field_kinds => #{},
         methods           => [{increment, 1}, {value, 0}],
         class_methods     => [{new, 0}],
         method_info       => #{...},

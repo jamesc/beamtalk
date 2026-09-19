@@ -147,6 +147,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -735,6 +736,7 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![MethodInfo {
             selector: eco_string("ifTrue:"),
             arity: 1,

@@ -111,6 +111,8 @@ module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/
       'type_params' => [],
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'sumWithIndex:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -142,6 +144,8 @@ module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/
       'type_params' => [],
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{}~,
       'method_info' => ~{'sumWithIndex:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

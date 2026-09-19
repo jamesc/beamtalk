@@ -30,6 +30,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

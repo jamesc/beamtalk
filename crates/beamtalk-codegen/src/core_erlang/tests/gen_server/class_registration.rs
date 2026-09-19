@@ -288,6 +288,57 @@ fn test_no_class_state_emits_empty_class_fields() {
 }
 
 #[test]
+fn test_late_state_and_classstate_emit_field_kinds_in_meta() {
+    // ADR 0124 §1/B5a: a `late state:`/`late classState:` declaration must
+    // be reflected into __beamtalk_meta/0 as 'late' entries in the
+    // 'field_kinds' (instance) and 'class_field_kinds' (class-side) maps,
+    // alongside every ordinary declaration's 'eager' entry.
+    let src = concat!(
+        "typed Actor subclass: CodexClient\n",
+        "  late state: proc :: Subprocess\n",
+        "  state: id :: Integer = 0\n",
+        "  late classState: current :: CodexClient\n",
+        "  classState: total :: Integer = 0\n\n",
+        "  launch => self.proc\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("codex_client"))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("'field_kinds' => ~{'proc' => 'late', 'id' => 'eager'}~"),
+        "Should include instance field_kinds (late proc, eager id) in meta map. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_field_kinds' => ~{'current' => 'late', 'total' => 'eager'}~"),
+        "Should include class_field_kinds (late current, eager total) in meta map. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
+    // A class with no state/classState declarations still emits the
+    // 'field_kinds'/'class_field_kinds' keys (empty maps), matching
+    // 'class_fields' emitting `[]` in test_no_class_state_emits_empty_class_fields
+    // — the runtime intrinsic always finds the key.
+    let src = "Actor subclass: Empty\n  noop => nil\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("empty")).expect("codegen should succeed");
+
+    assert!(
+        code.contains("'field_kinds' => ~{}~"),
+        "Should emit empty field_kinds map. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_field_kinds' => ~{}~"),
+        "Should emit empty class_field_kinds map. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_no_class_registration_for_empty_module() {
     // Modules without class definitions should not have on_load or register_class
     let module = Module::new(vec![], Span::new(0, 0));

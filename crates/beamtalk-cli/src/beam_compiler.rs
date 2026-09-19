@@ -1491,6 +1491,7 @@ end
             state: vec![],
             state_types: std::collections::HashMap::new(),
             state_has_default: std::collections::HashMap::new(),
+            state_kinds: std::collections::HashMap::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],

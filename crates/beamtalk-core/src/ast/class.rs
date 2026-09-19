@@ -579,6 +579,7 @@ impl DeclaredKeyword {
 /// check. This is the parser/AST half only (ADR 0124 B1); codegen and
 /// runtime do not yet consult it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SlotKind {
     /// The default: initialised eagerly (a declared default, or `nil` for an
     /// untyped/undefaulted slot) and present in the state map from spawn.

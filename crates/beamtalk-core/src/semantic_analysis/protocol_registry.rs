@@ -1117,6 +1117,7 @@ mod tests {
             state: vec![],
             state_types: std::collections::HashMap::new(),
             state_has_default: std::collections::HashMap::new(),
+            state_kinds: HashMap::new(),
             methods: vec![],
             class_methods: selectors
                 .into_iter()
@@ -1194,6 +1195,7 @@ mod tests {
                 state: vec![],
                 state_types: std::collections::HashMap::new(),
                 state_has_default: std::collections::HashMap::new(),
+                state_kinds: HashMap::new(),
                 methods: vec![MethodInfo {
                     selector: "serialize".into(),
                     arity: 0,
@@ -1469,6 +1471,7 @@ mod tests {
                 state: vec![],
                 state_types: HashMap::new(),
                 state_has_default: HashMap::new(),
+                state_kinds: HashMap::new(),
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -1537,6 +1540,7 @@ mod tests {
                 state: vec![],
                 state_types: HashMap::new(),
                 state_has_default: HashMap::new(),
+                state_kinds: HashMap::new(),
                 methods: vec![],
                 class_methods: vec![],
                 class_variables: vec![],

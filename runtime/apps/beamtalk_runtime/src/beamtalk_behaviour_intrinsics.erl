@@ -457,6 +457,15 @@ classAllFieldHasDefaultByName(ClassName) ->
         #{}
     ).
 
+%% ADR 0124 §1/B5a: `__beamtalk_meta/0` now also carries `'field_kinds'`
+%% (instance `state:`) and `'class_field_kinds'` (class-side `classState:`)
+%% — per-field maps of `eager | late`, alongside `'field_types'` and
+%% `'field_has_default'` above (`class_meta.rs`'s `meta_field_kinds_map`).
+%% No reader here yet: the flattened `classAllFieldKindsByName/1` intrinsic
+%% and its walk-hierarchy merge (mirroring `classAllFieldTypesByName/1`
+%% above) land in B5b (BT-3550), which also adds the `fieldKinds`/
+%% `allFieldKinds` `behaviour.bt` selectors that call it.
+
 -doc """
 Test whether the selector is defined locally in this class.
 
