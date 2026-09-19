@@ -30,6 +30,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -72,6 +73,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -116,6 +118,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let logging_counter = ClassDefinition {
@@ -138,6 +141,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     // Module with both classes; first class is LoggingCounter
@@ -207,6 +211,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -250,6 +255,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -297,6 +303,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -343,6 +350,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -749,6 +757,7 @@ fn test_object_subclass_no_auto_getters() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -825,6 +834,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -871,6 +881,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -976,6 +987,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {

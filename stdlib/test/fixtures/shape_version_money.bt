@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3537 (ADR 0123 §2 "Money" example): a Value-class shapeVersion:/
+// migrateFromVN: fixture, exercising Behaviour >> shapeVersion and
+// Behaviour >> migrateShape:from: on a class with no live process for its
+// instances.
+//
+// The hook reads/writes `old` via the Erlang FFI gateway (maps:get/2,
+// maps:put/3, maps:remove/2) rather than Dictionary at:/at:put:/removeKey:
+// sends — a Dictionary send on a non-literal value falls through to runtime
+// dispatch inside a migrateFromVN: hook (invoked via local_call/3), which is
+// undef for an @primitive-only class like Dictionary (BT-3541), the same
+// limitation `beamtalk_shape_migration_tests`' ShapeChainCart fixture works
+// around.
+
+Value subclass: ShapeVersionMoney
+  shapeVersion: 2
+  field: amount :: Float = 0.0
+  field: currency :: Symbol = #USD
+
+  /// v1 had only `cents` (an Integer); v2 replaces it with a Float `amount`.
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    cents := Erlang maps get: #cents from: old
+    withAmount := Erlang maps
+      put: #amount
+      value: (cents / 100.0)
+      in: old
+    Erlang maps remove: #cents from: withAmount

@@ -41,6 +41,7 @@ typed Actor subclass: ClassBuilder
   state: classDoc :: String | Nil = nil
   state: meta :: Dictionary | Nil = nil
   state: isConstructible :: Boolean | Nil = nil
+  state: shapeVersion :: Integer | Nil = nil
 
   /// Set the class name (a Symbol).
   ///
@@ -352,6 +353,17 @@ typed Actor subclass: ClassBuilder
   /// ```
   native: anErlangModule :: Symbol -> Symbol =>
     self.backingModule := anErlangModule
+
+  /// Set the class's declared shape version (ADR 0123 §1) — the
+  /// programmatic counterpart to the `shapeVersion: N` header clause on a
+  /// compiled `.bt` class. Absent (the default) means shape version `1`,
+  /// same as an absent `shapeVersion:` clause.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// builder shapeVersion: 2
+  /// ```
+  shapeVersion: aVersion :: Integer -> Integer => self.shapeVersion := aVersion
 
   // === Registration ===
 

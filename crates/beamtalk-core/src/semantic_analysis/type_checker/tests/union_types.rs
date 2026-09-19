@@ -837,6 +837,7 @@ fn false_or_param_resolves_to_union() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     };
 
@@ -908,6 +909,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: span(),
     };
 

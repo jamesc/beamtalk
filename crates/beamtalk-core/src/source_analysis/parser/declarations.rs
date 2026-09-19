@@ -12,8 +12,8 @@ use crate::ast::{
     ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition,
     MethodKind, MethodModifiers, NativeDeclaration, ParameterDefinition, ProtocolDefinition,
-    ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition,
-    TypeAnnotation, TypeParamDecl,
+    ProtocolMethodSignature, ShapeVersionDeclaration, StandaloneMethodDefinition, StateDeclaration,
+    TypeAliasDefinition, TypeAnnotation, TypeParamDecl,
 };
 use crate::source_analysis::{Span, TokenKind};
 use ecow::EcoString;
@@ -72,6 +72,18 @@ fn is_class_state_keyword(kind: &TokenKind) -> bool {
 /// reached *inside* the body loop is a misplaced-clause error.
 fn is_handle_scope_keyword(kind: &TokenKind) -> bool {
     matches!(kind, TokenKind::Keyword(k) if k == "handleScope:")
+}
+
+/// Returns `true` if the token kind is the `shapeVersion:` keyword
+/// (ADR 0123 §1). Like `handleScope:`, only ever valid as a class-header
+/// clause parsed before the class body loop runs (see
+/// [`Parser::parse_optional_shape_version`]); a `shapeVersion:` reached
+/// *inside* the body loop is a misplaced-clause error. Deliberately not
+/// added to [`is_state_like_declaration_keyword`]'s set — that set is the
+/// single source for where a method body ends, and `shapeVersion:` is a
+/// header-only clause with no benefit from joining it (ADR 0123 §1).
+fn is_shape_version_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "shapeVersion:")
 }
 
 /// Returns `true` for a `state:`/`field:`/`classState:` keyword — the set of
@@ -283,30 +295,52 @@ impl Parser {
         // trailing trivia instead of the header line's, silently dropping a
         // header-line comment.
         let header_line_end = self.current.saturating_sub(1);
-        let handle_scope_on_new_line = is_handle_scope_keyword(self.current_kind())
-            && self.current_token().has_leading_newline();
 
-        // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
-        // the head of the class body, like `native:` is a header clause.
-        let handle_scope = self.parse_optional_handle_scope();
+        // Parse optional `handleScope: #symbol` (ADR 0103) and `shapeVersion:
+        // N` (ADR 0123 §1) header clauses — both appear at the head of the
+        // class body, like `native:` is a header clause. A `while` loop
+        // (mirroring the `abstract`/`sealed`/`typed`/`internal` modifier loop
+        // above) accepts either clause in either order, since nothing in
+        // either ADR fixes a relative order between them.
+        let mut handle_scope = None;
+        let mut shape_version: Option<ShapeVersionDeclaration> = None;
+        let mut last_header_clause_on_new_line = false;
+        loop {
+            if handle_scope.is_none() && is_handle_scope_keyword(self.current_kind()) {
+                last_header_clause_on_new_line = self.current_token().has_leading_newline();
+                handle_scope = self.parse_optional_handle_scope();
+            } else if is_shape_version_keyword(self.current_kind()) {
+                let on_new_line = self.current_token().has_leading_newline();
+                if let Some(sv) = self.parse_one_shape_version_clause(shape_version) {
+                    if shape_version.is_none() {
+                        last_header_clause_on_new_line = on_new_line;
+                    }
+                    shape_version = Some(sv);
+                }
+            } else {
+                break;
+            }
+        }
 
         // Collect a trailing end-of-line comment on the class header line
         // (after the last header token — class name, type params, or
-        // `native:` module — or, when `handleScope:` follows on the same
-        // line, its `#symbol`), mirroring the identical handling for type
-        // alias/protocol declarations. When `handleScope:` is on
+        // `native:` module — or, when a header clause follows on the same
+        // line, its own last token), mirroring the identical handling for
+        // type alias/protocol declarations. When the first header clause is on
         // its own line, prefer a comment on the header line itself, but fall
-        // back to the post-`handleScope:` check (its old, only behavior) so
-        // a comment trailing the `handleScope: #symbol` line is still
-        // captured instead of silently dropped.
+        // back to the post-clause check (the old, only behavior) so a
+        // comment trailing that clause's own line is still captured instead
+        // of silently dropped.
         //
         // `comments.trailing` is a single slot, so if *both* the header line
-        // and the `handleScope:` line carry a trailing comment, only the
-        // header-line one survives — the `handleScope:`-line comment is
-        // discarded. This is a deliberate choice (the header-line comment is
-        // the more prominent of the two), not an oversight; see
+        // and a clause's line carry a trailing comment, only the header-line
+        // one survives — the clause-line comment is discarded. This is a
+        // deliberate choice (the header-line comment is the more prominent of
+        // the two), not an oversight; see
         // `parse_handle_scope_on_new_line_prefers_header_over_scope_comment_when_both_present`.
-        comments.trailing = if handle_scope.is_some() && handle_scope_on_new_line {
+        comments.trailing = if (handle_scope.is_some() || shape_version.is_some())
+            && last_header_clause_on_new_line
+        {
             self.collect_trailing_comment_at(header_line_end)
                 .or_else(|| self.collect_trailing_comment())
         } else {
@@ -326,6 +360,12 @@ impl Parser {
         // ranges must cover it.
         if let Some(ref hs) = handle_scope {
             end = end.merge(hs.span);
+        }
+        // ADR 0123 §1: same rationale as `handleScope:` above — include the
+        // `shapeVersion:` clause so a version-only class body still spans its
+        // declaration.
+        if let Some(ref sv) = shape_version {
+            end = end.merge(sv.span);
         }
         if let Some(s) = state.last() {
             end = end.merge(s.span);
@@ -363,6 +403,7 @@ impl Parser {
         class_def.comments = comments;
         class_def.backing_module = backing_module;
         class_def.handle_scope = handle_scope;
+        class_def.shape_version = shape_version;
         class_def
     }
 
@@ -392,6 +433,71 @@ impl Parser {
             }
             None
         }
+    }
+
+    /// Parses one `shapeVersion: N` clause (ADR 0123 §1), where the caller
+    /// has already confirmed `is_shape_version_keyword(self.current_kind())`.
+    /// `first` is the already-parsed first occurrence, if any — a second
+    /// (or later) occurrence found still adjacent to the header (i.e. before
+    /// the class body loop takes over) is a **duplicate** compile error
+    /// distinct from `handleScope:`'s generic "must appear in header"
+    /// misplaced-clause error, naming the value already recorded; the clause
+    /// is still consumed so parsing recovers, but `None` is returned so the
+    /// caller keeps the first value. `N` must be a positive integer literal
+    /// — the compiler reads it without evaluating code, so anything else
+    /// (a non-literal expression, zero, or a negative number) is a compile
+    /// error mirroring `handleScope:`'s "expected a symbol" recovery.
+    fn parse_one_shape_version_clause(
+        &mut self,
+        first: Option<ShapeVersionDeclaration>,
+    ) -> Option<ShapeVersionDeclaration> {
+        self.advance(); // consume `shapeVersion:`
+        let TokenKind::Integer(text) = self.current_kind() else {
+            self.error("Expected a positive integer literal after 'shapeVersion:'");
+            if !self.current_token().has_leading_newline() && !self.is_at_end() {
+                self.advance(); // consume the offending token so parsing recovers
+            }
+            return None;
+        };
+        let text = text.clone();
+        let span = self.current_token().span();
+        self.advance(); // consume the integer literal
+        let value = match super::expressions::parse_integer(&text) {
+            Ok(v) if v > 0 => v,
+            Ok(_) => {
+                self.diagnostics.push(Diagnostic::error(
+                    "'shapeVersion:' expects a positive integer literal (got a non-positive value)",
+                    span,
+                ));
+                return None;
+            }
+            Err(e) => {
+                self.diagnostics.push(Diagnostic::error(e, span));
+                return None;
+            }
+        };
+        // SAFETY/CORRECTNESS: `value > 0` was just checked; Beamtalk integer
+        // literals parsed here are small class-versioning numbers, so a
+        // `u32`-range overflow is not a real-world concern, but guard it
+        // anyway rather than truncate silently.
+        let Ok(version) = u32::try_from(value) else {
+            self.diagnostics.push(Diagnostic::error(
+                "'shapeVersion:' value is too large",
+                span,
+            ));
+            return None;
+        };
+        if let Some(existing) = first {
+            self.diagnostics.push(Diagnostic::error(
+                format!(
+                    "duplicate shapeVersion: declaration (already {})",
+                    existing.version
+                ),
+                span,
+            ));
+            return None;
+        }
+        Some(ShapeVersionDeclaration { version, span })
     }
 
     /// Parses optional type parameters: `(T, E)` or `(T :: Printable, E)`.
@@ -519,6 +625,7 @@ impl Parser {
     ///
     /// State declarations start with `state:`.
     /// Methods are identified by having a `=>` somewhere.
+    #[allow(clippy::too_many_lines)] // one dispatch loop over several declaration kinds
     fn parse_class_body(
         &mut self,
     ) -> (
@@ -627,6 +734,19 @@ impl Parser {
                     && matches!(self.current_kind(), TokenKind::Symbol(_))
                 {
                     self.advance(); // consume the symbol argument to recover
+                }
+            } else if is_shape_version_keyword(self.current_kind()) {
+                // ADR 0123 §1: `shapeVersion:` is a header clause parsed
+                // *before* the body (see `parse_one_shape_version_clause`),
+                // same class of error `handleScope:` gets above.
+                self.error(
+                    "'shapeVersion:' must appear in the class header, before state or method declarations",
+                );
+                self.advance(); // consume `shapeVersion:`
+                if !self.current_token().has_leading_newline()
+                    && matches!(self.current_kind(), TokenKind::Integer(_))
+                {
+                    self.advance(); // consume the integer argument to recover
                 }
             } else {
                 // @expect before an invalid position (e.g., end of class body)
@@ -1042,6 +1162,7 @@ impl Parser {
     fn current_token_could_start_a_declaration(&self) -> bool {
         is_state_like_declaration_keyword(self.current_kind())
             || is_handle_scope_keyword(self.current_kind())
+            || is_shape_version_keyword(self.current_kind())
             || self.is_at_method_definition()
     }
 

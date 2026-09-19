@@ -95,6 +95,7 @@ fn test_class_registration_generation() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 50),
     };
 
@@ -354,6 +355,7 @@ fn test_multiple_classes_registration() {
             doc_comment: None,
             backing_module: None,
             handle_scope: None,
+            shape_version: None,
             span: Span::new(0, span_end),
         }
     }
@@ -492,6 +494,7 @@ fn test_multi_class_early_error_short_circuits() {
             doc_comment: None,
             backing_module: None,
             handle_scope: None,
+            shape_version: None,
             span: Span::new(0, span_end),
         }
     }
@@ -576,6 +579,7 @@ fn test_three_class_short_circuit_nesting() {
             doc_comment: None,
             backing_module: None,
             handle_scope: None,
+            shape_version: None,
             span: Span::new(0, 20),
         }
     }

@@ -31,6 +31,7 @@ fn make_abstract_class(name: &str) -> ClassDefinition {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     }
 }
@@ -221,6 +222,7 @@ fn test_actor_new_error_in_standalone_method() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 

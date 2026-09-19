@@ -70,6 +70,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -127,6 +128,7 @@ fn test_analyse_reports_sealed_class_diagnostic() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -443,6 +445,7 @@ fn test_abstract_class_instantiation_error() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 

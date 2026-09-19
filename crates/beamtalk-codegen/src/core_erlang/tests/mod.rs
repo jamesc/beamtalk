@@ -142,6 +142,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     Module {
