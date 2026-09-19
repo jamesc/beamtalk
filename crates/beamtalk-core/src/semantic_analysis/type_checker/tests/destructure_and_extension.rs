@@ -393,6 +393,7 @@ Base subclass: Child
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

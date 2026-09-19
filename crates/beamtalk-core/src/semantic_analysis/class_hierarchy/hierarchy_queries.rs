@@ -9,10 +9,10 @@
 
 use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, SlotKind};
 use ecow::EcoString;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use super::ClassHierarchy;
-use super::class_info::MethodInfo;
+use super::class_info::{InitializeAssignsSummary, MethodInfo};
 use super::declared_type::DeclaredType;
 
 impl ClassHierarchy {
@@ -761,6 +761,56 @@ impl ClassHierarchy {
             }
         }
         SlotKind::Eager
+    }
+
+    /// Composed "`initialize` definitely assigns" summary for a class,
+    /// flattened parent-first over the ADR 0078 chain (ADR 0124 A2a) —
+    /// unions each chain link's own [`ClassInfo::initialize_assigns`], the
+    /// same walk [`Self::superclass_chain`]-based accessors already use and
+    /// the same composition `inherited_typed_no_default_fields`
+    /// (`beamtalk-codegen`) already performs for `state_has_default`.
+    ///
+    /// Union, not intersection: each class's own summary only covers what
+    /// *its own* `initialize` assigns, but ADR 0078 auto-chains every
+    /// ancestor's `initialize` to run, parent-first, before the leaf's own —
+    /// so a slot an ancestor definitely assigns is definitely assigned by the
+    /// time the whole chain finishes, regardless of the leaf.
+    ///
+    /// [`InitializeAssignsSummary::incomplete`] is set when a `native:`
+    /// ancestor (ADR 0056 — its slots belong to a backing `gen_server` with
+    /// no `initialize` AST to analyse) appears anywhere in the chain, or the
+    /// chain has a missing link (see [`Self::has_cross_file_parent`]) — both
+    /// mean `assigned` may be missing slots a caller would otherwise expect,
+    /// not merely that nothing is assigned.
+    #[must_use]
+    pub fn all_initialize_assigns(&self, class_name: &str) -> InitializeAssignsSummary {
+        let mut ordered: Vec<EcoString> = self
+            .superclass_chain(class_name)
+            .into_iter()
+            .rev()
+            .collect();
+        ordered.push(EcoString::from(class_name));
+
+        let mut assigned = BTreeSet::new();
+        let mut incomplete = self.has_cross_file_parent(class_name);
+        for name in &ordered {
+            if matches!(name.as_str(), "Actor" | "Object" | "ProtoObject") {
+                continue;
+            }
+            let Some(info) = self.classes.get(name.as_str()) else {
+                incomplete = true;
+                continue;
+            };
+            if info.is_native {
+                incomplete = true;
+            }
+            assigned.extend(info.initialize_assigns.iter().cloned());
+        }
+
+        InitializeAssignsSummary {
+            assigned,
+            incomplete,
+        }
     }
 
     /// Synthesizes auto-generated slot methods for a `Value subclass:` class

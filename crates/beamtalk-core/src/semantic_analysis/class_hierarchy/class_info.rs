@@ -8,7 +8,7 @@
 
 use crate::ast::{ClassDefinition, ClassKind, Expression, MethodKind, SlotKind};
 use ecow::EcoString;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use super::{ClassHierarchy, DeclaredType};
 
@@ -199,6 +199,18 @@ pub struct ClassInfo {
     /// cross-file metadata) are treated as [`SlotKind::Eager`] by readers —
     /// see [`ClassHierarchy::state_field_kind`].
     pub state_kinds: HashMap<EcoString, SlotKind>,
+    /// Slots this class's *own* `initialize` method definitely assigns —
+    /// a must-analysis (intersection over branches/completions, ADR 0124
+    /// A2a) over the method body, computed by
+    /// [`crate::semantic_analysis::analyze_initialize_assigns`]. Empty when
+    /// the class declares no `initialize`.
+    ///
+    /// This is a per-class summary, not the flattened chain: use
+    /// [`ClassHierarchy::all_initialize_assigns`](super::ClassHierarchy::all_initialize_assigns)
+    /// to compose it parent-first across the ADR 0078 inheritance chain the
+    /// same way [`Self::state_has_default`] is composed by
+    /// `inherited_typed_no_default_fields` (`beamtalk-codegen`).
+    pub initialize_assigns: BTreeSet<EcoString>,
     /// Methods defined directly on this class (instance-side).
     pub methods: Vec<MethodInfo>,
     /// Class-side methods defined on this class.
@@ -225,6 +237,29 @@ pub struct ClassInfo {
     ///
     /// **References:** ADR 0068 Challenge 4
     pub superclass_type_args: Vec<SuperclassTypeArg>,
+}
+
+/// The composed "`initialize` definitely assigns" summary for a class,
+/// flattened parent-first over the ADR 0078 inheritance chain (ADR 0124
+/// A2a) — see [`super::ClassHierarchy::all_initialize_assigns`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InitializeAssignsSummary {
+    /// Slots definitely assigned by *some* class's own `initialize` in the
+    /// chain (the union of every chain link's own [`ClassInfo::initialize_assigns`] —
+    /// safe to union rather than intersect, because ADR 0078 auto-chains
+    /// every ancestor's `initialize` to run, parent-first, before the leaf's
+    /// own, so an ancestor's assignment is guaranteed present by the time the
+    /// chain finishes regardless of what the leaf's own `initialize` does).
+    pub assigned: BTreeSet<EcoString>,
+    /// `true` when the chain could not be fully resolved: a `native:`
+    /// ancestor (ADR 0056, whose slots are owned by its backing `gen_server`
+    /// and carry no `initialize` AST to analyse) or a missing chain link (an
+    /// ancestor absent from this [`ClassHierarchy`] entirely — see
+    /// [`super::ClassHierarchy::has_cross_file_parent`]) makes `assigned`
+    /// potentially incomplete rather than merely empty. Callers that need to
+    /// distinguish "genuinely assigns nothing" from "can't fully tell" read
+    /// this flag rather than treating an empty `assigned` as the answer.
+    pub incomplete: bool,
 }
 
 impl ClassInfo {
@@ -324,6 +359,12 @@ impl ClassInfo {
                 .iter()
                 .map(|s| (s.name.name.clone(), s.slot_kind))
                 .collect(),
+            initialize_assigns: class
+                .methods
+                .iter()
+                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "initialize")
+                .map(|m| crate::semantic_analysis::analyze_initialize_assigns(&m.body))
+                .unwrap_or_default(),
             methods: instance_methods,
             class_methods,
             class_variables: class

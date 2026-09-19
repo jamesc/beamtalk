@@ -29,6 +29,7 @@ fn union_arg_all_compatible_no_warning() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -88,6 +89,7 @@ fn union_arg_none_compatible_warns() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -153,6 +155,7 @@ fn union_arg_mixed_compatible_hints() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -218,6 +221,7 @@ fn union_arg_dynamic_still_skips() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "compute:".into(),
             arity: 1,
@@ -288,6 +292,7 @@ fn test_hierarchy_with_class_literal_arg(
             state_types: std::collections::HashMap::new(),
             state_has_default: std::collections::HashMap::new(),
             state_kinds: HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -311,6 +316,7 @@ fn test_hierarchy_with_class_literal_arg(
             state_types: std::collections::HashMap::new(),
             state_has_default: std::collections::HashMap::new(),
             state_kinds: HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
             methods: vec![MethodInfo {
                 selector: "accept:".into(),
                 arity: 1,
@@ -760,6 +766,7 @@ fn union_protocol_mixed_conformance_hints() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "sortKey".into(),
             arity: 0,
@@ -847,6 +854,7 @@ fn union_type_param_bounds_all_conform_no_warning() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -914,6 +922,7 @@ fn union_type_param_bounds_none_conform_warns() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],
@@ -993,6 +1002,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1016,6 +1026,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
             methods: vec![MethodInfo {
                 selector: "sortKey".into(),
                 arity: 0,
@@ -1804,6 +1815,7 @@ fn union_arg_parameterized_member_mismatch_warns() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "take:".into(),
             arity: 1,
@@ -1881,6 +1893,7 @@ fn union_arg_parameterized_members_all_match_no_warning() {
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "take:".into(),
             arity: 1,

@@ -49,6 +49,7 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: eco_string("query:"),
             arity: 1,
@@ -93,6 +94,7 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: eco_string("withTimeout:"),
             arity: 1,
@@ -274,6 +276,7 @@ fn logger_class(
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: eco_string("log:"),
             arity: 1,

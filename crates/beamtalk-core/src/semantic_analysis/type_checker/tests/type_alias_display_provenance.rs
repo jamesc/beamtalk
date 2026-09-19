@@ -519,6 +519,7 @@ Supervisor spawnWith: #{#policy => 42}
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // exercises three ClassInfo fixtures inline; splitting hurts readability
 fn instance_arg_rejected_for_class_typed_alias_parameter() {
     // `check_argument_types`'s
     // `class_shortcut_applies` guard (validation.rs, `expected_ty.as_str()
@@ -555,6 +556,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
             state_types: std::collections::HashMap::new(),
             state_has_default: std::collections::HashMap::new(),
             state_kinds: std::collections::HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -578,6 +580,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
             state_types: std::collections::HashMap::new(),
             state_has_default: std::collections::HashMap::new(),
             state_kinds: std::collections::HashMap::new(),
+            initialize_assigns: std::collections::BTreeSet::new(),
             methods: vec![MethodInfo {
                 selector: "accept:".into(),
                 arity: 1,
@@ -674,6 +677,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
         state_kinds: std::collections::HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![MethodInfo {
             selector: "restart:".into(),
             arity: 1,
