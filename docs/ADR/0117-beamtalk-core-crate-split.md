@@ -1,7 +1,7 @@
 # ADR 0117: Splitting `beamtalk-core` into Sub-Crates
 
 ## Status
-Accepted (2026-08-30)
+Implemented (2026-08-30) — landed via epics BT-3338 (steps 1–4) and BT-3359 (step 5); see Implementation Tracking
 
 ## Context
 
