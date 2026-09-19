@@ -453,7 +453,7 @@ build_delegate_proxy(RealMod, StubMod, OverrideSources) ->
         end
      || {F, A} <- Exports
     ],
-    Forms = parse_forms(
+    Forms = beamtalk_test_erl_forms:parse_forms(
         ["-module(" ++ atom_to_list(StubMod) ++ ")." | [ExportsDecl | Bodies]]
     ),
     {ok, StubMod, Bin} = compile:forms(Forms, [return_errors]),
@@ -478,28 +478,27 @@ delegate_source(RealMod, F, A) ->
 %% `local_call/3`, e.g. for `migrateFromVN:` hooks) is a separate table,
 %% keyed and populated independently of `beamtalk_class_metadata`, so it is
 %% unaffected by this swap.
+%%
+%% Uses `merge_identity/5`, not `insert/5`: `ClassName` already has a row
+%% (this is an update, not row creation), and `insert/5`'s own moduledoc
+%% warns that overwriting an existing row resets `has_runtime_class_methods`
+%% to `false` on every call — `merge_identity/5` updates the same four
+%% fields without touching that gate, so the "restore" leaves the row
+%% exactly as it was, not just field-for-field equal.
 with_class_module_override(ClassName, TempModule, Fun) ->
     {ok, OrigModule, Selectors} = beamtalk_class_metadata:lookup_methods(ClassName),
     {ok, Superclass} = beamtalk_class_metadata:lookup_superclass(ClassName),
     {ok, IsAbstract} = beamtalk_class_metadata:lookup_is_abstract(ClassName),
-    ok = beamtalk_class_metadata:insert(ClassName, TempModule, Selectors, Superclass, IsAbstract),
+    ok = beamtalk_class_metadata:merge_identity(
+        ClassName, TempModule, Selectors, Superclass, IsAbstract
+    ),
     try
         Fun()
     after
-        beamtalk_class_metadata:insert(ClassName, OrigModule, Selectors, Superclass, IsAbstract)
+        beamtalk_class_metadata:merge_identity(
+            ClassName, OrigModule, Selectors, Superclass, IsAbstract
+        )
     end.
-
-%% Parse a list of complete top-level Erlang source forms (each ending in
-%% `.`) into abstract forms suitable for compile:forms/2.
-parse_forms(SourceLines) ->
-    lists:map(
-        fun(Line) ->
-            {ok, Tokens, _} = erl_scan:string(Line),
-            {ok, Form} = erl_parse:parse_form(Tokens),
-            Form
-        end,
-        SourceLines
-    ).
 
 %% Load a fixture .bt module (bt@<Basename>) and register its class if it
 %% is not already registered — idempotent, same convention

@@ -429,12 +429,16 @@ test_field_migration_initialize_class_no_telemetry() ->
 %% BT-3532, updated for ADR 0123 Phase 2 (BT-3536): an init/1 return that is
 %% still not {ok, Map} (module loaded, no exception, just an unexpected
 %% shape) must be logged at ?LOG_WARNING — not silently treated as "keep old
-%% state" without a trace. Field migration now delegates to
-%% beamtalk_shape_migration:migrate/3, which resolves Module from Class via
-%% the class registry (see test_field_migration_init_failure_preserves_state
-%% above), so this uses a real registered class ('Counter') for field
-%% reconciliation, while the misbehaving `init/1` lives on a disposable
-%% stub module rather than 'bt@counter' itself.
+%% state" without a trace. `code_change/3`'s `Module` argument (threaded
+%% through `migrate_state/2`) only ever reaches this module's own
+%% `seed_internal_keys/4`; `beamtalk_shape_migration:safe_init_defaults/2`
+%% never sees it — it resolves its own module for `ClassName` independently,
+%% via `beamtalk_class_metadata:lookup_module/1` — so this uses a real
+%% registered class ('Counter') for field reconciliation (that lookup
+%% resolves to the real, unmodified 'bt@counter', whose own init/1 succeeds
+%% and needs no misbehavior here), while the misbehaving `init/1` exercised
+%% by `seed_internal_keys/4` lives on `beamtalk_hot_reload_bad_init_test_helper`
+%% (a disposable stub module, never 'bt@counter' itself).
 %%
 %% `meck:new('bt@counter', [passthrough])` cannot be used here (or on any
 %% other `bt@...` module): `.bt` classes compile straight to Core Erlang via
@@ -446,11 +450,7 @@ test_field_migration_initialize_class_no_telemetry() ->
 %% degrades an empty forms list to `{error, ...}` rather than raising —
 %% `meck_code:compile_and_load_forms/2` then turns that `{error, ...}` into
 %% `exit({compile_forms, {error, ...}})`, killing the meck_proc gen_server
-%% (BT flaky-test fix — see overnight CI runs of BT-3531..BT-3537). The
-%% stub module below sidesteps this: `code_change/3`'s `Module` argument
-%% only ever reaches `Module:init/1` (in `seed_internal_keys/4` and
-%% `beamtalk_shape_migration:safe_init_defaults/2`), so any atom naming a
-%% loaded module with the right `init/1` behavior works.
+%% (BT flaky-test fix — see overnight CI runs of BT-3531..BT-3537).
 test_field_migration_unexpected_init_return_logs_warning() ->
     %% test/sys.config pins the primary logger level to `error` to keep CI
     %% output clean, which would otherwise drop this ?LOG_WARNING before it
@@ -462,14 +462,7 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         config => #{parent => self()},
         level => all
     }),
-    StubMod = bt_3532_bad_init_stub,
-    Forms = parse_forms([
-        "-module(" ++ atom_to_list(StubMod) ++ ").",
-        "-export([init/1]).",
-        "init(_Args) -> {error, not_a_state_map}."
-    ]),
-    {ok, StubMod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, StubMod} = code:load_binary(StubMod, "bt_3532_bad_init_stub.erl", Bin),
+    StubMod = beamtalk_hot_reload_bad_init_test_helper,
     try
         OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 3},
         {ok, NewState} = beamtalk_hot_reload:code_change(
@@ -484,8 +477,6 @@ test_field_migration_unexpected_init_return_logs_warning() ->
             receive_bad_init_warning(StubMod, {error, not_a_state_map}, 5)
         )
     after
-        code:purge(StubMod),
-        code:delete(StubMod),
         logger:remove_handler(HandlerId),
         logger:set_primary_config(level, error)
     end.
@@ -829,18 +820,6 @@ field_migration_init_throws_returns_old_state_test() ->
 %%====================================================================
 %% Helpers
 %%====================================================================
-
-%% Parse a list of complete top-level Erlang source forms (each ending in
-%% `.`) into abstract forms suitable for compile:forms/2.
-parse_forms(SourceLines) ->
-    lists:map(
-        fun(Line) ->
-            {ok, Tokens, _} = erl_scan:string(Line),
-            {ok, Form} = erl_parse:parse_form(Tokens),
-            Form
-        end,
-        SourceLines
-    ).
 
 ensure_counter_loaded() ->
     case code:ensure_loaded('bt@counter') of
