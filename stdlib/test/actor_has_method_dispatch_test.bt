@@ -9,23 +9,25 @@
 // fixtures/bt3467child.bt for the inheritance chain these tests exercise.
 
 TestCase subclass: ActorHasMethodDispatchTest
+  field: child = nil
+
+  setUp => self.child := Bt3467Child spawn
+
+  tearDown => self.child stop
 
   testRespondsToOwnActorMethod =>
-    child := Bt3467Child spawn
-    self assert: (child respondsTo: #shout)
-    self assert: child shout equals: "HI"
+    self assert: (self.child respondsTo: #shout)
+    self assert: self.child shout equals: "HI"
 
   // Bt3467Child does not define greet itself — only Bt3467Base does.
   // respondsTo: must delegate through the superclass module's has_method/1
   // for this to answer true.
   testRespondsToInheritedActorMethod =>
-    child := Bt3467Child spawn
-    self assert: (child respondsTo: #greet)
-    self assert: child greet equals: "hi"
+    self assert: (self.child respondsTo: #greet)
+    self assert: self.child greet equals: "hi"
 
   testDoesNotRespondToUnknownSelector =>
-    child := Bt3467Child spawn
-    self deny: (child respondsTo: #bt3467BogusSelector)
+    self deny: (self.child respondsTo: #bt3467BogusSelector)
 
   // A foreign extension registered directly on the actor's class must be
   // visible to respondsTo:, matching a value type's has_method/1 behavior.
@@ -36,8 +38,7 @@ TestCase subclass: ActorHasMethodDispatchTest
       selector: #bt3467ExtensionMethod
       fun: extFun
       owner: #test
-    child := Bt3467Child spawn
-    self assert: (child respondsTo: #bt3467ExtensionMethod)
+    self assert: (self.child respondsTo: #bt3467ExtensionMethod)
     extKey := Erlang erlang list_to_tuple: #(#Bt3467Child, #bt3467ExtensionMethod)
     Erlang ets delete: #beamtalk_extensions key: extKey
-    self deny: (child respondsTo: #bt3467ExtensionMethod)
+    self deny: (self.child respondsTo: #bt3467ExtensionMethod)
