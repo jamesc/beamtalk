@@ -49,10 +49,11 @@ TestCase subclass: UninitializedStateTest
     self assert: a getCount equals: 1
 
   // === BT-3546 (ADR 0124 §7 A1): alias-typed field expanding to nilable ===
-  // `type LocalJsonValue = Nil | Boolean | Integer | Float | String | List |
-  // Dictionary` (mirroring `stdlib/src/json.bt`'s `JsonValue`) — a
-  // defaultless `state: value :: LocalJsonValue` must spawn without raising,
-  // since the alias resolves to a union containing `Nil`.
+  // `state: value :: JsonValue` references `stdlib/src/json.bt`'s real
+  // `type JsonValue = Nil | Boolean | Integer | Float | String | List |
+  // Dictionary` cross-file — a defaultless field of this type must spawn
+  // without raising, since the alias resolves to a union containing `Nil`
+  // (also regression coverage for BT-3561's cross-file alias pre-loading).
   testAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>
     a := JsonValueStateActor spawn
     self assert: a getValue equals: nil

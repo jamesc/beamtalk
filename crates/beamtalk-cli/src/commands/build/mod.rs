@@ -44,8 +44,8 @@ mod stubs;
 // `deps/path.rs` keep working unchanged.
 pub(crate) use changes::{clean_stale_artifacts, detect_changes};
 pub(crate) use class_index::{
-    CachedAst, build_class_index, build_class_module_index, collect_all_class_infos,
-    collect_project_alias_infos,
+    CachedAst, build_class_index, build_class_module_index, collect_all_alias_infos,
+    collect_all_class_infos, collect_project_alias_infos,
 };
 pub(crate) use environment::{
     BuildEnvironment, DependencyContext, package_identity, resolve_and_validate_dependencies,
@@ -72,9 +72,7 @@ pub(crate) use stubs::{
 // its own defining submodule, so re-exporting them unconditionally would be
 // an unused-import warning under `-D warnings` in a non-test build.
 #[cfg(test)]
-pub(crate) use class_index::{
-    collect_all_alias_infos, collect_all_protocol_infos, collect_project_protocol_infos,
-};
+pub(crate) use class_index::{collect_all_protocol_infos, collect_project_protocol_infos};
 #[cfg(test)]
 pub(crate) use native::{
     aggregate_native_dependencies, check_native_module_collisions, collect_erl_files,
