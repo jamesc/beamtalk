@@ -28,7 +28,9 @@
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
 use crate::{Completion, CompletionKind, Position};
-use beamtalk_core::ast::{ClassDefinition, ClassKind, Expression, MethodDefinition, Module};
+use beamtalk_core::ast::{
+    ClassDefinition, ClassKind, Expression, MethodDefinition, Module, declared_shape_migrations,
+};
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
@@ -476,6 +478,30 @@ fn add_keyword_completions(
             }
             ClassKind::Object => {
                 // Object subclasses cannot have instance data — don't offer either keyword
+            }
+        }
+        // ADR 0123 §4 (BT-3539): offer `migrateFromV<N-1>:` in a class body
+        // once the class has bumped `shapeVersion:` past the implicit
+        // default. `N-1` is read off the class's own declared
+        // `shape_version` (`effective_shape_version`), never hardcoded — a
+        // class at v3 offers `migrateFromV2:`, one at v5 offers
+        // `migrateFromV4:`. Suppressed once that step already exists, so
+        // completion doesn't re-suggest a hook the author already wrote.
+        let target_version = class.effective_shape_version();
+        if target_version > 1 {
+            let prev_version = target_version - 1;
+            let already_defined = declared_shape_migrations(class)
+                .iter()
+                .any(|(n, _)| *n == prev_version);
+            if !already_defined {
+                let selector = format!("migrateFromV{prev_version}:");
+                completions.push(
+                    Completion::new(selector.clone(), CompletionKind::Function)
+                        .with_documentation(format!(
+                            "Migration step: shape v{prev_version} → v{target_version} (ADR 0123)"
+                        ))
+                        .with_detail(format!("class {selector} old -> Dictionary =>")),
+                );
             }
         }
     }
@@ -1846,6 +1872,79 @@ mod tests {
             !completions.iter().any(|c| c.label == "state:"),
             "Inherited Value subclass body should NOT offer 'state:'"
         );
+    }
+    // --- migrateFromVN: completion tests (ADR 0123 §4, BT-3539) ---
+    #[test]
+    fn shape_version_bump_offers_migrate_from_previous_version() {
+        // shapeVersion: 2 with no migrateFromV1: yet — offer the step down
+        // from the implicit default (v1).
+        let source = "Actor subclass: Cart\n  shapeVersion: 2\n  state: items = #()\n\n  increment => self.items";
+        let completions = completions_at(source, Position::new(3, 0));
+        assert!(
+            completions.iter().any(|c| c.label == "migrateFromV1:"),
+            "shapeVersion: 2 with no migrateFromV1: yet should offer migrateFromV1:. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+    #[test]
+    fn migrate_from_completion_is_sourced_from_declared_version_not_static() {
+        // A class at v5 must offer migrateFromV4:, never a hardcoded
+        // migrateFromV1: — the "not a static string" half of the
+        // acceptance criteria.
+        let source = "Actor subclass: Cart\n  shapeVersion: 5\n  state: items = #()\n\n  increment => self.items";
+        let completions = completions_at(source, Position::new(3, 0));
+        assert!(
+            completions.iter().any(|c| c.label == "migrateFromV4:"),
+            "shapeVersion: 5 should offer migrateFromV4: (N-1). Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            !completions.iter().any(|c| c.label == "migrateFromV1:"),
+            "must not offer a hardcoded migrateFromV1: for a class at v5"
+        );
+    }
+    #[test]
+    fn migrate_from_completion_suppressed_once_step_already_defined() {
+        // migrateFromV1: is already declared, so the class body's normal
+        // "existing class methods" completion path already offers it (like
+        // any other declared method) — the shapeVersion:-bump heuristic
+        // must not offer a *second*, duplicate migrateFromV1: entry.
+        let source = "Actor subclass: Cart\n  shapeVersion: 2\n  state: items = #()\n\n  class migrateFromV1: old -> Dictionary =>\n    old\n\n  increment => self.items";
+        let completions = completions_at(source, Position::new(3, 0));
+        let count = completions
+            .iter()
+            .filter(|c| c.label == "migrateFromV1:")
+            .count();
+        assert_eq!(
+            count, 1,
+            "migrateFromV1: should appear exactly once (as the existing method), not duplicated by the completion heuristic. Got {count} entries"
+        );
+    }
+    #[test]
+    fn no_shape_version_offers_no_migrate_from_completion() {
+        // A class at the implicit v1 default (no shapeVersion: clause) has
+        // no "previous version" to migrate from.
+        let source = "Actor subclass: Plain\n  state: x = 0\n\n  method => self.x";
+        let completions = completions_at(source, Position::new(2, 0));
+        assert!(
+            !completions
+                .iter()
+                .any(|c| c.label.starts_with("migrateFromV")),
+            "a class at the implicit v1 default should not offer a migrateFromV completion. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+    #[test]
+    fn migrate_from_completion_has_correct_kind_and_docs() {
+        let source = "Actor subclass: Cart\n  shapeVersion: 2\n  state: items = #()\n\n  increment => self.items";
+        let completions = completions_at(source, Position::new(3, 0));
+        let completion = completions
+            .iter()
+            .find(|c| c.label == "migrateFromV1:")
+            .expect("should offer migrateFromV1: completion");
+        assert_eq!(completion.kind, CompletionKind::Function);
+        assert!(completion.documentation.is_some());
+        assert!(completion.detail.is_some());
     }
     // --- Erlang module completion tests ---
     #[test]

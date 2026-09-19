@@ -301,6 +301,30 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
+%% ADR 0123 §4 (BT-3538): shape-reload findings (dropped-without-bump,
+%% version bumped/decreased, migration outcome) — a **distinct** event
+%% (`shape_findings`, not `completed`) on the *same* `reload_check` channel
+%% (`beamtalk_repl_subscriptions:announcement_classes(reload_check)`), so it
+%% reaches every existing `reload_check` subscriber without a new
+%% subscription, but does not match the CLI/LSP's existing
+%% `(reload_check, completed)` pattern — see
+%% `beamtalk_repl_loader:publish_reload_findings/2`'s doc for why this is a
+%% new event rather than folded into `'ReloadCheckCompleted'`'s existing
+%% payload shape (a different finding schema: `class`/`kind`/`fields`/
+%% `migrated`/`suspended`/`pids`, not `owner`/`selector`/`sites`).
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'ShapeReloadFindingsCompleted', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"reload_check">>,
+            <<"event">> => <<"shape_findings">>,
+            <<"data">> => encode_shape_reload_findings_event(Event)
+        })
+    ),
+    {[{text, Push}], State};
 %% Log event push from beamtalk_ws_log_handler
 websocket_info(
     {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
@@ -1051,6 +1075,48 @@ encode_reload_check_event(Event) ->
             beamtalk_repl_protocol:encode_reload_finding(F)
          || F <- maps:get(findings, Event, [])
         ]
+    }.
+
+-doc """
+ADR 0123 §4 (BT-3538): encode a `'ShapeReloadFindingsCompleted'` announcement
+payload (built by `beamtalk_repl_loader:publish_reload_findings/2`) for the
+`reload_check`/`shape_findings` push frame — the class-body reload/migration
+findings table (dropped-without-bump, added-only, bumped-without-migration,
+version-decreased, instances-suspended), distinct from
+`encode_reload_check_event/1`'s xref-dependent-caller findings.
+""".
+-spec encode_shape_reload_findings_event(map()) -> map().
+encode_shape_reload_findings_event(Event) ->
+    #{
+        <<"class">> => maps:get(class, Event, <<>>),
+        <<"findings">> => [
+            encode_shape_reload_finding(F)
+         || F <- maps:get(findings, Event, [])
+        ]
+    }.
+
+-doc "Encode one `beamtalk_shape_diff:reload_finding()` for JSON.".
+-spec encode_shape_reload_finding(map()) -> map().
+encode_shape_reload_finding(Finding) ->
+    #{
+        <<"class">> => maps:get(class, Finding, <<>>),
+        <<"kind">> => atom_to_binary(maps:get(kind, Finding, undefined), utf8),
+        <<"severity">> => atom_to_binary(maps:get(severity, Finding, hint), utf8),
+        <<"fields">> => maps:get(fields, Finding, []),
+        <<"fromVersion">> => beamtalk_repl_protocol:undefined_to_null(
+            maps:get(from_version, Finding, undefined)
+        ),
+        <<"toVersion">> => beamtalk_repl_protocol:undefined_to_null(
+            maps:get(to_version, Finding, undefined)
+        ),
+        <<"migrated">> => beamtalk_repl_protocol:undefined_to_null(
+            maps:get(migrated, Finding, undefined)
+        ),
+        <<"suspended">> => beamtalk_repl_protocol:undefined_to_null(
+            maps:get(suspended, Finding, undefined)
+        ),
+        <<"pids">> => [encode_event_pid(P) || P <- maps:get(pids, Finding, [])],
+        <<"message">> => maps:get(message, Finding, <<>>)
     }.
 
 -doc "Encode an announcement event pid for JSON, mapping a `nil` pid to `null`.".

@@ -30,7 +30,7 @@ use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
 use crate::{HoverInfo, Position};
 use beamtalk_core::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
-    StateDeclaration,
+    StateDeclaration, declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
@@ -205,10 +205,29 @@ fn find_hover_in_declarations(
         if offset >= class.name.span.start() && offset < class.name.span.end() {
             let mut hover =
                 class_reference_hover_info(&class.name.name, None, class.name.span, hierarchy);
+            if let Some(chain) = shape_chain_summary(class) {
+                hover = HoverInfo::new(format!("{}\n\n{chain}", hover.contents), hover.span);
+            }
             if let Some(doc) = &class.doc_comment {
                 hover = hover.with_documentation(doc.clone());
             }
             return Some(hover);
+        }
+        // ADR 0123 §4 (BT-3539): hover on the `shapeVersion: N` clause
+        // itself shows the same chain, anchored at the integer literal's
+        // span so it fires independently of hovering the class name.
+        if let Some(shape_version) = &class.shape_version {
+            if offset >= shape_version.span.start() && offset < shape_version.span.end() {
+                let migrations = declared_shape_migrations(class);
+                let chain = shape_chain_line(class.effective_shape_version(), &migrations);
+                return Some(HoverInfo::new(
+                    format!(
+                        "Declared shape version: `{}`\n\n{chain}",
+                        shape_version.version
+                    ),
+                    shape_version.span,
+                ));
+            }
         }
         if let Some(superclass) = &class.superclass {
             if offset >= superclass.span.start() && offset < superclass.span.end() {
@@ -406,6 +425,70 @@ fn method_declaration_selector_hover_info(
 
     hover = hover.with_documentation(doc_parts.join("\n\n"));
     hover
+}
+
+/// Builds the "Shape chain: v1 → v2 (migrateFromV1:) → v3 (no hook,
+/// structural fallback)" line for hovering a class's own migration chain
+/// (ADR 0123 §4, BT-3539), or `None` when the class has never opted into
+/// `shapeVersion:` and declares no `migrateFromVN:` methods — matching
+/// `class_meta.rs`'s own omit-when-absent convention so hovering an
+/// ordinary, unversioned class stays unchanged.
+fn shape_chain_summary(class: &ClassDefinition) -> Option<String> {
+    let migrations = declared_shape_migrations(class);
+    if class.shape_version.is_none() && migrations.is_empty() {
+        return None;
+    }
+    Some(shape_chain_line(
+        class.effective_shape_version(),
+        &migrations,
+    ))
+}
+
+/// Upper bound on the number of steps [`shape_chain_line`] renders
+/// individually. `shapeVersion:` is parsed as any positive `u32` literal
+/// (`declarations.rs`'s `parse_optional_shape_version` checks only
+/// `value > 0` and that it fits `u32`, no upper bound) — with no cap here, a
+/// stray or malicious `shapeVersion: 4000000000` would make hover try to
+/// build a multi-gigabyte string (and blow well past this module's own
+/// documented <50ms budget) the moment the class name or its `shapeVersion:`
+/// clause is hovered. No real class has anywhere near this many shape
+/// versions, so the cap never truncates realistic chains.
+const MAX_RENDERED_CHAIN_STEPS: u32 = 200;
+
+/// Renders the migration chain from `v1` to `target`, walking each step and
+/// naming its `migrateFromVN:` hook when `migrations` declares one for that
+/// step, or noting "structural fallback" for a gap — the same semantics
+/// `beamtalk_shape_migration:migrate/3` runs at reload (ADR 0123 §3, ¶2):
+/// a step with no hook is a no-op on the dictionary, reconciled against the
+/// final declared shape at the end of the chain.
+fn shape_chain_line(target: u32, migrations: &[(u32, ecow::EcoString)]) -> String {
+    if target > MAX_RENDERED_CHAIN_STEPS {
+        // See MAX_RENDERED_CHAIN_STEPS: bail out before the per-step loop
+        // below ever runs, rather than truncating a partially-built string.
+        // Count only hooks that land *inside* the rendered `1..target`
+        // range — `migrations` can carry an unreachable `migrateFromVN:`
+        // for `N >= target` (a stray leftover after `shapeVersion:` was
+        // lowered, or a typo'd version number; ADR 0123 §2 warns on these
+        // separately at compile time), which must not inflate this count.
+        let hooks_in_range = migrations.iter().filter(|(n, _)| *n < target).count();
+        return format!(
+            "**Shape chain:** v1 → … → v{target} (current) — {} steps ({hooks_in_range} with a declared migrateFromVN: hook), too long to render in full",
+            target - 1,
+        );
+    }
+    let mut segments = vec!["v1".to_string()];
+    for from in 1..target {
+        let to = from + 1;
+        let step = migrations.iter().find(|(n, _)| *n == from).map_or_else(
+            || format!("v{to} (no hook, structural fallback)"),
+            |(_, selector)| format!("v{to} (`{selector}`)"),
+        );
+        segments.push(step);
+    }
+    if let Some(last) = segments.last_mut() {
+        last.push_str(" — current");
+    }
+    format!("**Shape chain:** {}", segments.join(" → "))
 }
 
 fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
@@ -2433,6 +2516,167 @@ mod tests {
             hover.contents.contains("Class: `Counter`"),
             "Unexpected hover contents: {}",
             hover.contents
+        );
+    }
+
+    // --- shapeVersion:/migrateFromVN: chain hover tests (ADR 0123 §4, BT-3539) ---
+
+    #[test]
+    fn hover_on_class_name_shows_migration_chain() {
+        let source = concat!(
+            "Actor subclass: Cart\n",
+            "  shapeVersion: 3\n",
+            "  state: items = #()\n",
+            "\n",
+            "  class migrateFromV1: old -> Dictionary =>\n",
+            "    old\n",
+        );
+        let class_offset = source.find("Cart").unwrap();
+        let hover = hover_at(source, pos_at(source, class_offset));
+        assert!(hover.is_some(), "Should hover class declaration name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Shape chain"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("v1"),
+            "chain should include v1: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("`migrateFromV1:`"),
+            "chain should name the migrateFromV1: hook for the v1 → v2 step: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("v3 (no hook, structural fallback)"),
+            "the v2 → v3 step has no hook and should note the structural fallback: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_shape_version_clause_shows_declared_version_and_chain() {
+        let source = concat!(
+            "Actor subclass: Cart\n",
+            "  shapeVersion: 2\n",
+            "  state: items = #()\n",
+            "\n",
+            "  class migrateFromV1: old -> Dictionary =>\n",
+            "    old\n",
+        );
+        let version_offset = source.find("shapeVersion: 2").unwrap() + "shapeVersion: ".len();
+        let hover = hover_at(source, pos_at(source, version_offset));
+        assert!(hover.is_some(), "Should hover the shapeVersion: clause");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Declared shape version: `2`"),
+            "Unexpected hover contents: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("`migrateFromV1:`"),
+            "chain should name the migrateFromV1: hook: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_class_with_no_shape_version_omits_chain() {
+        // A class that never opted into ADR 0123 shows no shape chain —
+        // matches `class_meta.rs`'s own omit-when-absent convention.
+        let source = "Actor subclass: Plain\n  state: x = 0\n\n  method => self.x";
+        let class_offset = source.find("Plain").unwrap();
+        let hover = hover_at(source, pos_at(source, class_offset));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(
+            !hover.contents.contains("Shape chain"),
+            "an unversioned class should not show a shape chain: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_shape_version_with_gap_notes_structural_fallback() {
+        // v1 -> v2 -> v3 -> v4, only migrateFromV2: defined: v1->v2 and
+        // v3->v4 are both structural-fallback gaps.
+        let source = concat!(
+            "Actor subclass: Session\n",
+            "  shapeVersion: 4\n",
+            "  state: user = \"\"\n",
+            "\n",
+            "  class migrateFromV2: old -> Dictionary =>\n",
+            "    old\n",
+        );
+        let class_offset = source.find("Session").unwrap();
+        let hover = hover_at(source, pos_at(source, class_offset));
+        let hover = hover.expect("should hover class declaration name");
+        assert!(
+            hover
+                .contents
+                .contains("v2 (no hook, structural fallback) → v3 (`migrateFromV2:`) → v4 (no hook, structural fallback)"),
+            "gaps on both sides of the one declared hook should each read as structural fallback: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn shape_chain_line_caps_pathologically_large_shape_version() {
+        // A `shapeVersion:` far beyond any real class (the parser only
+        // checks `value > 0` and that it fits `u32` — no upper bound) must
+        // not make this build a multi-gigabyte string or iterate billions
+        // of times; it should bail out to the capped summary instead. This
+        // calls the renderer directly (rather than through a parsed source
+        // string) so the test itself stays fast regardless of the cap.
+        let huge = MAX_RENDERED_CHAIN_STEPS + 1;
+        let migrations = vec![(1u32, ecow::EcoString::from("migrateFromV1:"))];
+        let line = shape_chain_line(huge, &migrations);
+        assert!(
+            line.contains("too long to render in full"),
+            "expected the capped summary form, got: {line}"
+        );
+        assert!(
+            line.contains(&format!("v{huge}")),
+            "capped summary should still name the current version: {line}"
+        );
+        assert!(
+            !line.contains("structural fallback"),
+            "capped summary must not enumerate individual steps: {line}"
+        );
+    }
+
+    #[test]
+    fn shape_chain_line_at_the_cap_still_renders_in_full() {
+        // One step below the cap: still the full per-step rendering, not
+        // the capped summary — confirms the boundary is exact.
+        let migrations: Vec<(u32, ecow::EcoString)> = Vec::new();
+        let line = shape_chain_line(MAX_RENDERED_CHAIN_STEPS, &migrations);
+        assert!(
+            !line.contains("too long to render in full"),
+            "a chain exactly at the cap should still render step-by-step: {line}"
+        );
+        assert!(line.contains("structural fallback"));
+    }
+
+    #[test]
+    fn shape_chain_line_capped_summary_excludes_unreachable_hooks_from_its_count() {
+        // Bot review finding (PR #3947): the capped-summary branch's hook
+        // count must only include migrateFromVN: steps inside the rendered
+        // `1..target` range — an unreachable one (N >= target, e.g. left
+        // over after shapeVersion: was lowered) must not inflate it.
+        let huge = MAX_RENDERED_CHAIN_STEPS + 1;
+        let migrations = vec![
+            (1u32, ecow::EcoString::from("migrateFromV1:")),
+            // Unreachable: >= huge, so outside the 1..huge rendered range.
+            (huge, ecow::EcoString::from("migrateFromV999999:")),
+        ];
+        let line = shape_chain_line(huge, &migrations);
+        assert!(
+            line.contains("1 with a declared migrateFromVN: hook"),
+            "the unreachable hook at N >= target must not be counted: {line}"
         );
     }
 

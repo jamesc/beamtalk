@@ -28,9 +28,19 @@ suite happens to register it first.
 %% Logger handler callback for the fun-outside-table warning test below.
 -export([log/2]).
 
+%% Called from the dynamically-compiled meta-stub module installed by
+%% with_shape_chain_cart_meta/3 below — must be exported since it's invoked
+%% as beamtalk_shape_migration_tests:apply_meta_override/1 from that other
+%% module.
+-export([apply_meta_override/1]).
+
 log(LogEvent, #{config := #{parent := Parent}}) ->
     Parent ! {log_event, LogEvent},
     ok.
+
+apply_meta_override(Real) ->
+    {ShapeVersion, Migrations} = get(bt_3536_shape_chain_cart_meta_override),
+    Real#{shape_version => ShapeVersion, shape_migrations => Migrations}.
 
 %%====================================================================
 %% Fixture
@@ -186,25 +196,45 @@ test_migrate_typed_field_unset_fails() ->
 %% not exempt from the "may not leave a typed slot unset" rule when the
 %% real default can't actually be computed. TypedFieldCounter's
 %% `value :: Integer = 0` has a declared default; `label` is supplied so
-%% only `value` is missing, and init/1 is meck'd unavailable so
+%% only `value` is missing, and init/1 is stubbed unavailable so
 %% safe_init_defaults/2 degrades to `#{}` — silently defaulting `value` to
 %% `nil` here would defeat the typed-slot invariant just as surely as the
 %% no-default case above.
+%%
+%% `meck:new('bt@typed_field_counter', [passthrough])` can't be used here
+%% (see with_class_module_override/3's moduledoc): `.bt` classes compile
+%% straight to Core Erlang, so their `.beam` carries an empty
+%% `raw_abstract_v1` chunk rather than real abstract code, and meck's
+%% unconditional (any option set) recompile-from-forms step in
+%% `backup_original/4` crashes on it. A disposable delegate-proxy stub
+%% (build_delegate_proxy/3) with only `init/1` overridden, installed via
+%% with_class_module_override/3, gets the same effect without going through
+%% meck at all. The stub must still forward `'__beamtalk_meta'/0` to the
+%% real module rather than omitting it: `beamtalk_shape_migration:reconcile/5`
+%% reads `is_typed` from the stub's meta (falling back to `false` when a
+%% module has no `'__beamtalk_meta'/0` at all — see `read_meta/1`), and this
+%% test's whole point is exercising the *typed*-slot-unset path.
 test_migrate_typed_field_with_default_fails_when_init_unavailable() ->
-    meck:new('bt@typed_field_counter', [passthrough]),
-    meck:expect('bt@typed_field_counter', init, fun(_Args) -> {error, boom} end),
+    RealMod = 'bt@typed_field_counter',
+    StubMod = bt_3536_typed_field_counter_bad_init,
+    build_delegate_proxy(RealMod, StubMod, [
+        {{init, 1}, "init(_Args) -> {error, boom}."}
+    ]),
     try
-        {error, Reason} = beamtalk_shape_migration:migrate(
-            'TypedFieldCounter', 1, #{label => <<"x">>}
-        ),
-        ?assertMatch(
-            #beamtalk_error{
-                kind = shape_migration_failed, class = 'TypedFieldCounter', selector = value
-            },
-            Reason
-        )
+        with_class_module_override('TypedFieldCounter', StubMod, fun() ->
+            {error, Reason} = beamtalk_shape_migration:migrate(
+                'TypedFieldCounter', 1, #{label => <<"x">>}
+            ),
+            ?assertMatch(
+                #beamtalk_error{
+                    kind = shape_migration_failed, class = 'TypedFieldCounter', selector = value
+                },
+                Reason
+            )
+        end)
     after
-        meck:unload('bt@typed_field_counter')
+        code:purge(StubMod),
+        code:delete(StubMod)
     end.
 
 test_migrate_drops_undeclared_field() ->
@@ -459,23 +489,123 @@ build_nested_shape_point_envelope(N) ->
 %% Helpers
 %%====================================================================
 
-%% Meck ShapeChainCart's __beamtalk_meta/0 to report `shape_version` and
+%% Stub ShapeChainCart's __beamtalk_meta/0 to report `shape_version` and
 %% `shape_migrations` — the Phase 3 language surface (shapeVersion:,
 %% migrateFromVN: parsing and meta emission) has not shipped yet, so these
 %% keys do not exist on any compiled class today (ADR 0123 § Runtime
 %% contract: absent means 1/#{}). The migrateFromV1:/migrateFromV2: class
 %% methods themselves are real, compiled, and invoked via local_call/3 —
 %% only the meta lookup is stubbed.
+%%
+%% `meck:new('bt@shape_chain_cart', [passthrough])` + `meck:passthrough/1`
+%% inside the expectation can't be used here: see
+%% with_class_module_override/3's moduledoc for why meck can never back up
+%% a `.bt` class's original code. The stub is a build_delegate_proxy/3
+%% delegate proxy with only `'__beamtalk_meta'/0` overridden — it calls the
+%% real one directly (an ordinary remote call, no meck involved) and
+%% overlays the requested keys via apply_meta_override/1.
 with_shape_chain_cart_meta(ShapeVersion, Migrations, Fun) ->
-    meck:new('bt@shape_chain_cart', [passthrough]),
-    meck:expect('bt@shape_chain_cart', '__beamtalk_meta', fun() ->
-        Real = meck:passthrough([]),
-        Real#{shape_version => ShapeVersion, shape_migrations => Migrations}
-    end),
+    RealMod = 'bt@shape_chain_cart',
+    StubMod = bt_3536_shape_chain_cart_meta_stub,
+    put(bt_3536_shape_chain_cart_meta_override, {ShapeVersion, Migrations}),
+    OverrideSrc =
+        "'__beamtalk_meta'() -> "
+        "Real = apply('" ++ atom_to_list(RealMod) ++
+            "', '__beamtalk_meta', []), "
+            "beamtalk_shape_migration_tests:apply_meta_override(Real).",
+    build_delegate_proxy(RealMod, StubMod, [{{'__beamtalk_meta', 0}, OverrideSrc}]),
+    try
+        with_class_module_override('ShapeChainCart', StubMod, Fun)
+    after
+        code:purge(StubMod),
+        code:delete(StubMod),
+        erase(bt_3536_shape_chain_cart_meta_override)
+    end.
+
+%% Build and load a disposable module named StubMod that delegates every
+%% export of RealMod to RealMod via apply/3, except the {Name, Arity} pairs
+%% named in OverrideSources, whose given source text (a complete
+%% "name(Args) -> Body." form) is used instead.
+%%
+%% Used in place of `meck:new(RealMod, [passthrough])`: `.bt` classes
+%% compile straight to Core Erlang via
+%% `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never
+%% produces a real `raw_abstract_v1` abstract-code chunk — the `.beam` still
+%% carries the chunk (so meck's `abstract_code/1` doesn't throw
+%% `no_abstract_code`), but with an empty forms list. meck's
+%% `backup_original/4` reads it and recompiles it via `compile:forms/2`
+%% *unconditionally*, regardless of the `passthrough` option — an empty
+%% forms list degrades that recompile to `{error, ...}` rather than
+%% raising, and `meck_code:compile_and_load_forms/2` turns that into
+%% `exit({compile_forms, {error, ...}})`, killing the meck_proc gen_server
+%% the instant `meck:new/2` is called on any `bt@...` module (the flaky
+%% "N cancelled" `test-runtime` failures across the BT-3531..BT-3537
+%% overnight runs). The proxy built here needs no backup step at all: it's
+%% compiled fresh from a real export list (via beam_lib, so it reflects the
+%% actual compiled `.beam` rather than a hand-kept list that could drift)
+%% and every non-overridden call forwards straight to RealMod, still fully
+%% loaded and untouched throughout.
+build_delegate_proxy(RealMod, StubMod, OverrideSources) ->
+    {ok, {RealMod, [{exports, Exports}]}} = beam_lib:chunks(code:which(RealMod), [exports]),
+    ExportsDecl =
+        "-export([" ++
+            string:join(
+                ["'" ++ atom_to_list(F) ++ "'/" ++ integer_to_list(A) || {F, A} <- Exports],
+                ", "
+            ) ++
+            "]).",
+    Bodies = [
+        case lists:keyfind({F, A}, 1, OverrideSources) of
+            {_, Source} -> Source;
+            false -> delegate_source(RealMod, F, A)
+        end
+     || {F, A} <- Exports
+    ],
+    Forms = beamtalk_test_erl_forms:parse_forms(
+        ["-module(" ++ atom_to_list(StubMod) ++ ")." | [ExportsDecl | Bodies]]
+    ),
+    {ok, StubMod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, StubMod} = code:load_binary(StubMod, atom_to_list(StubMod) ++ ".erl", Bin),
+    ok.
+
+%% Source text for a single delegate-proxy function body that forwards its
+%% arguments to RealMod via apply/3.
+delegate_source(RealMod, F, A) ->
+    Args = string:join(["A" ++ integer_to_list(N) || N <- lists:seq(1, A)], ", "),
+    QuotedF = "'" ++ atom_to_list(F) ++ "'",
+    QuotedF ++
+        "(" ++ Args ++ ") -> apply('" ++ atom_to_list(RealMod) ++ "', " ++ QuotedF ++ ", [" ++
+        Args ++ "]).".
+
+%% Temporarily repoint Class's registered module (beamtalk_class_metadata's
+%% class->module row) to TempModule for the duration of Fun/0, restoring
+%% the original row afterward — used instead of `meck:new/2` on a compiled
+%% `.bt` module (see build_delegate_proxy/3's moduledoc for why). Swapping
+%% the class->module row never touches meck or recompiles anything:
+%% `beamtalk_class_registry`'s pid-based method dispatch (used by
+%% `local_call/3`, e.g. for `migrateFromVN:` hooks) is a separate table,
+%% keyed and populated independently of `beamtalk_class_metadata`, so it is
+%% unaffected by this swap.
+%%
+%% Uses `merge_identity/5`, not `insert/5`: `ClassName` already has a row
+%% (this is an update, not row creation), and `insert/5`'s own moduledoc
+%% warns that overwriting an existing row resets `has_runtime_class_methods`
+%% to `false` on every call — `merge_identity/5` updates the same four
+%% fields without touching that gate, so the "restore" leaves the row
+%% exactly as it was, not just field-for-field equal.
+with_class_module_override(ClassName, TempModule, Fun) ->
+    {ok, OrigModule, Selectors} = beamtalk_class_metadata:lookup_methods(ClassName),
+    {ok, Superclass} = beamtalk_class_metadata:lookup_superclass(ClassName),
+    {ok, IsAbstract} = beamtalk_class_metadata:lookup_is_abstract(ClassName),
+    ok = beamtalk_class_metadata:merge_identity(
+        ClassName, TempModule, Selectors, Superclass, IsAbstract
+    ),
     try
         Fun()
     after
-        meck:unload('bt@shape_chain_cart')
+        beamtalk_class_metadata:merge_identity(
+            ClassName, OrigModule, Selectors, Superclass, IsAbstract
+        )
     end.
 
 %% Load a fixture .bt module (bt@<Basename>) and register its class if it
