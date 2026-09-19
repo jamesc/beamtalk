@@ -10,8 +10,13 @@ TestCase subclass: JsonTest
     // Parse a JSON float
     self assert: (Json parse: "3.14") unwrap equals: 3.14
     // Parse JSON true
+    // BT-3561: JsonValue's alias now resolves cross-file, so `unwrap`'s
+    // static type is the real Nil | Boolean | ... union — @expect type
+    // marks each `Json parse:`/`unwrap` type-erasure boundary below.
+    @expect type
     self assert: (Json parse: "true") unwrap
     // Parse JSON false
+    @expect type
     self deny: (Json parse: "false") unwrap
     // Parse JSON null to nil
     self assert: (Json parse: "null") unwrap equals: nil
@@ -22,6 +27,7 @@ TestCase subclass: JsonTest
     // Parse a nested array
     self assert: (Json parse: "[[1, 2], [3, 4]]") unwrap equals: #(#(1, 2), #(3, 4))
     // Parse a mixed array — verify size and individual access
+    @expect type
     self assert: (Json parse: "[1, true, null]") unwrap size equals: 3
     // Parse an empty array
     self assert: (Json parse: "[]") unwrap equals: #()
@@ -44,16 +50,19 @@ TestCase subclass: JsonTest
     // Round-trip an integer
     self assert: (Json parse: (Json generate: 42)) unwrap equals: 42
     // Round-trip a boolean
+    @expect type
     self assert: (Json parse: (Json generate: true)) unwrap
     // Round-trip null
     self assert: (Json parse: (Json generate: nil)) unwrap equals: nil
     // Round-trip an array
     self assert: (Json parse: (Json generate: #(1, 2, 3))) unwrap equals: #(1, 2, 3)
     // Round-trip a Dictionary
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "name" => "Ada"
     })) unwrap at: "name") equals: "Ada"
     // Round-trip nested structures
+    @expect type
     self
       assert: (((Json parse: (Json generate: #{
         "user" => #{"age" => 36}
@@ -64,27 +73,33 @@ TestCase subclass: JsonTest
     // Generate JSON from a Dictionary, then verify structure
     self assert: ((Json generate: #{"a" => 1}) size > 0)
     // Generate and re-parse a Dictionary
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "x" => 10,
       "y" => 20
     })) unwrap at: "x") equals: 10
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "x" => 10,
       "y" => 20
     })) unwrap at: "y") equals: 20
+    @expect type
     self assert: (Json parse: (Json generate: #{
       "x" => 10,
       "y" => 20
     })) unwrap size equals: 2
     // Dictionary with nested List
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "items" => #(1, 2, 3)
     })) unwrap at: "items") equals: #(1, 2, 3)
     // Dictionary with boolean values
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "active" => true
     })) unwrap at: "active")
     // Dictionary with null value
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "value" => nil
     })) unwrap at: "value") equals: nil
@@ -93,6 +108,7 @@ TestCase subclass: JsonTest
     // Pretty print produces a non-empty string
     self assert: ((Json prettyPrint: #{"a" => 1}) size > 0)
     // Pretty print produces same data as generate when re-parsed
+    @expect type
     self assert: ((Json parse: (Json prettyPrint: #{
       "a" => 1
     })) unwrap at: "a") equals: 1
@@ -105,28 +121,35 @@ TestCase subclass: JsonTest
     // A Value class implementing asJson controls its own JSON shape
     u := JsonUser fullName: "Ada Lovelace" age: 36
     parsed := (Json parse: (Json generate: u)) unwrap
+    @expect type
     self assert: (parsed at: "full_name") equals: "Ada Lovelace"
+    @expect type
     self assert: (parsed at: "age") equals: 36
 
   testGenerateAsJsonInsideCollections =>
     // asJson objects nested in Lists and Dictionaries convert recursively
     u := JsonUser fullName: "Ada" age: 36
     fromList := (Json parse: (Json generate: #(u))) unwrap
+    @expect type
     self assert: ((fromList at: 1) at: "full_name") equals: "Ada"
     fromDict := (Json parse: (Json generate: #{"author" => u})) unwrap
+    @expect type
     self assert: ((fromDict at: "author") at: "age") equals: 36
 
   testGenerateAsJsonRecursesIntoResult =>
     // An asJson result containing another asJson object converts recursively
     team := JsonTeam teamName: "Analytical Engines" lead: (JsonUser fullName: "Ada" age: 36)
     parsed := (Json parse: (Json generate: team)) unwrap
+    @expect type
     self assert: (parsed at: "team_name") equals: "Analytical Engines"
+    @expect type
     self assert: ((parsed at: "lead") at: "full_name") equals: "Ada"
 
   testGenerateDispatchesAsJsonOnActor =>
     // Actors implementing asJson serialize via a sync send
     a := JsonStatusActor spawn
     parsed := (Json parse: (Json generate: a)) unwrap
+    @expect type
     self assert: (parsed at: "hits") equals: 0
     a stop
 
@@ -134,6 +157,7 @@ TestCase subclass: JsonTest
     // prettyPrint: shares the asJson hook with generate:
     u := JsonUser fullName: "Ada" age: 36
     parsed := (Json parse: (Json prettyPrint: u)) unwrap
+    @expect type
     self assert: (parsed at: "full_name") equals: "Ada"
 
   testGenerateValueWithoutAsJsonKeepsFieldEncoding =>
@@ -141,7 +165,9 @@ TestCase subclass: JsonTest
     // fields directly as a JSON object (tag stripped)
     p := ValuePoint x: 3 y: 4
     parsed := (Json parse: (Json generate: p)) unwrap
+    @expect type
     self assert: (parsed at: "x") equals: 3
+    @expect type
     self assert: (parsed at: "y") equals: 4
 
   testErrorHandling =>

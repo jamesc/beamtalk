@@ -1027,6 +1027,40 @@ fn build_merged_class_indexes(
     )
 }
 
+/// Manifest-less "coherent package" fallback for cross-file type-alias
+/// resolution (BT-3561): when no `beamtalk.toml` exists anywhere above the
+/// test root — `stdlib` itself ships no manifest, the exact scenario
+/// `beamtalk build --stdlib-mode` already special-cases for the `build`
+/// pipeline (see `class_index.rs`'s `package_identity` doc) — a same-tree
+/// `src/` directory next to (or above) the test root still holds real
+/// `type X = ...` declarations a test/fixture file may reference (e.g.
+/// `stdlib/test/fixtures/*.bt` referencing `stdlib/src/json.bt`'s
+/// `JsonValue`). `ClassInfo` needs no equivalent fallback: a
+/// fixture/test-defined class already resolves via `fixture_class_index`,
+/// and a `src/`-defined class (e.g. stdlib's `Actor`) is reached by
+/// ordinary dynamic dispatch, never a compile-time `ClassInfo` lookup.
+///
+/// Walks upward from `test_path` — mirroring `find_package_root`'s own
+/// ancestor walk, keyed on a `src/` sibling instead of `beamtalk.toml` —
+/// and returns the first `src/` directory found, or `None` if the ancestor
+/// chain has none.
+fn implicit_sibling_src_dir(test_path: &Utf8Path) -> Option<Utf8PathBuf> {
+    let start = canonical_path(test_path);
+    let mut dir = if start.is_dir() {
+        Some(start)
+    } else {
+        start.parent().map(Utf8Path::to_path_buf)
+    };
+    while let Some(d) = dir {
+        let candidate = d.join("src");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        dir = d.parent().map(Utf8Path::to_path_buf);
+    }
+    None
+}
+
 /// Initialize the test pipeline: discover packages and build class indexes.
 fn initialize_pipeline(
     test_path: Utf8PathBuf,
@@ -1052,8 +1086,22 @@ fn initialize_pipeline(
         class_module_index,
         class_superclass_index,
         all_class_infos,
-        all_alias_infos,
+        mut all_alias_infos,
     ) = build_merged_class_indexes(&discovered_packages);
+
+    // See `implicit_sibling_src_dir`'s doc: only engages when manifest-based
+    // discovery found nothing at all, so a real manifest'd project's own
+    // `src/` (already covered by `build_merged_class_indexes` above) is
+    // never double-scanned.
+    if discovered_packages.is_empty() {
+        if let Some(src_dir) = implicit_sibling_src_dir(&test_path) {
+            if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
+                let extra_aliases = super::build::collect_project_alias_infos(&src_files, "");
+                all_alias_infos =
+                    super::build::collect_all_alias_infos(&[&all_alias_infos, &extra_aliases]);
+            }
+        }
+    }
 
     Ok(TestPipeline {
         test_path,
