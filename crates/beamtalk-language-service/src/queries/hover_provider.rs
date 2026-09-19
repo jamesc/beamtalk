@@ -465,10 +465,15 @@ fn shape_chain_line(target: u32, migrations: &[(u32, ecow::EcoString)]) -> Strin
     if target > MAX_RENDERED_CHAIN_STEPS {
         // See MAX_RENDERED_CHAIN_STEPS: bail out before the per-step loop
         // below ever runs, rather than truncating a partially-built string.
+        // Count only hooks that land *inside* the rendered `1..target`
+        // range — `migrations` can carry an unreachable `migrateFromVN:`
+        // for `N >= target` (a stray leftover after `shapeVersion:` was
+        // lowered, or a typo'd version number; ADR 0123 §2 warns on these
+        // separately at compile time), which must not inflate this count.
+        let hooks_in_range = migrations.iter().filter(|(n, _)| *n < target).count();
         return format!(
-            "**Shape chain:** v1 → … → v{target} (current) — {} steps ({} with a declared migrateFromVN: hook), too long to render in full",
+            "**Shape chain:** v1 → … → v{target} (current) — {} steps ({hooks_in_range} with a declared migrateFromVN: hook), too long to render in full",
             target - 1,
-            migrations.len()
         );
     }
     let mut segments = vec!["v1".to_string()];
@@ -2654,6 +2659,25 @@ mod tests {
             "a chain exactly at the cap should still render step-by-step: {line}"
         );
         assert!(line.contains("structural fallback"));
+    }
+
+    #[test]
+    fn shape_chain_line_capped_summary_excludes_unreachable_hooks_from_its_count() {
+        // Bot review finding (PR #3947): the capped-summary branch's hook
+        // count must only include migrateFromVN: steps inside the rendered
+        // `1..target` range — an unreachable one (N >= target, e.g. left
+        // over after shapeVersion: was lowered) must not inflate it.
+        let huge = MAX_RENDERED_CHAIN_STEPS + 1;
+        let migrations = vec![
+            (1u32, ecow::EcoString::from("migrateFromV1:")),
+            // Unreachable: >= huge, so outside the 1..huge rendered range.
+            (huge, ecow::EcoString::from("migrateFromV999999:")),
+        ];
+        let line = shape_chain_line(huge, &migrations);
+        assert!(
+            line.contains("1 with a declared migrateFromVN: hook"),
+            "the unreachable hook at N >= target must not be counted: {line}"
+        );
     }
 
     // --- Chain resolution hover tests ---
