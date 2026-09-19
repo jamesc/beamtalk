@@ -16,9 +16,11 @@
 // — expected and harmless for this fixture, not a real bug: see above.
 //
 // Hooks read/write `old` via the Erlang FFI gateway (`maps:get/2`,
-// `maps:put/3`) — a `Dictionary` send on a non-literal value falls through
-// to runtime dispatch, which is `undef` for an `@primitive`-only class like
-// `Dictionary` (BT-3541).
+// `maps:put/3`), the same style predating BT-3541's fix (a `Dictionary`
+// send on a non-literal value used to raise `undef` at runtime dispatch;
+// see stdlib/test/fixtures/shape_version_dict_send.bt for the same hook
+// shape using direct Dictionary sends) — kept as-is here since this
+// fixture's own focus is the migration chain, not dispatch.
 
 Actor subclass: ShapeChainCart
   state: itemCount :: Integer = 0

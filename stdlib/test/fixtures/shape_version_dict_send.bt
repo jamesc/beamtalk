@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3541 regression fixture: unlike ShapeVersionMoney's migrateFromV1:
+// (which routes around Dictionary at:/at:put:/removeKey: via the Erlang FFI
+// gateway, citing this same issue), this hook sends them directly to `old` —
+// a dynamically-dispatched send the compiler cannot statically resolve to
+// Dictionary, since `old`'s only type information is the method's own
+// parameter annotation. `local_call/3` (the migration chain's real
+// invocation path, ADR 0123 §3) must reach `bt@stdlib@dictionary`'s
+// compiled `dispatch/3` for this to succeed.
+
+Value subclass: ShapeVersionDictSend
+  shapeVersion: 2
+  field: amount :: Float = 0.0
+  field: currency :: Symbol = #USD
+
+  /// v1 had only `cents` (an Integer); v2 replaces it with a Float `amount`.
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    cents := old at: #cents
+    withAmount := old at: #amount put: (cents / 100.0)
+    withAmount removeKey: #cents
