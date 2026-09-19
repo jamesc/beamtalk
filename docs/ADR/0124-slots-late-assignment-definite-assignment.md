@@ -1435,6 +1435,18 @@ Converting a slot between eager and `late` changes its ADR 0123 reconcile row
 and requires a `shapeVersion:` bump, which the shape store detects once B9
 encodes kind (§4g).
 
+## Implementation Tracking
+
+**Epic:** BT-3544
+**Issues:** BT-3545 (B1), BT-3546 (A1), BT-3547 (B5a), BT-3548 (B2),
+BT-3549 (B3), BT-3550 (B5b), BT-3551 (B4), BT-3552 (A3+A4), BT-3553 (A2a),
+BT-1948 (A2b, repurposed), BT-3554 (A5), BT-3555 (B6), BT-3556 (B9),
+BT-3557 (B8, `needs-spec` until the `printString` rendering is confirmed),
+BT-3558 (B10), BT-3559 (stdlib singleton conversions)
+**Not planned:** B7 (inspector `#lateSlot`), B11 (`ClassBuilder` parity) —
+by decision, remain future work
+**Status:** Planned
+
 ## References
 - Related issues: [BT-3525](https://linear.app/beamtalk/issue/BT-3525)
   (this ADR); parent [BT-3523](https://linear.app/beamtalk/issue/BT-3523);
