@@ -23,7 +23,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
     ClassDefinition, ClassKind, MethodDefinition, MethodKind, Module, StateDeclaration,
-    TypeParamDecl, migrate_from_v_version,
+    TypeParamDecl, declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 
@@ -351,18 +351,10 @@ impl CoreErlangGenerator {
     /// `migrateFromVN:` class methods, mirroring `handle_scope_doc`'s
     /// omit-when-absent convention above.
     fn meta_shape_migrations_entry(class: &ClassDefinition) -> Document<'static> {
-        let mut migrations: Vec<(u32, String)> = class
-            .class_methods
-            .iter()
-            .filter_map(|m| {
-                let selector = m.selector.name();
-                migrate_from_v_version(&selector).map(|n| (n, selector.to_string()))
-            })
-            .collect();
+        let migrations = declared_shape_migrations(class);
         if migrations.is_empty() {
             return Document::Nil;
         }
-        migrations.sort_by_key(|(n, _)| *n);
 
         let mut parts: Vec<Document<'static>> = Vec::new();
         parts.push(Document::Str("~{"));
@@ -373,7 +365,7 @@ impl CoreErlangGenerator {
             parts.push(docvec![
                 leaf::int_lit(i64::from(version)),
                 " => ",
-                leaf::atom(selector),
+                leaf::atom(selector.to_string()),
             ]);
         }
         parts.push(Document::Str("}~"));
