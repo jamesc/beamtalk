@@ -9,6 +9,7 @@
 //! state from a stateful parent is supplied by the super-init chain
 //! (see `gen_server/callbacks.rs`), not by this module.
 
+use super::super::util::omit_late_defaultless_slot;
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf, line};
@@ -33,6 +34,9 @@ impl CoreErlangGenerator {
 
         if let Some(class) = current_class {
             for state in &class.state {
+                if omit_late_defaultless_slot(state) {
+                    continue;
+                }
                 let value_code = if let Some(ref default_value) = state.default_value {
                     self.expression_doc(default_value)?
                 } else {
@@ -95,6 +99,9 @@ impl CoreErlangGenerator {
             // is supplied at runtime by the super-init chain, not collected
             // here — this branch is only reached when the parent is a base class.
             for state in &class.state {
+                if omit_late_defaultless_slot(state) {
+                    continue;
+                }
                 let value_code = if let Some(ref default_value) = state.default_value {
                     self.expression_doc(default_value)?
                 } else {
@@ -112,6 +119,9 @@ impl CoreErlangGenerator {
             // `setup_class_identity`). Load-bearing for those tests, not dead code.
             for class in &module.classes {
                 for state in &class.state {
+                    if omit_late_defaultless_slot(state) {
+                        continue;
+                    }
                     let value_code = if let Some(ref default_value) = state.default_value {
                         self.expression_doc(default_value)?
                     } else {

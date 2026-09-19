@@ -15,6 +15,7 @@ use std::collections::HashSet;
 
 use super::super::selector_mangler::dispatch_fn_name;
 use super::super::spec_codegen;
+use super::super::util::omit_late_defaultless_slot;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
@@ -637,10 +638,15 @@ impl CoreErlangGenerator {
             }
             let class_method_source_doc = Document::Vec(class_method_source_docs);
 
-            // Class variable initial values
+            // Class variable initial values. ADR 0124 §2/B2: a defaultless
+            // `late classState:` slot is omitted from the map entirely — see
+            // `omit_late_defaultless_slot`.
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
-            for (cv_idx, cv) in class.class_variables.iter().enumerate() {
-                if cv_idx > 0 {
+            for cv in &class.class_variables {
+                if omit_late_defaultless_slot(cv) {
+                    continue;
+                }
+                if !class_var_parts.is_empty() {
                     class_var_parts.push(Document::Str(", "));
                 }
                 let val = if let Some(ref default_value) = cv.default_value {

@@ -22,7 +22,7 @@ use beamtalk_cerl_doc::leaf::{atom, int_lit, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
     CascadeMessage, ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
-    Module, StringSegment,
+    Module, SlotKind, StateDeclaration, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -139,6 +139,28 @@ pub(super) fn collect_body_exprs(body: &[ExpressionStatement]) -> Vec<&Expressio
 /// `core_erlang` submodules (CLAUDE.md's no-duplicate-implementations rule).
 pub(super) fn index_lit(n: usize) -> Document<'static> {
     int_lit(i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// ADR 0124 §2/B2: `true` when `decl` (a `state:` or `classState:`
+/// declaration) must be left out of an `init/1` state literal entirely,
+/// rather than emitted as `<name> => 'nil'` or its default — i.e. a `late`
+/// slot with no declared default. Its key then starts absent from the map
+/// (ADR 0124 §2's chosen representation for "not yet assigned"), so a later
+/// unguarded `maps:get/2` on it raises `badkey` (fixed by B3's guarded read,
+/// not this predicate) instead of silently reading `'nil'`.
+///
+/// A `late` slot that DOES declare a default is not omitted — the default is
+/// a real assignment, so the slot still starts present, exactly like an
+/// eager one; only being unassigned is what `late` excuses.
+///
+/// Shared by every state-literal emitter across `core_erlang` (instance-side
+/// `init/1` in `gen_server::state`, and the class-side `classState` map in
+/// `class_registry`/`gen_server::native_facade`) per CLAUDE.md's no-
+/// duplicate-implementations rule — this is the one place that decides
+/// "does this slot's key appear at all", so those four loops can't drift out
+/// of sync on the rule.
+pub(super) fn omit_late_defaultless_slot(decl: &StateDeclaration) -> bool {
+    decl.slot_kind == SlotKind::Late && decl.default_value.is_none()
 }
 
 /// `'file'` module attribute helper for BEAM stacktrace file names.

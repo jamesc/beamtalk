@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LateSlotActor — test fixture for BT-3548 (ADR 0124 §2/B2)
+//
+// A `late state:` field has no default and no `initialize` method assigning
+// it, so its key must be entirely absent from init/1's state literal — not
+// `nil` — until something explicitly assigns it. This exercises:
+//   - the actor spawns without raising UninitializedStateError (B2 excludes
+//     `late` slots from the post-initialize definite-assignment check)
+//   - `sys:get_state/1` shows no `proc` key at all after a plain `spawn`
+//   - `spawnWith: #{#proc => v}` (InitArgs merged over DefaultState) still
+//     supplies the slot, showing it present in state afterward
+//
+// `getProc` is only called by tests once `proc` has been supplied via
+// `spawnWith:` — reading an unassigned `late` slot is an unguarded
+// `maps:get/2` until B3 ships the guarded read (out of scope here).
+
+typed Actor subclass: LateSlotActor
+  late state: proc :: Subprocess
+  state: count :: Integer = 0
+
+  getCount -> Integer => self.count
+
+  getProc -> Subprocess => self.proc

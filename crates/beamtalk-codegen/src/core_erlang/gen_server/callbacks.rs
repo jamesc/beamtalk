@@ -12,7 +12,7 @@
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
-use beamtalk_core::ast::{ClassDefinition, Module};
+use beamtalk_core::ast::{ClassDefinition, Module, SlotKind};
 
 /// ADR 0078: Identifies a single class's `initialize` method in the
 /// auto-chained dispatch sequence emitted by `generate_handle_continue`.
@@ -783,6 +783,24 @@ impl CoreErlangGenerator {
                         .copied()
                         .unwrap_or(true);
                     if has_default {
+                        continue;
+                    }
+                    // ADR 0124 §1/B2: a `late` slot opts out of definite
+                    // assignment exactly like the AST path's
+                    // `requires_definite_assignment` (`SlotKind::Late` short-
+                    // circuits before nilability is even considered) —
+                    // mirrored here via `state_kinds` since a cross-file
+                    // ancestor has no `StateDeclaration` to hand that
+                    // predicate directly. Missing metadata (an older
+                    // `__beamtalk_meta/0` predating `state_kinds`) degrades to
+                    // `SlotKind::Eager`, matching `state_field_kind`'s own
+                    // fallback.
+                    let kind = info
+                        .state_kinds
+                        .get(field_name)
+                        .copied()
+                        .unwrap_or(SlotKind::Eager);
+                    if kind == SlotKind::Late {
                         continue;
                     }
                     let type_name = type_name.to_string();

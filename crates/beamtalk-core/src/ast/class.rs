@@ -579,8 +579,8 @@ impl DeclaredKeyword {
 /// check. This is the parser/AST half (ADR 0124 B1); the exemption itself is
 /// `semantic_analysis::requires_definite_assignment` (ADR 0124 A1), which
 /// `beamtalk-codegen`'s post-`initialize` field check now calls. The state
-/// map/`init/1` literal itself does not yet exclude `late` slots (ADR 0124
-/// B2).
+/// map/`init/1` literal itself also excludes a defaultless `late` slot
+/// entirely (ADR 0124 B2), so it starts absent rather than `nil`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SlotKind {

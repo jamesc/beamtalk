@@ -62,6 +62,47 @@ init_with_non_map_test() ->
     ?assertEqual({stop, {invalid_state, not_a_map}}, beamtalk_actor:init([1, 2, 3])),
     ?assertEqual({stop, {invalid_state, not_a_map}}, beamtalk_actor:init(123)).
 
+init_actor_started_log_omits_unassigned_late_slot_state_keys_test() ->
+    %% BT-3548 (ADR 0124 B2): compiled codegen now leaves a defaultless
+    %% `late` slot's key out of the state map entirely (never emits
+    %% `<name> => 'nil'`). The "Actor started" log's `state_keys` is derived
+    %% purely from `maps:keys(State)`, so it naturally reflects that absence
+    %% with no change needed in `beamtalk_actor:init/1` itself — this pins
+    %% that derivation against a State map shaped the way codegen now
+    %% produces for a `late state: proc` slot with no `spawnWith:`-supplied
+    %% value: no `proc` key at all, alongside an ordinary eager `count` key.
+    %% The test sys.config caps the primary logger level at `error` (to
+    %% keep CI output clean), which would filter out `?LOG_INFO`'s "Actor
+    %% started" before it ever reaches a handler — bump it for this test's
+    %% duration, matching the same pattern beamtalk_hot_reload_tests.erl /
+    %% beamtalk_shape_migration_tests.erl use for their own info-level log
+    %% assertions.
+    OldLevel = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, all),
+    Parent = self(),
+    HandlerId = bt_3548_actor_started_state_keys_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => Parent},
+        level => all
+    }),
+    try
+        State = #{
+            '$beamtalk_class' => 'LateSlotActor',
+            '__methods__' => #{},
+            '__class_mod__' => 'bt@late_slot_actor',
+            count => 0
+        },
+        ?assertEqual({ok, State}, beamtalk_actor:init(State)),
+        Found = collect_log_meta("Actor started", state_keys, 500),
+        ?assertMatch({ok, _}, Found),
+        {ok, Keys} = Found,
+        ?assertNot(lists:member(proc, Keys)),
+        ?assert(lists:member(count, Keys))
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, maps:get(level, OldLevel))
+    end.
+
 %%% Sync message dispatch tests
 
 sync_message_with_reply_test() ->
@@ -2028,21 +2069,31 @@ spawn_callback_crash_log_includes_stacktrace_test() ->
 Collect log events until we find one matching the expected message with stacktrace
 """.
 collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
-    collect_log_with_stacktrace(ExpectedMsg, Timeout, erlang:monotonic_time(millisecond)).
+    collect_log_meta(ExpectedMsg, stacktrace, Timeout).
 
-collect_log_with_stacktrace(ExpectedMsg, Timeout, Start) ->
+-doc """
+Collect log events until we find one matching `ExpectedMsg` whose metadata
+carries `MetaKey`, returning `{ok, Value}` for that key. Shared by every
+`log/2`-handler test in this module (CLAUDE.md's no-duplicate-implementations
+rule) — `collect_log_with_stacktrace/2` is this with `MetaKey = stacktrace`.
+""".
+collect_log_meta(ExpectedMsg, MetaKey, Timeout) ->
+    collect_log_meta(ExpectedMsg, MetaKey, Timeout, erlang:monotonic_time(millisecond)).
+
+collect_log_meta(ExpectedMsg, MetaKey, Timeout, Start) ->
     Remaining = Timeout - (erlang:monotonic_time(millisecond) - Start),
     case Remaining > 0 of
         false ->
             not_found;
         true ->
             receive
-                {log_event, #{msg := {string, Msg}, meta := #{stacktrace := ST}}} when
-                    Msg =:= ExpectedMsg
-                ->
-                    {ok, ST};
+                {log_event, #{msg := {string, Msg}, meta := Meta}} when Msg =:= ExpectedMsg ->
+                    case maps:find(MetaKey, Meta) of
+                        {ok, Value} -> {ok, Value};
+                        error -> collect_log_meta(ExpectedMsg, MetaKey, Timeout, Start)
+                    end;
                 {log_event, _} ->
-                    collect_log_with_stacktrace(ExpectedMsg, Timeout, Start)
+                    collect_log_meta(ExpectedMsg, MetaKey, Timeout, Start)
             after Remaining ->
                 not_found
             end

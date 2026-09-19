@@ -18,6 +18,7 @@
 //! in name but carried this shared logic.
 
 use super::gen_server::extract_package_from_module_name;
+use super::util::omit_late_defaultless_slot;
 use super::value_accessors::has_opaque_native_representation;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
@@ -478,8 +479,14 @@ impl CoreErlangGenerator {
         class_variables: &[StateDeclaration],
     ) -> Result<Document<'static>> {
         let mut parts: Vec<Document<'static>> = Vec::new();
-        for (idx, cv) in class_variables.iter().enumerate() {
-            if idx > 0 {
+        for cv in class_variables {
+            // ADR 0124 §2/B2: a defaultless `late classState:` slot is
+            // omitted from the map entirely, not emitted as `'nil'` — see
+            // `omit_late_defaultless_slot`.
+            if omit_late_defaultless_slot(cv) {
+                continue;
+            }
+            if !parts.is_empty() {
                 parts.push(Document::Str(", "));
             }
             let val = if let Some(ref default_value) = cv.default_value {
