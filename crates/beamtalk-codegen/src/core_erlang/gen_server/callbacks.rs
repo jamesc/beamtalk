@@ -134,6 +134,13 @@ impl CoreErlangGenerator {
 
         let module_name = self.module_name.clone();
 
+        // ADR 0123 §1: `'__shape_version__'` is the leaf class's own
+        // declared `shapeVersion:` (default 1) — never inherited, since
+        // shape versions and migration chains are per concrete class
+        // (BT-3534 added the internal-fields plumbing; this is what makes
+        // the written value non-default).
+        let shape_version = current_class.map_or(1, ClassDefinition::effective_shape_version);
+
         // Use the clean Beamtalk class name (e.g., "EventStore") for
         // lifecycle telemetry metadata instead of the compiled Erlang module name
         // (e.g., "bt@exdura@event_store"). This matches how dispatch traces
@@ -207,7 +214,10 @@ impl CoreErlangGenerator {
                                             INDENT,
                                             docvec![
                                                 line(),
-                                                Self::internal_state_prefix_doc(&module_name),
+                                                Self::internal_state_prefix_doc(
+                                                    &module_name,
+                                                    shape_version
+                                                ),
                                                 Document::Vec(own_state_fields),
                                             ]
                                         ),
@@ -266,7 +276,7 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                Self::internal_state_prefix_doc(&module_name),
+                                Self::internal_state_prefix_doc(&module_name, shape_version),
                                 Document::Vec(initial_state_fields),
                             ]
                         ),
@@ -286,7 +296,7 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// The `'__class_mod__'` and `'__shape_version__' => 1` internal-key
+    /// The `'__class_mod__'` and `'__shape_version__' => N` internal-key
     /// pair, as map-literal entries (each after the first needs its own
     /// leading `, `) — the prefix shared, byte for byte, by both `init/1`
     /// code paths: the base-class `DefaultState` map and the subclass
@@ -294,15 +304,16 @@ impl CoreErlangGenerator {
     /// same two entries against the same `module_name`.
     ///
     /// `'__shape_version__'` is ADR 0123 Phase 0's (BT-3534) hot-reload
-    /// shape version; `shapeVersion:` itself is a later phase, so every
-    /// class is version 1 today.
-    fn internal_state_prefix_doc(module_name: &str) -> Document<'static> {
+    /// shape version key; `shape_version` is this leaf class's own
+    /// effective `shapeVersion:` (ADR 0123 §1, default `1`) — never the
+    /// superclass's, since shape versions are per concrete class.
+    fn internal_state_prefix_doc(module_name: &str, shape_version: u32) -> Document<'static> {
         docvec![
             "'__class_mod__' => ",
             leaf::atom(module_name.to_owned()),
             line(),
             ", '__shape_version__' => ",
-            leaf::int_lit(1),
+            leaf::int_lit(i64::from(shape_version)),
         ]
     }
 

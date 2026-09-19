@@ -3,11 +3,17 @@
 
 // BT-3536 (ADR 0123 Phase 2) regression fixture: beamtalk_shape_migration_tests
 // exercises a genuine v1 -> v2 -> v3 chain (two real class-side hooks, invoked
-// via local_call/3) through migrate/3. `shapeVersion:`/`migrateFromVN:` are
-// not real language keywords yet (Phase 3) — `migrateFromV1:`/`migrateFromV2:`
-// below are ordinary class-side method selectors. The tests meck this module's
-// `__beamtalk_meta/0` to add the `'shape_version'`/`'shape_migrations'` keys
-// Phase 3 will eventually emit for real.
+// via local_call/3) through migrate/3. The tests meck this module's
+// `__beamtalk_meta/0` to control the `'shape_version'`/`'shape_migrations'`
+// keys per test case (gaps, downgrade, idempotency, the fun-outside-table
+// warning), so this fixture deliberately keeps `shapeVersion:` at its
+// implicit default (1) rather than declaring `shapeVersion: 3` for real —
+// several tests (e.g. "meta absent", "drops undeclared field") rely on the
+// *real* (unmocked) meta resolving `FromVersion (1) >= ToVersion` so the
+// chain runs no steps outside a meck'd scenario. BT-3537 (ADR 0123 Phase 3)
+// consequently flags both hooks below as unreachable at compile time
+// (`shapeVersion: 1`, but `migrateFromV1:`/`migrateFromV2:` target `N >= 1`)
+// — expected and harmless for this fixture, not a real bug: see above.
 //
 // Hooks read/write `old` via the Erlang FFI gateway (`maps:get/2`,
 // `maps:put/3`) — a `Dictionary` send on a non-literal value falls through

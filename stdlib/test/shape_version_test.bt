@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3537 (ADR 0123 Phase 3): shapeVersion:/migrateFromVN: language surface —
+// Behaviour >> shapeVersion, Behaviour >> migrateShape:from: (the sealed
+// wrapper over beamtalk_shape_migration:migrate/3), and a real
+// migrateFromVN: hook on a Value class (no live process for its instances).
+//
+// Fixture: stdlib/test/fixtures/shape_version_money.bt (ShapeVersionMoney)
+
+TestCase subclass: ShapeVersionTest
+  field: cls = nil
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  testShapeVersionDefaultsToOneWhenUndeclared =>
+    // Object declares no shapeVersion: clause.
+    self assert: Object shapeVersion equals: 1
+
+  testDeclaredShapeVersion =>
+    self assert: ShapeVersionMoney shapeVersion equals: 2
+
+  testMigrateFromV1DirectCall =>
+    // migrateFromV1: is an ordinary class-side method — callable directly,
+    // no process needed (ADR 0123 §2's "REPL-testable" promise).
+    old := #{#cents => 250, #currency => #USD}
+    migrated := ShapeVersionMoney migrateFromV1: old
+    self assert: (migrated at: #amount) equals: 2.5
+    self deny: (migrated includesKey: #cents)
+
+  testMigrateShapeFromRunsFullChainAndReconciles =>
+    old := #{#cents => 500}
+    migrated := ShapeVersionMoney migrateShape: old from: 1
+    self assert: (migrated at: #amount) equals: 5.0
+    self assert: (migrated at: #currency) equals: #USD
+    self deny: (migrated includesKey: #cents)
+
+  testMigrateShapeFromIsIdempotentAtCurrentVersion =>
+    current := #{#amount => 9.99, #currency => #EUR}
+    migrated := ShapeVersionMoney migrateShape: current from: 2
+    self assert: migrated equals: current
+
+  // ADR 0123 §1: `ClassBuilder shapeVersion:` — the programmatic
+  // counterpart, no compiled `.bt` source at all. `Behaviour >> shapeVersion`
+  // reads the class gen_server's own seeded field, not `__beamtalk_meta/0`
+  // (which a ClassBuilder-only class never exports), so this exercises a
+  // different code path than the compiled-class tests above.
+  testClassBuilderShapeVersionKeyword =>
+    Object classBuilder name: #BT3537ShapeVersionBuilderClass;
+      superclass: Object;
+      shapeVersion: 3;
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3537ShapeVersionBuilderClass
+    self assert: self.cls shapeVersion equals: 3

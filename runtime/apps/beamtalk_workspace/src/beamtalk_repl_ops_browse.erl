@@ -765,12 +765,25 @@ class_definition_text(ClassName, Super, State, IsTyped, IsSealed, IsAbstract, Me
         <<" subclass: ">>,
         atom_to_binary(ClassName, utf8)
     ],
+    ShapeVersionLine = shape_version_line(Meta),
     Keyword = state_keyword(Meta),
     StateLines = [
         [<<"\n  ">>, Keyword, <<": ">>, Name, type_suffix(Type), default_suffix(Default)]
      || #{<<"name">> := Name, <<"default">> := Default, <<"type">> := Type} <- State
     ],
-    iolist_to_binary([Header | StateLines]).
+    iolist_to_binary([Header, ShapeVersionLine | StateLines]).
+
+%% ADR 0123 §1: `shapeVersion: N` is a header clause, like `handleScope:`
+%% (whose skeleton emission this module doesn't (yet) synthesize) — round-
+%% tripping the compiler's own `'shape_version'` meta key (omitted when the
+%% class is at the implicit default, version 1, mirroring
+%% `class_meta.rs`'s `handle_scope`-pattern omission) so a `Workspace flush`
+%% resubmit of the skeleton doesn't silently drop a declared version.
+-spec shape_version_line(map()) -> iolist().
+shape_version_line(#{shape_version := N}) when is_integer(N), N > 0 ->
+    [<<"\n  shapeVersion: ">>, integer_to_binary(N)];
+shape_version_line(_Meta) ->
+    [].
 
 -spec modifier_prefix(boolean(), binary()) -> iolist().
 modifier_prefix(true, Keyword) -> [Keyword, <<" ">>];

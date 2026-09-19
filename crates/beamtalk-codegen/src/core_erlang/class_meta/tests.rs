@@ -7,7 +7,8 @@
 
 use super::*;
 use beamtalk_core::ast::{
-    ClassDefinition, ClassKind, Identifier, Module, TypeAnnotation, TypeParamDecl,
+    ClassDefinition, ClassKind, Identifier, KeywordPart, MessageSelector, MethodDefinition, Module,
+    ParameterDefinition, ShapeVersionDeclaration, TypeAnnotation, TypeParamDecl,
 };
 use beamtalk_core::source_analysis::Span;
 use beamtalk_core::test_helpers::test_support::make_actor_class;
@@ -628,5 +629,127 @@ fn test_type_annotation_to_meta_repr_generic_with_type_params() {
                 },
             ],
         }
+    );
+}
+
+// ─── ADR 0123 §1/§2: `'shape_version'` / `'shape_migrations'` meta ────────
+
+/// Builds a `migrateFromVN:` class-side method with an empty body and no
+/// return type — the tests below only need the selector shape to be
+/// recognized by `meta_shape_migrations_entry`.
+fn make_migrate_from_v_method(version: u32) -> MethodDefinition {
+    let span = s();
+    let mut m = MethodDefinition::new(
+        MessageSelector::Keyword(vec![KeywordPart::new(
+            format!("migrateFromV{version}:"),
+            span,
+        )]),
+        vec![ParameterDefinition::new(Identifier::new("old", span))],
+        Vec::new(),
+        span,
+    );
+    m.is_class_method = true;
+    m
+}
+
+#[test]
+fn test_meta_omits_shape_version_when_undeclared() {
+    let class = make_actor_class("Plain");
+    let module = module_with(class.clone());
+    let doc = CoreErlangGenerator::build_meta_map_doc(
+        &class,
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("shape_version"),
+        "meta map should omit 'shape_version' for a class with no shapeVersion: clause. Got: {output}"
+    );
+    assert!(
+        !output.contains("shape_migrations"),
+        "meta map should omit 'shape_migrations' for a class with no migrateFromVN: methods. Got: {output}"
+    );
+}
+
+#[test]
+fn test_meta_emits_declared_shape_version() {
+    let mut class = make_actor_class("Cart");
+    class.shape_version = Some(ShapeVersionDeclaration {
+        version: 2,
+        span: s(),
+    });
+    let module = module_with(class.clone());
+    let doc = CoreErlangGenerator::build_meta_map_doc(
+        &class,
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'shape_version' => 2"),
+        "meta map should emit the declared shapeVersion: 2. Got: {output}"
+    );
+}
+
+#[test]
+fn test_meta_emits_shape_migrations_table_sorted_by_version() {
+    let mut class = make_actor_class("Cart");
+    class.shape_version = Some(ShapeVersionDeclaration {
+        version: 3,
+        span: s(),
+    });
+    // Declared out of order — the emitted table must be sorted by version.
+    class.class_methods = vec![make_migrate_from_v_method(2), make_migrate_from_v_method(1)];
+    let module = module_with(class.clone());
+    let doc = CoreErlangGenerator::build_meta_map_doc(
+        &class,
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'shape_migrations' => ~{1 => 'migrateFromV1:', 2 => 'migrateFromV2:'}~"),
+        "meta map should emit the shape_migrations table sorted by version. Got: {output}"
+    );
+}
+
+#[test]
+fn test_meta_shape_migrations_excludes_non_matching_class_methods() {
+    let mut class = make_actor_class("Cart");
+    class.class_methods = vec![make_migrate_from_v_method(1)];
+    class.class_methods.push({
+        let span = s();
+        let mut m = MethodDefinition::new(
+            MessageSelector::Unary("new".into()),
+            Vec::new(),
+            Vec::new(),
+            span,
+        );
+        m.is_class_method = true;
+        m
+    });
+    let module = module_with(class.clone());
+    let doc = CoreErlangGenerator::build_meta_map_doc(
+        &class,
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'shape_migrations' => ~{1 => 'migrateFromV1:'}~"),
+        "meta map's shape_migrations table must only include migrateFromVN: methods. Got: {output}"
     );
 }

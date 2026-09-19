@@ -202,6 +202,30 @@ fn test_init_subclass_actor_writes_shape_version_one() {
     );
 }
 
+/// ADR 0123 §1 (BT-3537): once `shapeVersion:` is declared, `init/1` writes
+/// the class's own declared value, not the Phase 0 hardcoded `1`.
+#[test]
+fn test_init_actor_with_declared_shape_version_writes_real_value() {
+    let src = concat!(
+        "Actor subclass: Cart\n",
+        "  shapeVersion: 3\n",
+        "  state: items = #()\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("cart")).expect("codegen should succeed");
+
+    assert!(
+        code.contains("'__shape_version__' => 3"),
+        "init/1's DefaultState must stamp the declared shapeVersion: 3, not the default. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'__shape_version__' => 1"),
+        "init/1 must not also stamp the default 1 for a class declaring shapeVersion: 3. Got:\n{code}"
+    );
+}
+
 // ── Type-annotation codegen coverage ─────────────────────────────────────────
 //
 // Target: gen_server/callbacks.rs — is_nilable_type Union branch,
@@ -251,6 +275,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: s,
     };
     Module {

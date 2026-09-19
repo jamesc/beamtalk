@@ -91,6 +91,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {

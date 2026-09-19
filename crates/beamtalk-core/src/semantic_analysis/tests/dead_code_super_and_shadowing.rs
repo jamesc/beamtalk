@@ -60,6 +60,7 @@ fn test_dead_code_after_return_in_method() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -125,6 +126,7 @@ fn test_no_dead_code_without_return() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -198,6 +200,7 @@ fn test_dead_code_in_block() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -261,6 +264,7 @@ fn test_return_at_end_no_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -350,6 +354,7 @@ fn test_super_inside_method_no_error() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -456,6 +461,7 @@ fn test_block_param_shadows_outer_variable() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -539,6 +545,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
@@ -620,6 +627,7 @@ fn test_no_shadow_warning_different_names() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
 
