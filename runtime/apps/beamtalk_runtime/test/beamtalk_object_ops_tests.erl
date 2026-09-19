@@ -401,3 +401,72 @@ test_field_names_empty() ->
     },
     {reply, Names, _} = beamtalk_object_ops:dispatch('fieldNames', [], self_ref(), State),
     ?assertEqual([], Names).
+
+%%% ============================================================================
+%%% try_dispatch/3 error path
+%%% ============================================================================
+
+try_dispatch_error_path_test_() ->
+    {"try_dispatch/3 propagates dispatch errors via beamtalk_error:raise/1", [
+        {"try_dispatch raises for subclassResponsibility", fun test_try_dispatch_raises_error/0}
+    ]}.
+
+test_try_dispatch_raises_error() ->
+    %% subclassResponsibility has_method=true but dispatch returns {error,...}.
+    %% try_dispatch must re-raise it rather than returning {ok, _}.
+    ?assertError(_, beamtalk_object_ops:try_dispatch(subclassResponsibility, [], counter_state())).
+
+%%% ============================================================================
+%%% respondsTo: with #beamtalk_object{} Self
+%%% ============================================================================
+
+responds_to_object_record_test_() ->
+    {"respondsTo: with #beamtalk_object{} Self exercises responds_to_result/3 first clause", [
+        {"instance record (no \" class\" suffix) uses responds_to",
+            fun test_responds_to_instance_record/0},
+        {"class-tagged record (\" class\" suffix) uses class_responds_to",
+            fun test_responds_to_class_record/0}
+    ]}.
+
+test_responds_to_instance_record() ->
+    %% is_class_object/1 is pure: returns false for a tag without " class" suffix.
+    %% Exercises responds_to_result/3 line 321 guard + false branch (line 326-327).
+    Self = #beamtalk_object{class = 'Counter', pid = self(), class_mod = counter},
+    {reply, Result, _} = beamtalk_object_ops:dispatch(
+        'respondsTo:', [isNil], Self, counter_state()
+    ),
+    ?assert(is_boolean(Result)).
+
+test_responds_to_class_record() ->
+    %% is_class_object/1 is pure: returns true when class atom ends with " class".
+    %% Exercises responds_to_result/3 true branch (lines 322-325).
+    Self = #beamtalk_object{class = 'Counter class', pid = self(), class_mod = counter},
+    {reply, Result, _} = beamtalk_object_ops:dispatch(
+        'respondsTo:', [isNil], Self, counter_state()
+    ),
+    ?assert(is_boolean(Result)).
+
+%%% ============================================================================
+%%% print_string_label/2 class_display_name paths
+%%% ============================================================================
+
+print_string_class_display_test_() ->
+    {"printString exercises class_display_name paths", [
+        {"class-tagged record renders as bare class name",
+            fun test_print_string_class_tagged_record/0},
+        {"non-record Self with empty state renders via class_display_name",
+            fun test_print_string_non_record_empty_state/0}
+    ]}.
+
+test_print_string_class_tagged_record() ->
+    %% is_class_object returns true for 'Counter class' (pure, no ETS).
+    %% Exercises print_string_label/2 line 254 and class_display_name/2 lines 278-279.
+    Self = #beamtalk_object{class = 'Counter class', pid = self(), class_mod = counter},
+    {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], Self, #{}),
+    ?assertEqual(<<"Counter">>, Str).
+
+test_print_string_non_record_empty_state() ->
+    %% Non-record Self (atom nil) with empty State triggers the
+    %% map_size(State) =:= 0 branch (line 269) and class_display_name/2.
+    {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], nil, #{}),
+    ?assertEqual(<<"Object">>, Str).
