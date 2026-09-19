@@ -30,6 +30,7 @@ pub mod collision_checker;
 pub mod definite_assignment;
 pub mod error;
 pub mod facts;
+pub mod initialize_assigns;
 pub mod lowering;
 pub(crate) mod method_validators;
 pub mod module_validator;
@@ -73,6 +74,7 @@ pub use definite_assignment::{
 };
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
+pub use initialize_assigns::analyze_initialize_assigns;
 pub use lowering::lower_module_for_codegen;
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};

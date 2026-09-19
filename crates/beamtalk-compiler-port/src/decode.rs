@@ -357,6 +357,17 @@ pub(crate) fn parse_class_info_from_meta_term(
     let state_kinds = map_get(m, "field_kinds")
         .map(term_to_slot_kind_map)
         .unwrap_or_default();
+    // ADR 0124 A2a: initialize_assigns — this class's own `initialize`
+    // definitely-assigned slot summary (`meta_initialize_assigns_list`,
+    // beamtalk-codegen). Missing key (older BEAM artifact predating this
+    // key) degrades to the empty set, same "AST-less metadata is best-effort"
+    // contract every other meta-derived field on `ClassInfo` already has.
+    let initialize_assigns: std::collections::BTreeSet<ecow::EcoString> =
+        map_get(m, "initialize_assigns")
+            .map(term_to_atom_list)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
     // Class variables: name list from `class_fields` (the key codegen
     // actually emits — `meta_atom_list(&class.class_variables...)` in
     // `class_meta.rs`), paired with per-name slot kind from
@@ -421,6 +432,7 @@ pub(crate) fn parse_class_info_from_meta_term(
         state_types,
         state_has_default,
         state_kinds,
+        initialize_assigns,
         methods,
         class_methods,
         class_variables,

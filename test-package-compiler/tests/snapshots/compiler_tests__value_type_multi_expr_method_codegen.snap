@@ -121,6 +121,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -154,6 +155,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

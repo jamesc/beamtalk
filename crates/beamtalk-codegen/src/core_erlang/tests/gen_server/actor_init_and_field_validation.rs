@@ -827,6 +827,7 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
             m
         },
         state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
         methods: vec![],
         class_methods: vec![],
         class_variables: vec![],

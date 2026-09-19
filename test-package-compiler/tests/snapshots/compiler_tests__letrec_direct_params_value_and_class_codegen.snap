@@ -129,6 +129,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -173,6 +174,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{'spawnCount' => 'eager'}~,
+      'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'countDownFrom:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -207,6 +209,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

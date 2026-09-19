@@ -753,3 +753,85 @@ fn test_meta_shape_migrations_excludes_non_matching_class_methods() {
         "meta map's shape_migrations table must only include migrateFromVN: methods. Got: {output}"
     );
 }
+
+// ─── ADR 0124 A2a: 'initialize_assigns' meta emission ─────────────────────
+
+/// Parses `src` (a single class definition) into a `Module`, for tests that
+/// need a real `initialize` method body rather than hand-built AST nodes.
+fn parse_single_class_module(src: &str) -> Module {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(
+        diagnostics.is_empty(),
+        "test fixture source should parse cleanly, got diagnostics: {diagnostics:?}"
+    );
+    module
+}
+
+#[test]
+fn test_meta_map_emits_initialize_assigns() {
+    let module = parse_single_class_module(
+        "typed Actor subclass: Connection\n  \
+         state: socket :: Socket\n  \
+         initialize => self.socket := Socket open\n",
+    );
+    let class = module.classes.first().unwrap();
+    let doc = CoreErlangGenerator::build_meta_map_doc(
+        class,
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'initialize_assigns' => ['socket']"),
+        "meta map should emit the class's own definitely-assigned slots. Got: {output}"
+    );
+}
+
+#[test]
+fn test_meta_map_initialize_assigns_empty_without_initialize() {
+    let class = make_actor_class("Counter");
+    let module = module_with(class.clone());
+    let doc = CoreErlangGenerator::build_meta_map_doc(
+        &class,
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'initialize_assigns' => []"),
+        "a class with no initialize should emit an empty initialize_assigns list. Got: {output}"
+    );
+}
+
+#[test]
+fn test_meta_map_initialize_assigns_excludes_conditionally_assigned_slot() {
+    // Only one arm of ifTrue: assigns `retries` — not definite (ADR 0124 §6).
+    let module = parse_single_class_module(
+        "typed Actor subclass: Connection\n  \
+         state: socket :: Socket\n  \
+         state: retries :: Integer = 0\n  \
+         initialize =>\n    \
+         self.retries > 0 ifTrue: [self.socket := Socket open]\n",
+    );
+    let class = module.classes.first().unwrap();
+    let doc = CoreErlangGenerator::build_meta_map_doc(
+        class,
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    );
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'initialize_assigns' => []"),
+        "a slot assigned only inside ifTrue: (no else) must not appear. Got: {output}"
+    );
+}

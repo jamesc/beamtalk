@@ -26,7 +26,8 @@ mod method_resolution;
 #[cfg(test)]
 mod tests;
 pub use class_info::{
-    ClassInfo, ClassVarInfo, MethodInfo, SuperclassTypeArg, format_default_value,
+    ClassInfo, ClassVarInfo, InitializeAssignsSummary, MethodInfo, SuperclassTypeArg,
+    format_default_value,
 };
 pub use declared_type::DeclaredType;
 /// Per-class selector index: maps class name → (selector → method vec position).
@@ -247,6 +248,7 @@ impl ClassHierarchy {
                     state_types: HashMap::new(),
                     state_has_default: HashMap::new(),
                     state_kinds: HashMap::new(),
+                    initialize_assigns: std::collections::BTreeSet::new(),
                     methods: vec![],
                     class_methods,
                     class_variables: vec![],
@@ -438,6 +440,7 @@ impl ClassHierarchy {
                         state_types: HashMap::new(),
                         state_has_default: HashMap::new(),
                         state_kinds: HashMap::new(),
+                        initialize_assigns: std::collections::BTreeSet::new(),
                         methods: Vec::new(),
                         class_methods: Vec::new(),
                         class_variables: Vec::new(),

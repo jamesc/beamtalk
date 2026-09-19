@@ -111,6 +111,7 @@ let _BinLeft1 = Self in let _BinRight2 = 2 in case call 'erlang':'is_number'(_Bi
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~
@@ -144,6 +145,7 @@ let _BinLeft1 = Self in let _BinRight2 = 2 in case call 'erlang':'is_number'(_Bi
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~
     }~

@@ -357,6 +357,7 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
       'field_has_default' => ~{'logCount' => 'true'}~,
       'field_kinds' => ~{'logCount' => 'eager'}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getLogCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~
@@ -394,6 +395,7 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
       'field_has_default' => ~{'logCount' => 'true'}~,
       'field_kinds' => ~{'logCount' => 'eager'}~,
       'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
       'method_info' => ~{'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getLogCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
     }~,
