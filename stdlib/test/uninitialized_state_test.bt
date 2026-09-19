@@ -62,17 +62,15 @@ TestCase subclass: UninitializedStateTest
   // `state: value :: JsonValue` references `stdlib/src/json.bt`'s real
   // `type JsonValue = Nil | Boolean | Integer | Float | String | List |
   // Dictionary` cross-file — a defaultless field of this type must spawn
-  // without raising, since the alias resolves to a union containing `Nil`
-  // (also regression coverage for BT-3561's cross-file alias pre-loading,
-  // which closed the `beamtalk test` pipeline gap BT-1948's construction-site
-  // check ran into — see BT-3564).
+  // without raising, since the alias resolves to a union containing `Nil`.
+  // No `@expect` needed: BT-3561 closed the `beamtalk test` pipeline gap
+  // that otherwise made BT-1948's construction-site check see `JsonValue`
+  // as an unresolved, non-nilable name and warn.
   testAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>
-    @expect all
     a := JsonValueStateActor spawn
     self assert: a getValue equals: nil
 
   testAliasTypedNilableFieldOtherStateWorks =>
-    @expect all
     a := JsonValueStateActor spawn
     self assert: a getCount equals: 1
 
