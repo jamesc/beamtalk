@@ -429,19 +429,28 @@ test_field_migration_initialize_class_no_telemetry() ->
 %% BT-3532, updated for ADR 0123 Phase 2 (BT-3536): an init/1 return that is
 %% still not {ok, Map} (module loaded, no exception, just an unexpected
 %% shape) must be logged at ?LOG_WARNING — not silently treated as "keep old
-%% state" without a trace. Field migration now delegates to
-%% beamtalk_shape_migration:migrate/3, which resolves Module from Class via
-%% the class registry (see test_field_migration_init_failure_preserves_state
-%% above), so this uses a real registered class ('Counter') with its
-%% init/1 meck'd to misbehave, rather than 'Weird' — a class name that was
-%% never actually registered and predates that registry lookup.
+%% state" without a trace. `code_change/3`'s `Module` argument (threaded
+%% through `migrate_state/2`) only ever reaches this module's own
+%% `seed_internal_keys/4`; `beamtalk_shape_migration:safe_init_defaults/2`
+%% never sees it — it resolves its own module for `ClassName` independently,
+%% via `beamtalk_class_metadata:lookup_module/1` — so this uses a real
+%% registered class ('Counter') for field reconciliation (that lookup
+%% resolves to the real, unmodified 'bt@counter', whose own init/1 succeeds
+%% and needs no misbehavior here), while the misbehaving `init/1` exercised
+%% by `seed_internal_keys/4` lives on `beamtalk_hot_reload_bad_init_test_helper`
+%% (a disposable stub module, never 'bt@counter' itself).
 %%
-%% Two call sites independently attempt Module:init(#{'__skip_initialize__'
-%% => true}) and degrade on a bad return: beamtalk_shape_migration's
-%% reconcile-default lookup, and this module's seed_internal_keys/4 — both
-%% log a ?LOG_WARNING naming 'bt@counter' and the bad return, and both fall
-%% back to "keep what we had", so the overall migration still succeeds with
-%% state unchanged.
+%% `meck:new('bt@counter', [passthrough])` cannot be used here (or on any
+%% other `bt@...` module): `.bt` classes compile straight to Core Erlang via
+%% `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never
+%% produces a real `raw_abstract_v1` abstract-code chunk — the `.beam` still
+%% carries the chunk, but with an empty forms list. meck's
+%% `backup_original/4` reads it unconditionally (regardless of the
+%% `passthrough` option) and recompiles it via `compile:forms/2`, which
+%% degrades an empty forms list to `{error, ...}` rather than raising —
+%% `meck_code:compile_and_load_forms/2` then turns that `{error, ...}` into
+%% `exit({compile_forms, {error, ...}})`, killing the meck_proc gen_server
+%% (BT flaky-test fix — see overnight CI runs of BT-3531..BT-3537).
 test_field_migration_unexpected_init_return_logs_warning() ->
     %% test/sys.config pins the primary logger level to `error` to keep CI
     %% output clean, which would otherwise drop this ?LOG_WARNING before it
@@ -453,12 +462,11 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         config => #{parent => self()},
         level => all
     }),
-    meck:new('bt@counter', [passthrough]),
-    meck:expect('bt@counter', init, fun(_Args) -> {error, not_a_state_map} end),
+    StubMod = beamtalk_hot_reload_bad_init_test_helper,
     try
         OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 3},
         {ok, NewState} = beamtalk_hot_reload:code_change(
-            v1, OldState, #{module => 'bt@counter'}
+            v1, OldState, #{module => StubMod}
         ),
         %% Migration still succeeds (value was already present in ChainedFields,
         %% so the failed init/1 defaults were never actually needed) and stamps
@@ -466,10 +474,9 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         ?assertEqual(1, maps:get('__shape_version__', NewState)),
         ?assertEqual(OldState, maps:remove('__shape_version__', NewState)),
         ?assert(
-            receive_bad_init_warning('bt@counter', {error, not_a_state_map}, 5)
+            receive_bad_init_warning(StubMod, {error, not_a_state_map}, 5)
         )
     after
-        meck:unload('bt@counter'),
         logger:remove_handler(HandlerId),
         logger:set_primary_config(level, error)
     end.
@@ -583,14 +590,18 @@ test_field_migration_stamps_shape_version() ->
     ?assertEqual(1, maps:get('__shape_version__', NewState)),
     ?assertNot(lists:member('__shape_version__', beamtalk_tagged_map:user_field_keys(NewState))).
 
-%% Read-before-seed (BT-3534): migrate_fields/2 seeds BaseState from the
-%% new init's defaults — which, as of this change, also carry
-%% '__shape_version__' => 1 — before overlaying the old state. An old
-%% instance whose own '__shape_version__' is not 1 (simulated directly
-%% here, since nothing produces a value other than 1 yet — shapeVersion:
-%% is a later phase) must keep *its own* version in the migrated result,
-%% not the new default's, proving the old value is read before the new
-%% default's seed overwrites it.
+%% Read-before-seed (BT-3534, superseded by BT-3536's beamtalk_shape_migration
+%% pipeline): the old '__shape_version__' (7, simulated directly here, since
+%% nothing produces a value other than 1 yet — shapeVersion: is a later
+%% phase) is read as FromVersion before anything overwrites it — proven by
+%% ToVersion coming back as 1 (Counter's real, declared meta), not
+%% `undefined` or a crash. A stale OldState version older than the class's
+%% current one is exactly the downgrade case
+%% `test_migrate_downgrade_runs_reconcile_only` (beamtalk_shape_migration_tests.erl)
+%% covers: `migrate/3` stamps ToVersion (the class's own current version),
+%% never FromVersion — this OldState's `value` field is still preserved by
+%% reconcile falling through to the chained/declared value, just not its
+%% stale version number.
 test_field_migration_read_before_seed_preserves_old_version() ->
     OldState = #{
         '$beamtalk_class' => 'Counter',
@@ -601,7 +612,7 @@ test_field_migration_read_before_seed_preserves_old_version() ->
     {ok, NewState} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => 'bt@counter'}
     ),
-    ?assertEqual(7, maps:get('__shape_version__', NewState)),
+    ?assertEqual(1, maps:get('__shape_version__', NewState)),
     ?assertEqual(42, maps:get(value, NewState)).
 
 %% Absent '__shape_version__' on the old state (a pre-BT-3534 instance,
