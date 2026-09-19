@@ -61,6 +61,7 @@ Module {
                         ),
                     ),
                     declared_keyword: Field,
+                    slot_kind: Eager,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [],
@@ -105,6 +106,7 @@ Module {
                         ),
                     ),
                     declared_keyword: Field,
+                    slot_kind: Eager,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [],

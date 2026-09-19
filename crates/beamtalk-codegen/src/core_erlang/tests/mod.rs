@@ -120,6 +120,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 declared_keyword: DeclaredKeyword::default(),
+                slot_kind: beamtalk_core::ast::SlotKind::default(),
                 span: Span::new(0, 0),
             },
             StateDeclaration {
@@ -130,6 +131,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 declared_keyword: DeclaredKeyword::default(),
+                slot_kind: beamtalk_core::ast::SlotKind::default(),
                 span: Span::new(0, 0),
             },
         ],

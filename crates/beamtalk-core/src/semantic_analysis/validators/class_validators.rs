@@ -2112,6 +2112,28 @@ mod tests {
         assert!(diagnostics[0].message.contains("cannot have instance data"));
     }
 
+    /// ADR 0124 B1: `late state:` on an `Object` subclass hits the same
+    /// "cannot have instance data" error as an eager one — `late` doesn't
+    /// exempt it, since `Object` never holds instance data at all.
+    #[test]
+    fn late_state_on_object_errors() {
+        let src = "Object subclass: BadObj\n  late state: x :: Integer";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for late state: on Object, got: {diagnostics:?}"
+        );
+        assert!(diagnostics[0].severity == Severity::Error);
+        assert!(diagnostics[0].message.contains("cannot have instance data"));
+    }
+
     #[test]
     fn field_on_object_errors() {
         let src = "Object subclass: BadObj\n  field: x = 0";

@@ -1247,6 +1247,47 @@ typed Actor subclass: TypedAccount
   balance -> Integer => self.balance
 ```
 
+### `late` Slots (ADR 0124)
+
+`late` is a declaration-level modifier on `state:`/`classState:` for a slot
+that is legitimately unassigned after `initialize` — acquired later by an
+explicit lifecycle call (open a subprocess, start a listener) — instead of
+being declared nilable and nil-checked at every read:
+
+```beamtalk
+typed Actor subclass: CodexClient
+  late state: proc :: Subprocess   // not `proc :: Subprocess | Nil = nil`
+  state: workspacePath :: String
+
+  launch -> Nil =>
+    self.proc := Subprocess open: "/bin/bash" args: #() dir: self.workspacePath
+```
+
+The modifier precedes the declaration keyword, matching the class-header
+modifier position (`sealed typed Actor subclass: …`). It requires a type
+annotation, and that type must not admit `Nil` and must have no default
+value — a `late` slot has exactly two states, absent and assigned, and its
+declared type is always non-nilable:
+
+```beamtalk
+late state: x            // error: requires a type annotation
+late state: x :: T | Nil // error: drop `late` or make the type non-nilable
+late state: x :: T = v   // error: a slot with a default is never unset
+```
+
+`late` is rejected on a Value's `field:` — a Value is fully constructed by
+`new`/`new:`/its keyword constructor and never reassigned, so "assigned
+later" has no meaning; make the field optional (`| Nil = nil`) or hold the
+resource in an Actor instead. `late` is also rejected wherever a data
+declaration already is — `state:`/`field:` on `Object` and `state:` on a
+`native:` Actor. Outside declaration position `late` stays an ordinary
+identifier (`late := 1`) or method name.
+
+This covers parsing and validation only; codegen and runtime behaviour
+(excluding a `late` slot from the post-`initialize` definite-assignment
+check, and the guarded `hasField:`/`clearField:` read/write semantics) land
+in later phases of ADR 0124.
+
 ### Annotation Forms
 
 ```beamtalk

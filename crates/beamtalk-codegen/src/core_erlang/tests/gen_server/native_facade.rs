@@ -412,6 +412,7 @@ fn make_native_actor_with_class_methods() -> Module {
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: beamtalk_core::ast::SlotKind::default(),
             span: Span::new(0, 0),
         }],
         type_params: vec![],

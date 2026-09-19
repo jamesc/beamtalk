@@ -907,6 +907,15 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
 
+    // Error on malformed `late` slot declarations (ADR 0124 §1, §5, B1):
+    // `late field:` on a Value, no type annotation, a nilable type, or a
+    // default value.
+    validators::check_late_slot_declarations(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+
     // Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 

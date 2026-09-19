@@ -345,6 +345,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
             comments: CommentAttachment::default(),
             doc_comment: None,
             declared_keyword: DeclaredKeyword::default(),
+            slot_kind: beamtalk_core::ast::SlotKind::default(),
             span: Span::new(0, 10),
         }],
         methods: vec![],
