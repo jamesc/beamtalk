@@ -39,7 +39,16 @@ from `beamtalk_shape_chain:migrate/4`, wrapped here as
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1, field_tier/1]).
+-export([migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1]).
+
+-ifdef(TEST).
+%% Export field_tier/1 for the BT-3542 cross-boundary conformance test
+%% (beamtalk_shape_migration_tests) — same convention as beamtalk_stdlib.erl's
+%% `-ifdef(TEST). -export([...]). -endif.` block for internal helpers that
+%% only EUnit coverage needs, rather than widening this module's public API
+%% surface permanently for a test-only need.
+-export([field_tier/1]).
+-endif.
 
 -export_type([envelope/0]).
 
@@ -93,11 +102,9 @@ and would otherwise repeat it, and its `?LOG_WARNING`, once per live instance.
 migrate(Class, FromVersion, Fields, Opts) when
     is_atom(Class), is_integer(FromVersion), FromVersion > 0, is_map(Fields), is_map(Opts)
 ->
-    case beamtalk_class_metadata:lookup_module(Class) of
-        {ok, Module} ->
-            Meta = read_meta(Module),
+    case resolve_migrations(Class) of
+        {ok, Module, Meta, Migrations} ->
             ToVersion = maps:get(shape_version, Meta, 1),
-            Migrations = maps:get(shape_migrations, Meta, #{}),
             maybe_log_downgrade(Class, FromVersion, ToVersion),
             case maps:get(skip_stray_warning, Opts, false) of
                 true -> ok;
@@ -114,6 +121,24 @@ migrate(Class, FromVersion, Fields, Opts) when
             end;
         not_found ->
             {error, class_not_found_error(Class)}
+    end.
+
+-doc """
+Resolve `Class`'s compiled `Module`, its full `__beamtalk_meta/0` map, and
+its `'shape_migrations'` table (default `#{}`) in one lookup — the
+resolution sequence `migrate/4` and `check_stray_migrations/1` both need,
+extracted so a future change to it (an inherited-chain lookup, a different
+fallback) only needs updating here.
+""".
+-spec resolve_migrations(atom()) -> {ok, module(), map(), map()} | not_found.
+resolve_migrations(Class) ->
+    case beamtalk_class_metadata:lookup_module(Class) of
+        {ok, Module} ->
+            Meta = read_meta(Module),
+            Migrations = maps:get(shape_migrations, Meta, #{}),
+            {ok, Module, Meta, Migrations};
+        not_found ->
+            not_found
     end.
 
 -doc """
@@ -147,10 +172,8 @@ finds no module for has no `migrateFromV*` methods to warn about either.
 """.
 -spec check_stray_migrations(atom()) -> ok.
 check_stray_migrations(Class) ->
-    case beamtalk_class_metadata:lookup_module(Class) of
-        {ok, Module} ->
-            Meta = read_meta(Module),
-            Migrations = maps:get(shape_migrations, Meta, #{}),
+    case resolve_migrations(Class) of
+        {ok, _Module, _Meta, Migrations} ->
             warn_migrations_outside_table(Class, Migrations);
         not_found ->
             ok
@@ -516,11 +539,12 @@ class-kind-based branches below are pinned against
 — a corpus shared with `sendability.rs`'s own
 `runtime_field_tier_kind_mapping_matches_compile_time_base_tier` test — by
 `beamtalk_shape_migration_tests`'s
-`sendability_tier_conformance_matches_shared_corpus_test/0`. A future kind
+`test_sendability_tier_conformance_matches_shared_corpus/0`. A future kind
 added to either side's `case` (or a change to the `Object`/`handleScope:`
 precedence) that isn't reflected in the corpus fails one or both of those
-tests, catching the drift this function alone cannot prevent. Exported for
-that test's direct use.
+tests, catching the drift this function alone cannot prevent. Exported
+under `-ifdef(TEST)` for that test's direct use (see `beamtalk_stdlib.erl`
+for the same test-only export-gating convention).
 
 **Known, deliberate scope gaps versus the compile-time lattice** (both
 recorded as corpus entries or their own regression coverage, not just this
@@ -528,7 +552,7 @@ comment, per BT-3542):
 1. A generic annotation's type arguments (`List(Port)`) are not composed
    here — only the head type name is graded. Deferred alongside this
    module's other Phase 2 scoping choices (ADR 0123 § Consequences); see
-   `field_tier_does_not_compose_generic_type_args_test/0`.
+   `test_field_tier_does_not_compose_generic_type_args/0`.
 2. An `Object` with no `handleScope:` declaration grades `Unknown` at
    compile time (silent, ADR 0100 advisory-only) but `passthrough` here
    (allowed through `pack/1` as an opaque unversioned term) — the
