@@ -3417,7 +3417,10 @@ fn all_initialize_assigns_includes_own_summary() {
 
 /// A `native:` ancestor anywhere in the chain marks the summary incomplete
 /// (ADR 0056 — its slots belong to a backing `gen_server`, no `initialize`
-/// AST to analyse), not merely empty.
+/// AST to analyse), not merely empty — and `incomplete` is independent of
+/// `assigned`: a slot the leaf's own `initialize` genuinely assigns still
+/// shows up alongside the incomplete flag, rather than the flag suppressing
+/// or replacing the (partial) answer.
 #[test]
 fn all_initialize_assigns_native_ancestor_marks_incomplete() {
     let module = Module {
@@ -3434,6 +3437,11 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
     let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
         panic!("build should succeed");
     };
+    // Give Child its own definitely-assigned slot so this test can prove
+    // `incomplete` doesn't come at the cost of losing `assigned` data.
+    if let Some(info) = h.classes_mut().get_mut("Child") {
+        info.initialize_assigns = BTreeSet::from([EcoString::from("own")]);
+    }
 
     let native_info = ClassInfo {
         surface_incomplete: false,
@@ -3465,6 +3473,10 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
     assert!(
         summary.incomplete,
         "a native: ancestor in the chain must mark the summary incomplete"
+    );
+    assert!(
+        summary.assigned.contains("own"),
+        "incomplete must not suppress a slot the leaf's own initialize genuinely assigns"
     );
 }
 
