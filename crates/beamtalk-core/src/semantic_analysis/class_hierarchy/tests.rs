@@ -432,6 +432,7 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     }
 }
@@ -725,6 +726,7 @@ fn make_class_with_sealed_method(
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     }
 }
@@ -767,6 +769,7 @@ fn make_class_with_sealed_class_method(
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     }
 }
@@ -1013,6 +1016,7 @@ fn multiple_user_classes_in_module() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let derived = ClassDefinition {
@@ -1048,6 +1052,7 @@ fn multiple_user_classes_in_module() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1153,6 +1158,7 @@ fn duplicate_instance_method_detected() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1225,6 +1231,7 @@ fn duplicate_class_method_detected() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1294,6 +1301,7 @@ fn no_duplicate_for_different_selectors() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1464,6 +1472,7 @@ fn user_class_return_type_propagated() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1524,6 +1533,7 @@ fn user_class_param_types_propagated() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1576,6 +1586,7 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     }
 }
@@ -1664,6 +1675,7 @@ fn state_field_type_inherited_from_parent() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1728,6 +1740,7 @@ fn state_field_type_shadowed_untyped_field() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1888,6 +1901,7 @@ fn value_subclass_sets_is_value_flag() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module::new(vec![], test_span());
@@ -1925,6 +1939,7 @@ fn value_subclass_auto_generates_slot_methods() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -1999,6 +2014,7 @@ fn value_subclass_auto_methods_have_generated_docs() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -2092,6 +2108,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {
@@ -2144,6 +2161,7 @@ fn actor_subclass_does_not_set_is_value_flag() {
 /// should not break early; it should continue walking up the chain
 /// using the `external_superclasses` data.
 #[test]
+#[allow(clippy::too_many_lines)] // several hand-built ClassDefinition literals
 fn sealed_override_checks_with_external_superclasses() {
     // ClassB (in module) has sealed method foo
     let sealed_base = ClassDefinition {
@@ -2179,6 +2197,7 @@ fn sealed_override_checks_with_external_superclasses() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     // ClassC (in module) inherits from UnknownClass (external)
@@ -2216,6 +2235,7 @@ fn sealed_override_checks_with_external_superclasses() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: test_span(),
     };
     let module = Module {

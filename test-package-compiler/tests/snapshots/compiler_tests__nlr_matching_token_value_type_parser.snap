@@ -373,6 +373,7 @@ Module {
             doc_comment: None,
             backing_module: None,
             handle_scope: None,
+            shape_version: None,
             type_params: [],
             superclass_type_args: [],
             span: Span {

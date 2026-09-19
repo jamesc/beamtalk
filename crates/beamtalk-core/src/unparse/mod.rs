@@ -599,6 +599,25 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         header
     };
 
+    // `shapeVersion: N` (ADR 0123 §1) — same canonical placement as
+    // `handleScope:` above: its own indented line following the class
+    // header (and any earlier header clause).
+    let header = if let Some(sv) = &class.shape_version {
+        docvec![
+            header,
+            nest(
+                2,
+                docvec![
+                    line(),
+                    "shapeVersion: ",
+                    leaf::int_lit(i64::from(sv.version))
+                ]
+            )
+        ]
+    } else {
+        header
+    };
+
     docs.push(header);
 
     // State declarations — use nest(2, ...) so that leading comments and

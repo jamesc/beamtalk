@@ -325,6 +325,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
 

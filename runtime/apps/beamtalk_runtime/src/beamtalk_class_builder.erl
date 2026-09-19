@@ -61,6 +61,7 @@ Accepts a map with the following keys:
   - `methodSpecs`  — map (optional): selector => fun()
   - `modifiers`    — list (optional): [:abstract, :sealed, ...]
   - `builderPid`   — pid (optional): builder process to stop after registration
+  - `shapeVersion` — integer (optional): declared shape version (ADR 0123 §1, default 1)
 
 Additional keys for compiled classes (ADR 0038 Phase 3):
   - `moduleName`   — atom: compiled Erlang module name (default: className)
@@ -350,6 +351,18 @@ build_compiled_class_info(
     %% into the generated `new/0`); `field_defaults` carries the initial values
     %% the runtime instantiation path needs when there is no loaded module.
     FieldDefaults = maps:get(fieldSpecs, BuilderState, #{}),
+    %% ADR 0123 §1: `ClassBuilder shapeVersion:` — the programmatic
+    %% counterpart to the compiler's `shapeVersion: N` header clause
+    %% (`class_meta.rs`'s `'shape_version'` key), same absent-means-1
+    %% default. Beamtalk's `nil` (the builder state field's own default)
+    %% normalizes to `1` here rather than via `maybe_put`, since — unlike
+    %% the optional keys below — `shape_version` is always present in
+    %% ClassInfo, mirroring `is_sealed`/`is_abstract` above.
+    ShapeVersion =
+        case maps:get(shapeVersion, BuilderState, nil) of
+            N when is_integer(N), N > 0 -> N;
+            _ -> 1
+        end,
     Base = #{
         name => ClassName,
         superclass => SuperclassName,
@@ -359,7 +372,8 @@ build_compiled_class_info(
         instance_methods => InstanceMethods,
         class_methods => ClassMethods,
         is_sealed => IsSealed,
-        is_abstract => IsAbstract
+        is_abstract => IsAbstract,
+        shape_version => ShapeVersion
     },
     %% Per-instance-variable declaration-line index, the state-var
     %% analogue of methodXref below. Wrapped as the outermost maybe_put

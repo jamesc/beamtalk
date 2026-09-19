@@ -38,7 +38,11 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     compute_is_constructible/2,
     abstract_class_error/2,
     resolve_is_abstract_or_raise/2,
-    resolve_module_or_raise/2
+    resolve_module_or_raise/2,
+    %% ADR 0123 §3: shared with beamtalk_shape_migration's reconcile step —
+    %% a Value class has no init/1, so its declared-field defaults are
+    %% derived from new/0 instead (CLAUDE.md: no duplicate implementations).
+    ancestor_compiled_defaults/1
 ]).
 
 -type class_name() :: atom().

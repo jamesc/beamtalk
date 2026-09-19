@@ -25,6 +25,13 @@ suite happens to register it first.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+%% Logger handler callback for the fun-outside-table warning test below.
+-export([log/2]).
+
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {log_event, LogEvent},
+    ok.
+
 %%====================================================================
 %% Fixture
 %%====================================================================
@@ -65,6 +72,8 @@ shape_migration_test_() ->
                 fun test_migrate_typed_field_with_default_fails_when_init_unavailable/0},
             {"undeclared field is dropped with a warning",
                 fun test_migrate_drops_undeclared_field/0},
+            {"a migrateFromV* class method absent from shape_migrations warns (ADR 0123 §2)",
+                fun test_migrate_warns_when_class_method_outside_shape_migrations_table/0},
             {"pack/1 rejects a SendableRef (Actor-typed) field",
                 fun test_pack_rejects_sendable_ref_field/0},
             {"pack/1 rejects a HandleScoped field", fun test_pack_rejects_handle_scoped_field/0},
@@ -194,6 +203,55 @@ test_migrate_drops_undeclared_field() ->
     {ok, NewFields, _ToVersion} = beamtalk_shape_migration:migrate('ShapeChainCart', 1, Fields),
     ?assertNot(maps:is_key(ghost, NewFields)),
     ?assertEqual(1, maps:get(itemCount, NewFields)).
+
+%% ADR 0123 §2: `ShapeChainCart`'s `migrateFromV2:` is a real, installed
+%% class-side method (see the fixture), but this scenario's meck'd
+%% `shape_migrations` table only lists `migrateFromV1:` — modelling a fun
+%% installed outside the compiler-emitted table (e.g. a bare
+%% `ClassBuilder addClassMethod:body:` patch with no recompile). `migrate/3`
+%% must still succeed (the gap is a no-op step, same as any other gap) while
+%% also warning that `migrateFromV2:` exists but will not run.
+test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
+    logger:set_primary_config(level, all),
+    HandlerId = bt_3537_stray_migration_warning_test_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all
+    }),
+    try
+        with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
+            {ok, NewFields, ToVersion} =
+                beamtalk_shape_migration:migrate('ShapeChainCart', 1, #{itemCount => 2}),
+            ?assertEqual(3, ToVersion),
+            %% migrateFromV1: still ran (it IS in the table); migrateFromV2:
+            %% is a gap from the chain's point of view — reconcile defaults
+            %% `tag`, it does not run the stray method.
+            ?assertEqual(20, maps:get(total, NewFields)),
+            ?assertEqual(<<"none">>, maps:get(tag, NewFields)),
+            ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 5))
+        end)
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
+    end.
+
+%% Drains up to N pending {log_event, ...} messages looking for the
+%% stray-migration warning naming Class and Selector.
+receive_stray_migration_warning(_Class, _Selector, 0) ->
+    false;
+receive_stray_migration_warning(Class, Selector, N) ->
+    receive
+        {log_event, #{level := warning, meta := Meta}} ->
+            case
+                maps:get(class, Meta, undefined) =:= Class andalso
+                    lists:member(Selector, maps:get(selectors, Meta, []))
+            of
+                true -> true;
+                false -> receive_stray_migration_warning(Class, Selector, N - 1)
+            end
+    after 1000 ->
+        false
+    end.
 
 %%====================================================================
 %% pack/1 — Sendable-tier walk

@@ -833,6 +833,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // ADR 0123 §1–§2: `shapeVersion:`/`migrateFromVN:` native refusal,
+    // unreachable-migration warning, class-variable-access rejection, and
+    // Dictionary-return-type check.
+    validators::check_shape_version_and_migrations(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // ADR 0103: nudge undeclared FFI-wrapping handle classes. Suppressed for
     // stdlib compilation — the builtin tier table already covers the stdlib.
     if !stdlib_mode {

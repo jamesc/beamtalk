@@ -23,7 +23,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
     ClassDefinition, ClassKind, MethodDefinition, MethodKind, Module, StateDeclaration,
-    TypeParamDecl,
+    TypeParamDecl, migrate_from_v_version,
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 
@@ -275,6 +275,28 @@ impl CoreErlangGenerator {
             None => Document::Nil,
         };
 
+        // ADR 0123 §1: emit the declared shape version, only when present —
+        // same "keeps meta output stable for the vast majority of classes"
+        // rationale as `handle_scope` above. `beamtalk_shape_migration:
+        // migrate/3` already reads `shape_version` with a default of `1`
+        // (BT-3536), so omission here is exactly the absent-means-1 contract.
+        let shape_version_doc: Document<'static> = match &class.shape_version {
+            Some(sv) => docvec![
+                ",\n      'shape_version' => ",
+                leaf::int_lit(i64::from(sv.version)),
+            ],
+            None => Document::Nil,
+        };
+
+        // ADR 0123 §2: `'shape_migrations' => #{N => Selector, ...}` — the
+        // Rust↔Erlang conformance table `beamtalk_shape_migration:migrate/3`
+        // reads instead of ever parsing a selector name itself. Only the
+        // class's *own* `migrateFromVN:` class methods participate (chains
+        // are per concrete class, not inherited — ADR 0123 §1). Omitted
+        // when empty, matching `beamtalk_shape_chain`'s existing `#{}`
+        // default (BT-3536).
+        let shape_migrations_doc: Document<'static> = Self::meta_shape_migrations_entry(class);
+
         docvec![
             "~{'class' => ",
             leaf::atom(class_name),
@@ -312,11 +334,51 @@ impl CoreErlangGenerator {
             class_method_info_doc,
             // ADR 0103: sendability handle scope (omitted when undeclared).
             handle_scope_doc,
+            // ADR 0123 §1/§2: declared shape version + migration table
+            // (each omitted at their own default).
+            shape_version_doc,
+            shape_migrations_doc,
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
             extra_entries,
             "\n    }~",
         ]
+    }
+
+    /// Builds the `'shape_migrations' => #{N => Selector, ...}` meta entry
+    /// (ADR 0123 §2), including its leading `,\n      ` separator — omitted
+    /// entirely (`Document::Nil`) when the class declares no
+    /// `migrateFromVN:` class methods, mirroring `handle_scope_doc`'s
+    /// omit-when-absent convention above.
+    fn meta_shape_migrations_entry(class: &ClassDefinition) -> Document<'static> {
+        let mut migrations: Vec<(u32, String)> = class
+            .class_methods
+            .iter()
+            .filter_map(|m| {
+                let selector = m.selector.name();
+                migrate_from_v_version(&selector).map(|n| (n, selector.to_string()))
+            })
+            .collect();
+        if migrations.is_empty() {
+            return Document::Nil;
+        }
+        migrations.sort_by_key(|(n, _)| *n);
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("~{"));
+        for (i, (version, selector)) in migrations.into_iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec![
+                leaf::int_lit(i64::from(version)),
+                " => ",
+                leaf::atom(selector),
+            ]);
+        }
+        parts.push(Document::Str("}~"));
+
+        docvec![",\n      'shape_migrations' => ", Document::Vec(parts)]
     }
 
     /// ADR 0098 Phase 3: emit the `beamtalk_version` / `otp_release` provenance

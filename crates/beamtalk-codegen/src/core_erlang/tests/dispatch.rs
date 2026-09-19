@@ -356,6 +356,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 50),
     };
 
@@ -3327,6 +3328,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -3409,6 +3411,7 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -3488,6 +3491,7 @@ fn test_spawn_with_args_validates_map_argument() {
         doc_comment: None,
         backing_module: None,
         handle_scope: None,
+        shape_version: None,
         span: Span::new(0, 0),
     };
     let module = Module {
