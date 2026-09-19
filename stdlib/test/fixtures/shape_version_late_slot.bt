@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3556 (ADR 0124 Section 8/B9): a `late` slot fixture for
+// shape_version_test.bt — an unassigned `late` slot is not a key in the
+// dictionary a `migrateFromVN:` hook sees, so the hook guards the read with
+// `at:ifAbsent:` (no new hook contract — the same guard
+// docs/beamtalk-language-features.md's "gaps are fine" rule already
+// recommends for any possibly-absent key). `late` needs no live process to
+// exercise via `Behaviour >> migrateShape:from:` (ADR 0123 §2's
+// "REPL-testable" promise), so this stays an `Actor subclass:` only because
+// `late` is rejected on a Value's `field:` (late Slots section) — no
+// instance is ever spawned.
+
+Actor subclass: ShapeVersionLateSlot
+  shapeVersion: 2
+  late state: proc :: String
+  state: flag :: String = "unset"
+
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    old at: #flag put: (old at: #proc ifAbsent: ["absent"])

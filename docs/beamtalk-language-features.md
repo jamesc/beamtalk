@@ -4089,12 +4089,25 @@ class's current `T`:
    to the running dictionary; otherwise that step is a no-op.
 2. **Reconcile** against the declared field list (the flattened one,
    inherited fields included). A declared field present in the dictionary is
-   kept; absent gets its declared default; absent with no default is `nil`
-   on an untyped class and a **failure** on a `typed` one (a migration may
-   not leave a typed slot unset, same rule ADR 0078 enforces after
-   `initialize`). An undeclared key is dropped with a warning.
+   kept, whether or not it is `late` (see [`late` Slots](#late-slots-adr-0124));
+   absent gets its declared default; absent with no default is `nil` on an
+   untyped class and a **failure** on a `typed` one (a migration may not
+   leave a typed slot unset, same rule ADR 0078 enforces after
+   `initialize`) — **except** a declared-but-absent `late` field (ADR 0124
+   §8), which is never defaulted or failed: it simply **stays absent** from
+   the reconciled dictionary, on both a `typed` and an untyped class (`late`
+   slots declare no default in the first place, so this check runs before
+   the has-default/typed-no-default rules above, not as a fallback from
+   them). An undeclared key is dropped with a warning.
 3. Downgrading (`T < V`) runs reconcile only — `migrateToVN:` downgrade
    hooks are reserved, not defined.
+
+Changing a slot between eager and `late` (or back) is a **shape change** —
+it changes what an absent key means to the reconcile step above — and bumps
+`shapeVersion:` the same way adding, removing, or retyping a slot does; the
+reload-time tooling findings ([ADR 0123](ADR/0123-versioned-state-migration.md)
+§4) flag a flip that lands without a version bump the same way they flag a
+dropped or retyped field.
 
 Every live actor's state map carries one internal key,
 `'__shape_version__'`, written by `init/1` (absent means `1`) and updated to

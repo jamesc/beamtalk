@@ -97,6 +97,19 @@ previous and new generation's version history
 (`beamtalk_shape_diff:reload_findings/4`) without a second read of
 `__beamtalk_meta/0`.
 
+## Kind alongside type (ADR 0124 Section 9/B9)
+
+A `shape()` value is `{DeclaredType, Kind}`, not a bare type - `field_kinds`
+is flattened the exact same way `field_types` is (`ancestor_field_kinds/1`/
+`flattened_field_kinds/2`, sharing `ancestor_field_map/2`'s walk with the
+type side rather than a second hand-rolled copy of it), and
+`normalize_shape/2` zips the two flattened maps into `shape()`'s
+`{TypeBin, KindBin}` values. This is what makes an eager<->late slot flip
+visible to `beamtalk_shape_diff:diff/2` as a `kind_changed` field change,
+the same way a declared-type change is visible as `retyped` - without it,
+`capture/1`'s diff would see two structurally-identical `field_types` maps
+across a `late` toggle and classify the reload `no_op`.
+
 ## Known, accepted concurrency gap (adversarial review)
 
 `prime/1` runs synchronously on the reloading session's own process,
@@ -126,7 +139,16 @@ moduledoc already declined for the same complexity/benefit tradeoff.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([start_link/0, prime/1, capture/1, previous/1, clear/0, field_type_to_binary/1]).
+-export([
+    start_link/0,
+    prime/1,
+    capture/1,
+    previous/1,
+    clear/0,
+    field_type_to_binary/1,
+    field_kind_to_binary/1,
+    normalize_shape/2
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -299,12 +321,13 @@ read_own_meta(ClassNameBin) ->
     end.
 
 -doc """
-Read `ClassNameBin`'s currently-installed, **flattened** `field_types`
-(ADR 0123 Phase 4, BT-3538: own class merged with every ancestor's, closer
-levels winning), normalised to `shape()` (binary field name -> binary type
-name, `<<"Dynamic">>` for an untyped field — the same sentinel
-`beamtalk_workspace_signature_store:meta_type_to_binary/1` uses, so a
-meta-seeded shape compares equal to a freshly-compiled one when nothing
+Read `ClassNameBin`'s currently-installed, **flattened** `field_types`/
+`field_kinds` (ADR 0123 Phase 4, BT-3538: own class merged with every
+ancestor's, closer levels winning; ADR 0124 §9/B9: `field_kinds` flattened
+the same way), normalised to `shape()` (binary field name -> `{binary type
+name, binary kind}` — `<<"Dynamic">>` for an untyped field, the same
+sentinel `beamtalk_workspace_signature_store:meta_type_to_binary/1` uses, so
+a meta-seeded shape compares equal to a freshly-compiled one when nothing
 changed). Best-effort: any resolution failure on `ClassNameBin` itself (class
 not registered, no `__beamtalk_meta/0` exported) returns `undefined` rather
 than raising; an ancestor that fails to resolve simply contributes no fields
@@ -317,7 +340,9 @@ read_shape_from_meta(ClassNameBin) ->
         undefined ->
             undefined;
         {ok, ClassAtom, Meta} ->
-            normalize_field_types(flattened_field_types(ClassAtom, Meta))
+            normalize_shape(
+                flattened_field_types(ClassAtom, Meta), flattened_field_kinds(ClassAtom, Meta)
+            )
     end.
 
 -doc """
@@ -340,10 +365,15 @@ read_generation_from_meta(ClassNameBin) ->
         undefined ->
             undefined;
         {ok, ClassAtom, Meta} ->
+            AncestorFieldTypes = ancestor_field_types(ClassAtom),
+            AncestorFieldKinds = ancestor_field_kinds(ClassAtom),
             #{
                 shape => read_shape_from_meta(ClassNameBin),
-                own_shape => normalize_field_types(maps:get(field_types, Meta, #{})),
-                ancestor_shape => normalize_field_types(ancestor_field_types(ClassAtom)),
+                own_shape =>
+                    normalize_shape(
+                        maps:get(field_types, Meta, #{}), maps:get(field_kinds, Meta, #{})
+                    ),
+                ancestor_shape => normalize_shape(AncestorFieldTypes, AncestorFieldKinds),
                 version => maps:get(shape_version, Meta, 1),
                 migrations => maps:get(shape_migrations, Meta, #{})
             }
@@ -362,6 +392,20 @@ flattened_field_types(ClassAtom, OwnMeta) ->
     maps:merge(ancestor_field_types(ClassAtom), OwnFieldTypes).
 
 -doc """
+Like `flattened_field_types/2`, for `field_kinds` (ADR 0124 §9/B9): `ClassAtom`'s
+own `field_kinds` merged with every ancestor's (`ancestor_field_kinds/1`),
+closer level wins. A field absent from both — a level with no `field_kinds`
+meta at all, or a field this level never mentions — simply has no entry
+here; `normalize_shape/2` defaults a missing kind to `eager` when it zips
+this against `field_types`, the same default `classAllFieldKindsByName/1`
+uses for a class/level predating B5a's meta.
+""".
+-spec flattened_field_kinds(atom(), map()) -> #{atom() => atom()}.
+flattened_field_kinds(ClassAtom, OwnMeta) ->
+    OwnFieldKinds = maps:get(field_kinds, OwnMeta, #{}),
+    maps:merge(ancestor_field_kinds(ClassAtom), OwnFieldKinds).
+
+-doc """
 `ClassAtom`'s ancestor-only `field_types` contribution (BT-3560): every
 ancestor's own `field_types`, walked via `beamtalk_class_metadata` (module +
 superclass, ETS-resident) and merged closer-ancestor-wins — but, unlike
@@ -378,9 +422,31 @@ raw atoms at this point (`field_type_to_binary/1` normalises after).
 """.
 -spec ancestor_field_types(atom()) -> #{atom() => atom()}.
 ancestor_field_types(ClassAtom) ->
+    ancestor_field_map(ClassAtom, field_types).
+
+-doc """
+Like `ancestor_field_types/1`, for `field_kinds` (ADR 0124 §9/B9) — the
+ancestor-only contribution `ancestor_shape`'s kind half needs, walked and
+merged by the exact same `ancestor_field_map/2` this shares with
+`ancestor_field_types/1` (one walk-and-merge algorithm, parameterised by
+which `__beamtalk_meta/0` key it reads at each level, rather than a second
+copy of `merge_ancestor_field_types/2`'s hand-rolled walk — CLAUDE.md's
+no-duplicate-implementations rule).
+""".
+-spec ancestor_field_kinds(atom()) -> #{atom() => atom()}.
+ancestor_field_kinds(ClassAtom) ->
+    ancestor_field_map(ClassAtom, field_kinds).
+
+-doc """
+Shared ancestor walk-and-merge, parameterised by `MetaKey` (`field_types` or
+`field_kinds`) — the one hierarchy-walk algorithm `ancestor_field_types/1`
+and `ancestor_field_kinds/1` are both thin wrappers over.
+""".
+-spec ancestor_field_map(atom(), atom()) -> #{atom() => atom()}.
+ancestor_field_map(ClassAtom, MetaKey) ->
     case beamtalk_class_metadata:lookup_superclass(ClassAtom) of
         {ok, none} -> #{};
-        {ok, Super} -> merge_ancestor_field_types(Super, #{});
+        {ok, Super} -> merge_ancestor_field_map(Super, MetaKey, #{});
         not_found -> #{}
     end.
 
@@ -388,17 +454,17 @@ ancestor_field_types(ClassAtom) ->
 Walk from `StartSuper` up to the hierarchy root via
 `beamtalk_hierarchy:walk_ancestors/3` (the shared depth-guarded ancestor
 walker every hierarchy walk in this codebase is built on), merging each
-level's own `field_types` into `AccSoFar` — `AccSoFar` (the more-derived
+level's own `MetaKey` map into `AccSoFar` — `AccSoFar` (the more-derived
 levels already folded in) always wins a conflict, `maps:merge/2`'s "second
 argument wins" applied with the accumulator as the second argument at every
 step. Degrades to the partial merge on a hierarchy cycle
 (`?MAX_HIERARCHY_DEPTH` exceeded), logging a warning naming the cycle point —
 the same degrade `beamtalk_behaviour_intrinsics:walk_hierarchy/3` uses.
 """.
--spec merge_ancestor_field_types(atom(), #{atom() => atom()}) -> #{atom() => atom()}.
-merge_ancestor_field_types(StartSuper, AccSoFar) ->
+-spec merge_ancestor_field_map(atom(), atom(), #{atom() => atom()}) -> #{atom() => atom()}.
+merge_ancestor_field_map(StartSuper, MetaKey, AccSoFar) ->
     StepFun = fun({CurrentClass, Acc}, _Depth) ->
-        NewAcc = maps:merge(ancestor_own_field_types(CurrentClass), Acc),
+        NewAcc = maps:merge(ancestor_own_field_map(CurrentClass, MetaKey), Acc),
         case beamtalk_class_metadata:lookup_superclass(CurrentClass) of
             {ok, none} -> {found, NewAcc};
             {ok, Super} -> {next, {Super, NewAcc}};
@@ -425,9 +491,10 @@ merge_ancestor_field_types(StartSuper, AccSoFar) ->
     end.
 
 -doc """
-An ancestor's own `field_types`, tolerant of every way it can be unavailable
-(unregistered, no `__beamtalk_meta/0`, a non-map or raising meta call) —
-mirrors `beamtalk_behaviour_intrinsics:meta_for_module/1`'s degrade, since a
+An ancestor's own `MetaKey` map (`field_types` or `field_kinds`), tolerant of
+every way it can be unavailable (unregistered, no `__beamtalk_meta/0`, a
+non-map or raising meta call) — mirrors
+`beamtalk_behaviour_intrinsics:meta_for_module/1`'s degrade, since a
 dynamic/legacy ancestor contributing nothing at its level must not fail the
 whole flatten (see the moduledoc).
 
@@ -440,12 +507,12 @@ same "qualified call auto-loads" reasoning `read_own_meta/1` already relies
 on for the starting class. `error:undef` is the "no such function" case this
 degrades on; anything else escapes to the outer catch-all.
 """.
--spec ancestor_own_field_types(atom()) -> #{atom() => atom()}.
-ancestor_own_field_types(ClassAtom) ->
+-spec ancestor_own_field_map(atom(), atom()) -> #{atom() => atom()}.
+ancestor_own_field_map(ClassAtom, MetaKey) ->
     case beamtalk_class_metadata:lookup_module(ClassAtom) of
         {ok, Module} ->
             try Module:'__beamtalk_meta'() of
-                Meta when is_map(Meta) -> maps:get(field_types, Meta, #{});
+                Meta when is_map(Meta) -> maps:get(MetaKey, Meta, #{});
                 _ -> #{}
             catch
                 error:undef -> #{};
@@ -455,11 +522,30 @@ ancestor_own_field_types(ClassAtom) ->
             #{}
     end.
 
--spec normalize_field_types(#{atom() => atom()}) -> shape().
-normalize_field_types(FieldTypes) ->
+-doc """
+Zip a flattened `field_types` map with its matching `field_kinds` map into a
+`shape()` — binary field name -> `{binary type name, binary kind}`
+(ADR 0124 §9/B9). A field present in `FieldTypes` but absent from
+`FieldKinds` (a class/level predating B5a's `field_kinds` meta, or a
+dynamic/ClassBuilder-built level — see `beamtalk_behaviour_intrinsics:
+classAllFieldKindsByName/1`'s doc) defaults to `eager`, the same fallback
+that function uses. Exported (not `-ifdef(TEST)`-gated, unlike
+`read_shape_from_meta/1`/`read_generation_from_meta/1`) so
+`beamtalk_repl_loader:precheck_class_shape/2`'s pending-generation read can
+normalise a *pending*, not-yet-captured pair of maps the exact same way
+without a second implementation of this zip (CLAUDE.md's
+no-duplicate-implementations rule) — see also `field_type_to_binary/1`/
+`field_kind_to_binary/1`, this function's two per-value normalisers.
+""".
+-spec normalize_shape(#{atom() => atom()}, #{atom() => atom()}) -> shape().
+normalize_shape(FieldTypes, FieldKinds) ->
     maps:fold(
         fun(FieldAtom, TypeAtom, Acc) ->
-            Acc#{atom_to_binary(FieldAtom, utf8) => field_type_to_binary(TypeAtom)}
+            KindAtom = maps:get(FieldAtom, FieldKinds, eager),
+            Acc#{
+                atom_to_binary(FieldAtom, utf8) =>
+                    {field_type_to_binary(TypeAtom), field_kind_to_binary(KindAtom)}
+            }
         end,
         #{},
         FieldTypes
@@ -467,13 +553,21 @@ normalize_field_types(FieldTypes) ->
 
 -doc """
 The `none` -> `<<"Dynamic">>` sentinel normalisation every `field_types`
-read in this module uses. Exported (not `-ifdef(TEST)`-gated, unlike
-`read_shape_from_meta/1`/`read_generation_from_meta/1`) so
-`beamtalk_repl_loader:precheck_class_shape/2`'s pending-generation read can
-normalise a *pending*, not-yet-captured `field_types` map the exact same way
-without a second implementation of this one-line rule (CLAUDE.md's
-no-duplicate-implementations rule).
+read in this module uses. Exported for the same reason `normalize_shape/2`
+is — see its doc.
 """.
 -spec field_type_to_binary(atom()) -> binary().
 field_type_to_binary(none) -> <<"Dynamic">>;
 field_type_to_binary(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8).
+
+-doc """
+`field_kinds`' `'eager'`/`'late'` atom -> binary normalisation
+`normalize_shape/2` uses for a `shape()` value's `Kind` half. Any other atom
+(a class/level with no `field_kinds` entry for this field at all, which
+`normalize_shape/2` already defaults to the atom `eager` before calling
+this) also normalises to `<<"eager">>` — `late` is the only kind that ever
+needs a non-default answer here.
+""".
+-spec field_kind_to_binary(eager | late) -> binary().
+field_kind_to_binary(late) -> <<"late">>;
+field_kind_to_binary(_) -> <<"eager">>.
