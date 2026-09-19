@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Hot reload counter - version 3 adds a derived field 'bonus'
+//
+// BT-3540 (ADR 0123 Phase 5): completes the v1 -> v2 -> v3 chain. `bonus` is
+// computed from `value` and `step` — the "hooked step" that the purely
+// structural v1 -> v2 bump (hot_counter_v2.bt) cannot express. The hook
+// reads/writes `old` via the Erlang FFI gateway (maps:get/2, maps:put/3)
+// rather than Dictionary at:/at:put: — a Dictionary send on a non-literal
+// value falls through to runtime dispatch inside a migrateFromVN: hook
+// (invoked via local_call/3), which is undef for an @primitive-only class
+// like Dictionary. Known limitation, BT-3541 — also worked around the same
+// way by stdlib/test/fixtures/shape_version_money.bt and
+// beamtalk_shape_migration_tests' ShapeChainCart fixture.
+//
+// See hot_counter_v3_broken.bt for the deliberately-failing counterpart of
+// this same migrateFromV2: step, used to exercise the suspend-on-failure /
+// recovery path.
+
+Actor subclass: HotCounter
+  shapeVersion: 3
+  state: value = 0
+  state: step = 5
+  state: bonus = 0
+
+  /// v2 had `value`/`step`; v3 adds `bonus`, derived from both.
+  class migrateFromV2: old :: Dictionary -> Dictionary =>
+    Erlang maps
+      put: #bonus
+      value: ((Erlang maps get: #value from: old) * (Erlang maps get: #step from: old))
+      in: old
+
+  increment => self.value := self.value + 10
+
+  getValue => ^self.value
+
+  getStep => ^self.step
+
+  getBonus => ^self.bonus

@@ -1,0 +1,131 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E for ADR 0123's versioned-state-migration language surface, end to
+// end through a full v1 -> v2 -> v3 chain (BT-3540, Phase 5):
+//   v1 -> v2 : purely structural step, no migrateFromV1: hook
+//              (hot_counter_v2.bt)
+//   v2 -> v3 : hooked step, migrateFromV2: computes a derived field
+//              (hot_counter_v3.bt) — first exercised in its deliberately
+//              broken form (hot_counter_v3_broken.bt) to prove the
+//              suspend-on-failure / recover-on-reload path, then in its
+//              correct form to prove the happy path.
+//
+// BT-3534's hot_reload_shape_version.btscript already covers the
+// '__shape_version__' plumbing (internal-field invisibility) for the
+// implicit-v1 case; this case is the first REPL-protocol e2e to exercise a
+// real, declared shapeVersion:/migrateFromVN: chain (BT-3537) and the
+// failure/recovery path (ADR 0123 §3) together.
+
+// ---------------------------------------------------------------------------
+// v1: load, spawn, mutate
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter.bt
+// => Loaded: HotCounter
+
+HotCounter shapeVersion
+// => 1
+
+hc := HotCounter spawn
+// => Actor(HotCounter, _)
+
+hc increment
+// => 1
+
+hc getValue
+// => 1
+
+// ---------------------------------------------------------------------------
+// v1 -> v2: purely structural step — no migrateFromV1: hook. The existing
+// instance's value survives, and the new `step` field is defaulted by the
+// reconcile step of `migrate/3`, not by any hook.
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter_v2.bt
+// => Loaded: HotCounter
+
+HotCounter shapeVersion
+// => 2
+
+hc getValue
+// => 1
+
+hc getStep
+// => 5
+
+// ---------------------------------------------------------------------------
+// v2 -> v3, broken hook: migrateFromV2: raises. The class still loads (a
+// hook failure is a per-instance runtime outcome, not a compile error), but
+// `hc` is left suspended with its v2-shaped state intact — not resumed on
+// stale state, not killed (ADR 0123 §3).
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter_v3_broken.bt
+// => Loaded: HotCounter
+
+// `sys:get_status`-backed liveness check (beamtalk_process_navigation,
+// ADR 0092 §5, the same primitive SupervisionNode>>status uses): the
+// process is alive but suspended, not resumed on the old shape.
+((Erlang beamtalk_process_navigation) status: hc pid) at: #sysState
+// => suspended
+
+// `sys:get_state` still works for inspection (ADR 0123 §3) — called
+// directly via the Erlang FFI gateway, not through `anActor inspect`: the
+// `inspect` *selector* is itself an ordinary message send that lands in the
+// actor's mailbox (`beamtalk_object_ops`'s dispatch captures a
+// timeout-guarded snapshot once it is running *inside* the actor's own
+// `handle_call` — see beamtalk_inspector's self-inspection doc), so it
+// cannot be answered by a suspended actor any more than any other send can.
+// `sys:get_state/1` is a `sys` debug message, not a `gen_server:call`; it
+// bypasses the mailbox entirely and reads the suspended process's state
+// directly — the pre-migration v2 shape (value/step, no bonus yet) is
+// intact.
+(Erlang maps get: #value from: (Erlang sys get_state: hc pid))
+// => 1
+
+(Erlang maps get: #step from: (Erlang sys get_state: hc pid))
+// => 5
+
+// A synchronous ordinary send to the suspended actor cannot be answered —
+// it does not crash or does_not_understand, it never gets a reply at all —
+// so the only assertions above are the guarded, out-of-band ones (status,
+// raw sys:get_state).
+
+// ---------------------------------------------------------------------------
+// Corrected reload recovers the instance: `:load` re-suspends (idempotent)
+// and, since this migrateFromV2: succeeds, resumes it with `bonus` computed
+// from the intact v2-shaped state (value: 1, step: 5 -> bonus: 5).
+// ---------------------------------------------------------------------------
+
+:load tests/repl-protocol/fixtures/hot_counter_v3.bt
+// => Loaded: HotCounter
+
+((Erlang beamtalk_process_navigation) status: hc pid) at: #sysState
+// => running
+
+hc getValue
+// => 1
+
+hc getStep
+// => 5
+
+hc getBonus
+// => 5
+
+HotCounter shapeVersion
+// => 3
+
+// migrateShape:from: is directly REPL-callable too (ADR 0123 §2's
+// "REPL-testable" promise) — no live instance or process needed.
+migratedFromV2 := HotCounter migrateShape: #{#value => 4, #step => 2} from: 2
+// => _
+
+migratedFromV2 at: #value
+// => 4
+
+migratedFromV2 at: #step
+// => 2
+
+migratedFromV2 at: #bonus
+// => 8
