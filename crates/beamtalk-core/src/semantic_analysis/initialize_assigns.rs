@@ -39,11 +39,16 @@
 //!   an exception firing mid-body); its *handler* may not run at all.
 //!
 //! Self-sends are opaque — this analysis never traces into another method's
-//! body (that is BT-1948's documented Hint tier, out of this issue's scope).
+//! body ([`has_dynamic_field_writer`] below is BT-1948's Hint-tier answer to
+//! the narrower case of this that ADR 0124 §6 names explicitly: a
+//! `fieldAt:put:`/`perform:` write anywhere in the class, which this
+//! must-analysis has no way to attribute to a slot at all).
 
 use crate::ast::{
-    CascadeMessage, Expression, ExpressionStatement, MatchArm, MessageSelector, Pattern,
+    CascadeMessage, Expression, ExpressionStatement, MatchArm, MessageSelector, MethodDefinition,
+    Pattern, WellKnownSelector,
 };
+use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::block_facts::is_self_reference;
 use ecow::EcoString;
 use std::collections::BTreeSet;
@@ -74,6 +79,72 @@ pub fn analyze_initialize_assigns(body: &[ExpressionStatement]) -> BTreeSet<EcoS
         completions.push(fallthrough);
     }
     intersect_all(&completions)
+}
+
+/// `true` when any instance method in `methods` sends `fieldAt:put:` or
+/// `perform:` anywhere in its body (ADR 0124 §6's severity table) — the two
+/// Actor-only dynamic-write escape hatches [`analyze_initialize_assigns`]
+/// cannot see, since it only recognises the literal `self.field := value`
+/// syntax (this module's `Assignment` arm in [`analyze_expr`]). A class
+/// that writes a slot through either selector may be definitely assigning
+/// it by a path this must-analysis has no way to attribute to a name, so
+/// BT-1948's construction-site check reads this to demote its finding from
+/// Warning to Hint rather than suppress it outright: the diagnostic may
+/// still be right, but the analysis can no longer prove it with the same
+/// confidence.
+///
+/// Scans **every** method (not just `initialize`) since the dynamic write
+/// could happen from a helper called during or after `initialize`'s own
+/// body. Callers pass instance methods only — a class-side method runs in
+/// the class's own `gen_server` process (CLAUDE.md § Blocks into class
+/// methods), not the spawned instance's, so a class-side `self
+/// fieldAt:put:` cannot write an *instance* slot and must not be scanned
+/// here.
+///
+/// Reuses [`walk_expression`] (descends into nested blocks, cascades and
+/// match arms) rather than a second hand-rolled recursive `Expression`
+/// match (CLAUDE.md's no-duplicate-implementations rule) — unlike this
+/// module's own [`analyze_expr`] walk, which threads assignment-set state
+/// through the traversal and can't reuse a stateless visitor. A cascade's
+/// second-and-later messages (`self fieldAt: #a put: 1; fieldAt: #b put:
+/// 2`) are [`CascadeMessage`]s, not `Expression::MessageSend` nodes —
+/// `walk_expression`'s `Cascade` arm only descends into each one's
+/// *arguments*, never exposes the [`CascadeMessage`] itself to the visitor
+/// — so this walk special-cases `Expression::Cascade` to also check every
+/// cascaded message's own selector directly (the first message doesn't
+/// need this: the parser folds it into `receiver` as an ordinary
+/// `MessageSend`, which the generic arm below already catches).
+#[must_use]
+pub fn has_dynamic_field_writer(methods: &[MethodDefinition]) -> bool {
+    fn is_dynamic_writer_selector(selector: &MessageSelector) -> bool {
+        matches!(
+            selector.well_known(),
+            Some(WellKnownSelector::FieldAtPut | WellKnownSelector::Perform)
+        )
+    }
+
+    methods.iter().any(|method| {
+        method.body.iter().any(|stmt| {
+            let mut found = false;
+            walk_expression(&stmt.expression, &mut |expr| {
+                if found {
+                    return;
+                }
+                match expr {
+                    Expression::MessageSend { selector, .. } => {
+                        found = is_dynamic_writer_selector(selector);
+                    }
+                    Expression::Cascade { messages, .. } => {
+                        found = messages
+                            .iter()
+                            .any(|msg| is_dynamic_writer_selector(&msg.selector));
+                    }
+                    _ => {}
+                }
+            });
+            found
+        })
+    })
 }
 
 /// Intersects every set in `sets`. Empty input yields the empty set (the
@@ -843,5 +914,126 @@ mod tests {
             result.is_empty(),
             "a local-variable assignment is not a `self` slot assignment"
         );
+    }
+
+    // --- has_dynamic_field_writer tests -------------------------------
+
+    fn method_named(name: &str, body: Vec<Expression>) -> MethodDefinition {
+        MethodDefinition::new(
+            MessageSelector::Unary(name.into()),
+            vec![],
+            body.into_iter().map(bare).collect(),
+            span(),
+        )
+    }
+
+    fn field_at_put(field_name: &str, value: Expression) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(self_expr()),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart::new("fieldAt:", span()),
+                KeywordPart::new("put:", span()),
+            ]),
+            arguments: vec![
+                Expression::Literal(Literal::Symbol(field_name.into()), span()),
+                value,
+            ],
+            is_cast: false,
+            span: span(),
+        }
+    }
+
+    fn perform(selector_name: &str) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(self_expr()),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("perform:", span())]),
+            arguments: vec![Expression::Literal(
+                Literal::Symbol(selector_name.into()),
+                span(),
+            )],
+            is_cast: false,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn field_at_put_send_is_detected() {
+        let methods = vec![method_named(
+            "initialize",
+            vec![field_at_put("x", nil_lit())],
+        )];
+        assert!(has_dynamic_field_writer(&methods));
+    }
+
+    #[test]
+    fn perform_send_is_detected() {
+        let methods = vec![method_named("initialize", vec![perform("bump")])];
+        assert!(has_dynamic_field_writer(&methods));
+    }
+
+    #[test]
+    fn ordinary_assignment_only_is_not_detected() {
+        let methods = vec![method_named(
+            "initialize",
+            vec![assign_field("x", nil_lit())],
+        )];
+        assert!(!has_dynamic_field_writer(&methods));
+    }
+
+    #[test]
+    fn writer_in_a_helper_method_other_than_initialize_is_detected() {
+        // The scan covers every method, not just `initialize` — a helper
+        // called during or after `initialize` can write dynamically too.
+        let methods = vec![
+            method_named("initialize", vec![]),
+            method_named("primeCount", vec![field_at_put("count", nil_lit())]),
+        ];
+        assert!(has_dynamic_field_writer(&methods));
+    }
+
+    #[test]
+    fn field_at_put_as_a_non_first_cascaded_message_is_detected() {
+        // `self log: "x"; fieldAt: #count put: 0` — the writer is the
+        // *second* cascaded message, a `CascadeMessage`, not a top-level
+        // `Expression::MessageSend` node. `walk_expression`'s `Cascade` arm
+        // only descends into each cascaded message's arguments, never
+        // exposes the message itself, so this must be checked explicitly —
+        // regression coverage for that gap.
+        // `cascade_message` only builds a single-`KeywordPart` selector
+        // (fine for `log:`/`onFailure:`), so `fieldAt:put:`'s two colons
+        // need their own two-part `CascadeMessage` here — a one-part
+        // "fieldAt:put:" would (correctly) fail `well_known()`'s arity
+        // check, since it has arity 1 rather than `FieldAtPut`'s 2 (see
+        // `WellKnownSelector::from_selector`'s arity-mismatch guard).
+        let field_at_put_cascade_message = CascadeMessage::new(
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("fieldAt:", span()),
+                KeywordPart::new("put:", span()),
+            ]),
+            vec![
+                Expression::Literal(Literal::Symbol("count".into()), span()),
+                nil_lit(),
+            ],
+            span(),
+        );
+        let methods = vec![method_named(
+            "initialize",
+            vec![cascade(
+                self_expr(),
+                vec![
+                    cascade_message(
+                        "log:",
+                        vec![Expression::Literal(Literal::String("x".into()), span())],
+                    ),
+                    field_at_put_cascade_message,
+                ],
+            )],
+        )];
+        assert!(has_dynamic_field_writer(&methods));
+    }
+
+    #[test]
+    fn no_methods_have_no_writer() {
+        assert!(!has_dynamic_field_writer(&[]));
     }
 }

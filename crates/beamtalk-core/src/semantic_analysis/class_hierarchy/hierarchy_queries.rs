@@ -847,6 +847,7 @@ impl ClassHierarchy {
 
         let mut assigned = BTreeSet::new();
         let mut incomplete = self.has_cross_file_parent(class_name);
+        let mut has_dynamic_writer = false;
         for name in &ordered {
             if matches!(name.as_str(), "Actor" | "Object" | "ProtoObject") {
                 continue;
@@ -858,12 +859,16 @@ impl ClassHierarchy {
             if info.is_native {
                 incomplete = true;
             }
+            if info.has_dynamic_field_writer {
+                has_dynamic_writer = true;
+            }
             assigned.extend(info.initialize_assigns.iter().cloned());
         }
 
         InitializeAssignsSummary {
             assigned,
             incomplete,
+            has_dynamic_writer,
         }
     }
 

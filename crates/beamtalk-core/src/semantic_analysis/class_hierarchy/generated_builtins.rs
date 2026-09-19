@@ -156,6 +156,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "registerAs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::SelfType, DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Register this (already-spawned) actor under `name`.\n\nNon-atomic with respect to spawn: another process may claim `name`\nbetween the actor's `spawn` and this call. Prefer `class spawnAs:` when\nthe name is known at spawn time.\n\nOn success returns `Result ok: self` so calls can be chained:\n\n```beamtalk\n(counter registerAs: #c) onSuccess: [:c | c increment]\n```".into()) },
                 MethodInfo { selector: "unregister".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Unregister this actor's name, if any. Idempotent.\n\nReturns `#ok` even when the actor has no registered name or the name has\nalready been released. When a real failure occurs (reserved name, type\nerror, etc.) the error is raised — consistent with other teardown methods\nlike `stop` and `kill`.\n\nWhen an actor process exits, Erlang automatically releases its registered\nname; callers do not need to call `unregister` from `terminate:`.\n\n## Examples\n```beamtalk\ncounter unregister   // => #ok\n```".into()) },
@@ -212,6 +213,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("actorClass".into(), true), ("pid".into(), true)]),
             state_kinds: HashMap::from([("actorClass".into(), SlotKind::Eager), ("pid".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -240,6 +242,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("actorClass".into(), true), ("pid".into(), true), ("reason".into(), true)]),
             state_kinds: HashMap::from([("actorClass".into(), SlotKind::Eager), ("pid".into(), SlotKind::Eager), ("reason".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -268,6 +271,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -296,6 +300,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "subscriptions".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AnnouncementNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("SubscriptionNode")])), param_types: vec![], doc: Some("A read-only snapshot of every live subscription on the navigated announcer,\nas immutable `SubscriptionNode` records. Re-call to refresh.\n\n## Examples\n```beamtalk\nAnnouncementNavigation default subscriptions   // => [a SubscriptionNode, ...]\n```".into()) },
                 MethodInfo { selector: "subscribersOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AnnouncementNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("SubscriptionNode")])), param_types: vec![Some(DeclaredType::simple("Class"))], doc: Some("A read-only snapshot of the subscriptions to exactly `aClass`, as\n`SubscriptionNode` records. Matches exactly `aClass` (not subclasses) — the\nas-subscribed key, mirroring `when:do:`. The IDE's \"event wiring\" pane\n(ADR 0017/0091) groups this by `announcementClass`.\n\n## Examples\n```beamtalk\nAnnouncementNavigation default subscribersOf: ActorSpawned\n```".into()) },
@@ -331,6 +336,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "when:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Subscription")), param_types: vec![Some(DeclaredType::simple("Class")), Some(DeclaredType::simple("Block"))], doc: Some("Subscribe: deliver announcements of `aClass` (or any subclass, via MRO\nmatching) to the calling process by evaluating `aBlock` with the event.\n\nReturns a `Subscription` token for later unsubscription. Each call mints\na distinct subscription — re-subscribing never silently replaces.\n\n## Examples\n```beamtalk\nsub := announcer when: PriceChanged do: [:e | e newPrice printNl]\nsub isActive   // => true\n```".into()) },
                 MethodInfo { selector: "when:send:to:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Subscription")), param_types: vec![Some(DeclaredType::simple("Class")), Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("Object"))], doc: Some("Subscribe: when an announcement of `aClass` arrives, send `sel` to\n`receiver` with the event as the sole argument.\n\n## Examples\n```beamtalk\nannouncer when: PriceChanged send: #handlePrice: to: handler\n```".into()) },
@@ -372,6 +378,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of elements in the array.\n\n## Examples\n```beamtalk\n#[1, 2, 3] size              // => 3\n#[] size                     // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test if the array has no elements.\n\n## Examples\n```beamtalk\n#[] isEmpty                  // => true\n#[1] isEmpty                 // => false\n```".into()) },
@@ -417,6 +424,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "increment".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Atomically add 1. Returns the new value.\n\n## Examples\n```beamtalk\nc increment    // => 1\n```".into()) },
                 MethodInfo { selector: "incrementBy:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("Atomically add N. Returns the new value.\n\n## Examples\n```beamtalk\nc incrementBy: 5    // => 6\n```".into()) },
@@ -456,6 +464,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -484,6 +493,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("counts".into(), true)]),
             state_kinds: HashMap::from([("counts".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Total number of element occurrences (sum of all counts).\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 1, 2)) size   // => 3\nBag new size                     // => 0\n```".into()) },
                 MethodInfo { selector: "occurrencesOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("E"))], doc: Some("Number of occurrences of `element` in the bag.\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 1, 2)) occurrencesOf: 1   // => 2\n(Bag withAll: #(1, 1, 2)) occurrencesOf: 3   // => 0\n```".into()) },
@@ -524,6 +534,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "allClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Class")])), param_types: vec![], doc: Some("Return a list of all registered classes as class objects.\n\n## Examples\n```beamtalk\nBeamtalk allClasses\n```".into()) },
                 MethodInfo { selector: "classNamed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("Class"), DeclaredType::simple("Nil")])), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Look up a class by name (symbol).\n\n## Examples\n```beamtalk\nBeamtalk classNamed: #Integer\n```".into()) },
@@ -574,6 +585,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Return the name of the receiver (class or metaclass) as a Symbol.\n\nDeclared on `Behaviour` so registry walks that hold the abstract\n`Behaviour` type (e.g. `SystemNavigation allClasses`, `superclassChain`)\ncan read the name without a dnu suppression. `Class` inherits this\ndirectly; `Metaclass` overrides it to append ` class` (e.g.\n`#'Integer class'`). The `className` primitive resolves the name for\nany class object.\n\n## Examples\n```beamtalk\nCounter name   // => #Counter\nInteger name   // => #Integer\n```".into()) },
                 MethodInfo { selector: ">>".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("CompiledMethod"), DeclaredType::simple("Nil")])), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Look up a method by selector, returning a CompiledMethod object,\nor nil if the selector is not found in the method dictionary.\n\nFollows Smalltalk-80 convention: `Behaviour >> #selector` returns a\nCompiledMethod with selector, source, and argument count metadata.\n\n## Examples\n```beamtalk\n(Integer >> #+) selector         // => #+\n(Integer >> #+) argumentCount    // => 1\nInteger >> #nonExistent          // => nil\n```".into()) },
@@ -645,6 +657,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return the byte count of this binary.\n\n## Examples\n```beamtalk\n(Binary serialize: 42) size   // => _\n```".into()) },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Block"))], doc: Some("Iterate over each byte (Integer 0-255), evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) do: [:b | Transcript show: b]\n```".into()) },
@@ -697,6 +710,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("name".into(), true), ("value".into(), true), ("sessionId".into(), true)]),
             state_kinds: HashMap::from([("name".into(), SlotKind::Eager), ("value".into(), SlotKind::Eager), ("sessionId".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -725,6 +739,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Return the value bound to `key`, or `nil` if absent.\n\n## Examples\n```beamtalk\nSession current bindings at: #x              // => 42\n```".into()) },
                 MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("Object"))], doc: Some("Write `value` under `key` (write-through) and return the value put.\n\nFor a session view, the write is enqueued and applied at end of eval, so\nit is not read back within the same expression. For the workspace view,\nthe write routes through `bind:as:` (synchronous, conflict-checked).\n\n## Examples\n```beamtalk\nSession current bindings at: #y put: 99      // => 99\n```".into()) },
@@ -763,6 +778,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Block".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Evaluate a zero-argument block.\n\n## Examples\n```beamtalk\n[2 + 3] value              // => 5\n```".into()) },
                 MethodInfo { selector: "value:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Block".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Evaluate a one-argument block with `arg`.\n\n## Examples\n```beamtalk\n[:x | x * 2] value: 3     // => 6\n```".into()) },
@@ -803,6 +819,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Boolean".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("R")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")])), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")]))], doc: Some("Conditional evaluation: evaluate `trueBlock` if true, `falseBlock` if false.\n\nBoth arms declare the same `Block(R)` parameter type so the result type\nunifies to `R` — callers see the common return type of the two arms\nwithout requiring an explicit local type annotation (BT-2020).".into()) },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Boolean".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")]))], doc: Some("If true, evaluate `trueBlock`.\n\nDeliberately has no declared return type here (unlike the combined\n`ifTrue:ifFalse:` above): on an unnarrowed `Boolean` receiver, the\ntype checker can't statically prove whether `True` or `False` handles\nthe send, and `False>>ifFalse:`'s sibling override, `False>>ifTrue:`,\nnever invokes `trueBlock` — it returns `self` (`False`), not the\nblock's result. Declaring `-> R` here would let the checker promise\n`R` for an expression that can actually evaluate to `False` at\nruntime — a soundness hole caught in BT-2834 review. `True`/`False`'s\nown overrides below still declare accurate concrete return types once\nthe receiver is narrowed to one of them.".into()) },
@@ -840,6 +857,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("seq".into(), true), ("className".into(), true), ("selector".into(), true), ("kind".into(), true), ("oldClass".into(), true), ("oldSelector".into(), true), ("side".into(), true), ("intent".into(), true), ("flushable".into(), true), ("authorKind".into(), true), ("sourceFile".into(), true), ("orphan".into(), true), ("priorEpoch".into(), true), ("active".into(), true), ("shadowed".into(), true), ("clean".into(), true), ("diff".into(), true)]),
             state_kinds: HashMap::from([("seq".into(), SlotKind::Eager), ("className".into(), SlotKind::Eager), ("selector".into(), SlotKind::Eager), ("kind".into(), SlotKind::Eager), ("oldClass".into(), SlotKind::Eager), ("oldSelector".into(), SlotKind::Eager), ("side".into(), SlotKind::Eager), ("intent".into(), SlotKind::Eager), ("flushable".into(), SlotKind::Eager), ("authorKind".into(), SlotKind::Eager), ("sourceFile".into(), SlotKind::Eager), ("orphan".into(), SlotKind::Eager), ("priorEpoch".into(), SlotKind::Eager), ("active".into(), SlotKind::Eager), ("shadowed".into(), SlotKind::Eager), ("clean".into(), SlotKind::Eager), ("diff".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "seq".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChangeEntry".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("The monotonic sequence number assigned when the entry was logged.\n\n## Examples\n```beamtalk\n(Workspace changes select: [:e | true]) first seq   // => _\n```".into()) },
                 MethodInfo { selector: "className".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChangeEntry".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("The name (Symbol) of the class that was patched.\n\nNamed `className` rather than `class` because every object already\nresponds to `class` (returning the metaclass).\n\n## Examples\n```beamtalk\n(Workspace changes select: [:e | true]) first className   // => _\n```".into()) },
@@ -922,6 +940,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("entries".into(), true)]),
             state_kinds: HashMap::from([("entries".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "activeEntries".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChangeLog".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("ChangeEntry")])), param_types: vec![], doc: Some("Return the active entries: current epoch, not orphaned, not shadowed by a\nnewer entry for the same method, and not clean (still differing from disk).\n\nThis is the live, dirty-relative-to-disk set that the default collection\nviews operate on. Repeated patches/reverts of one method (a revert is\nitself a patch, ADR 0082 \"Undo\") collapse to the latest entry — the one\n`Workspace flush` would apply. A method reverted back to exactly its\non-disk body has no net change, so it drops out entirely (\"disappear when\nclean\", BT-2575). `select:` (which reaches orphaned, shadowed, and clean\nentries) uses the full set instead, so the audit trail stays complete.".into()) },
                 MethodInfo { selector: "allEntries".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ChangeLog".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("ChangeEntry")])), param_types: vec![], doc: Some("Return all entries, including prior-epoch and orphan entries.\n\n## Examples\n```beamtalk\nWorkspace changes allEntries   // => _\n```".into()) },
@@ -969,6 +988,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("Character"))], doc: Some("Test strict equality with another character.\n\n## Examples\n```beamtalk\n$A =:= $A                  // => true\n$A =:= $B                  // => false\n```".into()) },
                 MethodInfo { selector: "=/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Character".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("Character"))], doc: Some("Test strict inequality with another character.\n\n## Examples\n```beamtalk\n$A =/= $B                  // => true\n$A =/= $A                  // => false\n```".into()) },
@@ -1018,6 +1038,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a human-readable string representation.\n\n## Examples\n```beamtalk\nCounter printString   // => \"Counter\"\n```".into()) },
                 MethodInfo { selector: "isClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test whether this is a Class (not a Metaclass).\n\n## Examples\n```beamtalk\nCounter isClass   // => true\n```".into()) },
@@ -1051,6 +1072,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("className".into(), true), ("superclassRef".into(), true), ("fieldSpecs".into(), true), ("methodSpecs".into(), true), ("modifiers".into(), true), ("backingModule".into(), true), ("methodSource".into(), true), ("classMethods".into(), true), ("classMethodSource".into(), true), ("classState".into(), true), ("methodSignatures".into(), true), ("classMethodSignatures".into(), true), ("methodReturnTypes".into(), true), ("classMethodReturnTypes".into(), true), ("methodDocs".into(), true), ("classMethodDocs".into(), true), ("classDoc".into(), true), ("meta".into(), true), ("isConstructible".into(), true), ("shapeVersion".into(), true)]),
             state_kinds: HashMap::from([("className".into(), SlotKind::Eager), ("superclassRef".into(), SlotKind::Eager), ("fieldSpecs".into(), SlotKind::Eager), ("methodSpecs".into(), SlotKind::Eager), ("modifiers".into(), SlotKind::Eager), ("backingModule".into(), SlotKind::Eager), ("methodSource".into(), SlotKind::Eager), ("classMethods".into(), SlotKind::Eager), ("classMethodSource".into(), SlotKind::Eager), ("classState".into(), SlotKind::Eager), ("methodSignatures".into(), SlotKind::Eager), ("classMethodSignatures".into(), SlotKind::Eager), ("methodReturnTypes".into(), SlotKind::Eager), ("classMethodReturnTypes".into(), SlotKind::Eager), ("methodDocs".into(), SlotKind::Eager), ("classMethodDocs".into(), SlotKind::Eager), ("classDoc".into(), SlotKind::Eager), ("meta".into(), SlotKind::Eager), ("isConstructible".into(), SlotKind::Eager), ("shapeVersion".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "name:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Set the class name (a Symbol).\n\n## Examples\n```beamtalk\nbuilder name: #Counter\n```".into()) },
                 MethodInfo { selector: "superclass:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Set the superclass reference.\n\n## Examples\n```beamtalk\nbuilder superclass: Object\n```".into()) },
@@ -1107,6 +1129,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("className".into(), true)]),
             state_kinds: HashMap::from([("className".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1135,6 +1158,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("className".into(), true)]),
             state_kinds: HashMap::from([("className".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1163,6 +1187,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return the number of elements.".into()) },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("E"), DeclaredType::simple("Object")]))], doc: Some("Iterate over each element, evaluating `block` with each one.".into()) },
@@ -1227,6 +1252,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "selector".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Return the method selector as a symbol.\n\n## Examples\n```beamtalk\n(Integer >> #+) selector       // => #+\n```".into()) },
                 MethodInfo { selector: "source".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return the method source code as a string.\n\n## Examples\n```beamtalk\n(Integer >> #+) source\n```".into()) },
@@ -1262,6 +1288,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "printLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Printable"))], doc: Some("Write a value to stdout followed by a newline. Returns nil.\n\nRenders `aValue` via the `displayString` protocol (ADR 0094) — `\"abc\"`\nprints as `abc`, not `\"abc\"`.\n\n## Examples\n```beamtalk\nConsole printLine: \"hello\"\n// => nil\n```".into()) },
@@ -1298,6 +1325,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "year".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Year component.".into()) },
                 MethodInfo { selector: "month".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Month component (1-12).".into()) },
@@ -1361,6 +1389,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of key-value pairs.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} size                   // => 2\n```".into()) },
                 MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("K")])), param_types: vec![], doc: Some("Return a list of all keys.\n\n## Examples\n```beamtalk\n#{#a => 1, #b => 2} keys\n```".into()) },
@@ -1405,6 +1434,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "sha256:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Digest".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Binary")), param_types: vec![Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Binary")]))], doc: Some("SHA-256 digest (32 bytes) of `input`.\n\n## Examples\n```beamtalk\n(Digest sha256: \"abc\") byteSize   // => 32\n```".into()) },
@@ -1439,6 +1469,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "asMilliseconds".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Duration".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Total milliseconds (exact Integer).\n\n## Examples\n```beamtalk\n(Duration seconds: 2) asMilliseconds           // => 2000\n```".into()) },
                 MethodInfo { selector: "asSeconds".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Duration".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Total whole seconds (Integer, truncated toward zero).\n\n## Examples\n```beamtalk\n(Duration milliseconds: 1999) asSeconds        // => 1\n```".into()) },
@@ -1492,6 +1523,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "startChild".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("C"), DeclaredType::simple("Error")])), param_types: vec![], doc: Some("Start a new child with default args.\n\nADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Use `unwrap`\nwhen failure should propagate as an exception, or `ifOk:ifError:` /\n`andThen:` for recoverable starts. Failures surface as\n`Result error: #beamtalk_error{kind = child_start_failed}`.".into()) },
                 MethodInfo { selector: "startChild:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("C"), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Start a new child with the given initialization args.\n\n`args` is passed to the child class's `init/1` the same way\n`ActorClass spawnWith: args` would — e.g. a `Dictionary` merged into\nthe child's declared `state:` fields.\n\nADR 0080 Phase 2 (BT-1999): returns `Result(C, Error)`. Use `unwrap`\nwhen failure should propagate as an exception, or `ifOk:ifError:` /\n`andThen:` for recoverable starts. Failures surface as\n`Result error: #beamtalk_error{kind = child_start_failed}`.\n\n## Automatic restart replays this call's args (BT-3365)\n\nOTP tracks, per child, the exact args it was started with — so a\nchild started via `startChild: args` that later crashes under a\n`#permanent`/`#transient` restart policy comes back with those SAME\n`args`, not blank defaults. A child started via the no-arg `startChild`\nrestarts the same way it started: with no args. Either way, restart\nre-runs `init/1` from scratch — it does not resume the child's prior\nruntime state, only its original construction args.\n\n## Examples\n```beamtalk\nDynamicSupervisor(Widget) subclass: WidgetSupervisor\n  class childClass => Widget\n\npool := (WidgetSupervisor supervise) unwrap\nw := (pool startChild: #{#label => \"y\"}) unwrap  // => Widget(label: \"y\")\n```".into()) },
@@ -1537,6 +1569,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Erlang".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("ErlangModule")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("List"))], doc: Some("Look up an Erlang module by name, returning an ErlangModule proxy.\n\nInvoked automatically when an unknown message is sent to the `Erlang`\nsingleton. The `selector` becomes the module name; `arguments` is\nalways empty for unary lookups.\nCompiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\nErlang lists       // => #ErlangModule<lists>\nErlang maps        // => #ErlangModule<maps>\n```".into()) },
             ],
@@ -1567,6 +1600,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ErlangModule".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("List"))], doc: Some("Forward an unknown message as an Erlang function call on the proxied module.\n\nInvoked automatically when any message is sent to an ErlangModule instance.\nMaps the Beamtalk selector and arguments to `erlang:apply(Module, Fun, Args)`\naccording to the selector-to-function-name rules in ADR 0028 §1.\nCompiled via `@intrinsic erlangApply` — no gen_server roundtrip.\n\n## Examples\n```beamtalk\n(Erlang lists) reverse: #(3, 2, 1)    // => [1, 2, 3]\n(Erlang erlang) node                   // => :'nonode@nohost'\n```".into()) },
             ],
@@ -1597,6 +1631,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1625,6 +1660,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("V"), DeclaredType::simple("Nil")])), param_types: vec![Some(DeclaredType::simple("K"))], doc: Some("Look up a key. Returns the value, or `nil` if the key is absent.\n\nFor `#bag` and `#duplicateBag` tables with multiple entries per key,\nreturns the first stored value. The current wrapper exposes only one\nvalue per key; bag tables are best suited for single-value-per-key use.\n\n## Examples\n```beamtalk\ncache at: \"key\"        // => value or nil\n```".into()) },
                 MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("K")), Some(DeclaredType::simple("V"))], doc: Some("Insert or replace a key-value pair. Returns `nil`.\n\nFor `#bag` and `#duplicateBag` tables, all existing entries for `key`\nare removed before the new entry is inserted, giving best-effort\nupsert semantics. Concurrent writes from multiple actors to the same\nkey on a bag table are not serialized — interleaved operations may\nresult in multiple entries for that key.\n\n## Examples\n```beamtalk\ncache at: \"counter\" put: 1\n```".into()) },
@@ -1667,6 +1703,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "message".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return the error message string.\n\n## Examples\n```beamtalk\n[1 / 0] on: Exception do: [:e | e message]\n```".into()) },
                 MethodInfo { selector: "hint".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Exception".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("Return the actionable hint string, or nil if none.\n\n## Examples\n```beamtalk\n[1 / 0] on: Exception do: [:e | e hint]\n```".into()) },
@@ -1709,6 +1746,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1737,6 +1775,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("R")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")])), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")]))], doc: Some("If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `falseBlock` result.\n\n## Examples\n```beamtalk\nfalse ifTrue: [\"yes\"] ifFalse: [\"no\"]   // => \"no\"\n```".into()) },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("False")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")]))], doc: Some("If true, evaluate `trueBlock`. Returns self (false) since condition is false.\n\n## Examples\n```beamtalk\nfalse ifTrue: [\"yes\"]      // => false\n```".into()) },
@@ -1773,6 +1812,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "exists:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "File".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Test if a file exists at the given path (class method).\n\n## Examples\n```beamtalk\nFile exists: \"test.txt\"   // => true or false\n```".into()) },
@@ -1825,6 +1865,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "lines".into(), arity: 0, kind: MethodKind::Primary, defined_in: "FileHandle".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Stream", vec![DeclaredType::simple("String")])), param_types: vec![], doc: Some("Return a lazy Stream of lines from this file handle.\n\nThe Stream reads lines one at a time, starting from the handle's current\nposition, and is bounded by the handle's lifetime: from a `open:do:` or\n`open:mode:do:` block it must be consumed inside that block, and from a\ncaller-owned `open:mode:` handle it must not outlive your `close`.\n\nUnlike the rest of the handle protocol this answers a Stream rather than\na `Result`, so there is nowhere to put an error — a closed or write-only\nhandle raises instead.\n\n## Examples\n\n```beamtalk\nFile open: \"data.csv\" do: [:handle |\n  handle lines do: [:line | Transcript show: line].\n].\n```".into()) },
                 MethodInfo { selector: "read:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "FileHandle".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("Binary"), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("Read up to `count` bytes from the current position.\n\nFor a `count` above zero, a shorter binary means end-of-file was reached\nand an empty binary means the handle was already at end-of-file.\n`read: 0` is a no-op that always answers an empty binary without moving\nthe position — don't drive a read loop off `isEmpty` unless the chunk\nsize is known to be positive.\n\n## Examples\n\n```beamtalk\n(handle read: 4) unwrap   // => the next 4 bytes\n```".into()) },
@@ -1865,6 +1906,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "+".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Float")), param_types: vec![Some(DeclaredType::simple("Number"))], doc: Some("Add a number to the receiver.\n\n## Examples\n```beamtalk\n1.5 + 2.5        // => 4.0\n```".into()) },
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Float")), param_types: vec![Some(DeclaredType::simple("Number"))], doc: Some("Subtract a number from the receiver.\n\n## Examples\n```beamtalk\n5.0 - 2.5        // => 2.5\n```".into()) },
@@ -1943,6 +1985,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("files".into(), true)]),
             state_kinds: HashMap::from([("files".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1971,6 +2014,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "subject".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![], doc: Some("The inspected object — the value itself, or, for an actor, the captured\nstate snapshot.\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) subject   // => Point(x: 3, y: 4)\n```".into()) },
                 MethodInfo { selector: "kind".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("The subject kind: `#value` (structural), `#actor` (snapshot),\n`#collection` (windowed elements/associations, ADR 0095 §6), or `#foreign`\n(a non-Beamtalk OTP process, ADR 0095 §3).\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) kind   // => #value\n(Inspector on: aCounter) kind            // => #actor\n(Inspector on: #(1, 2, 3)) kind          // => #collection\n```".into()) },
@@ -2018,6 +2062,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("name".into(), true), ("label".into(), true), ("value".into(), true), ("kind".into(), true), ("drillable".into(), true)]),
             state_kinds: HashMap::from([("name".into(), SlotKind::Eager), ("label".into(), SlotKind::Eager), ("value".into(), SlotKind::Eager), ("kind".into(), SlotKind::Eager), ("drillable".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "isLeaf".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this field is a leaf scalar (the negation of `drillable`).\n\n## Examples\n```beamtalk\nfield isLeaf   // => false\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Human-readable one-line description, e.g.\n`#InspectorField<x: 3>` or `#InspectorField<status: #unavailable>`.\n\n## Examples\n```beamtalk\nfield printString   // => \"#InspectorField<x: 3>\"\n```".into()) },
@@ -2061,6 +2106,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2089,6 +2135,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "+".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("Number"))], doc: Some("Add an integer to the receiver.\n\n## Examples\n```beamtalk\n3 + 4         // => 7\n-1 + 1        // => 0\n```".into()) },
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("Number"))], doc: Some("Subtract an integer from the receiver.\n\n## Examples\n```beamtalk\n10 - 3        // => 7\n0 - 5         // => -5\n```".into()) },
@@ -2173,6 +2220,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("from".into(), true), ("to".into(), true), ("step".into(), true)]),
             state_kinds: HashMap::from([("from".into(), SlotKind::Eager), ("to".into(), SlotKind::Eager), ("step".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of elements in the interval.\n\nReturns 0 when the step direction does not move from toward to.\n\n## Examples\n```beamtalk\n(1 to: 10) size      // => 10\n(1 to: 1) size       // => 1\n(1 to: 0) size       // => 0\n(1 to: 0 by: 2) size  // => 0\n```".into()) },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Integer"), DeclaredType::simple("Object")]))], doc: Some("Iterate over each element, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(1 to: 3) do: [:i | Transcript show: i]\n```".into()) },
@@ -2209,6 +2257,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "parse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("JsonValue"), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Parse a JSON string into a Beamtalk value (class method).\n\nJSON objects become Dictionaries with String keys, arrays become\nLists, strings become Strings, numbers become Integer or Float,\nbooleans stay as true/false, null becomes nil.\n\n## Examples\n```beamtalk\n(Json parse: \"[1, 2, 3]\") unwrap   // => #(1, 2, 3)\n(Json parse: \"42\") unwrap          // => 42\n(Json parse: \"null\") unwrap        // => nil\n```".into()) },
@@ -2241,6 +2290,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of elements in the list.\n\n## Examples\n```beamtalk\n#(1, 2, 3) size          // => 3\n#() size                 // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test if the list has no elements.\n\n## Examples\n```beamtalk\n#() isEmpty              // => true\n#(1) isEmpty             // => false\n```".into()) },
@@ -2315,6 +2365,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "info:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Logger".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Log a message at info level.\n\n## Examples\n```beamtalk\nLogger info: \"request processed\"\n// => nil\n```".into()) },
@@ -2352,6 +2403,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test whether this is a metaclass. Always true for Metaclass instances.\n\n## Examples\n```beamtalk\n42 class class isMeta   // => true\n```".into()) },
                 MethodInfo { selector: "isClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test whether this is a Class (not a Metaclass). Always false.\n\n## Examples\n```beamtalk\n42 class class isClass   // => false\n```".into()) },
@@ -2396,6 +2448,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "+".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Number".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Number")), param_types: vec![Some(DeclaredType::simple("Number"))], doc: Some("Addition. Subclasses (Integer/Float) implement this as a primitive;\ndeclared here so receiver-dispatched `a + b` has a protocol target (BT-2709).".into()) },
                 MethodInfo { selector: "-".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Number".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Number")), param_types: vec![Some(DeclaredType::simple("Number"))], doc: Some("Subtraction.".into()) },
@@ -2443,6 +2496,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Execute a shell command and return its trimmed stdout as a String.\n\nRuns the command through the shell with a default 30-second timeout.\nRaises a `#timeout` error if the command does not exit within the limit,\nor an `#output_too_large` error if stdout exceeds 10 MB.\n\n## Examples\n```beamtalk\nOS run: \"echo hello\"   // => \"hello\"\n```\n\nBT-2829: the underlying FFI spec types the result `binary()` (`String |\nBinary`, BT-2254), but `beamtalk_os:run/1` always builds and returns a\nUTF-8 String — suppress the resulting `String | Binary` vs. declared\n`String` return-type mismatch.".into()) },
@@ -2474,6 +2528,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::SelfClass), param_types: vec![], doc: Some("Return the class of the receiver.\n\n## Examples\n```beamtalk\n42 class              // => Integer\n\"hello\" class         // => String\n```".into()) },
                 MethodInfo { selector: "isNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test if the receiver is nil. Returns false for all objects except nil.\n\n## Examples\n```beamtalk\n42 isNil              // => false\nnil isNil             // => true\n```".into()) },
@@ -2531,6 +2586,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("pid".into(), true), ("actorClass".into(), true), ("changedSlots".into(), true)]),
             state_kinds: HashMap::from([("pid".into(), SlotKind::Eager), ("actorClass".into(), SlotKind::Eager), ("changedSlots".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -2559,6 +2615,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("name".into(), true), ("version".into(), true), ("classes".into(), true), ("dependencies".into(), true), ("source".into(), true)]),
             state_kinds: HashMap::from([("name".into(), SlotKind::Eager), ("version".into(), SlotKind::Eager), ("classes".into(), SlotKind::Eager), ("dependencies".into(), SlotKind::Eager), ("source".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("The package name.\n\n## Examples\n```beamtalk\n(Package named: \"stdlib\") name\n// => \"stdlib\"\n```".into()) },
                 MethodInfo { selector: "version".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("The package version string.\n\n## Examples\n```beamtalk\n(Package named: \"stdlib\") version\n// => _\n```".into()) },
@@ -2606,6 +2663,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "all:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Parallel".into(), is_sealed: true, is_internal: false, spawns_block: true, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Result")])), param_types: vec![Some(DeclaredType::generic("List", vec![DeclaredType::simple("Block")]))], doc: Some("Run each zero-argument block in `blocks` in its own process; block the\ncaller until every block finishes. Returns one `Result` per block, in\nthe same order as `blocks` — a block that raises yields `Result\nerror:` for its slot, but the other blocks still run to completion.\n\n## Examples\n```beamtalk\n(Parallel all: #([1 + 1], [2 + 2])) collect: [:r | r value]  // => #(2, 4)\n((Parallel all: #([1 / 0], [42])) at: 1) isError             // => true\nParallel all: #()                                            // => #()\n```".into()) },
@@ -2638,6 +2696,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Convert the pid to a readable string representation.\n\n## Examples\n```beamtalk\npid asString           // => \"#Pid<0.123.0>\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\npid printString        // => \"#Pid<0.123.0>\"\n```".into()) },
@@ -2676,6 +2735,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Convert the port to a readable string representation.\n\n## Examples\n```beamtalk\nport asString          // => \"#Port<0.5>\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Port".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\nport printString       // => \"#Port<0.5>\"\n```".into()) },
@@ -2711,6 +2771,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("nodes".into(), true)]),
             state_kinds: HashMap::from([("nodes".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "tree".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("SupervisionTree")), param_types: vec![], doc: Some("The navigable `SupervisionTree` snapshot for this navigation.\n\n## Examples\n```beamtalk\nProcessNavigation default tree   // => a SupervisionTree\n```".into()) },
                 MethodInfo { selector: "nodes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("SupervisionNode")])), param_types: vec![], doc: Some("Returns the `nodes` field value. Default: `#()`.\n\n*(compiler-generated)*".into()) },
@@ -2751,6 +2812,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "commandName".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Program".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("The invoked program's name as a `String`.\n\nUnder a packaged escript it is the invoked filename; under `beamtalk run`\nthere is no argv[0], so it is the literal `\"beamtalk\"`. Handy for usage and\n`--help` text; not load-bearing.\n\nNamed `commandName` (not `name`) deliberately: `name` is the sealed\nreflective class-identity accessor (`Behaviour>>name`, a primitive used by\n`SystemNavigation` and the class machinery), so a class-side `name` on\n`Program` would shadow it and break reflection over the class universe.\n\n## Examples\n```beamtalk\nProgram commandName\n// => \"beamtalk\"\n```".into()) },
@@ -2783,6 +2845,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "==".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("ProtoObject"))], doc: Some("Test value equality (Erlang `==`, non-strict — `1 == 1.0` is true).\n\n## Examples\n```beamtalk\n42 == 42           // => true\n\"abc\" == \"abc\"     // => true\n```".into()) },
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("ProtoObject"))], doc: Some("Test value inequality (negation of `==`).\n\n## Examples\n```beamtalk\n1 /= 2             // => true\n42 /= 42           // => false\n```".into()) },
@@ -2821,6 +2884,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "requiredMethods:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Protocol".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Symbol")])), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Return the required method selectors for a protocol.\n\nReturns a list of selector symbols. Includes methods from extended\nprotocols. Returns an empty list if the protocol is not registered.\n\n## Examples\n```beamtalk\nProtocol requiredMethods: #Printable   // => [#asString, #printString]\n```".into()) },
@@ -2854,6 +2918,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "enqueue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Queue")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Add an element to the back of the queue. Returns a new Queue.\n\nO(1) amortised.\n\n## Examples\n```beamtalk\nq2 := q enqueue: 42\n```".into()) },
                 MethodInfo { selector: "dequeue".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Tuple")), param_types: vec![], doc: Some("Remove and return the front element as a `{value, newQueue}` Tuple.\n\nO(1) amortised. Raises `empty_queue` if the queue is empty.\n\n## Examples\n```beamtalk\nresult := q dequeue\nvalue := result at: 1\nrest := result at: 2\n```".into()) },
@@ -2890,6 +2955,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a display string. Overrides the default structural Value form\nbecause the instance holds an opaque internal `rand` generator state\nthat is not meaningful (or safe) to render field-by-field.\n\n## Examples\n```beamtalk\nRandom new printString       // => \"Random\"\n```".into()) },
                 MethodInfo { selector: "next".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Float")), param_types: vec![], doc: Some("Return a random float from the instance state.\n\nNote: the instance holds an explicit seed snapshot. Calling `next`\nrepeatedly on the same instance returns the same value.\nFor advancing sequences, use class-side `Random next` (process dictionary).\n\n## Examples\n```beamtalk\nrng := Random new\nrng next                     // => 0.0..1.0\n```".into()) },
@@ -2928,6 +2994,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\n## Examples\n```beamtalk\nproc writeLine: \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()) },
                 MethodInfo { selector: "exitCode".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("Integer"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("Get the exit code. Returns nil if the subprocess is still running.\n\n## Examples\n```beamtalk\nproc exitCode.   // => 0\n```".into()) },
@@ -2963,6 +3030,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Convert the reference to a readable string representation.\n\n## Examples\n```beamtalk\nref asString           // => \"#Ref<0.1.2.3>\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Reference".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\nref printString        // => \"#Ref<0.1.2.3>\"\n```".into()) },
@@ -2999,6 +3067,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "source".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return the original pattern source string.\n\n## Examples\n```beamtalk\n(Regex from: \"[0-9]+\") source              // => \"[0-9]+\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Human-readable representation: Regex(pattern).\n\n## Examples\n```beamtalk\n(Regex from: \"[0-9]+\") printString         // => \"Regex([0-9]+)\"\n```".into()) },
@@ -3034,6 +3103,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("okValue".into(), true), ("errReason".into(), true), ("isOk".into(), true)]),
             state_kinds: HashMap::from([("okValue".into(), SlotKind::Eager), ("errReason".into(), SlotKind::Eager), ("isOk".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "ok".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("True if this Result holds a success value.\n\n## Examples\n```beamtalk\n(Result ok: 42) ok      // => true\n(Result error: #x) ok   // => false\n```".into()) },
                 MethodInfo { selector: "isError".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Result".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("True if this Result holds an error.\n\n## Examples\n```beamtalk\n(Result ok: 42) isError      // => false\n(Result error: #x) isError   // => true\n```".into()) },
@@ -3089,6 +3159,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("initialInterval".into(), true), ("backoffCoefficient".into(), true), ("maximumInterval".into(), true), ("maximumAttempts".into(), true), ("jitter".into(), true), ("nonRetryableErrors".into(), true)]),
             state_kinds: HashMap::from([("initialInterval".into(), SlotKind::Eager), ("backoffCoefficient".into(), SlotKind::Eager), ("maximumInterval".into(), SlotKind::Eager), ("maximumAttempts".into(), SlotKind::Eager), ("jitter".into(), SlotKind::Eager), ("nonRetryableErrors".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "intervalForAttempt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("The backoff delay before attempt `attempt + 1`, in milliseconds.\n\nComputed as `initialInterval * backoffCoefficient ^ (attempt - 1)`,\ncapped at `maximumInterval` when set (or at an internal near-unlimited\nsentinel when not — see `unlimitedIntervalCap`), then randomized within\n`[0, cappedDelay]` when `jitter` is true.\n\nWhen `backoffCoefficient` exceeds 1 (real exponential growth) or is\nnegative, this grows by repeated multiplication and stops the instant\nthe running value would reach the cap, rather than raising\n`backoffCoefficient` to the full `attempt - 1` power up front — that\nwould overflow `Float` and raise for `attempt` in the thousands,\nregardless of `maximumInterval` (BT-3006). A coefficient in `[0, 1]`\n(constant or decaying backoff) can never overflow this way, so it uses\nthe direct power computation instead — see `cappedRawIntervalForAttempt:`.\n\n## Examples\n```beamtalk\nrp := RetryPolicy new: #{#initialInterval => 1000, #backoffCoefficient => 2.0}\nrp intervalForAttempt: 1    // => 1000\nrp intervalForAttempt: 2    // => 2000\nrp intervalForAttempt: 3    // => 4000\n\ncapped := RetryPolicy new: #{#initialInterval => 1000, #maximumInterval => 1500}\ncapped intervalForAttempt: 3   // => 1500\n\nunbounded := RetryPolicy new: #{#backoffCoefficient => 2.0}\n(unbounded intervalForAttempt: 2000) isKindOf: Integer   // => true\n```".into()) },
                 MethodInfo { selector: "cappedRawIntervalForAttempt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: true, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("`initialInterval * backoffCoefficient ^ (attempt - 1)`, capped at\n`maximumInterval` (or `unlimitedIntervalCap` when unset).\n\nA `backoffCoefficient` in `[0, 1]` can never overflow Float no matter\nhow large `attempt` gets (it shrinks or stays constant, never grows),\nso that range uses the direct closed-form computation in O(1) instead\nof `growInterval:`'s O(attempt) loop — otherwise a constant-backoff\n(`backoffCoefficient = 1.0`) or decaying-backoff (`< 1.0`) policy would\npay for a full `attempt - 1` iterations on every single call, turning\nan unlimited-attempts `do:` loop's total interval-computation cost\nquadratic in the number of retries.\n\n`initialInterval` is nothing but a plain `field:` default —\n`RetryPolicy`'s `new:` is entirely compiler-generated from the `field:`\ndeclarations, so there's no constructor hook to validate a negative\nvalue against (BT-3016). Clamped to 0 here, before either path runs,\nfor the same reason `growInterval:remaining:cap:` clamps a\ngoing-negative running interval: a negative delay isn't meaningful,\nand letting it flow through to `Timer sleep:` in `do:`'s executor\nwould raise there, breaking `do:`'s `Result(R, Exception)` contract.".into()) },
@@ -3141,6 +3212,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -3169,6 +3241,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "handleInfo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Server".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![None], doc: Some("Handle a raw Erlang message delivered to this server's process.\n\nOverride in subclasses to process raw messages (timer events, DOWN\ntuples). The return value is always discarded.\nIf this method raises an error, the server logs a warning and\ncontinues with its pre-call state (does not crash).\n\n## Examples\n```beamtalk\nhandleInfo: msg =>\n  msg match: [\n    #tick -> [self doWork];\n    _ -> nil\n  ]\n```".into()) },
             ],
@@ -3199,6 +3272,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "bindings".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("BindingsView")), param_types: vec![], doc: Some("Live view of this session's local bindings (the `x := 42` layer).\nReads return current values; `at:put:` and `removeKey:` mutate\nsession state (write-through, for the calling session only).\n\nThere is no `globals` here — globals are workspace-owned; use\n`Workspace globals`.\n\n## Examples\n```beamtalk\nSession current bindings keys                 // => #(#x)\n```".into()) },
                 MethodInfo { selector: "resolve:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Resolve a name exactly the way bare-name lookup does, returning the\nfirst match or nil. Order: session locals → workspace globals\n(bind:as: + singletons) → class registry. Primarily a REPL debugging\ntool: answers \"where does this name resolve from?\" interactively.\n\n## Examples\n```beamtalk\nSession current resolve: #Transcript          // => the Transcript singleton\n```".into()) },
@@ -3238,6 +3312,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("elements".into(), true)]),
             state_kinds: HashMap::from([("elements".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of elements in the set.\n\n## Examples\n```beamtalk\n(Set new add: 1) size           // => 1\nSet new size                    // => 0\n```".into()) },
                 MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test if the set has no elements.\n\n## Examples\n```beamtalk\nSet new isEmpty                 // => true\n```".into()) },
@@ -3285,6 +3360,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "method".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Return the function/method name as a symbol.\n\n## Examples\n```beamtalk\nframe method   // => #dispatch\n```".into()) },
                 MethodInfo { selector: "receiverClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "StackFrame".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("Return the Beamtalk class name, or nil if not a Beamtalk class.\n\n## Examples\n```beamtalk\nframe receiverClass   // => Counter\n```".into()) },
@@ -3322,6 +3398,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Stream", vec![DeclaredType::simple("E")])), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("E"), DeclaredType::simple("Boolean")]))], doc: Some("Filter elements matching predicate (lazy).\n\n## Examples\n```beamtalk\n((Stream on: #(1, 2, 3, 4)) select: [:n | n > 2]) asList  // => #(3, 4)\n```".into()) },
                 MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Stream", vec![DeclaredType::simple("R")])), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("E"), DeclaredType::simple("R")]))], doc: Some("Transform each element (lazy).\n\n## Examples\n```beamtalk\n((Stream on: #(1, 2, 3)) collect: [:n | n * 10]) asList  // => #(10, 20, 30)\n```".into()) },
@@ -3369,6 +3446,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "=:=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![None], doc: Some("Test strict equality with another string.\n\n## Examples\n```beamtalk\n\"abc\" =:= \"abc\"      // => true\n\"abc\" =:= \"xyz\"      // => false\n```".into()) },
                 MethodInfo { selector: "=/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![None], doc: Some("Test strict inequality with another string.\n\n## Examples\n```beamtalk\n\"abc\" =/= \"xyz\"      // => true\n\"abc\" =/= \"abc\"      // => false\n```".into()) },
@@ -3467,6 +3545,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\n## Examples\n```beamtalk\nagent writeLine: \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()) },
                 MethodInfo { selector: "readLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("Read one line from stdout. Blocks until a line is available. Returns nil at EOF.\n\n## Examples\n```beamtalk\nline := agent readLine.   // => \"hello\" or nil\n```".into()) },
@@ -3509,6 +3588,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "unsubscribe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subscription".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![], doc: Some("Remove exactly this subscription (the SubRef's row) from the bus.\nIdempotent — unsubscribing an already-removed subscription is a no-op.\n\n## Examples\n```beamtalk\nsub unsubscribe   // => nil\n```".into()) },
                 MethodInfo { selector: "isActive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subscription".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this subscription is still active (the SubRef row exists in ETS).\nReturns `false` after `unsubscribe` or after the subscriber process died.\n\n## Examples\n```beamtalk\nsub isActive   // => true\nsub unsubscribe\nsub isActive   // => false\n```".into()) },
@@ -3540,6 +3620,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("announcementClass".into(), true), ("announcer".into(), true), ("subscriber".into(), true), ("handlerKind".into(), true), ("once".into(), true)]),
             state_kinds: HashMap::from([("announcementClass".into(), SlotKind::Eager), ("announcer".into(), SlotKind::Eager), ("subscriber".into(), SlotKind::Eager), ("handlerKind".into(), SlotKind::Eager), ("once".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "isSend".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this is a `when:send:to:` subscription (its handler dispatches a\nselector to a receiver, rather than evaluating a block).\n\n## Examples\n```beamtalk\nnode isSend   // => false\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Human-readable description, e.g.\n`#SubscriptionNode<PriceChanged #do #Pid<0.132.0>>` or, for a one-shot,\n`#SubscriptionNode<ActorSpawned #doOnce #Pid<0.200.0>>`.\n\n## Examples\n```beamtalk\nnode printString\n  // => \"#SubscriptionNode<PriceChanged #do #Pid<0.132.0>>\"\n```".into()) },
@@ -3583,6 +3664,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("supervisor".into(), true), ("childClass".into(), true), ("childPid".into(), true)]),
             state_kinds: HashMap::from([("supervisor".into(), SlotKind::Eager), ("childClass".into(), SlotKind::Eager), ("childPid".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -3611,6 +3693,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("supervisor".into(), true), ("childClass".into(), true), ("childPid".into(), true), ("reason".into(), true)]),
             state_kinds: HashMap::from([("supervisor".into(), SlotKind::Eager), ("childClass".into(), SlotKind::Eager), ("childPid".into(), SlotKind::Eager), ("reason".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -3639,6 +3722,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("pid".into(), true), ("registeredName".into(), true), ("kind".into(), true), ("behaviourClass".into(), true), ("childCount".into(), true)]),
             state_kinds: HashMap::from([("pid".into(), SlotKind::Eager), ("registeredName".into(), SlotKind::Eager), ("kind".into(), SlotKind::Eager), ("behaviourClass".into(), SlotKind::Eager), ("childCount".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this node is a supervisor (Beamtalk or foreign).\n\n## Examples\n```beamtalk\nnode isSupervisor   // => true\n```".into()) },
                 MethodInfo { selector: "isBeamtalk".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this node is a Beamtalk process (actor or supervisor) — i.e. its\n`kind` is one of the `#beamtalk*` kinds. Foreign OTP processes and\nrestarting children answer `false`.\n\n## Examples\n```beamtalk\nnode isBeamtalk   // => true\n```".into()) },
@@ -3690,6 +3774,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("id".into(), true), ("actorClass".into(), true), ("restart".into(), true), ("args".into(), true), ("shutdown".into(), true), ("classMethod".into(), true), ("name".into(), true)]),
             state_kinds: HashMap::from([("id".into(), SlotKind::Eager), ("actorClass".into(), SlotKind::Eager), ("restart".into(), SlotKind::Eager), ("args".into(), SlotKind::Eager), ("shutdown".into(), SlotKind::Eager), ("classMethod".into(), SlotKind::Eager), ("name".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "withId:withRestart:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("SupervisionSpec")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("RestartStrategy"))], doc: Some("Return a new spec with id and restart overridden.".into()) },
                 MethodInfo { selector: "withId:withArgs:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("SupervisionSpec")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("Object"))], doc: Some("Return a new spec with id and args overridden.".into()) },
@@ -3743,6 +3828,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("flatNodes".into(), true)]),
             state_kinds: HashMap::from([("flatNodes".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "nodes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("SupervisionNode")])), param_types: vec![], doc: Some("The flat list of nodes, each enriched so parent/child navigation works.\n\nThis *is* the flat record API the ADR exposes; `root` is the navigable\nhead layered on top.\n\n## Examples\n```beamtalk\ntree nodes   // => #(a SupervisionNode, ...)\n```".into()) },
                 MethodInfo { selector: "root".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("SupervisionNode"), DeclaredType::simple("Nil")])), param_types: vec![], doc: Some("The snapshot root — the first node with no parent — or `nil` for an empty\nsnapshot.\n\nNote: the `default` / `system` snapshot can be a *forest* (the app root,\nworkspace-attached supervisors, and standalone `supervise`d trees are each\nparentless). `root` returns the first such root; iterate `nodes` (or\n`select: [:n | n parentPid isNil]`) to reach every root in a forest.\n\n## Examples\n```beamtalk\ntree root   // => a SupervisionNode | nil\n```".into()) },
@@ -3789,6 +3875,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "children".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Symbol")])), param_types: vec![], doc: Some("Return the OTP child ids of currently-running children.\n\nBT-1997 / ADR 0080 Phase 1: `whichChildren/1` returns a Result-shaped\nvalue; call `unwrap` at the FFI boundary so the user-facing signature is\na list of child-id Symbols while the runtime migrates to Result returns.\nStdlib signature updates land in Phase 2 (BT-P2-stdlib).\n\nBT-2254: now that FFI list element types are carried, `whichChildren`'s\n`{ok, [atom()]}` spec resolves `unwrap` to `List(Symbol)`. The declared\nreturn type matches that inferred body type so no type-mismatch warning\nis produced (the runtime value is a list of atoms, i.e. `List(Symbol)`).".into()) },
                 MethodInfo { selector: "whichChildrenResult".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, is_internal: true, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::generic("List", vec![DeclaredType::simple("Symbol")]), DeclaredType::simple("Error")])), param_types: vec![], doc: Some("Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped\n`whichChildren/1` call. Keeps `children` pure Beamtalk.".into()) },
@@ -3835,6 +3922,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Convert the symbol to a string.\n\n## Examples\n```beamtalk\n#hello asString        // => \"hello\"\n```".into()) },
                 MethodInfo { selector: "asAtom".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Symbol".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Convert the symbol to an atom (returns self).\n\n## Examples\n```beamtalk\n#hello asAtom          // => #hello\n```".into()) },
@@ -3872,6 +3960,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "getEnv:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("String"), DeclaredType::simple("Nil")])), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("Read an environment variable by name. Returns nil if not set.\n\n## Examples\n```beamtalk\nSystem getEnv: \"HOME\"\n// => _\nSystem getEnv: \"NONEXISTENT_VAR_12345\"\n// => nil\n```".into()) },
@@ -3914,6 +4003,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "announceAndWait:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Announcement"))], doc: Some("PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.\nThe system bus is async-only (ADR 0093 §1).".into()) },
                 MethodInfo { selector: "announceAndWait:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Announcement")), Some(DeclaredType::simple("Integer"))], doc: Some("PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.\nThe system bus is async-only (ADR 0093 §1).".into()) },
@@ -3947,6 +4037,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "allClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Behaviour")])), param_types: vec![], doc: Some("Snapshot of the class registry visible to this navigation query.\n\nCurrently always returns the full registry. Future scoped instances\n(BT-2201) will override this to filter by package or explicit class\nlist. Wrapping the FFI in a typed instance method lets downstream\nblock parameters infer `Class` / `Behaviour` instead of `Dynamic`.".into()) },
                 MethodInfo { selector: "actorClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Behaviour")])), param_types: vec![], doc: Some("Return every class that participates in the actor model — i.e. each class\nwhose `superclassChain` includes `Actor`.\n\nIncludes `Actor` itself (the abstract root); callers wanting only concrete\nactors can filter it out. Iterates `allClasses`, so stdlib and\nuser-defined actor classes are both in scope. Returns `[]` if `Actor` is\nnot in the loaded image (defensive).\n\nSorted alphabetically by class name for a stable, snapshot-friendly order.\n`name` is read directly on the `Behaviour`-typed elements (it lives on\n`Behaviour` per BT-2232), so no dnu suppression is needed.\n\n## Examples\n```beamtalk\nSystemNavigation default actorClasses  // => [Actor, ClassBuilder, ...]\n```".into()) },
@@ -4068,6 +4159,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "setUp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::SelfType), param_types: vec![], doc: Some("Prepare the test fixture. Called before each test method.\nOverride in subclasses to set up shared state or resources.\n\nReturns self (or an updated copy with fields set). The test runner\nuses the return value as the receiver for the test method, so\nsubclasses should return the configured instance. `self.field := value`\nas the LAST statement returns the updated self, so this works:\n\n```beamtalk\nsetUp => self.counter := Counter spawn\n```\n\nAny statement after that last field assignment must be followed by an\nexplicit trailing `self` (or another `self.field := value`), or the\nfields set above it are silently lost for the test method:\n\n```beamtalk\nsetUp =>\n  self.counter := Counter spawn\n  self.log := AlertLog spawn\n  self   // <- required once anything follows the last field assignment\n```".into()) },
                 MethodInfo { selector: "tearDown".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestCase".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![], doc: Some("Clean up after the test. Called after each test method.\nOverride in subclasses to release resources or reset state.".into()) },
@@ -4115,6 +4207,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "passed".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of test methods that passed.\n\n## Examples\n```beamtalk\nresult passed      // => 5\n```".into()) },
                 MethodInfo { selector: "failed".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestResult".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of test methods that failed or raised an error.\n\n## Examples\n```beamtalk\nresult failed      // => 0\n```".into()) },
@@ -4153,6 +4246,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "runAll".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TestRunner".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("TestResult")), param_types: vec![], doc: Some("Run all test methods across all discovered TestCase subclasses.\nReturns a TestResult aggregating the combined results.\nRuns all classes sequentially (equivalent to `runAll: 1`).\n\n## Examples\n```beamtalk\nresult := TestRunner runAll\nresult hasPassed       // => true\n```".into()) },
@@ -4186,6 +4280,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -4214,6 +4309,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "nowS".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Current time in seconds since the Unix epoch.\n\nWraps `erlang:system_time(second)`.\n\n## Examples\n```beamtalk\nTime nowS   // => _\n```".into()) },
@@ -4246,6 +4342,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::from([("target".into(), true), ("timeoutMs".into(), true)]),
             state_kinds: HashMap::from([("target".into(), SlotKind::Eager), ("timeoutMs".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "setTarget:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Actor")), param_types: vec![Some(DeclaredType::simple("Actor"))], doc: Some("Set the target actor to forward messages to.".into()) },
                 MethodInfo { selector: "setTimeoutMs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Timeout")), param_types: vec![Some(DeclaredType::simple("Timeout"))], doc: Some("Set the timeout in milliseconds (or `#infinity`).".into()) },
@@ -4278,6 +4375,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "cancel".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Cancel this timer. Returns true if the timer was active, false if already done.\n\n## Examples\n```beamtalk\nt := Timer after: 10000 do: ['never' printNl]\nt cancel    // => true\nt cancel    // => false\n```".into()) },
                 MethodInfo { selector: "isActive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("True if this timer is still scheduled to fire.\n\n## Examples\n```beamtalk\nt := Timer after: 10000 do: ['never' printNl]\nt isActive    // => true\nt cancel      // => true\nt isActive    // => false\n```".into()) },
@@ -4314,6 +4412,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![
                 MethodInfo { selector: "setContext:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tracing".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Dictionary"))], doc: Some("Set application-level trace context that propagates across actor calls.\nMerges with any existing context. Use for workflow correlation IDs,\nrequest IDs, or any application-level metadata you want in traces and logs.\n\n## Examples\n```beamtalk\nTracing setContext: #{#workflowId => \"wf-123\", #workflowType => \"OrderWorkflow\"}\n// => nil\n```".into()) },
@@ -4363,6 +4462,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "show:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Printable"))], doc: Some("Write a value to the transcript.\n\n## Examples\n```beamtalk\nTranscript show: \"hello\"\nTranscript show: 42\n```".into()) },
                 MethodInfo { selector: "cr".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![], doc: Some("Write a newline to the transcript.\n\n## Examples\n```beamtalk\nTranscript cr\n```".into()) },
@@ -4402,6 +4502,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("R")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")])), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")]))], doc: Some("If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `trueBlock` result.\n\n## Examples\n```beamtalk\ntrue ifTrue: [\"yes\"] ifFalse: [\"no\"]   // => \"yes\"\n```".into()) },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("R")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")]))], doc: Some("If true, evaluate `trueBlock`. Returns block result.\n\n## Examples\n```beamtalk\ntrue ifTrue: [\"yes\"]       // => \"yes\"\n```".into()) },
@@ -4438,6 +4539,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Number of elements in the tuple.\n\n## Examples\n```beamtalk\nresult size   // => 2 (e.g., an {ok, Value} tuple)\n```".into()) },
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("Return the element at the given 1-based index.\n\n## Examples\n```beamtalk\nresult at: 2   // => the value from an {ok, Value} tuple\n```".into()) },
@@ -4481,6 +4583,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -4509,6 +4612,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "isNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Returns true. nil is nil.\n\n## Examples\n```beamtalk\nnil isNil                   // => true\n```".into()) },
                 MethodInfo { selector: "notNil".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Returns false. nil is not \"not nil\".\n\n## Examples\n```beamtalk\nnil notNil                  // => false\n```".into()) },
@@ -4548,6 +4652,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Canonical lowercase hyphenated string form (`8-4-4-4-12` hex digits).\n\n## Examples\n```beamtalk\n(Uuid fromString: \"550E8400-E29B-41D4-A716-446655440000\") unwrap asString\n// => \"550e8400-e29b-41d4-a716-446655440000\"\n```".into()) },
                 MethodInfo { selector: "asBinary".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Binary")), param_types: vec![], doc: Some("Raw 16-byte binary representation.\n\n## Examples\n```beamtalk\nUuid v4 asBinary size                       // => 16\n```".into()) },
@@ -4591,6 +4696,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Value".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a developer-readable string representation showing fields.\n\nProduces `ClassName(field: value, ...)` via the canonical structural\nrenderer (ADR 0094). Field values are rendered with their own\n`printString` (strings stay quoted, nested values show their structural\nform), in sorted field order. A class with no fields produces\n`ClassName()`. Recursion is bounded by depth/width/length caps with a\ncycle guard.\n\n## Examples\n```beamtalk\nValuePoint x: 3 y: 4        printString   // => \"ValuePoint(x: 3, y: 4)\"\nValuePoint new              printString   // => \"ValuePoint(x: 0, y: 0)\"\n```".into()) },
             ],
@@ -4624,6 +4730,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             state_kinds: HashMap::new(),
             initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Actor")])), param_types: vec![], doc: Some("Return a list of all live actors as object references.\n\n## Examples\n```beamtalk\nWorkspace actors\n```".into()) },
                 MethodInfo { selector: "processes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("SupervisionTree")), param_types: vec![], doc: Some("Return a navigable snapshot of the live supervision tree (ADR 0092).\n\nThe dynamic counterpart of `Workspace actors`: a `SupervisionTree` over the\nworkspace application tree with runtime plumbing filtered out (the\n`default` scope, `== ProcessNavigation default tree`). Walk it (`do:`,\n`select:`, `findClass:`), reach the head (`root`), or take the flat record\nlist (`nodes`). The snapshot is best-effort point-in-time — re-call to\nrefresh.\n\nThe `default`-scope reach is an ADR-0091 Read op, scoped exactly like\n`actors`. For the privileged whole-node view use `ProcessNavigation system\ntree`.\n\n## Examples\n```beamtalk\nWorkspace processes root                  // => the snapshot root SupervisionNode\nWorkspace processes do: [:n | Transcript showLine: n printString]\nWorkspace processes findClass: Counter    // => List(SupervisionNode)\nWorkspace processes nodes                 // => the flat List(SupervisionNode)\n```".into()) },

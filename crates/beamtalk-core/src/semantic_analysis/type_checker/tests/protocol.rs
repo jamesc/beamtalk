@@ -375,6 +375,7 @@ fn setup_json_class_side_fixture(
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods: vec![MethodInfo {
             selector: "generate:".into(),
@@ -809,6 +810,7 @@ fn setup_intersection_param_fixture() -> (
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: "process:".into(),
@@ -958,6 +960,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: "asString".into(),
@@ -1076,6 +1079,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
         state_has_default: std::collections::HashMap::new(),
         state_kinds: HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
         methods: vec![],
         class_methods,
         class_variables: vec![],

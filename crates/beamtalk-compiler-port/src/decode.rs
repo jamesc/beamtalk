@@ -433,6 +433,15 @@ pub(crate) fn parse_class_info_from_meta_term(
         state_has_default,
         state_kinds,
         initialize_assigns,
+        // BT-1948 (ADR 0124 §6): the `fieldAt:put:`/`perform:` dynamic-writer
+        // scan (`beamtalk_core::semantic_analysis::has_dynamic_field_writer`)
+        // is not part of `__beamtalk_meta`'s wire format — cross-package
+        // construction-site confidence is already the documented gap ADR
+        // 0100 WS3 (cross-package metadata) leaves open, same as
+        // `is_native` above. `false` here only ever costs confidence
+        // (Warning where a Hint would be more honest), never correctness —
+        // see `ClassInfo::has_dynamic_field_writer`'s doc.
+        has_dynamic_field_writer: false,
         methods,
         class_methods,
         class_variables,
