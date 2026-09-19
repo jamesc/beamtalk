@@ -39,7 +39,7 @@ from `beamtalk_shape_chain:migrate/4`, wrapped here as
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([migrate/3, pack/1, unpack/1]).
+-export([migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1]).
 
 -export_type([envelope/0]).
 
@@ -77,8 +77,21 @@ Chain semantics (ADR 0123 § Runtime contract):
 """.
 -spec migrate(Class :: atom(), FromVersion :: pos_integer(), Fields :: map()) ->
     {ok, NewFields :: map(), ToVersion :: pos_integer()} | {error, #beamtalk_error{}}.
-migrate(Class, FromVersion, Fields) when
-    is_atom(Class), is_integer(FromVersion), FromVersion > 0, is_map(Fields)
+migrate(Class, FromVersion, Fields) ->
+    migrate(Class, FromVersion, Fields, #{}).
+
+-doc """
+Same as `migrate/3`, with `Opts`. `skip_stray_warning => true` (default
+`false`) skips this call's own `warn_migrations_outside_table/2` check —
+for a caller that already ran it once at a class-wide granularity (BT-3543:
+`beamtalk_hot_reload`'s per-instance `code_change/3` path, via
+`check_stray_migrations/1` hoisted to `beamtalk_repl_loader:hot_reload_class/2`)
+and would otherwise repeat it, and its `?LOG_WARNING`, once per live instance.
+""".
+-spec migrate(Class :: atom(), FromVersion :: pos_integer(), Fields :: map(), Opts :: map()) ->
+    {ok, NewFields :: map(), ToVersion :: pos_integer()} | {error, #beamtalk_error{}}.
+migrate(Class, FromVersion, Fields, Opts) when
+    is_atom(Class), is_integer(FromVersion), FromVersion > 0, is_map(Fields), is_map(Opts)
 ->
     case beamtalk_class_metadata:lookup_module(Class) of
         {ok, Module} ->
@@ -86,7 +99,10 @@ migrate(Class, FromVersion, Fields) when
             ToVersion = maps:get(shape_version, Meta, 1),
             Migrations = maps:get(shape_migrations, Meta, #{}),
             maybe_log_downgrade(Class, FromVersion, ToVersion),
-            warn_migrations_outside_table(Class, Migrations),
+            case maps:get(skip_stray_warning, Opts, false) of
+                true -> ok;
+                false -> warn_migrations_outside_table(Class, Migrations)
+            end,
             Invoke = fun(Selector, Dict) -> invoke_hook(Class, Selector, Dict) end,
             case
                 beamtalk_shape_chain:migrate(Migrations, {FromVersion, ToVersion}, Fields, Invoke)
@@ -119,6 +135,26 @@ maybe_log_downgrade(Class, FromVersion, ToVersion) when ToVersion < FromVersion 
     );
 maybe_log_downgrade(_Class, _FromVersion, _ToVersion) ->
     ok.
+
+-doc """
+Run `warn_migrations_outside_table/2` once for `Class` — the class-level
+call site BT-3543 hoists this check to (`beamtalk_repl_loader:hot_reload_class/2`,
+once per reload) instead of the `migrate/4` call inside it repeating the same
+two class-process round-trips, and any resulting `?LOG_WARNING`, once per live
+instance. Degrades to `ok` when `Class` is not a registered/compiled class —
+the same tolerant-degrade convention `read_meta/1` uses — since a class this
+finds no module for has no `migrateFromV*` methods to warn about either.
+""".
+-spec check_stray_migrations(atom()) -> ok.
+check_stray_migrations(Class) ->
+    case beamtalk_class_metadata:lookup_module(Class) of
+        {ok, Module} ->
+            Meta = read_meta(Module),
+            Migrations = maps:get(shape_migrations, Meta, #{}),
+            warn_migrations_outside_table(Class, Migrations);
+        not_found ->
+            ok
+    end.
 
 -doc """
 Warn when a class-method fun whose selector matches `migrateFromV*` is

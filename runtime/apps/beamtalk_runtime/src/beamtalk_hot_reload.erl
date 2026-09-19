@@ -24,7 +24,7 @@ runtime.
   field list (inherited fields included, BT-3531), defaulting from
   `Module:init(#{'__skip_initialize__' => true})` (BT-3532). This module's
   own job is narrower now: read `'__shape_version__'` from the *old* state
-  before any new default seeds it (`migrate_state/2`'s read-before-seed,
+  before any new default seeds it (`migrate_state/3`'s read-before-seed,
   BT-3534), strip/re-attach the internal keys `beamtalk_shape_migration`
   never sees, and let a migration failure propagate as `{error, _}` so
   `try_change_code/3`'s existing suspend-on-failure path (BT-3534) catches
@@ -67,14 +67,15 @@ version of a module.
 %% @returns {ok, NewState} on success, or {error, Reason} on failure
 -spec code_change(OldVsn :: term(), State :: term(), Extra :: term()) ->
     {ok, NewState :: term()} | {error, Reason :: term()}.
-code_change(_OldVsn, State, #{module := Module}) when is_map(State), is_atom(Module) ->
+code_change(_OldVsn, State, #{module := Module} = Extra) when is_map(State), is_atom(Module) ->
     %% Field migration during hot reload
     ?LOG_DEBUG("code_change: field migration", #{
         module => Module,
         domain => [beamtalk, runtime]
     }),
     MigratedState = maybe_migrate_class_key(State),
-    case migrate_state(MigratedState, Module) of
+    SkipStrayWarning = maps:get(skip_stray_warning, Extra, false),
+    case migrate_state(MigratedState, Module, SkipStrayWarning) of
         {ok, NewState} ->
             {ok, NewState};
         {error, Reason} ->
@@ -197,9 +198,16 @@ unchanged: `code_change/3`'s caller, `try_change_code/3`, already treats any
 non-`{ok, _}` return as "leave this pid suspended, state intact" (BT-3534) —
 the same suspend-on-failure contract the migration hook napkin spike
 (BT-3535) exercised, generalised here to the whole chain.
+
+**`SkipStrayWarning`** (BT-3543): `true` when the class-level reload
+orchestration (`beamtalk_repl_loader:hot_reload_class/2`) already ran
+`beamtalk_shape_migration:check_stray_migrations/1` once for this class
+before triggering `code_change/3` across its live instances — passed through
+so this per-instance call does not repeat that same class-process check (and
+any resulting `?LOG_WARNING`) once per live instance.
 """.
--spec migrate_state(map(), atom()) -> {ok, map()} | {error, term()}.
-migrate_state(OldState, Module) ->
+-spec migrate_state(map(), atom(), boolean()) -> {ok, map()} | {error, term()}.
+migrate_state(OldState, Module, SkipStrayWarning) ->
     %% BT-3534/BT-3536: read-before-seed — capture the old version before
     %% anything below can seed a different one. Absent means version 1.
     OldShapeVersion = maps:get('__shape_version__', OldState, 1),
@@ -207,7 +215,8 @@ migrate_state(OldState, Module) ->
     InternalKeys = beamtalk_tagged_map:internal_fields(),
     OldInternalKeys = maps:with(InternalKeys, OldState),
     UserFields = maps:without(InternalKeys, OldState),
-    case beamtalk_shape_migration:migrate(ClassName, OldShapeVersion, UserFields) of
+    MigrateOpts = #{skip_stray_warning => SkipStrayWarning},
+    case beamtalk_shape_migration:migrate(ClassName, OldShapeVersion, UserFields, MigrateOpts) of
         {ok, NewFields, NewShapeVersion} ->
             BaseState = seed_internal_keys(ClassName, Module, InternalKeys, OldInternalKeys),
             {ok, maps:merge(BaseState, NewFields#{'__shape_version__' => NewShapeVersion})};
