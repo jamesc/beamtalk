@@ -841,6 +841,20 @@ impl ThreadingPlan {
     /// regardless of the selected mode; now that class-var writes thread
     /// through `StateAcc` mode instead of being rejected, mode selection must
     /// route them there correctly rather than latently into Hybrid.
+    ///
+    /// ADR 0124 §4e/B3 (`control_flow/loop_mode.rs` hoisting note): also
+    /// excluded when any mutated field is a `late` slot. Hybrid mode
+    /// pre-extracts every `field_writes` entry with an unconditional
+    /// `maps:get` before the loop body runs at all (`pre_extract_hybrid_fields`'s
+    /// `mutated_params`, which — unlike `readonly_params` — has no per-field
+    /// `late` skip, since a mutated field must stay a plain fun param for the
+    /// `hybrid_mutated_fields` rebind-on-write path to work); a `late` slot's
+    /// key can be absent from `State` (ADR §2), so that `maps:get` would
+    /// `badkey`-crash before the loop's own guarded per-iteration read/write
+    /// ever gets a chance to run — even for a loop whose body never actually
+    /// mutates the field on a given pass. Falling back to `StateAcc` mode
+    /// keeps every read/write through the ordinary guarded per-iteration
+    /// `generate_field_access`/`generate_field_assignment_open` path instead.
     fn select_hybrid_params(
         allow_direct_params: bool,
         threaded_locals: &[String],
@@ -855,6 +869,14 @@ impl ThreadingPlan {
             || use_direct_params
             || !matches!(context, CodeGenContext::Actor)
             || generator.in_class_method()
+        {
+            return false;
+        }
+        let class_name = generator.class_name();
+        if body_analysis
+            .field_writes
+            .iter()
+            .any(|field| generator.is_late_state_field(&class_name, field))
         {
             return false;
         }

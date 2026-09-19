@@ -25,7 +25,8 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
-    CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector, StringSegment,
+    CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector, SlotKind,
+    StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -509,6 +510,120 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&preamble, literal_doc, "ArrLit"))
     }
 
+    /// ADR 0124 §3/B3: `true` when `field_name` is declared `late` on
+    /// `class_name` or an ancestor, per the flattened `ClassHierarchy`
+    /// metadata `state_field_kind` (BT-3547 B5a). Missing hierarchy metadata
+    /// (no class compiled — e.g. a bare REPL expression with no enclosing
+    /// class) degrades to `false`, the pre-ADR-0124 unguarded `maps:get`.
+    pub(in crate::core_erlang) fn is_late_state_field(
+        &self,
+        class_name: &str,
+        field_name: &str,
+    ) -> bool {
+        self.class_hierarchy
+            .as_ref()
+            .is_some_and(|h| h.state_field_kind(class_name, field_name) == SlotKind::Late)
+    }
+
+    /// Class-side counterpart to [`Self::is_late_state_field`], for a
+    /// `classState:` slot read via `self.<var>` in a class method.
+    fn is_late_class_var(&self, class_name: &str, var_name: &str) -> bool {
+        self.class_hierarchy
+            .as_ref()
+            .is_some_and(|h| h.class_variable_kind(class_name, var_name) == SlotKind::Late)
+    }
+
+    /// ADR 0124 §3: builds one `call 'beamtalk_error':'raise'(...)` arm for
+    /// an unassigned `late` slot read — shared by both `{ok, 'nil'}` and
+    /// `'error'` case arms of [`Self::generate_late_field_read`], which need
+    /// the identical raise with independent fresh variable names (Core
+    /// Erlang `let`-bound names are unique per function, so the two arms
+    /// can't share one set of names even though only one of them ever
+    /// executes). Reuses the shared `beamtalk_error:'new'` →
+    /// `'with_selector'` → `'with_hint'` chain (`errors.rs`) rather than
+    /// hand-rolling it, per CLAUDE.md's no-duplicate-implementations rule.
+    fn generate_uninitialized_state_raise(
+        &mut self,
+        class_name: &str,
+        selector: &str,
+        hint_text: &str,
+    ) -> Document<'static> {
+        let err0 = self.fresh_temp_var("LateErr");
+        let err1 = self.fresh_temp_var("LateErr");
+        let err2 = self.fresh_temp_var("LateErr");
+        docvec![
+            super::errors::beamtalk_error_doc(
+                leaf::var(err0.clone()),
+                leaf::var(err0),
+                leaf::var(err1.clone()),
+                leaf::var(err1),
+                leaf::var(err2.clone()),
+                "uninitialized_state_error",
+                leaf::atom(class_name.to_string()),
+                leaf::atom(selector.to_string()),
+                leaf::binary_lit(hint_text),
+                Document::Str(" "),
+            ),
+            "call 'beamtalk_error':'raise'(",
+            leaf::var(err2),
+            ")",
+        ]
+    }
+
+    /// ADR 0124 §3/B3: the guarded `late`-slot read —
+    /// ```erlang
+    /// case maps:find(Slot, State) of
+    ///   {ok, 'nil'} -> <raise uninitialized_state_error>
+    ///   {ok, V}     -> V
+    ///   'error'     -> <raise uninitialized_state_error>
+    /// end
+    /// ```
+    /// Shared by `generate_field_access`'s instance branch (State/Self map)
+    /// and class-method branch (`ClassVars` map) — both read the same slot the
+    /// same way, differing only in which map variable and declared-type
+    /// lookup feed it. The `'nil'` arm is required, not optional: `nil` can
+    /// reach an unassigned `late` slot's key unobserved (`spawnWith:` with a
+    /// non-literal map, `fieldAt:put:`, `perform:`), and a presence-only
+    /// guard would hand that `nil` to a reader the type checker told to skip
+    /// narrowing (ADR §3). Stays pure — returns a value, threads no state —
+    /// because reading never writes.
+    fn generate_late_field_read(
+        &mut self,
+        field_name: &str,
+        state_var: Document<'static>,
+        declared_type: Option<beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType>,
+    ) -> Document<'static> {
+        let class_name = self.class_name();
+        let selector = self
+            .current_method_selector
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let type_name = declared_type.map_or_else(|| "Unknown".to_string(), |t| t.to_string());
+        let hint_text = format!(
+            "{class_name} field '{field_name}' (:: {type_name}) is declared `late` \
+             and has not been assigned yet"
+        );
+        let ok_var = self.fresh_temp_var("LateVal");
+        let nil_raise = self.generate_uninitialized_state_raise(&class_name, &selector, &hint_text);
+        let absent_raise =
+            self.generate_uninitialized_state_raise(&class_name, &selector, &hint_text);
+        docvec![
+            "case call 'maps':'find'(",
+            leaf::atom(field_name.to_string()),
+            ", ",
+            state_var,
+            ") of <{'ok', 'nil'}> when 'true' -> ",
+            nil_raise,
+            " <{'ok', ",
+            leaf::var(ok_var.clone()),
+            "}> when 'true' -> ",
+            leaf::var(ok_var),
+            " <'error'> when 'true' -> ",
+            absent_raise,
+            " end",
+        ]
+    }
+
     /// Generates code for field access (e.g., `self.value`).
     ///
     /// Maps to Erlang `maps:get/2` call:
@@ -516,6 +631,11 @@ impl CoreErlangGenerator {
     /// call 'maps':'get'('value', State)  // Actor context
     /// call 'maps':'get'('value', Self)   // ValueType context
     /// ```
+    ///
+    /// A `late` slot (ADR 0124 §1) instead emits the guarded
+    /// [`Self::generate_late_field_read`] form — `maps:get`'s `badkey` crash
+    /// on the slot's absent key would be strictly worse than the
+    /// `UninitializedStateError` ADR 0124 §3 specifies.
     pub(super) fn generate_field_access(
         &mut self,
         receiver: &Expression,
@@ -526,6 +646,18 @@ impl CoreErlangGenerator {
             if let Expression::Identifier(recv_id) = receiver {
                 if recv_id.name == "self" && self.class_var_names().contains(field.name.as_str()) {
                     let cv = self.current_class_var();
+                    let class_name = self.class_name();
+                    if self.is_late_class_var(&class_name, field.name.as_str()) {
+                        let declared_type = self
+                            .class_hierarchy
+                            .as_ref()
+                            .and_then(|h| h.class_variable_type(&class_name, field.name.as_str()));
+                        return Ok(self.generate_late_field_read(
+                            field.name.as_str(),
+                            leaf::var(cv),
+                            declared_type,
+                        ));
+                    }
                     return Ok(docvec![
                         "call 'maps':'get'(",
                         leaf::atom(field.name.to_string()),
@@ -548,8 +680,13 @@ impl CoreErlangGenerator {
         // diagnostic in the fall-through below.
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
+                let class_name = self.class_name();
+                let is_late = self.is_late_state_field(&class_name, field.name.as_str());
                 // In hybrid mode, read-only fields are pre-extracted before the letrec.
-                // Use the direct parameter variable instead of generating maps:get every iteration.
+                // Use the direct parameter variable instead of generating maps:get every
+                // iteration. A `late` field is never pre-extracted this way (loop_mode.rs
+                // withholds it from `hybrid_readonly_field_params`, ADR 0124 §4b), so this
+                // never fires for one — the guarded read below runs instead, per-iteration.
                 if self.loop_mode.in_hybrid_loop {
                     if let Some(param_var) = self
                         .loop_mode
@@ -565,6 +702,17 @@ impl CoreErlangGenerator {
                     super::CodeGenContext::Actor => self.current_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
+                if is_late {
+                    let declared_type = self
+                        .class_hierarchy
+                        .as_ref()
+                        .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
+                    return Ok(self.generate_late_field_read(
+                        field.name.as_str(),
+                        leaf::var(state_var),
+                        declared_type,
+                    ));
+                }
                 return Ok(docvec![
                     "call 'maps':'get'(",
                     leaf::atom(field.name.to_string()),

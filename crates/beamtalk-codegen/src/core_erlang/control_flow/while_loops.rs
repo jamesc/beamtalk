@@ -903,8 +903,24 @@ impl CoreErlangGenerator {
                 var_name
             };
 
-        let readonly_params: Vec<(String, String)> = plan
+        // ADR 0124 §4b/B3: a `late` slot's key may be absent from `State`
+        // (its unassigned representation, ADR §2) — pre-extracting it here
+        // with a bare `maps:get` would `badkey`-crash before the loop even
+        // runs, turning "raises when read inside the body" into "raises
+        // even if the body never runs". A `late` readonly field is skipped
+        // here so it's simply missing from `readonly_params`/
+        // `hybrid_readonly_field_params`; `generate_field_access`'s fast
+        // path then never matches it, and every read falls through to the
+        // ordinary per-iteration guarded `maps:find` read instead — exactly
+        // as if this loop weren't hybrid for that one field.
+        let class_name = self.class_name();
+        let eager_readonly_fields: Vec<String> = plan
             .readonly_fields
+            .iter()
+            .filter(|field| !self.is_late_state_field(&class_name, field))
+            .cloned()
+            .collect();
+        let readonly_params: Vec<(String, String)> = eager_readonly_fields
             .iter()
             .map(|field| {
                 let var_name = extract_field(&mut pre_extract_docs, self, field);
@@ -912,6 +928,11 @@ impl CoreErlangGenerator {
             })
             .collect();
 
+        // Mutated fields are a write-path concern (state-threaded
+        // accumulator seeding), out of B3's read-only scope (ADR §3: "None
+        // of the following applies to late slot reads: ... loop-hoisting
+        // interference") — `late` write/`clearField:` hoisting is B4/B6
+        // territory, not addressed here.
         let mutated_params: Vec<(String, String)> = plan
             .mutated_fields
             .iter()

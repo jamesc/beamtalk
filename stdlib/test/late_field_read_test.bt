@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BT-3549 (ADR 0124 §3/B3): the guarded `late` slot read.
+//
+// Fixtures:
+//   stdlib/test/fixtures/late_field_read_actor.bt          (instance `late state:`)
+//   stdlib/test/fixtures/late_class_var_read_actor.bt      (class-side, never assigned)
+//   stdlib/test/fixtures/late_class_var_assigned_actor.bt  (class-side, assign then read)
+
+TestCase subclass: LateFieldReadTest
+
+  // === Instance `late state:` ===
+  testReadBeforeAssignRaisesUninitializedStateError =>
+    a := LateFieldReadActor spawn
+    self should: [a getProc] raise: #uninitialized_state_error
+
+  testReadBeforeAssignErrorMentionsClassAndField =>
+    a := LateFieldReadActor spawn
+    result := [a getProc] on: Exception do: [:e | e message]
+    self assert: (result includesSubstring: "LateFieldReadActor")
+
+  testReadBeforeAssignHintMentionsFieldAndType =>
+    a := LateFieldReadActor spawn
+    result := [a getProc] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "proc")
+    self assert: (result includesSubstring: "Integer")
+    self assert: (result includesSubstring: "late")
+
+  testNilInjectedViaSpawnWithAlsoRaises =>
+    // spawnWith: with a non-literal map must be caught by the guard's
+    // {ok, nil} arm exactly like an absent key — the whole point of that
+    // arm (ADR §3): a `late` slot's key can carry an observed `nil`
+    // without going through ordinary assignment. Built via a variable
+    // (not an inline `#{...}` literal at the call site) so the compile-time
+    // literal-map type check doesn't reject it up front — exactly the
+    // "spawnWith: with a non-literal map" case the ADR names.
+    initArgs := Dictionary new at: #proc put: nil
+    a := LateFieldReadActor spawnWith: initArgs
+    self should: [a getProc] raise: #uninitialized_state_error
+
+  testReadAfterAssignAnswersTheValue =>
+    a := LateFieldReadActor spawn
+    a setProc: 42
+    self assert: a getProc equals: 42
+
+  testEagerFieldUnaffectedByLateSibling =>
+    a := LateFieldReadActor spawn
+    self assert: a getCount equals: 0
+
+  testLateReadInsideLoopThatNeverRunsDoesNotRaise =>
+    // The condition is false from the very first check, so the loop body
+    // — which reads the unassigned `late` field — never executes. The read
+    // guard must not have been pre-extracted ahead of the loop (ADR §4b).
+    a := LateFieldReadActor spawn
+    result := a pumpWhile: false
+    self assert: result equals: nil
+
+  testLateFieldMutatedInsideLoopDoesNotCrashAndAnswersFinalValue =>
+    // A `late` field mutated inside a `whileTrue:` body must not select
+    // Hybrid mode's pre-extraction (ADR §4e/B3) — it must run to
+    // completion and answer the final assigned value, not badkey-crash on
+    // the first iteration.
+    a := LateFieldReadActor spawn
+    result := a pumpAndSetProc: 5
+    self assert: result equals: 4
+
+  // === Class-side `late classState:` ===
+  testClassReadBeforeAssignRaisesUninitializedStateError =>
+    self should: [
+      LateClassVarReadActor getCurrent
+    ] raise: #uninitialized_state_error
+
+  testClassEagerVarUnaffectedByLateSibling =>
+    self assert: LateClassVarReadActor getTotal equals: 0
+
+  testClassReadAfterAssignAnswersTheValue =>
+    LateClassVarAssignedActor setCurrent: 7
+    self assert: LateClassVarAssignedActor getCurrent equals: 7

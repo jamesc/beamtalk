@@ -10,9 +10,10 @@
 use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, SlotKind};
 use ecow::EcoString;
 use std::collections::{BTreeSet, HashSet};
+use std::ops::ControlFlow;
 
 use super::ClassHierarchy;
-use super::class_info::{InitializeAssignsSummary, MethodInfo};
+use super::class_info::{ClassInfo, InitializeAssignsSummary, MethodInfo};
 use super::declared_type::DeclaredType;
 
 impl ClassHierarchy {
@@ -682,6 +683,50 @@ impl ClassHierarchy {
         state
     }
 
+    /// Shared superclass-chain walk behind [`Self::state_field_type`],
+    /// [`Self::state_field_kind`], [`Self::class_variable_kind`] and
+    /// [`Self::class_variable_type`] (CLAUDE.md "No duplicate
+    /// implementations": these four used to each hand-roll the identical
+    /// `visited`/`current` cycle-guarded loop below).
+    ///
+    /// Calls `settle` on each ancestor's [`ClassInfo`] in order (`class_name`
+    /// itself first, then each superclass). `settle` returns
+    /// `ControlFlow::Break(value)` from the first class that "owns" the
+    /// thing being looked up — the shared shadowing rule: a subclass
+    /// redeclaring a field/variable is its owner, even when its own value is
+    /// absent (e.g. an untyped redeclaration must NOT fall through to an
+    /// ancestor's type) — and the walk stops there, returning `value` as-is
+    /// (which may itself be `None`). `ControlFlow::Continue(())` keeps
+    /// walking up. Returns `None` if the chain is exhausted, or a cycle or
+    /// missing class is hit, without any class settling the matter; each
+    /// caller applies its own default (`SlotKind::Eager` for the two
+    /// kind-returning queries, plain `None` for the two type-returning
+    /// ones).
+    fn walk_superclass_chain<R>(
+        &self,
+        class_name: &str,
+        mut settle: impl FnMut(&ClassInfo) -> ControlFlow<Option<R>>,
+    ) -> Option<R> {
+        let mut visited = HashSet::new();
+        let mut current = Some(class_name.to_string());
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            let Some(info) = self.classes.get(name.as_str()) else {
+                break;
+            };
+            if let ControlFlow::Break(value) = settle(info) {
+                return value;
+            }
+            current = info
+                .superclass
+                .as_ref()
+                .map(std::string::ToString::to_string);
+        }
+        None
+    }
+
     /// Returns the declared type annotation for a state field, walking
     /// the superclass chain to find inherited field types.
     ///
@@ -689,28 +734,16 @@ impl ClassHierarchy {
     /// exist, or the class is unknown.
     #[must_use]
     pub fn state_field_type(&self, class_name: &str, field_name: &str) -> Option<DeclaredType> {
-        let mut visited = HashSet::new();
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                // If this class declares the field, return its type (or None if untyped).
-                // This handles shadowing: a subclass redeclaring a field without a type
-                // should NOT inherit the parent's type annotation.
-                if info.state.iter().any(|s| s == field_name) {
-                    return info.state_types.get(field_name).cloned();
-                }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
+        // If this class declares the field, its type settles the matter (or
+        // `None` if untyped) — a subclass redeclaring a field without a type
+        // must NOT inherit the parent's type annotation.
+        self.walk_superclass_chain(class_name, |info| {
+            if info.state.iter().any(|s| s == field_name) {
+                ControlFlow::Break(info.state_types.get(field_name).cloned())
             } else {
-                break;
+                ControlFlow::Continue(())
             }
-        }
-        None
+        })
     }
 
     /// Returns whether a state field carries an explicit default value,
@@ -764,29 +797,19 @@ impl ClassHierarchy {
     /// slot had.
     #[must_use]
     pub fn state_field_kind(&self, class_name: &str, field_name: &str) -> SlotKind {
-        let mut visited = HashSet::new();
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                if info.state.iter().any(|s| s == field_name) {
-                    return info
-                        .state_kinds
+        self.walk_superclass_chain(class_name, |info| {
+            if info.state.iter().any(|s| s == field_name) {
+                ControlFlow::Break(Some(
+                    info.state_kinds
                         .get(field_name)
                         .copied()
-                        .unwrap_or(SlotKind::Eager);
-                }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
+                        .unwrap_or(SlotKind::Eager),
+                ))
             } else {
-                break;
+                ControlFlow::Continue(())
             }
-        }
-        SlotKind::Eager
+        })
+        .unwrap_or(SlotKind::Eager)
     }
 
     /// Returns the slot kind (`#eager` | `#late`, ADR 0124 §1) for a class
@@ -796,25 +819,35 @@ impl ClassHierarchy {
     /// and missing-metadata-degrades-to-`#eager` rules.
     #[must_use]
     pub fn class_variable_kind(&self, class_name: &str, var_name: &str) -> SlotKind {
-        let mut visited = HashSet::new();
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                if let Some(cv) = info.class_variables.iter().find(|cv| cv.name == var_name) {
-                    return cv.kind;
-                }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                break;
-            }
-        }
-        SlotKind::Eager
+        self.walk_superclass_chain(class_name, |info| {
+            info.class_variables
+                .iter()
+                .find(|cv| cv.name == var_name)
+                .map_or(ControlFlow::Continue(()), |cv| {
+                    ControlFlow::Break(Some(cv.kind))
+                })
+        })
+        .unwrap_or(SlotKind::Eager)
+    }
+
+    /// Returns the declared type annotation for a class variable
+    /// (`classState:` declaration), walking the superclass chain.
+    ///
+    /// Class-side counterpart to [`Self::state_field_type`]; same shadowing
+    /// rule (a subclass redeclaring the variable is its owner) and `None`
+    /// result for an untyped variable, a variable that doesn't exist, or an
+    /// unknown class. ADR 0124 B3 uses this to name the declared type in a
+    /// `late` class variable's `UninitializedStateError` hint.
+    #[must_use]
+    pub fn class_variable_type(&self, class_name: &str, var_name: &str) -> Option<DeclaredType> {
+        self.walk_superclass_chain(class_name, |info| {
+            info.class_variables
+                .iter()
+                .find(|cv| cv.name == var_name)
+                .map_or(ControlFlow::Continue(()), |cv| {
+                    ControlFlow::Break(cv.ty.clone())
+                })
+        })
     }
 
     /// Composed "`initialize` definitely assigns" summary for a class,
