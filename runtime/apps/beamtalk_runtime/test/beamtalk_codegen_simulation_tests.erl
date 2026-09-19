@@ -224,6 +224,54 @@ spawn_with_multiple_overrides_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
+%%% `late` slot tests (BT-3548, ADR 0124 §2/B2)
+%%%
+%%% Tests use 'bt@late_slot_actor':spawn/0,1 from compiled
+%%% test_fixtures/late_slot_actor.bt (`late state: proc :: Subprocess`, no
+%%% `initialize`) — real codegen output for the "defaultless `late` slot is
+%%% absent from init/1's state literal" representation (ADR 0124 §2).
+%%% ===========================================================================
+
+late_slot_spawns_without_uninitialized_state_error_test() ->
+    %% A `late` slot opts out of the post-initialize definite-assignment
+    %% check (ADR 0124 A1/B2), so this must not raise UninitializedStateError
+    %% the way an eager typed-no-default field left unset would.
+    Object = 'bt@late_slot_actor':spawn(),
+    ?assertMatch({beamtalk_object, 'LateSlotActor', 'bt@late_slot_actor', _Pid}, Object),
+    Pid = element(4, Object),
+
+    ?assertEqual({ok, 0}, gen_server:call(Pid, {getCount, []})),
+
+    gen_server:stop(Pid).
+
+late_slot_absent_from_state_when_unassigned_test() ->
+    %% The unassigned `late` slot's key is entirely absent from state — not
+    %% present as `proc => nil` — so a plain `spawn` never puts it there.
+    Object = 'bt@late_slot_actor':spawn(),
+    Pid = element(4, Object),
+
+    ActorState = sys:get_state(Pid),
+    ?assertNot(maps:is_key(proc, ActorState)),
+    ?assertEqual(0, maps:get(count, ActorState)),
+
+    gen_server:stop(Pid).
+
+late_slot_spawn_with_supplies_the_slot_test() ->
+    %% spawnWith: #{#proc => v} merges InitArgs over DefaultState
+    %% (maps:merge(DefaultState, InitArgs)) — the documented injection path
+    %% for a `late` slot — so it shows up in state afterward even though
+    %% DefaultState itself never carried the key.
+    InitArgs = #{proc => a_fake_subprocess},
+    Object = 'bt@late_slot_actor':spawn(InitArgs),
+    Pid = element(4, Object),
+
+    ActorState = sys:get_state(Pid),
+    ?assertEqual(a_fake_subprocess, maps:get(proc, ActorState)),
+    ?assertEqual({ok, a_fake_subprocess}, gen_server:call(Pid, {getProc, []})),
+
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
 %%% Async future-cast protocol tests — DOCUMENTED AS STAYING SIMULATED
 %%% ===========================================================================
 %%%

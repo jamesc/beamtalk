@@ -890,3 +890,100 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
         "init/1 must return {{continue, initialize}} to defer post-initialize check. Got:\n{code}"
     );
 }
+
+/// BT-3548 (ADR 0124 §2/B2): a cross-file ancestor's `late`-declared,
+/// defaultless, non-nilable field must be excluded from the post-initialize
+/// definite-assignment check exactly like `reqField` would be excluded if it
+/// were nilable — but here via `SlotKind::Late` in `ClassInfo::state_kinds`,
+/// not nilability. Companion to
+/// `test_cross_file_ancestor_nil_typed_fields_excluded_from_validation`
+/// above, which covers the nilability exclusions; this covers the `late`
+/// exclusion the same `inherited_typed_no_default_fields` `ClassInfo` branch
+/// must also honor now that `state_kinds` carries slot-kind metadata
+/// (BT-3547).
+#[test]
+fn test_cross_file_ancestor_late_field_excluded_from_validation() {
+    use beamtalk_core::ast::SlotKind;
+    use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, DeclaredType};
+    use std::collections::HashMap;
+
+    let ancestor = ClassInfo {
+        surface_incomplete: false,
+        name: ecow::EcoString::from("BaseActor"),
+        superclass: Some(ecow::EcoString::from("Actor")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![
+            ecow::EcoString::from("lateField"),
+            ecow::EcoString::from("reqField"),
+        ],
+        state_types: {
+            let mut m = HashMap::new();
+            m.insert(
+                ecow::EcoString::from("lateField"),
+                DeclaredType::parse("Integer"),
+            );
+            m.insert(
+                ecow::EcoString::from("reqField"),
+                DeclaredType::parse("Integer"),
+            );
+            m
+        },
+        state_has_default: {
+            let mut m = HashMap::new();
+            m.insert(ecow::EcoString::from("lateField"), false);
+            m.insert(ecow::EcoString::from("reqField"), false);
+            m
+        },
+        state_kinds: {
+            let mut m = HashMap::new();
+            m.insert(ecow::EcoString::from("lateField"), SlotKind::Late);
+            m.insert(ecow::EcoString::from("reqField"), SlotKind::Eager);
+            m
+        },
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+
+    // LogChild extends cross-file BaseActor; only LogChild's AST is present.
+    let src = "BaseActor subclass: LogChild\n  logCount = 0\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@log_child").with_class_hierarchy(vec![ancestor]),
+    );
+    assert!(result.is_ok(), "Codegen should succeed: {result:?}");
+    let code = result.unwrap();
+
+    // reqField :: Integer, eager, no default → validation must fire.
+    assert!(
+        code.contains("'uninitialized_state_error'"),
+        "Eager non-nilable cross-file ancestor field must trigger typed-no-default validation. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'reqField'"),
+        "Non-nilable field 'reqField' must appear in the validation error hint. Got:\n{code}"
+    );
+
+    // lateField :: Integer, `late`, no default — excluded despite being
+    // non-nilable: `late` short-circuits before nilability is even
+    // considered (mirroring `requires_definite_assignment`'s AST-path rule).
+    assert!(
+        !code.contains("'lateField'"),
+        "`late` cross-file ancestor field must be excluded from the post-initialize check regardless of nilability. Got:\n{code}"
+    );
+}
