@@ -2535,7 +2535,7 @@ classremovefromsystembyname_with_class_spawned_actor_test_() ->
                 %% backing gen_server — so `code:delete/1` below only ever
                 %% unloads this throwaway module, never a shared test fixture.
                 ModAtom = bt_3243_removable_class_mod,
-                Forms = parse_forms([
+                Forms = beamtalk_test_erl_forms:parse_forms([
                     "-module(" ++ atom_to_list(ModAtom) ++ ").",
                     "-export([spawn/0]).",
                     "spawn() -> beamtalk_actor:safe_spawn(test_class_actor, #{})."
@@ -2576,18 +2576,6 @@ classremovefromsystembyname_with_class_spawned_actor_test_() ->
             end)
         ]
     end}.
-
-%% Parse a list of complete top-level Erlang source forms (each ending in
-%% `.`) into abstract forms suitable for compile:forms/2.
-parse_forms(SourceLines) ->
-    lists:map(
-        fun(Line) ->
-            {ok, Tokens, _} = erl_scan:string(Line),
-            {ok, Form} = erl_parse:parse_form(Tokens),
-            Form
-        end,
-        SourceLines
-    ).
 
 %%% ============================================================================
 %%% walk_hierarchy/3 — max depth cycle guard

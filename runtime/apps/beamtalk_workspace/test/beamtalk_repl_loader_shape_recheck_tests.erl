@@ -121,6 +121,20 @@ receive_reload_check_announcement() ->
         error(timeout_waiting_for_reload_check_announcement)
     end.
 
+%% ADR 0123 §4 (BT-3538): the shape-reload findings push — a distinct
+%% announcement class from 'ReloadCheckCompleted', riding the same
+%% `reload_check` subscription (`subscribe_self_to_reload_check/0` already
+%% covers both, see `beamtalk_repl_subscriptions:announcement_classes/1`).
+receive_shape_reload_findings_announcement() ->
+    receive
+        {beamtalk_announcement, _SubRef, 'ShapeReloadFindingsCompleted', _Handler, Event} ->
+            Event
+    after 2000 ->
+        error(timeout_waiting_for_shape_reload_findings_announcement)
+    end.
+
+state0() -> beamtalk_repl_state:new(undefined, 0).
+
 %%====================================================================
 %% Fixtures
 %%====================================================================
@@ -463,3 +477,372 @@ skipped_candidate_shape_change_marks_existing_finding_stale_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% End-to-end: ADR 0123 §4 shape-reload findings (BT-3538)
+%%
+%% One test per row of the findings table, each driving a real class-body
+%% reload through `beamtalk_repl_loader:handle_load/2` twice and asserting
+%% on the `'ShapeReloadFindingsCompleted'` push (`beamtalk_repl_loader:
+%% publish_reload_findings/2`) — the workspace-level counterpart to
+%% `beamtalk_shape_diff_tests`' pure per-row unit tests.
+%%====================================================================
+
+find_finding(Kind, Findings) ->
+    case [F || F <- Findings, maps:get(kind, F) =:= Kind] of
+        [F] -> F;
+        [] -> error({no_finding_of_kind, Kind, Findings})
+    end.
+
+%% Row 1: field removed, shapeVersion unchanged -> Warning.
+row1_dropped_without_bump_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_row1_~p.bt", [UniqueId])
+                    ),
+                    Gen1 =
+                        <<
+                            "Actor subclass: LoaderShapeRow1Counter\n"
+                            "  state: count :: Integer = 0\n"
+                            "  state: name :: String = \"\"\n"
+                        >>,
+                    Gen2 =
+                        <<
+                            "Actor subclass: LoaderShapeRow1Counter\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    ok = file:write_file(Path, Gen1),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = file:write_file(Path, Gen2),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+
+                    Event = receive_shape_reload_findings_announcement(),
+                    ?assertEqual(<<"LoaderShapeRow1Counter">>, maps:get(class, Event)),
+                    Finding = find_finding(dropped_without_bump, maps:get(findings, Event)),
+                    ?assertEqual(warning, maps:get(severity, Finding)),
+                    ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+                    ?assertEqual(1, maps:get(from_version, Finding)),
+                    ?assertEqual(1, maps:get(to_version, Finding))
+                end)
+            ]
+        end}}.
+
+%% Row 2: fields only added, version unchanged -> Hint.
+row2_added_only_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_row2_~p.bt", [UniqueId])
+                    ),
+                    Gen1 =
+                        <<
+                            "Actor subclass: LoaderShapeRow2Counter\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    Gen2 =
+                        <<
+                            "Actor subclass: LoaderShapeRow2Counter\n"
+                            "  state: count :: Integer = 0\n"
+                            "  state: name :: String = \"\"\n"
+                        >>,
+                    ok = file:write_file(Path, Gen1),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = file:write_file(Path, Gen2),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+
+                    Event = receive_shape_reload_findings_announcement(),
+                    Finding = find_finding(added_only, maps:get(findings, Event)),
+                    ?assertEqual(hint, maps:get(severity, Finding)),
+                    ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+                    ?assertEqual(1, maps:get(from_version, Finding)),
+                    ?assertEqual(1, maps:get(to_version, Finding))
+                end)
+            ]
+        end}}.
+
+%% Row 3: version bumped N -> N+1, no migrateFromVN: -> Hint.
+row3_bumped_without_migration_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_row3_~p.bt", [UniqueId])
+                    ),
+                    Gen1 =
+                        <<
+                            "Actor subclass: LoaderShapeRow3Counter\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    Gen2 =
+                        <<
+                            "Actor subclass: LoaderShapeRow3Counter\n"
+                            "  shapeVersion: 2\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    ok = file:write_file(Path, Gen1),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = file:write_file(Path, Gen2),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+
+                    Event = receive_shape_reload_findings_announcement(),
+                    Finding = find_finding(bumped_without_migration, maps:get(findings, Event)),
+                    ?assertEqual(hint, maps:get(severity, Finding)),
+                    ?assertEqual(1, maps:get(from_version, Finding)),
+                    ?assertEqual(2, maps:get(to_version, Finding))
+                end)
+            ]
+        end}}.
+
+%% Row 4: version decreased -> Warning.
+row4_version_decreased_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_row4_~p.bt", [UniqueId])
+                    ),
+                    Gen1 =
+                        <<
+                            "Actor subclass: LoaderShapeRow4Counter\n"
+                            "  shapeVersion: 3\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    Gen2 =
+                        <<
+                            "Actor subclass: LoaderShapeRow4Counter\n"
+                            "  shapeVersion: 2\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    ok = file:write_file(Path, Gen1),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = file:write_file(Path, Gen2),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+
+                    Event = receive_shape_reload_findings_announcement(),
+                    Finding = find_finding(version_decreased, maps:get(findings, Event)),
+                    ?assertEqual(warning, maps:get(severity, Finding)),
+                    ?assertEqual(3, maps:get(from_version, Finding)),
+                    ?assertEqual(2, maps:get(to_version, Finding))
+                end)
+            ]
+        end}}.
+
+%% Row 5: any instance left suspended by a failed migration -> Error.
+%% Spawns a real live instance under generation 1, then reloads to a
+%% generation whose migrateFromV1: hook unconditionally raises
+%% `does_not_understand` (`old bogusPrecheckSelector`) — `beamtalk_shape_chain`
+%% catches it as a step failure, `try_change_code/3` leaves the instance
+%% suspended (BT-3534), and `hot_reload_class/2` publishes this
+%% synchronously (not via the async shape-recheck worker the other four
+%% rows go through — see its doc).
+row5_instances_suspended_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_row5_~p.bt", [UniqueId])
+                    ),
+                    Gen1 =
+                        <<
+                            "Actor subclass: LoaderShapeRow5Counter\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    Gen2 =
+                        <<
+                            "Actor subclass: LoaderShapeRow5Counter\n"
+                            "  shapeVersion: 2\n"
+                            "  state: count :: Integer = 0\n"
+                            "\n"
+                            "  class migrateFromV1: old -> Dictionary =>\n"
+                            "    old bogusPrecheckSelector\n"
+                        >>,
+                    ok = file:write_file(Path, Gen1),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+
+                    {ok, _, _, _, _} = beamtalk_repl_eval:do_eval(
+                        "LoaderShapeRow5Counter spawn", state0()
+                    ),
+                    [Pid] = beamtalk_runtime_api:all_instances('LoaderShapeRow5Counter'),
+
+                    ok = file:write_file(Path, Gen2),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+
+                    Event = receive_shape_reload_findings_announcement(),
+                    ?assertEqual(<<"LoaderShapeRow5Counter">>, maps:get(class, Event)),
+                    Finding = find_finding(instances_suspended, maps:get(findings, Event)),
+                    ?assertEqual(error, maps:get(severity, Finding)),
+                    ?assertEqual(1, maps:get(suspended, Finding)),
+                    ?assertEqual([Pid], maps:get(pids, Finding)),
+                    ?assertEqual(
+                        suspended, maps:get(sysState, beamtalk_process_navigation:status(Pid))
+                    )
+                end)
+            ]
+        end}}.
+
+%%====================================================================
+%% Pre-save advisory: precheck_class_shape/2 (ADR 0105 Phase 3, ADR 0123 §4,
+%% BT-3538) — fires the same "dropped without bump" finding before install.
+%%====================================================================
+
+precheck_class_shape_flags_dropped_field_before_install_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_precheck_~p.bt", [UniqueId])
+                    ),
+                    Gen1 =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckCounter\n"
+                            "  state: count :: Integer = 0\n"
+                            "  state: name :: String = \"\"\n"
+                        >>,
+                    ok = file:write_file(Path, Gen1),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+
+                    %% A pending edit that would drop `name` without bumping
+                    %% shapeVersion — never installed via handle_load/2 at
+                    %% all, unlike every other test in this module.
+                    PendingSource =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckCounter\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                        <<"LoaderShapePrecheckCounter">>, PendingSource
+                    ),
+                    Finding = find_finding(dropped_without_bump, Findings),
+                    ?assertEqual(warning, maps:get(severity, Finding)),
+                    ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+
+                    %% Never installed: the store's own captured generation
+                    %% is untouched — a *real* reload of this same pending
+                    %% edit still finds the same "previous" baseline.
+                    Prev = beamtalk_workspace_shape_store:previous(
+                        <<"LoaderShapePrecheckCounter">>
+                    ),
+                    ?assertEqual(
+                        #{<<"count">> => <<"Integer">>, <<"name">> => <<"String">>},
+                        maps:get(shape, Prev)
+                    )
+                end)
+            ]
+        end}}.
+
+%% A pending edit with nothing shape-relevant changed (e.g. just a method
+%% body tweak — here, literally unchanged) reports no findings.
+precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_precheck_clean_~p.bt", [UniqueId])
+                    ),
+                    Source =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckCleanCounter\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    ok = file:write_file(Path, Source),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+
+                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                        <<"LoaderShapePrecheckCleanCounter">>, Source
+                    ),
+                    ?assertEqual([], Findings)
+                end)
+            ]
+        end}}.
+
+%% precheck_class_shape/2 must never leak an atom per call — a per-call
+%% `unique_integer`-suffixed throwaway module name would (see
+%% `beamtalk_repl_loader:precheck_temp_module_name/0`'s doc); the fixed name
+%% + `global:trans/3` critical section fix means the node's atom count is
+%% unchanged after several calls, including a couple of failing (bad source)
+%% ones — a compile failure must not leak either.
+precheck_class_shape_does_not_leak_atoms_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_precheck_leak_~p.bt", [UniqueId])
+                    ),
+                    Source =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckLeakCounter\n"
+                            "  state: count :: Integer = 0\n"
+                            "  state: name :: String = \"\"\n"
+                        >>,
+                    ok = file:write_file(Path, Source),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+
+                    PendingSource =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckLeakCounter\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    %% Warm the fixed scratch atom once before measuring, so
+                    %% the very first load (which does mint that one atom)
+                    %% isn't counted against the repeated calls below.
+                    {ok, _} = beamtalk_repl_loader:precheck_class_shape(
+                        <<"LoaderShapePrecheckLeakCounter">>, PendingSource
+                    ),
+                    AtomCountBefore = erlang:system_info(atom_count),
+
+                    lists:foreach(
+                        fun(_) ->
+                            {ok, _} = beamtalk_repl_loader:precheck_class_shape(
+                                <<"LoaderShapePrecheckLeakCounter">>, PendingSource
+                            ),
+                            %% A syntactically-broken pending edit must not
+                            %% leak an atom either.
+                            {ok, _} = beamtalk_repl_loader:precheck_class_shape(
+                                <<"LoaderShapePrecheckLeakCounter">>, <<"not valid beamtalk (((">>
+                            )
+                        end,
+                        lists:seq(1, 5)
+                    ),
+
+                    AtomCountAfter = erlang:system_info(atom_count),
+                    ?assertEqual(AtomCountBefore, AtomCountAfter)
+                end)
+            ]
+        end}}.
+
+%% A class never captured this session (no baseline) has nothing to compare
+%% against — [], not an error.
+precheck_class_shape_with_no_baseline_reports_nothing_test_() ->
+    {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+        ?_test(begin
+            {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                <<"NeverCapturedClassXyz">>,
+                <<"Actor subclass: NeverCapturedClassXyz\n  state: count :: Integer = 0\n">>
+            ),
+            ?assertEqual([], Findings)
+        end)
+    end}.
