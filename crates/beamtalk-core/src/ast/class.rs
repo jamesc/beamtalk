@@ -337,6 +337,29 @@ pub fn migrate_from_v_version(selector_text: &str) -> Option<u32> {
     digits.parse::<u32>().ok().filter(|&n| n > 0)
 }
 
+/// Collects a class's own `migrateFromVN:` class methods as `(N, selector)`
+/// pairs, sorted ascending by `N` (ADR 0123 §2).
+///
+/// This is the shared leaf both `beamtalk-codegen`'s `'shape_migrations'`
+/// `__beamtalk_meta` emission (`class_meta.rs`) and the language service's
+/// completion/hover providers (BT-3539) build from — a class's chain is
+/// exactly its **own** `migrateFromVN:` methods (chains are per concrete
+/// class, not inherited, ADR 0123 §1), so both consumers must read the same
+/// list rather than re-deriving it.
+#[must_use]
+pub fn declared_shape_migrations(class: &ClassDefinition) -> Vec<(u32, EcoString)> {
+    let mut migrations: Vec<(u32, EcoString)> = class
+        .class_methods
+        .iter()
+        .filter_map(|m| {
+            let selector = m.selector.name();
+            migrate_from_v_version(&selector).map(|n| (n, selector))
+        })
+        .collect();
+    migrations.sort_by_key(|(n, _)| *n);
+    migrations
+}
+
 /// A standalone method definition (Tonel-style).
 ///
 /// Defines or replaces a single method on an existing class without
@@ -688,5 +711,59 @@ mod migrate_from_v_version_tests {
     fn rejects_unrelated_selector() {
         assert_eq!(migrate_from_v_version("migrateTo:"), None);
         assert_eq!(migrate_from_v_version("initialize"), None);
+    }
+}
+
+#[cfg(test)]
+mod declared_shape_migrations_tests {
+    use super::{ClassDefinition, MethodDefinition, declared_shape_migrations};
+    use crate::ast::expression::{Identifier, KeywordPart, MessageSelector};
+    use crate::ast::method::ParameterDefinition;
+    use crate::span::Span;
+    use crate::test_helpers::test_support::make_actor_class;
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn migrate_from_v_method(version: u32) -> MethodDefinition {
+        let span = s();
+        let mut m = MethodDefinition::new(
+            MessageSelector::Keyword(vec![KeywordPart::new(
+                format!("migrateFromV{version}:"),
+                span,
+            )]),
+            vec![ParameterDefinition::new(Identifier::new("old", span))],
+            Vec::new(),
+            span,
+        );
+        m.is_class_method = true;
+        m
+    }
+
+    #[test]
+    fn empty_when_no_migrate_from_v_methods() {
+        let class = make_actor_class("Plain");
+        assert!(declared_shape_migrations(&class).is_empty());
+    }
+
+    #[test]
+    fn collects_and_sorts_by_version_regardless_of_declaration_order() {
+        let mut class: ClassDefinition = make_actor_class("Cart");
+        class.class_methods = vec![migrate_from_v_method(2), migrate_from_v_method(1)];
+        let migrations = declared_shape_migrations(&class);
+        assert_eq!(
+            migrations,
+            vec![(1, "migrateFromV1:".into()), (2, "migrateFromV2:".into()),]
+        );
+    }
+
+    #[test]
+    fn excludes_non_matching_class_methods() {
+        let mut class: ClassDefinition = make_actor_class("Cart");
+        let mut other = migrate_from_v_method(1);
+        other.selector = MessageSelector::Unary("initialize".into());
+        class.class_methods = vec![other];
+        assert!(declared_shape_migrations(&class).is_empty());
     }
 }
