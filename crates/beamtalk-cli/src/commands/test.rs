@@ -19,7 +19,6 @@ use crate::beam_compiler::{
 };
 use beamtalk_codegen::core_erlang::escape_atom_chars;
 use beamtalk_core::file_walker::FileWalker;
-use beamtalk_project::package;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +27,7 @@ use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
 use super::build_layout::BuildLayout;
+use super::lint::find_package_root;
 use super::manifest;
 use super::util;
 
@@ -522,20 +522,6 @@ fn canonical_path(p: &Utf8Path) -> Utf8PathBuf {
 /// guarantee path-shape consistency (relative vs absolute, symlinked paths).
 fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
     find_package_root(path).map(|r| canonical_path(&r))
-}
-
-/// Walk up from `path` to find the nearest ancestor directory containing `beamtalk.toml`.
-///
-/// If `path` is a file, starts at its parent directory. If `path` is a directory,
-/// starts there. Returns the directory path if found, `None` if no manifest exists
-/// anywhere in the ancestor chain.
-///
-/// Delegates to [`beamtalk_project::package::find_package_root`] — the same
-/// canonical implementation used by `beamtalk lint` — which
-/// canonicalizes `path` before the walk and guards against
-/// empty-path false hits.
-fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
-    package::find_package_root(path.as_std_path()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
 }
 
 // ──────────────────────────────────────────────────────────────────────────
