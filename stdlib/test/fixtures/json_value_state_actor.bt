@@ -2,37 +2,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // JsonValueStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)
+// and BT-3561 (cross-file alias pre-loading in `beamtalk test`).
 //
-// A typed-no-default state field whose type is an ADR 0108 alias that
-// expands to a union containing `Nil` — mirroring `stdlib/src/json.bt`'s
-// `type JsonValue = Nil | Boolean | Integer | Float | String | List |
-// Dictionary`. Declared locally (rather than referencing the real stdlib
-// `JsonValue`) because `beamtalk test`'s fixture/test-file compilation does
-// not yet pre-load same-package `stdlib/src` type aliases the way it
-// pre-loads `ClassInfo` — a separate, pre-existing gap in the `test`
-// pipeline (only `beamtalk build` extracts project-wide `AliasInfo` via
-// `collect_project_protocol_and_alias_infos`) filed as a follow-up rather
-// than fixed here; the alias-resolution behaviour under test is identical
-// either way, since `AliasRegistry` treats same-file and same-package
-// aliases through the same lookup.
+// A typed-no-default state field whose type is the real `stdlib/src/json.bt`
+// `JsonValue` alias (`type JsonValue = Nil | Boolean | Integer | Float |
+// String | List | Dictionary`), referenced across files/packages rather than
+// declared locally — this exercises BT-3561's fix (`beamtalk test`'s
+// pipeline now pre-loads same-package `stdlib/src` type aliases the same
+// way it pre-loads `ClassInfo`) in addition to BT-3546's alias-aware
+// definite-assignment predicate.
 //
 // Before BT-3546, the definite-assignment predicate did not resolve
-// aliases, so `LocalJsonValue` was (wrongly) reported non-nilable and this
-// actor raised `UninitializedStateError` at spawn even though `Nil` is a
-// member of the alias's expansion. Should spawn successfully and leave
-// `value` unset (`nil`).
-
-type LocalJsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary
+// aliases, so `JsonValue` was (wrongly) reported non-nilable and this actor
+// raised `UninitializedStateError` at spawn even though `Nil` is a member of
+// the alias's expansion. Should spawn successfully and leave `value` unset
+// (`nil`).
 
 typed Actor subclass: JsonValueStateActor
-  state: value :: LocalJsonValue
+  state: value :: JsonValue
   state: count :: Integer = 0
 
   initialize -> Integer =>
-    // Deliberately does NOT set self.value — LocalJsonValue expands to
+    // Deliberately does NOT set self.value — JsonValue expands to
     // include Nil, so nil is a legitimate value here.
     self.count := 1
 
-  getValue -> LocalJsonValue => self.value
+  getValue -> JsonValue => self.value
 
   getCount -> Integer => self.count

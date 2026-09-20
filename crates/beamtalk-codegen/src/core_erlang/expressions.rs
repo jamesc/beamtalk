@@ -343,15 +343,12 @@ impl CoreErlangGenerator {
                             self.current_self_var()
                         }
                         super::CodeGenContext::Actor | super::CodeGenContext::Repl => {
-                            // Use StateAcc when inside loop body
-                            // Hybrid loops use State* naming, not StateAcc*
-                            if self.loop_mode.in_hybrid_loop {
-                                self.current_state_var()
-                            } else if self.in_loop_body {
-                                super::util::versioned_var("StateAcc", self.state_version())
-                            } else {
-                                self.current_state_var()
-                            }
+                            // `current_field_read_state_var` already applies
+                            // the StateAcc-in-loop-body/hybrid-State*/BT-3562
+                            // direct-params-capture rules — see its own doc
+                            // comment (CLAUDE.md: no duplicate "mirrors" of
+                            // that same rule here).
+                            self.current_field_read_state_var()
                         }
                     };
                     // ADR 0081 Phase 1: in REPL context a free
@@ -696,10 +693,15 @@ impl CoreErlangGenerator {
                         return Ok(leaf::var(param_var.clone()));
                     }
                 }
-                // Use appropriate variable based on context
+                // Use appropriate variable based on context. Actor uses
+                // `current_field_read_state_var` (not `current_state_var`
+                // directly) so a bare field read inside a non-hybrid
+                // direct-params loop resolves to the captured pre-loop state
+                // variable instead of an unbound `StateAcc` (BT-3562) — see
+                // that accessor's own doc comment.
                 let state_var = match self.context {
                     super::CodeGenContext::ValueType => self.current_self_var(),
-                    super::CodeGenContext::Actor => self.current_state_var(),
+                    super::CodeGenContext::Actor => self.current_field_read_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
                 if is_late {

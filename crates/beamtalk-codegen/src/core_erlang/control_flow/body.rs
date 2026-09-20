@@ -531,11 +531,32 @@ impl CoreErlangGenerator {
         stmts.extend(prelude_stmts);
 
         if self.loop_mode.in_direct_params_loop {
-            // see `lower_non_assign_expr`'s identical branch — a
-            // nested list op's own open let-chain, emitted verbatim so its
-            // variable rebindings escape to the outer (this loop's) scope.
+            // A nested list op's own open let-chain (a mutation-threaded
+            // `do:`/dict-`do:` nested in this direct-params loop) is emitted
+            // VERBATIM — no `let _ = … in` wrap — so its variable rebindings
+            // escape to the outer (this loop's) scope; see
+            // `LoopMode::direct_params_do_open_chain`'s doc comment. BT-3562:
+            // that is NOT true of every non-assign statement reaching this
+            // fallback — a bare closed-value statement (a discarded field
+            // read, a literal, an ordinary message send) renders to a plain
+            // value with no open chain, so emitting it unwrapped left the
+            // NEXT statement glued directly onto it with no `in` between
+            // them (`erlc`: "syntax error before: 'let'"). Mirror
+            // `generate_expression_as_value`'s own detection here (the same
+            // side channel `generate_list_do_with_mutations`/
+            // `generate_dict_do_with_mutations` sets) instead of assuming
+            // every statement in this branch is an open chain.
+            self.loop_mode.direct_params_do_open_chain = false;
             let expr_code = self.expression_doc(expr)?;
-            stmts.push(ThreadedStmt::Statement(expr_code, span));
+            if self.loop_mode.direct_params_do_open_chain {
+                self.loop_mode.direct_params_do_open_chain = false;
+                stmts.push(ThreadedStmt::Statement(expr_code, span));
+            } else {
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let _ = ", expr_code, " in"],
+                    span,
+                ));
+            }
         } else if is_last && !has_direct_field_assignments {
             let produces_tuple = !hoisted_anything
                 && (self.get_control_flow_threaded_vars(expr).is_some()

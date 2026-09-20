@@ -34,6 +34,17 @@ use super::util;
 /// Per-package class module indexes: package root → (`class_module_index`, `class_superclass_index`).
 type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<String, String>)>;
 
+/// [`build_merged_class_indexes`]'s return: per-package indexes, the merged
+/// class-name→module-name/superclass-name indexes, and the merged
+/// `ClassInfo`/`AliasInfo` collections.
+type MergedClassIndexes = (
+    PkgClassIndexes,
+    HashMap<String, String>,
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+);
+
 // ──────────────────────────────────────────────────────────────────────────
 // Test discovery from AST
 // ──────────────────────────────────────────────────────────────────────────
@@ -752,6 +763,14 @@ struct TestPipeline {
     class_superclass_index: HashMap<String, String>,
     /// Cross-file class metadata for type checker hierarchy resolution.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Same-package `src/` (and dependency-exported) type-alias declarations
+    /// (ADR 0108 `type Name = ...`), pre-loaded into every fixture/test-file
+    /// compilation so a test or fixture can reference a stdlib-declared
+    /// alias (e.g. `stdlib/src/json.bt`'s `JsonValue`) the same way it can
+    /// already reference a stdlib class — mirrors `all_class_infos` above
+    /// and `beamtalk build`'s own `pre_loaded_aliases` wiring
+    /// (`beam_compiler.rs`).
+    all_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     /// Fixture-defined protocols so the unresolved-class validator
     /// and type checker recognise protocol names declared in `fixtures/*.bt`.
     fixture_protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
@@ -921,23 +940,23 @@ fn discover_packages_with_manifests(
 /// from a parent directory containing multiple packages. The merged index is
 /// used for fixture compilation (which can reference any package's classes).
 ///
-/// Returns `(pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos)`.
+/// Returns `(pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos, all_alias_infos)`.
 fn build_merged_class_indexes(
     discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
-) -> (
-    PkgClassIndexes,
-    HashMap<String, String>,
-    HashMap<String, String>,
-    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-) {
+) -> MergedClassIndexes {
     let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
-    // Collect source and dep ClassInfos separately, then merge
-    // via collect_all_class_infos for a single unified collection point.
+    // Collect source and dep ClassInfos/AliasInfos separately, then merge
+    // via collect_all_class_infos/collect_all_alias_infos for a single
+    // unified collection point each.
     let mut source_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
         Vec::new();
     let mut dep_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+        Vec::new();
+    let mut source_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> =
+        Vec::new();
+    let mut dep_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> =
         Vec::new();
     for (pkg_root, pkg) in discovered_packages {
         let src_dir = pkg_root.join("src");
@@ -958,6 +977,13 @@ fn build_merged_class_indexes(
                 class_superclass_index.extend(pkg_super_map);
                 source_class_infos.extend(class_infos);
             }
+            // Same-package `src/` type-alias declarations (ADR 0108), so a
+            // test/fixture file can reference a stdlib-declared `type X =
+            // ...` alias — mirrors `build`'s own `collect_project_alias_infos`
+            // call in `class_index.rs`'s `build_class_index`.
+            source_alias_infos.extend(super::build::collect_project_alias_infos(
+                &src_files, &pkg.name,
+            ));
         }
 
         // Load dependency class metadata so the type checker and validator
@@ -970,6 +996,7 @@ fn build_merged_class_indexes(
                         class_module_index.insert(class_name.clone(), module_name.clone());
                     }
                     dep_class_infos.extend(dep.class_infos.clone());
+                    dep_alias_infos.extend(dep.alias_infos.clone());
                 }
             }
             Err(e) => {
@@ -982,19 +1009,56 @@ fn build_merged_class_indexes(
         }
     }
 
-    // Single unified collection of all ClassInfo from all sources.
+    // Single unified collection of all ClassInfo/AliasInfo from all sources.
     // Fixture ClassInfo is added later in compile_fixtures() via
     // pipeline.all_class_infos.extend(fixture_class_infos).
-    // To add a new .bt source location, add its ClassInfo slice here.
+    // To add a new .bt source location, add its ClassInfo/AliasInfo slice here.
     let all_class_infos =
         super::build::collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
+    let all_alias_infos =
+        super::build::collect_all_alias_infos(&[&source_alias_infos, &dep_alias_infos]);
 
     (
         pkg_class_indexes,
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        all_alias_infos,
     )
+}
+
+/// Manifest-less "coherent package" fallback for cross-file type-alias
+/// resolution (BT-3561): when no `beamtalk.toml` exists anywhere above the
+/// test root — `stdlib` itself ships no manifest, the exact scenario
+/// `beamtalk build --stdlib-mode` already special-cases for the `build`
+/// pipeline (see `class_index.rs`'s `package_identity` doc) — a same-tree
+/// `src/` directory next to (or above) the test root still holds real
+/// `type X = ...` declarations a test/fixture file may reference (e.g.
+/// `stdlib/test/fixtures/*.bt` referencing `stdlib/src/json.bt`'s
+/// `JsonValue`). `ClassInfo` needs no equivalent fallback: a
+/// fixture/test-defined class already resolves via `fixture_class_index`,
+/// and a `src/`-defined class (e.g. stdlib's `Actor`) is reached by
+/// ordinary dynamic dispatch, never a compile-time `ClassInfo` lookup.
+///
+/// Walks upward from `test_path` — mirroring `find_package_root`'s own
+/// ancestor walk, keyed on a `src/` sibling instead of `beamtalk.toml` —
+/// and returns the first `src/` directory found, or `None` if the ancestor
+/// chain has none.
+fn implicit_sibling_src_dir(test_path: &Utf8Path) -> Option<Utf8PathBuf> {
+    let start = canonical_path(test_path);
+    let mut dir = if start.is_dir() {
+        Some(start)
+    } else {
+        start.parent().map(Utf8Path::to_path_buf)
+    };
+    while let Some(d) = dir {
+        let candidate = d.join("src");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        dir = d.parent().map(Utf8Path::to_path_buf);
+    }
+    None
 }
 
 /// Initialize the test pipeline: discover packages and build class indexes.
@@ -1017,8 +1081,27 @@ fn initialize_pipeline(
         .map(|(root, pkg)| (root.clone(), pkg.name.clone()))
         .collect();
 
-    let (pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos) =
-        build_merged_class_indexes(&discovered_packages);
+    let (
+        pkg_class_indexes,
+        class_module_index,
+        class_superclass_index,
+        all_class_infos,
+        mut all_alias_infos,
+    ) = build_merged_class_indexes(&discovered_packages);
+
+    // See `implicit_sibling_src_dir`'s doc: only engages when manifest-based
+    // discovery found nothing at all, so a real manifest'd project's own
+    // `src/` (already covered by `build_merged_class_indexes` above) is
+    // never double-scanned.
+    if discovered_packages.is_empty() {
+        if let Some(src_dir) = implicit_sibling_src_dir(&test_path) {
+            if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
+                let extra_aliases = super::build::collect_project_alias_infos(&src_files, "");
+                all_alias_infos =
+                    super::build::collect_all_alias_infos(&[&all_alias_infos, &extra_aliases]);
+            }
+        }
+    }
 
     Ok(TestPipeline {
         test_path,
@@ -1031,6 +1114,7 @@ fn initialize_pipeline(
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        all_alias_infos,
         fixture_protocol_infos: Vec::new(),
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
@@ -1098,6 +1182,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         class_superclass_index: pipeline.class_superclass_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
         pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        pre_loaded_aliases: pipeline.all_alias_infos.clone(),
         ..ClassHierarchyContext::default()
     };
     let fixtures_package = pipeline.current_package_for(&fixtures_dir);
@@ -1215,6 +1300,7 @@ fn compile_single_test_file(
         class_superclass_index: file_super_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
         pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        pre_loaded_aliases: pipeline.all_alias_infos.clone(),
         ..ClassHierarchyContext::default()
     };
 

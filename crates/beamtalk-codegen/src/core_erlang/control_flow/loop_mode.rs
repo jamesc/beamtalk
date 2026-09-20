@@ -137,6 +137,29 @@ pub(in crate::core_erlang) struct LoopMode {
     /// Reset to `false` by `threaded_expression` before each compile it
     /// wraps this way; never read or written anywhere else.
     pub(in crate::core_erlang) direct_params_do_open_chain: bool,
+    /// BT-3562: for a non-hybrid direct-params `whileTrue:`/`whileFalse:`/
+    /// counted loop (locals-only threading — no `StateAcc` accumulator
+    /// parameter is ever bound in its `letrec` fun), the enclosing state
+    /// variable name exactly as [`super::super::generator::CoreErlangGenerator::current_state_var`]
+    /// reported it immediately BEFORE entering the loop body (before
+    /// `with_branch_context` resets `state_version` to 0 and `in_loop_body`
+    /// starts rendering that same accessor as `StateAcc*`). A direct-params
+    /// loop's body is guaranteed to contain no field WRITES
+    /// (`ThreadingPlan::select_direct_params`'s `!body_analysis.has_state_effects()`
+    /// guard), so the state map is never rebuilt inside the loop — this
+    /// captured name stays correct on every iteration, and (unlike
+    /// `StateAcc`/`StateAcc0`) is still a real, lexically-in-scope Core
+    /// Erlang variable, since the loop's `letrec` fun is a genuine closure
+    /// over its enclosing function. `generate_field_access`/the bare-field
+    /// fallback consult this (via
+    /// [`super::super::generator::CoreErlangGenerator::current_field_read_state_var`])
+    /// for a bare mid-body field READ instead of blindly deriving `StateAcc`
+    /// from `in_loop_body` — the gap that made such a read compile to a
+    /// reference to a `StateAcc` variable the loop never actually bound.
+    /// `None` outside a direct-params loop, or when a direct-params loop
+    /// site hasn't been updated to capture it (the accessor then falls back
+    /// to the previous `current_state_var()` behaviour, unchanged).
+    pub(in crate::core_erlang) direct_params_outer_state_var: Option<String>,
 }
 
 impl LoopMode {

@@ -79,6 +79,30 @@ impl CoreErlangGenerator {
         )
     }
 
+    /// The state/map variable name for a **field read** (`self.field`, or
+    /// the bare-identifier implicit-field-read fallback) in
+    /// `CodeGenContext::Actor` — the one place both call sites
+    /// (`generate_field_access` and the `Identifier` fallback in
+    /// `expressions.rs`) resolve it, so they can't independently drift
+    /// (CLAUDE.md: no duplicate "mirrors" implementations).
+    ///
+    /// Identical to [`Self::current_state_var`] except inside a non-hybrid
+    /// direct-params loop with a captured
+    /// [`crate::core_erlang::control_flow::loop_mode::LoopMode::direct_params_outer_state_var`]
+    /// (BT-3562) — such a loop's `letrec` fun binds no `StateAcc`
+    /// accumulator parameter at all, so `current_state_var`'s blanket
+    /// `in_loop_body` → `StateAcc` rule names a variable that was never
+    /// bound. See that field's own doc comment for why the captured
+    /// pre-loop name is safe to reuse for every iteration.
+    pub(in crate::core_erlang) fn current_field_read_state_var(&self) -> String {
+        if !self.loop_mode.in_hybrid_loop {
+            if let Some(captured) = &self.loop_mode.direct_params_outer_state_var {
+                return captured.clone();
+            }
+        }
+        self.current_state_var()
+    }
+
     /// Resets the state version to 0.
     pub(in crate::core_erlang) fn reset_state_version(&mut self) {
         self.state_threading.reset();

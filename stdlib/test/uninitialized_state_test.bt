@@ -59,25 +59,18 @@ TestCase subclass: UninitializedStateTest
     self assert: a getCount equals: 1
 
   // === BT-3546 (ADR 0124 §7 A1): alias-typed field expanding to nilable ===
-  // `type LocalJsonValue = Nil | Boolean | Integer | Float | String | List |
-  // Dictionary` (mirroring `stdlib/src/json.bt`'s `JsonValue`) — a
-  // defaultless `state: value :: LocalJsonValue` must spawn without raising,
-  // since the alias resolves to a union containing `Nil`.
-  //
-  // BT-1948 (ADR 0124 §6 A2b): the `beamtalk test` pipeline does not
-  // pre-load cross-file `AliasRegistry` entries (this fixture's own header
-  // comment documents the pre-existing gap; `beamtalk build` resolves
-  // `LocalJsonValue` correctly), so the construction-site check here sees
-  // `value :: LocalJsonValue` as an unresolved, non-nilable name and warns —
-  // a false positive from that gap, not from the field's real (nilable)
-  // type. `@expect all` until the gap is closed (BT-3564).
+  // `state: value :: JsonValue` references `stdlib/src/json.bt`'s real
+  // `type JsonValue = Nil | Boolean | Integer | Float | String | List |
+  // Dictionary` cross-file — a defaultless field of this type must spawn
+  // without raising, since the alias resolves to a union containing `Nil`.
+  // No `@expect` needed: BT-3561 closed the `beamtalk test` pipeline gap
+  // that otherwise made BT-1948's construction-site check see `JsonValue`
+  // as an unresolved, non-nilable name and warn.
   testAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>
-    @expect all
     a := JsonValueStateActor spawn
     self assert: a getValue equals: nil
 
   testAliasTypedNilableFieldOtherStateWorks =>
-    @expect all
     a := JsonValueStateActor spawn
     self assert: a getCount equals: 1
 
