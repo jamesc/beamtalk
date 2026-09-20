@@ -79,3 +79,87 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::generate_array_bif;
+    use crate::core_erlang::primitives::doc_to_string;
+
+    fn check(selector: &str, params: &[&str], expected: &str) {
+        let params: Vec<String> = params.iter().map(|s| (*s).to_string()).collect();
+        assert_eq!(
+            doc_to_string(generate_array_bif(selector, &params)),
+            Some(expected.to_string()),
+            "selector: {selector:?}"
+        );
+    }
+
+    #[test]
+    fn test_do_block() {
+        check("do:", &["Block"], "call 'beamtalk_array':'do'(Self, Block)");
+    }
+
+    #[test]
+    fn test_at_index() {
+        check("at:", &["Index"], "call 'beamtalk_array':'at'(Self, Index)");
+    }
+
+    #[test]
+    fn test_at_put() {
+        check(
+            "at:put:",
+            &["Index", "Value"],
+            "call 'beamtalk_array':'at_put'(Self, Index, Value)",
+        );
+    }
+
+    #[test]
+    fn test_with_all() {
+        check(
+            "withAll:",
+            &["List"],
+            "call 'beamtalk_array':'from_list'(List)",
+        );
+    }
+
+    #[test]
+    fn test_collect() {
+        check(
+            "collect:",
+            &["Block"],
+            "call 'beamtalk_array':'collect'(Self, Block)",
+        );
+    }
+
+    #[test]
+    fn test_select() {
+        check(
+            "select:",
+            &["Block"],
+            "call 'beamtalk_array':'select'(Self, Block)",
+        );
+    }
+
+    #[test]
+    fn test_inject_into() {
+        check(
+            "inject:into:",
+            &["Init", "Block"],
+            "call 'beamtalk_array':'inject_into'(Self, Init, Block)",
+        );
+    }
+
+    #[test]
+    fn test_includes() {
+        check(
+            "includes:",
+            &["Elem"],
+            "call 'beamtalk_array':'includes'(Self, Elem)",
+        );
+    }
+
+    #[test]
+    fn test_unknown_selector_returns_none() {
+        assert!(generate_array_bif("notAMethod", &[]).is_none());
+    }
+}
