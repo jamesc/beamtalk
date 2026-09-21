@@ -452,8 +452,16 @@ release_mode_no_compiler: Counter >> increment cannot be compiled.
 `include-compiler = true` is the Pharo-style escape hatch for teams that
 deliberately want a live image in production. It bundles the compiler port
 binary and `beamtalk_compiler`, re-enables the compiler-dependent ops, and
-logs a warning at boot. It does **not** re-enable the ADR 0082/0113
-workspace ops: a release has no working tree to flush to.
+logs a warning at boot that names three things the operator has opted
+into: **a compiler is now reachable on a production node** (ADR 0058's
+trust boundary means anything past the cookie can compile and run
+arbitrary code — that was already true of `eval`, but a compiler widens
+what "arbitrary" reaches); **live patches bypass the release artifact**
+and are gone on the next redeploy, so the running node can silently
+diverge from what `beamtalk-provenance.json` describes; and **a class
+recompiled live loses its provenance stamp** (§1.8), so `__beamtalk_meta`
+no longer says which toolchain produced it. It does **not** re-enable the
+ADR 0082/0113 workspace ops: a release has no working tree to flush to.
 
 This is the concrete answer to the acceptance criterion "how `Behaviour >>
 reload` / ADR 0105 relate to (or are disabled in) release mode" — they are
