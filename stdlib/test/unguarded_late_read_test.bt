@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for ADR 0124 §4d (BT-3555): warn on an unguarded `late`-slot read
+// reachable from `terminate:`/`handleInfo:`.
+//
+// Fixtures: stdlib/test/fixtures/unguarded_late_read_actor.bt
+//           stdlib/test/fixtures/guarded_late_read_actor.bt
+//           stdlib/test/fixtures/guarded_helper_late_read_actor.bt
+//           stdlib/test/fixtures/eager_slot_terminate_actor.bt
+//
+// The diagnostic itself is compile-time — every guard shape (unguarded,
+// `ifTrue:`-guarded, `ifTrue:ifFalse:`-guarded, guarded one level away
+// through a self-send, a bare `ifFalse:` that does *not* guard, an eager
+// slot) is covered directly against the analyzer in
+// crates/beamtalk-core/src/semantic_analysis/validators/unguarded_late_read_validators.rs.
+// These BUnit tests instead confirm each fixture still compiles and runs
+// under `--warnings-as-errors` (`just test-bunit`): the unguarded actor
+// only compiles because of its `@expect all`, and a stale or missing
+// `@expect` on any of these fixtures would fail the build.
+
+TestCase subclass: UnguardedLateReadTest
+
+  testUnguardedReadActorStopsCleanly =>
+    a := UnguardedLateReadActor spawn
+    a setProc: 1
+    self assert: a stop equals: #ok
+
+  testGuardedReadActorStopsCleanly =>
+    a := GuardedLateReadActor spawn
+    a setProc: 1
+    self assert: a stop equals: #ok
+
+  testGuardedHelperReadActorStopsCleanly =>
+    a := GuardedHelperLateReadActor spawn
+    a setProc: 1
+    self assert: a stop equals: #ok
+
+  testEagerSlotTerminateActorStopsCleanly =>
+    a := EagerSlotTerminateActor spawn
+    self assert: a stop equals: #ok

@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for unguarded_late_read_test.bt — ADR 0124 §4d (BT-3555): a
+// `late` slot read that's reachable from `terminate:` one level away,
+// through a `self`-send (`terminate: → self releaseProc`), but guarded
+// inside that helper — silent, no diagnostic.
+
+Actor subclass: GuardedHelperLateReadActor
+  late state: proc :: Integer
+
+  setProc: value => self.proc := value
+
+  terminate: _reason => self releaseProc
+
+  releaseProc =>
+    (self hasField: #proc) ifTrue: [self.proc]
+    nil

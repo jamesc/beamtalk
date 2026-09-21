@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for unguarded_late_read_test.bt — ADR 0124 §4d (BT-3555): a
+// direct, unguarded read of a `late` slot in `terminate:` — warns.
+//
+// `terminate/2`'s dispatch swallows a raised `UninitializedStateError`
+// instead of crashing, so the unguarded read fails silently instead of
+// loudly. `@expect all` acknowledges the diagnostic this fixture
+// deliberately triggers — there is no dedicated `@expect` category for it
+// by design (the fix is the `hasField:` guard, not a suppression —
+// matching Definite Assignment's precedent).
+
+Actor subclass: UnguardedLateReadActor
+  late state: proc :: Integer
+
+  setProc: value => self.proc := value
+
+  terminate: _reason =>
+    @expect all
+    self.proc

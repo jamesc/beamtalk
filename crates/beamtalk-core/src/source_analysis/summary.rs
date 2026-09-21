@@ -157,6 +157,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::NativeDeclarationLocation => "NativeDeclarationLocation",
         DiagnosticCategory::FileClassNameMismatch => "FileClassNameMismatch",
         DiagnosticCategory::DefiniteAssignment => "DefiniteAssignment",
+        DiagnosticCategory::UnguardedLateRead => "UnguardedLateRead",
     }
 }
 
@@ -374,6 +375,7 @@ mod tests {
                 "NativeDeclarationLocation",
             ),
             (DiagnosticCategory::DefiniteAssignment, "DefiniteAssignment"),
+            (DiagnosticCategory::UnguardedLateRead, "UnguardedLateRead"),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);

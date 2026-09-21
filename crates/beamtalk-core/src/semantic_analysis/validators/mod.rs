@@ -15,6 +15,8 @@
 //! - `native_validators` — native actor validation
 //! - `operator_validators` — non-dispatchable operator declaration checks
 //! - `reserved_name_validators` — reserved internal-namespace name checks
+//! - `unguarded_late_read_validators` — unguarded `late`-slot read reachable
+//!   from `terminate:`/`handleInfo:` (ADR 0124 §4d)
 
 mod class_validators;
 mod late_slot_validators;
@@ -27,6 +29,7 @@ mod reserved_name_validators;
 mod sendability_validators;
 mod structural_validators;
 mod supervision_validators;
+mod unguarded_late_read_validators;
 mod visibility_validators;
 
 // Re-export all validators so callers don't need to know the submodule structure.
@@ -73,6 +76,7 @@ pub use structural_validators::{erlang_arity, erlang_function_name};
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
 };
+pub(crate) use unguarded_late_read_validators::check_unguarded_late_reads_in_lifecycle_hooks;
 pub(crate) use visibility_validators::{
     check_alias_leaked_visibility, check_class_visibility, check_internal_method_shadow,
     check_leaked_method_visibility,

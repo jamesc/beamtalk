@@ -2406,4 +2406,60 @@ Object subclass: Helper
             "a Value's hint must not offer `late` — it's rejected on `field:`: {finding:?}"
         );
     }
+
+    // ── ADR 0124 §4d (BT-3555): UnguardedLateRead surfaces through the same
+    // `compute_diagnostics` pipeline every other category does. The check
+    // itself and its guard shapes are covered exhaustively by
+    // `beamtalk-core`'s
+    // `semantic_analysis::validators::unguarded_late_read_validators` unit
+    // tests; this just pins that the language-service entry point the
+    // LSP/REPL/MCP actually call reaches the same diagnostic, with its
+    // category, severity and hint text intact end-to-end.
+
+    #[test]
+    fn unguarded_late_read_finding_reaches_diagnostic_provider() {
+        // `terminate:` reads `self.proc` directly, with no `hasField:` guard
+        // — ADR 0124 §4d, Implementation B6.
+        let source = "typed Actor subclass: CodexClient\n  late state: proc :: Integer\n\n  terminate: reason => self.proc";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let finding = diagnostics
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::UnguardedLateRead))
+            .unwrap_or_else(|| {
+                panic!("expected an UnguardedLateRead finding, got: {diagnostics:?}")
+            });
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(
+            finding.message.contains("proc") && finding.message.contains("terminate:"),
+            "message should name the unguarded slot and the lifecycle hook: {}",
+            finding.message
+        );
+        assert!(
+            finding
+                .hint
+                .as_ref()
+                .is_some_and(|h| h.contains("hasField: #proc")),
+            "hint should suggest the `hasField:` guard: {finding:?}"
+        );
+    }
+
+    #[test]
+    fn guarded_late_read_does_not_reach_diagnostic_provider() {
+        // Same slot, guarded by `(self hasField: #proc) ifTrue: [...]` — no
+        // finding at all.
+        let source = "typed Actor subclass: CodexClient\n  late state: proc :: Integer\n\n  terminate: reason =>\n    (self hasField: #proc)\n      ifTrue: [self.proc]\n    nil";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::UnguardedLateRead)),
+            "a guarded read must not produce an UnguardedLateRead finding, got: {diagnostics:?}"
+        );
+    }
 }
