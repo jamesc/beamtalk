@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// DeserializedNoDefaultValue — test fixture for BT-3554 (ADR 0124 §6).
+//
+// Demonstrates the definite-assignment check's documented limit: a Value
+// built by deserialization (`class fromBinary:` -> `Binary deserialize:`)
+// has no construction site at all — `label` is typed and defaulted nowhere,
+// but `Binary deserialize:` is not `new`/`new:`, so the checker never
+// inspects it and reports nothing here, consistent with ADR 0100's silence
+// where knowledge is absent. See "Definite assignment" in
+// docs/beamtalk-language-features.md.
+
+typed Value subclass: DeserializedNoDefaultValue
+  field: label :: String
+
+  class fromBinary: content :: Binary -> DeserializedNoDefaultValue =>
+    result :: DeserializedNoDefaultValue := Binary deserialize: content
+    result
+
+  getLabel -> String => self.label

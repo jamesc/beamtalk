@@ -56,7 +56,15 @@ Severity and category infrastructure already exists
   `beamtalk lint`), `Hint` (informational note).
 - **Categories** (`DiagnosticCategory`): `Dnu`, `Type`, `UnresolvedClass`,
   `UnresolvedFfi`, `ArityMismatch`, `Deprecation`, … — these let policy and
-  suppression target a class of diagnostic rather than a message string.
+  suppression target a class of diagnostic rather than a message string. The
+  category set has grown since this ADR was written — e.g.
+  `DefiniteAssignment` ([ADR 0124](0124-slots-late-assignment-definite-assignment.md)
+  §6), an Actor/Value construction-site check with no dedicated `@expect`
+  category by design — without revisiting this list each time; the current,
+  exhaustive, kebab-case set lives in the `[diagnostics]` Section of
+  [`docs/beamtalk-packages.md`](../beamtalk-packages.md#diagnostics-section)
+  (Rule 3 below), which every new category must be added to in order to be
+  reachable from `beamtalk.toml`.
 
 The de-facto behaviour for an unresolved *selector*
 (`type_checker/validation.rs`, `type_checker/inference.rs`):

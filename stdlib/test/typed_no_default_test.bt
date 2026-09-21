@@ -6,6 +6,7 @@
 // Fixtures:
 //   stdlib/test/fixtures/typed_no_default_actor.bt
 //   stdlib/test/fixtures/typed_no_default_value.bt
+//   stdlib/test/fixtures/deserialized_no_default_value.bt
 
 TestCase subclass: TypedNoDefaultTest
 
@@ -33,3 +34,34 @@ TestCase subclass: TypedNoDefaultTest
     v := TypedNoDefaultValue new: #{#name => "Alice", #age => 30}
     self assert: v getName equals: "Alice"
     self assert: v getAge equals: 30
+
+  // === BT-3554 (ADR 0124 §6 A3+A4): bare `new` leaves typed-no-default
+  // fields unassigned ===
+  //
+  // `TypedNoDefaultValue new` supplies neither `name` nor `age`, so the
+  // construction-site definite-assignment check warns for both (BT-3552) —
+  // `@expect all` acknowledges the diagnostics these tests deliberately
+  // trigger, since Values have no runtime post-`initialize` backstop and
+  // no dedicated `@expect` category by design (ADR 0124 §6: supply/default/
+  // widen/`late` are the only accepted fixes for real code).
+  testBareNewLeavesTypedNoDefaultFieldsNil =>
+    @expect all
+    v := TypedNoDefaultValue new
+    self assert: v getName equals: nil
+
+  testBareNewLeavesSecondTypedNoDefaultFieldNil =>
+    @expect all
+    v := TypedNoDefaultValue new
+    self assert: v getAge equals: nil
+
+  // === BT-3554 (ADR 0124 §6): the deserialization limit — no diagnostic ===
+  //
+  // `DeserializedNoDefaultValue fromBinary:` constructs via `Binary
+  // deserialize:`, not `new`/`new:` — the check never inspects it, so no
+  // `@expect` is needed here, and `--warnings-as-errors` (`just test-bunit`)
+  // would fail this file if that ever regressed.
+  testDeserializationHasNoConstructionSiteCheck =>
+    original := DeserializedNoDefaultValue new: #{#label => "hello"}
+    bin := Binary serialize: original
+    v := DeserializedNoDefaultValue fromBinary: bin
+    self assert: v getLabel equals: "hello"
