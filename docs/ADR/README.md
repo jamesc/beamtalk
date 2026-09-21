@@ -151,6 +151,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0122](0122-threaded-ir-storage-family-generalization-scope.md) | Unify `ThreadedIr` Storage-Family Threading | Implemented | 2026-09-16 |
 | [0123](0123-versioned-state-migration.md) | Versioned State Migration as a Language Surface (`shapeVersion:` + `migrateFromVN:`) | Implemented | 2026-09-19 |
 | [0124](0124-slots-late-assignment-definite-assignment.md) | Slots — Late Assignment and Definite Assignment | Accepted | 2026-09-18 |
+| [0125](0125-otp-releases-and-upgrade-compatibility.md) | OTP Releases and Upgrade Compatibility | Proposed | 2026-09-21 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
