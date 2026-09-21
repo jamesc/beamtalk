@@ -943,6 +943,79 @@ impl CoreErlangGenerator {
         Ok((preamble_doc, bind, val_var))
     }
 
+    /// `self clearField: #classVar` inside a class method (ADR 0124 §1/§4i,
+    /// B4): the `BindOp::Remove` counterpart to
+    /// [`Self::generate_class_var_field_assignment`] above, used at every
+    /// non-last-position or nested-producer call site
+    /// ([`Self::class_method_prelude_producer`], `util.rs`) the way that
+    /// function is.
+    pub(super) fn generate_class_var_field_clear(
+        &mut self,
+        field_name: &str,
+        span: beamtalk_core::source_analysis::Span,
+        frame: super::threaded_ir::FrameId,
+    ) -> Result<ThreadedValue> {
+        let (preamble_doc, bind, val_var) =
+            self.lower_class_var_field_clear_bind(field_name, span, frame)?;
+        Ok(ThreadedValue {
+            prelude: vec![ThreadedStmt::Statement(preamble_doc, span), bind],
+            value: ValueRef::Var(val_var),
+        })
+    }
+
+    /// Shared `self clearField: #classVar` `Bind` construction (ADR 0124
+    /// §1/§4i, B4) — the `BindOp::Remove` counterpart to
+    /// [`Self::lower_class_var_field_assignment_bind`], which this mirrors
+    /// exactly (same version-capture/shadow-write-gate/isolated-verify
+    /// sequence, ADR 0110's shadow write, same two call sites —
+    /// [`Self::generate_class_var_field_clear`] and
+    /// `gen_server::methods`'s `lower_class_method_last_class_var_clear`)
+    /// except there is no value expression to compile: `field_name` is
+    /// always a compile-time-known literal Symbol
+    /// ([`super::expr_shape::is_self_clear_field_class_var`] guarantees
+    /// this before either call site is reached), so there is no
+    /// `expression_doc(value)` step and no `preamble_doc` beyond an empty
+    /// `Document::Nil` — kept in the return shape only for symmetry with the
+    /// assignment sibling's `(preamble_doc, bind, val_var)` triple.
+    /// `val_var` is `"ClassSelf"` — `clearField: -> Self`'s return value,
+    /// mirroring `self clearField:`'s instance-side counterpart
+    /// (`generate_self_clear_field_open`) returning the literal `"Self"`.
+    pub(super) fn lower_class_var_field_clear_bind(
+        &mut self,
+        field_name: &str,
+        span: beamtalk_core::source_analysis::Span,
+        frame: super::threaded_ir::FrameId,
+    ) -> Result<(Document<'static>, super::threaded_ir::ThreadedStmt, String)> {
+        if !self.class_var_names().contains(field_name) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!("cannot clear instance field '{field_name}' in a class method"),
+                span: Some(span),
+            });
+        }
+        let source_version = self.class_var_version();
+        self.next_class_var();
+        let target_version = self.class_var_version();
+        let shadow_write = self.block_depth == 0;
+        let (bind, verify_errors) = super::threaded_ir::construct_and_verify_class_var_bind(
+            super::threaded_ir::BindOp::Remove {
+                field: field_name.to_string(),
+                class_tag: super::threaded_ir::ValueRef::Var("ClassSelf".to_string()),
+            },
+            shadow_write,
+            frame,
+            self.block_depth == 0, // independently re-derived per ADR 0111 §Verifier honesty — must not reuse `shadow_write`
+            source_version,
+            target_version,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &verify_errors,
+            "class-var mutation missing ADR 0110 shadow write",
+            span,
+        );
+        Ok((Document::Nil, bind, "ClassSelf".to_string()))
+    }
+
     /// ADR 0111 coverage extension: construct + verify the
     /// just-emitted `Self{N}`/`State{N}` `Bind`'s `ThreadedIr` shape via the
     /// shared [`super::threaded_ir::verify_simple_bind`] helper — for the two

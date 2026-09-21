@@ -55,6 +55,8 @@ and join the `beamtalk_classes` pg group for enumeration.
     class_send/3,
     local_call/3,
     set_class_var/3,
+    has_class_var/2,
+    clear_class_var/2,
     update_class/2,
     local_class_methods/1,
     local_class_methods_map/1,
@@ -275,6 +277,41 @@ set_class_var(ClassName, Name, Value) ->
             error(Error0);
         Pid ->
             gen_server:call(Pid, {set_class_var, Name, Value})
+    end.
+
+-doc """
+Presence test for a class variable on a class by name (ADR 0124 §1/§4i/B4).
+
+Never raises, unlike `get_class_var`'s declared-`late` branch — the
+class-side counterpart to `beamtalk_reflection:has_field/2`. An unregistered
+class answers `false` rather than raising, mirroring the non-raising
+contract `hasField:` promises everywhere else.
+""".
+-spec has_class_var(class_name(), atom()) -> boolean().
+has_class_var(ClassName, Name) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            false;
+        Pid ->
+            gen_server:call(Pid, {has_class_var, Name})
+    end.
+
+-doc """
+Returns a `late` class variable to unassigned (ADR 0124 §1/§4i/§4f/B4).
+
+The class-side counterpart to `beamtalk_reflection:clear_field/2` —
+`maps:remove/2` on `ClassVars`, never a sentinel value. Works uniformly on
+any class variable, not only a declared-`late` one, matching
+`clear_field/2`'s own "the caller's business, not this primitive's" stance.
+""".
+-spec clear_class_var(class_name(), atom()) -> term().
+clear_class_var(ClassName, Name) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            Error0 = beamtalk_error:new(class_not_found, ClassName),
+            error(Error0);
+        Pid ->
+            gen_server:call(Pid, {clear_class_var, Name})
     end.
 
 -doc "Create a new instance of this class.".
@@ -1412,13 +1449,53 @@ handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State};
-handle_call({get_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    {reply, maps:get(Name, ClassVars, nil), State};
+handle_call(
+    {get_class_var, Name}, _From, #class_state{name = ClassName, class_state = ClassVars} = State
+) ->
+    %% ADR 0124 §1/§4i/B4: a declared-`late` class variable is an error when
+    %% unassigned, agreeing with the instance-side direct read
+    %% (`generate_late_field_read`) — keyed on *declared* late so a typo'd
+    %% variable name keeps today's plain `nil`.
+    %%
+    %% Replies `{error, Error}` rather than raising here: this
+    %% `handle_call` clause runs directly in the class gen_server's own
+    %% process, outside the `dispatch_class_method`/`apply_class_method_in_context`
+    %% machinery that normally catches a `#beamtalk_error{}` raise from a
+    %% class-method body and converts it to a safe reply before it can
+    %% reach `handle_call`'s caller (`invoke_class_method`, this module) —
+    %% an uncaught `beamtalk_error:raise/1` here would crash this class's
+    %% gen_server (and so the whole class) instead of just answering the
+    %% caller with a catchable error, so it is never called directly.
+    %% `get_class_var_declared_late_unassigned_errors_without_crashing_test_`
+    %% (`beamtalk_object_class_tests.erl`) pins that the process survives.
+    case class_var_declared_late(ClassName, Name) of
+        true ->
+            case maps:find(Name, ClassVars) of
+                {ok, nil} ->
+                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State};
+                {ok, Value} ->
+                    {reply, Value, State};
+                error ->
+                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State}
+            end;
+        false ->
+            {reply, maps:get(Name, ClassVars, nil), State}
+    end;
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
     NewClassVars = ClassVars#{Name => Value},
     %% Keep the live snapshot in sync with this mutation.
     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-    {reply, Value, State#class_state{class_state = NewClassVars}}.
+    {reply, Value, State#class_state{class_state = NewClassVars}};
+handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
+    %% ADR 0124 §1/§4i/B4: never raises.
+    {reply, maps:is_key(Name, ClassVars), State};
+handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
+    %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
+    %% the instance-side intrinsic's `clearField: -> Self` convention.
+    NewClassVars = maps:remove(Name, ClassVars),
+    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+    NewState = State#class_state{class_state = NewClassVars},
+    {reply, beamtalk_class_registry:class_object_from_pid(self()), NewState}.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
 handle_cast(
@@ -1511,6 +1588,44 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 
 -doc """
+True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
+`ClassName` or an ancestor — the class-side counterpart to
+`beamtalk_reflection`'s `declared_late/2`, via
+`beamtalk_behaviour_intrinsics:classAllClassVarKindsByName/1` (B5a's
+flattened class-variable kind metadata). Keyed on *declared* late so a
+typo'd class variable name keeps today's plain `nil`.
+""".
+-spec class_var_declared_late(class_name(), atom()) -> boolean().
+class_var_declared_late(ClassName, Name) ->
+    Kinds = beamtalk_behaviour_intrinsics:classAllClassVarKindsByName(ClassName),
+    maps:get(Name, Kinds, eager) =:= late.
+
+-doc """
+Builds (but does not raise) the `uninitialized_state_error` for an
+unassigned declared-`late` class variable read via `get_class_var` (ADR 0124
+§1/§4i/B4) — the class-side counterpart to `beamtalk_reflection`'s
+`raise_uninitialized_state/2`, which DOES raise directly because it runs on
+the actor's already-`try`-wrapped `dispatch/4` path (`beamtalk_actor.erl`).
+`get_class_var`'s `handle_call` clause has no such wrapper, so this only
+constructs the error value for that clause to reply with as `{error, Error}`
+(see its own comment) rather than raising in the class gen_server's own
+process. No declared-type metadata is available for class variables the
+way `beamtalk_behaviour_intrinsics:classAllFieldTypesByName/1` supplies for
+instance fields (`__beamtalk_meta/0` carries no `class_field_types` key), so
+the hint names the variable without a `(:: Type)` suffix.
+""".
+-spec class_var_uninitialized_error(class_name(), atom()) -> #beamtalk_error{}.
+class_var_uninitialized_error(ClassName, Name) ->
+    Hint = iolist_to_binary(
+        io_lib:format(
+            "~s class variable '~s' is declared `late` and has not been assigned yet",
+            [ClassName, Name]
+        )
+    ),
+    Error0 = beamtalk_error:new(uninitialized_state_error, ClassName, 'fieldAt:'),
+    beamtalk_error:with_hint(Error0, Hint).
+
+-doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
 state, restoring the previously-seeded session context afterwards.
 
@@ -1528,6 +1643,38 @@ ownership when there is no session context to fall back to (tier 1).
 -spec dispatch_class_method(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
 ) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
+%% ADR 0124 §1/§4i/B4: `Cls hasField:`/`Cls clearField:` reach the class
+%% gen_server here, ahead of the local-class-method/superclass-chain/DNU
+%% priority order below — like `fieldAt:`/`fieldAt:put:` on an instance
+%% (`sealed` on `Object`, ADR 0035), these are reflection primitives, not
+%% overridable class methods. `ClassVars` lives in `State` directly, so
+%% neither needs `handle_class_method_call/6`'s method-lookup machinery;
+%% `has_class_var`/`clear_class_var`'s own `handle_call` clauses provide the
+%% identical read/write for `beamtalk_object_class:has_class_var/2` /
+%% `clear_class_var/2`'s direct-message-shape callers, so this clause is the
+%% ordinary-message-send route to the SAME two operations, not a third
+%% implementation of them (CLAUDE.md's no-duplicate-implementations rule
+%% notwithstanding — `maps:is_key/2`/`maps:remove/2` are the whole
+%% operation, so there is nothing to extract into a shared helper beyond
+%% the builtin itself).
+dispatch_class_method('hasField:', [Name], _From, State, Restore) when is_atom(Name) ->
+    Restore(),
+    #class_state{class_state = ClassVars} = State,
+    %% `{ok, _}`-wrapped, matching invoke_class_method/7's own reply shape
+    %% (`{reply, {ok, Result}, ...}`) — `class_send_dispatch/3`'s caller
+    %% (`beamtalk_class_dispatch.erl`) always unwraps a `class_method_call`
+    %% reply as `{ok, Result} | {error, _}`, so a bare, unwrapped value here
+    %% falls through every clause of that `case` and crashes the class
+    %% gen_server with `function_clause` — found via this issue's own "from
+    %% outside" BUnit test.
+    {reply, {ok, maps:is_key(Name, ClassVars)}, State};
+dispatch_class_method('clearField:', [Name], _From, State, Restore) when is_atom(Name) ->
+    Restore(),
+    #class_state{class_state = ClassVars} = State,
+    NewClassVars = maps:remove(Name, ClassVars),
+    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+    NewState = State#class_state{class_state = NewClassVars},
+    {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
 dispatch_class_method(Selector, Args, From, State, Restore) ->
     #class_state{
         class_methods = ClassMethods,

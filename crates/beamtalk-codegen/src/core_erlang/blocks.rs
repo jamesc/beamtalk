@@ -1172,7 +1172,9 @@ impl CoreErlangGenerator {
         // recovers the live value via the ADR 0110 shadow write and re-binds
         // it to a name that IS in scope here.
         if self.in_class_method()
-            && !(self.is_class_var_assignment(value) || self.is_class_method_self_send(value))
+            && !(self.is_class_var_assignment(value)
+                || self.is_self_clear_field_class_var(value)
+                || self.is_class_method_self_send(value))
         {
             let cv_version_before = self.class_var_version();
             let val_doc = self.expression_doc(value)?;

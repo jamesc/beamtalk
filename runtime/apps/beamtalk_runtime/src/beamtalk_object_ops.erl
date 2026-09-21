@@ -22,6 +22,8 @@ rather than being duplicated in every class's generated code.
 | `fieldNames`      | []            | Returns list of field names           |
 | `fieldAt:`        | [Name]        | Returns field value                   |
 | `fieldAt:put:`    | [Name, Value] | Sets field value                      |
+| `hasField:`       | [Name]        | Presence test, never raises (ADR 0124 §1/B4) |
+| `clearField:`     | [Name]        | Returns a `late` field to unassigned (ADR 0124 §1/B4) |
 
 ## Display Methods
 
@@ -110,6 +112,16 @@ dispatch('fieldAt:', [FieldName], _Self, State) ->
 dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
     {WrittenValue, NewState} = beamtalk_reflection:write_field(FieldName, Value, State),
     {reply, WrittenValue, NewState};
+dispatch('hasField:', [FieldName], _Self, State) ->
+    %% ADR 0124 §1/B4: a presence test, never raises. No state threading
+    %% (matches `fieldAt:` immediately above) — a pure read.
+    {reply, beamtalk_reflection:has_field(FieldName, State), State};
+dispatch('clearField:', [FieldName], Self, State) ->
+    %% ADR 0124 §1/§4f/B4: a write. Returns `Self`, matching
+    %% `fieldAt:put:`'s intrinsic-path convention (`generate_self_clear_field_open`)
+    %% — there is no written value to hand back the way `fieldAt:put:` does.
+    NewState = beamtalk_reflection:clear_field(FieldName, State),
+    {reply, Self, NewState};
 %% --- Display methods ---
 
 dispatch('printString', [], Self, State) ->
@@ -217,6 +229,8 @@ has_method('respondsTo:') -> true;
 has_method('fieldNames') -> true;
 has_method('fieldAt:') -> true;
 has_method('fieldAt:put:') -> true;
+has_method('hasField:') -> true;
+has_method('clearField:') -> true;
 has_method('perform:') -> true;
 has_method('perform:withArguments:') -> true;
 has_method('perform:withArguments:timeout:') -> true;

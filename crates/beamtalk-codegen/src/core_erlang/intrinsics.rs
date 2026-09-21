@@ -2241,6 +2241,8 @@ impl CoreErlangGenerator {
     /// - `fieldNames` — Get list of instance variable names (actors only)
     /// - `fieldAt:` — Read instance variable by name
     /// - `fieldAt:put:` — Write instance variable by name
+    /// - `hasField:` — Presence test for a named field (ADR 0124 §1/B4); never raises
+    /// - `clearField:` — Return a `late` field to unassigned (ADR 0124 §1/B4)
     #[expect(
         clippy::too_many_lines,
         reason = "fieldAt: and fieldAt:put: require verbose type guards for actor vs primitive dispatch"
@@ -2554,6 +2556,191 @@ impl CoreErlangGenerator {
                             ") end",
                         ];
                         Ok(Some(seq.close(self, call_doc, "FAtPutRes")))
+                    }
+                    // ADR 0124 §1/§9/B4: `hasField:` — a presence test that
+                    // never raises. Routed via the enum so the classifier
+                    // validates arity.
+                    Some(WellKnownSelector::HasField) => {
+                        debug_assert_eq!(arguments.len(), 1);
+                        // Class-method `self hasField: #x` reads `ClassVars`
+                        // directly (§4i) — a pure `maps:is_key`, never
+                        // raises, so it needs no state threading and works
+                        // at any nesting depth (unlike `clearField:` below,
+                        // which is a write).
+                        if self.in_class_method() {
+                            if let Expression::Identifier(id) = receiver {
+                                if id.name == "self" {
+                                    let name_var = self.fresh_var("Name");
+                                    let name_code = self.expression_doc(&arguments[0])?;
+                                    let cv = self.current_class_var();
+                                    let doc = docvec![
+                                        "let ",
+                                        leaf::var(name_var.clone()),
+                                        " = ",
+                                        name_code,
+                                        " in call 'maps':'is_key'(",
+                                        leaf::var(name_var),
+                                        ", ",
+                                        leaf::var(cv),
+                                        ")",
+                                    ];
+                                    return Ok(Some(doc));
+                                }
+                            }
+                        }
+                        // Fast-path for `self` receiver in actor instance
+                        // context. Avoids sync_send(self()) → deadlock.
+                        if let Expression::Identifier(id) = receiver {
+                            if id.name == "self"
+                                && self.context == super::CodeGenContext::Actor
+                                && !self.in_class_method()
+                                && self.lookup_var("self").is_none()
+                            {
+                                let name_var = self.fresh_var("Name");
+                                let name_code = self.expression_doc(&arguments[0])?;
+                                let doc = docvec![
+                                    "let ",
+                                    leaf::var(name_var.clone()),
+                                    " = ",
+                                    name_code,
+                                    " in call 'beamtalk_primitive':'send'(",
+                                    leaf::var(self.current_state_var()),
+                                    ", 'hasField:', [",
+                                    leaf::var(name_var),
+                                    "])",
+                                ];
+                                return Ok(Some(doc));
+                            }
+                        }
+
+                        // General dispatch: delegate to
+                        // `beamtalk_message_dispatch:send/3`, which already
+                        // classifies the receiver correctly (actor instance
+                        // → `sync_send`; class object → `beamtalk_object_class:class_send`,
+                        // reaching this issue's `dispatch_class_method`
+                        // `'hasField:'` clause; value/tagged-map/primitive
+                        // → `beamtalk_primitive:send`, reaching the
+                        // `hasField:` arm every class's `dispatch/3` now
+                        // carries). Unlike `fieldAt:`/`fieldAt:put:` above
+                        // (which hand-roll an `is_tuple`/`is_map` receiver
+                        // check that only distinguishes "an actor-shaped
+                        // `#beamtalk_object{}` tuple" from "not" — mistaking
+                        // a CLASS object, also `#beamtalk_object{}`-shaped,
+                        // for a plain actor instance and sending it the
+                        // wrong message shape, `{Selector, Args, PropCtx}`
+                        // instead of `{class_method_call, ...}`, which
+                        // crashes the class gen_server with a
+                        // `function_clause` — found via this issue's own
+                        // "from outside" test), `hasField:`/`clearField:`
+                        // reuse the SAME general dispatcher `perform:`
+                        // already does, so a class-object receiver is
+                        // handled correctly (CLAUDE.md no-duplicate-implementations
+                        // rule: `classify_receiver`'s actor/class/value
+                        // distinction lives in exactly one place).
+                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "HasF")?;
+                        let recv_doc = seq.next();
+                        let name_doc = seq.next();
+                        let call_doc = docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            recv_doc,
+                            ", 'hasField:', [",
+                            name_doc,
+                            "])",
+                        ];
+                        Ok(Some(seq.close(self, call_doc, "HasFRes")))
+                    }
+                    // ADR 0124 §1/§4f/B4: `clearField:` — returns a `late`
+                    // slot to unassigned. A write; lowers exactly as
+                    // `fieldAt:put:` does.
+                    Some(WellKnownSelector::ClearField) => {
+                        debug_assert_eq!(arguments.len(), 1);
+                        // Class-side: every top-level (and producer-
+                        // recognized nested) `self clearField:` position in
+                        // a class method body is intercepted before
+                        // `expression_doc` is ever reached for this exact
+                        // node — `class_method_prelude_producer`
+                        // (`util.rs`) and `lower_class_method_body`
+                        // (`gen_server/methods.rs`), per
+                        // `is_self_clear_field_class_var`'s own doc comment
+                        // (ADR 0124 §4i). There is no general `ClassVars`
+                        // state-threading for this shape at any OTHER
+                        // nesting depth (e.g. inside `ifTrue:` or a loop —
+                        // out of scope for this issue), and reaching this
+                        // class gen_server from inside its own process
+                        // would deadlock (`beamtalk_class_dispatch:handle_class_self_call/1`),
+                        // so reject clearly instead of silently losing the
+                        // mutation or hanging.
+                        if self.in_class_method() {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "'self clearField:' on a class variable is only \
+                                    supported as a class method's own body statement (ADR \
+                                    0124 §4i) — not nested inside a conditional or loop"
+                                    .to_string(),
+                                span: Some(receiver.span()),
+                            });
+                        }
+                        // Fast-path for `self` receiver in actor instance
+                        // context. Avoids sync_send(self()) → deadlock.
+                        // Method-body-level state threading is handled by
+                        // `lower_body_exprs_with_reply`/`is_self_clear_field`/
+                        // `generate_self_clear_field_open`, which intercepts
+                        // before `expression_doc` is called. This intrinsic
+                        // path is a deadlock-avoidance fallback for contexts
+                        // where method-body threading is unavailable (e.g.,
+                        // inside blocks) — mirrors `fieldAt:put:` above. It
+                        // delegates to `beamtalk_primitive:send(State,
+                        // 'clearField:', ...)`, the same pre-existing
+                        // state-threading gap fieldAt:put: has (BT-1324):
+                        // it does NOT thread the updated state back into the
+                        // actor's `State` variable.
+                        if let Expression::Identifier(id) = receiver {
+                            if id.name == "self"
+                                && self.context == super::CodeGenContext::Actor
+                                && self.lookup_var("self").is_none()
+                            {
+                                let name_var = self.fresh_var("Name");
+                                let name_code = self.expression_doc(&arguments[0])?;
+                                let doc = docvec![
+                                    "let ",
+                                    leaf::var(name_var.clone()),
+                                    " = ",
+                                    name_code,
+                                    " in call 'beamtalk_primitive':'send'(",
+                                    leaf::var(self.current_state_var()),
+                                    ", 'clearField:', [",
+                                    leaf::var(name_var),
+                                    "])",
+                                ];
+                                return Ok(Some(doc));
+                            }
+                        }
+
+                        // General dispatch: delegate to
+                        // `beamtalk_message_dispatch:send/3`, exactly like
+                        // `hasField:` above and for the identical reason —
+                        // a hand-rolled `is_tuple`/`is_map` receiver check
+                        // (as `fieldAt:`/`fieldAt:put:` above still do)
+                        // cannot tell a class-object `#beamtalk_object{}`
+                        // apart from an actor-instance one, so it would send
+                        // a live class gen_server the wrong message shape
+                        // and crash it. A value/primitive receiver reaches
+                        // the class's own `dispatch/3`, whose `clearField:`
+                        // arm always raises `immutable_value` (added
+                        // unconditionally, not only for `ClassKind::Value`
+                        // — see `generate_primitive_dispatch`), so no
+                        // hand-rolled error construction is needed here
+                        // either.
+                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "ClrF")?;
+                        let recv_doc = seq.next();
+                        let name_doc = seq.next();
+                        let call_doc = docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            recv_doc,
+                            ", 'clearField:', [",
+                            name_doc,
+                            "])",
+                        ];
+                        Ok(Some(seq.close(self, call_doc, "ClrFRes")))
                     }
                     _ => Ok(None),
                 }

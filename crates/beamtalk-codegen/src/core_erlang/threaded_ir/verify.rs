@@ -341,6 +341,12 @@ impl VerifyWalk<'_> {
                             self.check_use(v, *span);
                         }
                     }
+                    // `Remove` carries no `value` (a `maps:remove` has
+                    // nothing to write) — `class_tag` is never check_use'd
+                    // for `Put` either (it is always a bare `ClassSelf`/
+                    // `nil` literal, never a versioned value), so `Remove`
+                    // is symmetrically inert here.
+                    BindOp::Remove { .. } => {}
                     BindOp::Unpack { .. } => {
                         if let Some(mode) = self.mode_stack.last()
                             && !matches!(mode, ThreadingMode::StateAcc(_))
@@ -370,7 +376,7 @@ impl VerifyWalk<'_> {
                 // body, does not go through — so this joint check must
                 // exclude `Direct` explicitly, matching that exemption.
                 if matches!(target.prefix, VersionPrefix::ClassVars)
-                    && matches!(op, BindOp::Put { .. })
+                    && matches!(op, BindOp::Put { .. } | BindOp::Remove { .. })
                     && *self.shadow_write_eligible_stack.last().unwrap()
                     && !*shadow_write
                     && self.has_class_vars_nlr

@@ -37,6 +37,7 @@ that the Behaviour/Class libraries can rely on.
 | classFieldKinds/1            | Field name -> eager/late kind, local only (ADR 0124 §9/B5b) |
 | classAllFieldKinds/1         | Combined field name -> eager/late kind via superclass chain (ADR 0124 §9/B5b) |
 | classAllFieldKindsByName/1   | Same as classAllFieldKinds/1, by ClassName (ADR 0124 §9/B5b)  |
+| classAllClassVarKindsByName/1 | Flattened class-variable (`classState:`) name -> eager/late kind via superclass chain, by ClassName (ADR 0124 §4i/B4) |
 | classClassVarNames/1        | Class-side field names (class variables) from class meta   |
 | classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
@@ -82,6 +83,9 @@ that the Behaviour/Class libraries can rely on.
     classFieldKinds/1,
     classAllFieldKinds/1,
     classAllFieldKindsByName/1,
+    %% ADR 0124 §4i/B4: class-variable (`classState:`) counterpart, for
+    %% `beamtalk_object_class`'s declared-late `get_class_var` branch.
+    classAllClassVarKindsByName/1,
     %% class-side field (class variable) reflection
     classClassVarNames/1,
     classAllClassVarNames/1,
@@ -541,6 +545,43 @@ classAllFieldKindsByName(ClassName) ->
                         maps:from_list([{F, eager} || F <- Fields])
                 end,
             {cont, maps:merge(FieldKinds, Acc)}
+        end,
+        #{}
+    ).
+
+-doc """
+Flattened class-variable (`classState:`) name -> kind (`'eager'` | `'late'`)
+map, including inherited class variables (ADR 0124 §4i/B4).
+
+The class-side counterpart to `classAllFieldKindsByName/1` — same
+`walk_hierarchy/3` walk and merge-precedence rule, reading each level's own
+`'class_field_kinds'` key (`class_meta.rs`'s `class_field_kinds_doc`,
+B5a) instead of `'field_kinds'`. Backs `beamtalk_object_class`'s
+declared-`late` branch in `get_class_var`'s `handle_call`, which needs this
+per reflective read the same way `beamtalk_reflection:read_field/2` needs
+`classAllFieldKindsByName/1` (§9). Not exposed under a `Behaviour`
+selector — see `classFieldKinds/1`'s own doc for why instance- and
+class-side kind maps stay split rather than merged into one dictionary.
+
+A dynamic level with no `__beamtalk_meta/0` (ClassBuilder-built) contributes
+`'eager'` for every class variable *it* reports, via that level's own
+`gen_server:call(ClassPid, instance_variables)`-style fallback — but
+`ClassBuilder` has no `classState:` concept today, so this degrade is
+theoretical, kept only for symmetry with `classAllFieldKindsByName/1`.
+Returns `#{}` for an unregistered class.
+""".
+-spec classAllClassVarKindsByName(atom()) -> #{atom() => eager | late}.
+classAllClassVarKindsByName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(_CN, CPid, Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            ClassVarKinds =
+                case meta_for_module(Module) of
+                    {ok, Meta} -> maps:get(class_field_kinds, Meta, #{});
+                    not_available -> #{}
+                end,
+            {cont, maps:merge(ClassVarKinds, Acc)}
         end,
         #{}
     ).

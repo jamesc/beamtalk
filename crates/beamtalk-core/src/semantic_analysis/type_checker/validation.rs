@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 
 use crate::announce_selectors::is_announce_selector;
-use crate::ast::{Expression, Literal, TypeAnnotation};
+use crate::ast::{Expression, Literal, SlotKind, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -2236,6 +2236,25 @@ impl TypeChecker {
                     let declared_display = declared_display.clone();
                     let value_display =
                         InferredType::class_name_for_diagnostic(value_type.as_str());
+                    // ADR 0124 §3/§4f: assigning `nil` to a non-nilable
+                    // `late` field is still this same type mismatch (a
+                    // `late` field's type is never nilable — enforced by
+                    // `late_slot_validators`) — but the hint should point at
+                    // `clearField:`, the actual way to return the slot to
+                    // "unassigned", rather than suggesting a differently
+                    // *typed* value as the fix.
+                    let hint = if WellKnownClass::from_str(value_type.as_str())
+                        .is_some_and(WellKnownClass::is_nil_class)
+                        && hierarchy.state_field_kind(&class_name, &field.name) == SlotKind::Late
+                    {
+                        format!(
+                            "`{}` is `late` — use `clearField: #{}` to return it to the \
+                             unassigned state instead of assigning nil",
+                            field.name, field.name
+                        )
+                    } else {
+                        format!("Expected {declared_display} but assigning {value_display}")
+                    };
                     self.diagnostics.push(
                         Diagnostic::warning(
                             format!(
@@ -2245,9 +2264,7 @@ impl TypeChecker {
                             span,
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!(
-                            "Expected {declared_display} but assigning {value_display}"
-                        )),
+                        .with_hint(hint),
                     );
                 }
             }

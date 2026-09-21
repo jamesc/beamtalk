@@ -796,3 +796,69 @@ fn test_untyped_class_no_state_annotation_warning() {
         "non-typed class should not warn about state annotations, got: {warnings:?}"
     );
 }
+
+#[test]
+fn test_late_field_nil_assignment_names_clear_field_in_hint() {
+    // ADR 0124 §3/§4f (BT-3551): `self.proc := nil` on a non-nilable `late`
+    // field stays the same type-mismatch error it always was (`late`
+    // forbids a nilable type, so nil is never assignable) — but the hint
+    // now names `clearField:` as the actual way to reset the slot, rather
+    // than suggesting an Integer value as the fix.
+    let src = "typed Actor subclass: CodexClient\n  late state: proc :: Integer\n\n  stop -> Nil => self.proc := nil\n";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let mismatch = checker
+        .diagnostics()
+        .iter()
+        .find(|d| d.message.contains("Type mismatch: field `proc`"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a type mismatch diagnostic, got: {:?}",
+                checker.diagnostics()
+            )
+        });
+    assert!(
+        mismatch.message.contains("declared as Integer, got Nil"),
+        "the type error itself should be unchanged, got: {}",
+        mismatch.message
+    );
+    let hint = mismatch.hint.as_deref().unwrap_or("");
+    assert!(
+        hint.contains("clearField: #proc"),
+        "hint should name clearField: as the way to reset a late field, got: {hint:?}"
+    );
+}
+
+#[test]
+fn test_eager_field_nil_assignment_hint_unchanged() {
+    // The `clearField:` hint is scoped to `late` fields only — an eager
+    // non-nilable field's nil-assignment hint keeps suggesting a
+    // correctly-typed value, since `clearField:` cannot help there (an
+    // eager field has no "unassigned" state to return to).
+    let src = "typed Actor subclass: Counter\n  state: count :: Integer = 0\n\n  reset -> Nil => self.count := nil\n";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let mismatch = checker
+        .diagnostics()
+        .iter()
+        .find(|d| d.message.contains("Type mismatch: field `count`"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a type mismatch diagnostic, got: {:?}",
+                checker.diagnostics()
+            )
+        });
+    let hint = mismatch.hint.as_deref().unwrap_or("");
+    assert!(
+        !hint.contains("clearField:"),
+        "an eager field's hint should not mention clearField:, got: {hint:?}"
+    );
+    assert!(
+        hint.contains("Expected Integer but assigning Nil"),
+        "got: {hint:?}"
+    );
+}

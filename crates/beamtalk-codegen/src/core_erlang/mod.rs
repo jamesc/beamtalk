@@ -321,6 +321,7 @@ impl CoreErlangGenerator {
                         (Document::Nil, self.expression_doc(value)?)
                     } else if self.in_class_method()
                         && !(self.is_class_var_assignment(value.unwrap_parens())
+                            || self.is_self_clear_field_class_var(value.unwrap_parens())
                             || self.is_class_method_self_send(value.unwrap_parens()))
                     {
                         // ADR 0118 phase 5b: `value` is not ITSELF

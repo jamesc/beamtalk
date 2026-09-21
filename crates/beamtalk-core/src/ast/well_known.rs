@@ -117,6 +117,12 @@ pub enum WellKnownSelector {
     FieldAtPut,
     /// `fieldNames` — return the list of instance variable names of the receiver.
     FieldNames,
+    /// `hasField:` — presence test for a named field (ADR 0124 §1/B4). Never
+    /// raises, unlike `fieldAt:`.
+    HasField,
+    /// `clearField:` — returns a `late` slot to unassigned (ADR 0124 §1/B4).
+    /// A write; lowers exactly as `fieldAt:put:` does.
+    ClearField,
 
     // --- ProtoObject dynamic dispatch ---
     /// `perform:` — send the named selector to the receiver with no arguments.
@@ -178,6 +184,8 @@ impl WellKnownSelector {
             Self::FieldAt => "fieldAt:",
             Self::FieldAtPut => "fieldAt:put:",
             Self::FieldNames => "fieldNames",
+            Self::HasField => "hasField:",
+            Self::ClearField => "clearField:",
             Self::Perform => "perform:",
             Self::PerformWithArgs => "perform:withArguments:",
             Self::PerformLocallyWithArgs => "performLocally:withArguments:",
@@ -222,6 +230,8 @@ impl WellKnownSelector {
             "fieldAt:" => Some(Self::FieldAt),
             "fieldAt:put:" => Some(Self::FieldAtPut),
             "fieldNames" => Some(Self::FieldNames),
+            "hasField:" => Some(Self::HasField),
+            "clearField:" => Some(Self::ClearField),
             "perform:" => Some(Self::Perform),
             "perform:withArguments:" => Some(Self::PerformWithArgs),
             "performLocally:withArguments:" => Some(Self::PerformLocallyWithArgs),
@@ -261,6 +271,8 @@ impl WellKnownSelector {
             | Self::Ensure
             | Self::Error
             | Self::FieldAt
+            | Self::HasField
+            | Self::ClearField
             | Self::Perform
             | Self::WithTimeout
             | Self::At => 1,
@@ -379,6 +391,8 @@ mod tests {
         WellKnownSelector::FieldAt,
         WellKnownSelector::FieldAtPut,
         WellKnownSelector::FieldNames,
+        WellKnownSelector::HasField,
+        WellKnownSelector::ClearField,
         WellKnownSelector::Perform,
         WellKnownSelector::PerformWithArgs,
         WellKnownSelector::PerformLocallyWithArgs,

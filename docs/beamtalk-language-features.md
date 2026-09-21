@@ -1283,10 +1283,39 @@ declaration already is — `state:`/`field:` on `Object` and `state:` on a
 `native:` Actor. Outside declaration position `late` stays an ordinary
 identifier (`late := 1`) or method name.
 
-This covers parsing and validation only; codegen and runtime behaviour
-(excluding a `late` slot from the post-`initialize` definite-assignment
-check, and the guarded `hasField:`/`clearField:` read/write semantics) land
-in later phases of ADR 0124.
+A `late` slot is excluded from the post-`initialize` definite-assignment
+check, and reading it before assignment behaves differently depending on
+how: `self.slot` (or `fieldAt: #slot`) raises `UninitializedStateError`,
+while `hasField: #slot` is the non-raising presence test to ask first —
+`Object`'s `hasField:`/`clearField:` (ADR 0035's `field`-prefixed
+reflection family) make a `late` slot usable, not just declarable:
+`hasField:` answers whether it is currently assigned, and `clearField:`
+returns it to unassigned so it can be acquired again (`maps:remove`, not a
+sentinel value):
+
+```beamtalk
+typed Actor subclass: CodexClient
+  late state: proc :: Subprocess
+  state: workspacePath :: String
+
+  launch -> Nil =>
+    self.proc := Subprocess open: "/bin/bash" args: #() dir: self.workspacePath
+
+  stopProcess -> Nil =>
+    (self hasField: #proc)
+      ifTrue: [self clearField: #proc]
+    nil
+```
+
+`hasField:` and `clearField:` are declared on `Object`, so they answer for
+every receiver, not only `late`-slot actors: `hasField:` on a `Value`
+answers whether the named field is declared, and on a primitive (`Integer`,
+`String`, …) always answers `false` — never raises. `clearField:` on a
+`Value` is the same "Cannot modify slot on value type" error `fieldAt:put:`
+already raises, since a `Value` is fully constructed and never reassigned.
+The class-side counterpart (`classState:`) works the same way, both from
+inside a class method (`self hasField:`/`self clearField:`) and from
+outside (`SomeClass hasField: #x`/`SomeClass clearField: #x`).
 
 ### Definite Assignment (ADR 0124)
 

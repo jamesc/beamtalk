@@ -1911,6 +1911,48 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+                // C7b — self clearField: name (ADR 0124 §1/B4), mirroring C7
+                // immediately above: same `BindOp::Direct` shape with
+                // `maps:remove` in place of `maps:put` and no value argument
+                // to thread. Returns `Self` (`clearField: -> Self`,
+                // `generate_self_clear_field_open`'s own convention) rather
+                // than a written value.
+                BodyExprKind::SelfClearField => {
+                    if let Expression::MessageSend { arguments, .. } = expr {
+                        let name_var = self.fresh_var("Name");
+                        let name_code = self.expression_doc(&arguments[0])?;
+                        let source_version = self.state_version();
+                        let current_state_name = self.current_state_var();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in ",
+                            ],
+                            span,
+                        ));
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'maps':'remove'(",
+                                leaf::var(name_var),
+                                ", ",
+                                leaf::var(current_state_name),
+                                ")",
+                            ])),
+                            shadow_write: false,
+                            span,
+                        });
+                        if is_last {
+                            last_result = Some(ValueRef::Var("Self".to_string()));
+                        }
+                    }
+                }
                 // C8 — self fieldAt: name put: <control-flow-with-mutations>.
                 BodyExprKind::SelfFieldAtPutControlFlow => {
                     if let Expression::MessageSend { arguments, .. } = expr {

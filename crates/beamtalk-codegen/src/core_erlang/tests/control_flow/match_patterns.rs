@@ -294,21 +294,32 @@ fn test_match_type_pattern_true_false_nil_use_exact_atom_match() {
 
     eprintln!("Generated code for True/False/Nil/UndefinedObject type patterns:\n{code}");
 
+    // Scope the `is_map` check to the `match:` construct's own compiled
+    // function (`'test:'/2`), not the whole module: `dispatch/3` now
+    // unconditionally carries a `hasField:` arm (ADR 0124 B4) that uses
+    // `is_map` to tell a map-backed instance from a primitive/value term —
+    // an unrelated reflection check, not the tagged-class dispatch this
+    // test guards against.
+    let test_fn = code
+        .split("'test:'/2 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("generated code should contain a 'test:'/2 function");
     assert!(
-        !code.contains("is_map"),
-        "None of True/False/Nil/UndefinedObject should use the tagged-class is_map check. Got:\n{code}"
+        !test_fn.contains("is_map"),
+        "None of True/False/Nil/UndefinedObject should use the tagged-class is_map check. Got 'test:'/2 body:\n{test_fn}"
     );
     assert!(
-        code.matches("<'true'>").count() >= 1,
-        "Should contain an exact 'true' match for the True arm. Got:\n{code}"
+        test_fn.matches("<'true'>").count() >= 1,
+        "Should contain an exact 'true' match for the True arm. Got 'test:'/2 body:\n{test_fn}"
     );
     assert!(
-        code.matches("<'false'>").count() >= 1,
-        "Should contain an exact 'false' match for the False arm. Got:\n{code}"
+        test_fn.matches("<'false'>").count() >= 1,
+        "Should contain an exact 'false' match for the False arm. Got 'test:'/2 body:\n{test_fn}"
     );
     assert!(
-        code.matches("<'nil'>").count() >= 2,
-        "Should contain an exact 'nil' match for both the Nil and UndefinedObject arms. Got:\n{code}"
+        test_fn.matches("<'nil'>").count() >= 2,
+        "Should contain an exact 'nil' match for both the Nil and UndefinedObject arms. Got 'test:'/2 body:\n{test_fn}"
     );
 }
 

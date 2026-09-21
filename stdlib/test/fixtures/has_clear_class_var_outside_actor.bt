@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// HasClearClassVarOutsideActor — test fixture for BT-3551 (ADR 0124 §1/§4i/§9/B4)
+//
+// Kept as its own class, separate from `has_clear_class_var_actor.bt`'s
+// `HasClearClassVarActor`, so the "from outside" (`Cls hasField:`/`Cls
+// clearField:`) BUnit test and the "via class methods" one — both driving
+// the SAME long-lived, un-reset class gen_server through the identical
+// launch/clear lifecycle — can't observe each other's mutations, mirroring
+// `late_class_var_assigned_actor.bt`'s own reason for existing as a
+// separate class from `late_class_var_read_actor.bt`.
+
+typed Actor subclass: HasClearClassVarOutsideActor
+  late classState: current :: Integer
+
+  class launch: value :: Integer -> Nil =>
+    self.current := value
+    nil

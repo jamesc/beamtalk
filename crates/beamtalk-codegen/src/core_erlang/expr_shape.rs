@@ -48,6 +48,13 @@ pub(super) struct ShapeCtx<'a> {
     /// (`lookup_var("self").is_some()`) — a shadowed `self` (e.g. a REPL
     /// binding) is not the receiver [`is_self_field_at_put`] means.
     pub(super) self_var_bound: bool,
+    /// [`CoreErlangGenerator::block_depth`] — 0 at a class method's own top
+    /// frame (`lower_class_method_body`'s reset, `gen_server/methods.rs`),
+    /// `>= 1` once compilation has entered a block literal (`blocks.rs`'s
+    /// `block_depth += 1`/`-= 1` pair). [`is_self_clear_field_class_var`]
+    /// uses this the same way `generate_class_var_field_assignment`'s own
+    /// `shadow_write = self.block_depth == 0` gate does.
+    pub(super) block_depth: usize,
 }
 
 impl CoreErlangGenerator {
@@ -60,6 +67,7 @@ impl CoreErlangGenerator {
             class_method_selectors: self.class_method_selectors(),
             class_name: self.class_name(),
             self_var_bound: self.lookup_var("self").is_some(),
+            block_depth: self.block_depth,
         }
     }
 }
@@ -332,7 +340,8 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
     // layer **unconditionally** handles before `try_handle_self_dispatch`.
     // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
     // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
-    // `fieldAt:`, `fieldAt:put:`, `fieldNames`), Nil protocol
+    // `fieldAt:`, `fieldAt:put:`, `fieldNames`, `hasField:`, `clearField:`
+    // — ADR 0124 §1/B4), Nil protocol
     // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
     // `ifNotNil:ifNil:`), exception handling (`on:do:`, `ensure:`),
     // block application (`value`/`value:`/`value:value:`/
@@ -369,6 +378,8 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
                 | WellKnownSelector::FieldAt
                 | WellKnownSelector::FieldAtPut
                 | WellKnownSelector::FieldNames
+                | WellKnownSelector::HasField
+                | WellKnownSelector::ClearField
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
                 | WellKnownSelector::PerformLocallyWithArgs
@@ -442,6 +453,112 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
     false
 }
 
+/// Checks if an expression is `self clearField: <name>` in actor **instance**
+/// context (ADR 0124 §1/B4) — the arity-1 write counterpart to
+/// [`is_self_field_at_put`], recognized identically (same receiver/context/
+/// self-binding guard) but for `WellKnownSelector::ClearField`. Excludes a
+/// class method (`ctx.in_class_method`): a `classState:` slot lives in
+/// `ClassVars`, not `State`, and is handled separately by
+/// [`is_self_clear_field_class_var`].
+pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+    if ctx.context != CodeGenContext::Actor || ctx.in_class_method {
+        return false;
+    }
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    {
+        if let Expression::Identifier(id) = receiver.as_ref() {
+            if id.name == "self"
+                && !ctx.self_var_bound
+                && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
+                && arguments.len() == 1
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Checks if an expression is `self clearField: #name` inside a **class
+/// method**, where `#name` is a literal Symbol naming a declared class
+/// variable (ADR 0124 §4i) — the `MessageSend` counterpart to
+/// [`is_class_var_assignment`]'s `self.x := v` `Assignment` shape. A literal
+/// Symbol argument is required because the mutation lowers to a `ThreadedIr`
+/// `Bind` whose `maps:remove` target field is a static Core Erlang atom,
+/// exactly the constraint `is_class_var_assignment`'s AST-derived field name
+/// already carries. A dynamic-name `clearField:` (or one naming an unknown
+/// class variable) falls through to generic dispatch instead of this
+/// producer path.
+///
+/// `ctx.block_depth == 0` (the method's own top frame) is also required —
+/// unlike `is_class_var_assignment`/`is_class_method_self_send`, which a
+/// loop/conditional body's own per-statement classifier (`control_flow::body`,
+/// `control_flow::conditionals`) separately re-checks against that
+/// construct's actual `threading_families` before accepting the shape, this
+/// predicate's callers (`class_method_prelude_producer` and every
+/// `is_class_var_assignment(..) || is_self_clear_field_class_var(..) || ..`
+/// site) splice a real `Bind` unconditionally wherever it matches. `self
+/// clearField:` is deliberately excluded from `is_family_mutation`'s
+/// `ClassVars` arm (see that match arm's own comment) — no loop/conditional
+/// construct ever allocates a `ClassVars` slot for it — so recognizing this
+/// shape at `block_depth > 0` would splice a `Bind` whose result has nowhere
+/// to go: the mutation is silently dropped, and — inside a `whileTrue:`
+/// loop specifically — the loop's own local-variable threading is *also*
+/// broken by the same unaccounted-for prelude (`thread_ahead`'s unconditional
+/// `threaded_expression` call), an infinite loop, not just a lost write.
+/// Gating here, once, protects every current and future call site uniformly
+/// instead of auditing each one's own threading-family check; any nested
+/// position instead falls through to `try_generate_object_reflection`'s
+/// `ClearField` arm, whose `in_class_method()` check raises a clear
+/// `UnsupportedFeature` compile error (mirroring the `FieldAssignmentInUnsupportedBlock`/
+/// `ClassMethodSelfSendInThreadedLoopBody` diagnostics a plain `self.x := v`/
+/// self-send gets in the same position).
+pub(super) fn is_self_clear_field_class_var(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+    if !ctx.in_class_method || ctx.block_depth != 0 {
+        return false;
+    }
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    {
+        if let Expression::Identifier(id) = receiver.as_ref() {
+            if id.name == "self"
+                && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
+                && arguments.len() == 1
+            {
+                if let Expression::Literal(Literal::Symbol(name), _) = arguments[0].unwrap_parens()
+                {
+                    return ctx.class_var_names.contains(name.as_str());
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The literal Symbol field name `self clearField: #name` names, given
+/// [`is_self_clear_field_class_var`] already matched `expr` — the shared
+/// extraction every call site that matched the predicate uses instead of
+/// re-deriving the same `unwrap_parens`/pattern-match (CLAUDE.md
+/// no-duplicate-implementations rule).
+pub(super) fn self_clear_field_class_var_name(expr: &Expression) -> Option<&str> {
+    let Expression::MessageSend { arguments, .. } = expr else {
+        return None;
+    };
+    match arguments.first()?.unwrap_parens() {
+        Expression::Literal(Literal::Symbol(name), _) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
 impl CoreErlangGenerator {
     /// See [`is_class_var_assignment`].
     pub(super) fn is_class_var_assignment(&self, expr: &Expression) -> bool {
@@ -466,6 +583,16 @@ impl CoreErlangGenerator {
     /// See [`is_self_field_at_put`].
     pub(super) fn is_self_field_at_put(&self, expr: &Expression) -> bool {
         is_self_field_at_put(&self.shape_ctx(), expr)
+    }
+
+    /// See [`is_self_clear_field`].
+    pub(super) fn is_self_clear_field(&self, expr: &Expression) -> bool {
+        is_self_clear_field(&self.shape_ctx(), expr)
+    }
+
+    /// See [`is_self_clear_field_class_var`].
+    pub(super) fn is_self_clear_field_class_var(&self, expr: &Expression) -> bool {
+        is_self_clear_field_class_var(&self.shape_ctx(), expr)
     }
 
     /// See [`is_field_assignment`].
