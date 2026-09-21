@@ -1317,6 +1317,101 @@ The class-side counterpart (`classState:`) works the same way, both from
 inside a class method (`self hasField:`/`self clearField:`) and from
 outside (`SomeClass hasField: #x`/`SomeClass clearField: #x`).
 
+### Definite Assignment (ADR 0124)
+
+The compiler checks, at a class's construction site, that every declared,
+typed, non-nilable, no-default, non-`late` slot is guaranteed a real value —
+the same predicate ADR 0078's runtime backstop already used for Actors, now
+also checked statically, and now for Values too.
+
+**The predicate.** A `state:`/`field:` slot *requires definite assignment*
+when it carries a type annotation, has no default value, its declared type
+does not admit `Nil` (resolving [aliases](#named-type-aliases-type-declarations-adr-0108)
+and intersection/negation operators), and it is not declared `late`:
+
+```beamtalk
+state: count :: Integer            // requires assignment
+state: label :: String | Nil       // no — Nil is a valid value
+state: count :: Integer = 0        // no — has a default
+state: count                       // no — untyped, defaults to nil
+late state: proc :: Subprocess     // no — declared assigned later (see above)
+```
+
+**Where it reports: the construction site, not the declaration.** A
+declaration alone is not enough evidence — the slot might be supplied at
+every real call site — so the diagnostic fires on `Cls spawn` / `Cls new`,
+or a literal-map `Cls spawnWith: #{...}` / `Cls new: #{...}` that omits the
+slot; only a *literal* map is inspected, the same boundary the `spawnWith:`
+key-checking rule above uses:
+
+```beamtalk
+typed Actor subclass: Connection
+  state: socket :: Socket
+  state: retries :: Integer = 0
+
+Connection spawn
+//         ^ warning: `Connection` declares `socket :: Socket` with no
+//           default, and no `initialize` in its chain assigns it.
+//           `Connection spawn` supplies no `socket`, so it may raise
+//           `UninitializedStateError`
+```
+
+**The four fixes**, named in the diagnostic's hint: supply the slot at the
+construction site, give it a default value, widen its type to admit `Nil`,
+or declare it `late` (Actors only, since `late field:` is rejected on a
+Value — see above).
+
+**The Actor/Value asymmetry.** For an `Actor subclass:`, this diagnostic is
+an early warning in front of ADR 0078's existing runtime check — a spawn it
+flags was already going to raise `UninitializedStateError`, just later, at
+spawn time instead of at compile time. **For a `Value subclass:`, it is the
+*only* check there is** — Values have no `initialize` and no
+post-construction runtime validation, so `StoredSnapshot new` on a
+typed-no-default field silently yields an instance holding `nil` behind a
+declared non-nilable type, with nothing to catch it at runtime. That makes
+the default `Warning` severity a real gap, not merely an advisory one, for a
+Value-heavy codebase — see escalation below.
+
+**The deserialization limit.** A Value built by deserialization has no
+construction site at all:
+
+```beamtalk
+typed Value subclass: StoredSnapshot
+  field: state :: ReplaySnapshot   // typed, no default
+
+  class fromBinary: content :: Binary -> StoredSnapshot =>
+    result :: StoredSnapshot := Binary deserialize: content
+    result
+```
+
+`Binary deserialize:` is not `new`/`new:`, so the check never inspects this
+site — the local type annotation on `result` is an assertion at a
+type-erasure boundary, not something the checker can verify, and nothing is
+reported here (consistent with the open-world silence of
+[ADR 0100](ADR/0100-open-world-diagnostic-policy.md) where knowledge is
+absent). A class in this position should default the field or widen it to
+`| Nil`.
+
+**Severity and `@expect`.** The diagnostic is `Warning` when the checker's
+knowledge is complete — the ancestor chain is fully known, no ancestor is
+`native:`, and (for Actors) no `fieldAt:put:`/`perform:` write anywhere in
+the class is invisible to the must-analysis — and `Hint` otherwise. There is
+**no dedicated `@expect` category** for this diagnostic, by design: `late`
+is the language construct that opts a slot out, not an annotation that
+silences a warning about it. A test that deliberately constructs an
+instance with the slot left unassigned suppresses the diagnostic with
+`@expect all`.
+
+**Escalating to `Error`.** Per-project severity is
+[ADR 0100](ADR/0100-open-world-diagnostic-policy.md) Rule 3's `[diagnostics]`
+table (`definite-assignment = "error"` in `beamtalk.toml` — see the
+[Package Management guide](beamtalk-packages.md#diagnostics-section)).
+Because a Value's `Warning` has no runtime backstop, a Value-heavy codebase
+has more reason to make that escalation than an Actor-heavy one — provided
+the bare-`new`-override check is in place: a class that defines its own
+`class new`/`new:` already exempts that construction site, the same as any
+other override of the auto-generated constructor.
+
 ### Annotation Forms
 
 ```beamtalk
@@ -2501,6 +2596,8 @@ An `Actor subclass:`'s public method set *is* its message protocol — the check
    ```
 
    Only a *literal* map is inspected; a `spawnWith:` argument flowing in through a variable is not key-checked. The rule fires only for `Actor subclass:` receivers.
+
+   **Supplying a `late` slot by key counts as assigned.** `spawn`'s `init/1` merges the declared defaults with the caller's map, caller winning, so `CodexClient spawnWith: #{#proc => aFakeSubprocess}` puts `proc` in the state map even though it is declared `late` — this is legitimate dependency injection (substituting a value for a slot normally acquired by a lifecycle call), not a violation of `late`'s "absent until assigned" contract, and it also satisfies the [Definite Assignment](#definite-assignment-adr-0124) construction-site check the same way supplying any other unassigned slot does. See [`late` Slots](#late-slots-adr-0124) above.
 
 4. **`withTimeout:` is transparent; cross-process DNU grades like a local send.** `withTimeout:` returns a value typed as the *wrapped* actor (not the opaque `TimeoutProxy`), so forwarded calls resolve the wrapped class's real return types. A timeout raises rather than returning, so method return types are unchanged. An unknown selector on a statically-known actor gets the same knowledge-graded [ADR 0100](ADR/0100-diagnostic-severity-open-world.md) diagnostic as a local send — the process boundary is invisible to the checker:
 
