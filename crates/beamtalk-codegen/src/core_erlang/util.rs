@@ -693,6 +693,16 @@ impl CoreErlangGenerator {
                 frame,
             )?));
         }
+        if self.is_self_clear_field_class_var(expr) {
+            let field_name = super::expr_shape::self_clear_field_class_var_name(expr)
+                .expect("is_self_clear_field_class_var guarantees a literal Symbol argument")
+                .to_string();
+            return Ok(Some(self.generate_class_var_field_clear(
+                &field_name,
+                expr.span(),
+                frame,
+            )?));
+        }
         if self.is_class_method_self_send(expr) {
             let Expression::MessageSend {
                 selector,
@@ -811,7 +821,9 @@ impl CoreErlangGenerator {
         // binary operand, a cascade message, ...). A pure predicate check
         // (not the mutating producer call itself) so this stays a probe.
         if self.in_class_method()
-            && (self.is_class_var_assignment(inner) || self.is_class_method_self_send(inner))
+            && (self.is_class_var_assignment(inner)
+                || self.is_self_clear_field_class_var(inner)
+                || self.is_class_method_self_send(inner))
         {
             return true;
         }

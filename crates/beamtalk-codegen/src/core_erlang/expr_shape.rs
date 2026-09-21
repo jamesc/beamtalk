@@ -332,7 +332,8 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
     // layer **unconditionally** handles before `try_handle_self_dispatch`.
     // Covers ProtoObject (`class`, `perform:`/`perform:withArguments:`/
     // `performLocally:withArguments:`), Object reflection (`respondsTo:`,
-    // `fieldAt:`, `fieldAt:put:`, `fieldNames`), Nil protocol
+    // `fieldAt:`, `fieldAt:put:`, `fieldNames`, `hasField:`, `clearField:`
+    // — ADR 0124 §1/B4), Nil protocol
     // (`isNil`/`notNil`/`ifNil:`/`ifNotNil:`/`ifNil:ifNotNil:`/
     // `ifNotNil:ifNil:`), exception handling (`on:do:`, `ensure:`),
     // block application (`value`/`value:`/`value:value:`/
@@ -369,6 +370,8 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
                 | WellKnownSelector::FieldAt
                 | WellKnownSelector::FieldAtPut
                 | WellKnownSelector::FieldNames
+                | WellKnownSelector::HasField
+                | WellKnownSelector::ClearField
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
                 | WellKnownSelector::PerformLocallyWithArgs
@@ -442,6 +445,88 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
     false
 }
 
+/// Checks if an expression is `self clearField: <name>` in actor **instance**
+/// context (ADR 0124 §1/B4) — the arity-1 write counterpart to
+/// [`is_self_field_at_put`], recognized identically (same receiver/context/
+/// self-binding guard) but for `WellKnownSelector::ClearField`. Excludes a
+/// class method (`ctx.in_class_method`): a `classState:` slot lives in
+/// `ClassVars`, not `State`, and is handled separately by
+/// [`is_self_clear_field_class_var`].
+pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+    if ctx.context != CodeGenContext::Actor || ctx.in_class_method {
+        return false;
+    }
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    {
+        if let Expression::Identifier(id) = receiver.as_ref() {
+            if id.name == "self"
+                && !ctx.self_var_bound
+                && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
+                && arguments.len() == 1
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Checks if an expression is `self clearField: #name` inside a **class
+/// method**, where `#name` is a literal Symbol naming a declared class
+/// variable (ADR 0124 §4i) — the `MessageSend` counterpart to
+/// [`is_class_var_assignment`]'s `self.x := v` `Assignment` shape. A literal
+/// Symbol argument is required because the mutation lowers to a `ThreadedIr`
+/// `Bind` whose `maps:remove` target field is a static Core Erlang atom,
+/// exactly the constraint `is_class_var_assignment`'s AST-derived field name
+/// already carries. A dynamic-name `clearField:` (or one naming an unknown
+/// class variable) falls through to generic dispatch instead of this
+/// producer path.
+pub(super) fn is_self_clear_field_class_var(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+    if !ctx.in_class_method {
+        return false;
+    }
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    {
+        if let Expression::Identifier(id) = receiver.as_ref() {
+            if id.name == "self"
+                && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
+                && arguments.len() == 1
+            {
+                if let Expression::Literal(Literal::Symbol(name), _) = arguments[0].unwrap_parens()
+                {
+                    return ctx.class_var_names.contains(name.as_str());
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The literal Symbol field name `self clearField: #name` names, given
+/// [`is_self_clear_field_class_var`] already matched `expr` — the shared
+/// extraction every call site that matched the predicate uses instead of
+/// re-deriving the same `unwrap_parens`/pattern-match (CLAUDE.md
+/// no-duplicate-implementations rule).
+pub(super) fn self_clear_field_class_var_name(expr: &Expression) -> Option<&str> {
+    let Expression::MessageSend { arguments, .. } = expr else {
+        return None;
+    };
+    match arguments.first()?.unwrap_parens() {
+        Expression::Literal(Literal::Symbol(name), _) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
 impl CoreErlangGenerator {
     /// See [`is_class_var_assignment`].
     pub(super) fn is_class_var_assignment(&self, expr: &Expression) -> bool {
@@ -466,6 +551,16 @@ impl CoreErlangGenerator {
     /// See [`is_self_field_at_put`].
     pub(super) fn is_self_field_at_put(&self, expr: &Expression) -> bool {
         is_self_field_at_put(&self.shape_ctx(), expr)
+    }
+
+    /// See [`is_self_clear_field`].
+    pub(super) fn is_self_clear_field(&self, expr: &Expression) -> bool {
+        is_self_clear_field(&self.shape_ctx(), expr)
+    }
+
+    /// See [`is_self_clear_field_class_var`].
+    pub(super) fn is_self_clear_field_class_var(&self, expr: &Expression) -> bool {
+        is_self_clear_field_class_var(&self.shape_ctx(), expr)
     }
 
     /// See [`is_field_assignment`].

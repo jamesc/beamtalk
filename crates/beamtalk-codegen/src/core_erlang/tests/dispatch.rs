@@ -2522,6 +2522,122 @@ fn test_field_at_put_self_threads_state() {
     );
 }
 
+// ADR 0124 §1/§4f/B4 — `clearField:`/`hasField:` mirror `fieldAt:put:`/
+// `fieldAt:`'s own sync_send-avoidance tests immediately above.
+
+#[test]
+fn test_clear_field_other_receiver_uses_message_dispatch() {
+    // clearField: on a non-self receiver delegates to
+    // beamtalk_message_dispatch:send/3 (NOT a hand-rolled is_tuple/is_map
+    // check, unlike fieldAt:/fieldAt:put: above) — the general dispatcher
+    // already classifies actor/class-object/value receivers correctly, so
+    // a class-object receiver reaches `dispatch_class_method`'s
+    // `'clearField:'` clause instead of being mistaken for a plain actor
+    // instance and crashing it with the wrong message shape (found via
+    // this issue's own "from outside" BUnit test).
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  run: other with: name =>\n",
+        "    other clearField: name\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'beamtalk_message_dispatch':'send'") && code.contains("'clearField:'"),
+        "clearField: on a non-self receiver must delegate to beamtalk_message_dispatch:send with the 'clearField:' selector. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'async_send'"),
+        "clearField: must not use async_send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_clear_field_self_no_sync_send() {
+    // `self clearField: name` inside an actor must NOT route through
+    // sync_send (deadlock risk) — must thread state via maps:remove
+    // (`generate_self_clear_field_open`, mirroring `fieldAt:put:`'s
+    // `maps:put`).
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  clear: name =>\n",
+        "    self clearField: name\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        !has_sync_send_for_selector(&code, "'clearField:'"),
+        "self clearField: must not route through sync_send (deadlock risk). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'maps':'remove'"),
+        "self clearField: must thread state via maps:remove (ADR 0124 §4f). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_clear_field_self_threads_state() {
+    // After `self clearField: #x`, a subsequent `self fieldAt: #x` must
+    // read from the updated (post-remove) state, not the stale snapshot.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  clearAndRead =>\n",
+        "    self clearField: #x.\n",
+        "    self fieldAt: #x\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'maps':'remove'"),
+        "self clearField: must use maps:remove for state threading. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'(State1, 'fieldAt:'"),
+        "self fieldAt: read must reference State1 after clearField: threading. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_has_field_self_no_sync_send() {
+    // `self hasField: name` inside an actor must NOT route through
+    // sync_send (deadlock risk) — a pure read via beamtalk_primitive:send,
+    // mirroring `fieldAt:`.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  has: name =>\n",
+        "    self hasField: name\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        !has_sync_send_for_selector(&code, "'hasField:'"),
+        "self hasField: must not route through sync_send (deadlock risk). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'"),
+        "self hasField: must route through beamtalk_primitive:send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_has_field_other_receiver_uses_message_dispatch() {
+    // hasField: on a non-self receiver delegates to
+    // beamtalk_message_dispatch:send/3 — see
+    // test_clear_field_other_receiver_uses_message_dispatch's doc comment
+    // for why (a class-object receiver, not just a plain actor instance).
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: x = 0\n\n",
+        "  run: other with: name =>\n",
+        "    other hasField: name\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'beamtalk_message_dispatch':'send'") && code.contains("'hasField:'"),
+        "hasField: on a non-self receiver must delegate to beamtalk_message_dispatch:send with the 'hasField:' selector. Got:\n{code}"
+    );
+}
+
 // --- State-mutation hoisting in block value: apply paths ---
 
 #[test]

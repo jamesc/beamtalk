@@ -283,6 +283,33 @@ ProtoObject subclass: Object
   sealed fieldAt: name :: Symbol put: value :: Object -> Self =>
     @intrinsic fieldAtPut
 
+  /// Test whether the receiver has the named field. Never raises — the
+  /// non-raising counterpart to `fieldAt:`, in particular for a `late`
+  /// slot (ADR 0124): `fieldAt:` raises `UninitializedStateError` reading
+  /// an unassigned `late` slot, `hasField:` is the question to ask first.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := CodexClient start: "/tmp/ws" config: cfg onEvent: nil
+  /// c hasField: #proc      // => false — declared `late`, not yet assigned
+  /// c launch
+  /// c hasField: #proc      // => true
+  /// 42 hasField: #anything // => false — primitives have no fields
+  /// ```
+  sealed hasField: name :: Symbol -> Boolean => @intrinsic hasField
+
+  /// Return a `late` field to the unassigned state (ADR 0124), so it can be
+  /// assigned again (e.g. re-acquiring a resource). Joins `fieldAt:`/
+  /// `fieldAt:put:`/`fieldNames` in ADR 0035's `field`-prefixed reflection
+  /// family. Returns `self`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c clearField: #proc
+  /// c hasField: #proc       // => false — relaunchable
+  /// ```
+  sealed clearField: name :: Symbol -> Self => @intrinsic clearField
+
   /// Send a unary message dynamically.
   ///
   /// Left without a declared return type deliberately (BT-2834 pattern,

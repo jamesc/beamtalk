@@ -585,6 +585,12 @@ pub(in crate::core_erlang) enum BindOp {
         value: ValueRef,
         class_tag: ValueRef,
     },
+    /// A field/class-var un-assign (ADR 0124 §1/B4): `call
+    /// 'maps':'remove'(field, source)`. `clearField:`'s counterpart to
+    /// [`Self::Put`] — same shadow-write semantics (`class_tag`, rendered
+    /// identically), but two-arity `maps:remove` in place of three-arity
+    /// `maps:put`, since there is no value being written.
+    Remove { field: String, class_tag: ValueRef },
     /// Unpacks a threaded local from the incoming `StateAcc` map at
     /// loop-iteration start (`generate_unpack_at_iteration_start`) — legal
     /// only inside a [`ThreadingMode::StateAcc`] body; see

@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// HasClearFieldActor — test fixture for BT-3551 (ADR 0124 §1/§4f/§9/B4)
+//
+// The Symphony `CodexClient`/`stopProcess` shape the ADR is evidenced on
+// (§Context (a)): a `late state:` resource slot, acquired by an explicit
+// `launch`, released by `stopProcess`'s `hasField:`-guarded `clearField:`,
+// relaunchable afterwards.
+
+typed Actor subclass: HasClearFieldActor
+  late state: proc :: Integer
+  state: count :: Integer = 0
+
+  hasProc -> Boolean => self hasField: #proc
+
+  launch: value :: Integer -> Nil =>
+    self.proc := value
+    nil
+
+  // Mirrors Symphony's real `stopProcess` exactly (ADR 0124 §1):
+  //   stopProcess -> Nil =>
+  //     (self hasField: #proc) ifTrue: [... self clearField: #proc]
+  //     nil
+  stopProcess -> Nil =>
+    (self hasField: #proc) ifTrue: [self clearField: #proc]
+    nil
+
+  // A plain top-level `clearField:` (not guarded/nested), exercising the
+  // simpler shape and its `-> Self` return value.
+  clearProc -> Self => self clearField: #proc
+
+  getCount -> Integer => self.count

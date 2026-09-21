@@ -724,6 +724,31 @@ fn render_bind(
                 put_doc
             }
         }
+        BindOp::Remove { field, class_tag } => {
+            let remove_doc = docvec![
+                "let ",
+                leaf::var(target_name.clone()),
+                " = call 'maps':'remove'(",
+                leaf::atom(field.clone()),
+                ", ",
+                leaf::var(source_name),
+                ") in ",
+            ];
+            if shadow_write {
+                docvec![
+                    remove_doc,
+                    "let _ = call 'erlang':'put'({",
+                    leaf::atom("$bt_class_vars_shadow"),
+                    ", call 'erlang':'element'(2, ",
+                    render_value(class_tag, ctx),
+                    ")}, ",
+                    leaf::var(target_name),
+                    ") in ",
+                ]
+            } else {
+                remove_doc
+            }
+        }
         BindOp::Unpack { field } => docvec![
             "let ",
             leaf::var(target_name),

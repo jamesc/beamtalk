@@ -4188,8 +4188,9 @@ impl CoreErlangGenerator {
     ///
     /// This routes selectors to individual method functions, provides reflection
     /// methods (class, respondsTo:, fieldNames, fieldAt:, fieldAt:put:,
-    /// perform:, perform:withArguments:), checks the extension registry for unknown
-    /// selectors, and delegates to superclass dispatch/3 for inherited methods.
+    /// hasField:, clearField:, perform:, perform:withArguments:), checks the
+    /// extension registry for unknown selectors, and delegates to superclass
+    /// dispatch/3 for inherited methods.
     /// Only raises `does_not_understand` at the hierarchy root (`ProtoObject`).
     ///
     /// For classes with zero instance methods (e.g., File), generates a
@@ -4226,6 +4227,7 @@ impl CoreErlangGenerator {
         let is_value_class = class.class_kind == ClassKind::Value;
         let (field_names_branch, field_at_branch) =
             Self::generate_dispatch_reflection_branches(&class_name, is_value_class);
+        let has_field_branch = Self::generate_dispatch_has_field_branch();
 
         // fieldAt:put: hint — suggest with*: for value objects, assignment for primitives
         let immutable_hint = if is_value_class {
@@ -4290,6 +4292,8 @@ impl CoreErlangGenerator {
             field_names_branch,
             // fieldAt: — reads from map for value objects, error for primitives
             field_at_branch,
+            // hasField: — presence test, never raises (ADR 0124 §1/§9/B4)
+            has_field_branch,
             // fieldAt:put:
             "        <'fieldAt:put:'> when 'true' ->\n",
             "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', ",
@@ -4297,9 +4301,21 @@ impl CoreErlangGenerator {
             ") in\n",
             "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'fieldAt:put:') in\n",
             "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, ",
-            leaf::binary_lit(immutable_hint),
+            leaf::binary_lit(immutable_hint.clone()),
             ") in\n",
             "            call 'beamtalk_error':'raise'(ImmErr2)\n",
+            // clearField: — always the existing "Cannot modify slot on
+            // value type" error (ADR 0124 §1/B4): a Value can never declare
+            // a `late field:` (§5), so there is never a late slot to clear.
+            "        <'clearField:'> when 'true' ->\n",
+            "            let <ClrErr0> = call 'beamtalk_error':'new'('immutable_value', ",
+            leaf::atom(class_name.clone()),
+            ") in\n",
+            "            let <ClrErr1> = call 'beamtalk_error':'with_selector'(ClrErr0, 'clearField:') in\n",
+            "            let <ClrErr2> = call 'beamtalk_error':'with_hint'(ClrErr1, ",
+            leaf::binary_lit(immutable_hint),
+            ") in\n",
+            "            call 'beamtalk_error':'raise'(ClrErr2)\n",
             // perform:
             "        <'perform:'> when 'true' ->\n",
             "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
@@ -4410,6 +4426,44 @@ impl CoreErlangGenerator {
         };
 
         (field_names_branch, field_at_branch)
+    }
+
+    /// Generates the `hasField:` dispatch arm (ADR 0124 §1/§9/B4).
+    ///
+    /// A presence test that never raises — the one difference from
+    /// [`Self::generate_dispatch_reflection_branches`]'s `fieldAt:` sibling,
+    /// whose primitive-type branch raises `immutable_value` instead. A
+    /// primitive type has no fields at all, so `hasField:` on one always
+    /// answers `'false'`, exactly like `Object>>fieldNames` already answers
+    /// `#()` for a primitive rather than erroring.
+    ///
+    /// Guards with a **runtime** `is_map(Self)` check rather than trusting
+    /// the compile-time `ClassKind::Value` classification every OTHER
+    /// reflection arm in this function keys on: several stdlib `Value`
+    /// subclasses (`Integer`, `Float`, `String`, `Character`, `Boolean`,
+    /// `UndefinedObject`, `Block`, …, via `Number`/`Value`) are
+    /// `ClassKind::Value` for type-checking purposes but represent their
+    /// instances as bare Erlang terms, never a tagged map — so
+    /// `beamtalk_reflection:has_field/2`'s `is_map(State)` guard would
+    /// `function_clause`-crash on `Self` for any of them. `fieldAt:`'s own
+    /// arm has the identical latent gap but is masked in practice: every
+    /// existing call site reaches it only through the intrinsic's own
+    /// call-site `is_map`/`is_tuple` dance (`intrinsics.rs`), which never
+    /// forwards a non-map primitive into `dispatch/3` at all. `hasField:`
+    /// (and `clearField:`'s non-self path) instead delegate the general
+    /// case to `beamtalk_message_dispatch:send/3` (ADR 0124 §4i's
+    /// class-object-receiver fix), which — correctly — does route a bare
+    /// primitive here, so this arm must be safe for one on its own rather
+    /// than relying on a caller-side gate it no longer has.
+    fn generate_dispatch_has_field_branch() -> Document<'static> {
+        docvec![
+            "        <'hasField:'> when 'true' ->\n",
+            "            let <HfName> = call 'erlang':'hd'(Args) in\n",
+            "            case call 'erlang':'is_map'(Self) of\n",
+            "                <'true'> when 'true' -> call 'beamtalk_reflection':'has_field'(HfName, Self)\n",
+            "                <'false'> when 'true' -> 'false'\n",
+            "            end\n",
+        ]
     }
 
     /// Generates dispatch case arms for all class-defined instance methods.
@@ -4528,6 +4582,9 @@ impl CoreErlangGenerator {
             self.arity_error_fragment("'fieldAt:put:'", 2, "                    ");
         let inst_var_at_put_err2 =
             self.arity_error_fragment("'fieldAt:put:'", 2, "                ");
+        // hasField:/clearField: arity errors (ADR 0124 §1/§9/B4)
+        let has_field_err = self.arity_error_fragment("'hasField:'", 1, "                ");
+        let clear_field_err = self.arity_error_fragment("'clearField:'", 1, "                ");
         // perform: type error
         let perf_type_err =
             self.type_error_fragment("'perform:'", "selector must be an atom", "                ");
@@ -4584,6 +4641,25 @@ impl CoreErlangGenerator {
             "                    end\n",
             "                <_IvapBad1> when 'true' ->\n",
             inst_var_at_put_err2,
+            "\n",
+            "            end\n",
+            // --- hasField: (ADR 0124 §1/§9/B4) — never raises ---
+            "        <'hasField:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[HfName4|_]> when 'true' ->\n",
+            "                    {'reply', call 'beamtalk_reflection':'has_field'(HfName4, State), State}\n",
+            "                <_HfBadArgs> when 'true' ->\n",
+            has_field_err,
+            "\n",
+            "            end\n",
+            // --- clearField: (ADR 0124 §1/§4f/§9/B4) — a write ---
+            "        <'clearField:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[ClfName4|_]> when 'true' ->\n",
+            "                    let <ClfNewState4> = call 'beamtalk_reflection':'clear_field'(ClfName4, State) in\n",
+            "                    {'reply', Self, ClfNewState4}\n",
+            "                <_ClfBadArgs> when 'true' ->\n",
+            clear_field_err,
             "\n",
             "            end\n",
             // --- printString ---
@@ -4747,15 +4823,18 @@ impl CoreErlangGenerator {
             return self.generate_minimal_has_method(class);
         }
 
-        // Build the reflection selector list — the seven hard-coded
-        // dispatch/3 arms, plus the default `asString` dispatch/3 generates
-        // for classes that don't define it themselves.
+        // Build the reflection selector list — the nine hard-coded
+        // dispatch/3 arms (ADR 0124 §1/§9/B4 added `hasField:`/`clearField:`
+        // to the original seven), plus the default `asString` dispatch/3
+        // generates for classes that don't define it themselves.
         let mut reflection: Vec<&'static str> = vec![
             "class",
             "respondsTo:",
             "fieldNames",
             "fieldAt:",
             "fieldAt:put:",
+            "hasField:",
+            "clearField:",
             "perform:",
             "perform:withArguments:",
         ];

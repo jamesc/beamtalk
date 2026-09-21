@@ -52,6 +52,8 @@ pub(in crate::core_erlang) enum BodyExprKind {
     EarlyReturn,
     /// `self fieldAt: name put: val` — reflective field mutation.
     SelfFieldAtPut,
+    /// `self clearField: name` — reflective field un-assign (ADR 0124 §1/B4).
+    SelfClearField,
     /// `self.field := value` — direct field assignment.
     FieldAssignment,
     /// `self.field := expr` where the RHS is control flow with mutations.
@@ -652,6 +654,15 @@ impl CoreErlangGenerator {
             return BodyExprKind::SelfFieldAtPut;
         }
 
+        // self clearField: name — a write (ADR 0124 §1/B4), but its one
+        // argument is the field NAME, not a value expression that could
+        // itself embed control flow with mutations (unlike `fieldAt:put:`'s
+        // second argument), so there is no `...ControlFlow` sub-classification
+        // needed here.
+        if self.is_self_clear_field(expr) {
+            return BodyExprKind::SelfClearField;
+        }
+
         // self.field := value — sub-classify by RHS for control flow with mutations
         if Self::is_field_assignment(expr) {
             if let Expression::Assignment { value, .. } = expr {
@@ -1042,6 +1053,26 @@ impl CoreErlangGenerator {
                 // `verify_body_with_opaque_version_gaps`'s backfill.
                 BodyExprKind::SelfFieldAtPut => {
                     let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
+                    stmts.push(ThreadedStmt::Statement(doc, span));
+                    if is_last {
+                        let final_state = self.current_state_var();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "{'reply', ",
+                                leaf::var(val_var),
+                                ", ",
+                                leaf::var(final_state),
+                                "}",
+                            ],
+                            span,
+                        ));
+                    }
+                }
+                // Mirrors SelfFieldAtPut immediately above — same opaque
+                // Statement + is_last reply shape, mirroring
+                // `generate_self_clear_field_open` (ADR 0124 §1/B4).
+                BodyExprKind::SelfClearField => {
+                    let (doc, val_var) = self.generate_self_clear_field_open(expr)?;
                     stmts.push(ThreadedStmt::Statement(doc, span));
                     if is_last {
                         let final_state = self.current_state_var();
@@ -2589,10 +2620,15 @@ impl CoreErlangGenerator {
 
             if is_last && has_class_vars && self.is_class_var_assignment(expr) {
                 self.lower_class_method_last_class_var_bind(&mut stmts, expr, span)?;
+            } else if is_last && has_class_vars && self.is_self_clear_field_class_var(expr) {
+                self.lower_class_method_last_class_var_clear(&mut stmts, expr, span)?;
             } else if is_last {
                 let doc = self.generate_class_method_last_expr(expr, has_class_vars)?;
                 stmts.push(ThreadedStmt::Statement(doc, span));
-            } else if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+            } else if self.is_class_var_assignment(expr)
+                || self.is_self_clear_field_class_var(expr)
+                || self.is_class_method_self_send(expr)
+            {
                 // ADR 0118 phase 5a: splice the real `ClassVars`
                 // prelude instead of wrapping one opaque `Statement` around
                 // an already-rendered open-Document (`generate_class_method_non_last_expr`'s
@@ -2683,6 +2719,42 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Class-side `self clearField: #classVar` counterpart to
+    /// [`Self::lower_class_method_last_class_var_bind`] immediately above —
+    /// same joint-visibility promotion (a real top-level `Bind`, not an
+    /// opaque `Statement`), via the parallel shared helper
+    /// [`Self::lower_class_var_field_clear_bind`] (`expressions.rs`) rather
+    /// than hand-rolling the `BindOp::Remove` sequence a second time
+    /// (CLAUDE.md's no-duplicate-implementations rule).
+    fn lower_class_method_last_class_var_clear(
+        &mut self,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+        expr: &Expression,
+        span: Span,
+    ) -> Result<()> {
+        let field_name = crate::core_erlang::expr_shape::self_clear_field_class_var_name(expr)
+            .expect("is_self_clear_field_class_var guarantees a literal Symbol argument")
+            .to_string();
+
+        let (preamble_doc, bind, val_var) =
+            self.lower_class_var_field_clear_bind(&field_name, span, threaded_ir::FrameId::ROOT)?;
+
+        let final_cv = self.current_class_var();
+        stmts.push(threaded_ir::ThreadedStmt::Statement(preamble_doc, span));
+        stmts.push(bind);
+        stmts.push(threaded_ir::ThreadedStmt::Statement(
+            docvec![
+                "{'class_var_result', ",
+                leaf::var(val_var),
+                ", ",
+                leaf::var(final_cv),
+                "}",
+            ],
+            span,
+        ));
+        Ok(())
+    }
+
     /// Generates code for an explicit `^` return in a class method.
     fn generate_class_method_return(
         &mut self,
@@ -2719,7 +2791,10 @@ impl CoreErlangGenerator {
         // so `refresh_class_var_after_opaque_scope` recovers the live value
         // via the ADR 0110 shadow write instead of relying on lexical scope.
         if has_class_vars {
-            if self.is_class_var_assignment(value) || self.is_class_method_self_send(value) {
+            if self.is_class_var_assignment(value)
+                || self.is_self_clear_field_class_var(value)
+                || self.is_class_method_self_send(value)
+            {
                 let result_var = self.fresh_temp_var("Ret");
                 let frame = self.current_frame();
                 let tv = self.threaded_expression(value, frame)?;
@@ -2854,7 +2929,10 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<Document<'static>> {
         let frame = self.current_frame();
-        if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+        if self.is_class_var_assignment(expr)
+            || self.is_self_clear_field_class_var(expr)
+            || self.is_class_method_self_send(expr)
+        {
             // ADR 0118 phase 5b: `expr` is itself a producer at
             // its own top level, so `threaded_expression` always gives it a
             // real value (never the do:-in-direct-params-loop `'nil'` case

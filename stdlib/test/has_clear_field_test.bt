@@ -1,0 +1,117 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3551 (ADR 0124 §1/§4f/§4i/§9/B4): `hasField:`/`clearField:` on
+// instances and the class side.
+//
+// The Symphony shape (§Context (a), §1): launch -> hasField: true ->
+// clearField: -> hasField: false -> launch again succeeds. Exercised on an
+// instance `late state:` and, separately, on a `late classState:` via class
+// methods and from outside (§4i). Also covers `hasField:`/`clearField:` on
+// a Value (§9: `hasField:` answers, `clearField:` is the existing
+// "Cannot modify slot on value type" error) and on a primitive (`hasField:`
+// answers `false`, never raises).
+//
+// Fixtures: stdlib/test/fixtures/has_clear_field_actor.bt (instance side)
+//           stdlib/test/fixtures/has_clear_class_var_actor.bt (class side,
+//             via class methods)
+//           stdlib/test/fixtures/has_clear_class_var_outside_actor.bt
+//             (class side, from outside — kept separate so the two
+//             class-side lifecycle tests can't observe each other's
+//             mutations to their long-lived class gen_server's ClassVars)
+
+TestCase subclass: HasClearFieldTest
+  field: a = nil
+
+  setUp => self.a := HasClearFieldActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  // === Instance `late state:` — the Symphony shape ===
+  testHasFieldFalseBeforeLaunch => self deny: self.a hasProc
+
+  testHasFieldTrueAfterLaunch =>
+    self.a launch: 42
+    self assert: self.a hasProc
+
+  testStopProcessClearsAndHasFieldAnswersFalseAgain =>
+    self.a launch: 42
+    self assert: self.a hasProc
+    self.a stopProcess
+    self deny: self.a hasProc
+
+  testStopProcessBeforeLaunchIsANoOp =>
+    // The `hasField:`-guarded shape: clearField: never runs when the slot
+    // was never assigned, so this must not raise.
+    self.a stopProcess
+    self deny: self.a hasProc
+
+  testRelaunchAfterClearSucceeds =>
+    self.a launch: 1
+    self.a stopProcess
+    self.a launch: 2
+    self assert: self.a hasProc
+
+  testClearFieldReturnsSelf =>
+    self.a launch: 42
+    self assert: self.a clearProc equals: self.a
+
+  testFieldAtRaisesAfterClear =>
+    self.a launch: 42
+    self.a stopProcess
+    self should: [self.a fieldAt: #proc] raise: #uninitialized_state_error
+
+  testEagerFieldUnaffectedByClearField =>
+    self.a launch: 42
+    self.a stopProcess
+    self assert: self.a getCount equals: 0
+
+  // === Class-side `late classState:` — same shape, via class methods ===
+  //
+  // One comprehensive test per class-side scenario, each driving its own
+  // dedicated fixture class through the FULL lifecycle in a single test
+  // method: a `late classState:` slot's `ClassVars` map is owned by the
+  // class's own long-lived gen_server process, never reset between test
+  // methods the way a fresh `spawn` gives each instance test its own state
+  // (mirrors `late_class_var_read_actor.bt`'s/`late_class_var_assigned_actor.bt`'s
+  // own reason for staying separate classes), so a scenario split across
+  // multiple test methods on the SAME class would be order-dependent.
+  testClassHasFieldLifecycleViaClassMethods =>
+    self deny: HasClearClassVarActor hasCurrent
+    HasClearClassVarActor launch: 42
+    self assert: HasClearClassVarActor hasCurrent
+    HasClearClassVarActor clearCurrent
+    self deny: HasClearClassVarActor hasCurrent
+    HasClearClassVarActor launch: 7
+    self assert: HasClearClassVarActor hasCurrent
+
+  // === Class-side, from outside (Cls hasField:/Cls clearField:) ===
+  testClassHasFieldAndClearFieldLifecycleFromOutside =>
+    self deny: (HasClearClassVarOutsideActor hasField: #current)
+    HasClearClassVarOutsideActor launch: 7
+    self assert: (HasClearClassVarOutsideActor hasField: #current)
+    HasClearClassVarOutsideActor clearField: #current
+    self deny: (HasClearClassVarOutsideActor hasField: #current)
+    HasClearClassVarOutsideActor launch: 8
+    self assert: (HasClearClassVarOutsideActor hasField: #current)
+
+  // === Value: `hasField:` answers, `clearField:` is the immutable-value error ===
+  testHasFieldOnValueAnswersTrueForDeclaredField =>
+    p := ValuePoint new: #{#x => 3, #y => 4}
+    self assert: (p hasField: #x)
+    self assert: (p hasField: #y)
+
+  testHasFieldOnValueAnswersFalseForUnknownField =>
+    p := ValuePoint new
+    self deny: (p hasField: #notAField)
+
+  testClearFieldOnValueRaisesImmutableValue =>
+    p := ValuePoint new
+    self should: [p clearField: #x] raise: #immutable_value
+
+  // === Primitive: `hasField:` never raises ===
+  testHasFieldOnPrimitiveIntegerAnswersFalse =>
+    self deny: (42 hasField: #anything)
+
+  testHasFieldOnPrimitiveStringAnswersFalse =>
+    self deny: ("hello" hasField: #anything)

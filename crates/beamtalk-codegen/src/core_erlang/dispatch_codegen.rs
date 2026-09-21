@@ -2393,6 +2393,52 @@ impl CoreErlangGenerator {
         ))
     }
 
+    /// Generates the opening part of `self clearField: name` with state
+    /// threading (ADR 0124 §1/§4f, B4) — the instance-`State` counterpart to
+    /// [`Self::generate_self_field_at_put_open`], which this mirrors exactly
+    /// except for the map op (`maps:remove` in place of `maps:put`) and arity
+    /// (one argument, no value to thread). `clearField:` returns `Self`
+    /// (`Object>>clearField: -> Self`, matching `fieldAt:put:`'s convention)
+    /// rather than a written value, since a clear has none.
+    ///
+    /// Generates:
+    /// ```erlang
+    /// let _Name = <name> in
+    /// let StateN = call 'maps':'remove'(_Name, StateN-1) in
+    /// ```
+    ///
+    /// The caller is responsible for closing the expression.
+    pub(super) fn generate_self_clear_field_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<(Document<'static>, String)> {
+        if let Expression::MessageSend { arguments, .. } = expr {
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let current_state = self.current_state_var();
+            let new_state = self.next_state_var();
+
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in let ",
+                leaf::var(new_state),
+                " = call 'maps':'remove'(",
+                leaf::var(name_var),
+                ", ",
+                leaf::var(current_state),
+                ") in ",
+            ];
+
+            return Ok((doc, "Self".to_string()));
+        }
+        Err(CodeGenError::Internal(
+            "generate_self_clear_field_open called on non-clearField: expression".to_string(),
+        ))
+    }
+
     /// Generates code for a super message send.
     ///
     /// Super calls use `beamtalk_dispatch:super/5` to invoke the superclass

@@ -445,6 +445,11 @@ mod tests {
                 | WellKnownSelector::FieldAt
                 | WellKnownSelector::FieldAtPut
                 | WellKnownSelector::FieldNames
+                // Neither `hasField:` nor `clearField:` carries a
+                // block-literal argument — both take a field-name Symbol
+                // (ADR 0124 §1/B4).
+                | WellKnownSelector::HasField
+                | WellKnownSelector::ClearField
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
                 | WellKnownSelector::PerformLocallyWithArgs
@@ -492,6 +497,8 @@ mod tests {
             WellKnownSelector::FieldAt,
             WellKnownSelector::FieldAtPut,
             WellKnownSelector::FieldNames,
+            WellKnownSelector::HasField,
+            WellKnownSelector::ClearField,
             WellKnownSelector::Perform,
             WellKnownSelector::PerformWithArgs,
             WellKnownSelector::PerformLocallyWithArgs,

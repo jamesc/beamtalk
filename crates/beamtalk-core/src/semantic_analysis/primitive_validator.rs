@@ -44,6 +44,9 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     "fieldNames",
     "fieldAt",
     "fieldAtPut",
+    // ADR 0124 §1/B4: presence test / late-slot un-assign.
+    "hasField",
+    "clearField",
     // Object protocol
     "printString",
     "hash",

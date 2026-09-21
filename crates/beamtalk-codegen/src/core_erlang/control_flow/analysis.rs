@@ -258,6 +258,21 @@ impl CoreErlangGenerator {
         match prefix {
             VersionPrefix::State => true,
             VersionPrefix::ClassVars => {
+                // `self clearField: #x` (ADR 0124 §1/B4) is deliberately
+                // NOT included here: unlike a field assignment or a
+                // class-method self-send, it has no per-statement Letrec/
+                // Foldl loop-body Bind construction of its own (out of
+                // scope for this issue — see `is_self_clear_field_class_var`'s
+                // own doc comment). Recognizing it as a "family mutation"
+                // here without that construction would make a loop believe
+                // it must thread `ClassVars` through a shape this crate
+                // cannot actually build a `Bind` for. `self clearField:` as
+                // a class method's own top-level statement (in or out of a
+                // loop) is instead compiled via
+                // `CoreErlangGenerator::class_method_prelude_producer` /
+                // `lower_class_method_body`, and any other position raises a
+                // clear compile-time diagnostic (`try_generate_object_reflection`'s
+                // `ClearField` arm) rather than silently losing the mutation.
                 (Self::is_field_assignment(expr) && self.is_class_var_assignment(expr))
                     || self.is_class_method_self_send(expr)
             }

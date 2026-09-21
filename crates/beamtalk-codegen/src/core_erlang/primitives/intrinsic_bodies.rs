@@ -74,6 +74,12 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
     ("fieldNames", IntrinsicBody::Placeholder),
     ("fieldAt", IntrinsicBody::Placeholder),
     ("fieldAtPut", IntrinsicBody::Placeholder),
+    // ADR 0124 §1/B4: both call-site-intercepted (`try_generate_object_reflection`
+    // for `hasField:`; the class-var/instance-state `clearField:` intrinsics in
+    // `dispatch_codegen.rs`/`expressions.rs` for `clearField:`), so their compiled
+    // method bodies are placeholders exactly like `fieldAt`/`fieldAtPut` above.
+    ("hasField", IntrinsicBody::Placeholder),
+    ("clearField", IntrinsicBody::Placeholder),
     ("printString", IntrinsicBody::Placeholder),
     ("hash", IntrinsicBody::Placeholder),
     ("conditional", IntrinsicBody::Placeholder),
