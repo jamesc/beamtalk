@@ -170,12 +170,13 @@ Built release orders-1.4.0 (with ERTS 16.0.2, linux/x86_64).
 $ _build/release/orders-1.4.0/bin/orders foreground
 [orders 1.4.0] OrdersSup started; console off (see [release] console)
 
-$ _build/release/orders-1.4.0/bin/orders eval "Beamtalk releaseInfo"
+$ _build/release/orders-1.4.0/bin/orders rpc "Beamtalk releaseInfo"
 #{#release => "orders", #version => "1.4.0", #otp => "28-16.0.2", …}
 ```
 
-No Erlang on the host, no `sys.config` written by hand, nothing to `-pa`.
-Everything after this section is what those three lines are made of.
+No Erlang on the host, no `sys.config` written by hand, nothing to `-pa`;
+the third line reaches *into the running node* — `rpc`, not a second VM
+(§1.7). Everything after this section is what those three lines are made of.
 
 `[application] supervisor` is **required**: a release is a service. A
 project without it gets a build error naming `beamtalk build --escript` as
@@ -228,8 +229,9 @@ pointing at `[package] version`.
 **`apps` is additive, not authoritative.** The included application set is
 *computed*: the project's own app, the ADR 0070 dependency closure (from
 `_build/deps/`, the same graph `beamtalk build` already resolves), the
-runtime closure, and `kernel`/`stdlib`/`sasl` (`sasl` is required —
-`release_handler` lives there). `[release] apps` names *extra* OTP apps (an
+runtime closure, and `kernel`/`stdlib`/`sasl` (`sasl` is already transitive
+— `beamtalk_workspace.app.src` declares it — and would be required
+regardless: `release_handler` lives there). `[release] apps` names *extra* OTP apps (an
 Erlang dependency reached only via FFI, say) that the closure cannot see.
 
 **The closure is an application-level set, and an application's own `.app`
@@ -276,7 +278,7 @@ _build/release/orders-1.4.0/
 │   ├── beamtalk_stdlib-0.4.0/ebin/
 │   └── …
 └── releases/
-    ├── RELEASES                   # written at first boot by release_handler
+    ├── RELEASES                   # release_handler:create_RELEASES/4, at assembly
     └── 1.4.0/
         ├── orders.rel
         ├── start.boot             # systools:make_script/2
@@ -312,8 +314,11 @@ for its `{vsn, …}`, create `lib/<app>-<vsn>/ebin/`, copy the beams and the
 `.app`, and (when `include-erts`) copy the ERTS tree that `erl` reports via
 `code:root_dir/0` + `erlang:system_info(version)`.
 
-**Stage from the generated `.app`, never from `.app.src`.** The runtime's
-five `.app.src` files carry `{vsn, {cmd, "escript ../../../scripts/version.escript"}}`
+**Stage from the generated `.app`, never from `.app.src`.** All five runtime
+`.app.src` files — the four that can ship (`beamtalk_runtime`,
+`beamtalk_stdlib`, `beamtalk_workspace`, and `beamtalk_compiler` under
+`include-compiler`) plus `beamtalk_test_support`, which never does — carry
+`{vsn, {cmd, "escript ../../../scripts/version.escript"}}`
 — a *rebar3* `.app.src` template construct that rebar3 resolves when it
 generates the real `.app`. `systools` reads plain `.app` files and has no
 idea what `{cmd, …}` means. The resolved artifact
@@ -332,6 +337,23 @@ accepts exactly this shape and emits a valid `.boot`; it also emits
 `{warning, missing_sasl}` when `sasl` is left out of the `.rel`, which is
 `systools` independently confirming the `sasl` requirement noted in §1.2.
 
+**But a `.boot` that builds is not a `.boot` that boots — `$ROOT`.** The
+same check, taken one step further, found the trap: `make_script/2`
+succeeds with `{path, ["lib/*/ebin"]}`, but the emitted `.script` records
+every path as `$ROOT/lib/<app>-<vsn>/ebin`. With bundled ERTS, `$ROOT` is
+the release directory and that resolves. With `--no-include-erts`, `$ROOT`
+is the **host** install's `code:root_dir/0`, every project and runtime app
+is unresolvable, and the node dies with `undef` on `<pkg>_app:start/2` —
+reproduced. The assembly therefore passes absolute paths plus
+`{variables, [{"RELEASE_DIR", Dir}]}` so the script says
+`$RELEASE_DIR/lib/…`, and the launcher passes `-boot_var RELEASE_DIR <dir>`
+on every boot — also reproduced working. `RELEASES` is likewise not
+something the node writes for itself at first boot (booted with `sasl`,
+`release_handler:which_releases/0` lists only OTP's own permanent release
+and creates no file); the assembly step calls
+`release_handler:create_RELEASES/4`, as relx does, so that Phase 7's
+`install_release/1` has a release to upgrade *from*.
+
 **Cross-compilation is not supported.** `include-erts = true` makes the
 release OS- and architecture-specific; build it on (or in a container
 matching) the target. This is stated in the command's own output, not
@@ -343,7 +365,7 @@ Built release orders-1.4.0 (with ERTS 15.0.1, linux/x86_64).
 
 This release bundles ERTS and runs only on linux/x86_64.
 Build on the target platform, or use --no-include-erts to require a
-host Erlang/OTP 27–28.
+host Erlang/OTP 28, 29 or 30 (§3.2).
 ```
 
 #### 1.4 Release-mode runtime — resolving the ADR 0061 constraint
@@ -355,9 +377,10 @@ application.** The boolean `repl => boolean()` becomes
 | | `run` | `workspace` | `release` |
 |---|---|---|---|
 | Class bootstrap (ADR 0019 singletons) | ✓ | ✓ | ✓ |
-| Project-module activation (scan `_build/`) | ✓ | ✓ | ✗ — pre-loaded at boot |
+| Project-module activation | ✓ scans `_build/` | ✓ scans `_build/` | ✓ **from the `.app` module lists** — no scan, and *not* preloaded (below) |
 | `beamtalk_compiler` app | ✓ | ✓ | ✗ (unless `include-compiler`) |
 | `beamtalk_actor_sup` | ✓ | ✓ | ✓ |
+| `telemetry_poller` (declared by `beamtalk_runtime`) | ✓ | ✓ | ✓ — mode-independent, ADR 0069 |
 | Workspace file logger / on-disk artifacts | ✗ | ✓ | ✗ |
 | ADR 0105 signature/shape/findings stores, recheck worker | ✗ | ✓ | ✗ |
 | ADR 0082 ChangeLog | memory-only | ✓ on disk | memory-only |
@@ -367,14 +390,21 @@ application.** The boolean `repl => boolean()` becomes
 
 Two rows carry the argument.
 
-**The idle monitor is why `release` cannot be `repl = true`.**
+**The idle monitor is the vivid case, not the decisive one.**
 `beamtalk_idle_monitor` does not merely stop the workspace supervisor — on
 `max_idle_seconds` it calls **`init:stop/0`**, halting the entire node
 (`beamtalk_idle_monitor.erl:120-122`). A production service that has served
-no REPL traffic for four hours is *healthy*; today's `repl = true` would
-take the node down under it. This is not a tuning knob — it is a mode
-distinction, and it is the clearest evidence that the boolean is the wrong
-shape.
+no REPL traffic for four hours is *healthy*; `repl = true` with the
+defaults would take the node down under it. It is, however, already
+switchable — `auto_cleanup => false` reaches the monitor as
+`enabled => false` and `check_idle` becomes a no-op
+(`beamtalk_workspace_sup.erl:78,346`; `beamtalk_idle_monitor.erl:110`) — so
+on its own it argues only that a release must *know* to switch it off,
+which is what a mode is. The decisive rows are the ones with no switch at
+all: the file logger, the ADR 0105 stores and recheck worker, `alias_xref`,
+and the compiler start are gated on the single `Repl` boolean and nothing
+else, so there is no configuration of today's supervisor that starts the
+REPL server without also starting the live-development image around it.
 
 **The REPL server is why `release` cannot be `repl = false`.** An operator
 needs a console. Run mode has none.
@@ -386,8 +416,11 @@ dropped to `undefined` in run mode so the log stays memory-only with no
 on-disk artifacts. Release mode takes the same memory-only form — not
 because a release has anything to log (§1.5 removes every mutation that
 would write an entry) but because leaving it as-is costs one idle
-gen_server and changing it would be a code change this ADR does not need.
-Listing it as "✗" would have described a change nobody is making.
+gen_server. The one touch it does need is mechanical: `changelog_workspace_id/2`
+is today a two-clause boolean function
+(`beamtalk_workspace_sup.erl:365-366`); the mode triple gives it a third
+clause, `release → undefined`. Listing the row as "✗" would have described
+a removal nobody is making.
 
 *Why not extract `beamtalk_repl_server` + `beamtalk_session_sup` into a
 standalone application (ADR 0061's other option)?* Because the extraction
@@ -404,38 +437,116 @@ becomes mechanical *after* §1.5's capability classification gives the op
 layer a seam; until then a mode variant is the smaller, more honest change.
 The extraction is recorded as the follow-up, not as this ADR's work.
 
-**Class loading in release mode.** All `bt@*` beams are in the release's
-`lib/*/ebin`, listed in each `.app`'s `{modules, …}`, and named in
-`start.boot`'s load instructions — the VM loads them before any application
-starts. `beamtalk_workspace_bootstrap` therefore runs in its existing
-**singleton-only** form (`start_link/0`, no project path) and does not scan
-`_build/`. The ADR 0061 class-loading problem is sidestepped, exactly as
-that ADR predicted: there is nothing to discover, because the boot script
-already loaded it.
+**Class loading in release mode — the boot script does *not* do it, and
+must not be asked to.** ADR 0061's forward-looking table marked release
+mode "✗ (pre-loaded)", and an earlier draft of this ADR repeated it. It is
+wrong in both of the VM's boot modes, for two different reasons that were
+checked empirically during review:
 
-The remaining ordering requirement is real and must be tested:
-`register_class/0` must run for every `bt@*` module **before** the project's
-root supervisor starts, or a supervised actor can be spawned for a class
-the registry has not yet seen. The generated `beamtalk_<pkg>_app:start/2`
-calls `register_class/0` over the topologically sorted module list
-(reusing `beamtalk_module_activation:sort_modules_by_dependency/2` — the
-same sort the escript and the workspace bootstrap use; **not a third
-copy**) before `OrdersSup start_link`.
+- In **interactive** mode — the default when nothing passes `-mode` — the
+  boot script's `{primLoad, …}` entries for application modules are
+  *skipped*; modules load lazily on first reference. A `bt@*` class that
+  no code names before it is needed is never loaded, never runs
+  `register_class/0`, and is invisible to the registry: `Object
+  allSubclasses` is short, and `Orders backfillPricing` is a DNU.
+- In **embedded** mode, `primLoad` *does* load every module — **before any
+  application starts**, and it runs `-on_load` as it goes. Every `bt@*`
+  module carries `-on_load(register_class/0)`
+  (`crates/beamtalk-codegen/src/core_erlang/actor_codegen.rs:241`), and
+  `register_class/0` calls `beamtalk_class_builder:register/1`, which
+  needs `beamtalk_runtime`'s ETS tables and re-raises on failure via
+  `raw_raise` so that the *load itself* fails
+  (`class_registry.rs:97-98,338`). With the runtime not yet started, that
+  is a `{load_failed, …}` boot halt — reproduced with a synthetic failing
+  `on_load`. The stdlib has the identical shape: today `beamtalk_stdlib` is
+  only `application:load`ed and its 115 modules are `ensure_loaded` lazily
+  from a `beamtalk_runtime_sup` child (`beamtalk_stdlib.erl:129-150`,
+  `beamtalk_runtime_sup.erl:91`); listing them in a `.rel` under embedded
+  mode primLoads them first.
+
+So the release boots in **interactive mode** and performs **explicit
+activation**, exactly as run mode and the escript already do — the
+difference is only *where the module list comes from*. Run mode scans
+`_build/dev/ebin`; the escript embeds a list; the release reads each
+shipped app's `{modules, …}` from its `.app` (the same list `systools`
+already validated) and hands the `bt@*` subset to
+`beamtalk_module_activation:activate_modules/2` — which takes a **module
+list**, not a directory (`beamtalk_module_activation.erl:210`), and is
+the function the escript calls (`escript.rs:289-297`). `activate_modules/2`
+loads each module (which fires `register_class/0`, now with the runtime
+up) in `topo_sort/1` order. `sort_modules_by_dependency/2` — which an
+earlier draft named here — is the *directory-reading* front end to the
+same sort and is the wrong entry point for a node that has no `_build/`.
+"Nothing to discover" was the right instinct for the wrong reason: there is
+no *scan*, because the manifest is authoritative; there is still an
+activation step, and it is the same one every other mode runs.
+
+**Who runs it — the actual ADR 0061 constraint.** Nothing in the tree
+starts `beamtalk_workspace_sup` from an application callback.
+`beamtalk_workspace_app:start/2` starts `beamtalk_workspace_app_sup`, whose
+`init/1` has **no children** ("workspaces are added dynamically … currently
+done by CLI directly", `beamtalk_workspace_app_sup.erl:13-16`); every
+existing `beamtalk_workspace_sup:start_link/1` call is a CLI `-eval`
+string (`repl_startup.rs:178`, `run.rs:509`, `escript.rs:293`). A
+`start.boot` that starts `beamtalk_workspace` therefore brings up no
+workspace supervisor, no bootstrap, no `beamtalk_actor_sup`, and a
+`mode => release` that nobody reads. The mode variant is only real once
+`beamtalk_workspace_app:start/2` **reads its config from the application
+environment** — `mode`, `console`, `bind`, `auto_cleanup`, and the
+`bt@*` activation list — and starts `beamtalk_workspace_sup` under
+`beamtalk_workspace_app_sup` when `mode` is set. `sys.config` is where a
+release sets that env; the CLI keeps passing a map for the other two modes
+(it may migrate to the same env path later, but that is not this ADR's
+scope). This is Phase 2's core, and it is **new code**, not a config
+tweak.
+
+**Ordering, then, is by application dependency and needs no new
+mechanism.** The generated project `.app` declares
+`{applications, [kernel, stdlib, beamtalk_runtime, beamtalk_workspace, …]}`
+(ADR 0026 §3 — `app_file.rs` must emit `beamtalk_workspace` here, which it
+does not today), so OTP starts `beamtalk_workspace` — and with it the
+bootstrap, activation of every shipped `bt@*` module, and
+`beamtalk_actor_sup` — **before** `beamtalk_<pkg>_app:start/2` runs. The
+generated `_app` keeps doing exactly what it does now
+(`'<Sup>':'start_link'()` + `beamtalk_supervisor:register_root/1`,
+`outputs.rs:316-341`); an earlier draft had it performing activation
+itself, which would have been a second copy of the workspace's job. The
+invariant to test is unchanged — every `bt@*` class registered before the
+root supervisor spawns its first actor — and the boot smoke test in Phase 2
+asserts it.
 
 #### 1.5 Capability in release mode follows from what is in the release
 
 The release ships **no compiler port** (`include-compiler = false` by
 default) and **no `.bt` sources**. Everything that compiles is therefore
-structurally impossible, not policy-gated:
+structurally impossible, not policy-gated — **and that includes `eval`.**
+An earlier draft listed `eval` as available; it is not. `eval` compiles the
+expression through the ADR 0022 port
+(`beamtalk_repl_eval.erl:192` → `beamtalk_repl_compiler:compile_expression/3`
+→ `beamtalk_compiler:compile_expression/3`). The only compile-free way to
+run code in the tree today is the **`run-entry`** op
+(`beamtalk_ws_handler.erl:471-704`): a class, a selector, and arguments,
+with no source string — which is exactly how ADR 0099's `beamtalk run
+--connect` dispatches. A release without a compiler is therefore a node you
+can *inspect* and *dispatch into*, but not *evaluate source on*:
 
-| Operation | Release mode |
-|---|---|
-| `eval`, `inspect`, `processes`, `actors`, `pid-stats`, `complete`, `describe` | ✓ |
-| `Class >> sel => body`, `compile:source:`, `load-source`, `Workspace load:` | ✗ `release_mode_no_compiler` |
-| `Behaviour >> reload`, ADR 0105 live re-check | ✗ `release_mode_no_compiler` (worker not started) |
-| `Workspace flush`, `flush: confirmDestructive:`, `removeFromSystem`, rename (ADR 0113/0114) | ✗ `release_mode_no_workspace` |
+| Operation | Release, default | Release, `include-compiler` |
+|---|---|---|
+| `run-entry` (`Class selector [args]`), `inspect`, `actors`, `actor-stats`, `pid-stats`, `sessions` | ✓ | ✓ |
+| `eval` (source), `complete`, `describe` (where they compile) | ✗ `release_mode_no_compiler` | ✓ |
+| `Class >> sel => body`, `compile:source:`, `load-source`, `Workspace load:` | ✗ `release_mode_no_compiler` | ✓ |
+| `Behaviour >> reload`, ADR 0105 live re-check | ✗ `release_mode_no_compiler` (worker not started) | ✓ reload; re-check still ✗ (no source) |
+| `Workspace flush`, `flush: confirmDestructive:`, `removeFromSystem`, rename (ADR 0113/0114) | ✗ `release_mode_no_workspace` | ✗ `release_mode_no_workspace` |
 
-Both refusals are `#beamtalk_error{}` values naming the mode and the
+(`processes`, which an earlier draft listed, is not an op; the process
+views are `sessions` and `actor-stats`.)
+
+This is a stronger ADR 0058 story than the earlier draft's, not a weaker
+one: a production console that cannot compile cannot be handed arbitrary
+source, so the default release's attack surface past the cookie is "call
+an exported selector on a registered class" rather than "run anything".
+`include-compiler = true` is what turns it back into a full REPL. Both
+refusals are `#beamtalk_error{}` values naming the mode and the
 alternative, never a crash and never a silent no-op:
 
 ```
@@ -488,11 +599,24 @@ console defaults are:
   reverse-proxy alternative. It is not refused — an operator inside a
   private overlay has a legitimate reason — but it is never silent.
 
-`bin/<name> remote_console` attaches over Erlang distribution from the same
-host (the classic OTP path); `beamtalk repl --host … --port …` attaches
-over the WebSocket protocol, identically to dev. Both land on
+`bin/<name> remote_console` attaches over Erlang distribution **from the
+same host only** — that is not a convenience default but ADR 0091's
+co-location rule for Attach, and 0091 (Implemented) is the ADR that owns
+remote access, not 0058/0020 alone: "Remote Attach **must** use TLS
+distribution (`inet_tls_dist`) or a tunnel" (0091 § finding 1), because
+plain distribution sends the cookie in an MD5 challenge over an
+unencrypted transport and `epmd` is itself a network service. So a release
+that enables distribution at all (`stop`/`ping`/`rpc`/`remote_console`
+require it) binds it to loopback by default, exactly as the console
+listener is, and anything past the host is 0091's Phoenix-authenticated
+front or a tunnel — never a `-name` on a routable interface. Note the
+asymmetry this creates with §1.7's `eval`, which starts *no* distribution
+and so needs none of this. `beamtalk repl --host … --port …` attaches over
+the WebSocket protocol, identically to dev. Both land on
 `beamtalk_repl_server`, so the op vocabulary is the dev vocabulary minus
-§1.5's refusals — no forked surface.
+§1.5's refusals — no forked surface — with the honest caveat from §1.5 that
+`remote_console` is an *Erlang* shell, and a Beamtalk `eval` in it needs
+`include-compiler`.
 
 #### 1.7 Lifecycle, entry points, and `eval`
 
@@ -501,27 +625,63 @@ The launcher (`bin/<name>` / `bin/<name>.cmd`) supports:
 | Verb | Behaviour |
 |---|---|
 | `foreground` (default) | Boots in the foreground. Stdout is the container's stdout — ADR 0099's `Console` writes land there, which is what 12-factor logging wants. |
-| `stop` | Graceful `init:stop()` via distribution. |
-| `ping` | Liveness check. |
-| `remote_console` | Attach a shell (§1.6). |
-| `eval "<expression>"` | Boot the release's applications, evaluate one Beamtalk expression, halt. |
+| `stop` | Graceful `init:stop()` in the running node, via distribution. |
+| `ping` | Liveness check, via distribution. |
+| `remote_console` | Attach a shell to the running node (§1.6). |
+| `eval "Class selector [args]"` | Start a **separate** VM: load the release's code and activate its classes, but start **neither** the project's root supervisor **nor** distribution; dispatch one `run-entry`; halt with its exit code. |
+| `rpc "Class selector [args]"` | Dispatch one `run-entry` **into the running node** over distribution and print the result. |
 | `version` | Print the release version and provenance summary. |
+
+`eval` and `rpc` take a class, a selector and arguments — the `run-entry`
+shape — not a source string, because the default release has no compiler
+(§1.5). `eval`'s "no applications, no distribution" rule is `mix release`'s
+(*"starts its own instance of the VM but without starting any of the
+applications in the release and without starting distribution"*), and for
+the same reason: on a host where the release is already running, starting
+the applications again would mean a second root supervisor, a second
+console listener on the same port, and an `-sname` clash. A task that needs
+the live system — a backfill against running actors — is `rpc`. A task that
+needs only the code — a schema check, a one-off report — is `eval`.
 
 Daemonisation is **not** provided. The supervisor is systemd, Docker, or
 Kubernetes — every one of which prefers a foreground process. This matches
 where the Elixir ecosystem landed and removes the `run_erl`/`to_erl` pid
-plumbing that ADR 0027 would otherwise make us write twice.
+plumbing that ADR 0027 would otherwise make us write twice. (Elixir's full
+verb set is `start start_iex daemon daemon_iex install eval rpc remote
+restart stop pid version`; `foreground` here is its `start`, and
+`restart`/`pid`/`install` are dropped as things the process supervisor
+does.)
 
-**ADR 0099's two-tier exit maps cleanly.** `System halt: N` halts the node —
-correct for a service, it is the "stop this node" verb. `Program exit: N`
-is bound to an *entry dispatch*; a release's root supervisor is not one, so
-`Program exit:` outside an entry raises `no_program_context`. Under
-`bin/<name> eval`, there **is** an entry context, so `Program exit: N` does
-what ADR 0099 says and the launcher adopts `N` — which is how you run a
-data migration or an admin task against a release.
+**ADR 0099's two-tier exit, applied honestly.** ADR 0099 §3 defines
+exactly two behaviours for `Program exit: N`, selected by the
+`node_owning` application env
+(`runtime/apps/beamtalk_stdlib/src/beamtalk_program.erl`): when the node
+is owned by the program, `erlang:halt(N)` from *any* process; otherwise a
+`throw({beamtalk_script_exit, N})`, which 0099 documents as crashing a
+supervised actor that calls it — "the supervisor simply restarts it". There
+is no third behaviour, and an earlier draft's `no_program_context` error
+does not exist anywhere. So the launcher sets `node_owning` per verb and
+the ADR says what follows:
+
+- `eval` sets `node_owning = true`, as the escript does (`escript.rs:290`):
+  `Program exit: N` halts that throwaway VM with `N`, and the launcher
+  adopts it. This is the data-migration case, and it is exactly 0099's
+  script semantics.
+- `foreground` sets `node_owning = false`. `Program exit:` from an actor in
+  a service is then a *throw in a supervised process*: that actor
+  restarts, the node does not stop. A service that wants to stop the node
+  says so with **`System halt: N`** — 0099's second tier, `erlang:halt/1`,
+  no `terminate/2`, no OTP shutdown — or, for the graceful path an operator
+  actually wants, is stopped from outside with `bin/<name> stop`
+  (`init:stop/0`, which *does* run the supervision tree down). The
+  distinction is worth an operator's attention: `System halt:` is for
+  "this node is wrong, end it now"; `stop` is for "we are done".
+- `rpc` runs inside the foreground node and inherits its `node_owning =
+  false`; a `Program exit:` in an rpc'd entry crashes the dispatching
+  session, not the node, and `rpc` reports it as a non-zero exit.
 
 ```bash
-$ bin/orders eval "Orders backfillPricing"
+$ bin/orders rpc "Orders backfillPricing"      # against the live node
 Backfilled 1,284 orders.
 $ echo $?
 0
@@ -553,7 +713,7 @@ collectively:
   "release_version": "1.4.0",
   "beamtalk_version": "0.4.0",          // BEAMTALK_VERSION, verbatim
   "otp_release": "28-16.0.2",           // build_stamp::current_otp_version()
-  "required_otp": { "min": 28, "max": 28 },  // §3.2
+  "required_otp": { "min": 28, "max": 30 },  // §3.2: build major .. +2
   "include_erts": true,
   "erts_version": "16.0.2",
   "platform": "linux/x86_64",
@@ -685,11 +845,16 @@ same class and starting map.
 
 `beamtalk release --upgrade-from <prev-release-or-dir>` runs in v1 as a
 **checker** even though it generates no relup. It compares the two releases'
-`shapes.json` (§3.4) and provenance and reports. A previous release built
-before `shapes.json` existed has no file to compare; the preflight then runs
-the §2.2 extractor over that release's `lib/*/ebin` to produce one on the
-fly, so the check never degrades to "unknown" merely because the old
-artifact predates the feature:
+`shapes.json` (§3.4) and provenance and reports. That comparison needs
+more than a version number per class — the report below names *fields*
+added and *migration methods* present or missing — so `shapes.json`
+carries the full per-class generation record the §2.2 extractor reads from
+`__beamtalk_meta/0`: `shape_version`, the **flattened** field map with
+declared types, and the `shape_migrations` table (see §3.4 for the
+shape). A previous release built before `shapes.json` existed has no file
+to compare; the preflight then runs the §2.2 extractor over that release's
+`lib/*/ebin` to produce one on the fly, so the check never degrades to
+"unknown" merely because the old artifact predates the feature:
 
 ```
 Upgrade check: orders 1.3.0 → 1.4.0
@@ -711,10 +876,19 @@ Upgrade check: orders 1.3.0 → 1.4.0
 1 error, 2 warnings.
 ```
 
-This is the same fingerprint check ADR 0123 §4 specified for the workspace,
-applied across two *releases* rather than two *edits* — the shared-leaf
-rule applies, and the comparison routes through the same
-`beamtalk_shape_diff`/fingerprint code rather than a release-local copy.
+This is the same check ADR 0123 §4 specified for the workspace, applied
+across two *releases* rather than two *edits* — but the reuse is narrower
+than "route through the existing code", and it is worth being exact about
+where the seam is. `beamtalk_shape_diff` (in `beamtalk_workspace`) diffs
+two `shape()` records; it has no fingerprint function, and its *input* is
+produced by `beamtalk_workspace_shape_store`'s ancestor walk over the live
+`beamtalk_class_metadata` ETS (`beamtalk_workspace_shape_store.erl:77-106`).
+A CLI preflight over two on-disk trees has no live ETS, so the flattening
+has to be reproduced from `__beamtalk_meta/0` — which is precisely what
+the §2.2 extractor does. The shared leaf is therefore: the extractor builds
+the `shape()` record from beams, and `beamtalk_shape_diff` diffs it. That
+makes the extractor a genuinely new leaf sitting *below* both the store
+(live) and the preflight (disk), and Phase 6's estimate is sized for it.
 
 For a restart-based deploy this check is the whole safety story: it is what
 tells you, before you deploy, that persisted or in-flight v2 `Session`
@@ -802,10 +976,16 @@ A test asserts the generated CI matrix equals the declared window, so the
 
 #### 3.2 BEAM files, ERTS, and what a release is valid on
 
-BEAM bytecode is backward-compatible within a bounded window and **not**
-forward-compatible: an older VM refuses a beam produced by a newer
-compiler. A release built on OTP 28 therefore runs on 28, may run on 29,
-and definitely does not run on 27.
+OTP's documented guarantee (System Principles § Compatibility): *"Compiled
+code can be loaded on at least two subsequent releases … Loading on
+previous releases is not supported."* So the direction is one-way, and the
+window is not "maybe the next one" — it is **guaranteed for the two
+majors after the build major**. A release built on OTP 28 runs on 28, 29
+and 30, and does not run on 27. An earlier draft said "may run on 29" and
+recorded `required_otp` as `{min: 28, max: 28}`; both understated a
+documented promise and would have refused hosts OTP itself supports. The
+runtime rule is therefore `host_major ∈ [build_major, build_major + 2]`,
+intersected with §3.1's support window when that is narrower.
 
 **Therefore `include-erts = true` is the default.** The release bundles the
 ERTS it was built against, the host needs no Erlang at all, and the
@@ -822,10 +1002,10 @@ orders 1.4.0 cannot start on Erlang/OTP 27.
   This release's BEAM files were produced by OTP 28 and will not load on
   an older VM.
 
-  Required: Erlang/OTP 28
+  Required: Erlang/OTP 28, 29 or 30 (built on 28)
   Found:    Erlang/OTP 27 (/usr/lib/erlang)
 
-  Either install OTP 28, or rebuild the release on OTP 27.
+  Either install OTP 28 or newer, or rebuild the release on OTP 27.
 ```
 
 Fail-closed at boot, with both versions named, beats a `badfile` crash
@@ -881,8 +1061,13 @@ fixes the contract; BT-3527 decides the messaging policy built on it.
    for a **wire**, where a rolling deploy makes every message from every
    already-upgraded peer a silent truncation.
 
-   So the skew contract adds one thin entry point rather than changing
-   `unpack/1`'s contract:
+   So the skew contract adds a public entry point rather than changing
+   `unpack/1`'s contract — though "thin" would oversell it: both `pack/1`
+   and `unpack/1` are wrappers over *private* arity-2 recursions
+   (`beamtalk_shape_migration.erl:507-517, 684-690`), and threading a
+   policy through the nested-`Value` walk means those private functions
+   grow a parameter. Small, but a refactor of existing code, not an
+   addition beside it:
 
    ```erlang
    %% Not `unpack/2` — that arity is taken by the existing private
@@ -921,8 +1106,17 @@ fixes the contract; BT-3527 decides the messaging policy built on it.
 
    ```jsonc
    { "schema": 1, "release_version": "1.4.0",
-     "shapes": { "Cart": 3, "Session": 2, "Account": 1 } }
+     "shapes": {
+       "Cart": { "version": 3,
+                 "fields": { "items": "List", "total": "Integer" },   // flattened
+                 "migrations": { "1": "migrateFromV1:", "2": "migrateFromV2:" } },
+       "Session": { "version": 2, "fields": { "user": "String", "startedAt": null }, "migrations": {} },
+       "Account": { "version": 1, "fields": { "balance": "Integer" }, "migrations": {} } } }
    ```
+
+   The connect-time comparison BT-3527 makes uses only each entry's
+   `version`; the rest is what §2.3's preflight needs and is the same
+   record either way, so one file serves both.
 
    The same map is answerable from a live node (`Beamtalk shapeManifest`,
    parity-neutral like §1.8's `releaseInfo`), so two nodes — or a deploy
@@ -944,8 +1138,10 @@ on-disk project and writes a build artifact, exactly as
 `beamtalk build --escript` does. There is no live-image analogue — a
 workspace cannot produce a release of itself.
 
-`bin/<name> eval "<expr>"` is the release's counterpart to
-`beamtalk run --connect`'s `run-entry` op and is likewise
+`bin/<name> eval` and `bin/<name> rpc` are both `run-entry`-shaped
+(`Class selector [args]`, no source) — `rpc` is literally the `run-entry`
+op that `beamtalk run --connect` already dispatches, reached over
+distribution instead of the WebSocket protocol — and are likewise
 `surface-specific`.
 
 `Beamtalk releaseInfo` and `Beamtalk shapeManifest` are **not**
@@ -973,9 +1169,15 @@ mislead a reader who finds 0061 first:
    This is a **correction to 0061, not a new policy** — no security posture
    changes here; 0061 simply describes one Beamtalk no longer has.
 
-0061's three-mode table (`run` / full workspace / release) stays accurate
-and is the direct ancestor of §1.4's table, which refines it with the
-`beamtalk_idle_monitor` and ChangeLog rows 0061 did not have to consider.
+0061's three-mode table (`run` / full workspace / release) is the direct
+ancestor of §1.4's table, and its *structure* holds — but its release
+row's "Bootstrap: ✗ (pre-loaded)" is the third stale item, and the most
+consequential: §1.4 shows the boot script cannot preload `bt@*` modules in
+either VM mode (interactive skips them; embedded runs `-on_load` before the
+runtime exists and halts the boot). Release mode bootstraps explicitly,
+like every other mode, from the `.app` module lists. §1.4's table also adds
+the `beamtalk_idle_monitor`, ChangeLog and `telemetry_poller` rows 0061 did
+not have to consider.
 
 ---
 
@@ -1000,8 +1202,9 @@ default, `sys.config`/`vm.args`, a `bin/<app>` script with
 all**. Distillery, its predecessor, did generate appups and relups, and the
 feature was a persistent source of subtle breakage; when releases moved into
 Elixir core, it was dropped rather than reimplemented. **Adopted:**
-`include_erts` default-on, the launcher verb set (minus `daemon`, §1.7),
-`eval` as the admin-task path, config at `releases/<vsn>/`. **Learned from:**
+`include_erts` default-on, `eval`'s no-apps/no-distribution semantics and
+`rpc` for the live node, a subset of the verb set (§1.7 lists what is kept
+and dropped), config at `releases/<vsn>/`. **Learned from:**
 the relup decision, which is §2.1's strongest external evidence.
 
 ### rebar3 / relx
@@ -1018,11 +1221,14 @@ ADR 0027 Windows). Its *design* is adopted; its *code* is not.
 
 Gleam compiles to Erlang and delegates packaging entirely — `gleam export
 erlang-shipment` produces a directory plus an `entrypoint.sh`, and anything
-more is rebar3's or the user's job. **Deliberately not followed.** Gleam can
-delegate because its users are already Erlang-ecosystem natives with
-`rebar3` installed. Beamtalk's README promises `erl` and nothing else, and
-its operator cohort (ADR 0099's steelman) asked for a real release, not a
-directory.
+more is the user's job. **Deliberately not followed** — and not for the
+reason an earlier draft gave. Gleam needs no `rebar3` (it builds with
+`erlc` and `escript` alone); its shipment is simply a *directory with a
+start script*, and Gleam's own docs say shipments are to be replaced by OTP
+releases. That is the point: a directory is where Beamtalk's escript
+already is, and the operator cohort (ADR 0099's steelman) asked for the
+thing Gleam has not built yet — `sys.config`, a boot script, a console, an
+upgrade story.
 
 ### Pharo / Squeak Smalltalk
 
@@ -1347,17 +1553,22 @@ before the moment it must be correct.
 
 - Beamtalk has a production deployment story: one command, one artifact, no
   host runtime, supervised foreground process, structured stdout.
-- ADR 0061's open constraint is resolved with a named mode triple, and the
-  `beamtalk_idle_monitor` bug that a naïve `repl = true` release would have
-  shipped (a production node self-terminating when idle) is ruled out by
-  construction.
+- ADR 0061's open constraint is resolved — and resolved at the level it
+  actually lived: a named mode triple *plus* an application-environment
+  start path for `beamtalk_workspace_sup`, which nothing in the tree has
+  today. The `beamtalk_idle_monitor` halt that a naïve `repl = true`
+  release would ship is switched off *by the mode* rather than by an
+  operator remembering `auto_cleanup = false`.
 - The prerequisite list is unchanged: `erl` and `erlc`, as the README
   already promises.
-- Most of the machinery already exists — `.app` generation (ADR 0026 §3),
-  the app-callback generator, the dependency closure (ADR 0070), the
-  topological module sort, the provenance stamp (ADR 0098), the escript's
-  staging logic. The new code is concentrated in tree assembly and the
-  launcher.
+- Much of the machinery already exists — `.app` generation (ADR 0026 §3),
+  the app-callback generator, the dependency closure (ADR 0070),
+  `activate_modules/2` and its topological sort, the provenance stamp (ADR
+  0098), the escript's staging logic. The genuinely new pieces are named,
+  not hidden: tree assembly and the launcher, the app-env start path for
+  `beamtalk_workspace_sup` (§1.4), and the build-time shape extractor
+  (§2.2). Review moved two of those from "already exists" to "new" — a
+  correction that cost estimates, not the design.
 - `shapeVersion:` earns its keep on day one: §2.3's preflight turns a
   restart-based deploy from "hope the state matches" into a checked
   operation, using the same fingerprint code ADR 0123 §4 already specified.
@@ -1420,9 +1631,10 @@ before the moment it must be correct.
 | Layer | Work |
 |---|---|
 | CLI (`beamtalk-cli`) | `commands/release.rs` (new); `manifest.rs` `[release]` section; `build_layout.rs` `release_dir()`; `doctor.rs` window check; `main.rs` `Release` subcommand |
-| Build | Release tree staging (`lib/<app>-<vsn>/ebin`), `.rel` writer, `systools` invocation via `ErlcInvocation`-style `erl -noshell` helper, tarball, ERTS copy |
+| Build | Release tree staging (`lib/<app>-<vsn>/ebin`), `.rel` writer, `systools` invocation via `ErlcInvocation`-style `erl -noshell` helper with `{variables, [{"RELEASE_DIR", …}]}`, `release_handler:create_RELEASES/4`, tarball, ERTS copy |
 | Launcher | `bin/<name>` (sh) + `bin/<name>.cmd`; verbs `foreground`/`stop`/`ping`/`remote_console`/`eval`/`version`; OTP-major boot check |
-| Runtime (`beamtalk_workspace`) | `mode => run \| workspace \| release` on `beamtalk_workspace_sup`; release child-spec set; capability refusals in `beamtalk_repl_ops*` |
+| Runtime (`beamtalk_workspace`) | `mode => run \| workspace \| release` on `beamtalk_workspace_sup`; **app-env-driven start of `beamtalk_workspace_sup` from `beamtalk_workspace_app:start/2`** (today `beamtalk_workspace_app_sup` has no children); third `changelog_workspace_id/2` clause; release child-spec set; capability refusals in `beamtalk_repl_ops*` |
+| Build (`app_file.rs`) | Emit `beamtalk_workspace` (and `beamtalk_runtime`) into the project `.app`'s `{applications, …}` so OTP starts the workspace before the project app |
 | Runtime (`beamtalk_runtime`) | `beamtalk_release:info/0`, `shape_manifest/0`; `Beamtalk releaseInfo`/`shapeManifest` intrinsics |
 | Provenance | `beamtalk-provenance.json` writer, reusing `build_stamp::current_otp_version()`; the **build-time shape extractor** (§2.2) — an `erl -noshell` step that loads staged `bt@*` beams and evaluates `__beamtalk_meta/0` — which writes `shapes.json` in Phase 1 and is reused by the Phase 6 preflight and Phase 7 appup diff |
 | Policy | `otp-support.toml`; `just otp-matrix`; CI matrix; matrix-vs-declaration test |
@@ -1431,18 +1643,21 @@ before the moment it must be correct.
 
 ### Phases
 
-**Phase 0 — Wire check (S).** Prove the one assumption the whole of Part 1
-rests on, before building any of it: that OTP's `systools` will boot a node
-from a Beamtalk-staged lib tree. Hand-stage one app, write a `.rel` by
-hand, run `systools:make_script/2`, and start a node from the resulting
-`.boot`. **Already partially done while drafting this ADR** —
-`make_script/2` accepts `lib/foo-0.4.0-dev+abc1234/ebin` (the real
-suffixed-version shape) and produces a valid `.boot`, which retires the
-"can an OTP version string hold a `+` and extra hyphens?" risk. What Phase
-0 still owes is the other half: stage the *actual* `beamtalk_runtime` +
-`beamtalk_stdlib` ebins, boot that node, and confirm the class registry
-comes up. If the generated `.app` files turn out to need changes to satisfy
-`systools`, that is far better learned here than in Phase 1.
+**Phase 0 — Wire check (S, but it is the critical path).** Prove the
+assumptions Part 1 rests on before building any of it. Review already
+settled three of them empirically: `systools:make_script/2` accepts the
+suffixed-version directory shape; a `.rel` omitting a declared dependency
+fails hard; and a `.boot` that *builds* still does not *boot* under
+`--no-include-erts` without `$RELEASE_DIR` (§1.3). What Phase 0 still owes
+is the half that matters most, and its acceptance criterion is exact: **a
+node boots from `start.boot`, in interactive mode, with the real
+`beamtalk_runtime` + `beamtalk_stdlib` + one project app staged, and every
+`bt@*` class is registered before the project's root supervisor starts** —
+which requires the §1.4 app-env start path to exist in at least a
+hand-written form. That criterion is where the on_load/embedded trap, the
+no-children `beamtalk_workspace_app_sup`, and the `.app` dependency order
+all either work or fail visibly. Anything learned here is far cheaper than
+learning it in Phase 2.
 
 **Phase 1 — Release assembly (L).** `beamtalk release` end to end: manifest
 `[release]`, app closure, staged lib tree, `.rel`, `systools:make_script`,
@@ -1457,14 +1672,31 @@ CLI integration test that builds a release from a fixture project and
 asserts the staged tree, the `.boot`, `shapes.json` and the provenance
 file exist and parse — the Phase 0 napkin promoted into CI.
 
-**Phase 2 — Release-mode runtime (M).** The `mode` triple, the release
-child-spec set, register-before-supervisor ordering, §1.5's capability
-refusals, and a boot smoke test that starts a real release and asserts the
-idle monitor, compiler app and ADR 0105 stores are absent.
+**Phase 2 — Release-mode runtime (L, was M).** The `mode` triple, the
+release child-spec set, the third `changelog_workspace_id/2` clause, §1.5's
+capability refusals — and the two pieces §1.4 identifies as genuinely new:
+`beamtalk_workspace_app:start/2` **reading its config from the application
+environment and starting `beamtalk_workspace_sup`** when `mode` is set, and
+`app_file.rs` emitting `beamtalk_workspace` into the project `.app`'s
+`{applications, …}` so OTP orders the start. Activation runs from the
+`.app` module lists through `activate_modules/2`. *Tests:* EUnit in
+`beamtalk_workspace` for the env-driven start, and the boot smoke test —
+start a real release from `start.boot` and assert every `bt@*` class is
+registered before the root supervisor's first actor, and that the idle
+monitor, compiler app and ADR 0105 stores are absent. This is the phase
+that ships the first deployable artifact together with Phase 1; the
+`foreground`/`stop` verbs are pulled forward from Phase 3 into it for that
+reason.
 
-**Phase 3 — Launcher (M).** `bin/<name>` + `.cmd`, all six verbs,
-`bin/<name> eval` wired to ADR 0099's two-tier exit, the OTP-major boot
-check. Windows CI coverage is part of the phase, not a follow-up (ADR 0027).
+**Phase 3 — Launcher (M).** `bin/<name>` + `.cmd` and the five verbs
+Phase 2 did not already need (`ping`, `remote_console`, `eval`, `rpc`,
+`version`; `foreground`/`stop` shipped with Phase 2). `eval` and `rpc` are
+`run-entry`-shaped with `node_owning` set per verb (§1.7); every boot
+passes `-boot_var RELEASE_DIR`; the OTP boot check enforces
+`host_major ∈ [build_major, build_major + 2]` (§3.2). Windows CI coverage
+is part of the phase, not a follow-up (ADR 0027). *Tests:* a launcher
+test per verb on both platforms, including `eval`'s exit-code adoption
+and `rpc` against a running fixture release.
 
 **Phase 4 — Console in release mode (M).** `[release] console`, cookie from
 `RELEASE_COOKIE`/`vm.args`, loopback default, non-loopback warning,
@@ -1478,9 +1710,16 @@ protocol suite is the natural home because it already exercises the same
 **Phase 5 — OTP support policy (S).** `otp-support.toml`, `doctor`/`build`/
 `release` consumers, CI matrix, the drift test, README and docs.
 
-**Phase 6 — Upgrade preflight (M).** `beamtalk release --upgrade-from`, the
-`shapes.json` diff, §2.3's report, routed through the existing
-`beamtalk_shape_diff`/fingerprint code.
+**Phase 6 — Upgrade preflight (L, was M).** `beamtalk release --upgrade-from`
+and §2.3's report. The size is honest about §2.3's seam: the §2.2
+extractor must build a `beamtalk_shape_diff:shape()` record from beams —
+the flattened field map with types plus the migrations table — with no
+live ETS to walk, which is a new leaf, not a call into one; only the diff
+itself is reused. *Tests:* EUnit pinning the extractor's output for a
+fixture class against what `beamtalk_workspace_shape_store` produces for
+the same class live — that equality is the conformance test that keeps the
+disk and live flattenings from drifting — plus a CLI test over two fixture
+releases asserting §2.3's report verbatim.
 
 **Phase 7 (deferred, separate epic) — relup (L).** §2.2's appup generation,
 `systools:make_relup/4`, `release_handler` integration, hand-written
@@ -1490,9 +1729,13 @@ protocol suite is the natural home because it already exercises the same
 ### Open questions for implementation
 
 - ~~Does `systools:make_script/2` need `{path, …}` for the staged tree?~~
-  **Answered** by the Phase 0 napkin check: `{path, ["lib/*/ebin"]}` with
-  `{outdir, …}` resolves a staged tree correctly. The `erl -noshell` call
-  passes `path`; `-pa` is not required.
+  **Answered, then corrected.** `{path, ["lib/*/ebin"]}` makes
+  `make_script/2` succeed, but the resulting script is `$ROOT`-relative and
+  fails to boot under `--no-include-erts` (§1.3). The real answer is
+  absolute paths plus `{variables, [{"RELEASE_DIR", Dir}]}` and
+  `-boot_var RELEASE_DIR` at boot; `-pa` is still not required. A lesson
+  for Phase 0's criterion: "the tool ran" is not the check, "the node
+  booted" is.
 - ERTS copy fidelity on macOS: `erts-*/bin` contains signed binaries;
   confirm the copy survives Gatekeeper, or document `--no-include-erts` as
   the macOS default.
@@ -1512,8 +1755,10 @@ optional and every key has a default. A project that already declares
 already use — is releasable with no manifest change at all.
 
 Internally, `repl => boolean()` becomes `mode => run | workspace | release`
-in `beamtalk_workspace_sup`'s config. The call sites are the CLI's workspace
-startup, `escript.rs`'s generated bootstrap, and the runtime test suites;
+in `beamtalk_workspace_sup`'s config, and `beamtalk_workspace_meta` takes
+the same key (`beamtalk_workspace_meta.erl:72,96`) and changes with it. The
+call sites are the CLI's workspace startup, `escript.rs`'s generated
+bootstrap, the meta process, and the runtime test suites;
 they are updated in the same change as the mode addition, with **no
 transitional boolean clause** (the same discipline ADR 0123 applied to the
 `code_change/3` `Extra` tuple).
