@@ -90,8 +90,12 @@ anywhere in the tree.** The only hits for those words are a comment in
 it") and `beamtalk_hot_reload`'s `code_change/3`.
 
 **OTP version policy is a README sentence.** "Erlang/OTP 27+" appears twice
-in `README.md`; `beamtalk doctor` hardcodes `27` in `parse_otp_major` and in
-three separate user-facing strings. CI has **no OTP matrix** — every job
+in `README.md`; `beamtalk doctor` hardcodes `27` in `check_erl`'s guard
+(`Some(major) if major >= 27`) and in five user-facing strings across
+`check_erl` and `print_install_instructions` (including two
+`asdf install erlang 27.2` lines). `parse_otp_major` itself is
+version-agnostic — `version.split('.').next()?.parse()` — and needs no
+change. CI has **no OTP matrix** — every job
 runs the single version pinned in `.tool-versions` (currently `erlang 28.5`).
 The only place a compound OTP version is computed is
 `build_stamp::current_otp_version()`, which produces the
@@ -586,6 +590,13 @@ structural reconcile against the older declared shape — and logs a warning
 naming every field it dropped. Rolling back a release is a blue/green
 rollback to the previous artifact, not a state downgrade.
 
+This keeps `migrate/3`'s shipped permissive behaviour on the local/relup
+path, and it is deliberately **not** what §3.4 does on the wire: a local
+downgrade is one operator-initiated, recoverable event, whereas a rolling
+deploy would apply the same truncation to every message from every
+upgraded peer, invisibly. §3.4 item 3 is where that difference is named
+and paid for.
+
 The reason is that a correct downgrade hook is strictly harder to write than
 its forward twin (it must invent information the forward step discarded),
 it doubles the authoring burden on every shape change, and in practice it
@@ -633,8 +644,10 @@ max-major = 28
 
 Three consumers read it, none of them copying it:
 
-1. **`beamtalk doctor`** — replaces the hardcoded `27` in `parse_otp_major`
-   and its three user-facing strings.
+1. **`beamtalk doctor`** — replaces the hardcoded `27` in `check_erl`'s
+   `major >= 27` guard and in the `check_erl` /
+   `print_install_instructions` strings. `parse_otp_major` is already
+   version-agnostic and is left alone.
 2. **`beamtalk build` / `beamtalk release`** — a build-time check; building
    on an out-of-window OTP is a warning for `build` (you may be developing
    ahead) and an **error** for `release` (you are producing an artifact
@@ -709,17 +722,59 @@ A cluster is a set of releases, possibly at different versions. This ADR
 fixes the contract; BT-3527 decides the messaging policy built on it.
 
 1. **The wire shape is ADR 0123's envelope, verbatim:**
-   `{beamtalk_shape, Class, ShapeVersion, Fields}`. Nothing new is
-   invented; `pack/1`/`unpack/1` are the same functions persistence uses.
+   `{beamtalk_shape, Class, ShapeVersion, Fields}`, and `pack/1` is reused
+   unchanged. The *chain* is shared too — one `beamtalk_shape_chain`, one
+   reconcile, for persistence and the wire alike.
 2. **Receivers migrate forward, never backward.** `unpack/1` already runs
    `migrate/3` from the envelope's version, so a node at a *newer* shape
-   accepts an older peer's term transparently.
-3. **A receiver that is behind refuses.** An envelope whose `ShapeVersion`
-   exceeds the receiving node's `shapeVersion` for that class raises
+   accepts an older peer's term transparently. This direction needs nothing
+   new.
+3. **A receiver that is behind refuses — and this is new code, not a reuse.**
+   Today's `unpack/1` is *permissive* in the backward direction, and
+   deliberately so: `migrate/3`'s `ToVersion < FromVersion` branch logs a
+   downgrade warning (`beamtalk_shape_migration:maybe_log_downgrade/3`),
+   runs step 3's reconcile against the receiver's **older** declared field
+   list, drops every key that list does not declare, and returns
+   `{ok, Kept, ToVersion}`. That is the right policy for **persistence** —
+   an operator-initiated, single-node, recoverable rollback where the old
+   code genuinely cannot use the new fields — and it is the wrong policy
+   for a **wire**, where a rolling deploy makes every message from every
+   already-upgraded peer a silent truncation.
+
+   So the skew contract adds one thin entry point rather than changing
+   `unpack/1`'s contract:
+
+   ```erlang
+   %% Not `unpack/2` — that arity is taken by the existing private
+   %% nesting-depth recursion (?MAX_PACK_DEPTH).
+   -spec unpack_strict(envelope()) ->
+       {ok, Instance :: map()} | {error, #beamtalk_error{}}.
+   ```
+
+   `unpack_strict/1` refuses an envelope whose `ShapeVersion` exceeds the
+   receiver's declared `shapeVersion` for that class, short-circuiting
+   **before the chain runs** and returning
    `#beamtalk_error{kind = shape_version_ahead}` naming the class and both
-   versions. It does not guess, and it does not silently drop fields. This
-   is the same ordering discipline OTP's own upgrade guidance uses: upgrade
-   receivers before senders.
+   versions. It does not guess, and it does not drop fields. Everything
+   else delegates to the same `migrate/3`. `unpack/1` is untouched, so
+   every existing caller keeps today's behaviour. This is the ordering
+   discipline OTP's own upgrade guidance uses: upgrade receivers before
+   senders.
+
+   **The check must be per envelope, not per message.** `pack/1` packs
+   nested `Value` instances recursively so each carries its own version
+   (ADR 0123 § Envelope), and `unpack_nested_value/2` calls `migrate/3`
+   for each one. A strict unpack therefore threads its policy down that
+   recursion: a `Cart` at the receiver's own version carrying a `Money`
+   field one version ahead is still skew, and refusing only at the top
+   level would truncate the nested `Value` silently — the same bug one
+   level down.
+
+   **Ownership:** this ADR *defines* `unpack_strict/1`; **BT-3527
+   implements it**, because BT-3527 is what first puts an envelope on a
+   wire. Nothing in this ADR's v1 sends or receives one, so it appears in
+   no phase here — the same anti-rot reason §2.2 pins the appup rules in
+   prose instead of shipping an unexercised generator.
 4. **Skew is detectable at connect time, not per message.** Each release
    writes `releases/<vsn>/shapes.json` — `class → shapeVersion` for every
    class in the release, derived from `__beamtalk_meta` at assembly time:
@@ -1138,8 +1193,9 @@ before the moment it must be correct.
   CI matrix generated from it, a test that the two agree, and a boot-time
   refusal on mismatch.
 - BT-3527 gets a concrete contract to build on rather than a shape to
-  invent: ADR 0123's envelope, forward-only migration, and a connect-time
-  shape manifest.
+  invent: ADR 0123's envelope, forward-only migration, a named
+  `unpack_strict/1` for the backward direction, and a connect-time shape
+  manifest.
 
 ### Negative
 
@@ -1196,6 +1252,7 @@ before the moment it must be correct.
 | Provenance | `beamtalk-provenance.json` + `shapes.json` writers, reusing `build_stamp::current_otp_version()` |
 | Policy | `otp-support.toml`; `just otp-matrix`; CI matrix; matrix-vs-declaration test |
 | Docs | `docs/development/surface-parity.md` (4 rows); a new `docs/development/deploying.md`; `README.md` OTP window |
+| *(BT-3527, not phased here)* | `beamtalk_shape_migration:unpack_strict/1` (§3.4 item 3) — defined by this ADR, implemented by the ADR that first puts an envelope on a wire |
 
 ### Phases
 
