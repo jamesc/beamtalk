@@ -629,6 +629,23 @@ pub enum DiagnosticCategory {
     /// category suppresses this one by design (ADR 0124 §6): the exemption
     /// is the language construct `late`, not an annotation.
     DefiniteAssignment,
+    /// Unguarded `late`-slot read reachable from `terminate:`/`handleInfo:`
+    /// (ADR 0124 §4d, Implementation B6) — `terminate/2` wraps its dispatch
+    /// in `try … catch -> 'ok'` and `handleInfo:` errors are logged and
+    /// swallowed (log-and-continue), so an unguarded read that raises
+    /// `UninitializedStateError` there lets the callback "complete" while
+    /// silently skipping whatever it was meant to do.
+    ///
+    /// A sibling to [`Self::DefiniteAssignment`] rather than reusing it
+    /// (ADR 0124 §4d, BT-3555): the two check different things (a
+    /// construction site leaving a slot unassigned, vs. a read reachable
+    /// from a lifecycle hook whose failure is silent) for different
+    /// audiences (the class author, vs. the operator debugging a shutdown
+    /// that skipped cleanup), and giving this one its own category lets
+    /// `[diagnostics]` escalate/mute it independently. Like
+    /// `DefiniteAssignment`, no `@expect` category suppresses this one by
+    /// design — the exemption is the `hasField:` guard, not an annotation.
+    UnguardedLateRead,
 }
 
 /// A secondary note attached to a diagnostic.
