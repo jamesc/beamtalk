@@ -211,18 +211,40 @@ pointing at `[package] version`.
 **`apps` is additive, not authoritative.** The included application set is
 *computed*: the project's own app, the ADR 0070 dependency closure (from
 `_build/deps/`, the same graph `beamtalk build` already resolves), the
-runtime closure (`beamtalk_runtime`, `beamtalk_stdlib`, plus `cowboy`/
-`ranch` only when `console = true`, plus `telemetry`/`telemetry_poller`),
-and `kernel`/`stdlib`/`sasl`. `[release] apps` names *extra* OTP apps (an
+runtime closure, and `kernel`/`stdlib`/`sasl` (`sasl` is required —
+`release_handler` lives there). `[release] apps` names *extra* OTP apps (an
 Erlang dependency reached only via FFI, say) that the closure cannot see.
-`beamtalk_compiler` and `beamtalk_workspace`'s development stores are
-**not** in the closure (§1.4).
+
+**The closure is an application-level set, and an application's own `.app`
+decides its dependencies — not this ADR.** Two consequences follow, and
+both are costs of §1.4's mode-variant decision rather than things a
+`[release]` key can opt out of:
+
+- **`beamtalk_workspace` is in every release**, because §1.4 keeps release
+  mode inside `beamtalk_workspace_sup`. Its development stores are
+  *unstarted modules*, not absent applications. The `.rel` lists the app;
+  the supervisor does not start those children.
+- **`cowboy`/`ranch` are therefore unconditional too**, even at
+  `console = false`. `beamtalk_workspace.app.src` declares `cowboy` in its
+  `{applications, …}` list, and `systools:make_script/2` *hard-errors* on a
+  `.rel` that omits a declared dependency — verified:
+  `{error, systools_make, {undefined_applications,[crypto]}}` for an
+  equivalent minimal case. So the listener's *code* ships whether or not a
+  listener is *started*. Making this conditional means moving `cowboy` out
+  of `beamtalk_workspace`'s hard dependencies, which is part of the
+  extraction §1.4 defers, not a separate knob.
+
+`beamtalk_compiler` **is** genuinely excludable, and is excluded by
+default, precisely because nothing *declares* it —
+`beamtalk_workspace_sup` starts it dynamically via
+`application:ensure_all_started/1`, which is exactly the seam
+`start_compiler => false` already uses for the escript.
 
 #### 1.3 Build mechanism: Rust stages, OTP's `systools` boots
 
 **Decision: assemble the lib tree in Rust, write the `.rel` from the
 computed app closure, and call `systools:make_script/2` and
-`systools:make_tarball/2` through `erl -noshell`.** No `rebar3`, no `relx`,
+`systools:make_tar/2` through `erl -noshell`.** No `rebar3`, no `relx`,
 no `mix`.
 
 ```
@@ -254,7 +276,7 @@ Why `systools` rather than relx-via-rebar3:
   today. Requiring `rebar3` would add a user-facing install step for the
   one command that operators use most.
 - **relx is a convenience layer over `systools`.** What it adds beyond
-  `make_script`/`make_tarball` is overlays and shell scripts — and the shell
+  `make_script`/`make_tar` is overlays and shell scripts — and the shell
   scripts are precisely the part we must write ourselves anyway, because
   they have to carry ADR 0099's `Console`/two-tier-exit semantics and ADR
   0027's Windows `.cmd`.
@@ -268,10 +290,30 @@ Why `systools` rather than relx-via-rebar3:
 
 Staging is a *copy* into a fresh versioned tree — `_build/dev/ebin/` and
 the installed `lib/<app>/ebin/` layouts are untouched. The staging step is
-the one genuinely new piece of Rust: read each app's `.app` file for its
-`{vsn, …}`, create `lib/<app>-<vsn>/ebin/`, copy the beams and the `.app`,
-and (when `include-erts`) copy the ERTS tree that `erl` reports via
+the one genuinely new piece of Rust: read each app's **generated** `.app`
+for its `{vsn, …}`, create `lib/<app>-<vsn>/ebin/`, copy the beams and the
+`.app`, and (when `include-erts`) copy the ERTS tree that `erl` reports via
 `code:root_dir/0` + `erlang:system_info(version)`.
+
+**Stage from the generated `.app`, never from `.app.src`.** The runtime's
+five `.app.src` files carry `{vsn, {cmd, "escript ../../../scripts/version.escript"}}`
+— a *rebar3* `.app.src` template construct that rebar3 resolves when it
+generates the real `.app`. `systools` reads plain `.app` files and has no
+idea what `{cmd, …}` means. The resolved artifact
+(`runtime/_build/default/lib/<app>/ebin/<app>.app`, e.g.
+`{vsn,"0.4.0-dev+38a688d"}`) is the only valid staging source. This is a
+one-line rule that is very easy to get wrong in the opposite direction, so
+it is stated here rather than left to be discovered.
+
+**The dev version string is safe in a lib directory name — verified, not
+assumed.** `BEAMTALK_VERSION` carries a prerelease suffix in source builds
+(`0.4.0-dev+38a688d`), so a staged directory is
+`lib/beamtalk_runtime-0.4.0-dev+38a688d/ebin` — a name containing both `+`
+and additional hyphens, which raises a fair question about how `App-Vsn`
+is split. A napkin check (Phase 0 below) confirms `systools:make_script/2`
+accepts exactly this shape and emits a valid `.boot`; it also emits
+`{warning, missing_sasl}` when `sasl` is left out of the `.rel`, which is
+`systools` independently confirming the `sasl` requirement noted in §1.2.
 
 **Cross-compilation is not supported.** `include-erts = true` makes the
 release OS- and architecture-specific; build it on (or in a container
@@ -301,21 +343,34 @@ application.** The boolean `repl => boolean()` becomes
 | `beamtalk_actor_sup` | ✓ | ✓ | ✓ |
 | Workspace file logger / on-disk artifacts | ✗ | ✓ | ✗ |
 | ADR 0105 signature/shape/findings stores, recheck worker | ✗ | ✓ | ✗ |
-| ADR 0082 ChangeLog, `alias_xref` | ✗ | ✓ | ✗ |
+| ADR 0082 ChangeLog | memory-only | ✓ on disk | memory-only |
+| `alias_xref` | ✗ | ✓ | ✗ |
 | `beamtalk_session_sup` + `beamtalk_repl_server` | ✗ | ✓ | opt-in (`console`) |
 | `beamtalk_idle_monitor` | ✗ | ✓ | **✗ — never** |
 
 Two rows carry the argument.
 
 **The idle monitor is why `release` cannot be `repl = true`.**
-`beamtalk_idle_monitor` self-terminates the workspace after
-`max_idle_seconds`. A production service that has served no REPL traffic
-for four hours is *healthy*; today's `repl = true` would shut it down. This
-is not a tuning knob — it is a mode distinction, and it is the clearest
-evidence that the boolean is the wrong shape.
+`beamtalk_idle_monitor` does not merely stop the workspace supervisor — on
+`max_idle_seconds` it calls **`init:stop/0`**, halting the entire node
+(`beamtalk_idle_monitor.erl:120-122`). A production service that has served
+no REPL traffic for four hours is *healthy*; today's `repl = true` would
+take the node down under it. This is not a tuning knob — it is a mode
+distinction, and it is the clearest evidence that the boolean is the wrong
+shape.
 
 **The REPL server is why `release` cannot be `repl = false`.** An operator
 needs a console. Run mode has none.
+
+**The ChangeLog row is the one place release mode inherits run mode rather
+than diverging.** `beamtalk_workspace_changelog` is started
+*unconditionally* today, in every mode; only its `workspace_id` is gated,
+dropped to `undefined` in run mode so the log stays memory-only with no
+on-disk artifacts. Release mode takes the same memory-only form — not
+because a release has anything to log (§1.5 removes every mutation that
+would write an entry) but because leaving it as-is costs one idle
+gen_server and changing it would be a code change this ADR does not need.
+Listing it as "✗" would have described a change nobody is making.
 
 *Why not extract `beamtalk_repl_server` + `beamtalk_session_sup` into a
 standalone application (ADR 0061's other option)?* Because the extraction
@@ -494,8 +549,8 @@ The reasoning, stated honestly because the operator cohort will push back
 (and their steelman is in §Steelman):
 
 1. **A relup must cover the whole release, not just user classes.** It needs
-   correct `.appup` files for `beamtalk_runtime`, `beamtalk_stdlib` (several
-   hundred `bt@stdlib@*` modules), `cowboy`, `ranch`, `telemetry` — every
+   correct `.appup` files for `beamtalk_runtime`, `beamtalk_stdlib` (115
+   `bt@stdlib@*` modules), `cowboy`, `ranch`, `telemetry` — every
    application in the closure. OTP's own applications ship *hand-written*
    `.appup` files for exactly this reason. That is Beamtalk's own release
    process (`docs/development/releasing.md`), recurring every version, and
@@ -528,7 +583,7 @@ the two releases' beams — the ADR 0050 mechanism, which already treats
 | Method bodies only; `shape_version` and flattened field set unchanged | `{load_module, Mod}` |
 | `shape_version` bumped, **or** flattened field set changed | `{update, Mod, {advanced, #{module => Mod}}}` |
 | Class added | `{add_module, Mod}` |
-| Class removed | `{delete_module, Mod}` — refused if instances are live (ADR 0112) |
+| Class removed | `{delete_module, Mod}` — warned at generation, **refused at install if instances are live** (see below) |
 | Superclass changed, or an ancestor's field set changed | `{update, …}` for **every concrete descendant** |
 
 The last row mirrors ADR 0123's "subclass instances are migrated on a
@@ -537,6 +592,27 @@ actually holds, so an ancestor's change is a descendant's migration.
 Instruction ordering is the class dependency topological order from
 `beamtalk_module_activation:sort_modules_by_dependency/2` — the existing
 function, not a re-derivation.
+
+**Class removal refuses here, and that is deliberately *not* what ADR 0112
+does.** `removeFromSystem`'s safety checks refuse on a stdlib module and on
+a class with direct subclasses, but for live instances it **stops the
+actors and proceeds** — it does not refuse. That is right in a workspace:
+the author asked for the class to be gone, and the actors are theirs. It is
+wrong in a production upgrade, where the same instruction would terminate
+live actors — with their mailboxes and state — as a *side effect* of
+deploying, with nothing in the deploy naming it.
+
+The check therefore splits across the two moments, because only one of them
+can see instances: **generation time** (on a build machine) knows a class
+was removed but has no idea what is running on any target node, so it emits
+a *warning* naming the class and marks the relup as carrying a destructive
+removal; **install time** (on the node, where `release_handler` runs) is
+the only place the instance count exists, so that is where the upgrade
+refuses if instances are live. Draining or stopping them stays an explicit
+operator step before the deploy, never something the upgrade does quietly.
+
+This is the same split as §3.4's: one mechanism, two policies, because a
+dev workspace and a production deploy have different things to lose.
 
 **`Extra` is ADR 0123's `Extra`, verbatim.** The issue's requirement — *one
 mechanism, not two* — is enforced by a conformance test, not a comment:
@@ -815,6 +891,28 @@ before them.
 
 `docs/development/surface-parity.md` gains rows for all four.
 
+### Amendment to ADR 0061
+
+ADR 0061 is **Implemented**, and its § "Future: Release Mode" is the one
+forward-looking part of it that this ADR closes. On acceptance, two things
+in that section become stale and should be edited rather than left to
+mislead a reader who finds 0061 first:
+
+1. **The open design constraint is resolved.** 0061 asked for "either a
+   third config variant or … a standalone OTP application". §1.4 chooses
+   the third variant and records the extraction as a follow-up. 0061's
+   constraint paragraph should point at §1.4 instead of posing the question.
+2. **"TLS + auth required" is wrong and was wrong when written.** It
+   predates ADR 0058's record that mTLS was removed (PR #1401). §1.6
+   replaces it with 0058's actual stance: console off by default, loopback
+   when on, cookie mandatory, TLS terminated by a reverse proxy or overlay.
+   This is a **correction to 0061, not a new policy** — no security posture
+   changes here; 0061 simply describes one Beamtalk no longer has.
+
+0061's three-mode table (`run` / full workspace / release) stays accurate
+and is the direct ancestor of §1.4's table, which refines it with the
+`beamtalk_idle_monitor` and ChangeLog rows 0061 did not have to consider.
+
 ---
 
 ## Prior Art
@@ -823,7 +921,7 @@ before them.
 
 The canonical mechanism, and the one this ADR builds directly on.
 `systools:make_script/2` turns a `.rel` into a boot script;
-`make_tarball/2` packages it; `make_relup/4` computes an upgrade script
+`make_tar/2` packages it; `make_relup/4` computes an upgrade script
 from two releases plus their `.appup` files; `release_handler` installs one
 at runtime with automatic fallback to the previous release. **Adopted
 wholesale.** What OTP does *not* provide is appup *generation* — every OTP
@@ -952,6 +1050,19 @@ from a live node. The `mode => run | workspace | release` triple is a
 clearer thing to reason about than today's boolean, and §1.5's capability
 table is the classification an LSP or IDE needs to grey out operations
 against a release-mode node.
+
+The cost lands here too, and it is not small. **Today every node a tool
+connects to is a workspace, so capability can be assumed; after this ADR it
+must be queried.** Every surface that offers a mutation — LSP code actions,
+the MCP `save_method`/`try_method` tools, the LiveView IDE's save buttons —
+needs a mode check and a new error path for §1.5's structured refusals,
+and a tool that skips it degrades from "button is greyed out" to "button
+throws". There is also a genuine two-sources-of-truth hazard: `shapes.json`
+on disk describes the *artifact*, `Beamtalk shapeManifest` describes the
+*running node*, and a node running last week's release disagrees with the
+directory sitting next to it. Tools must say which one they are reporting;
+this ADR deliberately keeps both rather than picking, because the deploy
+tool needs the file (no node yet) and the operator needs the node.
 
 ---
 
@@ -1256,6 +1367,19 @@ before the moment it must be correct.
 
 ### Phases
 
+**Phase 0 — Wire check (S).** Prove the one assumption the whole of Part 1
+rests on, before building any of it: that OTP's `systools` will boot a node
+from a Beamtalk-staged lib tree. Hand-stage one app, write a `.rel` by
+hand, run `systools:make_script/2`, and start a node from the resulting
+`.boot`. **Already partially done while drafting this ADR** —
+`make_script/2` accepts `lib/foo-0.4.0-dev+abc1234/ebin` (the real
+suffixed-version shape) and produces a valid `.boot`, which retires the
+"can an OTP version string hold a `+` and extra hyphens?" risk. What Phase
+0 still owes is the other half: stage the *actual* `beamtalk_runtime` +
+`beamtalk_stdlib` ebins, boot that node, and confirm the class registry
+comes up. If the generated `.app` files turn out to need changes to satisfy
+`systools`, that is far better learned here than in Phase 1.
+
 **Phase 1 — Release assembly (L).** `beamtalk release` end to end: manifest
 `[release]`, app closure, staged lib tree, `.rel`, `systools:make_script`,
 tarball, ERTS bundling, provenance + shapes files. Ships without a launcher
@@ -1289,12 +1413,14 @@ classification.
 
 ### Open questions for implementation
 
-- Does `systools:make_script/2` need `{path, …}` for the staged tree, or is
-  `-pa` sufficient? (Assembly detail; affects the `erl -noshell` call shape.)
+- ~~Does `systools:make_script/2` need `{path, …}` for the staged tree?~~
+  **Answered** by the Phase 0 napkin check: `{path, ["lib/*/ebin"]}` with
+  `{outdir, …}` resolves a staged tree correctly. The `erl -noshell` call
+  passes `path`; `-pa` is not required.
 - ERTS copy fidelity on macOS: `erts-*/bin` contains signed binaries;
   confirm the copy survives Gatekeeper, or document `--no-include-erts` as
   the macOS default.
-- Whether `beamtalk_stdlib`'s several hundred `bt@stdlib@*` modules should
+- Whether `beamtalk_stdlib`'s 115 `bt@stdlib@*` modules should
   be pruned to the transitively-reachable set (a large artifact-size win,
   but it breaks `Object allSubclasses` reflection and DNU-based dynamic
   dispatch). Out of scope for v1; recorded as a size optimisation.
