@@ -2638,6 +2638,104 @@ fn test_has_field_other_receiver_uses_message_dispatch() {
     );
 }
 
+#[test]
+fn test_class_side_clear_field_nested_in_loop_is_compile_error() {
+    // ADR 0124 §4i/B4: `self clearField: #classVar` is only wired for a
+    // class method's own top-level body statement — `is_family_mutation`'s
+    // `ClassVars` arm deliberately does NOT recognize it (see that match
+    // arm's own doc comment), so no loop construct ever allocates a
+    // `ClassVars` slot for it. Before the `block_depth == 0` guard on
+    // `is_self_clear_field_class_var` (`expr_shape.rs`), this exact shape
+    // compiled successfully but silently discarded the mutation AND broke
+    // the loop's own `flag` local-variable threading, producing an infinite
+    // loop at runtime (a live deadlock, found by hand-running this
+    // scenario) — the worst possible outcome of the three (clean rejection,
+    // silent no-op, infinite loop). Must be the clean rejection.
+    let src = concat!(
+        "Object subclass: CvClearInLoop\n",
+        "  classState: current = 0\n\n",
+        "  class clearLoop =>\n",
+        "    flag := true\n",
+        "    [flag] whileTrue: [\n",
+        "      self clearField: #current\n",
+        "      flag := false\n",
+        "    ]\n",
+        "    nil\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvclearinloop").with_workspace_mode(true),
+    );
+    let err = match result {
+        Err(err @ CodeGenError::UnsupportedFeature { .. }) => err,
+        other => panic!("Expected UnsupportedFeature for a nested clearField:. Got: {other:?}"),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("clearField:") && rendered.contains("not nested inside"),
+        "expected the 'not nested inside a conditional or loop' diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn test_class_side_clear_field_nested_in_conditional_is_compile_error() {
+    // The `ifTrue:`-guarded sibling of the loop case above — the exact
+    // class-side shape of the Symphony `hasField:`-guarded `clearField:`
+    // pattern (`stdlib/test/fixtures/has_clear_field_actor.bt`'s
+    // `stopProcess`, instance-side). Before the fix this compiled and ran
+    // WITHOUT error but silently left the class variable unchanged (no
+    // infinite loop here, since `ifTrue:` has no loop-condition local to
+    // corrupt — just a lost write). Must also be the clean rejection.
+    let src = concat!(
+        "Object subclass: CvClearInConditional\n",
+        "  classState: current = 0\n\n",
+        "  class clearIfPresent =>\n",
+        "    (self hasField: #current)\n",
+        "      ifTrue: [self clearField: #current]\n",
+        "    nil\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvclearinconditional").with_workspace_mode(true),
+    );
+    let err = match result {
+        Err(err @ CodeGenError::UnsupportedFeature { .. }) => err,
+        other => panic!("Expected UnsupportedFeature for a nested clearField:. Got: {other:?}"),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("clearField:") && rendered.contains("not nested inside"),
+        "expected the 'not nested inside a conditional or loop' diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn test_class_side_clear_field_top_level_non_last_statement_still_works() {
+    // The positive control for the two rejection tests above: a top-level
+    // (not nested in any block), non-last statement `self clearField:
+    // #classVar` in a class method must still compile and actually thread
+    // the mutation — `block_depth == 0` at this position, so
+    // `is_self_clear_field_class_var` still recognizes it via
+    // `class_method_prelude_producer`'s `threaded_expression` call
+    // (`lower_class_method_body`'s non-last branch, `gen_server/methods.rs`).
+    let src = concat!(
+        "Object subclass: CvClearTopLevel\n",
+        "  classState: current = 0\n\n",
+        "  class clearAndLog =>\n",
+        "    self clearField: #current\n",
+        "    nil\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'maps':'remove'"),
+        "a top-level, non-last self clearField: must still thread via maps:remove. Got:\n{code}"
+    );
+}
+
 // --- State-mutation hoisting in block value: apply paths ---
 
 #[test]

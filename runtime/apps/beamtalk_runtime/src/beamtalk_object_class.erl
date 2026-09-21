@@ -1452,16 +1452,31 @@ handle_call(get_module, _From, #class_state{module = Module} = State) ->
 handle_call(
     {get_class_var, Name}, _From, #class_state{name = ClassName, class_state = ClassVars} = State
 ) ->
-    %% ADR 0124 §1/§4i/B4: a declared-`late` class variable raises when
+    %% ADR 0124 §1/§4i/B4: a declared-`late` class variable is an error when
     %% unassigned, agreeing with the instance-side direct read
     %% (`generate_late_field_read`) — keyed on *declared* late so a typo'd
     %% variable name keeps today's plain `nil`.
+    %%
+    %% Replies `{error, Error}` rather than raising here: this
+    %% `handle_call` clause runs directly in the class gen_server's own
+    %% process, outside the `dispatch_class_method`/`apply_class_method_in_context`
+    %% machinery that normally catches a `#beamtalk_error{}` raise from a
+    %% class-method body and converts it to a safe reply before it can
+    %% reach `handle_call`'s caller (`invoke_class_method`, this module) —
+    %% an uncaught `beamtalk_error:raise/1` here would crash this class's
+    %% gen_server (and so the whole class) instead of just answering the
+    %% caller with a catchable error, so it is never called directly.
+    %% `get_class_var_declared_late_unassigned_errors_without_crashing_test_`
+    %% (`beamtalk_object_class_tests.erl`) pins that the process survives.
     case class_var_declared_late(ClassName, Name) of
         true ->
             case maps:find(Name, ClassVars) of
-                {ok, nil} -> raise_class_var_uninitialized(ClassName, Name);
-                {ok, Value} -> {reply, Value, State};
-                error -> raise_class_var_uninitialized(ClassName, Name)
+                {ok, nil} ->
+                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State};
+                {ok, Value} ->
+                    {reply, Value, State};
+                error ->
+                    {reply, {error, class_var_uninitialized_error(ClassName, Name)}, State}
             end;
         false ->
             {reply, maps:get(Name, ClassVars, nil), State}
@@ -1586,16 +1601,21 @@ class_var_declared_late(ClassName, Name) ->
     maps:get(Name, Kinds, eager) =:= late.
 
 -doc """
-Raises `uninitialized_state_error` for an unassigned declared-`late` class
-variable read via `get_class_var` (ADR 0124 §1/§4i/B4) — the class-side
-counterpart to `beamtalk_reflection`'s `raise_uninitialized_state/2`. No
-declared-type metadata is available for class variables the way
-`beamtalk_behaviour_intrinsics:classAllFieldTypesByName/1` supplies for
+Builds (but does not raise) the `uninitialized_state_error` for an
+unassigned declared-`late` class variable read via `get_class_var` (ADR 0124
+§1/§4i/B4) — the class-side counterpart to `beamtalk_reflection`'s
+`raise_uninitialized_state/2`, which DOES raise directly because it runs on
+the actor's already-`try`-wrapped `dispatch/4` path (`beamtalk_actor.erl`).
+`get_class_var`'s `handle_call` clause has no such wrapper, so this only
+constructs the error value for that clause to reply with as `{error, Error}`
+(see its own comment) rather than raising in the class gen_server's own
+process. No declared-type metadata is available for class variables the
+way `beamtalk_behaviour_intrinsics:classAllFieldTypesByName/1` supplies for
 instance fields (`__beamtalk_meta/0` carries no `class_field_types` key), so
 the hint names the variable without a `(:: Type)` suffix.
 """.
--spec raise_class_var_uninitialized(class_name(), atom()) -> no_return().
-raise_class_var_uninitialized(ClassName, Name) ->
+-spec class_var_uninitialized_error(class_name(), atom()) -> #beamtalk_error{}.
+class_var_uninitialized_error(ClassName, Name) ->
     Hint = iolist_to_binary(
         io_lib:format(
             "~s class variable '~s' is declared `late` and has not been assigned yet",
@@ -1603,8 +1623,7 @@ raise_class_var_uninitialized(ClassName, Name) ->
         )
     ),
     Error0 = beamtalk_error:new(uninitialized_state_error, ClassName, 'fieldAt:'),
-    Error1 = beamtalk_error:with_hint(Error0, Hint),
-    beamtalk_error:raise(Error1).
+    beamtalk_error:with_hint(Error0, Hint).
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's

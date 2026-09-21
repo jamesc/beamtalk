@@ -61,6 +61,20 @@ TestCase subclass: HasClearFieldTest
     self.a stopProcess
     self should: [self.a fieldAt: #proc] raise: #uninitialized_state_error
 
+  testFieldAtRaisesAfterClearHintMentionsFieldAndType =>
+    // The reflective `fieldAt:` path (`beamtalk_reflection:read_field/2`)
+    // must raise the same shape of hint the direct `self.slot` read does
+    // (`late_field_read_test.bt`'s `testReadBeforeAssignHintMentionsFieldAndType`)
+    // — the CLAUDE.md no-duplicate-implementations rule requires this
+    // "matches the direct read" claim to be test-enforced, not just a
+    // doc comment.
+    self.a launch: 42
+    self.a stopProcess
+    result := [self.a fieldAt: #proc] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "proc")
+    self assert: (result includesSubstring: "Integer")
+    self assert: (result includesSubstring: "late")
+
   testEagerFieldUnaffectedByClearField =>
     self.a launch: 42
     self.a stopProcess

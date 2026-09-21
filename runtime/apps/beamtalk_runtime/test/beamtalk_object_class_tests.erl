@@ -2030,6 +2030,62 @@ set_and_get_class_var_test_() ->
         ]
     end}.
 
+%% ADR 0124 §1/§4i/B4: `get_class_var` on a declared-`late` unassigned class
+%% variable replies `{error, #beamtalk_error{kind = uninitialized_state_error}}`
+%% rather than answering `nil` — and, critically, the class gen_server
+%% itself survives the call (a business error, not a crash): `get_class_var`
+%% is a raw `handle_call` clause outside the
+%% `dispatch_class_method`/`apply_class_method_in_context` machinery that
+%% normally catches a `#beamtalk_error{}` raise from a class-method body, so
+%% an uncaught `beamtalk_error:raise/1` here would take down the whole
+%% class instead of just answering the caller.
+%%
+%% `class_var_declared_late/2` needs real `__beamtalk_meta/0` metadata
+%% (`class_field_kinds => #{current => late}`) to take the "declared late"
+%% branch — a bare `module => test_class` fixture (as every other test in
+%% this section uses) has none and always degrades to `eager`/`nil`, so this
+%% builds a real meta-carrying module via `compile:forms/2`, mirroring
+%% `bt1982_has_class_new_in_chain_test_` above.
+get_class_var_declared_late_unassigned_errors_without_crashing_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Meta = #{class_field_kinds => #{current => late}},
+                MetaAbstract = erl_parse:abstract(Meta, [{line, 3}]),
+                Forms = [
+                    {attribute, 1, module, bt3551_late_classvar_mod},
+                    {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+                    {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
+                ],
+                {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+                {module, Mod} = code:load_binary(Mod, "bt3551_late_classvar_mod.erl", Bin),
+                try
+                    ClassInfo = #{
+                        name => 'BT3551LateClassVar',
+                        module => Mod,
+                        superclass => 'Object',
+                        instance_methods => #{},
+                        class_methods => #{}
+                    },
+                    {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                    %% Unassigned + declared late -> a safe {error, _} reply.
+                    Result = gen_server:call(Pid, {get_class_var, current}),
+                    ?assertMatch(
+                        {error, #beamtalk_error{kind = uninitialized_state_error}}, Result
+                    ),
+                    ?assert(is_process_alive(Pid)),
+                    %% Assigned -> answers the value, same declared-late branch.
+                    ?assertEqual(7, gen_server:call(Pid, {set_class_var, current, 7})),
+                    ?assertEqual(7, gen_server:call(Pid, {get_class_var, current}))
+                after
+                    _ = code:purge(Mod),
+                    _ = code:delete(Mod),
+                    _ = code:purge(Mod)
+                end
+            end)
+        ]
+    end}.
+
 %%% ============================================================================
 %%% is_constructible Tests
 %%% ============================================================================
