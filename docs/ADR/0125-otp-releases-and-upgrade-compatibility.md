@@ -504,10 +504,21 @@ $ echo $?
 
 #### 1.8 Provenance (ADR 0098)
 
-Every module already carries `beamtalk_version` and `otp_release` in
-`__beamtalk_meta` (ADR 0098 §3), so a release is self-describing at
-runtime with no new mechanism. The release adds one file that aggregates
-what the modules cannot say collectively:
+Every module **`beamtalk build` produces** already carries
+`beamtalk_version` and `otp_release` in `__beamtalk_meta` (ADR 0098 §3),
+so a release is self-describing at runtime with no new mechanism. The
+scope is exact, and worth being exact about: those keys are written only
+when the CLI supplies them via `CodegenOptions::with_provenance`, and the
+two call sites are both in `beam_compiler.rs` — the path `beamtalk build`
+and the stdlib build (`build_stdlib.rs`, via `BeamCompiler`) share. The
+REPL/compiler-port path supplies none, by design (`options.rs:85`:
+"absent for REPL/tests"; readers treat absence as a stale module). So a
+release's *shipped* modules — project, dependencies, and `bt@stdlib@*`
+alike — are all stamped. The one way a module in a running release loses
+its stamp is a class recompiled live under `include-compiler = true`
+(§1.5), which is one more thing that flag's boot warning names. The
+release adds one file that aggregates what the modules cannot say
+collectively:
 
 ```jsonc
 // releases/1.4.0/beamtalk-provenance.json
@@ -574,8 +585,32 @@ merely available, is §2.3's compatibility preflight.
 
 When the relup phase lands, `beamtalk release --upgrade-from <prev>` derives
 each Beamtalk application's `.appup` by diffing `__beamtalk_meta` between
-the two releases' beams — the ADR 0050 mechanism, which already treats
-`__beamtalk_meta` as the durable class-hierarchy record. Per `bt@*` module:
+the two releases' beams. ADR 0050 established `__beamtalk_meta/0` as the
+durable class-hierarchy record, and that is the *record* this reuses — but
+**not** 0050's *reader*, and not `beam_lib` either, for a reason worth
+stating so nobody reaches for the wrong tool:
+
+- `__beamtalk_meta/0` is a **compiled function**, not a BEAM chunk. Its
+  value exists only when it is *executed*. `beam_lib:chunks/2` can read
+  `attributes` and `exports` from a `.beam` on disk (which is what
+  `beamtalk_module_activation` and `beamtalk_native_docs` use it for) but
+  cannot evaluate a function, so it cannot produce the meta map.
+- ADR 0050's reader calls `Module:'__beamtalk_meta'()` on modules already
+  loaded in a *live* node. A build machine diffing two release directories
+  has no such node, and it cannot load both releases into one node either:
+  both carry the same module names (`bt@orders@cart` in 1.3.0 and 1.4.0),
+  and a BEAM node holds at most one current version of a name.
+
+So the diff is done by a small **build-time shape extractor**: an
+`erl -noshell` step that loads one release's staged `bt@*` beams into a
+scratch node, calls `__beamtalk_meta/0` on each, and writes the result out
+as a term file — then does the same for the other release, and diffs the
+two files. This extractor is not relup-specific: **it is the same step
+that produces `releases/<vsn>/shapes.json` in Phase 1** (§3.4), which is
+likewise a projection of `__beamtalk_meta/0` over the release's classes and
+likewise cannot be computed without executing it. Phase 1 builds the
+extractor because `shapes.json` needs it; Phase 6's preflight and Phase 7's
+appup generator reuse it. That is the shared leaf. Per `bt@*` module:
 
 | Change between releases | Appup instruction |
 |---|---|
@@ -625,7 +660,11 @@ same class and starting map.
 
 `beamtalk release --upgrade-from <prev-release-or-dir>` runs in v1 as a
 **checker** even though it generates no relup. It compares the two releases'
-`shapes.json` (§3.4) and provenance and reports:
+`shapes.json` (§3.4) and provenance and reports. A previous release built
+before `shapes.json` existed has no file to compare; the preflight then runs
+the §2.2 extractor over that release's `lib/*/ebin` to produce one on the
+fly, so the check never degrades to "unknown" merely because the old
+artifact predates the feature:
 
 ```
 Upgrade check: orders 1.3.0 → 1.4.0
@@ -1360,7 +1399,7 @@ before the moment it must be correct.
 | Launcher | `bin/<name>` (sh) + `bin/<name>.cmd`; verbs `foreground`/`stop`/`ping`/`remote_console`/`eval`/`version`; OTP-major boot check |
 | Runtime (`beamtalk_workspace`) | `mode => run \| workspace \| release` on `beamtalk_workspace_sup`; release child-spec set; capability refusals in `beamtalk_repl_ops*` |
 | Runtime (`beamtalk_runtime`) | `beamtalk_release:info/0`, `shape_manifest/0`; `Beamtalk releaseInfo`/`shapeManifest` intrinsics |
-| Provenance | `beamtalk-provenance.json` + `shapes.json` writers, reusing `build_stamp::current_otp_version()` |
+| Provenance | `beamtalk-provenance.json` writer, reusing `build_stamp::current_otp_version()`; the **build-time shape extractor** (§2.2) — an `erl -noshell` step that loads staged `bt@*` beams and evaluates `__beamtalk_meta/0` — which writes `shapes.json` in Phase 1 and is reused by the Phase 6 preflight and Phase 7 appup diff |
 | Policy | `otp-support.toml`; `just otp-matrix`; CI matrix; matrix-vs-declaration test |
 | Docs | `docs/development/surface-parity.md` (4 rows); a new `docs/development/deploying.md`; `README.md` OTP window |
 | *(BT-3527, not phased here)* | `beamtalk_shape_migration:unpack_strict/1` (§3.4 item 3) — defined by this ADR, implemented by the ADR that first puts an envelope on a wire |
@@ -1382,8 +1421,12 @@ comes up. If the generated `.app` files turn out to need changes to satisfy
 
 **Phase 1 — Release assembly (L).** `beamtalk release` end to end: manifest
 `[release]`, app closure, staged lib tree, `.rel`, `systools:make_script`,
-tarball, ERTS bundling, provenance + shapes files. Ships without a launcher
-(boot with `erl -boot`), so the assembly is verifiable on its own.
+tarball, ERTS bundling, `beamtalk-provenance.json`, and the **build-time
+shape extractor** (§2.2) that produces `shapes.json` — an `erl -noshell`
+step loading the staged `bt@*` beams and evaluating `__beamtalk_meta/0`,
+built here because `shapes.json` cannot exist without it and reused
+unchanged by Phases 6 and 7. Ships without a launcher (boot with
+`erl -boot`), so the assembly is verifiable on its own.
 
 **Phase 2 — Release-mode runtime (M).** The `mode` triple, the release
 child-spec set, register-before-supervisor ordering, §1.5's capability
