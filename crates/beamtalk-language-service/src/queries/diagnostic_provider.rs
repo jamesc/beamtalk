@@ -2337,4 +2337,73 @@ Object subclass: Helper
             "Should NOT warn about shadowing in stdlib_mode, got: {diagnostics:?}"
         );
     }
+
+    // ── ADR 0124 §6 (BT-3554): DefiniteAssignment surfaces through the same
+    // `compute_diagnostics` pipeline every other category does — one Actor
+    // finding, one Value finding. The predicate itself and its many edge
+    // cases are covered exhaustively by
+    // `beamtalk-core`'s `type_checker/tests/actor_construction_definite_assignment.rs`
+    // and `value_construction_definite_assignment.rs`; these two just pin
+    // that the language-service entry point the LSP/REPL/MCP actually call
+    // reaches the same diagnostic, with its category, severity and hint text
+    // intact end-to-end.
+
+    #[test]
+    fn definite_assignment_actor_finding_reaches_diagnostic_provider() {
+        // `Connection spawn` supplies no `socket`, and no `initialize`
+        // assigns it — the ADR 0124 §6 Implementation A2b (BT-1948) warning.
+        let source =
+            "typed Actor subclass: Connection\n  state: socket :: Integer\n\nConnection spawn";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let finding = diagnostics
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::DefiniteAssignment))
+            .unwrap_or_else(|| {
+                panic!("expected a DefiniteAssignment finding, got: {diagnostics:?}")
+            });
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(
+            finding.message.contains("socket") && finding.message.contains("Connection"),
+            "message should name the unassigned field and its class: {}",
+            finding.message
+        );
+        assert!(
+            finding.hint.as_ref().is_some_and(|h| h.contains("late")),
+            "hint should offer `late` as one of the Actor fixes: {finding:?}"
+        );
+    }
+
+    #[test]
+    fn definite_assignment_value_finding_reaches_diagnostic_provider() {
+        // `Snapshot new` resolves to the auto-generated constructor and
+        // supplies no `payload` — the ADR 0124 §6 Implementation A3+A4
+        // (BT-3552) warning; the *only* definite-assignment check a Value
+        // ever gets, since Values have no runtime post-`initialize` backstop.
+        let source = "typed Value subclass: Snapshot\n  field: payload :: Integer\n\nSnapshot new";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let finding = diagnostics
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::DefiniteAssignment))
+            .unwrap_or_else(|| {
+                panic!("expected a DefiniteAssignment finding, got: {diagnostics:?}")
+            });
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(
+            finding.message.contains("payload") && finding.message.contains("Snapshot"),
+            "message should name the unassigned field and its class: {}",
+            finding.message
+        );
+        // No `late` fix for a Value (`late field:` is rejected, ADR 0124 §1)
+        // — only supply/default/widen.
+        assert!(
+            finding.hint.as_ref().is_some_and(|h| !h.contains("late")),
+            "a Value's hint must not offer `late` — it's rejected on `field:`: {finding:?}"
+        );
+    }
 }
