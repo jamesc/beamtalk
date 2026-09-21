@@ -160,6 +160,23 @@ Output lands at `_build/release/<name>-<vsn>/` (a new
 `BuildLayout::release_dir(name, vsn)`), plus a `.tar.gz` of the same tree —
 the artifact you copy to a server or `ADD` into a container.
 
+The whole story, end to end, is three commands — build, run, look inside:
+
+```bash
+$ beamtalk release
+Built release orders-1.4.0 (with ERTS 16.0.2, linux/x86_64).
+  → _build/release/orders-1.4.0.tar.gz  (48.2 MB)
+
+$ _build/release/orders-1.4.0/bin/orders foreground
+[orders 1.4.0] OrdersSup started; console off (see [release] console)
+
+$ _build/release/orders-1.4.0/bin/orders eval "Beamtalk releaseInfo"
+#{#release => "orders", #version => "1.4.0", #otp => "28-16.0.2", …}
+```
+
+No Erlang on the host, no `sys.config` written by hand, nothing to `-pa`.
+Everything after this section is what those three lines are made of.
+
 `[application] supervisor` is **required**: a release is a service. A
 project without it gets a build error naming `beamtalk build --escript` as
 the right artifact for a script.
@@ -1426,7 +1443,11 @@ shape extractor** (§2.2) that produces `shapes.json` — an `erl -noshell`
 step loading the staged `bt@*` beams and evaluating `__beamtalk_meta/0`,
 built here because `shapes.json` cannot exist without it and reused
 unchanged by Phases 6 and 7. Ships without a launcher (boot with
-`erl -boot`), so the assembly is verifiable on its own.
+`erl -boot`), so the assembly is verifiable on its own. *Tests:* Rust unit
+tests in `beamtalk-cli` for the closure computation and `.rel` writer; one
+CLI integration test that builds a release from a fixture project and
+asserts the staged tree, the `.boot`, `shapes.json` and the provenance
+file exist and parse — the Phase 0 napkin promoted into CI.
 
 **Phase 2 — Release-mode runtime (M).** The `mode` triple, the release
 child-spec set, register-before-supervisor ordering, §1.5's capability
@@ -1440,7 +1461,11 @@ check. Windows CI coverage is part of the phase, not a follow-up (ADR 0027).
 **Phase 4 — Console in release mode (M).** `[release] console`, cookie from
 `RELEASE_COOKIE`/`vm.args`, loopback default, non-loopback warning,
 `remote_console`, `beamtalk repl --host`. Depends on Phase 2's capability
-classification.
+classification. *Tests:* `tests/repl-protocol/cases/*.btscript` against a
+release-mode node, asserting that every §1.5 refusal comes back as the
+named `#beamtalk_error{}` and that `eval`/`inspect` still answer — the
+protocol suite is the natural home because it already exercises the same
+`beamtalk_repl_server` the release reuses.
 
 **Phase 5 — OTP support policy (S).** `otp-support.toml`, `doctor`/`build`/
 `release` consumers, CI matrix, the drift test, README and docs.
