@@ -23,10 +23,17 @@ sealed typed Object subclass: WorkspaceInterface
   // consulting the receiver, so the self-threading `self delegate` form would be
   // wrong. The methods stay receiver-ignoring instance FFI, wrapped-by-default
   // since BT-2722.
-  classState: current :: WorkspaceInterface | Nil = nil
+  late classState: current :: WorkspaceInterface
 
-  /// Return the current singleton instance.
-  class current -> WorkspaceInterface => self.current
+  /// Return the current singleton instance (nil before workspace bootstrap).
+  ///
+  /// `@expect type`: a class method's `self hasField:` send infers as
+  /// `Dynamic` rather than its declared `Boolean` return type — a
+  /// pre-existing type-checker gap (ADR 0124 B4's `has_clear_class_var_actor.bt`
+  /// fixture hits the same thing), not something this conversion introduces.
+  @expect type
+  class current -> WorkspaceInterface | Nil =>
+    (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
 
   // === Actors and processes ===
 
