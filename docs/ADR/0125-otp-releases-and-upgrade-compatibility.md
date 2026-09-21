@@ -213,6 +213,9 @@ apps          = []              # extra OTP apps beyond the computed closure
 include-erts  = true            # bundle this machine's ERTS
 console       = false           # start the REPL/remote-console listener
 bind          = "127.0.0.1"     # only meaningful when console = true
+# Erlang distribution is always on and loopback-bound (§1.6): it is what
+# stop / ping / rpc / remote_console use. `console` governs only the
+# WebSocket REPL listener. There is no distribution toggle.
 sys-config    = "config/sys.config"
 vm-args       = "config/vm.args"
 strip-beams   = false           # drop debug_info chunks
@@ -586,7 +589,16 @@ implements no TLS of its own (mTLS was removed in PR #1401). The release's
 console defaults are:
 
 - **Off.** `[release] console = false`. A release that nobody configured a
-  console for does not open a port.
+  console for opens no *WebSocket* listener. It does open one port
+  regardless: **Erlang distribution is always on and loopback-bound**
+  (`-sname`, `inet_dist_use_interface {127,0,0,1}`, `epmd` as OTP starts
+  it), because `stop`, `ping`, `rpc` and `remote_console` all ride on it
+  and an operator's `ExecStop` must work without further configuration —
+  the same default `mix release` takes by naming the node. `console`
+  governs the REPL listener only; it is not a distribution toggle, and
+  there is none. (Hardening to `-start_epmd false` with a fixed
+  `inet_dist_listen_min/max` is an operator choice recorded under
+  Consequences, not a default.)
 - **Loopback.** When enabled, `bind = "127.0.0.1"`. Remote access is a
   reverse proxy (Caddy/nginx terminating TLS to `ws://127.0.0.1:<port>`) or
   an overlay network — ADR 0058's Layer 2, unchanged.
@@ -605,13 +617,13 @@ co-location rule for Attach, and 0091 (Implemented) is the ADR that owns
 remote access, not 0058/0020 alone: "Remote Attach **must** use TLS
 distribution (`inet_tls_dist`) or a tunnel" (0091 § finding 1), because
 plain distribution sends the cookie in an MD5 challenge over an
-unencrypted transport and `epmd` is itself a network service. So a release
-that enables distribution at all (`stop`/`ping`/`rpc`/`remote_console`
-require it) binds it to loopback by default, exactly as the console
-listener is, and anything past the host is 0091's Phoenix-authenticated
-front or a tunnel — never a `-name` on a routable interface. Note the
-asymmetry this creates with §1.7's `eval`, which starts *no* distribution
-and so needs none of this. `beamtalk repl --host … --port …` attaches over
+unencrypted transport and `epmd` is itself a network service. That is
+exactly why the always-on distribution above is **loopback-bound**, as the
+console listener is, and why anything past the host is 0091's
+Phoenix-authenticated front or a tunnel — never a `-name` on a routable
+interface. The one launcher verb that sidesteps all of this is §1.7's
+`eval`, which starts a separate VM with *no* distribution and so needs
+none of it. `beamtalk repl --host … --port …` attaches over
 the WebSocket protocol, identically to dev. Both land on
 `beamtalk_repl_server`, so the op vocabulary is the dev vocabulary minus
 §1.5's refusals — no forked surface — with the honest caveat from §1.5 that
@@ -628,18 +640,23 @@ The launcher (`bin/<name>` / `bin/<name>.cmd`) supports:
 | `stop` | Graceful `init:stop()` in the running node, via distribution. |
 | `ping` | Liveness check, via distribution. |
 | `remote_console` | Attach a shell to the running node (§1.6). |
-| `eval "Class selector [args]"` | Start a **separate** VM: load the release's code and activate its classes, but start **neither** the project's root supervisor **nor** distribution; dispatch one `run-entry`; halt with its exit code. |
+| `eval "Class selector [args]"` | Start a **separate** VM with the **runtime closure only** — `beamtalk_runtime`, `beamtalk_stdlib`, `beamtalk_workspace` in release mode with `console` forced off — so classes activate (§1.4), but **not the project's own application** (no root supervisor) and **no distribution**; dispatch one `run-entry`; halt with its exit code. |
 | `rpc "Class selector [args]"` | Dispatch one `run-entry` **into the running node** over distribution and print the result. |
 | `version` | Print the release version and provenance summary. |
 
 `eval` and `rpc` take a class, a selector and arguments — the `run-entry`
 shape — not a source string, because the default release has no compiler
-(§1.5). `eval`'s "no applications, no distribution" rule is `mix release`'s
-(*"starts its own instance of the VM but without starting any of the
-applications in the release and without starting distribution"*), and for
-the same reason: on a host where the release is already running, starting
-the applications again would mean a second root supervisor, a second
-console listener on the same port, and an `-sname` clash. A task that needs
+(§1.5). `eval`'s rule is *modelled on* `mix release`'s (*"without starting
+any of the applications in the release and without starting
+distribution"*) but is **weaker, and says so**: Beamtalk cannot dispatch
+onto a `bt@*` class that has not been activated, and §1.4 gives activation
+exactly one path — `beamtalk_workspace_sup`, started by the
+`beamtalk_workspace` application. So `eval` must start the runtime closure.
+What it must *not* start is the project's own application, and it starts
+no distribution — and that is enough to avoid the same-host collision,
+because the runtime closure in release mode with `console` forced off
+opens no listener and registers only per-node names: no second root
+supervisor, no second console port, no `-sname` clash. A task that needs
 the live system — a backfill against running actors — is `rpc`. A task that
 needs only the code — a schema check, a one-off report — is `eval`.
 
@@ -984,8 +1001,19 @@ majors after the build major**. A release built on OTP 28 runs on 28, 29
 and 30, and does not run on 27. An earlier draft said "may run on 29" and
 recorded `required_otp` as `{min: 28, max: 28}`; both understated a
 documented promise and would have refused hosts OTP itself supports. The
-runtime rule is therefore `host_major ∈ [build_major, build_major + 2]`,
-intersected with §3.1's support window when that is narrower.
+runtime rule is therefore `host_major ∈ [build_major, build_major + 2]`
+— **and only that.** It is deliberately *not* intersected with §3.1's
+support window, because the two answer different questions and are
+enforced at different moments. The window is a *policy* about which OTP
+majors Beamtalk builds and tests on; §3.1 item 2 enforces it at **build
+time**, where the operator can act on it. The boot check is a *fact* about
+what this artifact's bytecode will load on; applying the policy there would
+refuse a host the artifact demonstrably runs on, for a reason nobody at
+boot can do anything about. So when the window later moves to 28–29, a
+release built on 28 still boots on 30: the window governs what we build
+*on*, the BEAM rule governs what we boot *on*. (A first revision of this
+section said "intersected", which would have made `required_otp`
+`{28, 28}` again by the back door.)
 
 **Therefore `include-erts = true` is the default.** The release bundles the
 ERTS it was built against, the host needs no Erlang at all, and the
@@ -1613,6 +1641,12 @@ before the moment it must be correct.
 
 - Existing `beamtalk build --escript` behaviour is unchanged; releases are
   additive and the two artifacts serve different jobs.
+- Every release runs loopback-bound Erlang distribution and, by OTP
+  default, an `epmd` (§1.6). An operator who wants no `epmd` at all can
+  set `-start_epmd false` with a fixed `inet_dist_listen_min`/`_max` in
+  `vm.args` and point `stop`/`ping`/`rpc` at the fixed port; this ADR
+  records that as a supported hardening, not a default, because the default
+  has to make `bin/<name> stop` work with zero configuration.
 - No language surface changes. `shapeVersion:`/`migrateFromVN:` (ADR 0123)
   are consumed as-is; `Beamtalk releaseInfo`/`shapeManifest` are reflective
   sends, parity-neutral by construction.
