@@ -454,8 +454,11 @@ checked empirically during review:
   allSubclasses` is short, and `Orders backfillPricing` is a DNU.
 - In **embedded** mode, `primLoad` *does* load every module — **before any
   application starts**, and it runs `-on_load` as it goes. Every `bt@*`
-  module carries `-on_load(register_class/0)`
-  (`crates/beamtalk-codegen/src/core_erlang/actor_codegen.rs:241`), and
+  module that defines a class, protocol or foreign extension carries
+  `-on_load(register_class/0)` — emitted under `needs_register_class`
+  (`crates/beamtalk-codegen/src/core_erlang/actor_codegen.rs:227-241`),
+  so not literally *every* generated module, but every one that matters
+  here, since those are exactly the modules whose load registers — and
   `register_class/0` calls `beamtalk_class_builder:register/1`, which
   needs `beamtalk_runtime`'s ETS tables and re-raises on failure via
   `raw_raise` so that the *load itself* fails
