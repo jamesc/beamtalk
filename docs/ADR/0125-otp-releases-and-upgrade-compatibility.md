@@ -171,7 +171,7 @@ $ _build/release/orders-1.4.0/bin/orders foreground
 [orders 1.4.0] OrdersSup started; console off (see [release] console)
 
 $ _build/release/orders-1.4.0/bin/orders rpc "Beamtalk releaseInfo"
-#{#release => "orders", #version => "1.4.0", #otp => "28-16.0.2", …}
+#{#release => "orders", #release_version => "1.4.0", #otp_release => "28-16.0.2", …}
 ```
 
 No Erlang on the host, no `sys.config` written by hand, nothing to `-pa`;
