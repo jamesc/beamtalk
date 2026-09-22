@@ -7,6 +7,7 @@
 //! `self delegate` methods, and writes a skeleton `.erl` file with matching
 //! `handle_call/3` clauses.
 
+use beamtalk_codegen::core_erlang::escape_atom_chars;
 use beamtalk_core::ast::{ClassDefinition, MessageSelector, MethodDefinition};
 use camino::Utf8PathBuf;
 use miette::{Context, Result};
@@ -251,12 +252,7 @@ fn write_handle_call_clause(out: &mut String, method: &MethodDefinition) {
         format!("[{}]", arg_vars.join(", "))
     };
 
-    // Quote the selector atom if it contains special characters
-    let atom = if needs_quoting(&selector_name) {
-        format!("'{selector_name}'")
-    } else {
-        selector_name.to_string()
-    };
+    let atom = format!("'{}'", escape_atom_chars(&selector_name));
 
     // Add return type comment for this clause
     if let Some(ref ret_type) = method.return_type {
@@ -272,19 +268,6 @@ fn write_handle_call_clause(out: &mut String, method: &MethodDefinition) {
 
     writeln!(out, "    %% TODO: implement {selector_name}").unwrap();
     writeln!(out, "    {{reply, {{ok, todo}}, State}};").unwrap();
-}
-
-/// Returns `true` if the atom name needs single-quoting in Erlang.
-fn needs_quoting(name: &str) -> bool {
-    // Erlang atoms starting with lowercase and containing only [a-z0-9_@]
-    // don't need quoting. Everything else does.
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_lowercase() => {}
-        _ => return true,
-    }
-    name.chars()
-        .any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '@')
 }
 
 /// Build Erlang variable names from method parameters.
@@ -396,7 +379,7 @@ Actor subclass: MyActor native: my_actor
             .collect();
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
-        assert!(output.contains("handle_call({status, []}, _From, State) ->"));
+        assert!(output.contains("handle_call({'status', []}, _From, State) ->"));
         assert!(output.contains("{reply, {ok, todo}, State};"));
         assert!(output.contains("%% TODO: implement status"));
     }
@@ -457,7 +440,7 @@ Actor subclass: MyActor native: my_actor
         let output = generate_erlang_stub(&class, "my_actor", &delegates);
 
         // Should have getValue but not create
-        assert!(output.contains("handle_call({getValue, []}, _From, State) ->"));
+        assert!(output.contains("handle_call({'getValue', []}, _From, State) ->"));
         assert!(!output.contains("create"));
     }
 
@@ -522,16 +505,6 @@ Actor subclass: MyActor native: my_actor
         assert_eq!(capitalize_erlang_var("timeout"), "Timeout");
         assert_eq!(capitalize_erlang_var("x"), "X");
         assert_eq!(capitalize_erlang_var(""), "_Arg");
-    }
-
-    #[test]
-    fn needs_quoting_works() {
-        assert!(!needs_quoting("status"));
-        assert!(!needs_quoting("getValue"));
-        assert!(needs_quoting("writeLine:"));
-        assert!(needs_quoting("at:put:"));
-        assert!(needs_quoting("+"));
-        assert!(needs_quoting(">="));
     }
 
     #[test]
