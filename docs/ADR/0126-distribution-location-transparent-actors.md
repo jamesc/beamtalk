@@ -51,9 +51,9 @@ remote pid. The exit mapping (lines 952-965) has no `nodedown`/`noconnection`
 case: a partition falls into the catch-all and is reported as `actor_dead`,
 which is false — the actor may be alive on the far side. BT-2530 already fixed
 the same `is_process_alive` bug in announcements with a
-`node(Pid) =:= node()` guard (`beamtalk_announcements.erl:621`); similar ad-hoc
-guards exist in `beamtalk_inspector.erl:261` and
-`beamtalk_object_class.erl:1811`.
+`node(Pid) =:= node()` guard (`beamtalk_announcements.erl:621`
+`subscriber_alive/1`); the inspector has its own `node(Pid) =/= node()` clause
+(`beamtalk_inspector.erl:261`).
 
 **Spawn.** Unnamed `spawn`/`spawnWith:` use `gen_server:start` — **unlinked**
 in the common case (`safe_spawn/2`, `beamtalk_actor.erl:437`). Named spawn
@@ -363,10 +363,25 @@ first failure.
 
 #### 5.4 Sendability across nodes — per tier
 
-The wire encoder applies a **wire policy** to `pack/1`. ADR 0123's `pack/1`
-rejects anything non-`Sendable` because it serves persistence (a pid on disk is
-meaningless). A pid on the wire is fine, so `pack/2` gains a policy argument:
-`pack(Term, persist)` (today's behaviour) and `pack(Term, wire)`.
+ADR 0123's `pack/1` rejects any field whose **declared type** is
+`SendableRef` or `HandleScoped` (`pack_fields/6` → `field_tier/1`,
+`beamtalk_shape_migration.erl:~555`), because it serves persistence — a pid on
+disk is meaningless. The wire needs a different policy on two axes:
+
+1. **Pids are fine on the wire.** A new exported `pack_wire/1` shares
+   `pack/1`'s internal walk, threaded with a policy parameter (`persist` |
+   `wire`; the existing internal `pack/2` is the depth-carrying recursion, so
+   the policy is a new parameter on it, not a new arity of the public API).
+   Under `wire`, `sendable_ref` fields pass.
+2. **Runtime values, not declared types.** Message arguments are arbitrary
+   terms, and an untyped field (`Unknown`) can hold an `Ets`. `beamtalk_wire`
+   therefore walks the actual term (lists, tuples, maps), classifies every
+   tagged map by its **runtime class** (`beamtalk_tagged_map:class_of/1` → class
+   kind + declared `handleScope:`), packs `Value` instances via `pack_wire/1`,
+   and rejects `HandleScoped` instances wherever they appear. The runtime
+   class→tier classification routes through the same `field_tier/1` table that
+   BT-3542's Rust↔Erlang conformance test already pins against
+   `sendability.rs` — no second tier table.
 
 | Tier (ADR 0103) | Examples | Cross-node, `wire` policy |
 |-----------------|----------|---------------------------|
@@ -407,7 +422,8 @@ module is the culprit — to:
 The error surfaces **where the block runs**. For a block passed as an argument
 to a sync send and invoked during that call, that is the callee — and the
 error is relayed back to the sender like any other callee error. For a block
-stored and invoked later (e.g. a remote `Timer every:do:`), it surfaces in the
+stored and invoked later (e.g. a remote actor that keeps a callback block and
+later hands it to `Timer every:do:` on its own node), it surfaces in the
 remote actor, like any other runtime error there.
 
 Non-local return (`^`) from a block invoked on another node during a sync call
@@ -494,9 +510,10 @@ at-most-once-*reply* / possibly-executed semantics, identical to a local
 #### 7.3 Liveness checks
 
 All six `is_process_alive/1` guards in `beamtalk_actor.erl` route through one
-shared helper, extracted from the three existing ad-hoc copies
-(`beamtalk_announcements.erl:621`, `beamtalk_inspector.erl:261`,
-`beamtalk_object_class.erl:1811`) into a leaf module (`beamtalk_pid:is_alive/1`):
+shared helper, extracted from the existing ad-hoc copy
+(`beamtalk_announcements.erl:621` `subscriber_alive/1`; the inspector's
+`beamtalk_inspector.erl:261` clause routes through it too) into a leaf module
+(`beamtalk_pid:is_alive/1`):
 local pids use `is_process_alive/1`; remote pids return `true`
 optimistically and let the send fail with its real reason. `lookup_class/1`
 for a remote pid uses the `class` already in the `#beamtalk_object{}` record
@@ -629,6 +646,19 @@ serializer; schema evolution is the user's problem (Jackson/protobuf).
 (`node_down` ≠ `actor_dead`). **Improved on:** versioning is built in via ADR
 0123 instead of left to the serializer.
 
+**Swift distributed actors (SE-0336/SE-0344).** The closest mainstream
+design: a `distributed actor` declares `distributed func`s; every
+cross-actor call is `try await` because it may fail with a transport error;
+arguments and results must be `Codable` (checked at compile time); the
+transport is a pluggable `ActorSystem`. Swift chose **explicit** remoteness at
+the declaration site. **Adopted:** the compile-time "can this argument cross?"
+check (our tiers + known-remote warnings) and a pluggable-backend seam
+(`scope:` leaves room for `{via, Mod, Term}`). **Rejected:** marking actors
+`distributed` at declaration — on BEAM every actor is already remotely
+addressable, so the marker would describe nothing the VM does not already do,
+and Beamtalk sends are synchronous by default (ADR 0043), so there is no
+`await` to hang the fallibility on; errors raise like local ones.
+
 **Orleans (virtual actors).** Grains are addressed by identity, activated on
 demand, placed and moved by the runtime. Elegant for elastic services, but
 requires a distributed directory and a placement service. Rejected for v1; see
@@ -740,8 +770,8 @@ suite exercises the remote path.
 - 🎩 **Smalltalk purist**: "A block is a closure over *this* image; shipping it
   is a category error."
 
-*Response:* It would rule out remote `Timer every:do:`, remote
-`collect:`-style APIs and every Erlang library that takes a fun. Erlang allows
+*Response:* It would rule out remote actors that accept callbacks, remote
+`select:`/`collect:`-style query APIs and every Erlang library that takes a fun. Erlang allows
 it and the failure is well-defined; we map it to a clear
 `remote_code_mismatch` and warn when the receiver is known-remote.
 
@@ -823,7 +853,7 @@ Rejected — see Steelman.
 - ADR 0103's `#node` tier finally does something: node-bound handles are
   rejected at the boundary where they would break.
 - Location transparency (ADR 0104) is kept; no new type constructor.
-- Three ad-hoc remote-pid liveness checks collapse into one shared helper.
+- The ad-hoc remote-pid liveness checks collapse into one shared helper.
 
 ### Negative
 - Remote sends pay a deep term walk for encoding/decoding; large payloads of
@@ -854,14 +884,14 @@ Rejected — see Steelman.
 Each phase is independently shippable. Sizes are rough.
 
 **Phase 0 — Remote-safe runtime and multi-node test harness (M).**
-Extract `beamtalk_pid:is_alive/1` from the three ad-hoc copies and route all
+Extract `beamtalk_pid:is_alive/1` from `subscriber_alive/1` and route all
 `beamtalk_actor` guards through it; `lookup_class/1` uses the object record for
 remote pids; map `{nodedown, N}`/`noconnection` to `node_down` and add
 `node_down`/`remote_code_mismatch` to `kind_to_class/1` and the `.hrl` kind
 list. Add a `peer`-based (OTP 25+) two-node EUnit/CT fixture. Raw remote pids
 (via FFI) work end-to-end at the end of this phase.
 *Files:* `beamtalk_actor.erl`, `beamtalk_announcements.erl`,
-`beamtalk_inspector.erl`, `beamtalk_object_class.erl`,
+`beamtalk_inspector.erl`,
 `beamtalk_exception_handler.erl`, `beamtalk.hrl`, new `beamtalk_pid.erl`.
 
 **Phase 1 — `Node` class and cluster events (M).**
@@ -879,7 +909,7 @@ Depends on Phase 0.
 
 **Phase 3 — The wire (L).**
 New `beamtalk_wire.erl` (encode/decode, tagged message, reply symmetry);
-`pack/2` wire/persist policy and `unpack_strict/1` in
+`pack_wire/1` (policy parameter on the internal walk) and `unpack_strict/1` in
 `beamtalk_shape_migration.erl` (ADR 0125 §3.4, including the private
 recursions at lines 507-517 and 684-690); registered-ref rewriting;
 `handleScope: #node` on `Ets`, `AtomicCounter`, `Timer`; `badfun`/`undef` →
