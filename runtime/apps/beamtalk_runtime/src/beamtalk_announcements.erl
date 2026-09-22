@@ -616,12 +616,15 @@ dead or unreachable remote pid is a silent no-op, and the cross-node
 `erlang:monitor/2` armed at subscribe time prunes the row when the `DOWN`
 arrives (with up to ~`net_ticktime` lag for an undetected node loss). Every
 delivery path must call this instead of `is_process_alive/1` directly.
+
+Delegates to `beamtalk_pid:is_alive/1` (ADR 0126 §7.3), the shared leaf
+module extracted from this exact guard so `beamtalk_actor.erl`'s six
+`is_process_alive/1` call sites route through the same logic instead of a
+second copy (CLAUDE.md "No duplicate implementations").
 """.
 -spec subscriber_alive(pid()) -> boolean().
-subscriber_alive(SubscriberPid) when node(SubscriberPid) =:= node() ->
-    is_process_alive(SubscriberPid);
-subscriber_alive(_RemoteSubscriberPid) ->
-    true.
+subscriber_alive(SubscriberPid) ->
+    beamtalk_pid:is_alive(SubscriberPid).
 
 -doc """
 Read a subscription row for delivery, consuming it if it is a `doOnce`

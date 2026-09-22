@@ -225,6 +225,14 @@ handle_getValue([], State) ->
 %% sync_send_remote/3's cross-actor Context construction.
 -export([lookup_class/1]).
 
+%% ADR 0126 §7.3 (Phase 0): let a caller that already holds the actor's
+%% class — from a #beamtalk_object{} record — hand it to lookup_class/1 as
+%% a fallback for a remote pid, whose class the local-only
+%% beamtalk_instance_registry cannot resolve. beamtalk_message_dispatch is
+%% the one call site that has the class handy; it stashes it for the
+%% duration of a single send.
+-export([stash_known_class/2, clear_known_class/0]).
+
 %% per-object change publish hook, called from compiled actor
 %% gen_server callbacks after a method commits new state.
 %% strip_local_temps/1 cleans codegen-internal `__local__` threading
@@ -555,7 +563,8 @@ await_initialize_or_kill_unlinked(Pid) ->
 %%% - `isAlive`, `monitor`, and `stop` are handled locally (no gen_server message needed)
 %%% - Dead actor detection rejects futures / returns errors immediately
 %%%
-%%% WARNING: Race condition! is_process_alive/1 is a snapshot check.
+%%% WARNING: Race condition! beamtalk_pid:is_alive/1 is a snapshot check
+%%% (and answers `true` optimistically for a remote pid — ADR 0126 §7.3).
 %%% The actor could die between the alive check and the gen_server:cast.
 %%% For robust lifecycle management, use monitors instead of isAlive polling.
 
@@ -596,7 +605,7 @@ async_send({registered, Name} = Ref, Selector, Args, FuturePid) when is_atom(Nam
     end;
 async_send(ActorPid, isAlive, [], FuturePid) ->
     %% isAlive is handled locally - no message to the actor
-    Result = is_process_alive(ActorPid),
+    Result = beamtalk_pid:is_alive(ActorPid),
     beamtalk_future:resolve(FuturePid, Result),
     ok;
 async_send(ActorPid, stop, [], FuturePid) ->
@@ -709,7 +718,7 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
     %% actor and future processes: if the actor dies before the future is
     %% resolved, the watcher rejects the future with a structured error.
     maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
-        case is_process_alive(ActorPid) of
+        case beamtalk_pid:is_alive(ActorPid) of
             true ->
                 PropCtx = get_propagated_ctx(),
                 gen_server:cast(ActorPid, {Selector, Args, FuturePid, PropCtx}),
@@ -728,7 +737,7 @@ Send a fire-and-forget message to an actor (no future, no return value).
 Checks if the actor is alive before sending. If dead, silently returns ok
 (fire-and-forget semantics — the caller does not expect a reply).
 
-WARNING: Race condition! is_process_alive/1 is a snapshot check.
+WARNING: Race condition! beamtalk_pid:is_alive/1 is a snapshot check.
 The actor could die between the alive check and the gen_server:cast.
 """.
 -spec cast_send(pid() | {registered, atom()}, atom(), list()) -> ok.
@@ -746,7 +755,7 @@ cast_send(ActorPid, Selector, Args) ->
     Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => cast},
     maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
-        case is_process_alive(ActorPid) of
+        case beamtalk_pid:is_alive(ActorPid) of
             true ->
                 PropCtx = get_propagated_ctx(),
                 gen_server:cast(ActorPid, {cast, Selector, Args, PropCtx}),
@@ -790,7 +799,7 @@ sync_send({registered, Name} = Ref, Selector, Args) when is_atom(Name) ->
             sync_send(Pid, Selector, Args)
     end;
 sync_send(ActorPid, isAlive, []) ->
-    is_process_alive(ActorPid);
+    beamtalk_pid:is_alive(ActorPid);
 sync_send(ActorPid, stop, []) ->
     %% stop is handled locally - gracefully stops the actor process
     %% No send-site telemetry for stop — terminate/2 handles it
@@ -896,7 +905,7 @@ sync_send_remote(ActorPid, Selector, Args) ->
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
     try
         maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
-            case is_process_alive(ActorPid) of
+            case beamtalk_pid:is_alive(ActorPid) of
                 true ->
                     %% Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}.
                     %% Unwrap here so callers receive the value directly.
@@ -958,6 +967,22 @@ sync_send_remote(ActorPid, Selector, Args) ->
             raise_actor_dead(Selector);
         exit:{timeout, _} ->
             raise_timeout(Selector);
+        exit:{{nodedown, Node}, _} ->
+            %% ADR 0126 §7.1: a partitioned or never-connected node —
+            %% the actor may be alive on the far side. Checked before the
+            %% catch-all so it isn't misreported as actor_dead. Verified
+            %% empirically: gen_server:call/2,3 exits with exactly this
+            %% shape (`{{nodedown, Node}, {gen_server, call, [...]}}`) for
+            %% both a mid-call partition and a never-connected node.
+            raise_node_down(Node, Selector);
+        exit:{noconnection, _} ->
+            %% Defensive: not observed from gen_server:call in practice
+            %% (that always wraps as {nodedown, Node} above), but this is
+            %% the DOWN reason erlang:monitor/2 uses for the same
+            %% condition, and ADR 0126 §7.1 names it explicitly.
+            raise_node_down(node(ActorPid), Selector);
+        exit:noconnection ->
+            raise_node_down(node(ActorPid), Selector);
         exit:{_Reason, _} ->
             %% Catch-all for other exit reasons: {shutdown, Term}, killed,
             %% custom stop reasons, etc. All indicate the actor is unavailable.
@@ -1000,7 +1025,7 @@ sync_send(ActorPid, Selector, Args, Timeout) when
             Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
             try
                 maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
-                    case is_process_alive(ActorPid) of
+                    case beamtalk_pid:is_alive(ActorPid) of
                         true ->
                             PropCtx = get_sync_propagated_ctx(),
                             %% Layer 2: Check for transitive cycles.
@@ -1037,6 +1062,14 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                     raise_actor_dead(Selector);
                 exit:{timeout, _} ->
                     raise_timeout(Selector);
+                exit:{{nodedown, Node}, _} ->
+                    %% ADR 0126 §7.1 (see sync_send_remote/3's clause for
+                    %% the empirical basis for this exit shape).
+                    raise_node_down(Node, Selector);
+                exit:{noconnection, _} ->
+                    raise_node_down(node(ActorPid), Selector);
+                exit:noconnection ->
+                    raise_node_down(node(ActorPid), Selector);
                 exit:{_Reason, _} ->
                     raise_actor_dead(Selector)
             end
@@ -1190,6 +1223,31 @@ actor_dead_error_record(Selector) ->
     ).
 
 -doc """
+Raise a structured node_down error as an Erlang exception (ADR 0126 §7.1).
+
+Used by sync_send_remote/3 and sync_send/4 when gen_server:call exits with
+`{nodedown, Node}` (partitioned or never-connected node), and by
+spawn_future_watcher/3 for the equivalent monitor DOWN reason. Distinct
+from actor_dead: the node is unreachable, but the actor may be alive and
+well on the far side once the partition heals — retry logic needs to be
+able to tell the two apart.
+""".
+-spec raise_node_down(node(), atom()) -> no_return().
+raise_node_down(Node, Selector) ->
+    beamtalk_exception_handler:reraise(node_down_error_record(Node, Selector)).
+
+-doc "Construct a structured node_down error record for the given node and selector.".
+-spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.
+node_down_error_record(Node, Selector) ->
+    Error = beamtalk_error:new(
+        node_down,
+        unknown,
+        Selector,
+        <<"The node may come back; retry, or use monitors to detect when it does">>
+    ),
+    beamtalk_error:with_details(Error, #{node => Node}).
+
+-doc """
 ADR 0079: raise a `no_such_process` error for sends through a
 name-resolving proxy when the registered name no longer points at any
 process. Distinct from `actor_dead`, which fires when a held pid points
@@ -1334,14 +1392,57 @@ maybe_execute_telemetry(EventName, Measurements, Metadata) ->
 Resolve actor class name via beamtalk_object_instances reverse lookup.
 Returns the class atom if found, or 'unknown' for non-Beamtalk PIDs.
 Uses ets:match on the bag table — single ETS read (~50-100ns).
+
+`beamtalk_instance_registry` is populated only on the node that spawned
+the actor, so this always misses for a remote pid. ADR 0126 §7.3: fall
+back to a class stashed via `stash_known_class/2` before returning
+'unknown', so a caller that already held the class from a
+`#beamtalk_object{}` record (`beamtalk_message_dispatch`, the one call
+site with it) doesn't lose it to telemetry and error breadcrumbs. Local
+pids are unaffected — the registry match above already resolves them, so
+the fallback is only ever consulted for a remote (or truly unknown) pid.
 """.
 -spec lookup_class(pid()) -> atom().
 lookup_class(Pid) ->
     try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
         [[Class] | _] -> Class;
-        [] -> unknown
+        [] -> known_class_hint(Pid)
     catch
-        error:badarg -> unknown
+        error:badarg -> known_class_hint(Pid)
+    end.
+
+-doc """
+Stash `Class` as the answer `lookup_class/1` should fall back to for
+`Pid`, for the duration of a single send. No-op for a local pid — the
+instance registry is already authoritative there, and stashing would only
+risk masking a genuine 'unknown' (e.g. a non-Beamtalk pid). Callers
+(`beamtalk_message_dispatch`) always pair this with `clear_known_class/0`
+in an `after` block so the hint cannot outlive the one send it was
+computed for, or leak into an unrelated pid's lookup on the same process.
+""".
+-spec stash_known_class(pid(), atom()) -> ok.
+stash_known_class(Pid, Class) when is_pid(Pid), is_atom(Class), node(Pid) =/= node() ->
+    put('$bt_known_remote_class', {Pid, Class}),
+    ok;
+stash_known_class(_Pid, _Class) ->
+    ok.
+
+-doc "Clear the hint set by stash_known_class/2.".
+-spec clear_known_class() -> ok.
+clear_known_class() ->
+    erase('$bt_known_remote_class'),
+    ok.
+
+-doc """
+Read back the hint set by stash_known_class/2, keyed by `Pid` so a stale
+or mismatched hint (e.g. left over from a differently-shaped call on the
+same process) is never applied to the wrong pid.
+""".
+-spec known_class_hint(pid()) -> atom().
+known_class_hint(Pid) ->
+    case get('$bt_known_remote_class') of
+        {Pid, Class} -> Class;
+        _ -> unknown
     end.
 
 -doc """
@@ -1548,9 +1649,13 @@ restore_propagated_ctx(_) ->
 Spawn a lightweight watcher that monitors both the actor and future.
 Closes the TOCTOU race in async_send — if the actor dies during
 message processing (after the cast but before the future is resolved),
-the watcher rejects the future with a structured actor_dead error.
-The watcher also monitors the future process so it can clean up promptly
-when the future completes normally. Times out after 30s as a safety net.
+the watcher rejects the future with a structured error. ADR 0126 §7.1:
+a `noconnection` DOWN reason (the actor's node partitioned or was never
+connected — verified empirically, see erlang:monitor/2 docs) rejects with
+`node_down` instead of `actor_dead`, matching the sync/timeout paths'
+exit mapping. The watcher also monitors the future process so it can
+clean up promptly when the future completes normally. Times out after
+30s as a safety net.
 """.
 -spec spawn_future_watcher(pid(), pid(), atom()) -> pid().
 spawn_future_watcher(ActorPid, FuturePid, Selector) ->
@@ -1558,9 +1663,15 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
         ActorRef = erlang:monitor(process, ActorPid),
         FutureRef = erlang:monitor(process, FuturePid),
         receive
-            {'DOWN', ActorRef, process, ActorPid, _Reason} ->
-                %% Actor died — reject future (no-op if already resolved)
-                beamtalk_future:reject(FuturePid, actor_dead_error_record(Selector)),
+            {'DOWN', ActorRef, process, ActorPid, Reason} ->
+                %% Actor died (or its node went away) — reject future
+                %% (no-op if already resolved).
+                Error =
+                    case Reason of
+                        noconnection -> node_down_error_record(node(ActorPid), Selector);
+                        _ -> actor_dead_error_record(Selector)
+                    end,
+                beamtalk_future:reject(FuturePid, Error),
                 erlang:demonitor(FutureRef, [flush]);
             {'DOWN', FutureRef, process, FuturePid, _Reason} ->
                 %% Future completed and its process ended — clean up

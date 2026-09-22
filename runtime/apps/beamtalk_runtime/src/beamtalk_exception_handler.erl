@@ -123,6 +123,19 @@ kind_to_class(erlang_throw) -> 'ThrowError';
 %% signal (from signal_message/1) stays Error — user decides semantics.
 %% file_*/io_error/permission_denied stay Error — future IOError (ADR 0015 Phase 6).
 kind_to_class(signal) -> 'Error';
+%% ADR 0126 §7.1 (distribution and location-transparent actors, Phase 0):
+%% every kind the ADR's error-mapping table adds or newly routes.
+%% `invalid_node_name` is a caller mistake (a malformed `name@host`), so it
+%% classifies like `type_error`; every other new kind is `RuntimeError`,
+%% exactly as the ADR specifies.
+kind_to_class(node_down) -> 'RuntimeError';
+kind_to_class(remote_code_mismatch) -> 'RuntimeError';
+kind_to_class(not_serialisable) -> 'RuntimeError';
+kind_to_class(shape_version_ahead) -> 'RuntimeError';
+kind_to_class(shape_migration_failed) -> 'RuntimeError';
+kind_to_class(wire_version_unsupported) -> 'RuntimeError';
+kind_to_class(insecure_distribution) -> 'RuntimeError';
+kind_to_class(invalid_node_name) -> kind_to_class(type_error);
 kind_to_class(_) -> 'Error'.
 
 -doc """
