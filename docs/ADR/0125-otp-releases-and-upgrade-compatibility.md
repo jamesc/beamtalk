@@ -1,7 +1,7 @@
 # ADR 0125: OTP Releases and Upgrade Compatibility
 
 ## Status
-Proposed (2026-09-21)
+Accepted (2026-09-22)
 
 ## Context
 
