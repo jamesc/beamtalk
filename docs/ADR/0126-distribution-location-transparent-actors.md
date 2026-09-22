@@ -2,14 +2,18 @@
 
 ## Status
 Accepted (2026-09-22). The Phase 0.5 wire-check spike (BT-3579; see
-Implementation) confirms or corrects this ADR's five load-bearing runtime
-assumptions. Its findings are folded back in as an amendment before Phases 1–7
-are filed.
+Implementation and the Amendment section) confirmed four of this ADR's five
+load-bearing runtime assumptions (with API corrections) and found one
+(non-local return across a remote block invocation, §5.5) does not hold
+today. Phases 1–7 are filed against the corrected ADR once that gap is
+fixed (tracked against the epic, BT-3577).
 
 ## Implementation Tracking
 
 **Epic:** BT-3577
-**Issues:** BT-3578 (Phase 0), BT-3579 (Phase 0.5 spike). Phases 1–7 are filed after the spike.
+**Issues:** BT-3578 (Phase 0), BT-3579 (Phase 0.5 spike, done — see
+Amendment). Phases 1–7 are filed once the (c) NLR-relay gap the spike found
+is fixed.
 **Status:** Planned
 
 ## Context
@@ -251,6 +255,14 @@ would die the moment `remote_spawn` returned. `remote_spawn` therefore
 path `do_class_self_named_spawn/6` already does for named class-side spawns.
 The Phase 0 spike (see Implementation) pins this with a two-node test before
 anything else is built on it.
+
+**Confirmed by the Phase 0.5 spike (BT-3579)**, both directions: with the
+unlink, the actor survives the erpc worker's exit; without it, the actor
+reliably dies — so the non-`normal`-exit-reason claim above holds. One
+correction: `safe_spawn_named/3` itself is not `-export`ed, so `remote_spawn`
+(like `do_class_self_named_spawn/6` today) must go through the public
+`beamtalk_actor:'spawnAs'/3` wrapper, not the private function this section
+names. See the Amendment (Phase 0.5 findings) section.
 
 `named:on:` runs its class check on the target node (an `erpc` call to the
 existing `named/2` lookup there, which reads the `'$beamtalk_actor'` marker
@@ -536,6 +548,14 @@ likely to be wrong in practice, so it is tested in the Phase 0.5 spike, not
 deferred to Phase 3. A `^` from a block that outlives
 its defining method raises as it does locally.
 
+**This does not hold today.** The Phase 0.5 spike (BT-3579) found that
+`beamtalk_actor:dispatch_user_method/4` — the dispatch path every instance
+actor method runs through, compiled or runtime-`__methods__`, local or
+remote — has no `?IS_NLR` relay clause the way `beamtalk_class_dispatch.erl`'s
+class-method dispatch does. It catches the NLR throw as an ordinary error and
+reports `runtime_error` instead of relaying it. See the Amendment (Phase 0.5
+findings) section for the full finding and the fix this implies.
+
 Blocks through class methods (§ Passing Blocks Through Class Methods) need no
 special rule, **because a class object never crosses a node as a remote
 reference**: the wire encoder rewrites class objects to by-name refs resolved on
@@ -545,6 +565,14 @@ over: xs` always runs in the class process of the node that evaluates it.
 Without this rewrite a class object returned from B would carry B's class
 gen_server pid, and a class-side send to it would silently ship `aBlock` to B;
 Phase 0.5 includes a test pinning the rewrite.
+
+**Confirmed by the Phase 0.5 spike (BT-3579).** Unpatched, a class object
+obtained from a remote actor does carry the remote node's class gen_server
+pid, exactly as described. The by-name rewrite/resolve prototype fixes it: a
+class-side send through the resolved object runs on the receiving node. One
+gap: the runtime's own equivalent of the resolve step,
+`beamtalk_behaviour_intrinsics:atom_to_class_object/1`, is not exported —
+see the Amendment (Phase 0.5 findings) section.
 
 ### 6. Typing: transparent, with "known-remote" provenance
 
@@ -1082,6 +1110,9 @@ different module version raises `badfun`, and the mapping to
 on B during a sync call returns correctly to A; (d) an async send's future
 resolves across nodes; (e) a class object returned from B, re-sent to, resolves
 to A's class once rewritten. Findings feed back into this ADR before Phase 2.
+**Findings (BT-3579): see the Amendment (Phase 0.5 findings) section below —
+(a), (b), (d) and (e) hold (with API corrections); (c) does not hold today and
+blocks Phase 3 until fixed.**
 
 **Phase 1 — `Node` class and cluster events (M).**
 `stdlib/src/node.bt` (`native:` backing `beamtalk_node.erl`), `Pid>>node`,
@@ -1148,6 +1179,113 @@ BT-3542 conformance test; the `handleScope: #node` declarations are read from
 class metadata, so compile-time and runtime tiers come from the same source.
 The new error kinds follow the existing `.hrl` ↔ `kind_to_class/1` pattern. No
 new cross-language table is introduced.
+
+## Amendment (Phase 0.5 findings)
+
+BT-3579 ran all five assumptions below on two real `peer` nodes (the BT-3578
+harness, `beamtalk_dist_test_helper`), keeping the tests as
+`runtime/apps/beamtalk_runtime/test/beamtalk_dist_wirecheck_tests.erl` — the
+Phase 2/3 regression suite this section promised. Per-item verdicts, using
+the issue's own scale (holds / fails / holds-with-caveat):
+
+**(a) Remote named spawn survives — holds, with a naming correction (§3).**
+Both directions confirmed on two nodes: `erpc:call` + spawn + immediate
+`unlink/1` leaves the actor alive and registered after the erpc worker
+exits; without the unlink, the actor reliably dies once the erpc worker
+exits (the worker's own exit reason is indeed non-`normal`, as §3 claims).
+Correction: `beamtalk_actor:safe_spawn_named/3`, the function §3 and the
+Implementation phase name, is **not exported** — only
+`beamtalk_actor:'spawnAs'/2,3` is public, and that is what
+`do_class_self_named_spawn/6` already calls. A real `remote_spawn` must go
+through `'spawnAs'/3`, exactly like the existing class-side path; this ADR's
+references to `safe_spawn_named/3` should be read as "via `'spawnAs'/3`."
+
+**(b) Block code-version mismatch is identifiable — holds, with an
+asymmetry (§5.5).** A block whose defining module has no copy on the
+invoking node raises `error:undef`; a block whose module is loaded at a
+*different* version (a different compiled identity for the same module
+name — the deployment-skew case) raises `error:{badfun, Fun}`. The two
+reasons are not symmetric: `{badfun, Fun}` carries the fun value itself, so
+`erlang:fun_info(Fun, module)` on the *reason* identifies the module
+directly. The bare atom `undef` carries nothing — identification there can
+only come from `erlang:fun_info/2` on the block value the dispatch layer
+was about to invoke (which it always still holds, being the block argument
+itself), not from the exception or its stacktrace. The Phase 3
+`remote_code_mismatch` mapping needs both paths: extract the fun from the
+reason when it's `{badfun, Fun}`, fall back to the caller's own held block
+value for `undef`.
+
+**(c) Non-local return across nodes — does NOT hold today (§5.1, §5.5).**
+This is the negative result the spike was designed to catch. A block
+containing `^`, invoked on a remote actor B during a sync call from A, does
+not relay the NLR back to the defining method. `beamtalk_actor:dispatch_
+user_method/4` — the dispatch path every instance-actor method runs
+through (compiled `.bt` classes included: they register the same
+`__methods__` map `test_counter.erl`/`test_wirecheck_actor.erl` mirror) —
+wraps the block invocation in
+`try Fun(...) catch Class:Reason:Stacktrace -> wrap_method_error(...) end`
+with no `?IS_NLR(Reason)` exclusion, unlike `beamtalk_class_dispatch.erl`'s
+`class_send_dispatch/3` / `metaclass_send_dispatch/4`, which both special-case
+`throw:Nlr:_ when ?IS_NLR(Nlr) -> throw(Nlr)` specifically so ADR 0110's
+relay works across that hop. The thrown `{'$bt_nlr', Token, Value, State}`
+is caught, classified `runtime_error`, and reported to the sync caller as
+`error:#{'$beamtalk_class' => 'RuntimeError', error := #beamtalk_error{kind
+= runtime_error, details = #{original_class => throw, original_reason =>
+{'$bt_nlr', Token, Value, State}}}}` — the original tuple survives only as
+opaque debug detail. Two things this is **not**: it is not
+distribution-specific (the identical miscategorisation reproduces on a
+purely local cross-actor block invocation — this is a pre-existing ADR
+0110 coverage gap, not a new wire concern), and it is not a stability bug
+(the callee actor does not crash; it stays alive and keeps answering
+further sends after the miscategorised reply). **This blocks Phase 3.**
+Before any block may legitimately cross a node boundary and be invoked
+there, `dispatch_user_method/4` needs the same `?IS_NLR` relay
+`beamtalk_class_dispatch.erl` already has — filed as a prerequisite,
+tracked against this ADR's epic (BT-3577).
+
+**(d) Async futures resolve across nodes — holds, with two usage notes
+(§5.1).** An async send from A to an actor on B resolves A's future with
+the correct value via `beamtalk_future:resolve/2`, and rejects it on error.
+Two things a Phase 3 implementer should not assume: `beamtalk_future:
+await/2` signals rejection as a **`throw`** of `{future_rejected, Reason}`,
+not an `error/1` (matching its own doc, easy to get wrong from the "error
+handling" framing elsewhere in this ADR); and `Reason` is the bare
+`#beamtalk_error{}` record only when the failing method raises it directly
+(`error(beamtalk_error:new(...))`, matching `dispatch_user_method/4`'s
+first catch clause) — a method that instead calls `beamtalk_error:raise/1`
+on itself gets **double-wrapped**, because `raise/1`'s
+`beamtalk_exception_handler:wrap/1` step is meant for the top-level
+API/REPL boundary, not for an error a dispatch layer is about to wrap
+again itself.
+
+**(e) Class objects crossing nodes — holds, with an export gap (§5.1,
+§5.5).** Confirmed unpatched: a class object obtained from a remote actor
+instance carries the *remote* node's class gen_server pid, transparently —
+a class-side send through it would silently run on the wrong node, exactly
+as this ADR warns. The prototyped fix — rewrite to `{'$beamtalk_class_ref',
+ClassName}` when `node(Pid) =/= node()`, resolve via
+`beamtalk_class_registry:whereis_class/1` + `class_object_tag/1` on the
+*receiving* node — works: a class-side send through the resolved object
+runs on the receiving node. Gap: the runtime's own existing equivalent of
+the resolve step, `beamtalk_behaviour_intrinsics:atom_to_class_object/1`,
+is not exported (same shape as (a)'s finding) — Phase 3's real resolver
+needs either that function exported or its four-line body promoted to
+`beamtalk_class_registry` (which already owns both `whereis_class/1` and
+`class_object_tag/1`, making it the more DDD-appropriate home than
+exporting an intrinsics-module internal).
+
+**Simplifications, for the record.** (b), (c) and (d) used raw
+`__methods__`-map actor fixtures (`test_wirecheck_actor.erl`, mirroring
+`test_counter.erl`) rather than compiled `.bt` classes: blocks are already
+plain Erlang funs and NLR is already the raw `{'$bt_nlr', ...}` tuple at
+this layer, so a compiled class would add toolchain weight without
+changing what was being proven. (e) used a minimal stand-in "class"
+gen_server (`test_wirecheck_fakeclass.erl`) registered the same way a real
+class is, rather than booting the full compiled stdlib `Counter` class on
+both peers. Neither simplification is expected to change any verdict above
+— all five mechanisms tested are below the compiled/runtime-class line —
+but Phase 2/3 should re-run at least (c) against a real compiled `.bt`
+actor once the wire lands, since that is the one open bug.
 
 ## Migration Path
 
