@@ -60,6 +60,18 @@ parse_bind_addr_binary_test() ->
 parse_bind_addr_already_tuple_test() ->
     ?assertEqual({10, 0, 0, 1}, beamtalk_workspace_app:parse_bind_addr({10, 0, 0, 1})).
 
+%% A malformed tuple (wrong arity, or a byte out of 0..255) from a
+%% hand-edited sys.config falls back to loopback too, instead of being
+%% passed through unvalidated to beamtalk_repl_server's bind call.
+parse_bind_addr_wrong_arity_tuple_falls_back_test() ->
+    ?assertEqual({127, 0, 0, 1}, beamtalk_workspace_app:parse_bind_addr({10, 0, 0})).
+
+parse_bind_addr_out_of_range_tuple_falls_back_test() ->
+    ?assertEqual({127, 0, 0, 1}, beamtalk_workspace_app:parse_bind_addr({10, 0, 0, 999})).
+
+parse_bind_addr_non_integer_tuple_falls_back_test() ->
+    ?assertEqual({127, 0, 0, 1}, beamtalk_workspace_app:parse_bind_addr({10, 0, 0, not_a_byte})).
+
 %% A config typo (unparseable string) falls back to loopback rather than
 %% crashing the whole start/2.
 parse_bind_addr_unparseable_string_falls_back_test() ->

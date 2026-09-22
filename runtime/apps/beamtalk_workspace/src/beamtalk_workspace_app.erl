@@ -132,8 +132,23 @@ string) falls back to loopback with a warning rather than crashing the
 whole `start/2` — a config typo should not take the release down.
 """.
 -spec parse_bind_addr(term()) -> inet:ip4_address().
-parse_bind_addr(Addr) when is_tuple(Addr) ->
+parse_bind_addr({A, B, C, D} = Addr) when
+    is_integer(A),
+    is_integer(B),
+    is_integer(C),
+    is_integer(D),
+    A >= 0,
+    A =< 255,
+    B >= 0,
+    B =< 255,
+    C >= 0,
+    C =< 255,
+    D >= 0,
+    D =< 255
+->
     Addr;
+parse_bind_addr(Addr) when is_tuple(Addr) ->
+    bind_addr_fallback(Addr, invalid_ip4_tuple);
 parse_bind_addr(Addr) when is_binary(Addr) ->
     parse_bind_addr(binary_to_list(Addr));
 parse_bind_addr(Addr) when is_list(Addr) ->
