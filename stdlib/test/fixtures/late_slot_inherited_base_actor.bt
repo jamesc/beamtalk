@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LateSlotInheritedBaseActor — test fixture for BT-3558 (ADR 0124 B10)
+//
+// Declares a `late state:` field with real accessor methods, so a subclass
+// that adds no `late` field of its own can still be driven through the
+// full instance-level read/raise/assign/`hasField:` lifecycle on the
+// *inherited* slot — distinct from `late_field_kinds_base.bt`/
+// `late_field_kinds_sub.bt` (fixtures/late_field_kinds_base.bt), which only
+// exercise class-level `fieldKinds`/`allFieldKinds` reflection and never
+// spawn an instance or read `proc`'s value.
+
+typed Actor subclass: LateSlotInheritedBaseActor
+  late state: proc :: Integer
+  state: count :: Integer = 0
+
+  getProc -> Integer => self.proc
+
+  setProc: value :: Integer -> Integer => self.proc := value
+
+  hasProc -> Boolean => self hasField: #proc
+
+  clearProc -> Self => self clearField: #proc
+
+  getCount -> Integer => self.count
