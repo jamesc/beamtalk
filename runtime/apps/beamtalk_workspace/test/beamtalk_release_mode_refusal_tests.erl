@@ -97,6 +97,29 @@ compiler_ops_refused_without_compiler_test_() ->
         ]
     ].
 
+test_file_form_refused_without_compiler_test() ->
+    %% `test` with a `file` compiles it; the op name alone is `always`, so the
+    %% handler consults the gate for the file form.
+    with_capabilities(?RELEASE, fun() ->
+        ?assertEqual(
+            release_mode_no_compiler,
+            refusal_kind(dispatch(<<"test">>, #{<<"file">> => <<"test/foo_test.bt">>}))
+        )
+    end).
+
+direct_compile_entry_points_refused_without_compiler_test() ->
+    %% Entry points reached outside the REPL op seam — the Inspector's
+    %% `evaluate:` and the LiveView reload-from-disk RPC — consult the gate too.
+    with_capabilities(?RELEASE, fun() ->
+        ?assertEqual(
+            release_mode_no_compiler,
+            refusal_kind(beamtalk_repl_eval:eval_with_self(nil, <<"3 + 4">>))
+        ),
+        ?assertEqual(
+            release_mode_no_compiler, refusal_kind(beamtalk_repl_eval:reload_file("x.bt"))
+        )
+    end).
+
 eval_refusal_message_names_release_mode_test() ->
     with_capabilities(?RELEASE, fun() ->
         {error, Err} = dispatch(<<"eval">>, #{<<"code">> => <<"3 + 4">>}),

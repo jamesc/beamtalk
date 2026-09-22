@@ -534,7 +534,18 @@ handle_term(<<"test">>, Params, _Msg, _SessionPid) ->
                     invalid_argument, 'TestRunner', <<"'file' must be a binary path">>
                 )};
         {undefined, FP} when FP =/= undefined ->
-            run_test_op_file(FP);
+            %% Running a test *file* compiles it first; running loaded test
+            %% classes does not. The op name alone cannot tell the two apart,
+            %% so the file form consults the capability check here
+            %% (ADR 0125 §1.5).
+            case
+                beamtalk_capability:check(
+                    test_file, 'TestRunner', <<"The 'test' operation's 'file'">>
+                )
+            of
+                ok -> run_test_op_file(FP);
+                {error, _} = Refusal -> Refusal
+            end;
         _ ->
             run_test_op(ClassName)
     end;

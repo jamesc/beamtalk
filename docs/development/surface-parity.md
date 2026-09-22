@@ -433,7 +433,8 @@ calling the `Behaviour`/`Workspace` primitives). There is one classification,
   `eval`, `load-source`, `load-project`, `load-tests`, `show-codegen`,
   `diagnostics`, `compile:source:`, `tryCompile:source:`,
   `precheckCompile:source:`, `Behaviour >> reload`, `Workspace load:` /
-  `sync` / `newClass:at:`. The method-definition path (`Class >> sel =>
+  `sync` / `newClass:at:`, the `test` op's `file` form, the Inspector's
+  `evaluate:`, and the LiveView reload-from-disk RPC. The method-definition path (`Class >> sel =>
   body`) is refused with `eval`. Re-enabled by `[release] include-compiler =
   true`. `complete` stays available: only its compiler-port type-inference
   fallback is skipped, so completion degrades to its tokeniser-driven results

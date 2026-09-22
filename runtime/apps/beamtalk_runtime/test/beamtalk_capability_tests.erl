@@ -53,6 +53,8 @@ compiler_ops() ->
         'load:',
         sync,
         'newClass:at:',
+        test_file,
+        'evaluate:',
         completion_type_inference
     ].
 
@@ -165,6 +167,14 @@ protocol_op_default_subject_test() ->
             )
         )
     end).
+
+lazy_subject_only_evaluated_on_refusal_test() ->
+    Boom = fun() -> error(subject_evaluated) end,
+    ?assertEqual(ok, beamtalk_capability:check(reload, 'Counter', Boom, ?WORKSPACE)),
+    {error, Err} = beamtalk_capability:check(
+        reload, 'Counter', fun() -> <<"Counter reload">> end, ?RELEASE
+    ),
+    ?assertMatch({0, _}, binary:match(Err#beamtalk_error.message, <<"Counter reload">>)).
 
 %%% Node capabilities
 

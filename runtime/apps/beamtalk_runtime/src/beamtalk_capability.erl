@@ -158,6 +158,11 @@ classify(reload) -> compiler;
 classify('load:') -> compiler;
 classify(sync) -> compiler;
 classify('newClass:at:') -> compiler;
+%% The `test` op's `file` form (it compiles the file; the class form runs
+%% already-loaded tests and is `always`).
+classify(test_file) -> compiler;
+%% The Inspector's `evaluate:` (ADR 0095) compiles its source.
+classify('evaluate:') -> compiler;
 %% `complete`'s compiler-port type-inference fallback (the op itself is
 %% `always`: its tokeniser-driven completions need no compiler).
 classify(completion_type_inference) -> compiler;
