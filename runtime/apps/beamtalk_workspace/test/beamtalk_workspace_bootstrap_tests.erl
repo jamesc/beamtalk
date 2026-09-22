@@ -815,7 +815,7 @@ store_bootstrap_class_source_success_test_() ->
                         workspace_id => <<"bootstrap_src_test_ws">>,
                         project_path => undefined,
                         created_at => erlang:system_time(second),
-                        repl => false
+                        mode => run
                     });
                 _ ->
                     ok

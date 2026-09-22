@@ -605,7 +605,7 @@ git_status_populates_toplevel_cache_test() ->
             workspace_id => <<"git_cache_test">>,
             project_path => ProjectDir,
             created_at => erlang:system_time(second),
-            repl => false
+            mode => run
         }),
         try
             %% Cold cache: nothing stored for this project path yet.
@@ -819,7 +819,7 @@ with_workspace_meta(ProjectPath, WorkspaceId, Fun) ->
             workspace_id => WorkspaceId,
             project_path => ProjectPath,
             created_at => erlang:system_time(second),
-            repl => false
+            mode => run
         })
     of
         {ok, Pid} ->

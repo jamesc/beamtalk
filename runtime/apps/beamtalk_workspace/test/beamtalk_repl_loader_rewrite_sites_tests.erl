@@ -111,7 +111,7 @@ setup() ->
     SubCounterPath = filename:join(ProjDir, "sub_counter.bt"),
     ok = file:write_file(CounterPath, counter_source()),
     ok = file:write_file(SubCounterPath, sub_counter_source()),
-    %% `repl => false` for the same test-isolation reason
+    %% `mode => run` for the same test-isolation reason
     %% `beamtalk_repl_loader_precheck_tests.erl` uses it. `project_path` is
     %% set to the fixture directory so `classify_source_file/1` (used by
     %% `emit_rewrite_change_entry/2`'s flushability derivation) classifies
@@ -120,7 +120,7 @@ setup() ->
         workspace_id => <<"rewrite_sites_test_ws">>,
         project_path => list_to_binary(ProjDir),
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     beamtalk_compiler_server:clear_classes(),
     State0 = beamtalk_repl_state:new(undefined, 0),

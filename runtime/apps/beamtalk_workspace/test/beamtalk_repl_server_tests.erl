@@ -153,6 +153,7 @@ tcp_start_workspace(Retries) ->
     timer:sleep(50),
     TmpDir = beamtalk_file:'tempDirectory'(),
     Config = #{
+        mode => workspace,
         workspace_id => <<"tcp_test_ws">>,
         project_path => <<TmpDir/binary, "/bt_tcp_test">>,
         tcp_port => Port,

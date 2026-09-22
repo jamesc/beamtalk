@@ -203,6 +203,7 @@ Returns the loaded class object (or a list of class objects for multi-class file
 """.
 -spec load(term()) -> term().
 load(Path) ->
+    ok = beamtalk_capability:require('load:', 'Workspace', <<"Workspace load:">>),
     case handle_load(Path) of
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
@@ -221,6 +222,7 @@ returns the loaded class object(s), matching `load:`.
 """.
 -spec newClass(term(), term()) -> term().
 newClass(Source, Path) ->
+    ok = beamtalk_capability:require('newClass:at:', 'Workspace', <<"Workspace newClass:at:">>),
     case validate_new_class_args(Source, Path) of
         {ok, SourceBin, PathBin} ->
             case beamtalk_repl_eval:new_class(SourceBin, PathBin) of
@@ -279,6 +281,7 @@ unchanged on success.
 """.
 -spec moveClass(term(), term()) -> #beamtalk_object{}.
 moveClass(ClassArg, NewPath) ->
+    ok = beamtalk_capability:require('moveClass:to:', 'Workspace', <<"Workspace moveClass:to:">>),
     case beamtalk_class_registry:is_class_object(ClassArg) of
         false ->
             beamtalk_error:raise(move_class_arg_type_error(<<"a Behaviour for aClass">>, ClassArg));
@@ -327,6 +330,7 @@ the call site.
 """.
 -spec flush() -> map().
 flush() ->
+    ok = beamtalk_capability:require(flush, 'Workspace', <<"Workspace flush">>),
     case beamtalk_workspace_flush:flush() of
         {ok, Summary} -> Summary;
         {error, Err} -> beamtalk_error:raise(Err)
@@ -342,6 +346,7 @@ Called via `(Erlang beamtalk_workspace_interface_primitives) flush: filter`.
 """.
 -spec flush(term()) -> map().
 flush(Filter) ->
+    ok = beamtalk_capability:require('flush:', 'Workspace', <<"Workspace flush:">>),
     case beamtalk_workspace_flush:flush(Filter) of
         {ok, Summary} -> Summary;
         {error, Err} -> beamtalk_error:raise(Err)
@@ -359,6 +364,9 @@ never read from a workspace setting.
 """.
 -spec flush(term(), term()) -> map().
 flush(Filter, ConfirmDestructive) ->
+    ok = beamtalk_capability:require(
+        'flush:confirmDestructive:', 'Workspace', <<"Workspace flush:confirmDestructive:">>
+    ),
     case beamtalk_workspace_flush:flush(Filter, ConfirmDestructive) of
         {ok, Summary} -> Summary;
         {error, Err} -> beamtalk_error:raise(Err)
@@ -374,6 +382,9 @@ flushIncludingDestructive` bare-unary selector.
 """.
 -spec flushIncludingDestructive() -> map().
 flushIncludingDestructive() ->
+    ok = beamtalk_capability:require(
+        flushIncludingDestructive, 'Workspace', <<"Workspace flushIncludingDestructive">>
+    ),
     case beamtalk_workspace_flush:flush_including_destructive() of
         {ok, Summary} -> Summary;
         {error, Err} -> beamtalk_error:raise(Err)
@@ -1614,6 +1625,7 @@ Returns a Dictionary with keys:
 """.
 -spec sync() -> map().
 sync() ->
+    ok = beamtalk_capability:require(sync, 'Workspace', <<"Workspace sync">>),
     case beamtalk_repl_ops_load:sync_project(".", #{}) of
         {ok, Result} ->
             #{

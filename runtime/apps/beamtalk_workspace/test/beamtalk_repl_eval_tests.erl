@@ -1893,7 +1893,7 @@ eval_setup() ->
     %% method definition reached through do_eval/2 — all recompile from the
     %% class source workspace_meta records, same fixture pattern as
     %% handle_method_definition_with_source_compile_fail_test/0 above.
-    %% `repl => false` avoids the disk-persistence side effect
+    %% `mode => run` avoids the disk-persistence side effect
     %% beamtalk_repl_loader_precheck_tests.erl's fixture also steers clear of.
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
@@ -1903,7 +1903,7 @@ eval_setup() ->
         workspace_id => <<"eval_success_ws">>,
         project_path => undefined,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     %% precheck_method/4's signature-diff baseline (previous/3) needs a live
     %% store — without it every diff exits `noproc`.

@@ -22,6 +22,7 @@ test_project_path() ->
 
 test_config() ->
     #{
+        mode => workspace,
         workspace_id => <<"test123">>,
         project_path => test_project_path(),
         tcp_port => 49152,
@@ -348,6 +349,7 @@ all_children_alive_test() ->
 default_auto_cleanup_test() ->
     %% Config without auto_cleanup should default to true
     Config = #{
+        mode => workspace,
         workspace_id => <<"test-defaults">>,
         project_path => test_project_path(),
         tcp_port => 49152
@@ -361,6 +363,7 @@ default_auto_cleanup_test() ->
 default_max_idle_seconds_test() ->
     %% Config without max_idle_seconds should default to 4 hours
     Config = #{
+        mode => workspace,
         workspace_id => <<"test-defaults">>,
         project_path => test_project_path(),
         tcp_port => 49152
@@ -494,6 +497,7 @@ repl_server_custom_bind_addr_test() ->
 
 workspace_meta_config_test() ->
     Config = #{
+        mode => workspace,
         workspace_id => <<"meta-test">>,
         project_path => <<"/home/test/project">>,
         tcp_port => 5555,
@@ -508,111 +512,220 @@ workspace_meta_config_test() ->
     ?assertEqual(5555, maps:get(repl_port, MetaConfig)),
     ?assert(is_integer(maps:get(created_at, MetaConfig))).
 
-%%% Run mode tests (repl=false)
+%%% Mode tests (ADR 0125 §1.4)
+%%%
+%%% `mode => run | workspace | release` selects the child set. Each mode's
+%%% exact child-id list is asserted below, so a child added to (or dropped
+%%% from) a mode shows up here.
+
+%% Ids common to every mode, in start order: meta, changelog, the actor
+%% singletons (beamtalk_workspace_config:singletons/0), the actor registry,
+%% bootstrap, actor_sup.
+base_child_ids() ->
+    [beamtalk_workspace_meta, beamtalk_workspace_changelog] ++
+        [maps:get(module, S) || S <- beamtalk_workspace_config:singletons()] ++
+        [beamtalk_actor_registry, beamtalk_workspace_bootstrap, beamtalk_actor_sup].
+
+live_development_child_ids() ->
+    [
+        beamtalk_workspace_signature_store,
+        beamtalk_workspace_shape_store,
+        beamtalk_alias_xref,
+        beamtalk_workspace_shape_recheck_worker,
+        beamtalk_workspace_findings_store
+    ].
+
+console_child_ids() ->
+    [beamtalk_session_sup, beamtalk_repl_server].
+
+child_ids(Config) ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+    [maps:get(id, S) || S <- ChildSpecs].
+
+child_spec(Id, Config) ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == Id],
+    Spec.
 
 run_mode_config() ->
     #{
+        mode => run,
         workspace_id => <<"run-mode-test">>,
-        project_path => test_project_path(),
-        repl => false
+        project_path => test_project_path()
         %% tcp_port intentionally omitted — not required in run mode
     }.
 
-run_mode_children_count_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+release_mode_config() ->
+    #{
+        mode => release,
+        workspace_id => <<"release-mode-test">>,
+        project_path => undefined
+        %% tcp_port omitted — not required without a console
+    }.
 
-    %% Run mode: 6 children (no repl_server, idle_monitor, session_sup,
-    %% workspace_signature_store — all REPL-only).
-    %% workspace_meta, workspace_changelog, transcript_stream, actor_registry,
-    %% workspace_bootstrap, actor_sup.
-    %% class_events / bindings_events / flush_events retired (those push
-    %% streams now ride the SystemAnnouncer bus).
-    %% ADR 0105 Phase 1: workspace_signature_store is REPL-only (run
-    %% mode has no live-edit path to feed it) — see run_mode_no_signature_store_test.
-    ?assertEqual(6, length(ChildSpecs)).
+release_console_config() ->
+    (release_mode_config())#{console => true, tcp_port => 49153}.
 
-run_mode_no_repl_server_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+%% A release-mode init/1 records release capabilities in a persistent_term;
+%% restore the default so later tests in this VM are unaffected.
+with_capabilities_restored(Fun) ->
+    try
+        Fun()
+    after
+        beamtalk_capability:clear()
+    end.
 
-    Ids = [maps:get(id, S) || S <- ChildSpecs],
+run_mode_child_ids_test() ->
+    %% Run mode: the base set only — no REPL listener, no idle monitor, no
+    %% ADR 0105 / 0108 live-development stores.
+    ?assertEqual(base_child_ids(), child_ids(run_mode_config())).
+
+workspace_mode_child_ids_test() ->
+    ?assertEqual(
+        base_child_ids() ++ live_development_child_ids() ++ console_child_ids() ++
+            [beamtalk_idle_monitor],
+        child_ids(test_config())
+    ).
+
+release_mode_child_ids_test() ->
+    %% Release without a console: the base set only. Never the idle monitor
+    %% (it calls init:stop/0), never the live-development stores.
+    with_capabilities_restored(fun() ->
+        ?assertEqual(base_child_ids(), child_ids(release_mode_config()))
+    end).
+
+release_mode_with_console_child_ids_test() ->
+    %% `console => true` adds the REPL listener — and nothing else.
+    with_capabilities_restored(fun() ->
+        ?assertEqual(base_child_ids() ++ console_child_ids(), child_ids(release_console_config()))
+    end).
+
+release_mode_console_preserves_session_sup_ordering_test() ->
+    %% session_sup must start before repl_server in every mode that has them.
+    with_capabilities_restored(fun() ->
+        Ids = child_ids(release_console_config()),
+        ?assert(
+            string:str(Ids, [beamtalk_session_sup]) < string:str(Ids, [beamtalk_repl_server])
+        )
+    end).
+
+release_mode_never_idle_monitor_test() ->
+    %% Even with auto_cleanup set, a release never starts the idle monitor.
+    with_capabilities_restored(fun() ->
+        Config = (release_console_config())#{auto_cleanup => true, max_idle_seconds => 1},
+        ?assertNot(lists:member(beamtalk_idle_monitor, child_ids(Config)))
+    end).
+
+release_mode_console_requires_tcp_port_test() ->
+    with_capabilities_restored(fun() ->
+        ?assertError(
+            {bad_config, missing_tcp_port_for_repl},
+            beamtalk_workspace_sup:init((release_mode_config())#{console => true})
+        )
+    end).
+
+release_mode_ignores_console_key_outside_release_test() ->
+    %% `console` is a release-mode option: run mode never starts a listener.
+    Ids = child_ids((run_mode_config())#{console => true, tcp_port => 49154}),
     ?assertNot(lists:member(beamtalk_repl_server, Ids)).
 
-run_mode_no_idle_monitor_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+release_mode_records_capabilities_test() ->
+    with_capabilities_restored(fun() ->
+        _ = child_ids(release_mode_config()),
+        ?assertEqual(
+            #{mode => release, include_compiler => false}, beamtalk_capability:current()
+        ),
+        _ = child_ids((release_mode_config())#{include_compiler => true}),
+        ?assertEqual(
+            #{mode => release, include_compiler => true}, beamtalk_capability:current()
+        )
+    end).
 
-    Ids = [maps:get(id, S) || S <- ChildSpecs],
-    ?assertNot(lists:member(beamtalk_idle_monitor, Ids)).
+workspace_mode_records_capabilities_test() ->
+    with_capabilities_restored(fun() ->
+        _ = child_ids(test_config()),
+        ?assertMatch(#{mode := workspace}, beamtalk_capability:current())
+    end).
 
-run_mode_no_session_sup_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
-
-    Ids = [maps:get(id, S) || S <- ChildSpecs],
-    ?assertNot(lists:member(beamtalk_session_sup, Ids)).
-
-%% ADR 0105 Phase 1: run mode executes a precompiled artifact with
-%% no live-edit path (no session, no way to reach
-%% beamtalk_repl_loader:install_method/9), so the signature-generation store
-%% — REPL-only, like session_sup/repl_server/idle_monitor above — must not
-%% start there.
-run_mode_no_signature_store_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
-
-    Ids = [maps:get(id, S) || S <- ChildSpecs],
-    ?assertNot(lists:member(beamtalk_workspace_signature_store, Ids)).
-
-%% ADR 0105 Phase 1: the findings store is downstream of the
-%% signature store (a re-check needs a classified signature diff first, and
-%% run mode never produces one — see `run_mode_no_signature_store_test`'s
-%% doc) — REPL-only, same as the store it publishes from.
-run_mode_no_findings_store_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
-
-    Ids = [maps:get(id, S) || S <- ChildSpecs],
-    ?assertNot(lists:member(beamtalk_workspace_findings_store, Ids)).
+run_mode_no_tcp_port_required_test() ->
+    %% Starting in run mode with no tcp_port should succeed.
+    ?assert(length(child_ids(run_mode_config())) > 0).
 
 run_mode_required_children_present_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
-
-    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    Ids = child_ids(run_mode_config()),
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
     ?assert(lists:member(beamtalk_workspace_bootstrap, Ids)),
     ?assert(lists:member(beamtalk_actor_sup, Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)).
 
-run_mode_meta_gets_repl_false_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+%%% Mode passed to workspace_meta
 
-    [MetaSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_meta],
-    {beamtalk_workspace_meta, start_link, [MetaConfig]} = maps:get(start, MetaSpec),
-    ?assertEqual(false, maps:get(repl, MetaConfig)).
+meta_mode(Config) ->
+    {beamtalk_workspace_meta, start_link, [MetaConfig]} =
+        maps:get(start, child_spec(beamtalk_workspace_meta, Config)),
+    maps:get(mode, MetaConfig).
 
-run_mode_no_tcp_port_required_test() ->
-    %% Starting with repl=false and no tcp_port should succeed (return child specs without error)
-    Config = #{
-        workspace_id => <<"no-port-test">>,
-        project_path => test_project_path(),
-        repl => false
-    },
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
-    ?assert(length(ChildSpecs) > 0).
+run_mode_meta_gets_mode_run_test() ->
+    ?assertEqual(run, meta_mode(run_mode_config())).
 
-full_mode_meta_gets_repl_true_test() ->
-    %% Default (no repl key) should pass repl=true to workspace_meta
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+workspace_mode_meta_gets_mode_workspace_test() ->
+    ?assertEqual(workspace, meta_mode(test_config())).
 
-    [MetaSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_meta],
-    {beamtalk_workspace_meta, start_link, [MetaConfig]} = maps:get(start, MetaSpec),
-    ?assertEqual(true, maps:get(repl, MetaConfig)).
+release_mode_meta_gets_mode_release_test() ->
+    with_capabilities_restored(fun() ->
+        ?assertEqual(release, meta_mode(release_mode_config()))
+    end).
 
-repl_mode_missing_tcp_port_fails_fast_test() ->
-    %% repl=true (default) without tcp_port must fail fast, not silently pass
+%%% ChangeLog workspace id (memory-only outside workspace mode)
+
+changelog_workspace_id(Config) ->
+    {beamtalk_workspace_changelog, start_link, [#{workspace_id := Id}]} =
+        maps:get(start, child_spec(beamtalk_workspace_changelog, Config)),
+    Id.
+
+run_mode_changelog_memory_only_test() ->
+    ?assertEqual(undefined, changelog_workspace_id(run_mode_config())).
+
+workspace_mode_changelog_on_disk_test() ->
+    ?assertEqual(<<"test123">>, changelog_workspace_id(test_config())).
+
+release_mode_changelog_memory_only_test() ->
+    with_capabilities_restored(fun() ->
+        ?assertEqual(undefined, changelog_workspace_id(release_mode_config()))
+    end).
+
+%%% Config validation
+
+workspace_mode_missing_tcp_port_fails_fast_test() ->
+    %% Workspace mode without tcp_port must fail fast, not silently pass
     %% undefined into the REPL server child spec.
     Config = #{
+        mode => workspace,
         workspace_id => <<"fail-fast-test">>,
         project_path => test_project_path()
-        %% tcp_port intentionally omitted, repl defaults to true
     },
     ?assertError(
         {bad_config, missing_tcp_port_for_repl},
         beamtalk_workspace_sup:init(Config)
+    ).
+
+missing_mode_fails_fast_test() ->
+    %% `mode` is required — there is no default.
+    ?assertError(
+        {bad_config, missing_mode},
+        beamtalk_workspace_sup:init(maps:remove(mode, test_config()))
+    ).
+
+invalid_mode_fails_fast_test() ->
+    ?assertError(
+        {bad_config, {invalid_mode, repl}},
+        beamtalk_workspace_sup:init((test_config())#{mode => repl})
+    ).
+
+removed_repl_key_fails_fast_test() ->
+    %% No transitional `repl => boolean()` clause: a stale caller fails loudly
+    %% instead of being silently mapped to a mode.
+    ?assertError(
+        {bad_config, {removed_key, repl, use_mode}},
+        beamtalk_workspace_sup:init((run_mode_config())#{repl => false})
     ).

@@ -1559,14 +1559,23 @@ Compiler-based type resolution fallback for complex expressions.
 Sends the expression to the Rust compiler via the port. The compiler parses
 it fully, runs type inference, and returns the type of the last expression.
 Falls back to `undefined' if the compiler is unavailable or the type is unknown.
+
+On a release node without a compiler (ADR 0125 §1.5) this step is skipped
+outright: `complete` itself stays available, with only its tokeniser-driven
+completions, rather than failing the whole op.
 """.
 -spec resolve_type_via_compiler(binary()) -> {ok, atom(), instance | class} | undefined.
 resolve_type_via_compiler(Expr) ->
-    try beamtalk_compiler:resolve_completion_type(Expr) of
-        {ok, ClassName} -> {ok, ClassName, instance};
-        {error, type_unknown} -> undefined
-    catch
-        _:_ -> undefined
+    case beamtalk_capability:available(completion_type_inference) of
+        false ->
+            undefined;
+        true ->
+            try beamtalk_compiler:resolve_completion_type(Expr) of
+                {ok, ClassName} -> {ok, ClassName, instance};
+                {error, type_unknown} -> undefined
+            catch
+                _:_ -> undefined
+            end
     end.
 
 -doc """

@@ -61,7 +61,7 @@ stop_workspace_meta_if_running() ->
         Pid -> gen_server:stop(Pid)
     end.
 
-%% Start a throwaway workspace_meta (repl => false, so it never touches
+%% Start a throwaway workspace_meta (mode => run, so it never touches
 %% disk) for the duration of `Fun/1`, passing whether it actually started —
 %% `false` on a standalone EUnit run where beamtalk_workspace is unreachable.
 %% Always stops the process it started before returning, even on failure.
@@ -71,7 +71,7 @@ with_workspace_meta(Fun) ->
         beamtalk_workspace_meta:start_link(#{
             workspace_id => <<"bt3105-lifecycle-test">>,
             created_at => erlang:system_time(second),
-            repl => false
+            mode => run
         })
     of
         {ok, Pid} ->

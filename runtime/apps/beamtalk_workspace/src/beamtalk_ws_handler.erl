@@ -466,12 +466,21 @@ handle_protocol(Data, SessionPid, State) ->
                 <<"shutdown">> ->
                     handle_shutdown(Msg, State);
                 <<"eval">> ->
-                    %% Use async eval for streaming output
-                    handle_eval_async(Msg, SessionPid, State);
+                    %% Use async eval for streaming output. The async path
+                    %% bypasses beamtalk_repl_ops:dispatch/4, so it consults
+                    %% the capability check itself (ADR 0125 §1.5).
+                    with_capability(Op, Msg, State, fun() ->
+                        handle_eval_async(Msg, SessionPid, State)
+                    end);
                 <<"run-entry">> ->
                     %% Connected-mode `beamtalk run` — dispatch a class
-                    %% entry method with argv, streaming output like async eval.
-                    handle_run_entry_async(Msg, SessionPid, State);
+                    %% entry method with argv, streaming output like async
+                    %% eval. Compile-free, so available in every mode
+                    %% (ADR 0125 §1.5); still routed through the check so the
+                    %% classification stays the single source of truth.
+                    with_capability(Op, Msg, State, fun() ->
+                        handle_run_entry_async(Msg, SessionPid, State)
+                    end);
                 <<"stdin">> ->
                     %% Route stdin input to IO capture process
                     handle_stdin(Msg, State);
@@ -488,6 +497,19 @@ handle_protocol(Data, SessionPid, State) ->
         {error, DecodeError} ->
             ErrorJson = beamtalk_repl_json:format_error(DecodeError),
             {[{text, ErrorJson}], State}
+    end.
+
+-doc """
+Run `Handle` only if this node may perform `Op`
+(`beamtalk_capability:check/1`, ADR 0125 §1.5); otherwise reply with the
+structured refusal.
+""".
+with_capability(Op, Msg, State, Handle) ->
+    case beamtalk_capability:check(Op) of
+        ok ->
+            Handle();
+        {error, Err} ->
+            {[{text, beamtalk_repl_json:encode_error(Err, Msg)}], State}
     end.
 
 -doc "Start a new session or resume an existing one if session ID is provided.".
