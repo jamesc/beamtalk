@@ -32771,6 +32771,25 @@
       "explanation": "BT-2745 / ADR 0102 §4: advisory singleton-union match: exhaustiveness.  BUnit cannot observe compiler diagnostics, so the warning-*appearing* cases (missing member named in the message, residual type, Warning severity) are pinned at the Rust layer:   crates/beamtalk-core/src/semantic_analysis/type_checker/tests/singleton_match_exhaustiveness.rs  What THIS file pins is the silence cases, end-to-end: `just test-bunit` compiles with --warnings-as-errors and Type-category warnings are promoted to errors, so if any match below wrongly triggered the non-exhaustive warning, this file would fail to compile and the suite would go red."
     },
     {
+      "id": "stdlib-test-singleton-reset-current-test",
+      "title": "SingletonResetCurrentTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SingletonResetCurrentTest",
+        "TestCase",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "singleton_reset_current_test",
+        "subclassing",
+        "testBeamtalkInterfaceResetCurrentClearsSingleton",
+        "testWorkspaceInterfaceResetCurrentClearsSingleton"
+      ],
+      "source": "// BT-3566: BeamtalkInterface and WorkspaceInterface each gained a\n// resetCurrent class method mirroring TranscriptStream's, for symmetry\n// after BT-3559 converted their `current` classState singleton to a\n// `late` slot with no default. Verifies resetCurrent is safe to call and\n// leaves the singleton unassigned (current == nil), the same shape as\n// TranscriptStream's own resetCurrent test (show_cr_test.bt).\n\nTestCase subclass: SingletonResetCurrentTest\n\n  testBeamtalkInterfaceResetCurrentClearsSingleton =>\n    BeamtalkInterface resetCurrent\n    self assert: BeamtalkInterface current equals: nil\n\n  testWorkspaceInterfaceResetCurrentClearsSingleton =>\n    WorkspaceInterface resetCurrent\n    self assert: WorkspaceInterface current equals: nil",
+      "explanation": "BT-3566: BeamtalkInterface and WorkspaceInterface each gained a resetCurrent class method mirroring TranscriptStream's, for symmetry after BT-3559 converted their `current` classState singleton to a `late` slot with no default. Verifies resetCurrent is safe to call and leaves the singleton unassigned (current == nil), the same shape as TranscriptStream's own resetCurrent test (show_cr_test.bt)."
+    },
+    {
       "id": "stdlib-test-source-file-reload-test",
       "title": "SourceFileReloadTest",
       "category": "stdlib-tests",
