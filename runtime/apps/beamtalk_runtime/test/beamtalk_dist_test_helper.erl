@@ -172,13 +172,16 @@ ensure_epmd() ->
     ok.
 
 -doc """
-A short node name that will not collide across repeated test runs or
-concurrent `just test` / CI jobs on the same host: `Prefix_<unique
-integer>@<hostname>`. Uses `inet:gethostname/0` rather than a hardcoded
-"localhost" so the harness works on whatever host CI resolves this
-machine's shortname to (never a `/tmp`-style hardcoded path — the same
-"don't hardcode environment specifics" principle CLAUDE.md states for
-temp paths).
+A short node name intended to avoid collisions across repeated test runs
+on the same host: `Prefix_<unique integer>@<hostname>`. `unique_integer/1`
+is only unique within this BEAM instance's lifetime, so two independently
+started VMs (e.g. two parallel CI jobs on the same runner) have no
+cross-process coordination and could in principle pick overlapping names;
+a collision fails/flakes the affected test rather than corrupting state.
+Uses `inet:gethostname/0` rather than a hardcoded "localhost" so the
+harness works on whatever host CI resolves this machine's shortname to
+(never a `/tmp`-style hardcoded path — the same "don't hardcode
+environment specifics" principle CLAUDE.md states for temp paths).
 """.
 -spec unique_node_name(string()) -> node().
 unique_node_name(Prefix) ->

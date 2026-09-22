@@ -37,6 +37,14 @@ ref := counter monitor
 counter increment   %% handle 'DOWN' message if actor dies
 ```
 
+WARNING (remote actors, ADR 0126 §7.3): for an actor on another node,
+`isAlive` answers `true` optimistically without probing the peer, and
+keeps answering `true` even after that actor has genuinely died — it
+never becomes `false` through this selector. This mirrors the internal
+liveness guard's "let the send fail with its real reason" policy, not
+a liveness probe. Use a monitor's `'DOWN'` message to detect a dead
+remote actor.
+
 ## Actor State Structure
 
 Each actor maintains state in a map:
@@ -573,6 +581,7 @@ Send an asynchronous message to an actor, with lifecycle handling.
 
 Handles lifecycle methods locally without involving the actor process:
 - `isAlive` - checks if process is alive, resolves Future with boolean
+  (remote pid: always `true`, ADR 0126 §7.3 — see moduledoc)
 - `monitor` - creates a monitor reference, resolves Future with ref
 - `stop` - gracefully stops the actor process, resolves Future with ok
 
@@ -772,6 +781,7 @@ Send a synchronous message to an actor, with lifecycle handling.
 Handles lifecycle methods locally without involving the actor process:
 - `pid` - returns the raw Erlang PID backing the actor
 - `isAlive` - checks if process is alive, returns boolean
+  (remote pid: always `true`, ADR 0126 §7.3 — see moduledoc)
 - `monitor` - creates a monitor reference, returns ref
 - `onExit:` - monitors actor and calls block on exit
 - `stop` - gracefully stops the actor process, returns ok
