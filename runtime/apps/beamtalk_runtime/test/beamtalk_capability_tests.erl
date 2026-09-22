@@ -68,6 +68,8 @@ workspace_ops() ->
         'flush:',
         'flush:confirmDestructive:',
         flushIncludingDestructive,
+        'changes flushKinds:',
+        'changes revert:',
         autoflush,
         'moveClass:to:',
         removeFromSystem,

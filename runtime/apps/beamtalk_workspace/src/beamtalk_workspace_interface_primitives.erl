@@ -639,6 +639,15 @@ revert_side_field(_Other) -> undefined.
 %% side-agnostic, highest-seq selection.
 -spec do_revert(binary(), atom(), instance | class | undefined) -> term().
 do_revert(ClassNameBin, SelectorAtom, TargetSide) ->
+    %% ChangeLog revert (ADR 0082/0113/0114) is a workspace operation: its
+    %% branches reinstall, remove or recompile classes and methods, bypassing
+    %% the gates on `compile:source:`/`removeFromSystem`/`newClass:at:`. Every
+    %% entry point (`changeLogRevert/1`, and the LiveView RPC `revert_method/2,3`)
+    %% funnels through here, so one check refuses it on a release node, even
+    %% one built with `include_compiler` (ADR 0125 §1.5).
+    ok = beamtalk_capability:require(
+        'changes revert:', 'Workspace', <<"Workspace changes revert:">>
+    ),
     case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom, TargetSide) of
         {ok, PrevBody, Entry} ->
             %% A *modify* revert: re-install the recorded prior body on the
@@ -1184,6 +1193,11 @@ backing `Workspace changes flushKinds: aSet confirmDestructive: true`.
 """.
 -spec changeLogFlushKinds(term(), term()) -> map().
 changeLogFlushKinds(KindsSet, ConfirmDestructive) ->
+    %% Same flush machinery as `flush/0,1,2`, so the same refusal on a release
+    %% node (ADR 0125 §1.5). `changeLogFlushKinds/1` delegates here.
+    ok = beamtalk_capability:require(
+        'changes flushKinds:', 'Workspace', <<"Workspace changes flushKinds:">>
+    ),
     case kinds_to_list(KindsSet) of
         {ok, Kinds} ->
             case beamtalk_workspace_flush:flush_kinds(Kinds, ConfirmDestructive) of

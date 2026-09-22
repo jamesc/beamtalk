@@ -443,6 +443,8 @@ calling the `Behaviour`/`Workspace` primitives). There is one classification,
   working tree or on-disk ChangeLog: `unload` / `removeFromSystem`,
   `save-native-source`, `save-section`, `Workspace flush` / `flush:` /
   `flush:confirmDestructive:` / `flushIncludingDestructive` / `moveClass:to:`,
+  `Workspace changes flushKinds:` and `revert:` (including the LiveView
+  `revert_method` RPC),
   `renameTo:`, `renameSelector:to:`, and autoflush. Refused **even with**
   `include-compiler`.
 - Everything else — `run-entry`, `inspect`, `actors`, `actor-stats`,

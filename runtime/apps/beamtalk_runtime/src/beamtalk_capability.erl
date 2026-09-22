@@ -172,6 +172,11 @@ classify(flush) -> workspace;
 classify('flush:') -> workspace;
 classify('flush:confirmDestructive:') -> workspace;
 classify(flushIncludingDestructive) -> workspace;
+%% `Workspace changes` (the ChangeLog): `flushKinds:` flushes; `revert:`
+%% reinstalls, removes or recompiles classes and methods from recorded
+%% ChangeEntries (ADR 0082, 0113, 0114).
+classify('changes flushKinds:') -> workspace;
+classify('changes revert:') -> workspace;
 %% The autoflush a durable live patch triggers (ADR 0082 Phase 4) is a flush.
 classify(autoflush) -> workspace;
 classify('moveClass:to:') -> workspace;

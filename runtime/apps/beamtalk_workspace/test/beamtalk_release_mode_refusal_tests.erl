@@ -218,6 +218,51 @@ workspace_flush_refused_in_both_release_variants_test_() ->
         ]
     ].
 
+changelog_flush_kinds_and_revert_refused_in_both_release_variants_test_() ->
+    %% `Workspace changes flushKinds:` and `revert:` reach the same flush /
+    %% install / remove machinery as the gated primitives above; the LiveView
+    %% RPC `revert_method/2,3` returns the refusal instead of raising. The
+    %% gate runs before any ChangeLog lookup, so no ChangeLog server is needed.
+    [
+        ?_assertEqual(release_mode_no_workspace, with_capabilities(Caps, Call))
+     || Caps <- [?RELEASE, ?RELEASE_WITH_COMPILER],
+        Call <- [
+            fun() ->
+                raised_kind(fun() ->
+                    beamtalk_workspace_interface_primitives:changeLogFlushKinds(['new-class'])
+                end)
+            end,
+            fun() ->
+                raised_kind(fun() ->
+                    beamtalk_workspace_interface_primitives:changeLogFlushKinds(
+                        ['remove-class'], true
+                    )
+                end)
+            end,
+            fun() ->
+                raised_kind(fun() ->
+                    beamtalk_workspace_interface_primitives:changeLogRevert(#{
+                        className => 'Counter', selector => increment
+                    })
+                end)
+            end,
+            fun() ->
+                refusal_kind(
+                    beamtalk_workspace_interface_primitives:revert_method(
+                        <<"Counter">>, <<"increment">>
+                    )
+                )
+            end,
+            fun() ->
+                refusal_kind(
+                    beamtalk_workspace_interface_primitives:revert_method(
+                        <<"Counter">>, <<"increment">>, <<"class">>
+                    )
+                )
+            end
+        ]
+    ].
+
 workspace_load_refused_without_compiler_test_() ->
     [
         ?_assertEqual(release_mode_no_compiler, with_capabilities(?RELEASE, Call))
