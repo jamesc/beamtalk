@@ -1,4 +1,4 @@
-# ADR 0126: Traits — Stateless, Flattened Units of Behaviour
+# ADR 0127: Traits — Stateless, Flattened Units of Behaviour
 
 ## Status
 Proposed (2026-09-22)
