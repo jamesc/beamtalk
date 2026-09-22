@@ -1,7 +1,9 @@
 # ADR 0126: Distribution and Location-Transparent Actors
 
 ## Status
-Proposed (2026-09-22)
+Proposed (2026-09-22) — to be accepted after the Phase 0.5 wire-check spike
+(see Implementation) confirms or corrects its four load-bearing runtime
+assumptions.
 
 ## Context
 
@@ -116,6 +118,7 @@ node-agnostic.
 | Cluster events: `NodeUp`, `NodeDown`, `NodeShapeSkew` | Cross-node supervision trees |
 | Failure mapping: `node_down`, `remote_code_mismatch` | Cluster formation/discovery (libcluster-style strategies) |
 | Remote supervision-tree introspection | Separate cookie vs. WebSocket secret (ADR 0058 hardening) |
+| | Owner-monitored remote spawn (stop the actor when its spawner dies) |
 
 The rule of thumb: **if Erlang `dist` + `global` does it for free, v1 exposes
 it; if it needs new distributed state, it is out.**
@@ -554,7 +557,7 @@ receivers upgrade ADR 0103's boundary checks:
 |--------------------|---------------------------|------------------------|
 | `HandleScoped(#process)` | Warning (ADR 0103, unchanged) | Warning |
 | `HandleScoped(#node)` | silent (ADR 0103, unchanged) | **Warning** — "`cache` (Ets — node-bound handle) sent to a remote actor; it will be rejected at runtime" |
-| Block | silent | **Warning** — "block sent to a remote actor runs only if its class is loaded at the same version on `worker@host`" |
+| Block | silent | **Hint** — "block sent to a remote actor runs only if its class is loaded at the same version on `worker@host`" |
 
 All are `DiagnosticCategory::Sendability`, adjustable via
 `[diagnostics] sendability = "hint"`. Provenance does not flow through fields,
@@ -567,6 +570,13 @@ raises it to **Warning** because it also changes the runtime: 0103 assumed the
 handle would cross silently and merely misbehave; under §5.4 it is
 deterministically rejected, so the diagnostic predicts a certain runtime error,
 which is Warning territory by ADR 0103's own severity rule for `#process`.
+
+**Why blocks get a Hint, not a Warning.** A block sent to a remote actor
+fails only under version skew, and remote callbacks (`remote onEvent: [:e |
+...]`) are a normal, legitimate pattern. A Warning on every such send would
+train users to lower the whole `Sendability` category to `hint`, which would
+also hide the handle warnings that predict certain failures. The Hint shows in
+the editor; the runtime `remote_code_mismatch` stays the real safety net.
 
 **`withTimeout:` hides remoteness.** `remote withTimeout: 30000` returns a
 *local* `TimeoutProxy`; its `node`/`isRemote` report the local node, and the
@@ -903,7 +913,7 @@ suite exercises the remote path.
 *Response:* It would rule out remote actors that accept callbacks, remote
 `select:`/`collect:`-style query APIs and every Erlang library that takes a fun. Erlang allows
 it and the failure is well-defined; we map it to a clear
-`remote_code_mismatch` and warn when the receiver is known-remote.
+`remote_code_mismatch` and hint when the receiver is known-remote.
 
 ### Alternative: Pure FFI (status quo)
 
@@ -923,7 +933,7 @@ on top.
   This ADR chooses transparency in *syntax and types* and explicitness in
   *diagnostics, errors and events*.
 - Smalltalk purists would ban blocks across nodes; BEAM veterans would allow
-  them. We allow them with a mapped error and a warning.
+  them. We allow them with a mapped error and an editor hint.
 
 ## Alternatives Considered
 
