@@ -44,9 +44,10 @@ can never be one.
 
 **Evidence from the stdlib** (`stdlib/src/*.bt` at the time of writing):
 
-*Ordering.* Five classes hand-write the four ordering operators, each derived
-from one primitive comparison, and none of them gets `between:and:`, `min:`
-or `max:`, which exist only on `Number`:
+*Ordering.* Four classes outside the `Number` tower hand-write the four
+ordering operators, each derived from one primitive comparison, and none of
+them gets `between:and:`, `min:` or `max:`, which exist only on `Number` and
+its subclasses:
 
 | Class | `<` `>` `<=` `>=` | `between:and:` / `min:` / `max:` |
 |---|---|---|
@@ -54,7 +55,7 @@ or `max:`, which exist only on `Number`:
 | `Duration` (`duration.bt:225-253`) | 4 × `(Erlang beamtalk_duration) …` | none |
 | `Uuid` (`uuid.bt:140-149`) | 4 × `(Erlang beamtalk_uuid) …` | none |
 | `String` (`string.bt:96-123`) | 4 × `@primitive` | none |
-| `Character` (`character.bt:61-85`) | 4 × `@primitive` | none |
+| `Character` (`character.bt:61-85`) | 4 × `@primitive` | inherited — `Character` is an `Integer` subclass (`character.bt:16`) |
 | `Integer` / `Float` | 4 × `@primitive` each | `min:`/`max:` **duplicated verbatim** in both (`integer.bt:294-306`, `float.bt:177-188`); `between:and:` on `Number` only |
 
 *Enumeration.* Two `Value` classes that are not collections re-implement the
@@ -74,13 +75,36 @@ the wrong statement:
 `String` (`string.bt:414-423`) also re-implements `isEmpty` / `isNotEmpty`
 in terms of `length` rather than inheriting them.
 
-Neither cluster is fixable by inheritance. `DateTime` and `Uuid` are not
-numbers. `SupervisionTree` is a snapshot, not a collection, and an actor
-that wants `do:`/`select:`/`detect:` over its contents (a registry, a pool)
-cannot subclass `Collection` at all. The ADR 0037 steelman for "Option C:
-Traits / Protocol" already said so — "Traits separate the *what* (Enumerable
-protocol) from the *how* (implementation per type)" — and rejected it only
-because protocols did not yet exist. They do now.
+**Most of this stdlib duplication *is* fixable by single inheritance**, and
+the ADR should be judged knowing that. `DateTime`, `Duration`, `Uuid` and
+`Number` all subclass `Value` directly, so a Pharo-style abstract
+`Magnitude` Value class above them would remove the ordering copies for
+everything except `String`. `SupervisionTree` and `ChangeLog` also subclass
+`Value` directly, so an abstract enumerable Value class (with `Collection`
+under it) would remove the enumeration copies. §Alternatives treats this as
+the strongest rival, not a strawman.
+
+What inheritance cannot fix is the reason for this ADR:
+
+1. **A class that needs two concerns.** `String` is a `Collection` (via
+   `Binary`) *and* is ordered. Under inheritance it can have `Magnitude` or
+   `Collection` behaviour, not both; today it re-implements the ordering half
+   and `isEmpty`/`isNotEmpty` by hand.
+2. **The class-kind wall.** Every shared-behaviour base in the stdlib is a
+   `Value`. An `Actor` that wants `do:`/`select:`/`detect:` over what it
+   holds (a registry, a pool, a subscription set) can never inherit them.
+   The stdlib has no such actor today, because without traits there is no
+   way to write one except by hand. The evidence for this case is structural,
+   not a count.
+3. **A superclass slot already taken.** User classes subclass `TestCase`,
+   `Error`, `Supervisor` or an application base actor. Their superclass is
+   spent on framework integration, so shared behaviour has nowhere to go
+   except copies or extension methods.
+
+The ADR 0037 steelman for "Option C: Traits / Protocol" made the same
+argument — "Traits separate the *what* (Enumerable protocol) from the *how*
+(implementation per type)" — and rejected it only because protocols did not
+yet exist. They do now.
 
 ### Current state
 
@@ -199,8 +223,21 @@ The body grammar is the protocol body grammar (ADR 0068) plus method bodies:
 | `/// doc` | Doc comment, carried onto the flattened method and shown by `browse` |
 
 A trait may be generic — `Trait define: Enumerable(E)` — with the same
-type-parameter syntax as classes and protocols. `Self` in a trait signature
-denotes the using class.
+type-parameter syntax as classes and protocols.
+
+**`Self` in a trait.** In return position `Self` keeps its existing meaning
+(the static receiver class). In **parameter** position — which is an error in
+class methods today ("`Self` cannot be used as a parameter type … only valid
+in return position", `type_checker/validation.rs:1959`) and legal in protocol
+signatures (`beamtalk-language-features.md:1867`) — a trait may use `Self`,
+and flattening **substitutes the using class's name** before the method
+reaches the type checker. `Comparable>>max: other :: Self` becomes
+`DateTime>>max: other :: DateTime` in `DateTime` and
+`Number>>max: other :: Number` in `Number`: exactly the signature a hand-written
+method would declare. The Eiffel unsoundness that motivates the class-method
+ban (a subclass narrowing a parameter type) does not arise, because the
+substituted type is the using class, fixed at flattening, and subclasses
+inherit it unchanged as they inherit any hand-written method.
 
 A trait has no header modifiers, no superclass, no `state:` / `field:` /
 `classState:` (§7), and no `native:`. A `.bt` file holds one trait as its
@@ -437,10 +474,10 @@ which is what listing them does already.
 ### 9. All three class kinds can use traits
 
 **Value** — `DateTime`, above (§2). The same change applies to `Duration`,
-`Uuid`, `String` and `Character`; each keeps its primitive `<` and may keep
-its primitive `>`/`<=`/`>=` too, since a body method beats a provision (§3)
-— the decision to drop the three derived operators is per class and is a
-one-send-per-call trade.
+`Uuid`, `String` and `Number` (so `Integer`, `Float` and `Character` inherit
+it); each keeps its primitive `<` and may keep its primitive `>`/`<=`/`>=`
+too, since a body method beats a provision (§3) — the decision to drop the
+three derived operators is per class and is a one-send-per-call trade.
 
 **Actor** — an actor that wants enumeration over what it holds:
 
@@ -491,7 +528,8 @@ typed Actor subclass: WorkerPool
 ```
 
 `inject:into:` writes a captured local inside a block — a Tier 2 stateful
-block body (ADR 0111) — and `detect:ifNone:` uses `^`. Both lower through
+block (ADR 0041), lowered through `ThreadedIr` (ADR 0111) — and
+`detect:ifNone:` uses `^`. Both lower through
 `ThreadedIr` **in the using class's context**: in `WorkerPool` the method is
 an actor `dispatch/4` clause with `State` threading; in `SupervisionTree` it
 is a value function. The trait author writes it once and never thinks about
@@ -511,19 +549,18 @@ Trait define: Versioned
   /// Required.
   class version -> String
 
-  class banner -> String => self name ++ " " ++ self version
-  class isNewerThan: other :: String -> Boolean =>
-    (Erlang beamtalk_version) compare: self version with: other =:= #gt
+  class banner -> String => self name asString ++ " " ++ self version
+  class isVersion: v :: String -> Boolean => self version =:= v
 ```
 
 ```beamtalk
-Object subclass: Program
+Object subclass: ReportTool
   uses: Versioned
 
   class version -> String => "1.4.0"
 ```
 
-`Program banner // => "Program 1.4.0"`. A trait with instance-side provisions
+`ReportTool banner // => "ReportTool 1.4.0"`. A trait with instance-side provisions
 used by an `Object` subclass is not an error — the methods flatten onto a
 class that will never be instantiated, exactly as a hand-written instance
 method on an `Object` subclass is not an error today.
@@ -628,6 +665,7 @@ implementation in the existing `E`/`W` series.
 | `state:`/`field:`/`classState:` or `self.slot` in a trait | Error | "traits are stateless — declare `slot -> Type` as a required method" |
 | Trait `uses:` cycle | Error | "trait A uses itself through B" |
 | Trait modifier (`sealed Trait define:`) | Error | "traits take no modifiers; use `sealed` on individual methods" |
+| `Self` as a parameter type in a class body method | Error | unchanged (`check_no_self_in_params`); the hint mentions traits when the method's class uses one |
 | Type mismatch between a required signature and the class's method | Warning | as ADR 0025 protocol/type warnings |
 | `removeSelector:` on a trait-provided method of a class | Runtime error | see §11 |
 
@@ -649,12 +687,12 @@ typed Value subclass: Version
 v := Version major: 1 minor: 4
 v between: (Version major: 1 minor: 0) and: (Version major: 2 minor: 0)   // => true
 v max: (Version major: 1 minor: 9)                       // => Version(major: 1, minor: 9)
-Version traits                                            // => #(Comparable)
+Version traits                                            // => [Comparable]
 Version conformsTo: #Comparable                           // => true
 Integer conformsTo: #Comparable                           // => true — structurally, no uses:
 (Version >> #max:) origin                                 // => Comparable
 (Version >> #<) origin                                    // => nil
-Trait usersOf: #Comparable                                // => #(Version, DateTime, Duration, Uuid, String, Character)
+Trait usersOf: #Comparable                                // => [Version, DateTime, Duration, Uuid, String, Number]
 Comparable >> max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]
                                                           // => Comparable — six classes re-expanded
 Version removeSelector: #max:
@@ -692,12 +730,12 @@ Version removeSelector: #max:
 | **Scala** | `trait` with linearisation; `with A with B` | Linearised; `super` chains through traits | Order decides; `abstract override` | Yes | Rejected as mixins; but Scala's "trait is also a type" is our §8 |
 | **Rust** | `trait` with default methods, `impl T for S` | Static, type-directed; orphan rules | Disambiguation by qualified path | None (associated fns only) | Adopted: required vs. default methods as the two body shapes. Rejected: nominal `impl` — ADR 0068 chose structural |
 | **Swift** | Protocol extensions with default implementations | Static dispatch for non-requirement extension methods | Ambiguity error | None | Rejected: the static/dynamic dispatch split is a well-known footgun; Beamtalk has one dispatch (ADR 0006) |
-| **Java 8 / Kotlin** | Interface default methods | Flattened-ish; class wins, then explicit `A.super.m()` | Must override | None | Adopted: class wins. Rejected: `A.super.m()`; we alias instead (§4) |
+| **Java 8 / Kotlin** | Interface default methods | Flattened-ish; class wins, then explicit `A.super.m()` (Java) / `super<A>.m()` (Kotlin) | Must override | None | Adopted: class wins. Rejected: the qualified-super call; we alias instead (§4) |
 | **Pony** | `trait` (nominal, default methods) + `interface` (structural) | Nominal `is T` | Must override | None | Closest match to §8: nominal *composition* declaration + structural *type*. Pony has no exclusion/alias; we keep Pharo's |
 | **Dart** | `mixin` with `on` constraints, `with` | Linearised | Order decides | Yes | Rejected as mixins; `on` is our required-methods list |
 | **Ruby** | `module` + `include` / `prepend` | Linearised into the ancestor chain | Order decides | Instance vars by convention | Rejected as mixins; `Comparable`/`Enumerable` are the canonical examples and the names we use |
 | **Perl Moose / Raku** | Roles: `with 'R' => { -excludes => …, -alias => … }` | Flattened (roles are traits) | Compile-time conflict unless resolved | Attributes allowed | Confirms exclusion/alias as keyword clauses read fine outside Smalltalk |
-| **Elixir** | `use M` → `__using__` macro injects code; `defprotocol` for dispatch | Textual injection | None (last `def` wins, warning) | n/a | `use` is unchecked injection; our flattening is checked injection. Protocols ≈ our ADR 0068. `Enumerable` is the reference API |
+| **Elixir** | `use M` → `__using__` macro injects code; `defprotocol` for dispatch | Textual injection | Injected and local clauses of the same name/arity merge (with a "clause cannot match" warning) unless the injector marks them `defoverridable` | n/a | `use` is unchecked injection; our flattening is checked injection, and `defoverridable` is our class-wins rule made opt-in. Protocols ≈ our ADR 0068. `Enumerable` is the reference API |
 | **Erlang / OTP** | `-behaviour(M)` callbacks; `-extends` parse transform | Contract only | n/a | n/a | Behaviours ≈ protocols; no body sharing — the gap this ADR fills |
 | **LFE Flavors** | Mixins (`(defflavor … (:mixins …))`) | Linearised | Order | Yes | Rejected as mixins |
 | **Gleam** | None; modules and functions | n/a | n/a | n/a | Not applicable |
@@ -765,6 +803,14 @@ and `uses:` lines.
 - 🎨 **Language designer**: "Mixins can carry state, which traits here cannot; and linearisation gives a deterministic answer to every conflict without asking the user."
 - *Why rejected*: the "deterministic answer" is order-dependence, the thing Schärli's paper was written against. On BEAM each application is a class gen_server plus a module plus one more step in every chain walk (ADR 0032 removed cached tables precisely to keep walks short). Kind-crossing is worse, not better: a mixin carrying `state:` cannot be applied to a `Value`.
 
+### Option H: Inheritance only (`Magnitude`, abstract enumerable Value class)
+- 🧑‍💻 **Newcomer**: "One mechanism — classes — and I already know it."
+- 🎩 **Smalltalk purist**: "This is what Smalltalk-80 and Pharo actually do for ordering: `Magnitude` has been the home of `<`, `between:and:`, `min:` and `max:` since 1980."
+- ⚙️ **BEAM veteran**: "No compiler pass, no new module kind, no N-way recompile on edit."
+- 🏭 **Operator**: "Nothing new to observe; hot reload of `Magnitude` is one module."
+- 🎨 **Language designer**: "It removes most of the measured duplication with zero surface area. Add traits when the first actor needs enumeration, not before."
+- *Why not chosen*: every argument is correct for the stdlib as it stands. It fails `String`, every `Actor`, and every class whose superclass is spent, and those failures are built into single inheritance plus class kinds. It stays the recommended fallback if this ADR is deferred.
+
 ### Option D: Extension methods only (`Comparable+DateTime.bt` per class)
 - 🧑‍💻 **Newcomer**: "It already works today; I just copy a file."
 - 🎩 **Smalltalk purist**: "Class extensions are the Smalltalk way to add behaviour without touching the hierarchy."
@@ -790,12 +836,25 @@ and `uses:` lines.
 - *Why rejected*: ADR 0005 Q8 decided single dispatch and single inheritance; MI cannot cross class kinds; the diamond problem is exactly what traits were invented to remove.
 
 ### Tension points
+- **Evidence vs. structure (A vs. H).** The stdlib count is mostly answerable by inheritance; the case for traits rests on what single inheritance plus class kinds structurally cannot express. Reviewers who weigh measured duplication over structural capability will reasonably prefer H now and A later.
 - **One concept vs. two (A vs. B).** Language designers and Elixir users lean B; Smalltalkers and the "honesty of form" rule lean A. Resolved for A because the keyword carries information (bodies present or not) and the two are convertible in place.
 - **Copy vs. share (A vs. E).** Operators want E's one-reload; the compiler's lexical assumptions make A the only one that works without re-architecting self-sends. Resolved for A; the N-recompile cost is accepted and bounded (§Consequences).
 - **Stateless vs. stateful (A vs. F).** Newcomers and Pharo 7 users want F; the class-kind split makes A the only kind-neutral choice today. Deferred, not closed.
 - **Header vs. body `uses:`.** Pharo puts it in the header; Beamtalk's header tail is already order-fragile and cannot hold exclusion/alias clauses. Body lines chosen.
 
 ## Alternatives Considered
+
+### Inheritance only — `Magnitude` and an abstract enumerable Value class
+Add `abstract typed Value subclass: Magnitude` (Pharo's own home for
+`<`/`between:and:`/`min:`/`max:`) above `Number`, `DateTime`, `Duration` and
+`Uuid`, and an abstract enumerable Value class above `Collection`,
+`SupervisionTree` and `ChangeLog`. No new language surface; it removes most
+of the §Context duplication today. Rejected as the *mechanism* because it
+cannot serve `String` (ordered *and* a collection), any `Actor`, or any class
+whose superclass is already spent (§Context, "What inheritance cannot fix").
+It is **not** rejected as a stdlib refactor: if this ADR is declined or
+deferred, doing it is the right fallback, and nothing here conflicts with it
+later (a `Magnitude` class could itself `uses: Comparable`).
 
 ### Protocols with default method bodies
 `Protocol define: Comparable` gaining `=>` bodies. Rejected as a *separate*
@@ -847,9 +906,16 @@ flattening property (nothing trait-shaped survives compilation) and needs no
 new send form.
 
 ### Do nothing
-The BT-274 cancellation position. Rejected by the corpus: seven classes and
-~40 hand-written derived methods in the stdlib alone, plus the structural
-impossibility of enumeration on an actor.
+The BT-274 cancellation position ("the class hierarchy handles behavior
+sharing adequately for current needs"). The stdlib count alone does not
+refute it: eight classes and ~25 hand-written methods a trait would provide
+(12 derived ordering operators across four classes, four `min:`/`max:`
+copies, ten enumeration and emptiness methods across `SupervisionTree`,
+`ChangeLog` and `String`), most of which inheritance could also remove
+(see "Inheritance only" above). Rejected because the three cases
+inheritance cannot reach — two concerns on one class, the actor/value wall,
+and a spent superclass slot — are permanent properties of the language, not
+of today's corpus.
 
 ## Consequences
 
@@ -864,8 +930,9 @@ impossibility of enumeration on an actor.
   where Pharo gives a runtime error and Elixir gives a warning.
 - The type system gains nothing new: a trait is a protocol (§8), and
   ADR 0068's structural rule is untouched.
-- Stdlib shrinks: `Comparable` retires ~20 derived-operator bodies and adds
-  `between:and:`/`min:`/`max:` to five classes; `Enumerable` retires the
+- Stdlib shrinks: `Comparable` retires ~15 derived-operator and
+  `min:`/`max:` bodies and adds `between:and:`/`min:`/`max:` to four
+  classes; `Enumerable` retires the
   `SupervisionTree`/`ChangeLog` copies and delivers ADR 0037's Option C.
 - Protocol → trait conversion is source-compatible, so protocols can grow
   defaults when evidence appears rather than up front.
@@ -922,7 +989,19 @@ assumption this ADR could not verify from source.
 | 3 | **Codegen**: feed the flattened `ClassDefinition` to the existing generators (extend the self-extension `merge_method` fold); `methodXref` provenance/origin; `methodSource` from the trait; trait module emission (`__beamtalk_meta`, `register_trait/0`, implied protocol via `generate_protocol_registrations`); cross-package expansion by re-parsing meta-embedded source in the compiler port; `ProjectIndex` trait→users dependency edges; conformance fixture for the trait meta shape | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-language-service` | L | 2 |
 | 4 | **Runtime & reflection**: `beamtalk_trait_registry.erl` (ETS, mirrors protocol registry); `stdlib/src/trait.bt`; `Behaviour traits/allTraits/usesTrait:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := trait` + browse grouping; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
 | 5 | **Live system**: trait file reload → user recompile fan-out in the workspace loader; `Trait >> sel => …` and `Trait removeSelector:` live patching; `Trait define:` at the REPL; ADR 0105 re-check hookup; ADR 0114 rename (`renameSelector:to:` redirection, trait `renameTo:` with `uses:` reference rows); flush of trait files (ADR 0113); LSP go-to-definition/hover/completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
-| 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String`, `Character`, `Number` (retire `Integer`/`Float` `min:`/`max:`); `Enumerable(E)` on `Collection`, `SupervisionTree`, `ChangeLog`; BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9 | stdlib, docs | M | 5 |
+| 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String`, `Number` (retire `Integer`/`Float` `min:`/`max:`; `Character` inherits via `Integer`); `Enumerable(E)` on `Collection`, `SupervisionTree`, `ChangeLog`; BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9 | stdlib, docs | M | 5 |
+
+**Tests per phase.**
+
+| Phase | Suites |
+|---|---|
+| 0 | A BUnit fixture in `stdlib/test/` pinning the observed self-send binding: a subclass override called from an inherited actor method |
+| 1 | Parser unit tests and snapshots in `beamtalk-core`, unparse round-trip, and diagnostics for misplaced `uses:` and unknown keyword lines |
+| 2 | Semantic-analysis unit tests for each §13 row, the same-origin diamond, class-wins, `Self` substitution, and generic `E` substitution |
+| 3 | `test-package-compiler` codegen snapshots for one user of each class kind, `just verify-threaded-ir` over the flattened stdlib, and the trait-meta conformance fixture |
+| 4 | Runtime EUnit for `beamtalk_trait_registry`, BUnit reflection tests (`traits`, `origin`, `usersOf:`), and xref tests for `provenance := trait` |
+| 5 | `tests/repl-protocol/cases/` for trait reload fan-out, `Trait >> sel` live patching, `removeSelector:` refusal, and rename; plus LSP tests |
+| 6 | Existing `just test-stdlib` and `just test-bunit` stay green with the duplicates deleted, plus new BUnit tests for `between:and:`/`min:`/`max:` on each new user |
 
 Phase 1 alone is mergeable (a parsed but unexpanded `uses:` is a "not yet
 supported" error); phases 2–3 together give a working compiler; phase 4 is
