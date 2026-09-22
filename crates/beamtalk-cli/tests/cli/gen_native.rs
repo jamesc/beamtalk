@@ -59,10 +59,10 @@ fn gen_native_generates_valid_erlang_stub() {
     assert!(erl_content.contains("init(_Config) ->"));
 
     // Verify handle_call clauses for each delegate method
-    assert!(erl_content.contains("handle_call({getValue, []}, _From, State) ->"));
+    assert!(erl_content.contains("handle_call({'getValue', []}, _From, State) ->"));
     assert!(erl_content.contains("handle_call({'setValue:', [Val]}, _From, State) ->"));
     assert!(erl_content.contains("handle_call({'at:put:', [Idx, Val]}, _From, State) ->"));
-    assert!(erl_content.contains("handle_call({close, []}, _From, State) ->"));
+    assert!(erl_content.contains("handle_call({'close', []}, _From, State) ->"));
 
     // Verify {ok, Result} wrapping
     assert!(erl_content.contains("{reply, {ok, todo}, State}"));
