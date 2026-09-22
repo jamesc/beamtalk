@@ -131,18 +131,31 @@ This is the term-returning entry point for dist-attached clients. It mirrors
 the op routing previously inlined in `beamtalk_repl_server:handle_op/4`. Every
 op returns a native `op_result()` term shape — handlers never raise a
 user-facing error, they return `{error, #beamtalk_error{}}`.
+
+Every op is first checked against the node's capabilities
+(`beamtalk_capability:check/1`, ADR 0125 §1.5): on a release node, an op that
+compiles source is refused with `release_mode_no_compiler` and one that
+mutates the workspace with `release_mode_no_workspace`, before its handler
+runs.
 """.
 -spec dispatch(binary(), map(), protocol_msg(), pid()) -> op_result().
-dispatch(<<"eval">>, Params, Msg, SessionPid) ->
+dispatch(Op, Params, Msg, SessionPid) ->
+    case beamtalk_capability:check(Op) of
+        ok -> route(Op, Params, Msg, SessionPid);
+        {error, Err} -> {error, Err}
+    end.
+
+-spec route(binary(), map(), protocol_msg(), pid()) -> op_result().
+route(<<"eval">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_eval:handle_term(<<"eval">>, Params, Msg, SessionPid);
-dispatch(Op, Params, Msg, SessionPid) when
+route(Op, Params, Msg, SessionPid) when
     Op =:= <<"actors">>;
     Op =:= <<"inspect">>;
     Op =:= <<"kill">>;
     Op =:= <<"interrupt">>
 ->
     beamtalk_repl_ops_actors:handle_term(Op, Params, Msg, SessionPid);
-dispatch(Op, Params, Msg, SessionPid) when
+route(Op, Params, Msg, SessionPid) when
     Op =:= <<"load-source">>;
     Op =:= <<"load-project">>;
     Op =:= <<"unload">>;
@@ -153,7 +166,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"save-section">>
 ->
     beamtalk_repl_ops_load:handle_term(Op, Params, Msg, SessionPid);
-dispatch(Op, Params, Msg, SessionPid) when
+route(Op, Params, Msg, SessionPid) when
     Op =:= <<"sessions">>;
     Op =:= <<"clone">>;
     Op =:= <<"close">>;
@@ -161,7 +174,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"shutdown">>
 ->
     beamtalk_repl_ops_session:handle_term(Op, Params, Msg, SessionPid);
-dispatch(Op, Params, Msg, SessionPid) when
+route(Op, Params, Msg, SessionPid) when
     Op =:= <<"complete">>;
     Op =:= <<"hover">>;
     Op =:= <<"diagnostics">>;
@@ -184,7 +197,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"reload-findings">>
 ->
     beamtalk_repl_ops_dev:handle_term(Op, Params, Msg, SessionPid);
-dispatch(Op, Params, Msg, SessionPid) when
+route(Op, Params, Msg, SessionPid) when
     Op =:= <<"enable-tracing">>;
     Op =:= <<"disable-tracing">>;
     Op =:= <<"get-traces">>;
@@ -192,15 +205,15 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"export-traces">>
 ->
     beamtalk_repl_ops_perf:handle_term(Op, Params, Msg, SessionPid);
-dispatch(<<"pid-stats">>, Params, Msg, SessionPid) ->
+route(<<"pid-stats">>, Params, Msg, SessionPid) ->
     %% ADR 0095 §5 (Cockpit Phase 3): live-Inspector process metrics
     %% read, the request/response companion to the `object` push stream.
     beamtalk_repl_ops_watch:handle_term(<<"pid-stats">>, Params, Msg, SessionPid);
-dispatch(<<"nav-query">>, Params, Msg, SessionPid) ->
+route(<<"nav-query">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_nav:handle_term(<<"nav-query">>, Params, Msg, SessionPid);
-dispatch(<<"nav-symbols">>, Params, Msg, SessionPid) ->
+route(<<"nav-symbols">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_nav_symbols:handle_term(<<"nav-symbols">>, Params, Msg, SessionPid);
-dispatch(Op, Params, Msg, SessionPid) when
+route(Op, Params, Msg, SessionPid) when
     Op =:= <<"browse-classes">>;
     Op =:= <<"browse-protocols">>;
     Op =:= <<"browse-method-source">>;
@@ -218,7 +231,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     %% ADR 0095: System Browser browse facade — read-only term-ops,
     %% each returning `{value, JsonValue}`.
     beamtalk_repl_ops_browse:handle_term(Op, Params, Msg, SessionPid);
-dispatch(Op, _Params, _Msg, _SessionPid) ->
+route(Op, _Params, _Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(
         Err0,

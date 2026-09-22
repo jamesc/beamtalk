@@ -245,7 +245,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 
 | CLI subcommand | MCP tool | LSP capability | Notes |
 |---------------|----------|----------------|-------|
-| `build` | -- | -- | `surface-specific: offline compiler, no workspace`. The `--escript` packaging mode (ADR 0099 §4, BT-2689) — `beamtalk build --escript --entry "ClassName selector" -o <name>` — is CLI-specific: it bundles the project `bt@*.beam` + the `beamtalk_runtime`/`beamtalk_stdlib`/`beamtalk_workspace` (+ deps) beams + a generated `main/1` bootstrap into a single executable escript. The bootstrap reuses ADR 0061's run-mode lifecycle (workspace `repl = false`, topo-ordered class registration, `node_owning`/`program_name` seeded) so the packaged `Console`/`Program`/`System` behaviour matches `beamtalk run`. On Windows a `.cmd` launcher is emitted alongside (ADR 0027). **BT-2920:** `beamtalk build` now sets `CompilerOptions.current_package` (and stamps cross-file `ClassInfo`s with the package via `ClassHierarchy::stamp_package_on_infos`) so `check_class_visibility`/`check_alias_leaked_visibility` (E0401/E0402/E0403) fire at build time — previously only the LSP's `ProjectIndex`-backed path ever set `current_package`, so a project with zero LSP-detected problems could still build and ship code that violated its own declared `internal` boundaries. See the `lint` row below and BT-2921 for the MCP counterpart. |
+| `build` | -- | -- | `surface-specific: offline compiler, no workspace`. The `--escript` packaging mode (ADR 0099 §4, BT-2689) — `beamtalk build --escript --entry "ClassName selector" -o <name>` — is CLI-specific: it bundles the project `bt@*.beam` + the `beamtalk_runtime`/`beamtalk_stdlib`/`beamtalk_workspace` (+ deps) beams + a generated `main/1` bootstrap into a single executable escript. The bootstrap reuses ADR 0061's run-mode lifecycle (workspace `mode => run`, topo-ordered class registration, `node_owning`/`program_name` seeded) so the packaged `Console`/`Program`/`System` behaviour matches `beamtalk run`. On Windows a `.cmd` launcher is emitted alongside (ADR 0027). **BT-2920:** `beamtalk build` now sets `CompilerOptions.current_package` (and stamps cross-file `ClassInfo`s with the package via `ClassHierarchy::stamp_package_on_infos`) so `check_class_visibility`/`check_alias_leaked_visibility` (E0401/E0402/E0403) fire at build time — previously only the LSP's `ProjectIndex`-backed path ever set `current_package`, so a project with zero LSP-detected problems could still build and ship code that violated its own declared `internal` boundaries. See the `lint` row below and BT-2921 for the MCP counterpart. |
 | `build-stdlib` | -- | -- | `surface-specific: internal stdlib build step` |
 | `run` | -- | -- | `surface-specific: script/service runner`. The script-mode **entry-argument contract** (ADR 0099 §2, BT-2686) is CLI-specific: `beamtalk run ClassName selector` accepts either a unary selector (`run`, no args) or a single arity-1 keyword selector (`main:`) whose post-selector tokens are delivered to `ClassName>>main:` as one `List(String)`. Bare words need no `--`; `--` shields flag-shaped tokens (`-- --verbose`). Multi-keyword sends (`move:to:`) stay rejected (the validator amends ADR 0061). The `Console` and `Program` **stdlib classes** themselves are not CLI-specific — they are runtime stdlib reachable via `eval`/`evaluate` on every surface (like `System`/`OS`); only the `run … <args>` invocation form is. |
 | `new` | -- | -- | `surface-specific: project scaffolding` |
@@ -419,6 +419,40 @@ the LSP has no eval affordance and is unaffected).
   flagged in BT-2938's own PR description, not yet a closed decision.
   Pinned by `tests/repl-protocol/cases/type_alias_repl.btscript`'s
   `:help SupervisionStrategy` section.
+
+### Release-mode refusals (ADR 0125 §1.5)
+
+A node whose workspace supervisor runs with `mode => release` (an OTP release)
+refuses operations it structurally cannot perform, identically on every
+surface that reaches it (WebSocket REPL/MCP/LSP through
+`beamtalk_repl_ops:dispatch/4` and `beamtalk_ws_handler`, and Beamtalk code
+calling the `Behaviour`/`Workspace` primitives). There is one classification,
+`beamtalk_capability:classify/1`; no op module tests the mode itself.
+
+- **`release_mode_no_compiler`** — ops and primitives that compile source:
+  `eval`, `load-source`, `load-project`, `load-tests`, `show-codegen`,
+  `diagnostics`, `compile:source:`, `tryCompile:source:`,
+  `precheckCompile:source:`, `Behaviour >> reload`, `Workspace load:` /
+  `sync` / `newClass:at:`, the `test` op's `file` form, the Inspector's
+  `evaluate:`, and the LiveView reload-from-disk RPC. The method-definition path (`Class >> sel =>
+  body`) is refused with `eval`. Re-enabled by `[release] include-compiler =
+  true`. `complete` stays available: only its compiler-port type-inference
+  fallback is skipped, so completion degrades to its tokeniser-driven results
+  instead of failing.
+- **`release_mode_no_workspace`** — ops and primitives that write to the
+  working tree or on-disk ChangeLog: `unload` / `removeFromSystem`,
+  `save-native-source`, `save-section`, `Workspace flush` / `flush:` /
+  `flush:confirmDestructive:` / `flushIncludingDestructive` / `moveClass:to:`,
+  `Workspace changes flushKinds:` and `revert:` (including the LiveView
+  `revert_method` RPC),
+  `renameTo:`, `renameSelector:to:`, and autoflush. Refused **even with**
+  `include-compiler`.
+- Everything else — `run-entry`, `inspect`, `actors`, `actor-stats`,
+  `pid-stats`, `sessions`, `describe`, … — is available in every mode.
+
+Both refusals are `#beamtalk_error{}` values whose message names the release
+mode and whose hint names the alternative (rebuild and redeploy, or
+`include-compiler`). The `run` and `workspace` modes refuse nothing.
 
 ## Drift Check (CI)
 

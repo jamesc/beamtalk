@@ -74,7 +74,7 @@ setup() ->
         workspace_id => <<"reindent_fail_test_ws">>,
         project_path => list_to_binary(ProjDir),
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     {ok, _} = beamtalk_workspace_changelog:start_link(#{
         workspace_id => <<"reindent_fail_test_ws">>

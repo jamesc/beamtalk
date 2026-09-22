@@ -662,7 +662,8 @@ fn build_workspace_eval_cmd(
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
-         #{{workspace_id => <<\"{workspace_id}\">>, \
+         #{{mode => workspace, \
+         workspace_id => <<\"{workspace_id}\">>, \
          project_path => <<\"{project_path_str}\">>, \
          tcp_port => {port}, \
          bind_addr => {bind_addr_erl}, \
@@ -775,6 +776,7 @@ mod tests {
         assert!(cmd.contains("/ws/pid"));
         assert!(cmd.contains("my-workspace"));
         assert!(cmd.contains("/home/user/project"));
+        assert!(cmd.contains("mode => workspace"));
         assert!(cmd.contains("tcp_port => 9000"));
         assert!(cmd.contains("bind_addr => {127,0,0,1}"));
         assert!(cmd.contains("auto_cleanup => true"));

@@ -176,6 +176,7 @@ pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) 
          {{ok, Cwd}} = file:get_cwd(), \
          ProjectPath = case os:getenv(\"BEAMTALK_WORKSPACE_PROJECT_PATH\") of false -> list_to_binary(Cwd); Pp -> list_to_binary(Pp) end, \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{ \
+             mode => workspace, \
              workspace_id => list_to_binary(\"foreground_\" ++ integer_to_list(erlang:unique_integer([positive]))), \
              project_path => ProjectPath, \
              tcp_port => {port}, \
@@ -259,6 +260,9 @@ mod tests {
         assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
         // Must start workspace supervisor (which starts all singletons and services)
         assert!(prelude.contains("beamtalk_workspace_sup:start_link"));
+        // ADR 0125 §1.4: the interactive REPL runs the workspace supervisor in
+        // workspace mode (the `repl` boolean was removed).
+        assert!(prelude.contains("mode => workspace"));
         assert!(prelude.contains("tcp_port => 9000"));
         // Uses unique workspace_id and absolute project_path from Cwd
         assert!(prelude.contains("foreground_"));

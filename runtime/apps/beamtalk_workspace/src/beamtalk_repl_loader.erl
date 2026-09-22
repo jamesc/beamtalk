@@ -4140,9 +4140,14 @@ loaded_class_objects(ClassNames) ->
 maybe_autoflush(ephemeral) ->
     ok;
 maybe_autoflush(durable) ->
-    case beamtalk_workspace_meta:get_setting(autoflush, false) of
+    %% A release has no working tree to flush to (ADR 0125 §1.5), even when it
+    %% was built with `include_compiler` and so can install a live patch.
+    case
+        beamtalk_capability:available(autoflush) andalso
+            beamtalk_workspace_meta:get_setting(autoflush, false) =:= true
+    of
         true -> do_autoflush();
-        _ -> ok
+        false -> ok
     end.
 
 -spec do_autoflush() -> ok.

@@ -358,7 +358,7 @@ restart_workspace_meta() ->
                 workspace_id => <<"bench_recheck_fanout_ws">>,
                 project_path => undefined,
                 created_at => erlang:system_time(second),
-                repl => false
+                mode => run
             }),
             ok;
         _Pid ->
