@@ -1249,10 +1249,47 @@ typed Actor subclass: TypedAccount
 
 ### `late` Slots (ADR 0124)
 
+**A nilable slot is not automatically a `late` candidate.** The question
+`late` answers is narrow: is this slot acquired exactly once, by an
+explicit lifecycle call, and correct for as long as it stays assigned —
+never whether its type merely *permits* `nil`. Most nilable slots in real
+Beamtalk code use `nil` to mean something else, and converting them to
+`late` would be wrong. Exdura's timer manager resolves its dependencies by
+name on **every** read, deliberately, so that a supervisor restart of
+either dependency is picked up automatically instead of leaving a stale
+reference behind:
+
+```beamtalk
+typed Actor subclass: TimerManager
+  // (ADR 0079) instead of passing live refs, since neither exists yet
+  // when the child spec is built. `engine`/`eventStore` resolve fresh by
+  // name in that case, so a `rest_for_one` restart of either is picked up
+  // automatically instead of leaving a nil/stale field.
+  state: engine :: WorkflowEngine | Nil = nil
+  state: eventStore :: EventStore | Nil = nil
+```
+
+An ordinary method (`currentEngine`/`currentEventStore`, on the sibling
+`ExduraClient`) does the by-name lookup on every call. If `engine` were
+converted to `late state: engine :: WorkflowEngine` and assigned once from
+a resolved reference, a later restart of `WorkflowEngine` would leave the
+stale pid behind, unnoticed — exactly the failure this slot exists to
+avoid, and exactly what `late` cannot express: a `late` slot is
+absent-or-assigned, never "assigned, but now to the wrong thing." So the
+distinguishing question is never *"can this hold `nil`?"* — it is **"would
+a stale, already-assigned value here be wrong?"** If yes, the slot stays
+nilable and keeps resolving fresh in an ordinary method, the way
+`currentEngine` does — that method stays a method, not a slot kind; `late`
+has no "recompute on every read" mode and does not try to. Convert only a
+slot in the other shape: acquired exactly once by an
+explicit lifecycle call (open a subprocess, start a listener, attach a
+resource) and correct for the rest of that resource's life — Symphony's
+`CodexClient proc` below.
+
 `late` is a declaration-level modifier on `state:`/`classState:` for a slot
-that is legitimately unassigned after `initialize` — acquired later by an
-explicit lifecycle call (open a subprocess, start a listener) — instead of
-being declared nilable and nil-checked at every read:
+in that second shape — legitimately unassigned after `initialize`, acquired
+later by an explicit lifecycle call — instead of being declared nilable and
+nil-checked at every read:
 
 ```beamtalk
 typed Actor subclass: CodexClient
@@ -1267,31 +1304,72 @@ The modifier precedes the declaration keyword, matching the class-header
 modifier position (`sealed typed Actor subclass: …`). It requires a type
 annotation, and that type must not admit `Nil` and must have no default
 value — a `late` slot has exactly two states, absent and assigned, and its
-declared type is always non-nilable:
+declared type is always non-nilable. **Five compile-time Errors govern
+where `late` may appear:**
+
+1. `late field:` on a `Value` — a Value is fully constructed and never
+   reassigned (below).
+2. `late state:`/`classState:` with no type annotation — the point of
+   `late` is a non-nilable *declared* type, and an untyped slot already
+   defaults to `nil` with no check.
+3. `late state:`/`classState:` on a nilable type (`T | Nil`) — a slot whose
+   type already admits `nil` is never in the state `late` describes.
+4. `late state:`/`classState:` with a default value — a slot with a
+   default is never unset.
+5. `late state:` on a `native:` Actor, or `late state:`/`field:` on
+   `Object` — already errors before `late` is even considered (ADR 0056
+   forbids `state:` on a `native:` Actor; ADR 0067 gives `Object` no
+   instance data at all), and `late` does not change that.
 
 ```beamtalk
-late state: x            // error: requires a type annotation
-late state: x :: T | Nil // error: drop `late` or make the type non-nilable
-late state: x :: T = v   // error: a slot with a default is never unset
+late state: x            // error (2): requires a type annotation
+late state: x :: T | Nil // error (3): drop `late` or make the type non-nilable
+late state: x :: T = v   // error (4): a slot with a default is never unset
 ```
 
-`late` is rejected on a Value's `field:` — a Value is fully constructed by
-`new`/`new:`/its keyword constructor and never reassigned, so "assigned
-later" has no meaning; make the field optional (`| Nil = nil`) or hold the
-resource in an Actor instead. `late` is also rejected wherever a data
-declaration already is — `state:`/`field:` on `Object` and `state:` on a
-`native:` Actor. Outside declaration position `late` stays an ordinary
-identifier (`late := 1`) or method name.
+`late` is rejected on a Value's `field:` (error 1) — a Value is fully
+constructed by `new`/`new:`/its keyword constructor and never reassigned,
+so "assigned later" has no meaning; make the field optional
+(`| Nil = nil`) or hold the resource in an Actor instead. Outside
+declaration position `late` stays an ordinary identifier (`late := 1`) or
+method name.
+
+**Slot kinds and `fieldKinds`/`allFieldKinds`.** Every declared slot has a
+*kind* — `#eager` (the default, no modifier) or `#late` — reflectable via
+`Behaviour>>fieldKinds` (this class's own slots only) and `allFieldKinds`
+(this class's plus every inherited slot, the flattened chain, mirroring
+`fieldNames`/`allFieldNames`):
+
+```beamtalk
+CodexClient fieldKinds
+// => #{#proc => #late, #workspacePath => #eager}
+```
+
+This draws the identical instance-vs-declared line `fieldNames`/
+`allFieldNames` already draw (ADR 0035): **`Cls fieldKinds`/
+`Cls allFieldKinds` answer the declared schema** — a `late` slot is always
+listed there, assigned or not — while **an instance's `fieldNames` answers
+the keys actually present in its state map**, so an unassigned `late` slot
+is *not* listed there. That is why `c fieldNames` silently omitting `#proc`
+and `c hasField: #proc` answering `false` read as the same fact seen from
+two angles, not a contradiction: one reports declared shape, the other
+reports assignment.
 
 A `late` slot is excluded from the post-`initialize` definite-assignment
-check, and reading it before assignment behaves differently depending on
-how: `self.slot` (or `fieldAt: #slot`) raises `UninitializedStateError`,
-while `hasField: #slot` is the non-raising presence test to ask first —
-`Object`'s `hasField:`/`clearField:` (ADR 0035's `field`-prefixed
-reflection family) make a `late` slot usable, not just declarable:
-`hasField:` answers whether it is currently assigned, and `clearField:`
-returns it to unassigned so it can be acquired again (`maps:remove`, not a
-sentinel value):
+check. Reading it before assignment raises `UninitializedStateError`
+**whichever way it is still unassigned** — its key is simply absent, or an
+open-world writer (`spawnWith:` with a non-literal map, `fieldAt:put:`,
+`perform:`) has planted an observed `nil` there without going through
+ordinary `self.slot :=` assignment; `late` does not make a non-nilable
+declared type sound against those writers, it only makes the violation
+raise at the read, naming the slot, instead of surfacing as a
+does-not-understand on `nil` somewhere downstream. `self.slot` (or
+`fieldAt: #slot`) is the raising direct read; `hasField: #slot` is the
+non-raising presence test to ask first — `Object`'s `hasField:`/
+`clearField:` (ADR 0035's `field`-prefixed reflection family) make a
+`late` slot usable, not just declarable: `hasField:` answers whether it is
+currently assigned, and `clearField:` returns it to unassigned so it can be
+acquired again (`maps:remove`, not a sentinel value):
 
 ```beamtalk
 typed Actor subclass: CodexClient
@@ -1316,6 +1394,17 @@ already raises, since a `Value` is fully constructed and never reassigned.
 The class-side counterpart (`classState:`) works the same way, both from
 inside a class method (`self hasField:`/`self clearField:`) and from
 outside (`SomeClass hasField: #x`/`SomeClass clearField: #x`).
+
+**Supplying a `late` slot via `spawnWith:` counts as assigned** — this is
+legitimate dependency injection (substituting a value for a slot normally
+acquired by a lifecycle call), not a violation of "absent until assigned":
+see the `spawnWith:`-injection clause beside the `spawnWith:` key-checking
+rule in [Actor Message Passing](#actor-message-passing) below.
+**Converting a slot between eager and `late` (or back) is a shape
+change and bumps `shapeVersion:`** — see
+[Chain and reconcile semantics](#chain-and-reconcile-semantics) for the
+reconcile-table row and the reload-time tooling finding that flags a flip
+landing without a version bump.
 
 **Unguarded late-slot reads in lifecycle hooks.** A direct `self.slot` read
 of a `late` slot inside `terminate:` or `handleInfo:` (or one level of
