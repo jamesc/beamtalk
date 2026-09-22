@@ -257,6 +257,13 @@ classify(Subject, Parent, Path, Prov) ->
 %% introspected locally — `is_beamtalk_actor/1` (process dictionary),
 %% `is_process_alive/1`, and `process_info/2` all raise `badarg` for a remote pid —
 %% so it degrades to an unavailable `#foreign` cursor rather than crashing.
+%%
+%% ADR 0126 §7.3 / BT-3578: this `node(Pid) =/= node()` guard is deliberately
+%% NOT routed through `beamtalk_pid:is_alive/1`. That helper answers a
+%% liveness *question* (dead vs. possibly-alive, used to decide whether to
+%% attempt a send); this is a *routing* decision (which cursor kind to build
+%% for a pid this node cannot introspect at all, alive or not) — a different
+%% predicate with a different shape, not a duplicate of the same rule.
 -spec process_cursor(pid(), inspector() | nil, [term()]) -> inspector().
 process_cursor(Pid, Parent, Path) when node(Pid) =/= node() ->
     remote_cursor(Pid, Parent, Path);

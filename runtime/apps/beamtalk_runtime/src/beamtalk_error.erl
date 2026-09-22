@@ -372,6 +372,17 @@ generate_message(actor_dead, Class, Selector) ->
     iolist_to_binary(
         io_lib:format("Cannot send '~s' to ~s (actor process has terminated)", [Selector, Class])
     );
+%% ADR 0126 §7.1: the target node is unreachable — down, partitioned, or
+%% never connected — distinct from actor_dead (the node answered, the
+%% actor specifically is gone). Class is 'unknown' at every call site
+%% (a partition is discovered before the actor's class can be resolved),
+%% mirroring actor_dead's own generic wording above.
+generate_message(node_down, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s: node is unreachable", [Class]));
+generate_message(node_down, Class, Selector) ->
+    iolist_to_binary(
+        io_lib:format("Cannot send '~s' to ~s (node is unreachable)", [Selector, Class])
+    );
 generate_message(future_not_awaited, _Class, undefined) ->
     iolist_to_binary(io_lib:format("Sent message to a Future", []));
 generate_message(future_not_awaited, _Class, Selector) ->
