@@ -7,17 +7,18 @@
 // `late` touches parser, codegen, runtime reflection, hot reload and the
 // REPL — so this drives `late state:`/`late classState:` through a real
 // REPL session end to end: define, spawn, read-before-assign (error text),
-// assign, `fieldKinds`, `clearField:`, `spawnWith:` injection, and a hot
-// reload that flips a slot's kind both ways (B9's reconcile fix).
+// printString's `<unassigned>` rendering (BT-3557/B8), assign, `fieldKinds`,
+// `clearField:`, `spawnWith:` injection, and a hot reload that flips a
+// slot's kind both ways (B9's reconcile fix).
 //
 // Everything here is exercised in isolation already — Rust unit tests
 // (`late_slot_validators.rs`, `actor_construction_definite_assignment.rs`),
 // BUnit (`late_field_read_test.bt`, `has_clear_field_test.bt`,
-// `field_kinds_test.bt`, `unguarded_late_read_test.bt`, `late_slot_test.bt`)
-// and Erlang EUnit (`beamtalk_shape_diff_tests.erl`,
-// `beamtalk_recheck_tests.erl`) — this file is the proof the same behaviour
-// is actually reachable and correct through a real REPL session, not just
-// the isolated suites.
+// `field_kinds_test.bt`, `unguarded_late_read_test.bt`, `late_slot_test.bt`),
+// Erlang EUnit (`beamtalk_shape_diff_tests.erl`, `beamtalk_recheck_tests.erl`,
+// `beamtalk_object_printer_tests.erl`'s declared-`late`-unassigned cases) —
+// this file is the proof the same behaviour is actually reachable and
+// correct through a real REPL session, not just the isolated suites.
 //
 // Note on scope: the automatic per-reload shape-recheck outcome
 // (`'ReloadCheckCompleted'`/`'ShapeReloadFindingsCompleted'`) is published
@@ -94,6 +95,23 @@ a hasField: #proc
 // => true
 
 // ===========================================================================
+// printString/displayString — a declared, unassigned `late` slot renders as
+// `<unassigned>` (ADR 0124 §9/B8, `beamtalk_object_printer:structural_from_
+// state/1`). `displayString` defaults to `printString` (`Object>>displayString`)
+// and both go through the same renderer, so one check covers both selectors.
+//
+// An actor reference's own `printString` is the opaque, kind-headed
+// `Actor(ClassName, pid)` form (ADR 0094) — it never shows fields, whether or
+// not any of them are declared `late`. `structural_from_state/1` is the
+// renderer B8 changed, reached here the same way the REPL/inspector tooling
+// reaches it: a raw `sys:get_state` snapshot of the actor's own state map
+// (the FFI escape hatch, not a new public selector) fed straight to it.
+// ===========================================================================
+
+(Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
+// => LateSlotsReplActor(count: 0, proc: <unassigned>)
+
+// ===========================================================================
 // ASSIGN — the read now succeeds, and `hasField:` flips to true.
 // ===========================================================================
 
@@ -105,6 +123,10 @@ a getProc
 
 a hasField: #proc
 // => true
+
+// Assigned — `proc` is a present key now, so it renders its real value.
+(Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
+// => LateSlotsReplActor(count: 0, proc: 42)
 
 // ===========================================================================
 // fieldKinds — `#eager` / `#late`, keyed per declared slot.
@@ -128,6 +150,11 @@ a hasField: #proc
 
 [a getProc] on: Exception do: [:e | e kind]
 // => uninitialized_state_error
+
+// clearField: is maps:remove/2 (beamtalk_reflection:clear_field/2) — the
+// slot renders `<unassigned>` again, exactly as before the first assignment.
+(Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
+// => LateSlotsReplActor(count: 0, proc: <unassigned>)
 
 a setProc: 7
 // => 7
