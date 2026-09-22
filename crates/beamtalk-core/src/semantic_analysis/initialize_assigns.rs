@@ -119,7 +119,12 @@ pub fn has_dynamic_field_writer(methods: &[MethodDefinition]) -> bool {
     fn is_dynamic_writer_selector(selector: &MessageSelector) -> bool {
         matches!(
             selector.well_known(),
-            Some(WellKnownSelector::FieldAtPut | WellKnownSelector::Perform)
+            Some(
+                WellKnownSelector::FieldAtPut
+                    | WellKnownSelector::Perform
+                    | WellKnownSelector::PerformWithArgs
+                    | WellKnownSelector::PerformLocallyWithArgs
+            )
         )
     }
 
@@ -968,6 +973,43 @@ mod tests {
     #[test]
     fn perform_send_is_detected() {
         let methods = vec![method_named("initialize", vec![perform("bump")])];
+        assert!(has_dynamic_field_writer(&methods));
+    }
+
+    fn perform_with_arguments(selector_name: &str, args: Vec<Expression>) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(self_expr()),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart::new("perform:", span()),
+                KeywordPart::new("withArguments:", span()),
+            ]),
+            arguments: vec![
+                Expression::Literal(Literal::Symbol(selector_name.into()), span()),
+                Expression::ArrayLiteral {
+                    elements: args,
+                    span: span(),
+                },
+            ],
+            is_cast: false,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn perform_with_arguments_send_is_detected() {
+        // The only field-mutating path is `self perform: #fieldAt:put:
+        // withArguments: #(#x 5)` — no direct `fieldAt:put:`/bare `perform:`
+        // send — so this regresses BT-3565's `PerformWithArgs` gap.
+        let methods = vec![method_named(
+            "initialize",
+            vec![perform_with_arguments(
+                "fieldAt:put:",
+                vec![
+                    Expression::Literal(Literal::Symbol("x".into()), span()),
+                    nil_lit(),
+                ],
+            )],
+        )];
         assert!(has_dynamic_field_writer(&methods));
     }
 

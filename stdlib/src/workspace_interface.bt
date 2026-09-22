@@ -35,6 +35,16 @@ sealed typed Object subclass: WorkspaceInterface
   class current -> WorkspaceInterface | Nil =>
     (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
 
+  /// Clear the current singleton instance (reset to nil).
+  ///
+  /// `@expect type`: a class method's `self clearField:` send infers as
+  /// `Dynamic` rather than its declared `Self` return type — the same
+  /// pre-existing type-checker gap `current`'s `self hasField:` hits above.
+  @expect type
+  class resetCurrent -> Nil =>
+    self clearField: #current
+    nil
+
   // === Actors and processes ===
 
   /// Return a list of all live actors as object references.
