@@ -1317,6 +1317,20 @@ The class-side counterpart (`classState:`) works the same way, both from
 inside a class method (`self hasField:`/`self clearField:`) and from
 outside (`SomeClass hasField: #x`/`SomeClass clearField: #x`).
 
+**Unguarded late-slot reads in lifecycle hooks.** A direct `self.slot` read
+of a `late` slot inside `terminate:` or `handleInfo:` (or one level of
+self-send from either) that isn't guarded by `(self hasField: #slot)
+ifTrue: [...]` produces a compile-time warning (`unguarded-late-read`
+diagnostic category). Both lifecycle hooks swallow raised errors —
+`terminate/2`'s dispatch is `try`-wrapped, and `handleInfo:` logs and
+continues — so an `UninitializedStateError` from an unguarded read there
+never surfaces as a crash; the operation is silently skipped instead. The
+fix is the `hasField:` guard shown above, not a suppression — like
+`definite-assignment`, there is no site-level `@expect` category for this
+diagnostic. Per-project severity is configurable via the `[diagnostics]`
+table (`unguarded-late-read` key — see the
+[Package Management guide](beamtalk-packages.md#diagnostics-section)).
+
 ### Definite Assignment (ADR 0124)
 
 The compiler checks, at a class's construction site, that every declared,
