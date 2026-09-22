@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for unguarded_late_read_test.bt — ADR 0124 §4d (BT-3555): a
+// `late` slot read guarded by `(self hasField: #proc) ifTrue: [...]` in
+// `terminate:` — silent, no diagnostic.
+
+Actor subclass: GuardedLateReadActor
+  late state: proc :: Integer
+
+  setProc: value => self.proc := value
+
+  terminate: _reason =>
+    (self hasField: #proc) ifTrue: [self.proc]
+    nil

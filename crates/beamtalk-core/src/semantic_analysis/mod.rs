@@ -923,6 +923,16 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
 
+    // Warn on an unguarded `late`-slot read reachable from
+    // `terminate:`/`handleInfo:` (ADR 0124 §4d, B6): both lifecycle hooks
+    // swallow a raised error rather than crashing, so a read that raises
+    // `UninitializedStateError` there fails silently.
+    validators::check_unguarded_late_reads_in_lifecycle_hooks(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+
     // Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 

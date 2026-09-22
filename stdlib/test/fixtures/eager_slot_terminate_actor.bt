@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for unguarded_late_read_test.bt — ADR 0124 §4d (BT-3555): an
+// eager (non-`late`) slot read in `terminate:` is never flagged, guarded
+// or not.
+
+Actor subclass: EagerSlotTerminateActor
+  state: count = 0
+
+  terminate: _reason => self.count

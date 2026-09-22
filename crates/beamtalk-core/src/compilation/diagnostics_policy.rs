@@ -134,6 +134,7 @@ fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
         "native-declaration-location" => DiagnosticCategory::NativeDeclarationLocation,
         "file-class-name-mismatch" => DiagnosticCategory::FileClassNameMismatch,
         "definite-assignment" => DiagnosticCategory::DefiniteAssignment,
+        "unguarded-late-read" => DiagnosticCategory::UnguardedLateRead,
         _ => return None,
     })
 }
@@ -162,6 +163,7 @@ const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
     "native-declaration-location",
     "file-class-name-mismatch",
     "definite-assignment",
+    "unguarded-late-read",
 ];
 
 /// Return a human-readable TOML type name for error messages.
@@ -996,6 +998,7 @@ sendability = "hint"
 native-declaration-location = "error"
 file-class-name-mismatch = "error"
 definite-assignment = "error"
+unguarded-late-read = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
