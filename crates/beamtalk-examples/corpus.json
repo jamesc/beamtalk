@@ -24579,6 +24579,55 @@
       "explanation": "BT-1664: Test fixture for performLocally:withArguments: Non-sealed class with a class method that returns the caller's Erlang PID."
     },
     {
+      "id": "stdlib-test-fixtures-local-json-value-alias",
+      "title": "Local Json Value Alias",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "async",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "local_json_value_alias",
+        "process"
+      ],
+      "source": "// LocalJsonValue — regression fixture for BT-3563 (fixture-internal type\n// alias pre-loading in `beamtalk test`).\n//\n// Unlike `json_value_state_actor.bt`'s `JsonValue` (declared in the real\n// `stdlib/src/json.bt`, already pre-loaded by BT-3561's `src/`-alias\n// collection), this alias is declared inside a `stdlib/test/fixtures/*.bt`\n// file itself. `build_fixture_class_indexes` (test.rs) previously extracted\n// `ClassInfo`/`ProtocolInfo` from every fixture file but never `AliasInfo`,\n// so this alias would resolve only within this file — a field of this type\n// declared in a *different* fixture file (`local_json_value_state_actor.bt`)\n// would see `LocalJsonValue` as an opaque, non-nilable class name.\ntype LocalJsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary",
+      "explanation": "LocalJsonValue — regression fixture for BT-3563 (fixture-internal type alias pre-loading in `beamtalk test`).  Unlike `json_value_state_actor.bt`'s `JsonValue` (declared in the real `stdlib/src/json.bt`, already pre-loaded by BT-3561's `src/`-alias collection), this alias is declared inside a `stdlib/test/fixtures/*.bt` file itself. `build_fixture_class_indexes` (test.rs) previously extracted `ClassInfo`/`ProtocolInfo` from every fixture file but never `AliasInfo`, so this alias would resolve only within this file — a field of this type declared in a *different* fixture file (`local_json_value_state_actor.bt`) would see `LocalJsonValue` as an opaque, non-nilable class name."
+    },
+    {
+      "id": "stdlib-test-fixtures-local-json-value-state-actor",
+      "title": "LocalJsonValueStateActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "LocalJsonValueStateActor",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "getCount",
+        "getValue",
+        "inherit",
+        "inheritance",
+        "initialize",
+        "instance variable",
+        "local_json_value_state_actor",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "// LocalJsonValueStateActor — regression fixture for BT-3563.\n//\n// A typed-no-default state field whose type is `local_json_value_alias.bt`'s\n// `LocalJsonValue` — a type alias declared in a *different* fixtures/*.bt\n// file, not stdlib/src. Should spawn successfully and leave `value` unset\n// (`nil`), same as `json_value_state_actor.bt`, but exercising the\n// fixture-internal alias pre-loading gap rather than the `src/`-alias one.\n\ntyped Actor subclass: LocalJsonValueStateActor\n  state: value :: LocalJsonValue\n  state: count :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.value — LocalJsonValue expands to\n    // include Nil, so nil is a legitimate value here.\n    self.count := 1\n\n  getValue -> LocalJsonValue => self.value\n\n  getCount -> Integer => self.count",
+      "explanation": "LocalJsonValueStateActor — regression fixture for BT-3563.  A typed-no-default state field whose type is `local_json_value_alias.bt`'s `LocalJsonValue` — a type alias declared in a *different* fixtures/*.bt file, not stdlib/src. Should spawn successfully and leave `value` unset (`nil`), same as `json_value_state_actor.bt`, but exercising the fixture-internal alias pre-loading gap rather than the `src/`-alias one."
+    },
+    {
       "id": "stdlib-test-fixtures-local-mutation-actor",
       "title": "LocalMutationActor",
       "category": "stdlib-fixtures",
@@ -35244,6 +35293,8 @@
         "subclassing",
         "testAliasTypedNilableFieldLeftNilSpawnsSuccessfully",
         "testAliasTypedNilableFieldOtherStateWorks",
+        "testFixtureAliasTypedNilableFieldLeftNilSpawnsSuccessfully",
+        "testFixtureAliasTypedNilableFieldOtherStateWorks",
         "testNilAllowedFieldLeftNilSpawnsSuccessfully",
         "testNilAllowedFieldOtherStateWorks",
         "testTypedNoDefaultFieldInitialized",
@@ -35256,8 +35307,8 @@
         "testUninitializedTypedFieldRaisesError",
         "uninitialized_state_test"
       ],
-      "source": "// Tests for BT-1949: UninitializedStateError after Actor initialize.\n//\n// Fixtures:\n//   stdlib/test/fixtures/typed_no_default_actor.bt   (properly initializes)\n//   stdlib/test/fixtures/uninitialized_state_actor.bt (forgets to initialize)\n//\n// Also covers BT-3546 (ADR 0124 §7 A1) — the reimplemented, alias-aware\n// definite-assignment predicate:\n//   stdlib/test/fixtures/json_value_state_actor.bt (alias-typed, expands to nilable)\n//   stdlib/test/fixtures/undefined_object_union_state_actor.bt (UndefinedObject spelling)\n\nTestCase subclass: UninitializedStateTest\n\n  // === Success: typed-no-default field properly initialized ===\n  testTypedNoDefaultFieldInitialized =>\n    a := TypedNoDefaultActor spawn\n    self assert: a getLabel equals: \"initialized\"\n\n  testTypedNoDefaultFieldWithDefaultWorks =>\n    a := TypedNoDefaultActor spawn\n    self assert: a getCount equals: 0\n\n  // === Failure: typed-no-default field left nil ===\n  //\n  // BT-1948 (ADR 0124 §6 A2b): `UninitializedStateActor spawn` now ALSO\n  // warns at compile time (the point of BT-1948) — `@expect all`\n  // acknowledges the diagnostic these tests deliberately trigger, since it\n  // has no dedicated `@expect` category by design (ADR 0124 §6:\n  // supply/default/widen/`late` are the only accepted fixes for real code).\n  testUninitializedTypedFieldRaisesError =>\n    @expect all\n    self should: [UninitializedStateActor spawn] raise: #instantiation_error\n\n  testUninitializedErrorContainsClassName =>\n    @expect all\n    result := [UninitializedStateActor spawn] on: Exception do: [:e | e message]\n    self assert: (result includesSubstring: \"UninitializedStateActor\")\n\n  testUninitializedErrorHintContainsFieldName =>\n    @expect all\n    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]\n    self assert: (result includesSubstring: \"connection\")\n\n  testUninitializedErrorHintContainsTypeName =>\n    @expect all\n    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]\n    self assert: (result includesSubstring: \"String\")\n\n  // === Nilable typed-no-default field: nil is valid, no error ===\n  testNilAllowedFieldLeftNilSpawnsSuccessfully =>\n    a := NilAllowedStateActor spawn\n    self assert: a getLabel equals: nil\n\n  testNilAllowedFieldOtherStateWorks =>\n    a := NilAllowedStateActor spawn\n    self assert: a getCount equals: 1\n\n  // === BT-3546 (ADR 0124 §7 A1): alias-typed field expanding to nilable ===\n  // `state: value :: JsonValue` references `stdlib/src/json.bt`'s real\n  // `type JsonValue = Nil | Boolean | Integer | Float | String | List |\n  // Dictionary` cross-file — a defaultless field of this type must spawn\n  // without raising, since the alias resolves to a union containing `Nil`.\n  // No `@expect` needed: BT-3561 closed the `beamtalk test` pipeline gap\n  // that otherwise made BT-1948's construction-site check see `JsonValue`\n  // as an unresolved, non-nilable name and warn.\n  testAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>\n    a := JsonValueStateActor spawn\n    self assert: a getValue equals: nil\n\n  testAliasTypedNilableFieldOtherStateWorks =>\n    a := JsonValueStateActor spawn\n    self assert: a getCount equals: 1\n\n  // === BT-3546 (ADR 0124 §7 A1): UndefinedObject spelling, not just Nil ===\n  // `String | UndefinedObject` must spawn without raising — UndefinedObject\n  // is the canonical nil class, not only the `Nil` keyword spelling.\n  testUndefinedObjectUnionFieldLeftNilSpawnsSuccessfully =>\n    a := UndefinedObjectUnionStateActor spawn\n    self assert: a getLabel equals: nil\n\n  testUndefinedObjectUnionFieldOtherStateWorks =>\n    a := UndefinedObjectUnionStateActor spawn\n    self assert: a getCount equals: 1",
-      "explanation": "Tests for BT-1949: UninitializedStateError after Actor initialize.  Fixtures:   stdlib/test/fixtures/typed_no_default_actor.bt   (properly initializes)   stdlib/test/fixtures/uninitialized_state_actor.bt (forgets to initialize)  Also covers BT-3546 (ADR 0124 §7 A1) — the reimplemented, alias-aware definite-assignment predicate:   stdlib/test/fixtures/json_value_state_actor.bt (alias-typed, expands to nilable)   stdlib/test/fixtures/undefined_object_union_state_actor.bt (UndefinedObject spelling)"
+      "source": "// Tests for BT-1949: UninitializedStateError after Actor initialize.\n//\n// Fixtures:\n//   stdlib/test/fixtures/typed_no_default_actor.bt   (properly initializes)\n//   stdlib/test/fixtures/uninitialized_state_actor.bt (forgets to initialize)\n//\n// Also covers BT-3546 (ADR 0124 §7 A1) — the reimplemented, alias-aware\n// definite-assignment predicate:\n//   stdlib/test/fixtures/json_value_state_actor.bt (alias-typed, expands to nilable)\n//   stdlib/test/fixtures/undefined_object_union_state_actor.bt (UndefinedObject spelling)\n//\n// Also covers BT-3563 — fixture-internal type-alias pre-loading in\n// `beamtalk test` (an alias declared in one fixtures/*.bt file, referenced\n// as a declared field type from a *different* fixture file):\n//   stdlib/test/fixtures/local_json_value_alias.bt (declares LocalJsonValue)\n//   stdlib/test/fixtures/local_json_value_state_actor.bt (references it cross-file)\n\nTestCase subclass: UninitializedStateTest\n\n  // === Success: typed-no-default field properly initialized ===\n  testTypedNoDefaultFieldInitialized =>\n    a := TypedNoDefaultActor spawn\n    self assert: a getLabel equals: \"initialized\"\n\n  testTypedNoDefaultFieldWithDefaultWorks =>\n    a := TypedNoDefaultActor spawn\n    self assert: a getCount equals: 0\n\n  // === Failure: typed-no-default field left nil ===\n  //\n  // BT-1948 (ADR 0124 §6 A2b): `UninitializedStateActor spawn` now ALSO\n  // warns at compile time (the point of BT-1948) — `@expect all`\n  // acknowledges the diagnostic these tests deliberately trigger, since it\n  // has no dedicated `@expect` category by design (ADR 0124 §6:\n  // supply/default/widen/`late` are the only accepted fixes for real code).\n  testUninitializedTypedFieldRaisesError =>\n    @expect all\n    self should: [UninitializedStateActor spawn] raise: #instantiation_error\n\n  testUninitializedErrorContainsClassName =>\n    @expect all\n    result := [UninitializedStateActor spawn] on: Exception do: [:e | e message]\n    self assert: (result includesSubstring: \"UninitializedStateActor\")\n\n  testUninitializedErrorHintContainsFieldName =>\n    @expect all\n    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]\n    self assert: (result includesSubstring: \"connection\")\n\n  testUninitializedErrorHintContainsTypeName =>\n    @expect all\n    result := [UninitializedStateActor spawn] on: Exception do: [:e | e hint]\n    self assert: (result includesSubstring: \"String\")\n\n  // === Nilable typed-no-default field: nil is valid, no error ===\n  testNilAllowedFieldLeftNilSpawnsSuccessfully =>\n    a := NilAllowedStateActor spawn\n    self assert: a getLabel equals: nil\n\n  testNilAllowedFieldOtherStateWorks =>\n    a := NilAllowedStateActor spawn\n    self assert: a getCount equals: 1\n\n  // === BT-3546 (ADR 0124 §7 A1): alias-typed field expanding to nilable ===\n  // `state: value :: JsonValue` references `stdlib/src/json.bt`'s real\n  // `type JsonValue = Nil | Boolean | Integer | Float | String | List |\n  // Dictionary` cross-file — a defaultless field of this type must spawn\n  // without raising, since the alias resolves to a union containing `Nil`.\n  // No `@expect` needed: BT-3561 closed the `beamtalk test` pipeline gap\n  // that otherwise made BT-1948's construction-site check see `JsonValue`\n  // as an unresolved, non-nilable name and warn.\n  testAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>\n    a := JsonValueStateActor spawn\n    self assert: a getValue equals: nil\n\n  testAliasTypedNilableFieldOtherStateWorks =>\n    a := JsonValueStateActor spawn\n    self assert: a getCount equals: 1\n\n  // === BT-3563: alias declared in one fixture file, referenced from another ===\n  // `state: value :: LocalJsonValue` references\n  // `local_json_value_alias.bt`'s `type LocalJsonValue = Nil | Boolean |\n  // Integer | Float | String | List | Dictionary`, declared in a *different*\n  // fixtures/*.bt file — a defaultless field of this type must spawn without\n  // raising, since the alias resolves to a union containing `Nil`. No\n  // `@expect` needed: BT-3563 made `build_fixture_class_indexes` pre-load\n  // fixture-declared type aliases the same way it already pre-loads\n  // fixture-declared `ClassInfo`/`ProtocolInfo`.\n  testFixtureAliasTypedNilableFieldLeftNilSpawnsSuccessfully =>\n    a := LocalJsonValueStateActor spawn\n    self assert: a getValue equals: nil\n\n  testFixtureAliasTypedNilableFieldOtherStateWorks =>\n    a := LocalJsonValueStateActor spawn\n    self assert: a getCount equals: 1\n\n  // === BT-3546 (ADR 0124 §7 A1): UndefinedObject spelling, not just Nil ===\n  // `String | UndefinedObject` must spawn without raising — UndefinedObject\n  // is the canonical nil class, not only the `Nil` keyword spelling.\n  testUndefinedObjectUnionFieldLeftNilSpawnsSuccessfully =>\n    a := UndefinedObjectUnionStateActor spawn\n    self assert: a getLabel equals: nil\n\n  testUndefinedObjectUnionFieldOtherStateWorks =>\n    a := UndefinedObjectUnionStateActor spawn\n    self assert: a getCount equals: 1",
+      "explanation": "Tests for BT-1949: UninitializedStateError after Actor initialize.  Fixtures:   stdlib/test/fixtures/typed_no_default_actor.bt   (properly initializes)   stdlib/test/fixtures/uninitialized_state_actor.bt (forgets to initialize)  Also covers BT-3546 (ADR 0124 §7 A1) — the reimplemented, alias-aware definite-assignment predicate:   stdlib/test/fixtures/json_value_state_actor.bt (alias-typed, expands to nilable)   stdlib/test/fixtures/undefined_object_union_state_actor.bt (UndefinedObject spelling)  Also covers BT-3563 — fixture-internal type-alias pre-loading in `beamtalk test` (an alias declared in one fixtures/*.bt file, referenced as a declared field type from a *different* fixture file):   stdlib/test/fixtures/local_json_value_alias.bt (declares LocalJsonValue)   stdlib/test/fixtures/local_json_value_state_actor.bt (references it cross-file)"
     },
     {
       "id": "stdlib-test-uuid-test",

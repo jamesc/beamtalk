@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LocalJsonValue — regression fixture for BT-3563 (fixture-internal type
+// alias pre-loading in `beamtalk test`).
+//
+// Unlike `json_value_state_actor.bt`'s `JsonValue` (declared in the real
+// `stdlib/src/json.bt`, already pre-loaded by BT-3561's `src/`-alias
+// collection), this alias is declared inside a `stdlib/test/fixtures/*.bt`
+// file itself. `build_fixture_class_indexes` (test.rs) previously extracted
+// `ClassInfo`/`ProtocolInfo` from every fixture file but never `AliasInfo`,
+// so this alias would resolve only within this file — a field of this type
+// declared in a *different* fixture file (`local_json_value_state_actor.bt`)
+// would see `LocalJsonValue` as an opaque, non-nilable class name.
+type LocalJsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary

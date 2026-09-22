@@ -45,7 +45,7 @@ mod stubs;
 pub(crate) use changes::{clean_stale_artifacts, detect_changes};
 pub(crate) use class_index::{
     CachedAst, build_class_index, build_class_module_index, collect_all_alias_infos,
-    collect_all_class_infos, collect_project_alias_infos,
+    collect_all_class_infos, collect_project_alias_infos, collect_sibling_src_alias_infos,
 };
 pub(crate) use environment::{
     BuildEnvironment, DependencyContext, package_identity, resolve_and_validate_dependencies,
