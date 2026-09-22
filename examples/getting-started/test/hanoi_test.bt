@@ -23,7 +23,9 @@ TestCase subclass: HanoiTest
     self
 
   tearDown =>
-    TranscriptStream current: self.old_ts
+    self.old_ts ifNil: [
+      TranscriptStream resetCurrent
+    ] ifNotNil: [:t | TranscriptStream current: t]
     self.ts ifNotNil: [:t | t stop]
     self
 

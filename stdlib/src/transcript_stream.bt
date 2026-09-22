@@ -15,19 +15,33 @@
 /// Transcript recent
 /// ```
 typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
-  classState: current :: TranscriptStream | Nil = nil
+  late classState: current :: TranscriptStream
 
   // === Class-side Singleton ===
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current -> TranscriptStream => self.current
+  ///
+  /// `@expect type`: a class method's `self hasField:` send infers as
+  /// `Dynamic` rather than its declared `Boolean` return type — a
+  /// pre-existing type-checker gap (ADR 0124 B4's `has_clear_class_var_actor.bt`
+  /// fixture hits the same thing), not something this conversion introduces.
+  @expect type
+  class current -> TranscriptStream | Nil =>
+    (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
 
   /// Set the current singleton instance.
   class current: instance :: TranscriptStream -> TranscriptStream =>
     self.current := instance
 
   /// Clear the current singleton instance (reset to nil).
-  class resetCurrent -> Nil => self.current := nil
+  ///
+  /// `@expect type`: a class method's `self clearField:` send infers as
+  /// `Dynamic` rather than its declared `Self` return type — the same
+  /// pre-existing type-checker gap `current`'s `self hasField:` hits above.
+  @expect type
+  class resetCurrent -> Nil =>
+    self clearField: #current
+    nil
 
   // === Writing ===
 
