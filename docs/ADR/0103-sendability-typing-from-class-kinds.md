@@ -171,6 +171,13 @@ Header clauses are parsed in a fixed order:
    *local* (per-node) registration; cluster-wide registration is a deferred
    future ADR. When that ADR lands, `#node`-scoped sends to known-remote
    receivers gain an info-level note. Recorded as blocked, not designed here.
+
+   > **Amendment (2026-09-22, BT-3527 / ADR 0126):** ADR 0126 makes
+   > `#node`-scoped values crossing a node boundary a deterministic runtime
+   > rejection (`not_serialisable`), so a `#node` send to a *known-remote*
+   > receiver becomes a **Warning**, not the info-level note anticipated
+   > here — the same grade this ADR gives `#process` handles, whose failure is
+   > equally certain. Sends to receivers not known to be remote stay silent.
 2. **Blocks sent to actors** (including `Timer every:do:`, `!` casts) — warn
    when the block captures a `HandleScoped(#process)` value. **This is new
    analysis, not reuse**: the compiler has no closure-conversion pass (Core
