@@ -1780,6 +1780,20 @@ releases asserting §2.3's report verbatim.
   be pruned to the transitively-reachable set (a large artifact-size win,
   but it breaks `Object allSubclasses` reflection and DNU-based dynamic
   dispatch). Out of scope for v1; recorded as a size optimisation.
+- **New, from BT-3569's wire check:** `peer:stop/1` against a peer booted
+  with `connection => standard_io` must pass `shutdown => close`, not the
+  default `halt` (or a numeric-timeout variant) — those are documented in
+  terms of *waiting for the Erlang distribution connection to close*, and a
+  `standard_io`-connected peer has no distribution connection to wait on.
+  Against a `run`-mode peer with nothing much running this went unnoticed;
+  against a full `mode => release` boot (cowboy, `telemetry_poller`, the
+  workspace supervision tree) it reliably hung `peer:stop/1` with no error,
+  no timeout, and no output — the calling node's `-noshell` VM simply never
+  returned from `peer:stop/1`. `close` just tears down the control port and
+  returns, which is what a wire check (and Phase 3's `eval`/launcher tests)
+  actually want. Left for Phase 3 to confirm this also holds for the
+  launcher's own use of `peer` (if any) or a real `-boot`'d subprocess
+  started via `erl -boot` directly rather than `peer`.
 
 ---
 

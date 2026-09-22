@@ -37,6 +37,7 @@ source text) are handled via the `on_activate` callback in activation options.
     activate_module/1,
     activate_module/2,
     activate_modules/2,
+    collect_loaded_app_modules/0,
     find_bt_modules_in_dir/1,
     sort_modules_by_dependency/2,
     topo_sort/1,
@@ -211,6 +212,40 @@ Returns `{ok, Errors}` where `Errors` is a (possibly empty) list of
 activate_modules(Modules, Opts) ->
     Sorted = sort_loaded_modules_by_dependency(Modules),
     {ok, do_activate_all(Sorted, Opts)}.
+
+-doc """
+Collect `bt@*` class modules (excluding `bt@stdlib@*`) from every currently
+*loaded* OTP application's `{modules, …}` key (ADR 0125 §1.4 release mode).
+
+Unlike `find_bt_modules_in_dir/1` — a `_build/` directory scan — this reads
+each application's own module list via `application:get_key/2`, the same
+list `systools:make_script/2` already validated when the release was
+assembled. A release host has no `_build/` directory to scan, so
+`beamtalk_workspace_app` calls this instead when it activates a release's
+classes.
+
+`application:loaded_applications/0` includes every application that
+`application:load/1` has resolved, whether or not it has been *started*
+yet — and a `.rel` boot script loads every listed application before it
+starts any of them, so by the time `beamtalk_workspace` (a dependency of
+the project's own application, ADR 0125 §1.2) reaches its own `start/2`,
+every other shipped app — including the project's — is already loaded and
+its module list is readable here. No caller sorts this result:
+`activate_modules/2` already topo-sorts by superclass dependency.
+""".
+-spec collect_loaded_app_modules() -> [module()].
+collect_loaded_app_modules() ->
+    lists:flatmap(
+        fun({App, _Desc, _Vsn}) ->
+            case application:get_key(App, modules) of
+                {ok, Modules} ->
+                    lists:filter(fun is_release_class_module/1, Modules);
+                undefined ->
+                    []
+            end
+        end,
+        application:loaded_applications()
+    ).
 
 %%% ============================================================================
 %%% Private helpers
@@ -602,6 +637,11 @@ beam_file_to_module(File) ->
 -spec is_user_class_module(string()) -> boolean().
 is_user_class_module(ModName) ->
     lists:prefix("bt@", ModName) andalso not lists:prefix("bt@stdlib@", ModName).
+
+-doc "Module-atom wrapper around `is_user_class_module/1`, for `lists:filter/2`.".
+-spec is_release_class_module(module()) -> boolean().
+is_release_class_module(Module) ->
+    is_user_class_module(atom_to_list(Module)).
 
 -doc "Validate that a module name contains only valid Beamtalk characters.".
 -spec is_valid_module_name(string()) -> boolean().
