@@ -335,6 +335,12 @@ text across surfaces:
   processes, bare `ClassName` for plain objects. The old `a ClassName` article
   form is gone. This is **not surface-specific** — REPL, logs, and tooling must
   show the same text for the same value.
+- A declared `late` slot (ADR 0124) that has not been assigned renders as
+  `<unassigned>` rather than being omitted, e.g.
+  `CodexClient(proc: <unassigned>, nextId: 1)` — matching the inspector's
+  `#notAssigned` vocabulary (ADR 0124 §9/B7). Produced by the same shared
+  structural renderer (`beamtalk_object_printer:structural_from_state/1`), so
+  this is likewise not surface-specific.
 - **`displayString` (Display)** is the **string-interpolation hook**: every
   `{...}` segment in a string literal renders its value via `displayString`
   (defaults to `printString`). Because interpolation is a language feature, this

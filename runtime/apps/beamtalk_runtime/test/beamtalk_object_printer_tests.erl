@@ -276,3 +276,177 @@ structural_from_state_nested_test() ->
         <<"Line(from: Point(x: 0, y: 0), label: \"a\")">>,
         beamtalk_object_printer:structural_from_state(State)
     ).
+
+%%% ============================================================================
+%%% structural_from_state/1 — declared-`late`, unassigned slot (ADR 0124 §9/B8)
+%%% ============================================================================
+
+%% These need real `__beamtalk_meta/0` field-kind metadata behind a
+%% *registered* class process — `classAllFieldKindsByName/1` (B5b) is a
+%% hierarchy walk keyed on live class pids, not on the field list handed to
+%% `structural/2` directly, so a bare `#{'$beamtalk_class' => ...}` map (as
+%% every other test above uses) always degrades to "no late fields" and
+%% never exercises `unassigned_late_fields/2`. Mirrors
+%% `beamtalk_object_class_tests.erl`'s `get_class_var_declared_late_
+%% unassigned_errors_without_crashing_test_` — a real meta-carrying module
+%% built via `compile:forms/2`, registered as a live class with
+%% `beamtalk_object_class:start_link/1`.
+
+setup() ->
+    case whereis(pg) of
+        undefined ->
+            {ok, Pid} = pg:start_link(),
+            Pid;
+        Pid ->
+            Pid
+    end,
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table().
+
+teardown(_) ->
+    Members =
+        try
+            pg:get_members(beamtalk_classes)
+        catch
+            _:_ -> []
+        end,
+    lists:foreach(
+        fun(Pid) ->
+            catch gen_server:stop(Pid, normal, 1000)
+        end,
+        Members
+    ).
+
+%% Registers `ClassName` as a live class whose `__beamtalk_meta/0` declares
+%% `field_kinds => FieldKinds` — the B5b metadata `unassigned_late_fields/2`
+%% reads. `ModAtom` must be unique per test (a live, loaded Erlang module).
+register_class_with_field_kinds(ClassName, ModAtom, FieldKinds) ->
+    Meta = #{field_kinds => FieldKinds},
+    MetaAbstract = erl_parse:abstract(Meta, [{line, 3}]),
+    Forms = [
+        {attribute, 1, module, ModAtom},
+        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+        {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(ModAtom) ++ ".erl", Bin),
+    ClassInfo = #{
+        name => ClassName,
+        module => Mod,
+        superclass => 'Object',
+        instance_methods => #{},
+        class_methods => #{}
+    },
+    {ok, _Pid} = beamtalk_object_class:start_link(ClassInfo),
+    Mod.
+
+declared_late_unassigned_renders_placeholder_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                _ = register_class_with_field_kinds(
+                    'BT3557LateUnassigned',
+                    bt3557_late_unassigned_mod,
+                    #{proc => late, count => eager}
+                ),
+                %% `proc` is declared `late` and absent — renders `<unassigned>`.
+                %% `count` is present — renders its value normally.
+                State = #{'$beamtalk_class' => 'BT3557LateUnassigned', count => 5},
+                ?assertEqual(
+                    <<"BT3557LateUnassigned(count: 5, proc: <unassigned>)">>,
+                    beamtalk_object_printer:structural_from_state(State)
+                )
+            end)
+        ]
+    end}.
+
+declared_late_assigned_renders_value_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                _ = register_class_with_field_kinds(
+                    'BT3557LateAssigned',
+                    bt3557_late_assigned_mod,
+                    #{proc => late, count => eager}
+                ),
+                %% Once assigned, `proc` is a present key — renders its real
+                %% value, the same as any other field, not `<unassigned>`.
+                State = #{'$beamtalk_class' => 'BT3557LateAssigned', count => 5, proc => 42},
+                ?assertEqual(
+                    <<"BT3557LateAssigned(count: 5, proc: 42)">>,
+                    beamtalk_object_printer:structural_from_state(State)
+                )
+            end)
+        ]
+    end}.
+
+declared_late_cleared_field_renders_placeholder_again_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                _ = register_class_with_field_kinds(
+                    'BT3557LateCleared',
+                    bt3557_late_cleared_mod,
+                    #{proc => late}
+                ),
+                Assigned = #{'$beamtalk_class' => 'BT3557LateCleared', proc => 42},
+                ?assertEqual(
+                    <<"BT3557LateCleared(proc: 42)">>,
+                    beamtalk_object_printer:structural_from_state(Assigned)
+                ),
+                %% `clearField:` is `maps:remove/2` (`beamtalk_reflection:
+                %% clear_field/2`) — simulate its effect directly and confirm
+                %% the slot renders `<unassigned>` again, exactly as before
+                %% the first assignment.
+                Cleared = beamtalk_reflection:clear_field(proc, Assigned),
+                ?assertEqual(
+                    <<"BT3557LateCleared(proc: <unassigned>)">>,
+                    beamtalk_object_printer:structural_from_state(Cleared)
+                )
+            end)
+        ]
+    end}.
+
+declared_late_unassigned_nested_in_value_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                _ = register_class_with_field_kinds(
+                    'BT3557LateNested',
+                    bt3557_late_nested_mod,
+                    #{proc => late}
+                ),
+                %% render_value/5's nested-tagged-map branch shares
+                %% fields_for_state/2 with structural_from_state/1, so an
+                %% unassigned `late` field nested inside another value's
+                %% field also renders `<unassigned>`, not just at the top level.
+                Inner = #{'$beamtalk_class' => 'BT3557LateNested'},
+                ?assertEqual(
+                    <<"Wrapper(value: BT3557LateNested(proc: <unassigned>))">>,
+                    beamtalk_object_printer:structural('Wrapper', [{value, Inner}])
+                )
+            end)
+        ]
+    end}.
+
+no_late_fields_declared_behaves_as_before_test_() ->
+    %% A class with no `late` fields at all (the common case) is unaffected —
+    %% `unassigned_late_fields/2` contributes nothing, same output as before
+    %% this ADR 0124 §9/B8 change.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                _ = register_class_with_field_kinds(
+                    'BT3557AllEager',
+                    bt3557_all_eager_mod,
+                    #{count => eager}
+                ),
+                State = #{'$beamtalk_class' => 'BT3557AllEager', count => 5},
+                ?assertEqual(
+                    <<"BT3557AllEager(count: 5)">>,
+                    beamtalk_object_printer:structural_from_state(State)
+                )
+            end)
+        ]
+    end}.
