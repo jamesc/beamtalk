@@ -417,6 +417,67 @@ pub(crate) fn collect_project_alias_infos(
     collect_project_protocol_and_alias_infos(source_files, pkg_name).1
 }
 
+/// Manifest-less "coherent package" fallback for cross-file type-alias
+/// resolution (BT-3561): when no `beamtalk.toml` exists anywhere above a
+/// test/bootstrap-test root — `stdlib` itself ships no manifest, the exact
+/// scenario `beamtalk build --stdlib-mode` already special-cases for the
+/// `build` pipeline (see `package_identity`'s doc) — a same-tree `src/`
+/// directory next to (or above) that root still holds real `type X = ...`
+/// declarations a test/fixture file may reference (e.g.
+/// `stdlib/test/fixtures/*.bt` referencing `stdlib/src/json.bt`'s
+/// `JsonValue`). `ClassInfo` needs no equivalent fallback: a
+/// fixture/test-defined class already resolves via each test pipeline's own
+/// fixture class index, and a `src/`-defined class (e.g. stdlib's `Actor`)
+/// is reached by ordinary dynamic dispatch, never a compile-time `ClassInfo`
+/// lookup.
+///
+/// Shared by `test.rs`, `test_stdlib.rs`, `test_docs.rs`, and
+/// `test_metamorphic.rs` — each independently scans a manifest-less test
+/// root for a sibling `src/` and would otherwise duplicate this same
+/// ancestor walk (per the repo's no-duplicate-implementations rule).
+///
+/// Walks upward from `test_path` — mirroring `find_package_root`'s own
+/// ancestor walk, keyed on a `src/` sibling instead of `beamtalk.toml` —
+/// and returns the first `src/` directory found, or `None` if the ancestor
+/// chain has none.
+pub(crate) fn implicit_sibling_src_dir(test_path: &Utf8Path) -> Option<Utf8PathBuf> {
+    let start = std::fs::canonicalize(test_path)
+        .ok()
+        .and_then(|abs| Utf8PathBuf::from_path_buf(abs).ok())
+        .unwrap_or_else(|| test_path.to_owned());
+    let mut dir = if start.is_dir() {
+        Some(start)
+    } else {
+        start.parent().map(Utf8Path::to_path_buf)
+    };
+    while let Some(d) = dir {
+        let candidate = d.join("src");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        dir = d.parent().map(Utf8Path::to_path_buf);
+    }
+    None
+}
+
+/// Collects type-alias declarations from the sibling `src/` directory found
+/// by [`implicit_sibling_src_dir`], for a manifest-less test/bootstrap-test
+/// root (BT-3561/BT-3563). Returns an empty vector when there's no sibling
+/// `src/`, or it has no readable source files — the caller merges this into
+/// whatever alias infos it already collected (e.g. via
+/// `collect_all_alias_infos`), so an empty result is a no-op, not an error.
+pub(crate) fn collect_sibling_src_alias_infos(
+    test_path: &Utf8Path,
+) -> Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> {
+    let Some(src_dir) = implicit_sibling_src_dir(test_path) else {
+        return Vec::new();
+    };
+    let Ok(src_files) = super::sources::collect_source_files_from_dir(&src_dir) else {
+        return Vec::new();
+    };
+    collect_project_alias_infos(&src_files, "")
+}
+
 /// Merge alias infos from multiple sources (same-package cross-file +
 /// dependency-exported) into one collection, mirroring `collect_all_class_infos`.
 /// A plain concatenation — collision diagnostics are handled by

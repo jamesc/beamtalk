@@ -810,11 +810,14 @@ fn compile_transform_variant(
 
 /// Compiles every `@load` fixture referenced by `parsed`, returning the
 /// resulting `bt@...` module names.
+///
+/// `pre_loaded_aliases`: see `test_stdlib::compile_fixture`'s doc.
 fn compile_load_fixtures(
     parsed: &test_stdlib::ParsedTestFile,
     test_file: &camino::Utf8Path,
     build_dir: &camino::Utf8Path,
     opts: &TestRunOptions,
+    pre_loaded_aliases: &[beamtalk_core::semantic_analysis::alias_registry::AliasInfo],
 ) -> Result<Vec<String>> {
     let mut fixture_modules = Vec::new();
     for load_path in &parsed.load_files {
@@ -831,6 +834,7 @@ fn compile_load_fixtures(
             build_dir,
             opts.no_warnings,
             opts.warnings_as_errors,
+            pre_loaded_aliases,
         )?;
         fixture_modules.push(module_name);
     }
@@ -850,10 +854,13 @@ struct FileVariants {
 
 /// Parses one `.btscript` file, compiles its `@load` fixtures, and builds +
 /// compiles every transform variant of its cases.
+///
+/// `pre_loaded_aliases`: see `test_stdlib::compile_fixture`'s doc.
 fn process_test_file(
     test_file: &camino::Utf8Path,
     build_dir: &camino::Utf8Path,
     opts: &TestRunOptions,
+    pre_loaded_aliases: &[beamtalk_core::semantic_analysis::alias_registry::AliasInfo],
 ) -> Result<FileVariants> {
     let content = fs::read_to_string(test_file)
         .into_diagnostic()
@@ -874,7 +881,8 @@ fn process_test_file(
         );
     }
 
-    let fixture_modules = compile_load_fixtures(&parsed, test_file, build_dir, opts)?;
+    let fixture_modules =
+        compile_load_fixtures(&parsed, test_file, build_dir, opts, pre_loaded_aliases)?;
 
     let file_stem = test_file
         .file_stem()
@@ -955,6 +963,9 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
+    // BT-3563: see `test_stdlib::run_tests`'s equivalent comment.
+    let pre_loaded_aliases = crate::commands::build::collect_sibling_src_alias_infos(&test_path);
+
     let mut compiled_files: Vec<CompiledTestFile> = Vec::new();
     let mut labels: Vec<String> = Vec::new();
     let mut all_core_files = Vec::new();
@@ -963,7 +974,7 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     let mut skipped_units = 0usize;
 
     for test_file in &test_files {
-        let variants = process_test_file(test_file, &build_dir, opts)?;
+        let variants = process_test_file(test_file, &build_dir, opts, &pre_loaded_aliases)?;
         all_fixture_modules.extend(variants.fixture_modules);
         all_core_files.extend(variants.core_files);
         all_erl_files.extend(variants.erl_files);

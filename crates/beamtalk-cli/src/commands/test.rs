@@ -262,8 +262,15 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 /// 4. A `Vec<ProtocolInfo>` of fixture-defined protocols so the
 ///    unresolved-class validator recognises their names when analysing test
 ///    modules that reference them.
+/// 5. A `Vec<AliasInfo>` of fixture-defined type aliases (ADR 0108, BT-3563)
+///    so a `type Name = ...` declared in one fixture file (e.g.
+///    `type LocalJsonValue = Nil | Boolean | ...`) resolves through
+///    `AliasRegistry` when referenced as a declared field type from a
+///    *different* fixture or test file, instead of looking like an opaque,
+///    non-nilable class name to `requires_definite_assignment_for_declared_type`.
+///    Mirrors `ClassInfo`/`ProtocolInfo` immediately above.
 ///
-/// All four outputs are merged into the pipeline before fixture compilation so
+/// All five outputs are merged into the pipeline before fixture compilation so
 /// that cross-file references and class hierarchy resolution work correctly —
 /// in particular, Value sub-subclasses are recognized as value types rather
 /// than defaulting to actor codegen.
@@ -275,11 +282,13 @@ fn build_fixture_class_indexes(
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 )> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
     let mut class_infos = Vec::new();
     let mut protocol_infos = Vec::new();
+    let mut alias_infos = Vec::new();
 
     for file in fixture_files {
         let module_name = fixture_module_name(file)?;
@@ -301,6 +310,15 @@ fn build_fixture_class_indexes(
             ),
         );
 
+        // Extract AliasInfo (BT-3563) so a type alias declared in this
+        // fixture file resolves when referenced from another fixture/test
+        // file — mirrors the ClassInfo/ProtocolInfo extraction above.
+        alias_infos.extend(
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+                &module,
+            ),
+        );
+
         for class in &module.classes {
             let class_name = class.name.name.to_string();
             module_index.insert(class_name.clone(), module_name.clone());
@@ -311,7 +329,13 @@ fn build_fixture_class_indexes(
         }
     }
 
-    Ok((module_index, superclass_index, class_infos, protocol_infos))
+    Ok((
+        module_index,
+        superclass_index,
+        class_infos,
+        protocol_infos,
+        alias_infos,
+    ))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1013,40 +1037,6 @@ fn build_merged_class_indexes(
     )
 }
 
-/// Manifest-less "coherent package" fallback for cross-file type-alias
-/// resolution (BT-3561): when no `beamtalk.toml` exists anywhere above the
-/// test root — `stdlib` itself ships no manifest, the exact scenario
-/// `beamtalk build --stdlib-mode` already special-cases for the `build`
-/// pipeline (see `class_index.rs`'s `package_identity` doc) — a same-tree
-/// `src/` directory next to (or above) the test root still holds real
-/// `type X = ...` declarations a test/fixture file may reference (e.g.
-/// `stdlib/test/fixtures/*.bt` referencing `stdlib/src/json.bt`'s
-/// `JsonValue`). `ClassInfo` needs no equivalent fallback: a
-/// fixture/test-defined class already resolves via `fixture_class_index`,
-/// and a `src/`-defined class (e.g. stdlib's `Actor`) is reached by
-/// ordinary dynamic dispatch, never a compile-time `ClassInfo` lookup.
-///
-/// Walks upward from `test_path` — mirroring `find_package_root`'s own
-/// ancestor walk, keyed on a `src/` sibling instead of `beamtalk.toml` —
-/// and returns the first `src/` directory found, or `None` if the ancestor
-/// chain has none.
-fn implicit_sibling_src_dir(test_path: &Utf8Path) -> Option<Utf8PathBuf> {
-    let start = canonical_path(test_path);
-    let mut dir = if start.is_dir() {
-        Some(start)
-    } else {
-        start.parent().map(Utf8Path::to_path_buf)
-    };
-    while let Some(d) = dir {
-        let candidate = d.join("src");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-        dir = d.parent().map(Utf8Path::to_path_buf);
-    }
-    None
-}
-
 /// Initialize the test pipeline: discover packages and build class indexes.
 fn initialize_pipeline(
     test_path: Utf8PathBuf,
@@ -1075,18 +1065,14 @@ fn initialize_pipeline(
         mut all_alias_infos,
     ) = build_merged_class_indexes(&discovered_packages);
 
-    // See `implicit_sibling_src_dir`'s doc: only engages when manifest-based
-    // discovery found nothing at all, so a real manifest'd project's own
-    // `src/` (already covered by `build_merged_class_indexes` above) is
-    // never double-scanned.
+    // See `collect_sibling_src_alias_infos`'s doc: only engages when
+    // manifest-based discovery found nothing at all, so a real manifest'd
+    // project's own `src/` (already covered by `build_merged_class_indexes`
+    // above) is never double-scanned.
     if discovered_packages.is_empty() {
-        if let Some(src_dir) = implicit_sibling_src_dir(&test_path) {
-            if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
-                let extra_aliases = super::build::collect_project_alias_infos(&src_files, "");
-                all_alias_infos =
-                    super::build::collect_all_alias_infos(&[&all_alias_infos, &extra_aliases]);
-            }
-        }
+        let extra_aliases = super::build::collect_sibling_src_alias_infos(&test_path);
+        all_alias_infos =
+            super::build::collect_all_alias_infos(&[&all_alias_infos, &extra_aliases]);
     }
 
     Ok(TestPipeline {
@@ -1140,11 +1126,18 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         fixture_superclass_index,
         fixture_class_infos,
         fixture_protocol_infos,
+        fixture_alias_infos,
     ) = if fixtures_dir.is_dir() {
         let fixture_files = find_test_files(&fixtures_dir)?;
         build_fixture_class_indexes(&fixture_files)?
     } else {
-        (HashMap::new(), HashMap::new(), Vec::new(), Vec::new())
+        (
+            HashMap::new(),
+            HashMap::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     };
     pipeline
         .class_module_index
@@ -1162,6 +1155,11 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline
         .fixture_protocol_infos
         .extend(fixture_protocol_infos);
+    // Fixture-defined type aliases (BT-3563) need to flow through the same
+    // way, so a `type Name = ...` declared in one fixture file resolves
+    // when referenced as a declared field type from another fixture/test
+    // file — mirrors `fixture_protocol_infos` immediately above.
+    pipeline.all_alias_infos.extend(fixture_alias_infos);
 
     let fixture_hierarchy = ClassHierarchyContext {
         class_module_index: pipeline.class_module_index.clone(),
@@ -2335,7 +2333,7 @@ mod tests {
         .unwrap();
 
         let files = vec![dir.join("counter.bt")];
-        let (module_index, superclass_index, _class_infos, protocol_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("Counter").map(String::as_str),
@@ -2365,7 +2363,7 @@ mod tests {
 
         // fixture_module_name uses the file stem only, so scheme_env.bt → bt@scheme_env
         let files = vec![subdir.join("scheme_env.bt")];
-        let (module_index, superclass_index, _class_infos, protocol_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("SchemeEnv").map(String::as_str),
