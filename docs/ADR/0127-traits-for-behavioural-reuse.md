@@ -315,7 +315,9 @@ first, as it already does for `extending:`.
   behaviour goes.
 - `excluding:` drops provided selectors from this use (Pharo `-`).
 - `aliasing:` adds each trait-provided `#traitSel` to the class *also* under
-  `#newSel` (Pharo `@`). The original stays unless also excluded. The
+  `#newSel` (Pharo `@`). The alias always copies the trait's original
+  provision, even when `#traitSel` is also excluded; the original name stays
+  unless excluded. The
   dictionary direction is Pharo's: new name on the left.
 - The argument forms are ordinary literals — a list of symbols and a
   dictionary of symbols — so nothing new is lexed.
@@ -333,7 +335,11 @@ A class that uses traits **means exactly the class with the provided methods
 written into its body**, after these steps, in order:
 
 1. Expand each used trait transitively (a trait's own `uses:` first).
-2. Apply `excluding:`, then `aliasing:`, per `uses:` line.
+2. Per `uses:` line, apply `aliasing:` first, reading from the trait's
+   *original* provisions, then `excluding:`. An alias therefore survives
+   the exclusion of the selector it copies, which is what
+   `excluding: #(#printString) aliasing: #{#describeString => #printString}`
+   (§4) relies on.
 3. Merge the provisions of all used traits into one set, detecting
    conflicts (§4).
 4. Drop every trait provision whose selector (same side) the class body
@@ -426,8 +432,10 @@ Value subclass: Report
 
 Every required selector of every used trait (after exclusion) must resolve on
 the flattened class: from the class body, from another used trait's
-provisions, or from the superclass chain. Resolution uses the existing
-`ClassHierarchy::resolves_selector`, so ADR 0100's open-world policy applies:
+provisions, or from the superclass chain. The check runs in the second
+half of the expansion pass, after `ClassHierarchy` has been built from the
+flattened classes (§3), so it can use the existing
+`ClassHierarchy::resolves_selector`, and ADR 0100's open-world policy applies:
 an unresolvable requirement is an **error** when the chain is closed-world
 and a **hint** when the superclass lives in an unindexed package or the class
 overrides `doesNotUnderstand:`.
