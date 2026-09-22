@@ -81,7 +81,9 @@ TestCase subclass: SystemNavigationAnnouncementsSentByTest
 
   // The site-level form applies the same guard.
   testSitesRequiresClassArgument =>
-    self should: [self.nav announcementSitesSentBy: #NotAClass] raise: #user_error
+    self should: [
+      self.nav announcementSitesSentBy: #NotAClass
+    ] raise: #user_error
 
   // --- happy-path shape (compiler port absent) ---
   //
