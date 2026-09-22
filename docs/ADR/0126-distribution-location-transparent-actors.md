@@ -110,7 +110,7 @@ node-agnostic.
 | `Node` value object: identity, connect, list, ping | Actor migration (move a live actor to another node) |
 | Remote spawn (`spawnOn:`, `spawnWith:on:`, `spawnAs:on:`) | Distributed persistence / replicated state |
 | Remote named lookup (`named:on:`) | Consensus, leader election beyond `global` |
-| Opt-in cluster-unique names (`scope: #cluster`, OTP `global`) | Process groups / cluster pub-sub (`pg`) |
+| Opt-in cluster-unique names (`scope: #global`, OTP `global`) | Process groups / cluster pub-sub (`pg`) |
 | Remote sync send, cast, async send — unchanged syntax | Sharding, virtual actors (Orleans-style) |
 | Wire versioning (ADR 0123 envelope + ADR 0125 strict unpack) | Rename-aware envelope resolution (ADR 0123 known issue) |
 | Cluster events: `NodeUp`, `NodeDown`, `NodeShapeSkew` | Cross-node supervision trees |
@@ -224,22 +224,48 @@ hits increment           // => 1
 ```
 
 **Implementation shape.** `spawnOn:` is an `erpc:call(Node,
-beamtalk_actor, remote_spawn, [Class, Args, NameOrUndefined], Timeout)`. The
-spawn runs on the target node through the *existing* `safe_spawn/2` /
+beamtalk_actor, remote_spawn, [Class, WireArgs, NameOrUndefined], Timeout)`.
+The spawn runs on the target node through the *existing* `safe_spawn/2` /
 `safe_spawn_named/3` entry points — which is why initialisation,
 `initialize`, reserved-name checks (ADR 0079 `reserved_name/1`) and
 `ActorSpawned` announcements behave identically; they fire on the node where
 the actor lives. The class is resolved **by name on the target node**; the
-caller's module is never shipped.
+caller's module is never shipped. `spawnWith:on:` arguments are encoded by the
+wire encoder (§5.1) — remote spawn never ships raw, unversioned args.
+
+`safe_spawn_named/3` links the new actor to its caller (`start_link_and_await`),
+and under `erpc` the caller is erpc's short-lived worker process, which exits
+with a non-`normal` reason carrying the result — a linked, non-trapping actor
+would die the moment `remote_spawn` returned. `remote_spawn` therefore
+**unlinks immediately after a successful start**, exactly as the class-method
+path `do_class_self_named_spawn/6` already does for named class-side spawns.
+The Phase 0 spike (see Implementation) pins this with a two-node test before
+anything else is built on it.
+
+`named:on:` runs its class check on the target node (an `erpc` call to the
+existing `named/2` lookup there, which reads the `'$beamtalk_actor'` marker
+via the local-only `process_info/2`), then returns a
+`{registered, Name, Node}` ref.
+
+**Remote spawn is not idempotent.** If the `erpc` call times out *after* the
+spawn succeeded on the far side, the caller sees `timeout` and the actor is
+running unowned. Callers that must not duplicate should use a named spawn
+(`spawnAs:on:`), whose retry fails with `name_registered` and can then be
+resolved with `named:on:`.
 
 **Linking and supervision.** A remotely spawned actor is **never linked to the
 caller**, named or not. A link across a node boundary turns every partition
 into a crash of the caller (`noconnection` exit), which is the opposite of
 what a v1 user expects. The actor is exactly as supervised as a local
-`spawn`: not at all. Supervised actors on node B are started by node B's own
+`spawn`: not at all — and, unlike a local REPL spawn, the caller's workspace
+does not track it (its `ActorSpawned` fires on the remote node), so a remote
+actor outlives the session that created it until something stops it. That is
+the honest cost of "unlinked"; an opt-in owner monitor (the remote side
+monitors the spawner and stops the actor on `DOWN`, reason `noconnection`
+excluded) is listed as future work rather than guessed at here. Supervised actors on node B are started by node B's own
 supervision tree — its release's `[application] supervisor` (ADR 0125) or a
 class method invoked remotely — and then *found* with `named:on:` or
-`scope: #cluster`. Cross-node supervision (a supervisor on A owning a child on
+`scope: #global`. Cross-node supervision (a supervisor on A owning a child on
 B) is rejected; see Alternatives.
 
 **Registered refs are node-qualified on the wire.** A ref created by
@@ -257,22 +283,28 @@ Node-local names are the default and stay the default. A cluster-unique name
 is requested explicitly with a `scope:` keyword:
 
 ```beamtalk
-leader := (Scheduler spawnAs: #scheduler scope: #cluster) unwrap
+leader := (Scheduler spawnAs: #scheduler scope: #global) unwrap
 // on any node in the cluster:
-s := (Scheduler named: #scheduler scope: #cluster) unwrap
+s := (Scheduler named: #scheduler scope: #global) unwrap
 s tick
 ```
 
 | Selector | Backing | Returns |
 |----------|---------|---------|
-| `spawnAs: name scope: #cluster` | `gen_server:start({global, Name}, …)` | `Result(Self, Error)` |
-| `spawnWith: args as: name scope: #cluster` | same | `Result(Self, Error)` |
-| `named: name scope: #cluster` | `global:whereis_name/1`, class check | `Result(Self, Error)` |
-| `scope: #node` | identical to the existing selectors | — |
+| `spawnAs: name scope: #global` | `gen_server:start({global, Name}, …)` | `Result(Self, Error)` |
+| `spawnWith: args as: name scope: #global` | same | `Result(Self, Error)` |
+| `named: name scope: #global` | `global:whereis_name/1`, class check | `Result(Self, Error)` |
+| `spec withName: name scope: #global` | `SupervisionSpec` child registered `{global, Name}` | `SupervisionSpec` |
+| `scope: #local` | identical to the existing selectors | — |
 
-The scope symbol deliberately reuses ADR 0103's scope vocabulary (`#node`) —
-"node-scoped" means the same thing for handles and names. Any other scope
-symbol is `#beamtalk_error{kind = type_error}`.
+The scope symbols are the ones ADR 0079 reserved for exactly this ("Future:
+`Counter spawnAs: #counter scope: #global` / `Actor named: #counter scope:
+#global` / `spec withName: #counter scope: #global`", 0079 § Scope), and they
+match OTP's own `{local, Name}` / `{global, Name}` vocabulary. The
+`SupervisionSpec` form matters: it is how a **supervised** actor on node B
+becomes findable cluster-wide (§3). Any other scope symbol is
+`#beamtalk_error{kind = type_error}`; `{via, Mod, Term}` stays reserved for a
+future pluggable-registry scope.
 
 `global` names go through the **same** `reserved_name/1` check as local names
 (ADR 0079; the blocklist already contains `global_name_server`,
@@ -280,10 +312,21 @@ symbol is `#beamtalk_error{kind = type_error}`.
 via `global:whereis_name/1` per send, like registered refs.
 
 **Partition heal.** When a netsplit heals with the same global name on both
-sides, OTP's default resolver (`global:random_exit_name/3`) kills one
-registrant. v1 keeps the default and makes it observable: the losing actor's
-`ActorStopped` announcement carries `reason: #globalNameConflict`. A
-user-supplied resolver is future work.
+sides, `global` calls the registration's resolve function. OTP's default
+(`random_exit_name/3`) kills the loser with `exit(Pid, kill)` — `terminate/2`
+never runs and the only observable reason is `killed`. Beamtalk registers
+with its own resolver, `beamtalk_actor:resolve_global_conflict/3`: it keeps one
+registrant (the older, by start time, falling back to `random_exit_name`'s
+choice) and **stops** the other with `gen_server:stop(Loser,
+{shutdown, global_name_conflict}, Timeout)`, so the losing actor's
+`ActorStopped` announcement carries `reason: #globalNameConflict` and its
+`terminate` runs. User-supplied resolvers are future work.
+
+**Mesh side effects.** `global` keeps a fully connected mesh, and OTP 25+
+enables `prevent_overlapping_partitions` by default: on partial connectivity
+`global` actively disconnects nodes to restore a consistent view. Users of
+`scope: #global` will observe `NodeDown` events caused by `global` itself, not
+by the network; the language docs say so.
 
 `pg` process groups are **not** in v1 — they are a pub/sub/membership feature,
 not a lookup feature, and belong with a future "cluster announcements" ADR.
@@ -292,30 +335,62 @@ not a lookup feature, and belong with a future "cluster announcements" ADR.
 
 #### 5.1 Wrap on remote send only
 
-When the target of a send (sync, cast, async, or `spawnWith:on:` args) is on
-another node, the sender encodes the message through a single module,
-`beamtalk_wire`, and sends a **tagged wire message** instead of the local
-`{Selector, Args, PropCtx}`:
+When the target of a send is on another node, the sender encodes the payload
+through a single new module, `beamtalk_wire`, and sends a **tagged wire
+message** instead of the local form. All three send kinds, and both result
+paths, are covered:
 
-```erlang
-%% local (unchanged, zero cost):
-{Selector, Args, PropCtx}
-%% remote:
-{'$beamtalk_wire', 1, Selector, WireArgs, PropCtx}
-```
+| Send kind | Local message (unchanged) | Remote message |
+|-----------|---------------------------|----------------|
+| sync (`.`) | `{Selector, Args, PropCtx}` via `gen_server:call` | `{'$beamtalk_wire', 1, call, Selector, WireArgs, PropCtx}` |
+| async (Future) | `{Selector, Args, FuturePid, PropCtx}` via `gen_server:cast` | `{'$beamtalk_wire', 1, async, Selector, WireArgs, FuturePid, PropCtx}` |
+| cast (`!`) | `{cast, Selector, Args, PropCtx}` via `gen_server:cast` | `{'$beamtalk_wire', 1, cast, Selector, WireArgs, PropCtx}` |
 
-`WireArgs` is `Args` with every Beamtalk `Value` instance replaced by its ADR
-0123 envelope `{beamtalk_shape, Class, ShapeVersion, Fields}` (recursively —
-nested Values carry their own versions, ADR 0123), every local registered ref
-node-qualified (§3), and everything else passed through as an Erlang term. The
-receiving actor's dispatch prelude recognises the tag, runs
-`beamtalk_shape_migration:unpack_strict/1` over `WireArgs`, and dispatches
-normally. **Replies are symmetric**: the callee encodes its reply when
-`node(FromPid) =/= node()`, and the caller's `sync_send` decodes it.
+| Result path | Encoded when |
+|-------------|--------------|
+| sync reply (`{ok, R}` / `{error, E}`) | callee side, `node(FromPid) =/= node()` |
+| future resolution (`beamtalk_future:resolve/2`) | callee side, `node(FuturePid) =/= node()` |
 
 "Remote" is decided by `node(Pid) =/= node()` at send time (for
 `{registered, N, Node}` / `{global, N}` refs, by the resolved node). This is
 one comparison on the local path — constraint 2 holds.
+
+**`beamtalk_wire:encode/1` / `decode/1` are a full term walk**, not a call to
+`pack/1` (which accepts one tagged instance and recurses only into fields
+*declared* as Value types). The walk descends lists, tuples and maps —
+including the `'data'` of `Array` and `Dictionary` entries, so `c addAll:
+{money1. money2}` ships two envelopes, not two raw maps — and dispatches on
+each tagged map's **runtime class** (`beamtalk_tagged_map:class_of/1` → class
+kind, via the class registry):
+
+| Term the walk meets | Encoded as |
+|---------------------|------------|
+| `Value`-kind instance | ADR 0123 envelope via `pack_wire/1` (§5.4), recursively |
+| builtin tagged map (`Array`, `Dictionary`, `String`, `Set`, …) | same builtin shape, contents walked |
+| `Object`-kind instance with `handleScope:` (or builtin `HandleScoped`) | **rejected**: `not_serialisable` naming the path |
+| `Object`-kind instance without `handleScope:` (`Unknown`) | passed as a raw term |
+| Exception / `#beamtalk_error{}` | passed as a raw term (records of runtime-owned shape, BT-3528) |
+| actor `#beamtalk_object{}` | kept; `{registered, Name}` rewritten to `{registered, Name, node()}` (§3) |
+| **class object** `#beamtalk_object{}` (a class gen_server pid) | rewritten to a by-name class reference `{'$beamtalk_class_ref', ClassName}`, resolved on the **receiving** node's class registry on decode — so a class object that crosses a node is that node's class of the same name, never a remote class process |
+| NLR tuple (`?IS_NLR`, `{'$bt_nlr', Token, Value, State}`) | `Value` walked; `State` passed as a raw term — it is the *defining method's* actor state and returns to the node that owns it |
+| fun (block), pid, port, ref, other | raw term |
+
+`decode/1` is the inverse walk, calling
+`beamtalk_shape_migration:unpack_strict/1` at each envelope (which is
+per-envelope, as ADR 0125 §3.4 requires) and resolving class refs. The walk
+is bounded by the same depth cap as `pack/1` (`MAX_PACK_DEPTH`) and is the
+cost the remote path pays (see Consequences).
+
+**Encode failures on the callee side** never crash the callee. If a reply
+cannot be encoded (the method returned an `Ets`, say), the callee replies
+`{error, #beamtalk_error{kind = not_serialisable, selector = S}}` instead; the
+method's state change stands, exactly as if it had raised after mutating.
+
+The receiving actor's `handle_call`/`handle_cast` prelude recognises the
+`'$beamtalk_wire'` tag, decodes, and dispatches through the normal path. The
+envelope's leading version (`1`) is the wire-format version, distinct from any
+class's `shapeVersion`; a receiver that does not know the wire version refuses
+with `wire_version_unsupported`.
 
 #### 5.2 Version skew (consumes ADR 0123 + ADR 0125 §3.4)
 
@@ -327,8 +402,19 @@ one comparison on the local path — constraint 2 holds.
 | Envelope whose class is not loaded | `#beamtalk_error{kind = class_not_found}` |
 | Migration step raises | `#beamtalk_error{kind = shape_migration_failed}` (ADR 0123) |
 
-For a **sync** send, the error is raised in the *sender* (the reply is an
-error) — the receiving actor's state is untouched, it never saw the message.
+**Request direction.** For a **sync** send, the error is raised in the
+*sender* (the reply is an error) — the receiving actor's state is untouched, it
+never saw the message.
+
+**Reply direction.** If the *caller* cannot decode a reply (a Value in the
+result is newer than the caller knows), the method **has already run** and
+the callee's state has changed. The caller raises `shape_version_ahead` with
+`details = #{direction => reply}`; semantically this is "executed, result
+undecodable" — the same possibly-executed situation as a timeout (§7.2), and
+documented alongside it. The ADR 0125 deployment rule (upgrade the receiving
+side of a class first) avoids it for request payloads; for reply payloads it
+means *callers* of a method returning a bumped Value should be upgraded
+first.
 For a **cast**, there is no one to tell: the receiver logs it (`?LOG_WARNING`,
 domain `[beamtalk, runtime, dist]`) and emits a telemetry event
 `[beamtalk, dist, wire_rejected]`; the cast is dropped, matching Erlang's
@@ -354,6 +440,11 @@ SystemAnnouncer current when: NodeShapeSkew do: [:e |
     " local v", e localVersion printString, " remote v", e remoteVersion printString
 ]
 ```
+
+The comparison is re-run when a class is (re)loaded while peers are
+connected — `beamtalk_node_monitor` subscribes to `ClassLoaded` and, for a
+class whose `shapeVersion` changed, re-queries each connected peer's version of
+that class — so a hot reload on one node after connect still announces skew.
 
 Negotiation **informs; it does not refuse the connection**. Refusing would
 make every rolling upgrade (ADR 0125: "one shape-version bump per deploy,
@@ -428,14 +519,22 @@ remote actor, like any other runtime error there.
 
 Non-local return (`^`) from a block invoked on another node during a sync call
 behaves as it does across a local process hop: the escape travels back in the
-reply message (the mechanism ADR 0110 hardens for class-method hops), which is
-node-agnostic. Phase 3 includes a two-node test to pin this. A `^` from a block that outlives
+reply message as the `{'$bt_nlr', Token, Value, State}` tuple (the mechanism
+ADR 0110 hardens for class-method hops). The wire encoder treats that tuple
+specially (§5.1: `Value` walked, `State` passed raw). This is the claim most
+likely to be wrong in practice, so it is tested in the Phase 0.5 spike, not
+deferred to Phase 3. A `^` from a block that outlives
 its defining method raises as it does locally.
 
 Blocks through class methods (§ Passing Blocks Through Class Methods) need no
-special rule: a class method runs in its class's gen_server **on the node the
-class-side send was addressed to**, which for `Driver run: aBlock over: xs` is
-always the local node. Class-side sends are never implicitly remote in v1.
+special rule, **because a class object never crosses a node as a remote
+reference**: the wire encoder rewrites class objects to by-name refs resolved on
+the receiving node (§5.1). So `remoteCounter class` evaluated on node A — where
+the reply comes back from B — is A's `Counter` class, and `Driver run: aBlock
+over: xs` always runs in the class process of the node that evaluates it.
+Without this rewrite a class object returned from B would carry B's class
+gen_server pid, and a class-side send to it would silently ship `aBlock` to B;
+Phase 0.5 includes a test pinning the rewrite.
 
 ### 6. Typing: transparent, with "known-remote" provenance
 
@@ -447,7 +546,7 @@ remote actor.
 
 The checker does, however, track a **flow fact** — not a type — marking a
 local variable as *known-remote* when it is bound from `spawnOn:`,
-`spawnWith:on:`, `spawnAs:on:`, `named:on:`, or any `scope: #cluster`
+`spawnWith:on:`, `spawnAs:on:`, `named:on:`, or any `scope: #global`
 selector (through `unwrap`, `value`, `ifOk:ifError:` ok-branches). Known-remote
 receivers upgrade ADR 0103's boundary checks:
 
@@ -459,7 +558,21 @@ receivers upgrade ADR 0103's boundary checks:
 
 All are `DiagnosticCategory::Sendability`, adjustable via
 `[diagnostics] sendability = "hint"`. Provenance does not flow through fields,
-collections or method returns; the runtime check (§5.4) is authoritative.
+collections or method returns; the runtime check (§5.1/§5.4, which inspects
+runtime classes, not declared types) is authoritative.
+
+**Divergence from ADR 0103.** ADR 0103 anticipated an *info-level* note for
+`#node` handles sent to known-remote receivers (0103 L170-173, L254). This ADR
+raises it to **Warning** because it also changes the runtime: 0103 assumed the
+handle would cross silently and merely misbehave; under §5.4 it is
+deterministically rejected, so the diagnostic predicts a certain runtime error,
+which is Warning territory by ADR 0103's own severity rule for `#process`.
+
+**`withTimeout:` hides remoteness.** `remote withTimeout: 30000` returns a
+*local* `TimeoutProxy`; its `node`/`isRemote` report the local node, and the
+provenance fact does not flow through `withTimeout:`. `TimeoutProxy` forwards
+`node` and `isRemote` to its target (Phase 2), and the checker propagates
+known-remote through `withTimeout:` (Phase 6).
 
 ```beamtalk
 cache := Ets new: #sessions type: #set
@@ -478,13 +591,23 @@ c remember: cache
 | `exit:{{nodedown, N}, _}` / `noconnection` during call | catch-all → `actor_dead` (wrong) | **`node_down`**, `details = #{node => N}` |
 | `exit:{noproc, _}` on remote pid | `actor_dead` | `actor_dead` (unchanged — the node answered, the actor is gone) |
 | `exit:{timeout, _}` | `timeout` | `timeout` (unchanged) |
-| `{registered, N, Node}` not registered | — | `no_such_process` (as local) |
+| `exit:{noproc, _}` on a `{registered, N, Node}` / `{global, N}` ref | — | `no_such_process` (the ref-shaped branch is checked before the pid branch, matching the local `whereis` path) |
 | `badfun`/`undef` for a block's module | `erlang_error` | **`remote_code_mismatch`** |
-| envelope newer than receiver | — | `shape_version_ahead` |
-| `Port`/`Ets`/… in remote args | silently shipped | **`not_serialisable`** (sender) |
+| envelope newer than receiver (request or reply) | — | `shape_version_ahead` |
+| envelope class not loaded on receiver | — | `class_not_found` (existing) |
+| migration step raises | — | `shape_migration_failed` (ADR 0123) |
+| `Port`/`Ets`/… in remote args or reply | silently shipped | **`not_serialisable`** |
+| unknown `'$beamtalk_wire'` version | — | `wire_version_unsupported` |
+| `Node named:` on a malformed name | — | `invalid_node_name` |
+| `Node connect` off-host without TLS dist | — | `insecure_distribution` |
 
-`node_down` and `remote_code_mismatch` map to `RuntimeError` in
-`kind_to_class/1`, like `actor_dead`. `node_down` is distinct from
+This is the canonical list of kinds the ADR adds or newly routes. Every kind in
+it that `kind_to_class/1` does not already map (`node_down`,
+`remote_code_mismatch`, `not_serialisable`, `shape_version_ahead`,
+`shape_migration_failed`, `wire_version_unsupported`, `invalid_node_name`,
+`insecure_distribution`) maps to `RuntimeError` — except `invalid_node_name`,
+a caller mistake, which maps like `type_error` — and is added to the `.hrl`
+kind list in Phase 0. `node_down` is distinct from
 `actor_dead` on purpose: after a partition the actor may be perfectly alive,
 and retry logic must be able to tell "try again later" from "it's gone".
 
@@ -588,9 +711,16 @@ code execution, and the distribution boundary is single-user.
    from `RELEASE_COOKIE`/`vm.args` (releases) or the workspace cookie file
    (workspaces), never from Beamtalk code. Per-peer cookies remain an FFI
    escape hatch (`erlang:set_cookie/2`).
-4. **Workspaces are not cluster members by accident.** A workspace connects
-   to other nodes only through an explicit `Node connect` (or `spawnOn:` /
-   `named:on:`, which connect implicitly and apply the same policy).
+4. **Workspaces are not cluster members by accident — mostly.** The Beamtalk
+   API connects only through `Node connect`, `spawnOn:` and `named:on:`, which
+   apply the item-2 policy. But Erlang auto-connects on *any* send to a remote
+   pid, so a pid received from elsewhere can open a connection the policy never
+   saw. The item-2 guard is therefore **advisory for the language surface**,
+   not an enforcement boundary; operators who need enforcement set
+   `-kernel dist_auto_connect never` (the API then connects explicitly) and,
+   off-host, TLS distribution. With ADR 0125's `inet_dist_use_interface
+   {127,0,0,1}`, off-host connections already fail at the socket layer; the
+   item-2 guard exists to turn that into an actionable error message.
 5. **Tooling nodes are hidden.** The ADR 0097 attach front should start as a
    hidden node (`-hidden`) so it does not appear in `Node connected`, does not
    raise `NodeUp`, and does not join the `global` mesh. This is a follow-up
@@ -699,7 +829,7 @@ failure modes of Smalltalk remote proxies.
 
 **Erlang/Elixir developer.** Everything maps to something they know:
 `spawnOn:` is `erpc` + `gen_server:start`, `named:on:` is `{Name, Node}`,
-`scope: #cluster` is `global`, events are `monitor_nodes`. Messages to remote
+`scope: #global` is `global`, events are `monitor_nodes`. Messages to remote
 Beamtalk actors from Erlang must use the wire form or go through
 `beamtalk_actor:sync_send/3` (which encodes); a raw `gen_server:call` with a
 local-form message still works when no Values are involved. They gain what OTP
@@ -839,6 +969,24 @@ use `monitor`.
 ### Handshake-only / always-wrap wire policies
 Rejected — see Steelman.
 
+### Per-message version header instead of per-Value envelopes
+Send `term_to_binary(Args)` untouched plus one header mapping each class that
+appears to its `shapeVersion`, negotiated once per connection; migrate on the
+receiver by walking only if the header shows skew. Cheaper in the common
+no-skew case. Rejected for v1 because the receiver still needs the full walk
+whenever any class is skewed, the header must itself be computed by a walk on
+the sender (to know which classes appear), and ADR 0123/0125 already fixed the
+per-envelope shape as the shared contract with persistence. Worth revisiting
+as an optimisation behind the same `beamtalk_wire` interface.
+
+### Remote evaluation only (`node evaluate: [ ... ]`)
+An `erpc`-backed primitive that runs a block on another node and returns the
+result, with no remote actor references at all. Much smaller, and covers
+tooling and scripting cases. Rejected as the *whole* v1 because long-lived
+remote actors (the stated goal) still need spawn, lookup and a wire; and
+because shipping blocks is the hardest part of distribution (§5.5), making it
+the primary interface would put the weakest guarantee at the centre.
+
 ## Consequences
 
 ### Positive
@@ -856,8 +1004,19 @@ Rejected — see Steelman.
 - The ad-hoc remote-pid liveness checks collapse into one shared helper.
 
 ### Negative
-- Remote sends pay a deep term walk for encoding/decoding; large payloads of
-  nested Values are measurably slower remotely than a raw Erlang message.
+- Remote sends pay a full term walk on encode and decode (every list, tuple
+  and map, a class-kind lookup per tagged map), on both the request and reply
+  paths; large payloads are measurably slower remotely than a raw Erlang
+  message. The walk is linear and depth-capped, and local sends pay nothing.
+- Remote spawns are not tracked by the spawning workspace and are not linked:
+  an actor spawned on B outlives A's session, and an `erpc` timeout after a
+  successful spawn leaks an unowned actor. Named spawns make retries safe;
+  owner-monitoring is future work.
+- A reply that fails to decode (`shape_version_ahead`, reply direction) means
+  the method ran but the caller cannot see the result — a second
+  possibly-executed failure mode besides timeout.
+- `scope: #global` inherits `global`'s full-mesh locking cost and OTP 25+'s
+  `prevent_overlapping_partitions` disconnects.
 - Local and remote paths diverge in the runtime (tagged wire message vs local
   form); both need tests, and a multi-node test harness (`peer`) becomes a CI
   requirement.
@@ -881,68 +1040,97 @@ Rejected — see Steelman.
 
 ## Implementation
 
-Each phase is independently shippable. Sizes are rough.
+Phases are ordered so that nothing ships an unversioned or unchecked cross-node
+path: any selector that carries arguments to another node lands together with
+the wire (Phase 3), never before it. Sizes are rough.
 
 **Phase 0 — Remote-safe runtime and multi-node test harness (M).**
 Extract `beamtalk_pid:is_alive/1` from `subscriber_alive/1` and route all
 `beamtalk_actor` guards through it; `lookup_class/1` uses the object record for
-remote pids; map `{nodedown, N}`/`noconnection` to `node_down` and add
-`node_down`/`remote_code_mismatch` to `kind_to_class/1` and the `.hrl` kind
-list. Add a `peer`-based (OTP 25+) two-node EUnit/CT fixture. Raw remote pids
-(via FFI) work end-to-end at the end of this phase.
+remote pids; map `{nodedown, N}`/`noconnection` to `node_down`, remote
+ref-shaped `noproc` to `no_such_process`, and add every §7.1 kind to
+`kind_to_class/1` and the `.hrl` kind list. Add a `peer`-based (OTP 25+)
+two-node EUnit/CT fixture. Raw remote pids (via FFI) work end-to-end at the end
+of this phase.
 *Files:* `beamtalk_actor.erl`, `beamtalk_announcements.erl`,
-`beamtalk_inspector.erl`,
-`beamtalk_exception_handler.erl`, `beamtalk.hrl`, new `beamtalk_pid.erl`.
+`beamtalk_inspector.erl`, `beamtalk_exception_handler.erl`, `beamtalk.hrl`,
+new `beamtalk_pid.erl`.
+
+**Phase 0.5 — Wire-check spike (S, throwaway code, kept tests).**
+Before building the language surface, prove the assumptions most likely to be
+wrong, on two `peer` nodes: (a) `erpc` + `safe_spawn_named/3` + immediate
+unlink leaves a live actor (§3); (b) a block defined on A and invoked on B at a
+different module version raises `badfun`, and the mapping to
+`remote_code_mismatch` can identify the module; (c) an NLR `^` from a block run
+on B during a sync call returns correctly to A; (d) an async send's future
+resolves across nodes; (e) a class object returned from B, re-sent to, resolves
+to A's class once rewritten. Findings feed back into this ADR before Phase 2.
 
 **Phase 1 — `Node` class and cluster events (M).**
 `stdlib/src/node.bt` (`native:` backing `beamtalk_node.erl`), `Pid>>node`,
-`Actor>>node`/`isRemote`; `beamtalk_node_monitor` under
-`beamtalk_runtime_sup`; `NodeUp`/`NodeDown` announcement classes; the §9
-`insecure_distribution` connect policy. BUnit tests in `stdlib/test/node_test.bt`
-plus two-node runtime tests.
+`Actor>>node`/`isRemote` (forwarded by `TimeoutProxy`); `beamtalk_node_monitor`
+under `beamtalk_runtime_sup`; `NodeUp`/`NodeDown` announcement classes; the §9
+`insecure_distribution` connect policy. BUnit tests in
+`stdlib/test/node_test.bt` plus two-node runtime tests.
 
-**Phase 2 — Remote spawn and lookup (M).**
-`spawnOn:`, `spawnWith:on:`, `spawnAs:on:`, `spawnWith:as:on:`, `named:on:`,
-`allRegisteredOn:` in `actor.bt`; `beamtalk_actor:remote_spawn/3` via `erpc`;
-`{registered, Name, Node}` ref form and `?IS_REGISTERED_REF` update.
-Depends on Phase 0.
+**Phase 2 — Argument-free remote spawn and lookup (S/M).**
+`spawnOn:`, `spawnAs:on:`, `named:on:`, `allRegisteredOn:` in `actor.bt`;
+`beamtalk_actor:remote_spawn/3` via `erpc` (with the unlink from §3);
+`{registered, Name, Node}` ref form and `?IS_REGISTERED_REF` update. Sends to
+these actors still carry raw arguments until Phase 3, so this phase ships
+behind the same release as Phase 3 or is documented as "no Value arguments"
+until then. Depends on Phases 0 and 0.5.
 
 **Phase 3 — The wire (L).**
-New `beamtalk_wire.erl` (encode/decode, tagged message, reply symmetry);
-`pack_wire/1` (policy parameter on the internal walk) and `unpack_strict/1` in
-`beamtalk_shape_migration.erl` (ADR 0125 §3.4, including the private
-recursions at lines 507-517 and 684-690); registered-ref rewriting;
-`handleScope: #node` on `Ets`, `AtomicCounter`, `Timer`; `badfun`/`undef` →
-`remote_code_mismatch`; dispatch prelude recognising the wire tag; two-node
-tests for version-ahead, migrate-forward, `late` slot absence, NLR relay.
-Depends on Phases 0 and 2.
+New `beamtalk_wire.erl` (full term walk encode/decode per §5.1, all three send
+kinds, sync reply and future-resolution paths, class-object and NLR handling,
+callee-side encode-failure replies); `pack_wire/1` (policy parameter on the
+internal walk) and `unpack_strict/1` in `beamtalk_shape_migration.erl` (ADR
+0125 §3.4, including the private recursions at lines 507-517 and 684-690);
+registered-ref rewriting; `handleScope: #node` on `Ets`, `AtomicCounter`,
+`Timer`; `badfun`/`undef` → `remote_code_mismatch`; handle_call/handle_cast
+prelude recognising the wire tag; `spawnWith:on:` and `spawnWith:as:on:`.
+Two-node tests: version-ahead (request and reply), migrate-forward, Values
+inside `Array`/`Dictionary`, `Ets` inside an `Array` rejected, `late` slot
+absence, NLR relay, future resolution. Depends on Phases 0 and 2.
 
-**Phase 4 — Connect-time shape negotiation (S/M).**
-`NodeShapeSkew`, manifest exchange in `beamtalk_node_monitor`, `Node>>shapeManifest`.
-Depends on Phase 1 and ADR 0125's `Beamtalk shapeManifest`.
+**— v1 safety line —** Phases 0–3 deliver the safe core: nodes, remote
+spawn/lookup, and a versioned, handle-checked wire. Phases 4–7 add visibility
+and convenience and can be scheduled independently.
 
-**Phase 5 — Cluster scope (M).**
-`scope: #cluster` selectors via `global`; `{global, Name}` refs;
-`reserved_name/1` applied; `#globalNameConflict` stop reason.
-Depends on Phase 2.
+**Phase 4 — Connect-time and reload-time shape negotiation (S/M).**
+`NodeShapeSkew`, manifest exchange in `beamtalk_node_monitor`, re-check on
+`ClassLoaded`, `Node>>shapeManifest`. Depends on Phase 1 and ADR 0125's
+`Beamtalk shapeManifest`.
+
+**Phase 5 — Global scope (M).**
+`scope: #global` selectors via `global`, including
+`SupervisionSpec withName:scope:`; `{global, Name}` refs; `reserved_name/1`
+applied; `resolve_global_conflict/3` and the `#globalNameConflict` stop
+reason. Depends on Phase 3.
 
 **Phase 6 — Known-remote diagnostics (M).**
 Provenance fact in `crates/beamtalk-core/src/semantic_analysis/type_checker/`
-(flow-local); extend `validation.rs` actor-message checks and
-`sendability_validators.rs::check_block_captures` with the known-remote rows
-of §6. Tests in the type-checker suite.
+(flow-local, propagated through `withTimeout:`); extend `validation.rs`
+actor-message checks and `sendability_validators.rs::check_block_captures` with
+the known-remote rows of §6. Tests in the type-checker suite.
 
 **Phase 7 — Tooling and docs (M).**
 `ProcessNavigation on:`, `SupervisionNode node`, inspector `node` field,
 `nodes` surface op (REPL/MCP/LiveView) and `surface-parity.md`;
-`docs/beamtalk-language-features.md` § Distribution; ADR 0097 hidden-node
-follow-up issue.
+`docs/beamtalk-language-features.md` § Distribution (including the timeout /
+undecodable-reply / non-idempotent-spawn caveats and `global` mesh side
+effects); ADR 0097 hidden-node follow-up issue.
 
-**Conformance.** The wire tag and envelope cross Rust ↔ Erlang only via
-`beamtalk_shape_chain`/`beamtalk_shape_migration` (Erlang-only — the compiler
-emits `__beamtalk_meta` `shape_migrations`, which ADR 0123 already covers). The
-new error kinds follow the existing `.hrl` ↔ `kind_to_class/1` pattern. No new
-cross-language table is introduced.
+**Conformance.** The wire tag and envelope are Erlang-only
+(`beamtalk_wire`, `beamtalk_shape_chain`, `beamtalk_shape_migration`); the
+compiler's only contribution is `__beamtalk_meta` `shape_migrations`, which
+ADR 0123 already covers. The runtime class→tier classification the wire uses
+goes through `field_tier/1`, already pinned against `sendability.rs` by the
+BT-3542 conformance test; the `handleScope: #node` declarations are read from
+class metadata, so compile-time and runtime tiers come from the same source.
+The new error kinds follow the existing `.hrl` ↔ `kind_to_class/1` pattern. No
+new cross-language table is introduced.
 
 ## Migration Path
 
@@ -954,6 +1142,9 @@ changes for code already using distribution via FFI:
    also match `#node_down`.
 2. `Ets`, `AtomicCounter` and `Timer` values sent to a remote actor now raise
    `not_serialisable` in the sender instead of arriving as dangling handles.
+3. Class objects sent to another node arrive as the receiving node's class of
+   the same name (by-name rewrite, §5.1), not as a reference to the sender's
+   class process.
 
 ## References
 - Related issues: BT-3527 (this ADR), BT-3524 (versioned state), BT-3525
