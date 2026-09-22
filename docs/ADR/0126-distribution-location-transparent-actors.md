@@ -1,9 +1,16 @@
 # ADR 0126: Distribution and Location-Transparent Actors
 
 ## Status
-Proposed (2026-09-22) — to be accepted after the Phase 0.5 wire-check spike
-(see Implementation) confirms or corrects its four load-bearing runtime
-assumptions.
+Accepted (2026-09-22). The Phase 0.5 wire-check spike (BT-3579; see
+Implementation) confirms or corrects this ADR's five load-bearing runtime
+assumptions. Its findings are folded back in as an amendment before Phases 1–7
+are filed.
+
+## Implementation Tracking
+
+**Epic:** BT-3577
+**Issues:** BT-3578 (Phase 0), BT-3579 (Phase 0.5 spike). Phases 1–7 are filed after the spike.
+**Status:** Planned
 
 ## Context
 

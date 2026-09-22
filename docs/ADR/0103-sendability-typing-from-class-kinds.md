@@ -172,7 +172,7 @@ Header clauses are parsed in a fixed order:
    future ADR. When that ADR lands, `#node`-scoped sends to known-remote
    receivers gain an info-level note. Recorded as blocked, not designed here.
 
-   > **Amendment (2026-09-22, BT-3527 / ADR 0126, Proposed):** ADR 0126 makes
+   > **Amendment (2026-09-22, BT-3527 / ADR 0126):** ADR 0126 makes
    > `#node`-scoped values crossing a node boundary a deterministic runtime
    > rejection (`not_serialisable`), so a `#node` send to a *known-remote*
    > receiver becomes a **Warning**, not the info-level note anticipated
