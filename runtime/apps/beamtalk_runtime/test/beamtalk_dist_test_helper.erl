@@ -103,6 +103,15 @@ start_peer/1 with options:
   distribution-based channel) halts the peer as soon as this node
   disconnects from it, so a test that disconnects on purpose and expects
   the peer to survive (e.g. to reconnect) passes `standard_io`.
+
+`peer:start/1`'s own `wait_boot` defaults to 15 seconds
+(`peer:?WAIT_BOOT_TIMEOUT`) and raises a hard `exit(timeout)` — not a
+return value this module can turn into `{error, _}` — if the peer's `erl`
+process doesn't finish booting in time. A large `-pa` list (every path in
+this node's own `code:get_path/0`, forwarded below) makes that boot slower,
+and a shared CI runner under load can exceed 15 seconds even though it
+completes in a few seconds locally, so `wait_boot` is raised well past the
+default here rather than left to it.
 """.
 -spec start_peer(string(), #{extra_args => [string()], connection => standard_io}) ->
     {ok, peer:server_ref(), node()} | {error, term()}.
@@ -116,7 +125,8 @@ start_peer(NamePrefix, Opts) ->
     PeerOpts0 = #{
         name => PeerName,
         host => Host,
-        args => CookieArgs ++ ExtraArgs ++ CodePathArgs
+        args => CookieArgs ++ ExtraArgs ++ CodePathArgs,
+        wait_boot => 60000
     },
     PeerOpts =
         case Opts of
