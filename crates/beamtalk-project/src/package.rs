@@ -86,6 +86,32 @@ pub fn is_under_stubs_dir(root: &Path, file: &Path) -> bool {
     try_canonicalize(file).starts_with(try_canonicalize(root).join("stubs"))
 }
 
+/// Returns `true` if `file` lives under a `stdlib/src` directory anywhere in
+/// its ancestry — the same convention `beamtalk build-stdlib` hardcodes via
+/// its `STDLIB_SOURCE_DIR` constant to locate stdlib sources.
+///
+/// Unlike [`is_under_stubs_dir`], this takes no `root`: the stdlib source
+/// tree has no `beamtalk.toml` (it isn't a real package), so
+/// [`find_package_root`] never resolves a root for it and callers have
+/// nothing else to anchor a containment check on. `file` is canonicalized
+/// first so the check is correct regardless of the relative path a caller
+/// passes in (e.g. running from inside `stdlib/src` itself).
+///
+/// `beamtalk lint` uses this to set `CompilerOptions::stdlib_mode` per file
+/// — without it, every stdlib class that legitimately overrides a sealed
+/// method (e.g. `Uuid class new:`, which raises a pointed error instead of
+/// constructing) is reported as a "Cannot override sealed method" error
+/// that `beamtalk build-stdlib` never emits.
+#[must_use]
+pub fn is_under_stdlib_src_dir(file: &Path) -> bool {
+    let canonical = try_canonicalize(file);
+    let components: Vec<&str> = canonical
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+    components.windows(2).any(|pair| pair == ["stdlib", "src"])
+}
+
 /// Collect all `.bt` files from a package's conventional source directories
 /// (`src/` and `test/`) for cross-file class resolution.
 ///
@@ -272,6 +298,39 @@ mod tests {
         fs::write(&other_stubs_file, "declare native: lists\n").unwrap();
 
         assert!(!is_under_stubs_dir(&root, &other_stubs_file));
+    }
+
+    #[test]
+    fn is_under_stdlib_src_dir_true_for_file_under_stdlib_src() {
+        let tmp = TempDir::new().unwrap();
+        let stdlib_src = tmp.path().join("stdlib").join("src");
+        fs::create_dir_all(&stdlib_src).unwrap();
+        let file = stdlib_src.join("uuid.bt");
+        fs::write(&file, "Value subclass: Uuid\n").unwrap();
+
+        assert!(is_under_stdlib_src_dir(&file));
+    }
+
+    #[test]
+    fn is_under_stdlib_src_dir_false_for_stdlib_test() {
+        let tmp = TempDir::new().unwrap();
+        let stdlib_test = tmp.path().join("stdlib").join("test");
+        fs::create_dir_all(&stdlib_test).unwrap();
+        let file = stdlib_test.join("uuid_test.bt");
+        fs::write(&file, "TestCase subclass: UuidTest\n").unwrap();
+
+        assert!(!is_under_stdlib_src_dir(&file));
+    }
+
+    #[test]
+    fn is_under_stdlib_src_dir_false_for_unrelated_project() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        let file = src.join("foo.bt");
+        fs::write(&file, "Object subclass: Foo\n").unwrap();
+
+        assert!(!is_under_stdlib_src_dir(&file));
     }
 
     #[test]

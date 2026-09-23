@@ -15,7 +15,5 @@ Actor subclass: TerminateActor
     self.tableName isNil
       ifFalse: [
         table := Ets named: self.tableName
-        table at: #called put: true
-        table at: #reason put: reason
-        table at: #value put: self.value
+        table at: #called put: true; at: #reason put: reason; at: #value put: self.value
       ]

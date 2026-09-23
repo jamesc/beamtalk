@@ -36,7 +36,7 @@
 ///
 /// @see Exception (for exception-based error handling)
 /// @see Error (for exception subclass with reason codes)
-sealed typed Value subclass: Result(T, E)
+sealed typed Value subclass: Result(T, E) native: beamtalk_result
   field: okValue :: T = nil
   field: errReason :: E = nil
   field: isOk :: Boolean = true
@@ -51,7 +51,7 @@ sealed typed Value subclass: Result(T, E)
   /// Result ok: "hello"     // => Result ok: "hello"
   /// Result ok: nil         // => Result ok: nil
   /// ```
-  class ok: value :: T -> Result(T, E) => (Erlang beamtalk_result) ok: value
+  class ok: value :: T -> Result(T, E) => self delegate
 
   /// Create a failed Result wrapping an error reason (class method).
   ///
@@ -65,6 +65,9 @@ sealed typed Value subclass: Result(T, E)
   /// Result error: Error new    // => Result error: <Error>
   /// ```
   /// To capture a raised exception as a Result, use `Result tryDo: [Error signal: "oops"]`.
+  ///
+  /// Stays inline FFI (not `self delegate`): the backing function is named
+  /// `makeError:`, not `error:`.
   class error: reason :: E -> Result(T, E) =>
     (Erlang beamtalk_result) makeError: reason
 
@@ -80,8 +83,7 @@ sealed typed Value subclass: Result(T, E)
   /// Result tryDo: [Exception signal: "oops"]   // => Result error: <Exception>
   /// Result tryDo: [(File readAll: "missing.txt") unwrap] // => Result error: <Exception>
   /// ```
-  class sealed tryDo: block :: Block(T) -> Result(T, Exception) =>
-    (Erlang beamtalk_result) tryDo: block
+  class sealed tryDo: block :: Block(T) -> Result(T, Exception) => self delegate
 
   /// Convert an Erlang-style tagged tuple to a Result (class method).
   ///
@@ -93,8 +95,7 @@ sealed typed Value subclass: Result(T, E)
   /// Result fromTuple: (Tuple withAll: #(#ok, 42))       // => Result ok: 42
   /// Result fromTuple: (Tuple withAll: #(#error, #oops)) // => Result error: ...
   /// ```
-  class fromTuple: tuple :: Tuple -> Result(T, E) =>
-    (Erlang beamtalk_result) fromTuple: tuple
+  class fromTuple: tuple :: Tuple -> Result(T, E) => self delegate
 
   // ===== Instance Methods — Querying =====
 
@@ -193,6 +194,10 @@ sealed typed Value subclass: Result(T, E)
   /// This method NEVER returns a value — it always raises. The `-> T` return
   /// annotation exists only so the call typechecks as the `ifFalse:` branch of
   /// `unwrap -> T` (Beamtalk has no `Never`/`Bot` type to express divergence).
+  ///
+  /// Stays inline FFI (not `self delegate`): the backing function takes only
+  /// `aReason`, not `self` — `self delegate` would wrongly thread `self` as
+  /// an extra leading argument.
   internal unwrapError: aReason :: E -> T =>
     (Erlang beamtalk_result) unwrapError: aReason
 

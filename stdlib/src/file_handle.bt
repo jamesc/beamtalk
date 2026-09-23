@@ -33,7 +33,7 @@
 ///   handle sync.
 /// ].
 /// ```
-sealed typed Object subclass: FileHandle
+sealed typed Object subclass: FileHandle native: beamtalk_file_handle
 
   /// Return a lazy Stream of lines from this file handle.
   ///
@@ -53,6 +53,9 @@ sealed typed Object subclass: FileHandle
   ///   handle lines do: [:line | Transcript show: line].
   /// ].
   /// ```
+  ///
+  /// Stays inline FFI (not `self delegate`): the backing function lives on
+  /// `beamtalk_file`, not this class's own `beamtalk_file_handle` module.
   lines -> Stream(String) => (Erlang beamtalk_file) handleLines: self
 
   /// Read up to `count` bytes from the current position.
@@ -68,8 +71,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// (handle read: 4) unwrap   // => the next 4 bytes
   /// ```
-  read: count :: Integer -> Result(Binary, Error) =>
-    (Erlang beamtalk_file_handle) read: self count: count
+  read: count :: Integer -> Result(Binary, Error) => self delegate
 
   /// Read from the current position to end-of-file.
   ///
@@ -83,8 +85,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// (handle readAll) unwrap   // => the rest of the file
   /// ```
-  readAll -> Result(Binary, Error) =>
-    (Erlang beamtalk_file_handle) readAll: self
+  readAll -> Result(Binary, Error) => self delegate
 
   // === Writing ===
 
@@ -98,8 +99,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// handle write: "hello"
   /// ```
-  write: data :: String | Binary -> Result(Nil, Error) =>
-    (Erlang beamtalk_file_handle) write: self data: data
+  write: data :: String | Binary -> Result(Nil, Error) => self delegate
 
   /// Write a String or Binary followed by a newline.
   ///
@@ -108,8 +108,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// handle writeLine: "a log line"
   /// ```
-  writeLine: data :: String | Binary -> Result(Nil, Error) =>
-    (Erlang beamtalk_file_handle) writeLine: self data: data
+  writeLine: data :: String | Binary -> Result(Nil, Error) => self delegate
 
   // === Positioning ===
 
@@ -120,8 +119,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// (handle position) unwrap   // => 0
   /// ```
-  position -> Result(Integer, Error) =>
-    (Erlang beamtalk_file_handle) position: self
+  position -> Result(Integer, Error) => self delegate
 
   /// Move to an absolute byte offset measured from the start of the file,
   /// returning the new position.
@@ -134,8 +132,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// (handle seek: 0) unwrap   // => 0  (rewind)
   /// ```
-  seek: offset :: Integer -> Result(Integer, Error) =>
-    (Erlang beamtalk_file_handle) seek: self to: offset
+  seek: offset :: Integer -> Result(Integer, Error) => self delegate
 
   // === Lifecycle ===
 
@@ -149,7 +146,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// handle flush
   /// ```
-  flush -> Result(Nil, Error) => (Erlang beamtalk_file_handle) flush: self
+  flush -> Result(Nil, Error) => self delegate
 
   /// Force written data to physical storage (fsync).
   ///
@@ -162,7 +159,7 @@ sealed typed Object subclass: FileHandle
   /// handle write: record.
   /// handle sync.
   /// ```
-  sync -> Result(Nil, Error) => (Erlang beamtalk_file_handle) sync: self
+  sync -> Result(Nil, Error) => self delegate
 
   /// Close the handle.
   ///
@@ -173,7 +170,7 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// handle close
   /// ```
-  close -> Result(Nil, Error) => (Erlang beamtalk_file_handle) close: self
+  close -> Result(Nil, Error) => self delegate
 
   /// Whether the handle is still open.
   ///
@@ -182,4 +179,4 @@ sealed typed Object subclass: FileHandle
   /// ```beamtalk
   /// handle isOpen   // => true
   /// ```
-  isOpen -> Boolean => (Erlang beamtalk_file_handle) isOpen: self
+  isOpen -> Boolean => self delegate

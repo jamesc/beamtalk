@@ -60,7 +60,7 @@ TestCase subclass: RawErrorClassificationTest
 
   firstEven =>
     #(1, 2, 3, 4) do: [:x | x isEven ifTrue: [^x]]
-    ^0
+    0
 
   testOnDoStillCatches =>
     result := [#(1, "x") sum] on: Exception do: [:e | "caught"]
