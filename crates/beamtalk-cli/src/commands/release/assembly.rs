@@ -18,15 +18,22 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::process::Command;
 
+use beamtalk_codegen::core_erlang::escape_atom_chars;
+
 use crate::beam_compiler::escape_erlang_string;
+use crate::commands::util::to_forward_slash;
 
 use super::closure::{AppClosure, StagedApp};
 
 /// Copy every staged app's compiled `ebin/` contents into
 /// `<release_dir>/lib/<app>-<vsn>/ebin/`.
 ///
-/// Returns the absolute `lib/<app>-<vsn>/ebin` directories, in closure
-/// order — the `{path, …}` list `systools:make_script/2` needs.
+/// Returns the `lib/<app>-<vsn>/ebin` directories, in closure order — the
+/// `{path, …}` list `systools:make_script/2` needs. `release_dir` should
+/// already be absolute (see [`absolutize`]): the returned paths are a plain
+/// join under it, not `canonicalize`d, so they stay a literal string prefix
+/// match for the `RELEASE_DIR` variable `write_rel_and_boot_script` derives
+/// from that same `release_dir` via the same, non-canonicalizing join.
 pub fn stage_apps(release_dir: &Utf8Path, closure: &AppClosure) -> Result<Vec<Utf8PathBuf>> {
     let lib_dir = release_dir.join("lib");
     let mut staged_ebins = Vec::with_capacity(closure.staged_apps.len());
@@ -81,7 +88,7 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
         }
     }
 
-    Ok(dest.canonicalize_utf8().into_diagnostic().unwrap_or(dest))
+    Ok(dest)
 }
 
 /// Generate `releases/<vsn>/sys.config` — the `beamtalk_workspace`
@@ -98,12 +105,13 @@ pub fn generate_sys_config(
     console: bool,
     bind: &str,
 ) -> Result<Utf8PathBuf> {
+    let escaped_bind = escape_erlang_string(bind);
     let mut content = format!(
         "[\n\
          \x20 {{beamtalk_workspace, [\n\
          \x20   {{mode, release}},\n\
          \x20   {{console, {console}}},\n\
-         \x20   {{bind, \"{bind}\"}},\n\
+         \x20   {{bind, \"{escaped_bind}\"}},\n\
          \x20   {{auto_cleanup, false}}\n\
          \x20 ]}}"
     );
@@ -193,14 +201,17 @@ pub fn write_rel_and_boot_script(
     closure: &AppClosure,
     staged_ebins: &[Utf8PathBuf],
 ) -> Result<Utf8PathBuf> {
-    let rel_dir = release_dir.join("releases").join(release_vsn);
+    // Absolutize once and derive every other path from *this* value — see
+    // `absolutize`'s doc comment for why every path below has to agree,
+    // string-for-string, on how it got to absolute.
+    let release_dir_abs = absolutize(release_dir)?;
+    let rel_dir = release_dir_abs.join("releases").join(release_vsn);
     std::fs::create_dir_all(rel_dir.as_std_path())
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create '{rel_dir}'"))?;
 
     let rel_file = rel_dir.join(format!("{release_name}.rel"));
-    let releases_root = release_dir.join("releases");
-    let release_dir_abs = absolutize(release_dir)?;
+    let releases_root = release_dir_abs.join("releases");
 
     let eval = build_assembly_eval(
         release_name,
@@ -248,20 +259,61 @@ fn build_assembly_eval(
     releases_root: &Utf8Path,
     staged_ebins: &[Utf8PathBuf],
 ) -> String {
-    let host_apps_list = host_apps.join(", ");
+    // Every app name below is spliced into an expression `erl -eval`
+    // *evaluates* (not a string it merely reads), so each one goes through
+    // `escape_atom_chars` and stays inside a quoted-atom literal (`'…'`) —
+    // never a bare, unescaped identifier. `host_apps`/`staged_apps` names
+    // ultimately trace back to `extract_erlang_atom_list_field`
+    // (`closure.rs`), which is explicitly *not* a real Erlang term parser
+    // and just splits `{applications, […]}` text on commas — a crafted
+    // `.app` file from any staged dependency could otherwise smuggle
+    // arbitrary Erlang code (e.g. a name like `os:cmd("...")`) into a bare
+    // list literal and have it execute at build time. A quoted atom is a
+    // single term no matter what's inside the quotes, so this closes that
+    // off regardless of what the extractor's loose parsing lets through.
+    let host_apps_list = host_apps
+        .iter()
+        .map(|a| format!("'{}'", escape_atom_chars(a)))
+        .collect::<Vec<_>>()
+        .join(", ");
     let staged_names_list = staged_apps
         .iter()
-        .map(|a| format!("'{}'", a.name))
+        .map(|a| format!("'{}'", escape_atom_chars(&a.name)))
         .collect::<Vec<_>>()
         .join(", ");
     let staged_apps_term = staged_apps
         .iter()
-        .map(|a| format!("{{'{}', \"{}\"}}", a.name, escape_erlang_string(&a.vsn)))
+        .map(|a| {
+            format!(
+                "{{'{}', \"{}\"}}",
+                escape_atom_chars(&a.name),
+                escape_erlang_string(&a.vsn)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
+    // Forward-slash every path before it goes anywhere near the eval
+    // string: `Utf8Path::as_str()` carries native separators, and a native
+    // Windows `\` run inside an already-quote-escaped Erlang string
+    // literal is exactly the shape that miscounts under command-line
+    // re-quoting between this process and `erl`'s own argv parsing
+    // (verified against a real Windows CI failure — every staged `.app`
+    // reported `not_found` by `systools:make_script/2`, all at once, which
+    // a single shared mis-parsed path prefix explains and nothing else
+    // does). OTP accepts `/`-separated paths natively on Windows, so this
+    // sidesteps the whole class of backslash-requoting hazards rather than
+    // trying to get the escaping exactly right through every layer — the
+    // same reasoning (and the same shared `to_forward_slash` leaf) as
+    // `repl_startup.rs`'s `beam_pa_args` and `run.rs`'s eval-string path
+    // splicing use for the identical problem.
     let ebin_path_list = staged_ebins
         .iter()
-        .map(|p| format!("\"{}\"", escape_erlang_string(p.as_str())))
+        .map(|p| {
+            format!(
+                "\"{}\"",
+                escape_erlang_string(&to_forward_slash(p.as_str()))
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -341,13 +393,27 @@ fn build_assembly_eval(
                  halt(1) \
          end, \
          halt(0).",
-        rel_file_no_ext = escape_erlang_string(rel_file.as_str().trim_end_matches(".rel")),
-        release_dir_abs = escape_erlang_string(release_dir_abs.as_str()),
-        releases_root = escape_erlang_string(releases_root.as_str()),
+        rel_file_no_ext =
+            escape_erlang_string(to_forward_slash(rel_file.as_str()).trim_end_matches(".rel")),
+        release_dir_abs = escape_erlang_string(&to_forward_slash(release_dir_abs.as_str())),
+        releases_root = escape_erlang_string(&to_forward_slash(releases_root.as_str())),
     )
 }
 
-fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
+/// Make `path` absolute by joining it onto the current directory when it
+/// isn't already — deliberately **not** `canonicalize`/resolving symlinks.
+/// `write_rel_and_boot_script` passes the result as `{variables,
+/// [{"RELEASE_DIR", …}]}`, which `systools:make_script/2` uses to rewrite
+/// any staged ebin path that has it as a *literal string prefix* to
+/// `$RELEASE_DIR/…`; every staged ebin path this module produces is a plain
+/// join under the same `release_dir`, so both sides of that prefix match
+/// have to go through this identical, non-canonicalizing join or the
+/// prefix relationship silently breaks wherever the platform's temp
+/// directory is itself a symlink (macOS's `/tmp` → `/private/tmp`) — caught
+/// via a macOS-only CI failure (`ranch_app:start/2` undef at boot) that a
+/// prior version's `Utf8Path::canonicalize_utf8()` on the staged-ebin side
+/// alone, with no matching canonicalization on this side, produced.
+pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
     if path.is_absolute() {
         return Ok(path.to_owned());
     }
@@ -577,7 +643,98 @@ mod tests {
         assert!(eval.contains("\"start.boot\""), "{eval}");
         assert!(eval.contains("RELEASE_DIR"), "{eval}");
         assert!(eval.contains("'orders'"), "{eval}");
-        assert!(eval.contains("Seeds = [kernel, stdlib]"), "{eval}");
+        assert!(eval.contains("Seeds = ['kernel', 'stdlib']"), "{eval}");
         assert!(eval.contains("StagedNames = ['orders']"), "{eval}");
+    }
+
+    /// A host app name is never allowed to end up as a *bare* identifier in
+    /// the generated `Seeds = […]` list literal `erl -eval` evaluates. Every
+    /// entry `extract_erlang_atom_list_field` (`closure.rs`) can hand back
+    /// — which is explicitly not a real Erlang term parser and just splits
+    /// text on commas — must land inside a quoted-atom literal, with any
+    /// embedded quote/backslash escaped, so a crafted `.app` file
+    /// (`{applications, [kernel, 'os:cmd("pwned")']}`) can never smuggle a
+    /// second, executable expression into that list.
+    #[test]
+    fn build_assembly_eval_quotes_and_escapes_malicious_host_app_name() {
+        // The dangerous character for a *quoted atom* is `'` (the atom
+        // delimiter) — an unescaped one lets a crafted name close the atom
+        // early and splice a second, executable term into the `Seeds =
+        // […]` list literal `erl -eval` evaluates. `kernel'], os:cmd(...` is
+        // exactly that shape: naively spliced in bare, `Seeds = [kernel'],
+        // os:cmd("pwned"), ['stdlib]` would parse as two list elements, the
+        // second one a live function call.
+        let malicious = "kernel'], os:cmd(\"pwned\"), ['stdlib".to_string();
+        let eval = build_assembly_eval(
+            "orders",
+            "1.0.0",
+            std::slice::from_ref(&malicious),
+            &[],
+            &Utf8PathBuf::from("/rel/releases/1.0.0/orders.rel"),
+            &Utf8PathBuf::from("/rel"),
+            &Utf8PathBuf::from("/rel/releases"),
+            &[],
+        );
+        // Every `'` the malicious name contributes must come out escaped
+        // (`\'`), so none of them terminates the enclosing quoted atom —
+        // i.e. the *exact* escaped form is the only way this name appears.
+        assert!(
+            eval.contains(&format!("'{}'", escape_atom_chars(&malicious))),
+            "malicious host app name must be a single escaped quoted atom: {eval}"
+        );
+        // The raw name (with its live, un-escaped `'` characters) must not
+        // appear anywhere — that would mean it broke out of the atom.
+        assert!(!eval.contains(&malicious), "{eval}");
+    }
+
+    /// The staged-app equivalent of the above: a crafted `.app` naming a
+    /// dependency with an embedded `'` must stay inside a quoted-atom
+    /// literal rather than breaking out of it.
+    #[test]
+    fn build_assembly_eval_quotes_and_escapes_malicious_staged_app_name() {
+        let malicious_name = "orders', os:cmd(\"pwned\"), 'x".to_string();
+        let closure_apps = vec![StagedApp {
+            name: malicious_name.clone(),
+            vsn: "1.0.0".to_string(),
+            source_ebins: vec![],
+            declared_deps: Vec::new(),
+        }];
+        let eval = build_assembly_eval(
+            "orders",
+            "1.0.0",
+            &[],
+            &closure_apps,
+            &Utf8PathBuf::from("/rel/releases/1.0.0/orders.rel"),
+            &Utf8PathBuf::from("/rel"),
+            &Utf8PathBuf::from("/rel/releases"),
+            &[],
+        );
+        assert!(
+            eval.contains(&format!("'{}'", escape_atom_chars(&malicious_name))),
+            "malicious staged app name must be a single escaped quoted atom: {eval}"
+        );
+        assert!(!eval.contains(&malicious_name), "{eval}");
+    }
+
+    #[test]
+    fn generate_sys_config_escapes_bind_with_embedded_quote() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let malicious_bind = "127.0.0.1\"}, {evil, true}, {bind, \"0.0.0.0";
+        let path =
+            generate_sys_config(&root, &root, "config/sys.config", false, malicious_bind).unwrap();
+        let content = fs::read_to_string(path.as_std_path()).unwrap();
+        // The embedded `"` must come out escaped (`\"`), so the whole
+        // malicious value stays inert text inside one string literal
+        // instead of closing it early and splicing a live `{evil, true}`
+        // tuple into the `beamtalk_workspace` env list. The two `\"`
+        // occurrences either side of `{evil, true}` are exactly what keep
+        // it textual: a real Erlang reader sees one unbroken string, not a
+        // string that ends before `{evil, true}` and a new term starting
+        // after it.
+        assert!(
+            content.contains("127.0.0.1\\\"}, {evil, true}, {bind, \\\"0.0.0.0"),
+            "bind value must be escaped as a single string literal: {content}"
+        );
     }
 }

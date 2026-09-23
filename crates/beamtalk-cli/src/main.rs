@@ -88,6 +88,11 @@ enum Command {
         /// Force recompilation of all files, bypassing change detection
         #[arg(long)]
         force: bool,
+
+        /// Delete a pre-existing --output directory even if it doesn't
+        /// look like a previous `beamtalk release` output
+        #[arg(long)]
+        force_output: bool,
     },
 
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
@@ -621,13 +626,20 @@ fn dispatch_command(command: Command) -> Result<()> {
             path,
             output,
             force,
+            force_output,
         } => {
             let options = beamtalk_core::CompilerOptions {
                 workspace_mode: false,
                 ..Default::default()
             };
             let project_root = camino::Utf8PathBuf::from(&path);
-            commands::release::build_release(&project_root, output.as_deref(), &options, force)
+            commands::release::build_release(
+                &project_root,
+                output.as_deref(),
+                &options,
+                force,
+                force_output,
+            )
         }
         Command::BuildStdlib {
             quiet,

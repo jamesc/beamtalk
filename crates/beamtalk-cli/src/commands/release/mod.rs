@@ -26,11 +26,17 @@ use super::manifest;
 ///
 /// `output`, when given, overrides the release directory (otherwise
 /// `_build/release/<name>-<vsn>/`, [`BuildLayout::release_dir`]).
+///
+/// `force_output` allows wiping a pre-existing `--output` directory that
+/// does not look like a prior `beamtalk release` output — see
+/// [`ensure_clean_release_dir`]'s doc comment for why that distinction
+/// exists.
 pub fn build_release(
     project_root: &Utf8Path,
     output: Option<&str>,
     options: &beamtalk_core::CompilerOptions,
     force: bool,
+    force_output: bool,
 ) -> Result<()> {
     let Some(parsed) = manifest::find_manifest_full(project_root)? else {
         miette::bail!(
@@ -71,14 +77,16 @@ pub fn build_release(
         Some(dir) => Utf8PathBuf::from(dir),
         None => layout.release_dir(&release_name, &release_vsn),
     };
+    // Absolutize once, here, and use this value for everything downstream
+    // (staging, `.rel`/`RELEASE_DIR` writing, the printed boot command) —
+    // see `assembly::absolutize`'s doc comment for why a *second*,
+    // independently-derived absolute form of the same directory (even a
+    // theoretically-equivalent one, like `canonicalize`) breaks the literal
+    // string-prefix match `systools:make_script/2`'s `RELEASE_DIR`
+    // substitution depends on.
+    let release_dir = assembly::absolutize(&release_dir)?;
 
-    // Start from a clean tree: a stale app version staged from a previous
-    // build must not linger alongside the current one.
-    if release_dir.exists() {
-        std::fs::remove_dir_all(release_dir.as_std_path())
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to clean existing release dir '{release_dir}'"))?;
-    }
+    ensure_clean_release_dir(&release_dir, output.is_some(), force_output, &layout)?;
     std::fs::create_dir_all(release_dir.as_std_path())
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create release dir '{release_dir}'"))?;
@@ -129,6 +137,67 @@ pub fn build_release(
     Ok(())
 }
 
+/// Make `release_dir` a clean, empty directory, wiping it first if it
+/// already exists.
+///
+/// The internally-computed default (`_build/release/<name>-<vsn>/`) is
+/// always safe to wipe unconditionally — it can only ever be a prior
+/// release build's own output, the same way `beamtalk build`'s `_build/`
+/// always is (asserted here, mirroring `clean.rs`'s own safety net for the
+/// identical reason: the cost of a wrong assumption here is silent data
+/// loss, so a path-construction bug that broke it should panic loudly
+/// rather than quietly delete the wrong directory).
+///
+/// A user-supplied `--output <dir>` is a different risk: it can name *any*
+/// path on disk, so a typo (`--output .`, `--output ..`) or a reused path
+/// must not be wiped without confirmation. It is removed unconditionally
+/// only when it already looks like a previous `beamtalk release` output
+/// (has a `releases/` or `lib/` subdirectory — the two top-level
+/// directories every release this command produces has); otherwise it is
+/// refused unless `force_output` is set.
+fn ensure_clean_release_dir(
+    release_dir: &Utf8Path,
+    user_supplied_output: bool,
+    force_output: bool,
+    layout: &BuildLayout,
+) -> Result<()> {
+    if !release_dir.exists() {
+        return Ok(());
+    }
+
+    if user_supplied_output && !force_output {
+        let looks_like_release_output =
+            release_dir.join("releases").is_dir() || release_dir.join("lib").is_dir();
+        if !looks_like_release_output {
+            miette::bail!(
+                "'--output {release_dir}' already exists and does not look like a previous \
+                 `beamtalk release` output (no 'releases/' or 'lib/' subdirectory) — refusing \
+                 to delete it.\n\n\
+                 \x20 Pass a different --output path, remove '{release_dir}' yourself, or pass \
+                 \x20 --force-output to delete it anyway."
+            );
+        }
+    } else if !user_supplied_output {
+        // Safety net: the internally-computed path must be under
+        // `_build/`, the same invariant `clean.rs` asserts for every path
+        // it removes — this can only fail on a programming error, and the
+        // cost of being wrong here is deleting something that isn't a
+        // build artifact. `release_dir` is already absolutized by the
+        // caller, so `build_root()` is compared the same way (its own
+        // relative-to-cwd form would never be a prefix of an absolute
+        // path, which would make this assert fire on every ordinary run).
+        let build_root = assembly::absolutize(&layout.build_root())?;
+        assert!(
+            release_dir.starts_with(&build_root),
+            "computed release dir {release_dir} escapes build root {build_root}"
+        );
+    }
+
+    std::fs::remove_dir_all(release_dir.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to clean existing release dir '{release_dir}'"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,7 +215,7 @@ mod tests {
         .unwrap();
 
         let options = beamtalk_core::CompilerOptions::default();
-        let err = build_release(&root, None, &options, false).unwrap_err();
+        let err = build_release(&root, None, &options, false, false).unwrap_err();
         assert!(
             err.to_string().contains("requires a root supervisor"),
             "got: {err}"
@@ -163,10 +232,82 @@ mod tests {
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
         let options = beamtalk_core::CompilerOptions::default();
-        let err = build_release(&root, None, &options, false).unwrap_err();
+        let err = build_release(&root, None, &options, false, false).unwrap_err();
         assert!(
             err.to_string().contains("No 'beamtalk.toml' found"),
             "got: {err}"
         );
+    }
+
+    // -- ensure_clean_release_dir --------------------------------------
+
+    #[test]
+    fn ensure_clean_release_dir_absent_dir_is_a_no_op() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+        let target = root.join("dist");
+        ensure_clean_release_dir(&target, true, false, &layout).unwrap();
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn ensure_clean_release_dir_refuses_non_release_shaped_user_output_without_force() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+        let target = root.join("dist");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        fs::write(target.join("important.txt").as_std_path(), "keep me").unwrap();
+
+        let err = ensure_clean_release_dir(&target, true, false, &layout).unwrap_err();
+        assert!(
+            err.to_string().contains("does not look like a previous"),
+            "got: {err}"
+        );
+        assert!(err.to_string().contains("--force-output"), "got: {err}");
+        // Refused: the directory and its contents must be untouched.
+        assert!(target.join("important.txt").is_file());
+    }
+
+    #[test]
+    fn ensure_clean_release_dir_force_output_wipes_a_non_release_shaped_dir() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+        let target = root.join("dist");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        fs::write(target.join("important.txt").as_std_path(), "keep me").unwrap();
+
+        ensure_clean_release_dir(&target, true, true, &layout).unwrap();
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn ensure_clean_release_dir_wipes_a_release_shaped_user_output_without_force() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+        let target = root.join("dist");
+        // Looks like a prior `beamtalk release` output (has `lib/`).
+        fs::create_dir_all(target.join("lib").as_std_path()).unwrap();
+
+        ensure_clean_release_dir(&target, true, false, &layout).unwrap();
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn ensure_clean_release_dir_wipes_internally_computed_dir_without_force() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+        let target = layout.release_dir("orders", "1.0.0");
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        fs::write(target.join("stale.txt").as_std_path(), "old build").unwrap();
+
+        // Not user-supplied (`output.is_some()` is false), so no
+        // release-shape check and no --force-output needed.
+        ensure_clean_release_dir(&target, false, false, &layout).unwrap();
+        assert!(!target.exists());
     }
 }
