@@ -1,0 +1,96 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3581: Shared mutation-fragment corpus — Actor CLASS-METHOD context.
+//
+// Peer of mutation_corpus_class_method.bt, but rooted on an `Actor subclass:`
+// instead of `Object subclass:`. Every prior class-method corpus cell was
+// exercised only against a ValueType-rooted class, on the documented
+// assumption (see `eligible_families`'s doc comment in
+// crates/beamtalk-codegen/src/core_erlang/control_flow/analysis.rs) that "an
+// Actor's and a ValueType's class methods compile identically." That is true
+// for the `ClassVars` family threading ADR 0122 unified, but two SEPARATE
+// call sites never adopted the equivalent guard and were only found by
+// giving the class-method corpus this Actor-rooted twin:
+//
+// 1. `exception_body_outer_state` (exception_handling.rs) branches on
+//    `self.context` alone, so an Actor subclass's own class-side
+//    `on:do:`/`ensure:` block seeded its `StateAcc` scratch map from the
+//    bare `State` identifier, which does not exist in a class method
+//    (`erlc: unbound variable 'State'`) — the `*LocalOnly*`/
+//    `ensureNestedConditionalLastReadWrite:` fragments below.
+// 2. `is_actor_self_send` (expr_shape.rs) also branched on `ctx.context`
+//    alone, so a same-class self-send (`self bump`) inside a class-method
+//    loop/conditional body (`control_flow/body.rs`) or `on:do:`/`ensure:`
+//    body (`exception_handling.rs`'s E2 branch) was misrouted through
+//    `safe_dispatch` — the actor INSTANCE self-dispatch mechanism, which
+//    reads a `State` parameter that does not exist in a class method AND
+//    dispatches through the class's own gen_server from inside a call it is
+//    already synchronously handling. This did not fail to compile: it
+//    deadlocked (or, when the fallback selector-not-found path raised a
+//    `dispatch_error` instead of hanging, was silently miscompiled into a
+//    caught "would deadlock" error) at RUNTIME — the `selfSend*`/
+//    `onDoSelfSend*` fragments below.
+
+Actor subclass: MutationCorpusActorClassMethod
+  // Actor subclasses require at least the instance-state shape; unused by
+  // any class-method fragment below (they only thread outer LOCALS).
+  state: unused = 0
+
+  // Byte-for-byte the same body as mutation_corpus_class_method.bt's
+  // `onDoSelfSendLastReadWrite`'s sibling `ensureNestedConditionalLastReadWrite:`
+  // shape, minus the self-send — the plainest possible `on:do:`/`ensure:`
+  // outer-local mutation, now on an Actor-rooted class.
+  class ensureLocalOnlyReadWrite =>
+    t := 0
+    [
+      t := t + 1
+      nil
+    ] ensure: [nil]
+    t
+
+  class onDoLocalOnlyReadWrite =>
+    t := 0
+    [
+      t := t + 1
+      nil
+    ] on: Error do: [:e | nil]
+    t
+
+  // Nested-conditional-as-last-statement shape (BT-3176 axis 3) — the exact
+  // peer of mutation_corpus_class_method.bt's `ensureNestedConditionalLastReadWrite:`.
+  class ensureNestedConditionalLastReadWrite: flag =>
+    t := 0
+    [
+      t := t + 1
+      flag ifTrue: [t := t + 10]
+    ] ensure: [nil]
+    t
+
+  // ── self-send as the mutation mechanism (`is_actor_self_send` gap) ────────
+  class bump => 1
+
+  // Peer of mutation_corpus_class_method.bt's `selfSendWhileTrueNonLastReadWrite`
+  // (`control_flow/body.rs`'s loop-body self-send branch).
+  class selfSendWhileTrueNonLastReadWrite =>
+    seen := 0
+    i := 0
+    [i < 5]
+      whileTrue: [
+        self bump
+        i := i + 1
+        seen := seen + 1
+      ]
+    seen
+
+  // Peer of mutation_corpus_class_method.bt's `onDoSelfSendLastReadWrite`
+  // (`exception_handling.rs`'s E2 branch — the exact shape
+  // `ExduraHttpServer`'s own route handlers use: a same-class self-send as
+  // the `on:do:` try body's LAST statement, alongside a local mutation).
+  class onDoSelfSendLastReadWrite =>
+    t := 0
+    [
+      t := t + 1
+      self bump
+    ] on: Error do: [:e | nil]
+    t

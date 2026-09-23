@@ -268,12 +268,29 @@ pub(super) fn is_super_message_send(expr: &Expression) -> bool {
     }
 }
 
-/// Checks if an expression is a self-send in actor context.
+/// Checks if an expression is a self-send in actor INSTANCE context.
 /// These may mutate actor state and need state threading in loop bodies.
 /// Excludes cast sends (`self method!`), which are fire-and-forget
 /// and must not thread state through the loop accumulator.
+///
+/// BT-3581: also excludes a class method's own self-sends
+/// (`ctx.in_class_method`) — a same-class self-send there routes through
+/// `class_<selector>(ClassSelf, ClassVars, …)`
+/// ([`CoreErlangGenerator::generate_class_method_self_send`]), never
+/// `safe_dispatch` (which reads/threads the actor's own `State` — a
+/// parameter that does not exist in a class method, and which would dispatch
+/// through the class's own `gen_server` from inside a call it is already
+/// synchronously handling, deadlocking). Before this fix, `ctx.context`
+/// alone gated this: for an ACTOR subclass's own class method, `context` is
+/// still `Actor`, so a same-class self-send inside a loop/conditional body
+/// (`body.rs`) or an `on:do:`/`ensure:` construct
+/// (`exception_handling.rs`'s E2 branch) was misrouted through
+/// `safe_dispatch` — this codebase's other callers already re-derive the
+/// same guard ad hoc (e.g. [`CoreErlangGenerator::in_actor_instance_context`]),
+/// so folding it in here removes the one hand-listed exception rather than
+/// adding a new special case.
 pub(super) fn is_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    if ctx.context != CodeGenContext::Actor {
+    if ctx.context != CodeGenContext::Actor || ctx.in_class_method {
         return false;
     }
     if let Expression::MessageSend {

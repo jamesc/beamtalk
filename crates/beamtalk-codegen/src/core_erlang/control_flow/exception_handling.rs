@@ -680,7 +680,7 @@ impl CoreErlangGenerator {
     /// value-type context this produced a reference to a nonexistent
     /// variable (`erlc: unbound variable 'State'`).
     fn exception_body_outer_state(&mut self) -> String {
-        if self.context == CodeGenContext::Actor {
+        if self.context == CodeGenContext::Actor && !self.in_class_method() {
             self.current_state_var()
         } else {
             "~{}~".to_string()
