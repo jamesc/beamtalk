@@ -76,7 +76,7 @@ structured log lines) — no new JSON-encoding dependency.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([extract_shapes/2, write_shapes_json/4, class_shape_entry/1]).
+-export([extract_shapes/2, write_shapes_json/4, class_shape_entry/1, class_field_shape/1]).
 
 -type shape_entry() :: #{
     version := pos_integer(),
@@ -165,6 +165,43 @@ class_shape_entry(ClassAtom) ->
     end.
 
 -doc """
+Like `class_shape_entry/1`, but returns the flattened field map in
+`beamtalk_class_metadata:field_shape()` form — `{DeclaredType, Kind}` per
+field, the exact shape `beamtalk_shape_diff:shape()` (ADR 0105 Phase 2)
+expects — rather than `shapes.json`'s own `<<"Dynamic">>`/`null`-free JSON
+projection (`normalize_fields/1`, which drops `Kind` entirely; ADR 0125 §3.4
+has no use for it).
+
+This is the disk-side half of the ADR 0125 §2.3/BT-3574 preflight's
+conformance test: for the same class, this function's result must equal
+`beamtalk_workspace_shape_store:read_shape_from_meta/1`'s live result — both
+flatten via `beamtalk_class_metadata:flatten_ancestor_map/2` and normalise
+via `beamtalk_class_metadata:normalize_field_shape/2`, the two shared-leaf
+primitives this function and that one both call, so the two flatteners
+cannot structurally drift (CLAUDE.md's no-duplicate-implementations rule).
+
+`undefined` under the same conditions `class_shape_entry/1` degrades under.
+""".
+-spec class_field_shape(atom()) -> beamtalk_class_metadata:field_shape() | undefined.
+class_field_shape(ClassAtom) ->
+    case beamtalk_shape_migration:resolve_migrations(ClassAtom) of
+        {ok, _Module, Meta, _Migrations} ->
+            OwnFieldTypes = maps:get(field_types, Meta, #{}),
+            OwnFieldKinds = maps:get(field_kinds, Meta, #{}),
+            AncestorFieldTypes = beamtalk_class_metadata:flatten_ancestor_map(
+                ClassAtom, fun ancestor_field_types/1
+            ),
+            AncestorFieldKinds = beamtalk_class_metadata:flatten_ancestor_map(
+                ClassAtom, fun ancestor_field_kinds/1
+            ),
+            FlattenedFieldTypes = maps:merge(AncestorFieldTypes, OwnFieldTypes),
+            FlattenedFieldKinds = maps:merge(AncestorFieldKinds, OwnFieldKinds),
+            beamtalk_class_metadata:normalize_field_shape(FlattenedFieldTypes, FlattenedFieldKinds);
+        not_found ->
+            undefined
+    end.
+
+-doc """
 Extract `RuntimeLibDirs`/`EmitLibDirs` (`extract_shapes/2`) and write
 `releases/<vsn>/shapes.json` (ADR 0125 §3.4) to `OutPath`.
 """.
@@ -224,17 +261,42 @@ class_name_for_module(Module) ->
 
 -doc """
 An ancestor's own (un-flattened) `field_types` — the per-level reader
-`flatten_ancestor_map/2` calls at each step of the ancestor walk. Delegates
+`flatten_ancestor_map/2` calls at each step of the ancestor walk. A thin
+wrapper over `ancestor_own_field_map/2` (see its doc for the shared
+tolerant-degrade behaviour).
+""".
+-spec ancestor_field_types(atom()) -> #{atom() => atom()}.
+ancestor_field_types(ClassAtom) ->
+    ancestor_own_field_map(ClassAtom, field_types).
+
+-doc """
+Like `ancestor_field_types/1`, for `field_kinds` (ADR 0124 §9/B9) — the
+per-level reader `class_field_shape/1`'s `field_kinds` ancestor walk calls.
+Only used by `class_field_shape/1`, not `class_shape_entry/1`'s JSON
+projection, which has no use for `Kind` (see `class_field_shape/1`'s doc).
+""".
+-spec ancestor_field_kinds(atom()) -> #{atom() => atom()}.
+ancestor_field_kinds(ClassAtom) ->
+    ancestor_own_field_map(ClassAtom, field_kinds).
+
+-doc """
+Shared per-level reader behind `ancestor_field_types/1`/`ancestor_field_kinds/1`
+— one "read `MetaKey` off a resolved ancestor's meta, or contribute nothing"
+implementation, parameterised by which `__beamtalk_meta/0` key it reads,
+rather than two near-identical copies of the same `resolve_migrations/1`
+call and degrade (CLAUDE.md's no-duplicate-implementations rule). Delegates
 to `beamtalk_shape_migration:resolve_migrations/1`, the same tolerant lookup
 `class_shape_entry/1` itself uses, so an ancestor that cannot be resolved
 (unregistered, no meta) simply contributes no fields at its level — mirrors
 `beamtalk_workspace_shape_store:ancestor_own_field_map/2`'s identical degrade
-on the live side.
+on the live side (a different implementation, since the live side reads a
+qualified `Module:'__beamtalk_meta'()` call directly rather than going
+through this build-time-shared resolver — see that module's own doc for why).
 """.
--spec ancestor_field_types(atom()) -> #{atom() => atom()}.
-ancestor_field_types(ClassAtom) ->
+-spec ancestor_own_field_map(atom(), atom()) -> #{atom() => atom()}.
+ancestor_own_field_map(ClassAtom, MetaKey) ->
     case beamtalk_shape_migration:resolve_migrations(ClassAtom) of
-        {ok, _Module, Meta, _Migrations} -> maps:get(field_types, Meta, #{});
+        {ok, _Module, Meta, _Migrations} -> maps:get(MetaKey, Meta, #{});
         not_found -> #{}
     end.
 

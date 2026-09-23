@@ -496,49 +496,37 @@ ancestor_own_field_map(ClassAtom, MetaKey) ->
 -doc """
 Zip a flattened `field_types` map with its matching `field_kinds` map into a
 `shape()` — binary field name -> `{binary type name, binary kind}`
-(ADR 0124 §9/B9). A field present in `FieldTypes` but absent from
-`FieldKinds` (a class/level predating B5a's `field_kinds` meta, or a
-dynamic/ClassBuilder-built level — see `beamtalk_behaviour_intrinsics:
-classAllFieldKindsByName/1`'s doc) defaults to `eager`, the same fallback
-that function uses. Exported (not `-ifdef(TEST)`-gated, unlike
+(ADR 0124 §9/B9). Exported (not `-ifdef(TEST)`-gated, unlike
 `read_shape_from_meta/1`/`read_generation_from_meta/1`) so
 `beamtalk_repl_loader:precheck_class_shape/2`'s pending-generation read can
-normalise a *pending*, not-yet-captured pair of maps the exact same way
-without a second implementation of this zip (CLAUDE.md's
-no-duplicate-implementations rule) — see also `field_type_to_binary/1`/
-`field_kind_to_binary/1`, this function's two per-value normalisers.
+normalise a *pending*, not-yet-captured pair of maps the exact same way.
+
+Delegates to `beamtalk_class_metadata:normalize_field_shape/2` (ADR 0125
+§2.2/§3.4, BT-3574) — the shared leaf both this live flattener and the
+build-time `beamtalk_release_shapes` extractor use, rather than two
+independent implementations of the same `field_types`/`field_kinds` ->
+`shape()` zip (CLAUDE.md's no-duplicate-implementations rule). See also
+`field_type_to_binary/1`/`field_kind_to_binary/1`, this function's two
+per-value normalisers, which delegate the same way.
 """.
 -spec normalize_shape(#{atom() => atom()}, #{atom() => atom()}) -> shape().
 normalize_shape(FieldTypes, FieldKinds) ->
-    maps:fold(
-        fun(FieldAtom, TypeAtom, Acc) ->
-            KindAtom = maps:get(FieldAtom, FieldKinds, eager),
-            Acc#{
-                atom_to_binary(FieldAtom, utf8) =>
-                    {field_type_to_binary(TypeAtom), field_kind_to_binary(KindAtom)}
-            }
-        end,
-        #{},
-        FieldTypes
-    ).
+    beamtalk_class_metadata:normalize_field_shape(FieldTypes, FieldKinds).
 
 -doc """
 The `none` -> `<<"Dynamic">>` sentinel normalisation every `field_types`
-read in this module uses. Exported for the same reason `normalize_shape/2`
-is — see its doc.
+read in this module uses. Delegates to
+`beamtalk_class_metadata:field_type_to_binary/1` — see `normalize_shape/2`'s
+doc.
 """.
 -spec field_type_to_binary(atom()) -> binary().
-field_type_to_binary(none) -> <<"Dynamic">>;
-field_type_to_binary(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8).
+field_type_to_binary(Atom) -> beamtalk_class_metadata:field_type_to_binary(Atom).
 
 -doc """
 `field_kinds`' `'eager'`/`'late'` atom -> binary normalisation
-`normalize_shape/2` uses for a `shape()` value's `Kind` half. Any other atom
-(a class/level with no `field_kinds` entry for this field at all, which
-`normalize_shape/2` already defaults to the atom `eager` before calling
-this) also normalises to `<<"eager">>` — `late` is the only kind that ever
-needs a non-default answer here.
+`normalize_shape/2` uses for a `shape()` value's `Kind` half. Delegates to
+`beamtalk_class_metadata:field_kind_to_binary/1` — see `normalize_shape/2`'s
+doc.
 """.
 -spec field_kind_to_binary(eager | late) -> binary().
-field_kind_to_binary(late) -> <<"late">>;
-field_kind_to_binary(_) -> <<"eager">>.
+field_kind_to_binary(Atom) -> beamtalk_class_metadata:field_kind_to_binary(Atom).

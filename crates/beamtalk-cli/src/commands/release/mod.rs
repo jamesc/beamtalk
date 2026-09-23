@@ -22,6 +22,7 @@
 pub mod assembly;
 pub mod closure;
 pub mod provenance;
+pub mod upgrade;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -46,6 +47,12 @@ use super::manifest;
 /// manifest — a CLI flag is a one-shot override, so it can only turn the
 /// manifest's default *off*, never force it *on* (`[release] include-erts
 /// = false` already does that from the manifest side).
+///
+/// `upgrade_from` is `--upgrade-from <prev-release-dir-or-tarball>`
+/// (ADR 0125 §2.3, BT-3574): after this build finishes, runs the
+/// shape-compatibility preflight against the named previous release and
+/// prints its report. Any **error** finding fails the command (non-zero
+/// exit) — see [`upgrade::run_upgrade_preflight`].
 #[allow(clippy::too_many_lines)] // one straight-line assembly pipeline; splitting hurts readability
 pub fn build_release(
     project_root: &Utf8Path,
@@ -54,6 +61,7 @@ pub fn build_release(
     force: bool,
     force_output: bool,
     no_include_erts: bool,
+    upgrade_from: Option<&str>,
 ) -> Result<()> {
     let Some(parsed) = manifest::find_manifest_full(project_root)? else {
         miette::bail!(
@@ -241,7 +249,7 @@ pub fn build_release(
     let tar_out_dir = release_dir
         .parent()
         .map_or_else(|| release_dir.clone(), Utf8Path::to_path_buf);
-    let (tar_path, tar_size) = assembly::make_tarball(
+    let (tar_path, _) = assembly::make_tarball(
         &release_dir,
         &release_name,
         &release_vsn,
@@ -250,6 +258,38 @@ pub fn build_release(
         include_erts,
         &erts_root,
     )?;
+    // ADR 0125 §2.3, BT-3574: `systools:make_tar/2` does not archive
+    // shapes.json/beamtalk-provenance.json (see
+    // `append_shape_manifests_to_tarball`'s doc) — append them so a
+    // tarball this command produces is itself a valid `--upgrade-from`
+    // input, with no on-the-fly-extraction fallback needed. Re-stat
+    // afterward — the append step recompresses the tarball in place, so
+    // `make_tarball`'s own returned size is stale for the printed summary.
+    assembly::append_shape_manifests_to_tarball(&tar_path, &release_dir, &release_vsn)?;
+    let tar_size = std::fs::metadata(tar_path.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stat '{tar_path}' after appending manifests"))?
+        .len();
+
+    // ADR 0125 §2.3, BT-3574: only after the new release is fully built (its
+    // own shapes.json/beamtalk-provenance.json now exist) — the preflight
+    // compares the two releases' finished manifests, never a partial build.
+    if let Some(prev) = upgrade_from {
+        let report = upgrade::run_upgrade_preflight(
+            &Utf8PathBuf::from(prev),
+            &release_dir,
+            &release_name,
+            &release_vsn,
+        )?;
+        print!("\n{}", report.text);
+        if report.has_error {
+            miette::bail!(
+                "Upgrade check found blocking shape errors — see the report above.\n\n\
+                 \x20 Add the missing migration hook(s), or bump shapeVersion: to acknowledge \
+                 \x20 the structural fallback, then re-run `beamtalk release --upgrade-from`."
+            );
+        }
+    }
 
     let platform = provenance::current_platform();
     let erts_note = if include_erts {
@@ -485,7 +525,7 @@ mod tests {
         .unwrap();
 
         let options = beamtalk_core::CompilerOptions::default();
-        let err = build_release(&root, None, &options, false, false, false).unwrap_err();
+        let err = build_release(&root, None, &options, false, false, false, None).unwrap_err();
         assert!(
             err.to_string().contains("requires a root supervisor"),
             "got: {err}"
@@ -502,7 +542,7 @@ mod tests {
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
         let options = beamtalk_core::CompilerOptions::default();
-        let err = build_release(&root, None, &options, false, false, false).unwrap_err();
+        let err = build_release(&root, None, &options, false, false, false, None).unwrap_err();
         assert!(
             err.to_string().contains("No 'beamtalk.toml' found"),
             "got: {err}"
