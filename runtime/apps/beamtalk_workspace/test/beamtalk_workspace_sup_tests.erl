@@ -657,29 +657,50 @@ workspace_mode_records_capabilities_test() ->
 %% warning naming the three risks every time it boots, not just once at
 %% build time — an operator reading logs must see it even if they weren't
 %% the one who set the flag.
-release_mode_include_compiler_logs_boot_warning_test() ->
-    with_capabilities_restored(fun() ->
-        Parent = self(),
-        HandlerId = release_include_compiler_warning_test_handler,
-        ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
-        try
-            _ = child_ids((release_mode_config())#{include_compiler => true}),
-            ?assert(receive_include_compiler_warning(500))
-        after
-            _ = logger:remove_handler(HandlerId)
-        end
-    end).
+%% `{timeout, 10, ...}`: EUnit's own default 5s timetrap would otherwise
+%% race the 3s `receive_include_compiler_warning/1` wait below (plus this
+%% test's own setup) under the full suite's scheduler contention — this
+%% raises the *test's* budget, independent of that wait.
+release_mode_include_compiler_logs_boot_warning_test_() ->
+    {timeout, 10, fun() ->
+        with_capabilities_restored(fun() ->
+            Parent = self(),
+            HandlerId = release_include_compiler_warning_test_handler,
+            %% `apps/beamtalk_runtime/test/sys.config` sets the *primary*
+            %% logger level to `error` for clean test-suite output — a
+            %% WARNING event never reaches any handler, including this
+            %% test's own, unless the primary level is raised first. Same
+            %% pattern (and restore-to-`error`, not the pre-call value)
+            %% `beamtalk_shape_migration_tests` already uses for its own
+            %% stray-migration-warning assertions.
+            logger:set_primary_config(level, all),
+            ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
+            try
+                _ = child_ids((release_mode_config())#{include_compiler => true}),
+                ?assert(receive_include_compiler_warning(500))
+            after
+                _ = logger:remove_handler(HandlerId),
+                logger:set_primary_config(level, error)
+            end
+        end)
+    end}.
 
 release_mode_without_include_compiler_logs_no_boot_warning_test() ->
     with_capabilities_restored(fun() ->
         Parent = self(),
         HandlerId = release_no_include_compiler_warning_test_handler,
+        %% Raise the primary level the same way the positive-case test
+        %% does, so this negative assertion actually exercises "no WARNING
+        %% is logged" rather than passing vacuously because the ambient
+        %% `error`-level primary config already drops it either way.
+        logger:set_primary_config(level, all),
         ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
         try
             _ = child_ids(release_mode_config()),
             ?assertNot(receive_include_compiler_warning(200))
         after
-            _ = logger:remove_handler(HandlerId)
+            _ = logger:remove_handler(HandlerId),
+            logger:set_primary_config(level, error)
         end
     end).
 
