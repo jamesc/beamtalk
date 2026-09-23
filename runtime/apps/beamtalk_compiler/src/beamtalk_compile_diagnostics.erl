@@ -74,10 +74,9 @@ carrying whatever identifying detail the originating lint pass reports
 Prepends [`bug_header/0`](`bug_header/0`) — every error reachable here is,
 per this module's moduledoc, an internal-compiler bug by construction, so
 the message says so up front instead of leaving the reader to guess
-whether their `.bt` source is at fault — and best-effort demangles each
-`'class_<selector>'' Core Erlang export name (ADR 0032) into `class method
-'<selector>'', so the name matches what the `.bt` author actually wrote
-instead of the internal export beamtalk codegen produced it as.
+whether their `.bt` source is at fault. `format_messages/2' (shared with
+[`format_warnings/1`](`format_warnings/1`)) does the `'class_<selector>''
+demangling.
 """.
 -spec format_errors([{file:filename() | string() | binary(), [tuple()]}]) -> binary().
 format_errors(Errors) when is_list(Errors) ->
@@ -85,7 +84,7 @@ format_errors(Errors) when is_list(Errors) ->
         <<>> ->
             <<>>;
         Body ->
-            <<(bug_header())/binary, (demangle_class_methods(Body))/binary>>
+            <<(bug_header())/binary, Body/binary>>
     end.
 
 -doc """
@@ -120,19 +119,24 @@ Turn a `compile:forms/2' `Warnings' list (from `return_warnings') into a
 single human-readable binary, one line per underlying warning, prefixed
 `"Warning: "' — matching the wording `report_warnings' would have
 printed, and what `compile.escript''s `print_messages/2' already prints
-for the escript backend.
+for the escript backend. Demangled the same way `format_errors/1' is (see
+`format_messages/2'), for surface parity between the two: a warning about
+a class-side method reads `class method '<selector>'' regardless of which
+backend/call path produced it.
 """.
 -spec format_warnings([{file:filename() | string() | binary(), [tuple()]}]) -> binary().
 format_warnings(Warnings) when is_list(Warnings) ->
     format_messages(Warnings, "Warning: ").
 
+%% Shared by format_errors/1 and format_warnings/1: renders via
+%% sys_messages:format_messages/4, then demangle_class_methods/1.
 format_messages(Messages, Prefix) ->
     Lines = [
         Text
      || {File, ErrorInfos} <- Messages,
         {_Loc, Text} <- sys_messages:format_messages(to_filename(File), Prefix, ErrorInfos, [])
     ],
-    unicode:characters_to_binary(Lines).
+    demangle_class_methods(unicode:characters_to_binary(Lines)).
 
 -doc """
 Print a `compile:forms/2' `Warnings' list (from `return_warnings') to

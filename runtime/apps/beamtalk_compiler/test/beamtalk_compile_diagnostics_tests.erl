@@ -103,6 +103,23 @@ format_warnings_multiple_test() ->
     ?assertNotEqual(nomatch, binary:match(Formatted, <<"duplicate variable 'I' in bar/2">>)),
     ?assertNotEqual(nomatch, binary:match(Formatted, <<"unbound variable 'X' in baz/0">>)).
 
+%% Review finding (#3997): format_warnings/1 must demangle
+%% 'class_<selector>'' the same way format_errors/1 does — a warning about
+%% a class-side method should read identically regardless of which backend
+%% (Port vs escript) or which caller (build_worker vs compiler_server)
+%% produced it.
+format_warnings_demangles_class_method_test() ->
+    Warnings = [
+        {"my_module", [
+            {none, core_lint, {unbound_var, 'State', {'class_handleCancel:engine:', 4}}}
+        ]}
+    ],
+    Formatted = beamtalk_compile_diagnostics:format_warnings(Warnings),
+    ?assertNotEqual(
+        nomatch, binary:match(Formatted, <<"class method 'handleCancel:engine:'">>)
+    ),
+    ?assertEqual(nomatch, binary:match(Formatted, <<"'class_handleCancel:engine:'">>)).
+
 %% A binary file identifier is accepted the same as a string one.
 format_warnings_binary_file_test() ->
     Warnings = [{<<"my_module">>, [{none, core_lint, {unbound_var, 'Y', {qux, 3}}}]}],

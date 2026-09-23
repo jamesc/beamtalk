@@ -156,11 +156,18 @@ worker_loop(Parent, OutDir) ->
                     erlang:send(Parent, {compiled, ModuleName}),
                     worker_loop(Parent, OutDir);
                 {error, Errors, _Warnings} ->
-                    %% Warnings deliberately NOT printed here: every one of
-                    %% them is about some OTHER, successfully-compiled
-                    %% function in this module — when the module fails to
-                    %% compile at all, they are pure noise burying the
-                    %% actual error, not actionable information.
+                    %% Warnings deliberately NOT printed here. `Warnings' is
+                    %% unconditionally `[]' whenever `Errors' is non-empty
+                    %% for this `from_core' pipeline — `core_lint_module' is
+                    %% the first pass in `core_passes(non_verified_core)',
+                    %% before anything that can emit a warning, and
+                    %% `compile:forms'/`compile:file' aborts on its first
+                    %% failing pass. See
+                    %% `beamtalk_build_worker.erl''s sibling clause (this
+                    %% escript cannot depend on that module — see this
+                    %% file's moduledoc) and
+                    %% `beamtalk_build_worker_tests:compile_forms_error_implies_no_warnings_test/0'
+                    %% for the pinned regression.
                     print_bug_header(),
                     print_messages(Errors, ""),
                     erlang:send(Parent, failed),

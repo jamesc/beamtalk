@@ -301,11 +301,22 @@ compile_core_forms(CoreModule) ->
             {ok, ModuleName, Binary};
         {error, Errors, _Warnings} ->
             %% Warnings deliberately NOT printed here (unlike the two `ok'
-            %% arms above): every one of them is about some OTHER,
-            %% successfully-compiled function in this module — when the
-            %% module fails to compile at all, they are pure noise burying
-            %% the actual error, not actionable information. See
-            %% `beamtalk_compile_diagnostics:format_errors/1's bug_header.
+            %% arms above). Review finding (#3997): could one of them be
+            %% about the SAME function an error also names, so dropping it
+            %% loses real information? No — verified both by reading
+            %% `compile.erl''s pass list and empirically: `core_lint_module'
+            %% is literally the first pass in
+            %% `core_passes(non_verified_core)' (before `sys_core_prepare',
+            %% `sys_core_fold', or anything else that can emit a warning),
+            %% and `compile:forms' aborts the whole pipeline on its first
+            %% failing pass — so a `core_lint' failure means no later pass
+            %% ever runs, and `Warnings' is unconditionally `[]' whenever
+            %% `Errors' is non-empty for this pipeline. `_Warnings' is kept
+            %% bound (not `_') on purpose, matching the sibling clause in
+            %% `beamtalk_compiler_server.erl' and `compile.escript', and
+            %% `compile_core_erlang_error_warnings_are_always_empty_test/0'
+            %% below pins the invariant so a future OTP pass-order change
+            %% would fail CI instead of silently losing information here.
             {error,
                 {core_compile_error, #{
                     message => beamtalk_compile_diagnostics:format_errors(Errors),

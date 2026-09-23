@@ -1302,6 +1302,98 @@ end
         );
     }
 
+    /// Returns every `"..."` substring on `line` (assumes no escaped
+    /// quotes inside — true for every literal these conformance tests
+    /// extract). `line.split('"')` alternates outside/inside segments
+    /// starting outside, so the inside ones are every other element from
+    /// index 1.
+    fn quoted_strings(line: &str) -> Vec<&str> {
+        line.split('"').skip(1).step_by(2).collect()
+    }
+
+    fn line_containing<'a>(source: &'a str, needle: &str) -> &'a str {
+        source
+            .lines()
+            .find(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line containing {needle:?} in source"))
+    }
+
+    /// Concatenates a `"lit1"\n"lit2"\n...` Erlang string-literal
+    /// concatenation: starting at the first line containing `marker`,
+    /// every immediately-following line that is itself a bare quoted
+    /// segment (trimmed, starts and ends with `"`) is appended; stops at
+    /// the first line that isn't.
+    fn erlang_string_concat_from(source: &str, marker: &str) -> String {
+        let start = source
+            .find(marker)
+            .unwrap_or_else(|| panic!("marker {marker:?} not found in source"));
+        let mut out = String::new();
+        for line in source[start..].lines() {
+            let trimmed = line.trim();
+            if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+                out.push_str(&trimmed[1..trimmed.len() - 1]);
+            } else if !out.is_empty() {
+                break;
+            }
+        }
+        out
+    }
+
+    /// Review finding (#3997): `compile.escript`'s `print_bug_header/0` and
+    /// its `demangle`-via-`re:replace` in `print_messages/2` are hand-copied
+    /// from `beamtalk_compile_diagnostics:bug_header/0`/
+    /// `demangle_class_methods/1` (the escript cannot depend on that
+    /// module — see its own moduledoc), tagged only with a "mirrors X"
+    /// comment and no test enforcing the two stay identical. This
+    /// conformance test is that enforcement: it extracts both copies of
+    /// each literal from the actual source files (not a third hand-copied
+    /// expectation) and asserts they are byte-for-byte equal, so an edit to
+    /// either copy that isn't mirrored in the other fails this test instead
+    /// of silently drifting.
+    #[test]
+    fn test_escript_bug_header_and_demangle_match_beamtalk_compile_diagnostics() {
+        let diagnostics_erl_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../runtime/apps/beamtalk_compiler/src/beamtalk_compile_diagnostics.erl");
+        let diagnostics_erl = fs::read_to_string(&diagnostics_erl_path)
+            .unwrap_or_else(|e| panic!("failed to read {diagnostics_erl_path}: {e}"));
+
+        // bug_header/0 vs print_bug_header/0.
+        let marker = "\"Beamtalk compiler bug: code generation produced Core Erlang that \"";
+        let erl_header = erlang_string_concat_from(&diagnostics_erl, marker);
+        let escript_header = erlang_string_concat_from(COMPILE_ESCRIPT, marker);
+        assert!(
+            !erl_header.is_empty(),
+            "failed to extract bug_header/0's text"
+        );
+        assert_eq!(
+            erl_header, escript_header,
+            "compile.escript's print_bug_header/0 has drifted from \
+             beamtalk_compile_diagnostics:bug_header/0 — keep them byte-identical"
+        );
+
+        // demangle_class_methods/1 vs print_messages/2's inline re:replace.
+        let needle = "'class_(";
+        let erl_line = line_containing(&diagnostics_erl, needle);
+        let escript_line = line_containing(COMPILE_ESCRIPT, needle);
+        let erl_quoted = quoted_strings(erl_line);
+        let escript_quoted = quoted_strings(escript_line);
+        assert_eq!(
+            erl_quoted.len(),
+            2,
+            "expected exactly the regex pattern + replacement on beamtalk_compile_diagnostics.erl's re:replace line, got: {erl_line:?}"
+        );
+        assert_eq!(
+            escript_quoted.len(),
+            2,
+            "expected exactly the regex pattern + replacement on compile.escript's re:replace line, got: {escript_line:?}"
+        );
+        assert_eq!(
+            erl_quoted, escript_quoted,
+            "compile.escript's demangle re:replace pattern/replacement has drifted from \
+             beamtalk_compile_diagnostics:demangle_class_methods/1 — keep them byte-identical"
+        );
+    }
+
     // Tests for is_valid_module_name
     #[test]
     fn test_is_valid_module_name_valid() {
