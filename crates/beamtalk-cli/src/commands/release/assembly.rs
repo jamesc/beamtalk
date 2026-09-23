@@ -294,9 +294,22 @@ pub fn write_rel_and_boot_script(
                 continue;
             }
             let dest = release_dir_abs.join("lib").join(format!("{name}-{vsn}"));
-            copy_dir_recursive(src, &dest).wrap_err_with(|| {
-                format!("Failed to stage host app '{name}' ('{src}') into '{dest}'")
-            })?;
+            // Only `ebin/` (the code) and `priv/` (NIF `.so`s, certs, etc. —
+            // `crypto`/`asn1`/`public_key` need theirs at runtime) — never
+            // `src/`/`doc/`/`include/`/`examples/`, which a source-built OTP
+            // install (kerl/asdf, common in CI/dev) carries alongside `ebin/`
+            // and a release has no use for. Matches `stage_one_app`'s own
+            // ebin-only staging for every other app a few functions above.
+            for subdir in ["ebin", "priv"] {
+                let sub_src = src.join(subdir);
+                if !sub_src.is_dir() {
+                    continue;
+                }
+                let sub_dest = dest.join(subdir);
+                copy_dir_recursive(&sub_src, &sub_dest).wrap_err_with(|| {
+                    format!("Failed to stage host app '{name}' ('{sub_src}') into '{sub_dest}'")
+                })?;
+            }
         }
     }
 
@@ -412,7 +425,11 @@ fn build_assembly_eval(
          end, \
          HostAppVsns = ResolveHost(Seeds, sets:new(), []), \
          lists:foreach(fun({{HostApp, HostVsn}}) -> \
-             io:format(\"HOSTAPP ~s ~s ~s~n\", [HostApp, HostVsn, code:lib_dir(HostApp)]) \
+             LibDir = case code:lib_dir(HostApp) of \
+                 {{error, _}} -> \"\"; \
+                 Dir -> Dir \
+             end, \
+             io:format(\"HOSTAPP ~s ~s ~s~n\", [HostApp, HostVsn, LibDir]) \
          end, HostAppVsns), \
          StagedAppVsns = [{staged_apps_term}], \
          AllAppVsns = HostAppVsns ++ StagedAppVsns, \

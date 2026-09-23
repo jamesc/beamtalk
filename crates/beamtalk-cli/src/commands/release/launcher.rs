@@ -86,14 +86,44 @@ fn render_template(
     erts_version: &str,
     include_erts: bool,
 ) -> String {
-    template
-        .replace("__RELEASE_NAME__", release_name)
-        .replace("__RELEASE_VSN__", release_vsn)
-        .replace("__ERTS_VERSION__", erts_version)
-        .replace(
+    // A single left-to-right pass over `template`, substituting each
+    // placeholder as it's found and resuming the scan *after* the
+    // substituted value — never chained `.replace()` calls, each of which
+    // would re-scan the *whole* string (including text a previous call just
+    // substituted in). `[release] name`/`[package] version` are validated
+    // (`validate_release_path_component`) but that only rejects path
+    // separators/whitespace/control characters — a value that happens to
+    // spell another placeholder verbatim (e.g. `[release] name =
+    // "__RELEASE_VSN__"`) would otherwise have its own already-substituted
+    // occurrence corrupted by a later `.replace()` in the chain.
+    let placeholders: [(&str, &str); 4] = [
+        ("__RELEASE_NAME__", release_name),
+        ("__RELEASE_VSN__", release_vsn),
+        ("__ERTS_VERSION__", erts_version),
+        (
             "__INCLUDE_ERTS__",
             if include_erts { "true" } else { "false" },
-        )
+        ),
+    ];
+
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    'scan: while !rest.is_empty() {
+        for (placeholder, value) in &placeholders {
+            if let Some(after) = rest.strip_prefix(placeholder) {
+                out.push_str(value);
+                rest = after;
+                continue 'scan;
+            }
+        }
+        // No placeholder matches at this position — copy one char forward.
+        // `char_indices` gives the byte length of the char at position 0 so
+        // this stays UTF-8-safe (`vm.args`/error text can carry non-ASCII).
+        let ch_len = rest.chars().next().map_or(1, char::len_utf8);
+        out.push_str(&rest[..ch_len]);
+        rest = &rest[ch_len..];
+    }
+    out
 }
 
 /// Normalise `content` to `\r\n` line endings — first strip any `\r` that
@@ -159,6 +189,30 @@ mod tests {
         let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
         assert!(cmd.contains("RELEASE_NAME=orders"), "{cmd}");
         assert!(!cmd.contains("__RELEASE_NAME__"), "{cmd}");
+    }
+
+    /// A `[release] name`/`[package] version` value that happens to spell
+    /// another placeholder verbatim must not have its own already-substituted
+    /// occurrence corrupted by a later substitution — see `render_template`'s
+    /// single-pass-scan doc comment for why chained `.replace()` calls were
+    /// unsafe here.
+    #[test]
+    fn render_template_is_safe_when_a_value_spells_another_placeholder() {
+        let sh = render_template(
+            LAUNCHER_SH_TEMPLATE,
+            "__RELEASE_VSN__",
+            "1.4.0",
+            "16.0.2",
+            true,
+        );
+        assert!(
+            sh.contains("RELEASE_NAME=\"__RELEASE_VSN__\""),
+            "the release name's literal value must survive verbatim: {sh}"
+        );
+        assert!(
+            sh.contains("RELEASE_VSN=\"1.4.0\""),
+            "the actual version placeholder must still substitute correctly: {sh}"
+        );
     }
 
     #[test]

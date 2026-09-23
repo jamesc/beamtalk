@@ -290,13 +290,20 @@ pub fn build_release(
     // BT-3573) resolves the release root relative to its own location, so —
     // unlike the raw `erl -boot ... -boot_var RELEASE_DIR <dir>` invocation
     // this message used to print — the printed command needs no
-    // Windows-forward-slash normalisation of `release_dir`.
+    // Windows-forward-slash normalisation of `release_dir`. It does need the
+    // right *launcher* extension per platform: `bin/<name>` (no extension,
+    // a POSIX `sh` script) is not runnable as printed on Windows, and
+    // `bin/<name>.cmd` is unnecessary noise on Unix — `beamtalk release`
+    // itself only ever runs on the platform it's building for (cross-compile
+    // is unsupported, §1.3), so `cfg!(windows)` here is the same "this build
+    // machine" scope the rest of this function already assumes.
+    let launcher_suffix = if cfg!(windows) { ".cmd" } else { "" };
     println!(
         "Built release {release_name}-{release_vsn} ({erts_note}).\n\
          \x20 → {release_dir}\n\
          \x20 → {tar_path}  ({tar_size})\n\n\
          {trailer}\n\n\
-         Run it: {release_dir}/bin/{release_name} foreground",
+         Run it: {release_dir}/bin/{release_name}{launcher_suffix} foreground",
         tar_size = format_bytes(tar_size),
     );
     info!(name = %release_name, vsn = %release_vsn, dir = %release_dir, "release built");

@@ -351,65 +351,37 @@ raised.
     binary(), binary(), [binary()], pid() | undefined, beamtalk_repl_state:state()
 ) -> eval_result().
 do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
-    case resolve_entry(ClassNameBin, SelectorBin) of
-        {ok, ClassPid, Selector} ->
-            %% A unary entry takes no arguments; the arity-1 keyword form
-            %% (`main:`) receives the whole argv list as its single
-            %% `List(String)` argument (parity with run-mode's dispatch list).
-            DispatchArgs =
-                case is_keyword_selector(SelectorBin) of
-                    true -> [Argv];
-                    false -> []
-                end,
-            {CapturePid, _PrevGroupLeader} = CaptureRef = beamtalk_io_capture:start(Subscriber),
-            %% `beamtalk_io_capture:start/1` only redirects *this*
-            %% worker's IO, but the entry runs one hop away in its class's
-            %% gen_server, which kept the node's group leader from spawn — so its
-            %% `Console` output went to the detached node's stdout and the client
-            %% saw nothing. Publishing the capture process as the entry group
-            %% leader makes the class gen_server adopt it for the duration of the
-            %% call (`beamtalk_object_class:adopt_entry_group_leader/1`), giving
-            %% `--connect` the same "the program's output is my output" contract
-            %% run mode gets for free from the node's own stdout. Scoped to this
-            %% `run-entry` path: `do_eval` never seeds the key, so REPL `eval`
-            %% keeps routing output exactly as before.
-            PrevEntryGl = put(beamtalk_entry_group_leader, CapturePid),
-            EvalResult =
-                try beamtalk_class_dispatch:class_send(ClassPid, Selector, DispatchArgs) of
-                    RawResult ->
-                        case maybe_await_future(RawResult) of
-                            {future_rejected, FutureReason} ->
-                                FutExObj = beamtalk_exception_handler:ensure_wrapped(FutureReason),
-                                {error, FutExObj, State};
-                            Value ->
-                                {ok, Value, State}
-                        end
-                catch
-                    throw:{beamtalk_script_exit, Code} ->
-                        %% `Program exit: Code` from the dispatched entry —
-                        %% same connected-exit handling as the `do_eval` path.
-                        {script_exit, Code, State};
-                    Class:Reason:Stacktrace ->
-                        CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
-                            Class, Reason, Stacktrace
-                        ),
-                        {error, {eval_error, Class, CaughtExObj}, State}
-                after
-                    %% Unlike the eval path there is no transient eval module to
-                    %% purge — the entry runs in already-loaded class code. The
-                    %% capture process outlives this call only as a proxy to the
-                    %% original group leader, so drop the key before it can name a
-                    %% sink that is no longer streaming.
-                    case PrevEntryGl of
-                        undefined -> erase(beamtalk_entry_group_leader);
-                        _ -> put(beamtalk_entry_group_leader, PrevEntryGl)
-                    end
-                end,
-            Output = beamtalk_io_capture:stop(CaptureRef),
-            inject_output(EvalResult, Output, []);
-        {error, Err} ->
-            {error, Err, <<>>, [], State}
-    end.
+    {CapturePid, _PrevGroupLeader} = CaptureRef = beamtalk_io_capture:start(Subscriber),
+    %% `beamtalk_io_capture:start/1` only redirects *this* worker's IO, but
+    %% the entry runs one hop away in its class's gen_server, which kept the
+    %% node's group leader from spawn — so its `Console` output went to the
+    %% detached node's stdout and the client saw nothing. Publishing the
+    %% capture process as the entry group leader makes the class gen_server
+    %% adopt it for the duration of the call
+    %% (`beamtalk_object_class:adopt_entry_group_leader/1`), giving
+    %% `--connect` the same "the program's output is my output" contract run
+    %% mode gets for free from the node's own stdout. Scoped to this
+    %% `run-entry` path: `do_eval` never seeds the key, so REPL `eval` keeps
+    %% routing output exactly as before.
+    PrevEntryGl = put(beamtalk_entry_group_leader, CapturePid),
+    EvalResult =
+        try dispatch_sync(ClassNameBin, SelectorBin, Argv) of
+            {ok, Value} -> {ok, Value, State};
+            {script_exit, Code} -> {script_exit, Code, State};
+            {error, Err} -> {error, Err, State}
+        after
+            %% Unlike the eval path there is no transient eval module to
+            %% purge — the entry runs in already-loaded class code. The
+            %% capture process outlives this call only as a proxy to the
+            %% original group leader, so drop the key before it can name a
+            %% sink that is no longer streaming.
+            case PrevEntryGl of
+                undefined -> erase(beamtalk_entry_group_leader);
+                _ -> put(beamtalk_entry_group_leader, PrevEntryGl)
+            end
+        end,
+    Output = beamtalk_io_capture:stop(CaptureRef),
+    inject_output(EvalResult, Output, []).
 
 %% Resolve a `(ClassName, Selector)` entry against the live image for
 %% `do_dispatch/5`. Both names must already exist (the class is loaded; the
@@ -445,17 +417,19 @@ resolve_entry(ClassNameBin, SelectorBin) ->
 is_keyword_selector(SelectorBin) -> beamtalk_runtime_api:is_keyword_selector(SelectorBin).
 
 -doc """
-Synchronous run-entry dispatch (ADR 0125 §1.7) — the shared core `do_dispatch/5`
-also runs, minus the async-streaming/IO-capture plumbing that only a REPL
-session needs. Used by `beamtalk_release_launcher`'s `eval`/`rpc` launcher
-verbs (BT-3573), which have no subscriber to stream to: `eval` runs in a
-throwaway VM and inherits the VM's own stdout, and `rpc`'s caller only wants
-the final result. Resolves `ClassNameBin`/`SelectorBin` via the same
-`resolve_entry/2` + `is_keyword_selector/1` this module already uses, and maps
-`Program exit: N` (`throw({beamtalk_script_exit, N})`) to `{script_exit, N}`
-rather than letting it propagate — so a caller on the *dispatching* side (the
-`eval` VM, or the process `rpc:call/5` spawns on the target node) always gets
-back data, never an exception.
+Synchronous run-entry dispatch (ADR 0125 §1.7) — the resolve+dispatch+
+exception-mapping core `do_dispatch/5` itself calls, wrapped there in the
+async-streaming/IO-capture plumbing only a REPL session needs. Also called
+directly by `beamtalk_release_launcher`'s `eval`/`rpc` launcher verbs
+(BT-3573), which have no subscriber to stream to: `eval` runs in a throwaway
+VM and inherits the VM's own stdout, and `rpc`'s caller only wants the final
+result. One function, two callers — never a parallel dispatcher. Resolves
+`ClassNameBin`/`SelectorBin` via the same `resolve_entry/2` +
+`is_keyword_selector/1` this module already uses, and maps `Program exit: N`
+(`throw({beamtalk_script_exit, N})`) to `{script_exit, N}` rather than letting
+it propagate — so a caller on the *dispatching* side (the `eval` VM, the
+process `rpc:call/5` spawns on the target node, or `do_dispatch/5`'s own
+caller) always gets back data, never an exception.
 """.
 -spec dispatch_sync(binary(), binary(), [binary()]) ->
     {ok, term()} | {script_exit, integer()} | {error, #beamtalk_error{} | term()}.
@@ -479,7 +453,20 @@ dispatch_sync(ClassNameBin, SelectorBin, Argv) ->
                 throw:{beamtalk_script_exit, Code} ->
                     {script_exit, Code};
                 Class:Reason:Stacktrace ->
-                    {error, beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace)}
+                    %% `{eval_error, Class, ExObj}` — not the bare wrapped
+                    %% object — is deliberate: `beamtalk_repl_errors`/
+                    %% `beamtalk_repl_json` pattern-match this exact shape
+                    %% for WS-facing formatting (`do_dispatch/5`'s original
+                    %% contract, preserved here since `do_dispatch/5` now
+                    %% calls this function). Every other caller
+                    %% (`beamtalk_release_launcher`'s `eval`/`rpc`) only ever
+                    %% formats it via `beamtalk_error:format_safe/2`, which
+                    %% recurses into any tuple to find the `#beamtalk_error{}`
+                    %% inside regardless of this wrapper.
+                    CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
+                        Class, Reason, Stacktrace
+                    ),
+                    {error, {eval_error, Class, CaughtExObj}}
             end;
         {error, Err} ->
             {error, Err}
