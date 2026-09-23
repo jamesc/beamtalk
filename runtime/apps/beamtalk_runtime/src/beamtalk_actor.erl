@@ -957,6 +957,16 @@ sync_send_remote(ActorPid, Selector, Args) ->
                             %% Backward compat: safe_dispatch without stacktrace —
                             %% still pass exception class to preserve error kind
                             beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
+                        {error, Nlr} when ?IS_NLR(Nlr) ->
+                            %% A `^` inside a block invoked on ActorPid on our
+                            %% behalf (BT-3582). The matching catch frame is in
+                            %% *our* process — ActorPid had no frame holding
+                            %% that token, so its reply is the only way the
+                            %% signal gets back here. Re-throw so the enclosing
+                            %% method unwinds as it would have without the
+                            %% process hop — same relay shape as
+                            %% beamtalk_class_dispatch.erl's class-method hops.
+                            throw(Nlr);
                         {error, Error} ->
                             beamtalk_exception_handler:reraise(Error);
                         DirectValue ->
@@ -1054,6 +1064,9 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                                 {error, {ErlType, ErrorValue}} ->
                                     %% Backward compat: preserve exception class
                                     beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
+                                {error, Nlr} when ?IS_NLR(Nlr) ->
+                                    %% Relay a foreign `^` (BT-3582) — see sync_send/3.
+                                    throw(Nlr);
                                 {error, Error} ->
                                     beamtalk_exception_handler:reraise(Error);
                                 DirectValue ->
@@ -2281,6 +2294,16 @@ dispatch_user_method(Selector, Args, Self, State) ->
                 error:#beamtalk_error{} = BtError:_Stacktrace ->
                     %% Preserve structured beamtalk errors from method implementations
                     {error, BtError, State};
+                throw:Nlr:_Stacktrace when ?IS_NLR(Nlr) ->
+                    %% A `^` inside a block this method ran on behalf of a
+                    %% caller in another process (e.g. a block invoked here via
+                    %% an actor-to-actor send). The matching catch frame lives
+                    %% in that caller's process, not ours, so relay the NLR
+                    %% tuple as our reply instead of letting the catch-all
+                    %% below misclassify it as a runtime_error — mirrors
+                    %% beamtalk_class_dispatch.erl's class-method-hop relay
+                    %% (ADR 0110), extended to instance actor dispatch (BT-3582).
+                    {error, Nlr, State};
                 Class:Reason:Stacktrace ->
                     wrap_method_error(Selector, State, Class, Reason, Stacktrace)
             end;
@@ -2292,6 +2315,9 @@ dispatch_user_method(Selector, Args, Self, State) ->
                 error:#beamtalk_error{} = BtError:_Stacktrace ->
                     %% Preserve structured beamtalk errors from method implementations
                     {error, BtError, State};
+                throw:Nlr:_Stacktrace when ?IS_NLR(Nlr) ->
+                    %% See the arity-4 clause above — same relay, old-style methods.
+                    {error, Nlr, State};
                 Class:Reason:Stacktrace ->
                     wrap_method_error(Selector, State, Class, Reason, Stacktrace)
             end;

@@ -1650,7 +1650,7 @@ fn test_each_with_index_pure_block_falls_through() {
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items eachWithIndex: [:item :i | item + i]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        code.contains("'send'(_items4, 'eachWithIndex:', ["),
         "eachWithIndex: pure block: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
@@ -1669,7 +1669,7 @@ fn test_each_with_index_wrong_arity_block_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | x + 1]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        code.contains("'send'(_items4, 'eachWithIndex:', ["),
         "eachWithIndex: wrong arity: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
@@ -1773,7 +1773,7 @@ fn test_do_separated_by_pure_blocks_fall_through() {
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [:item | item + 1] separatedBy: [nil]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'do:separatedBy:', ["),
+        code.contains("'send'(_items4, 'do:separatedBy:', ["),
         "do:separatedBy: pure blocks: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
@@ -1793,7 +1793,7 @@ fn test_each_with_index_degenerate_param_names_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | x + 1]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        code.contains("'send'(_items4, 'eachWithIndex:', ["),
         "eachWithIndex: degenerate params: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
@@ -1815,7 +1815,7 @@ fn test_each_with_index_non_literal_callable_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | item + i]\n    items eachWithIndex: blk\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'eachWithIndex:', [Blk]"),
+        code.contains("'send'(_items4, 'eachWithIndex:', [Blk]"),
         "eachWithIndex: non-literal callable: should dispatch via message send. Got:\n{code}"
     );
     assert!(
@@ -1835,7 +1835,7 @@ fn test_do_separated_by_non_literal_callable_falls_through() {
     // eachWithIndex: assertion above: do:separatedBy: passes two arguments
     // (`[Blk, fun () -> 'nil']`), so `[Blk]` alone would never match.
     assert!(
-        code.contains("'send'(_items1, 'do:separatedBy:', [Blk"),
+        code.contains("'send'(_items4, 'do:separatedBy:', [Blk"),
         "do:separatedBy: non-literal callable: should dispatch via message send. Got:\n{code}"
     );
     assert!(
@@ -1854,7 +1854,7 @@ fn test_do_separated_by_non_literal_separator_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [nil]\n    items do: [:x | x printString] separatedBy: sep\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'do:separatedBy:', ["),
+        code.contains("'send'(_items4, 'do:separatedBy:', ["),
         "do:separatedBy: non-literal separator: should dispatch via message send. Got:\n{code}"
     );
     assert!(
@@ -1896,7 +1896,7 @@ fn test_each_with_index_zero_arity_block_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [1]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        code.contains("'send'(_items4, 'eachWithIndex:', ["),
         "eachWithIndex: zero-arity block: should fall through to a dispatch call site. Got:\n{code}"
     );
     assert!(
@@ -1915,7 +1915,7 @@ fn test_do_separated_by_separator_with_param_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | y + 1]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items1, 'do:separatedBy:', ["),
+        code.contains("'send'(_items4, 'do:separatedBy:', ["),
         "do:separatedBy: separator with param: should fall through to a dispatch call site. Got:\n{code}"
     );
     assert!(

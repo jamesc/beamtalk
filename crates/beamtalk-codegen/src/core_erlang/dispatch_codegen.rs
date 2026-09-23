@@ -169,9 +169,37 @@ impl CoreErlangGenerator {
     /// the clause body before the map is constructed. This only runs on the
     /// error path — no overhead on the success path.
     ///
+    /// ## NLR relay (BT-3580)
+    ///
+    /// A `^` inside a block passed through this self-send to a user HOM
+    /// (e.g. `self do: [:each | ... ifTrue: [^each]]`) throws the 4-tuple
+    /// `{'$bt_nlr', Token, Value, State}` (ADR 0041). `generate_safe_dispatch`
+    /// (`gen_server/dispatch.rs`) already special-cases that exact throw
+    /// shape ahead of its own catch-all (BT-3580/BT-3582) and returns it as
+    /// a *bare* value — `{'error', {'$bt_nlr', Token, Value, State}, State}`
+    /// — instead of packing it into the ordinary `{Type, Reason,
+    /// Stacktrace}` triple every other caught exception gets. This call
+    /// site must recognize that same bare shape and re-throw it (a plain
+    /// `erlang:throw/1` — there is no stacktrace left to preserve; `^` is
+    /// intentional control flow, not a reported error, matching the
+    /// existing relays in `beamtalk_actor.erl` and
+    /// `beamtalk_class_dispatch.erl`, neither of which preserves one
+    /// either) so the enclosing method's own NLR catch (which only matches
+    /// `throw:{'$bt_nlr', ...}` — see `nlr.rs`'s `wrap_body_with_nlr_catch`)
+    /// sees it, whether it owns this token or is itself just another
+    /// self-dispatch hop relaying it further up — the same relay
+    /// `beamtalk_class_dispatch.erl` already performs for class-method
+    /// self-dispatch hops (ADR 0110), now applied to instance actor
+    /// self-sends. A leading clause here must come before the "plain
+    /// returned error" catch-all below, which would otherwise pass the raw
+    /// NLR tuple to `beamtalk_error:'raise'/1` — a `function_clause` crash,
+    /// since that function only accepts a `#beamtalk_error{}` record.
+    ///
     /// # Generated Code
     ///
     /// ```erlang
+    /// <{'error', {'$bt_nlr', NlrTok, NlrVal, NlrSt}, _}> when 'true' ->
+    ///     call 'erlang':'throw'({'$bt_nlr', NlrTok, NlrVal, NlrSt})
     /// <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
     ///     let Class = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in
     ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace,
@@ -190,13 +218,32 @@ impl CoreErlangGenerator {
         var_prefix: &str,
         selector_atom: &str,
     ) -> Document<'static> {
+        let nlr_token_var = self.fresh_var(&format!("{var_prefix}NlrTok"));
+        let nlr_value_var = self.fresh_var(&format!("{var_prefix}NlrVal"));
+        let nlr_state_var = self.fresh_var(&format!("{var_prefix}NlrSt"));
         let type_var = self.fresh_var(&format!("{var_prefix}Type"));
         let reason_var = self.fresh_var(&format!("{var_prefix}Reason"));
         let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
         let plain_error_var = self.fresh_var(&format!("{var_prefix}Plain"));
         let class_var = self.fresh_var(&format!("{var_prefix}Class"));
         let no_match_fallback = self.case_clause_fallback(&format!("{var_prefix}NoMatch"));
+        let nlr_tuple_doc = || {
+            docvec![
+                "{'$bt_nlr', ",
+                leaf::var(nlr_token_var.clone()),
+                ", ",
+                leaf::var(nlr_value_var.clone()),
+                ", ",
+                leaf::var(nlr_state_var.clone()),
+                "}",
+            ]
+        };
         docvec![
+            "<{'error', ",
+            nlr_tuple_doc(),
+            ", _}> when 'true' -> call 'erlang':'throw'(",
+            nlr_tuple_doc(),
+            ") ",
             "<{'error', {",
             leaf::var(type_var.clone()),
             ", ",

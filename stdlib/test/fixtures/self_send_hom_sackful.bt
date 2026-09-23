@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3580: Value-class twin of `self_send_hom_pool.bt`'s
+// `SelfSendHomPool` — identical method bodies, routing a caller-supplied
+// block through a self-send (`self do:`) to a user HOM before invoking it.
+// This already worked before the fix; kept as a same-shape regression
+// guard alongside the actor fixture that didn't.
+
+Value subclass: SelfSendHomSackful
+  field: items = #(1, 2, 3, 4)
+
+  do: block => self.items do: block
+
+  detect: block ifNone: noneBlock =>
+    self do: [:each | (block value: each) ifTrue: [^each]]
+    noneBlock value
+
+  inject: initial into: block =>
+    acc := initial
+    self do: [:each | acc := block value: acc value: each]
+    acc
+
+  size => self inject: 0 into: [:n :_each | n + 1]

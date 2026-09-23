@@ -260,6 +260,34 @@ impl CoreErlangGenerator {
     /// Stacktrace is captured and returned in the error tuple so crash
     /// reports and caller-side re-raises preserve full diagnostic information.
     ///
+    /// ## NLR relay (BT-3580/BT-3582)
+    ///
+    /// This is the primary cross-process dispatch boundary every compiled
+    /// actor's generated `handle_call/3`/`handle_cast/2` calls directly
+    /// (`gen_server/callbacks.rs`) — not just the nested self-dispatch hop
+    /// `generate_self_dispatch_error_clause` (`dispatch_codegen.rs`)
+    /// covers. A `^` inside a block invoked here — one whose defining
+    /// frame belongs to a *different* process (the caller across a
+    /// `gen_server:call`), not this method's own `dispatch/4` clause —
+    /// escapes uncaught (no literal `^` of this method's own to catch it)
+    /// as the 4-tuple `{'$bt_nlr', Token, Value, State}` throw (ADR 0041).
+    /// The plain catch-all here would pack it as an ordinary `{Type,
+    /// Reason, Stacktrace}` triple, misclassified as a `runtime_error` by
+    /// every caller (`beamtalk_actor:sync_send`/`sync_send_remote`'s
+    /// existing 3-tuple `{ErlType, ErrorValue, Stacktrace}` reraise
+    /// clause would swallow it before ever reaching their newer `?IS_NLR`
+    /// guard, since a plain 3-tuple has no way to distinguish the two).
+    /// A leading clause instead returns the *bare* NLR tuple as `Error`
+    /// — the same "plain returned error" shape `dispatch/4`'s DNU
+    /// fallback already returns, which `handle_call/3` passes through
+    /// unwrapped as `{'reply', {'error', Error}, State}` — so the
+    /// `gen_server:call` result is the bare `{error, Nlr}` 2-tuple
+    /// `beamtalk_actor.erl`'s `sync_send`/`sync_send_remote` (BT-3582)
+    /// already relays via `throw(Nlr)`. Unlike the self-dispatch relay,
+    /// this must return a *value*, not re-raise: `handle_call/3` runs in
+    /// the callee actor's own `gen_server` loop, and throwing here would
+    /// crash that actor instead of relaying to the caller.
+    ///
     /// # Generated Code
     ///
     /// ```erlang
@@ -268,11 +296,19 @@ impl CoreErlangGenerator {
     ///     try call 'module':'dispatch'(Selector, Args, Self, State)
     ///     of Result -> Result
     ///     catch <Type, Error, Stacktrace> ->
-    ///         {'error', {Type, Error, Stacktrace}, State}
+    ///         case {Type, Error} of
+    ///             <{'throw', {'$bt_nlr', NlrTok, NlrVal, NlrSt}}> when 'true' ->
+    ///                 {'error', {'$bt_nlr', NlrTok, NlrVal, NlrSt}, State}
+    ///             <_> when 'true' ->
+    ///                 {'error', {Type, Error, Stacktrace}, State}
+    ///         end
     /// ```
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<Document<'static>> {
-        let module_name = &self.module_name;
+        let module_name = self.module_name.clone();
+        let nlr_token_var = self.fresh_var("SDNlrTok");
+        let nlr_value_var = self.fresh_var("SDNlrVal");
+        let nlr_state_var = self.fresh_var("SDNlrSt");
 
         let doc = docvec![
             "'safe_dispatch'/3 = fun (Selector, Args, State) ->",
@@ -292,8 +328,35 @@ impl CoreErlangGenerator {
                     line(),
                     "of Result -> Result",
                     line(),
-                    // Capture stacktrace and return in error tuple for diagnostics
-                    "catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}",
+                    // Capture stacktrace and return in error tuple for diagnostics;
+                    // a leading clause relays a foreign NLR (BT-3580/BT-3582) as a
+                    // bare error value instead of wrapping it as an ordinary triple.
+                    docvec![
+                        "catch <Type, Error, Stacktrace> -> case {Type, Error} of",
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                "<{'throw', {'$bt_nlr', ",
+                                leaf::var(nlr_token_var.clone()),
+                                ", ",
+                                leaf::var(nlr_value_var.clone()),
+                                ", ",
+                                leaf::var(nlr_state_var.clone()),
+                                "}}> when 'true' -> {'error', {'$bt_nlr', ",
+                                leaf::var(nlr_token_var),
+                                ", ",
+                                leaf::var(nlr_value_var),
+                                ", ",
+                                leaf::var(nlr_state_var),
+                                "}, State}",
+                                line(),
+                                "<_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}",
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ],
                 ]
             ),
             "\n\n",
