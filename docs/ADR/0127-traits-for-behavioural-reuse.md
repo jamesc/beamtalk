@@ -1643,6 +1643,25 @@ Deferred to follow-up ADRs, explicitly: stateful traits (§7); trait-level
 modifiers; `sealed` traits for whole-program optimisation (BT-274's last
 criterion — moot while flattening already gives per-class sealing).
 
+## Implementation Tracking
+
+**Epic:** [BT-3586](https://linear.app/beamtalk/issue/BT-3586)
+**Status:** Planned
+
+| ADR phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-3587](https://linear.app/beamtalk/issue/BT-3587) | Parse provided methods in `Protocol define:` and `uses:` lines in class bodies | M | — |
+| 2 | [BT-3588](https://linear.app/beamtalk/issue/BT-3588) | Flattening pass; protocol type is required ∪ provided | M | BT-3587 |
+| 2 | [BT-3589](https://linear.app/beamtalk/issue/BT-3589) | Semantic checks: requirements, `overriding:`, provision self-sends, protocol-side rules | M | BT-3588 |
+| 0, 3 | [BT-3590](https://linear.app/beamtalk/issue/BT-3590) | Codegen with protocol source identity and package-scoped name resolution | M | BT-3588 |
+| 3 | [BT-3591](https://linear.app/beamtalk/issue/BT-3591) | Build graph: protocol → user edges in every compile path | M | BT-3590 |
+| 4 | [BT-3592](https://linear.app/beamtalk/issue/BT-3592) | Runtime users index and reflection API | M | BT-3590 |
+| 5 | [BT-3593](https://linear.app/beamtalk/issue/BT-3593) | All-or-nothing reload and live patching | M | BT-3591, BT-3592 |
+| 6 | [BT-3594](https://linear.app/beamtalk/issue/BT-3594) | Stdlib adoption, Traits docs, end-to-end test | M | BT-3589, BT-3593 |
+| 7 | [BT-3595](https://linear.app/beamtalk/issue/BT-3595) | Post-v1 (needs-spec) | L | v1 |
+
+Related: [BT-3580](https://linear.app/beamtalk/issue/BT-3580) (actor self-send block bug; not blocking).
+
 ## Migration Path
 
 Additive for language semantics; three notes for adopters:
