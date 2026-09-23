@@ -206,10 +206,14 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   // ===== Instance Methods — Comparison =====
   //
   // Ordering (`< > <= >=`) is message-dispatched (BT-2709/2710), so these
-  // overrides are real. Equality is not, and deliberately has no declaration
-  // here: per ADR 0002 the compiler lowers `=:=`, `=/=`, `==` and `/=` straight
-  // to the Erlang BIFs with no method dispatch, so a method for any of them
-  // would be dead code — and is now rejected at compile time (BT-2997).
+  // overrides are real. `<`, `>`, `>=` are `self delegate` straight to
+  // `beamtalk_duration`'s same-named `'<'`/`'>'`/`'>='` functions. `<=` stays
+  // inline FFI: Erlang spells "less-or-equal" `=<`, not `<=`, so there is no
+  // `'<='/2` for `self delegate` to reach — it dispatches through the `lte`
+  // shim instead. Equality is not overridden here, and deliberately has no
+  // declaration: per ADR 0002 the compiler lowers `=:=`, `=/=`, `==` and `/=`
+  // straight to the Erlang BIFs with no method dispatch, so a method for any
+  // of them would be dead code — and is now rejected at compile time (BT-2997).
   //
   // Raw structural equality is already the right answer for Duration: every
   // constructor canonicalises to the single `millis` field, so equal lengths
@@ -222,8 +226,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```beamtalk
   /// (Duration seconds: 1) < (Duration seconds: 2)  // => true
   /// ```
-  < other :: Duration -> Boolean =>
-    (Erlang beamtalk_duration) lt: self with: other
+  < other :: Duration -> Boolean => self delegate
 
   /// True if this Duration is longer than `other`.
   ///
@@ -231,8 +234,7 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```beamtalk
   /// (Duration seconds: 2) > (Duration seconds: 1)  // => true
   /// ```
-  > other :: Duration -> Boolean =>
-    (Erlang beamtalk_duration) gt: self with: other
+  > other :: Duration -> Boolean => self delegate
 
   /// True if this Duration is shorter than or equal to `other`.
   ///
@@ -249,5 +251,4 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```beamtalk
   /// (Duration seconds: 2) >= (Duration seconds: 1)  // => true
   /// ```
-  >= other :: Duration -> Boolean =>
-    (Erlang beamtalk_duration) gte: self with: other
+  >= other :: Duration -> Boolean => self delegate

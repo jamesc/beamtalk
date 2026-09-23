@@ -210,8 +210,8 @@ that satisfy the first-keyword + `self`-threading rule.
 ~45 / 310):** BT-2731 (Resolved Decision 5) deliberately kept a set of classes on
 inline `(Erlang …)` FFI where a clean first-keyword rename is blocked or wrong —
 `Ets` (`at:`/`at:put:` first-keyword+arity collision), `AtomicCounter` (`value`
-intercepted by block-eval codegen), `DateTime` (operator selectors aren't valid
-Erlang function names), `Timer` (`after:` is reserved), `Announcer` (`when:`
+intercepted by block-eval codegen), `DateTime` (`<=` has no same-named Erlang
+function — Erlang spells "less-or-equal" `=<`, not `<=`), `Timer` (`after:` is reserved), `Announcer` (`when:`
 collision/reserved), `TestCase` (`fail:`/`skip:` don't thread `self`), and the
 `BeamtalkInterface`/`WorkspaceInterface` receiver-ignoring singletons. These stay
 inline but are **wrapped-by-default** since Part 2, so they still never leak raw
@@ -379,7 +379,7 @@ These forks were raised in review and resolved:
    - **Deliberately stays inline FFI** (already wrapped-by-default since BT-2722; a clean rename is blocked or semantically wrong):
      - **Ets** — `at:`/`at:put:`/`at:ifAbsent:` share the first keyword `at`, and `at:put:`/`at:ifAbsent:` both want `at/3` (irreducible first-keyword + arity collision, per Part 1 case (a)); `size`/`delete` would shadow the auto-imported `erlang:size/1` / clash with `ets:delete`.
      - **AtomicCounter** — `value`: the unary `value` selector is intercepted by block-evaluation codegen (BT-1260), so the backing fn is deliberately `readValue`.
-     - **DateTime** — the 7 comparison operators (`<` `>` `<=` `>=` `=:=` `=/=` `/=`): operator selectors are not valid Erlang function names, so `self delegate` cannot emit the call (shims `lt`/`gt`/… exist for the FFI path only).
+     - **DateTime** — `<`, `>`, `>=` are `self delegate` (the backing module already exports same-named `'<'`/`'>'`/`'>='` functions — a quoted atom is a perfectly valid Erlang function name, so operator selectors are not categorically excluded). Only `<=` stays inline FFI: Erlang spells "less-or-equal" `=<`, not `<=`, so there is no same-named function for `self delegate` to reach (the `lte` shim exists for that FFI path only). `=:=`/`=/=`/`/=` are not overridable at all — ADR 0002 hard-lowers them to raw Erlang term comparison with no method dispatch.
      - **Timer** — `after:do:`: `after` is an Erlang reserved word (rejected by the native_validators reserved-word check).
      - **Announcer** — `when:do:`/`when:doOnce:` both collapse to `when/3` (collision; `when` is also reserved), and `announce` would collide with the module's Layer-1 global `announce/2,3` bus API.
      - **TestCase** — `fail:`/`skip:` do not thread `self`, and `suiteFixture` lacks a return type; not worth `native:` on the heavily-subclassed base test class for one method.
