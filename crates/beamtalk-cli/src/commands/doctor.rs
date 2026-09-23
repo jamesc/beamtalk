@@ -87,20 +87,28 @@ type RuntimeInfo = (PathBuf, RuntimeLayout);
 // Individual checks
 // ---------------------------------------------------------------------------
 
-/// Check that `erl` is on PATH and OTP version is 27+.
+/// Check that `erl` is on PATH and its OTP major is within the declared
+/// support window (`otp-support.toml`, ADR 0125 §3.1): below the window
+/// fails, above it warns that it is untested.
 fn check_erl() -> CheckResult {
     let Some(erl_path) = which("erl") else {
         return CheckResult::Fail("erl not found on PATH".into());
     };
 
+    let window = beamtalk_cli::otp_support::window();
     match get_otp_version() {
         Some(version_str) => match parse_otp_major(&version_str) {
-            Some(major) if major >= 27 => {
-                CheckResult::Pass(format!("Erlang/OTP {version_str} ({erl_path})"))
-            }
-            Some(major) => CheckResult::Fail(format!(
-                "Erlang/OTP {version_str} ({erl_path}) — version {major} is too old, need 27+"
+            Some(major) if major < window.min_major => CheckResult::Fail(format!(
+                "Erlang/OTP {version_str} ({erl_path}) — version {major} is too old, need \
+                 {}",
+                window.display_range()
             )),
+            Some(major) if major > window.max_major => CheckResult::Warn(format!(
+                "Erlang/OTP {version_str} ({erl_path}) — version {major} is newer than the \
+                 tested window ({}) and is untested",
+                window.display_range()
+            )),
+            Some(_) => CheckResult::Pass(format!("Erlang/OTP {version_str} ({erl_path})")),
             None => CheckResult::Fail(format!(
                 "Erlang/OTP found ({erl_path}) but could not parse version: {version_str}"
             )),
@@ -284,16 +292,26 @@ fn count_beam_files(dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
-/// Print platform-specific installation instructions.
+/// Print platform-specific installation instructions, naming the declared
+/// support window (`otp-support.toml`, ADR 0125 §3.1) and recommending its
+/// newest major.
 fn print_install_instructions() {
+    let window = beamtalk_cli::otp_support::window();
+    let recommended = window.max_major;
     println!();
-    println!("Install Erlang/OTP 27+:");
+    println!(
+        "Install Erlang/OTP {} (recommended: {recommended}):",
+        window.display_range()
+    );
     if cfg!(target_os = "macos") {
-        println!("  brew install erlang        # Homebrew");
-        println!("  asdf install erlang 27.2   # asdf version manager");
+        println!("  brew install erlang               # Homebrew");
+        println!("  asdf install erlang {recommended}.0   # asdf version manager");
     } else if cfg!(target_os = "linux") {
-        println!("  sudo apt install erlang    # Debian/Ubuntu (check version is 27+)");
-        println!("  asdf install erlang 27.2   # asdf version manager");
+        println!(
+            "  sudo apt install erlang           # Debian/Ubuntu (check version is {})",
+            window.display_range()
+        );
+        println!("  asdf install erlang {recommended}.0   # asdf version manager");
     } else if cfg!(target_os = "windows") {
         println!("  Download from https://www.erlang.org/downloads");
         println!("  Or use: choco install erlang");

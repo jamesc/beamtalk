@@ -312,4 +312,75 @@ mod tests {
         let doc = nlr_arm_result("V", "S", NlrBoundary::ValueType);
         assert_eq!(doc.to_pretty_string(), "{V, S}");
     }
+
+    fn make_test_vars() -> NlrValueTypeCatchVars {
+        NlrValueTypeCatchVars {
+            token_var: "Tok0".to_string(),
+            result_var: "Res0".to_string(),
+            cls_var: "Cls0".to_string(),
+            err_var: "Err0".to_string(),
+            stk_var: "Stk0".to_string(),
+            ctk_var: "CTok0".to_string(),
+            val_var: "Val0".to_string(),
+            state_var: "St0".to_string(),
+            ot_pair_var: "OtP0".to_string(),
+        }
+    }
+
+    #[test]
+    fn format_try_prefix_binds_token_with_make_ref() {
+        let doc = make_test_vars().format_try_prefix().to_pretty_string();
+        assert!(
+            doc.contains("Tok0"),
+            "prefix should bind token var. Got:\n{doc}"
+        );
+        assert!(
+            doc.contains("call 'erlang':'make_ref'()"),
+            "prefix should call erlang:make_ref/0 to mint the NLR token. Got:\n{doc}"
+        );
+        assert!(
+            doc.contains("try"),
+            "prefix should open a try block. Got:\n{doc}"
+        );
+    }
+
+    #[test]
+    fn format_catch_suffix_passthrough_arm_uses_result_var() {
+        let doc = make_test_vars().format_catch_suffix().to_pretty_string();
+        // The `of` arm passes through non-throw results unchanged: `of Res0 -> Res0`.
+        assert!(
+            doc.contains("of Res0 -> Res0"),
+            "catch suffix `of` arm must pass through the result_var unchanged. Got:\n{doc}"
+        );
+    }
+
+    #[test]
+    fn format_catch_suffix_nlr_arm_yields_value_state_pair() {
+        let doc = make_test_vars().format_catch_suffix().to_pretty_string();
+        // Matching NLR throw: pattern must name the '$bt_nlr' tag.
+        assert!(
+            doc.contains("'$bt_nlr'"),
+            "NLR pattern must match the '$bt_nlr' tag. Got:\n{doc}"
+        );
+        // Token guard: catch-token must equal the method's own token.
+        assert!(
+            doc.contains("'=:='(CTok0, Tok0)"),
+            "catch suffix should guard with CTok0 =:= Tok0. Got:\n{doc}"
+        );
+        // ValueType boundary: NLR arm returns {Value, State}.
+        assert!(
+            doc.contains("{Val0, St0}"),
+            "ValueType NLR arm must yield {{Value, State}} pair. Got:\n{doc}"
+        );
+    }
+
+    #[test]
+    fn format_catch_suffix_reraises_non_nlr_exceptions() {
+        let doc = make_test_vars().format_catch_suffix().to_pretty_string();
+        // Non-NLR exceptions fall through to the wildcard arm and are re-raised.
+        assert!(
+            doc.contains("primop 'raw_raise'(Cls0, Err0, Stk0)"),
+            "catch suffix must re-raise non-NLR exceptions via primop raw_raise. Got:\n{doc}"
+        );
+    }
 }
