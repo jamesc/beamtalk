@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3580: a block passed to a user-defined higher-order method THROUGH an
+// actor self-send lost both `^` (non-local return) and captured-local
+// mutation — `safe_dispatch/3`'s catch-all had no NLR exclusion, so the
+// throw was misclassified as an ordinary runtime_error before it could
+// reach the defining method's own NLR catch. See
+// `fixtures/self_send_hom_pool.bt` for the reproduction (mirrors the
+// issue's `Pool`/`detect:ifNone:`/`size` shapes) and
+// `fixtures/self_send_hom_sackful.bt` for the already-working
+// Value-class twin.
+//
+// The `^` half is fixed (below). The captured-local-write half (`size`,
+// via `inject:into:`) is not — BT-3583 tracks it; it needs a different
+// state-threading mechanism than the existing Tier 2 machinery provides
+// for a block that crosses an opaque actor self-send boundary.
+
+TestCase subclass: ActorSelfSendHomTest
+
+  testDetectIfNoneReturnsMatchViaNlrThroughSelfSendHom =>
+    pool := SelfSendHomPool spawn
+    result := pool detect: [:x | x > 2] ifNone: [0]
+    self assert: result equals: 3
+
+  testDetectIfNoneFallsBackToNoneBlockWhenNoMatch =>
+    pool := SelfSendHomPool spawn
+    result := pool detect: [:x | x > 100] ifNone: [42]
+    self assert: result equals: 42
+
+  testSizeThreadsCapturedLocalWriteThroughSelfSendHom =>
+    self skip: "BT-3583: captured-local Tier2 accumulator not threaded through actor self-dispatch to a user HOM"
+
+  testValueClassTwinDetectIfNoneReturnsMatch =>
+    sackful := SelfSendHomSackful new
+    result := sackful detect: [:x | x > 2] ifNone: [0]
+    self assert: result equals: 3
+
+  testValueClassTwinSize =>
+    sackful := SelfSendHomSackful new
+    self assert: sackful size equals: 4

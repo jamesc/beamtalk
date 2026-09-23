@@ -275,8 +275,8 @@ block_different_version_raises(PeerNode) ->
 A block containing `^`, invoked on a remote actor during a sync call, must
 relay `{'$bt_nlr', Token, Value, State}` back to the defining method rather
 than surface as an ordinary method error — ADR 0126 §5.5 flags this as
-"the claim most likely to be wrong in practice". This pins whichever way it
-actually goes today.
+"the claim most likely to be wrong in practice". Fixed by BT-3582; this pins
+the correct relay behavior as a regression test.
 """.
 nlr_across_nodes(PeerNode) ->
     {ok, RemotePid} = rpc:call(PeerNode, test_wirecheck_actor, start, [0]),
@@ -290,32 +290,20 @@ nlr_across_nodes(PeerNode) ->
             catch
                 Class:Reason -> {caught, Class, Reason}
             end,
-        %% Finding: today this does NOT come back as the NLR value/relay —
-        %% `beamtalk_actor:dispatch_user_method/4`'s catch-all
-        %% (`Class:Reason:Stacktrace -> wrap_method_error(...)`) has no
-        %% `?IS_NLR` exclusion (unlike `beamtalk_class_dispatch.erl`'s
-        %% `class_send_dispatch/3` clauses), so the thrown NLR tuple is
-        %% caught there and reported as an ordinary `runtime_error` — the
-        %% original `{'$bt_nlr', Token, Value, State}` tuple survives only
-        %% as opaque debugging detail (`details.original_reason`), not as
-        %% the control-flow signal it should relay. See the ADR amendment
-        %% for the full narrative and the fix this implies for Phase 3.
+        %% BT-3582: `dispatch_user_method/4` now carries an `?IS_NLR`
+        %% relay clause ahead of its catch-all (mirroring
+        %% `beamtalk_class_dispatch.erl`'s `class_send_dispatch/3` /
+        %% `metaclass_send_dispatch/4`), and `sync_send/3,4` re-throws the
+        %% relayed `{error, Nlr}` reply on the caller side — so the NLR
+        %% tuple now unwinds back to the defining method's own catch frame
+        %% exactly as it would without the process hop, instead of
+        %% surfacing as an ordinary `runtime_error`.
         ?assertMatch(
-            {caught, error, #{
-                '$beamtalk_class' := 'RuntimeError',
-                error := #beamtalk_error{
-                    kind = runtime_error,
-                    details = #{
-                        original_class := throw,
-                        original_reason := {'$bt_nlr', Token, NlrValue, defining_method_state}
-                    }
-                }
-            }},
+            {caught, throw, {'$bt_nlr', Token, NlrValue, defining_method_state}},
             Outcome
         ),
         %% The callee node must still be alive and answer further sends —
-        %% the catch-all is at minimum a safety valve, even though the
-        %% semantics are wrong.
+        %% the relay unwinds the caller's stack, not the callee's.
         ?assertEqual(0, beamtalk_actor:sync_send(RemotePid, getValue, []))
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])

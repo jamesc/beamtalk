@@ -21,6 +21,10 @@ Tests all actor behaviors:
 
 %% Logger handler callback for the stacktrace-capture tests below
 -export([log/2]).
+%% BT-3582: `fun ?MODULE:F/A` external fun refs stored in `__methods__` maps
+%% resolve through the module's export table at call time, same as
+%% test_wirecheck_actor.erl's method funs — must be exported.
+-export([bt3582_invoke_block_fun4/4, bt3582_invoke_block_fun2/2]).
 
 log(LogEvent, #{config := #{parent := Parent}}) ->
     Parent ! {log_event, LogEvent},
@@ -3965,4 +3969,80 @@ registered_name_for_pid_returns_name_when_registered_test() ->
     after
         catch erlang:unregister(Name),
         Pid ! stop
+    end.
+
+%%====================================================================
+%% BT-3582: dispatch_user_method/4 relays a `^` (NLR) thrown by a block
+%% invoked on a *different* actor during a sync call, instead of
+%% dispatch_user_method/4's catch-all misclassifying it as an ordinary
+%% runtime_error (ADR 0110's class-method-hop relay, extended to instance
+%% actor dispatch). Same-node counterpart of
+%% beamtalk_dist_wirecheck_tests:nlr_across_nodes/1 — that test pins the
+%% two-node wire-check case, this one proves the fix holds for a plain
+%% local actor-to-actor sync send too.
+%%====================================================================
+
+bt3582_relay_state(Methods) ->
+    #{
+        '$beamtalk_class' => 'Bt3582TestActor',
+        '__methods__' => Methods,
+        value => 0
+    }.
+
+-doc "New-style (arity-4) method invoking a caller-supplied zero-arity block.".
+bt3582_invoke_block_fun4(_Selector, [Block], _Self, State) when is_function(Block, 0) ->
+    {reply, Block(), State}.
+
+-doc "Old-style (arity-2) method invoking a caller-supplied zero-arity block.".
+bt3582_invoke_block_fun2([Block], State) when is_function(Block, 0) ->
+    {reply, Block(), State}.
+
+bt3582_nlr_relayed_across_actor_send_arity4_test() ->
+    State = bt3582_relay_state(#{
+        getValue => fun(_Args, S) -> {reply, maps:get(value, S), S} end,
+        'invokeBlock:' => fun ?MODULE:bt3582_invoke_block_fun4/4
+    }),
+    {ok, ActorPid} = gen_server:start_link(beamtalk_actor, State, []),
+    Token = make_ref(),
+    NlrValue = bt3582_nlr_marker,
+    NlrBlock = fun() -> throw({'$bt_nlr', Token, NlrValue, defining_method_state}) end,
+    try
+        Outcome =
+            try
+                {returned, beamtalk_actor:sync_send(ActorPid, 'invokeBlock:', [NlrBlock])}
+            catch
+                Class:Reason -> {caught, Class, Reason}
+            end,
+        ?assertEqual(
+            {caught, throw, {'$bt_nlr', Token, NlrValue, defining_method_state}}, Outcome
+        ),
+        %% The callee actor must still be alive and answer further sends —
+        %% the relay unwinds the caller's stack, not the callee's.
+        ?assertEqual(0, beamtalk_actor:sync_send(ActorPid, getValue, []))
+    after
+        gen_server:stop(ActorPid)
+    end.
+
+bt3582_nlr_relayed_across_actor_send_arity2_test() ->
+    State = bt3582_relay_state(#{
+        getValue => fun(_Args, S) -> {reply, maps:get(value, S), S} end,
+        'invokeBlock:' => fun ?MODULE:bt3582_invoke_block_fun2/2
+    }),
+    {ok, ActorPid} = gen_server:start_link(beamtalk_actor, State, []),
+    Token = make_ref(),
+    NlrValue = bt3582_nlr_marker,
+    NlrBlock = fun() -> throw({'$bt_nlr', Token, NlrValue, defining_method_state}) end,
+    try
+        Outcome =
+            try
+                {returned, beamtalk_actor:sync_send(ActorPid, 'invokeBlock:', [NlrBlock])}
+            catch
+                Class:Reason -> {caught, Class, Reason}
+            end,
+        ?assertEqual(
+            {caught, throw, {'$bt_nlr', Token, NlrValue, defining_method_state}}, Outcome
+        ),
+        ?assertEqual(0, beamtalk_actor:sync_send(ActorPid, getValue, []))
+    after
+        gen_server:stop(ActorPid)
     end.
