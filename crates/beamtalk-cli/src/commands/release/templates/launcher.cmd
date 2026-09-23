@@ -21,9 +21,9 @@ set "PROVENANCE=%CONFIG_DIR%\beamtalk-provenance.json"
 rem Resolve the erl.exe to run: bundled ERTS when present (the default), else
 rem the host erl.exe on PATH (ADR 0125 §1.3/§3.2).
 set "USING_HOST_ERTS=false"
-if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\erl.exe" (
-    set "ERL=%ROOT%\erts-%ERTS_VSN%\bin\erl.exe"
-) else (
+set "ERL="
+if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\erl.exe" set "ERL=%ROOT%\erts-%ERTS_VSN%\bin\erl.exe"
+if not defined ERL (
     for %%E in (erl.exe) do set "ERL=%%~$PATH:E"
     set "USING_HOST_ERTS=true"
 )

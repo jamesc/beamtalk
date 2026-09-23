@@ -291,6 +291,17 @@ pub fn write_rel_and_boot_script(
             };
             let src = Utf8Path::new(lib_dir);
             if !src.is_dir() {
+                // `code:lib_dir/1` was only just queried for an app that
+                // `application:load`ed successfully a few lines above, so
+                // this should be unreachable in practice — but if it ever
+                // fires, `.rel`/`start.boot` still declares `name-vsn` (it
+                // was already written above) while the release tree ends up
+                // missing it under `lib/`: a build that reports success but
+                // won't boot, with no `--no-include-erts` fallback to catch
+                // it later. Surface it now rather than staying silent.
+                eprintln!(
+                    "warning: host app '{name}-{vsn}' resolved to '{lib_dir}', which is not a directory — it will be missing from the staged release tree"
+                );
                 continue;
             }
             let dest = release_dir_abs.join("lib").join(format!("{name}-{vsn}"));
