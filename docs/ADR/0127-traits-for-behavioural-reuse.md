@@ -75,9 +75,10 @@ Decided after the second review (2026-09-23):
    stdlib protocol needs it, and cutting it removes transitive expansion,
    cycle detection, protocol-internal precedence and same-origin diamonds
    from v1. `extending:` still composes types.
-9. **The stdlib-protocol patch refusal** reads "Cannot patch 'max:' on
-   stdlib protocol 'Comparable': built-in protocols are read-only.",
-   mirroring the existing stdlib-class message (§11).
+9. **The stdlib-protocol patch refusal** reads "Cannot recompile 'max:' on
+   stdlib protocol 'Comparable': built-in protocols are read-only in the
+   workspace", a literal mirror of the existing stdlib-class message
+   (`stdlib_method_read_only_error/2`, `beamtalk_repl_eval.erl`; §11).
 
 All decisions are resolved; accepted 2026-09-23.
 
@@ -1040,8 +1041,8 @@ module changed.
   recompile `DateTime` or `String`. The existing refusal looks up classes,
   not protocols, so `Comparable >> max: …` at the REPL gets a new message,
   approved to mirror the existing stdlib-class one (§Status 9):
-  "Cannot patch 'max:' on stdlib protocol 'Comparable': built-in protocols
-  are read-only."
+  "Cannot recompile 'max:' on stdlib protocol 'Comparable': built-in
+  protocols are read-only in the workspace"
 - **Editing a user-package trait file** recompiles the trait and **every
   loaded, source-backed, non-stdlib user**, then reloads each user through
   the existing `update_class` path. Users without source in the workspace
@@ -1135,7 +1136,7 @@ implementation in the existing `E`/`W` series.
 | Two traits provide the same selector | Error | "`sel` is provided by both A and B in C. Define `sel` in C, or exclude one: `uses: B excluding: #(#sel)`" |
 | Required selector unresolvable (closed world) | Error | "C uses T but does not implement required `sel`" + the required signature as hint |
 | Required selector unresolvable (open world) | Hint | as ADR 0100 |
-| `uses:` names a protocol with no provided methods | Warning | "`Printable` provides no methods, so `uses:` adds nothing; conformance is structural (ADR 0068). Remove it" |
+| `uses:` names a protocol with no provided methods | Hint | "`Printable` provides no methods, so `uses:` only checks its requirements here; conformance is structural (ADR 0068)" (§1, §Status 6) |
 | `uses:` names an unknown name | Error | "unknown protocol `T`" + nearest-name hint |
 | `uses:` after a slot or method | Error | "`uses:` lines must come before state and method declarations" |
 | Unknown keyword line in a class body | Error | "unexpected `foo:` in class body" (replaces the silent end-of-body) |
@@ -1194,7 +1195,7 @@ Integer conformsTo: #Comparable                           // => true
 (Version >> #<) origin                                    // => nil
 (Protocol usersOf: #Comparable) size                      // => 5
 Comparable >> max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]
-// => error: Cannot patch 'max:' on stdlib protocol 'Comparable': built-in protocols are read-only.
+// => error: Cannot recompile 'max:' on stdlib protocol 'Comparable': built-in protocols are read-only in the workspace
 Version removeSelector: #max:
 // => error: `max:` is provided by trait Comparable; exclude it with
 //    `uses: Comparable excluding: #(#max:)` or remove it from the trait
