@@ -67,7 +67,16 @@ for /f "tokens=1 delims=-" %%A in ("%BUILT_OTP%") do set "BUILT_MAJOR=%%A"
 if not defined REQ_MIN exit /b 0
 if not defined REQ_MAX exit /b 0
 set "HOST_MAJOR="
-for /f "delims=" %%A in ('"%ERL%" -noshell -eval "io:format(\"~s\", [erlang:system_info(otp_release)]), halt()." 2^>nul') do set "HOST_MAJOR=%%A"
+rem The extra outer quote pair around the whole inner command is required:
+rem this command starts with a quoted "%ERL%" and contains more than two
+rem `"` characters overall, which trips a documented `cmd.exe /c` quirk
+rem (see `cmd /?`) where, unless a command line has *exactly* two quote
+rem characters, cmd strips the *first and last* quote of the entire line
+rem instead of preserving it — silently mangling this call so it produces
+rem no output, leaving HOST_MAJOR unset and the OTP-window check a no-op.
+rem Wrapping the command in one more quote pair makes that bogus strip
+rem remove the added quotes instead, leaving the real ones intact.
+for /f "delims=" %%A in ('""%ERL%" -noshell -eval "io:format(\"~s\", [erlang:system_info(otp_release)]), halt()." 2^>nul"') do set "HOST_MAJOR=%%A"
 if not defined HOST_MAJOR exit /b 0
 if %HOST_MAJOR% LSS %REQ_MIN% goto :otp_window_fail
 if %HOST_MAJOR% GTR %REQ_MAX% goto :otp_window_fail
