@@ -15,9 +15,11 @@ traits with `uses:` lines at the top of its body. Composition is
 **flattened at compile time**: the using class is compiled exactly as if the
 provided methods were written in its own body, so `ThreadedIr`, the class-kind
 calling convention, `super`, sealed self-send optimisation, xref, and hot
-reload all see ordinary methods. A class's own method beats a trait's, a
-trait's beats an inherited one, and two traits providing the same selector is
-a compile error unless the class defines it or excludes one. Every trait also
+reload all see ordinary methods. A class's own method beats a trait's, and a
+trait's beats an inherited one **only when the using class says so** with an
+`overriding:` clause (§3a), so neither a trait release nor a superclass
+release can silently replace behaviour. Two traits providing the same
+selector is a compile error unless the class defines it or excludes one. Every trait also
 *is* a protocol of the same name (its required ∪ provided selectors), so the
 structural conformance rule of ADR 0068 is unchanged and `uses:` never
 becomes a nominal `implements:`.
@@ -306,7 +308,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
 Grammar of a `uses:` line:
 
 ```
-uses: [package@]TraitName[(TypeArgs)] [excluding: #(#sel, …)] [aliasing: #{#newSel => #traitSel, …}]
+uses: [package@]TraitName[(TypeArgs)] [excluding: #(#sel, …)] [overriding: #(#sel, …)] [aliasing: #{#newSel => #traitSel, …}]
 ```
 
 `package@` qualifies a trait from another package, as `json@Parser` does for
@@ -314,7 +316,8 @@ a superclass (ADR 0070). Inside a trait body, `uses:`, `excluding:` and
 `aliasing:` are reserved: today `parse_protocol_method_signature_with_doc`
 would read `uses: Comparable` as a required keyword signature with a
 parameter named `Comparable`, so the trait-body parser must check for them
-first, as it already does for `extending:`.
+first, as it already does for `extending:`. `overriding:` is reserved the
+same way.
 
 - One trait per `uses:` line; several traits are several lines. This matches
   `state:` / `field:` (one declaration per line) and keeps the header line —
@@ -326,6 +329,9 @@ first, as it already does for `extending:`.
   other unknown keyword line in a class body — the silent-end-of-body
   behaviour goes.
 - `excluding:` drops provided selectors from this use (Pharo `-`).
+- `overriding:` acknowledges provided selectors that replace a method the
+  class inherits from its superclass chain (§3a). It has no Pharo
+  equivalent; it plays the role of C#'s `override`.
 - `aliasing:` adds each trait-provided `#traitSel` to the class *also* under
   `#newSel` (Pharo `@`). The alias always copies the trait's original
   provision, even when `#traitSel` is also excluded; the original name stays
@@ -356,13 +362,16 @@ written into its body**, after these steps, in order:
    conflicts (§4).
 4. Drop every trait provision whose selector (same side) the class body
    defines — **the class wins**.
-5. Check requirements (§5).
+5. Check requirements (§5), and check that every provision replacing an
+   inherited method is acknowledged (§3a).
 6. Compile the class with the merged methods as if they were its own.
 
 Precedence, highest first: **class body → trait provision → inherited**. A
 trait provision therefore *overrides* an inherited method, precisely as a
-method written in the body would. This is Schärli's flattening property and
-Pharo's rule, and it is the property that makes every later section cheap:
+method written in the body would — but only an acknowledged one (§3a). This
+is Schärli's flattening property and Pharo's rule, with Pharo's silent
+override removed, and it is the property that makes every later section
+cheap:
 after step 6 there is nothing trait-shaped left for `ThreadedIr`, dispatch,
 `super`, sealed self-sends, xref or hot reload to know about.
 
@@ -406,6 +415,68 @@ field accessors and `with*:` setters are suppressed today whenever
 `class.methods` already has the selector (`value_accessors.rs:63-92`). A
 trait provision must not suppress them: synthesised accessors count as
 class body for step 4, so `field: size` beats a trait's `size`.
+
+### 3a. Trait provisions never silently override inherited methods
+
+**The problem.** Under plain Pharo precedence a trait's method beats an
+inherited one with no signal. That makes traits a worse fragile base class
+than inheritance, from two directions, and in neither does the using
+class's own source change:
+
+- **The trait grows.** `Describable` v2 adds a `printString` provision.
+  Every user whose superclass defines `printString` silently loses it.
+- **The superclass grows.** A superclass v2 adds `summary`, which a trait
+  the subclass uses already provides. The subclass silently keeps the
+  trait's `summary` and shadows the new superclass method.
+
+**The rule.** After class-wins (§3 step 4), every remaining provision whose
+selector the using class **inherits** from its superclass chain, on the
+same side, must be acknowledged on its `uses:` line:
+
+```beamtalk
+Record subclass: AuditRecord
+  uses: Describable overriding: #(#printString)
+```
+
+Otherwise it is a **compile error** in the using class, naming both
+sides and both fixes:
+
+```
+error: Describable provides `printString`, which AuditRecord would otherwise
+       inherit from Record.
+  hint: to use Describable's version, write
+          uses: Describable overriding: #(#printString)
+        to keep Record's version, write
+          uses: Describable excluding: #(#printString)
+```
+
+The error is the point: it turns a silent behaviour change on upgrade into a
+build break at the one place that can decide, which is the versioning
+argument behind C#'s explicit `override`/`new`.
+
+**Details.**
+
+- **Kind roots are exempt.** Methods inherited from `ProtoObject`,
+  `Object`, `Value` or `Actor` (and, class side, `Behaviour`, `Class` and
+  `Metaclass`) are defaults meant to be replaced, such as `printString`,
+  `displayString` and `hash`. Requiring `overriding:` for them would put the
+  clause on nearly every use of `Printable`-like traits and teach users to
+  write it without reading it.
+- **Sealed inherited methods** stay an error whether or not they are
+  acknowledged (§13), exactly as for a class-body method.
+- **Open world.** When the superclass chain leaves the indexed world
+  (ADR 0100), the check cannot know what is inherited, so an unacknowledged
+  override there is a hint, not an error.
+- **Stale acknowledgements.** An `overriding:` entry that no longer replaces
+  anything, because the superclass dropped the method or the trait dropped
+  the provision, is a warning. The list stays an accurate record of what
+  the class knowingly replaces.
+- **Only provisions are checked.** A method written in the class body
+  overrides an inherited one silently, as it does today; the class's own
+  source is where that decision is visible.
+- **Timing.** The check needs the superclass chain, so it runs in the
+  post-`ClassHierarchy` half of the pass, beside the requirement check (§3,
+  §5).
 
 ### 4. Conflicts and their resolution
 
@@ -859,6 +930,10 @@ implementation in the existing `E`/`W` series.
 | `sealed` or `internal` on a trait method | Error | "`sealed`/`internal` are not supported on trait methods in v1" |
 | A trait provides `initialize`, `migrateFromV<N>:`, `doesNotUnderstand:args:`, `supervisionPolicy` or `supervisionSpec` | Error | "a trait cannot provide `sel`; it changes how the class is built or dispatched. Declare it as a required method instead" |
 | A provision would override an inherited `sealed` method | Error | as for a class-body method overriding a sealed method |
+| A provision would override an inherited method (outside the kind roots) without `overriding:` | Error | §3a — names the trait, the superclass, and both `overriding:` and `excluding:` fixes |
+| The same, where the superclass chain is open-world (ADR 0100) | Hint | §3a |
+| An `overriding:` entry that replaces nothing | Warning | "`sel` in `overriding:` does not override an inherited method; remove it" |
+| `overriding:` names a selector T does not provide | Error | "T does not provide `sel`" |
 | A class `uses:` a trait its superclass already uses | Warning | "C's superclass already uses T; this re-flattens T's methods over the superclass's customisations" |
 | A class-body override is not override-compatible with the provision it replaces | Warning | §8 |
 | Renaming or removing a required selector on a user | Runtime error | §11 |
@@ -928,6 +1003,7 @@ Version removeSelector: #max:
 | **Scala** | `trait` with linearisation; `with A with B` | Linearised; `super` chains through traits | Order decides; `abstract override` | Yes | Rejected as mixins; but Scala's "trait is also a type" is our §8 |
 | **Rust** | `trait` with default methods, `impl T for S` | Static, type-directed; orphan rules | Disambiguation by qualified path | None (associated fns only) | Adopted: required vs. default methods as the two body shapes. Rejected: nominal `impl` — ADR 0068 chose structural |
 | **Swift** | Protocol extensions with default implementations | Static dispatch for non-requirement extension methods | Ambiguity error | None | Rejected: the static/dynamic dispatch split is a well-known footgun; Beamtalk has one dispatch (ADR 0006) |
+| **C# 8** | Default interface methods; `override` / `new` on class members | Class wins over interface defaults; a class member hiding a base member without `new` or `override` warns | Must override | None | Adopted: the versioning stance. C# makes replacing inherited behaviour an explicit act so a base-type release cannot silently change a subclass; `overriding:` (§3a) is that rule applied to trait provisions |
 | **Java 8 / Kotlin** | Interface default methods | Flattened-ish; class wins, then explicit `A.super.m()` (Java) / `super<A>.m()` (Kotlin) | Must override | None | Adopted: class wins. Rejected: the qualified-super call; we alias instead (§4) |
 | **Pony** | `trait` (nominal, default methods) + `interface` (structural) | Nominal `is T` | Must override | None | Closest match to §8: nominal *composition* declaration + structural *type*. Pony has no exclusion/alias; we keep Pharo's |
 | **Dart** | `mixin` with `on` constraints, `with` | Linearised | Order decides | Yes | Rejected as mixins; `on` is our required-methods list |
@@ -1151,6 +1227,10 @@ slot — are permanent properties of the language, not of today's corpus.
   shape.
 - Conflicts and missing requirements are **compile errors with a named fix**,
   where Pharo gives a runtime error and Elixir gives a warning.
+- **No silent override on upgrade** (§3a). Neither a new trait provision
+  nor a new superclass method can change a class's behaviour without an
+  error at that class's next build, which removes the fragile-base-class
+  problem that plain trait precedence makes worse.
 - The type system gains nothing new: a trait is a protocol (§8), and
   ADR 0068's structural rule is untouched.
 - `between:and:`/`min:`/`max:` arrive on `DateTime`, `Duration`, `Uuid` and
@@ -1161,6 +1241,10 @@ slot — are permanent properties of the language, not of today's corpus.
   source-compatible (§8).
 
 ### Negative
+- **One more clause to write.** A trait provision that replaces an
+  inherited, non-root method needs `overriding:` (§3a), and a trait or
+  superclass release that introduces such an overlap breaks downstream
+  builds until each user decides. That is intended; the cost is the break.
 - **Bytecode duplication**: one copy of each provided method per user. For
   `Comparable` (six methods × five users) and `Enumerable` (~ten × three)
   this is a few KB. A trait used by hundreds of classes would be measurable;
@@ -1229,7 +1313,7 @@ assumption this ADR could not verify from source.
 |---|---|---|---|---|
 | 0 | **Spike**: (a) confirm inherited actor method self-send binding (lexical `<module>:safe_dispatch` vs. `__class_mod__`), since §6 rests on self-sends resolving in the *using* class's module; (b) re-run the BT-3580 probe and record whether block-taking actor provisions are safe. Record both in `docs/development/debugging.md` | runtime, codegen (read-only) | S | — |
 | 1 | **Syntax**: `TraitDefinition` AST (`ast/class.rs`), `ClassDefinition.uses: Vec<TraitUse { trait, type_args, excluding, aliasing, span }>`; `is_at_trait_definition` in the top-level dispatch (`parser/mod.rs:1406-1429`); `parse_trait_body` sharing `parse_protocol_method_signature_with_doc` for requirements (reserving `uses:`/`excluding:`/`aliasing:`) and the class method parser for provisions; `package@Trait`; `uses:` in the class-body loop with ordering and unknown-keyword errors; unparse round-trip; one-definition-per-file and ADR 0119 module naming for traits; lexer nothing (contextual keywords) | `beamtalk-core` source_analysis, ast, unparse | M | — |
-| 2 | **Semantics**: `semantic_analysis/trait_registry.rs` (mirrors `protocol_registry.rs`: registration, name collision, cycle check); `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, aliasing, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; implied-protocol registration into `ProtocolInfo`; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
+| 2 | **Semantics**: `semantic_analysis/trait_registry.rs` (mirrors `protocol_registry.rs`: registration, name collision, cycle check); `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, aliasing, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; implied-protocol registration into `ProtocolInfo`; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
 | 3 | **Codegen & build graph**: feed the flattened `ClassDefinition` to the existing generators (no change to `merge_method`); `methodXref` provenance/origin; `methodSource` as the trait's source slice; `traits => [{Name, Hash}]` in user meta; trait module emission (`__beamtalk_meta`, `'__beamtalk_trait_source'/0`, `register_trait/0`, implied protocol via `generate_protocol_registrations`) loaded before classes like `protocol_modules`; every §10a entry point (CLI cache key, `build_stdlib` trait pre-pass and `generated_builtins.rs`, compiler port, `dependency_classes.rs`, `ProjectIndex` edges); conformance fixture for the trait meta shape | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-cli`, `beamtalk-language-service`, `build_stdlib` | L | 2 |
 | 4 | **Runtime & reflection**: `beamtalk_trait_registry.erl` (ETS, mirrors protocol registry); `stdlib/src/trait.bt`; `Behaviour traits/allTraits/usesTrait:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := trait` + browse grouping; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
 | 5 | **Live system**: trait file reload → user recompile fan-out in the workspace loader (source-backed, non-stdlib users only; stdlib traits read-only); `Trait >> sel => …` and `Trait removeSelector:` live patching; required-selector rename/remove refusal and `save-section` routing (§11); `Trait define:` at the REPL; ADR 0105 re-check hookup; ADR 0114 rename (`renameSelector:to:` redirection, trait `renameTo:` with `uses:` reference rows); flush of trait files (ADR 0113); LSP go-to-definition/hover/completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
@@ -1241,7 +1325,7 @@ assumption this ADR could not verify from source.
 |---|---|
 | 0 | A BUnit fixture in `stdlib/test/` pinning the observed self-send binding: a subclass override called from an inherited actor method |
 | 1 | Parser unit tests and snapshots in `beamtalk-core`, unparse round-trip, and diagnostics for misplaced `uses:` and unknown keyword lines |
-| 2 | Semantic-analysis unit tests for each §13 row, the same-origin diamond, class-wins, `Self` substitution, and generic `E` substitution |
+| 2 | Semantic-analysis unit tests for each §13 row, both §3a directions (trait grows, superclass grows), the same-origin diamond, class-wins, `Self` substitution, and generic `E` substitution |
 | 3 | `test-package-compiler` codegen snapshots for one user of each class kind, `just verify-threaded-ir` over the flattened stdlib, and the trait-meta conformance fixture |
 | 4 | Runtime EUnit for `beamtalk_trait_registry`, BUnit reflection tests (`traits`, `origin`, `usersOf:`), and xref tests for `provenance := trait` |
 | 5 | `tests/repl-protocol/cases/` for trait reload fan-out, `Trait >> sel` live patching, `removeSelector:` refusal, and rename; plus LSP tests |
