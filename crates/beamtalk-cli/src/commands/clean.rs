@@ -27,6 +27,7 @@ use tracing::{debug, info};
 
 use super::build_layout::BuildLayout;
 use super::util::find_project_root;
+use beamtalk_cli::path_util::is_symlink;
 
 /// What `clean` is allowed to remove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,20 +160,6 @@ fn clean_targets(layout: &BuildLayout, scope: CleanScope) -> Vec<Utf8PathBuf> {
             layout.deps_dir(),
             layout.registry_dir(),
         ],
-    }
-}
-
-/// Whether `path` exists and is a symbolic link (without following it).
-///
-/// A missing path is not a symlink. Any other stat error is surfaced so a
-/// genuine I/O problem is not silently treated as "not a symlink".
-fn is_symlink(path: &Utf8Path) -> Result<bool> {
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) => Ok(meta.file_type().is_symlink()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(e)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to stat '{path}'")),
     }
 }
 
