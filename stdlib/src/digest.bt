@@ -19,7 +19,7 @@
 /// (Digest hmacSha256: "message" key: "secret") byteSize
 /// // => 32
 /// ```
-sealed typed Object subclass: Digest
+sealed typed Object subclass: Digest native: beamtalk_digest
 
   // === Hashing ===
 
@@ -29,8 +29,7 @@ sealed typed Object subclass: Digest
   /// ```beamtalk
   /// (Digest sha256: "abc") byteSize   // => 32
   /// ```
-  class sealed sha256: input :: String | Binary -> Binary =>
-    (Erlang beamtalk_digest) sha256: input
+  class sealed sha256: input :: String | Binary -> Binary => self delegate
 
   /// SHA-512 digest (64 bytes) of `input`.
   ///
@@ -38,8 +37,7 @@ sealed typed Object subclass: Digest
   /// ```beamtalk
   /// (Digest sha512: "abc") byteSize   // => 64
   /// ```
-  class sealed sha512: input :: String | Binary -> Binary =>
-    (Erlang beamtalk_digest) sha512: input
+  class sealed sha512: input :: String | Binary -> Binary => self delegate
 
   /// MD5 digest (16 bytes) of `input`.
   ///
@@ -53,8 +51,7 @@ sealed typed Object subclass: Digest
   /// ```beamtalk
   /// (Digest md5: "abc") byteSize      // => 16
   /// ```
-  class sealed md5: input :: String | Binary -> Binary =>
-    (Erlang beamtalk_digest) md5: input
+  class sealed md5: input :: String | Binary -> Binary => self delegate
 
   // === HMAC ===
 
@@ -65,7 +62,7 @@ sealed typed Object subclass: Digest
   /// (Digest hmacSha256: "message" key: "secret") byteSize   // => 32
   /// ```
   class sealed hmacSha256: input :: String | Binary key: key :: String | Binary -> Binary =>
-    (Erlang beamtalk_digest) hmacSha256: input key: key
+    self delegate
 
   /// HMAC-SHA512 message authentication code of `input` using `key`.
   ///
@@ -74,4 +71,4 @@ sealed typed Object subclass: Digest
   /// (Digest hmacSha512: "message" key: "secret") byteSize   // => 64
   /// ```
   class sealed hmacSha512: input :: String | Binary key: key :: String | Binary -> Binary =>
-    (Erlang beamtalk_digest) hmacSha512: input key: key
+    self delegate

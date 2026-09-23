@@ -1242,14 +1242,13 @@ sealed typed Object subclass: SystemNavigation
 
   /// Raise the shared malformed-spec error for `ffiSitesFor:` / `parseFfiSpec:`.
   ///
-  /// Always raises (kind `#user_error`); the `^nil` is unreachable and exists
-  /// only so the helper type-checks as returning a value when its result is
-  /// used in an expression position (e.g. inside `ifTrue:` of `parseFfiSpec:`).
+  /// Always raises (kind `#user_error`); `error:` returns `Never`, so this
+  /// still type-checks as returning a value when its result is used in an
+  /// expression position (e.g. inside `ifTrue:` of `parseFfiSpec:`).
   raiseFfiSpecError: aSpec :: String -> Object =>
     self
       error: "SystemNavigation ffiSitesFor: expects a spec of the form ""module:function"" or ""module:function/arity"", got: "
         ++ aSpec
-    ^nil
 
   /// Append FFI call sites of `module`:`function` (constrained to `arity` unless
   /// it is `#any`) found in any method of `aScope` to `result`. Returns the

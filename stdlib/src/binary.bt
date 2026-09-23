@@ -16,7 +16,7 @@
 /// Binary fromIolist: #("hello", " ", "world")
 /// // => _
 /// ```
-sealed typed Collection subclass: Binary
+sealed typed Collection subclass: Binary native: beamtalk_binary
 
   // === Class methods ===
 
@@ -29,8 +29,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary serialize: 42) class name   // => "Binary"
   /// ```
-  class sealed serialize: term :: Object -> Binary =>
-    (Erlang beamtalk_binary) serialize: term
+  class sealed serialize: term :: Object -> Binary => self delegate
 
   /// Deserialize a binary back to the original value (class method).
   ///
@@ -42,8 +41,7 @@ sealed typed Collection subclass: Binary
   /// Binary deserialize: (Binary serialize: #(1, 2, 3))
   /// // => _
   /// ```
-  class sealed deserialize: binary :: Binary -> Object =>
-    (Erlang beamtalk_binary) deserialize: binary
+  class sealed deserialize: binary :: Binary -> Object => self delegate
 
   /// Convert an iolist to a flat binary (class method).
   ///
@@ -55,8 +53,7 @@ sealed typed Collection subclass: Binary
   /// Binary fromIolist: #("hello", " ", "world")
   /// // => _
   /// ```
-  class sealed fromIolist: iolist :: Object -> Binary =>
-    (Erlang beamtalk_binary) fromIolist: iolist
+  class sealed fromIolist: iolist :: Object -> Binary => self delegate
 
   /// Create a binary from a list of byte integers (0-255).
   ///
@@ -64,8 +61,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// Binary fromBytes: #(104, 101, 108, 108, 111)   // => _
   /// ```
-  class sealed fromBytes: bytes :: List(Integer) -> Binary =>
-    (Erlang beamtalk_binary) fromBytes: bytes
+  class sealed fromBytes: bytes :: List(Integer) -> Binary => self delegate
 
   /// Deserialize a binary and return both the value and bytes consumed.
   ///
@@ -79,8 +75,7 @@ sealed typed Collection subclass: Binary
   /// result first    // => 42
   /// result second   // => bytes consumed
   /// ```
-  class sealed deserializeWithUsed: binary :: Binary -> Tuple =>
-    (Erlang beamtalk_binary) deserializeWithUsed: binary
+  class sealed deserializeWithUsed: binary :: Binary -> Tuple => self delegate
 
   /// Decode a standard (RFC 4648 §4) base64 string to a Binary.
   ///
@@ -94,7 +89,7 @@ sealed typed Collection subclass: Binary
   /// (Binary fromBase64: "not base64!!") isError                // => true
   /// ```
   class sealed fromBase64: str :: String -> Result(Binary, Error) =>
-    (Erlang beamtalk_binary) fromBase64: str
+    self delegate
 
   /// Decode a URL-safe (RFC 4648 §5) base64 string to a Binary.
   ///
@@ -107,7 +102,7 @@ sealed typed Collection subclass: Binary
   /// (Binary fromBase64Url: "aGVsbG8h") unwrap asStringUnchecked   // => "hello!"
   /// ```
   class sealed fromBase64Url: str :: String -> Result(Binary, Error) =>
-    (Erlang beamtalk_binary) fromBase64Url: str
+    self delegate
 
   /// Decode a hexadecimal string to a Binary.
   ///
@@ -119,8 +114,7 @@ sealed typed Collection subclass: Binary
   /// (Binary fromHex: "68656c6c6f") unwrap asStringUnchecked   // => "hello"
   /// (Binary fromHex: "zz") isError                             // => true
   /// ```
-  class sealed fromHex: str :: String -> Result(Binary, Error) =>
-    (Erlang beamtalk_binary) fromHex: str
+  class sealed fromHex: str :: String -> Result(Binary, Error) => self delegate
 
   // === Collection subclass-responsibility methods ===
 
@@ -251,13 +245,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asBase64   // => "aGVsbG8="
   /// ```
-  ///
-  /// The underlying FFI spec types the result `binary()` (`String | Binary`),
-  /// but `beamtalk_binary:'asBase64:'/1` always builds an ASCII base64
-  /// string — suppress the resulting `String | Binary` vs. declared `String`
-  /// return-type mismatch.
-  @expect type
-  asBase64 -> String => (Erlang beamtalk_binary) asBase64: self
+  asBase64 -> String => self delegate
 
   /// Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding.
   ///
@@ -269,8 +257,7 @@ sealed typed Collection subclass: Binary
   /// (Binary fromBytes: #(251, 239)) asBase64      // => "++8="
   /// (Binary fromBytes: #(251, 239)) asBase64Url   // => "--8="
   /// ```
-  @expect type
-  asBase64Url -> String => (Erlang beamtalk_binary) asBase64Url: self
+  asBase64Url -> String => self delegate
 
   /// Encode as a lowercase hexadecimal string.
   ///
@@ -278,5 +265,4 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asHex   // => "68656c6c6f"
   /// ```
-  @expect type
-  asHex -> String => (Erlang beamtalk_binary) asHex: self
+  asHex -> String => self delegate

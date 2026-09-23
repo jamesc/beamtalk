@@ -12,7 +12,7 @@
 /// Time nowMs   // => _
 /// Time nowUs   // => _
 /// ```
-sealed typed Object subclass: Time
+sealed typed Object subclass: Time native: beamtalk_time
 
   /// Current time in seconds since the Unix epoch.
   ///
@@ -22,7 +22,7 @@ sealed typed Object subclass: Time
   /// ```beamtalk
   /// Time nowS   // => _
   /// ```
-  class sealed nowS -> Integer => (Erlang beamtalk_time) nowS
+  class sealed nowS -> Integer => self delegate
 
   /// Current time in milliseconds since the Unix epoch.
   ///
@@ -32,7 +32,7 @@ sealed typed Object subclass: Time
   /// ```beamtalk
   /// Time nowMs   // => _
   /// ```
-  class sealed nowMs -> Integer => (Erlang beamtalk_time) nowMs
+  class sealed nowMs -> Integer => self delegate
 
   /// Current time in microseconds since the Unix epoch.
   ///
@@ -42,4 +42,4 @@ sealed typed Object subclass: Time
   /// ```beamtalk
   /// Time nowUs   // => _
   /// ```
-  class sealed nowUs -> Integer => (Erlang beamtalk_time) nowUs
+  class sealed nowUs -> Integer => self delegate

@@ -282,11 +282,11 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
 
   // ===== Instance Methods — Comparison =====
   //
-  // `<`, `>`, `<=`, `>=` stay inline FFI (not `self delegate`, ADR 0101 / BT-2731):
-  // an operator selector is not a valid Erlang function name, so `self delegate`
-  // cannot emit the call. They dispatch through the named shims `lt`/`gt`/`lte`/`gte`
-  // (still wrapped-by-default), and a runtime dispatch guard (BT-2709/2710) lets
-  // this override actually run.
+  // `<`, `>`, `>=` are `self delegate` straight to `beamtalk_datetime`'s
+  // same-named `'<'`/`'>'`/`'>='` functions. `<=` stays inline FFI: Erlang
+  // spells "less-or-equal" `=<`, not `<=`, so there is no `'<='/2` for
+  // `self delegate` to reach — it dispatches through the `lte` shim instead.
+  // A runtime dispatch guard (BT-2709/2710) lets these overrides actually run.
   //
   // `=:=`, `=/=`, and `/=` are NOT overridable here: per ADR 0002, the compiler
   // hard-lowers all four equality/inequality operators straight to Erlang's raw
@@ -310,8 +310,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// (DateTime year: 2025 month: 1 day: 1) < (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  < other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) lt: self with: other
+  < other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime is later than `other`.
   ///
@@ -319,8 +318,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) > (DateTime year: 2025 month: 1 day: 1)  // => true
   /// ```
-  > other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) gt: self with: other
+  > other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime is earlier than or equal to `other`.
   ///
@@ -337,8 +335,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) >= (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  >= other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) gte: self with: other
+  >= other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime represents the same instant as `other`, regardless
   /// of offsetMinutes. A plain named method, not an operator override — `=:=`
