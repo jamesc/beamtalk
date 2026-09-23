@@ -73,6 +73,24 @@ pub fn build_release(
         .unwrap_or_else(|| parsed.package.name.clone());
     let release_vsn = parsed.package.version.clone();
 
+    // `release_name`/`release_vsn` both end up as filesystem path segments
+    // below (`layout.release_dir`, `rel_file = rel_dir.join("{name}.rel")`,
+    // `releases/<vsn>/`) and `release_name` is also written raw into
+    // `vm.args` as the node's `-sname` — a `/`/`..` in either is a
+    // path-traversal opportunity, and embedded whitespace/newlines in
+    // `release_name` would inject extra `vm.args` flags. `[release] name`
+    // defaults to `[package] name` (already charset-validated by
+    // `find_manifest_full`/`validate_package_name`), but an explicit
+    // `[release] name` override, and `[package] version` (never charset
+    // validated — see `manifest.rs`, versions are free-form strings), are
+    // not otherwise checked before reaching this function, so both are
+    // validated here regardless of where they came from. `assembly.rs`
+    // additionally runs both through `escape_erlang_string` at every splice
+    // site into the generated `.rel` term, the same defense-in-depth
+    // already applied to `host_apps`/`staged_apps`/`bind`.
+    validate_release_path_component("name", &release_name)?;
+    validate_release_path_component("version", &release_vsn)?;
+
     let release_dir = match output {
         Some(dir) => Utf8PathBuf::from(dir),
         None => layout.release_dir(&release_name, &release_vsn),
@@ -137,6 +155,37 @@ pub fn build_release(
     Ok(())
 }
 
+/// Validate that `value` (a `[release] name` or `[package] version`) is
+/// safe to use as a single filesystem path segment and, for `name`, as a
+/// `vm.args` `-sname` — never empty, never `.`/`..`, no path separator, and
+/// no whitespace or control character (which would also let it smuggle
+/// extra lines/flags into the generated `vm.args`).
+fn validate_release_path_component(kind: &str, value: &str) -> Result<()> {
+    if value.is_empty() {
+        miette::bail!("[release] {kind} must not be empty");
+    }
+    if value == "." || value == ".." {
+        miette::bail!(
+            "[release] {kind} '{value}' is not a valid path segment — it is used to build a \
+             filesystem path directly."
+        );
+    }
+    if value.contains('/') || value.contains('\\') {
+        miette::bail!(
+            "[release] {kind} '{value}' must not contain '/' or '\\' — it is used to build \
+             filesystem paths and must be a single path segment."
+        );
+    }
+    if value.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        miette::bail!(
+            "[release] {kind} '{value}' must not contain whitespace or control characters — \
+             `name` is also written into `vm.args` as the node's `-sname`, where those \
+             characters could inject additional flags."
+        );
+    }
+    Ok(())
+}
+
 /// Make `release_dir` a clean, empty directory, wiping it first if it
 /// already exists.
 ///
@@ -178,7 +227,7 @@ fn ensure_clean_release_dir(
             );
         }
     } else if !user_supplied_output {
-        // Safety net: the internally-computed path must be under
+        // Safety net 1: the internally-computed path must be under
         // `_build/`, the same invariant `clean.rs` asserts for every path
         // it removes — this can only fail on a programming error, and the
         // cost of being wrong here is deleting something that isn't a
@@ -191,6 +240,26 @@ fn ensure_clean_release_dir(
             release_dir.starts_with(&build_root),
             "computed release dir {release_dir} escapes build root {build_root}"
         );
+
+        // Safety net 2: `starts_with` is purely lexical, so it cannot see
+        // a symlinked `_build` (or `_build/release`) — `remove_dir_all` on
+        // a *sub-path* of one would traverse the link and delete the
+        // contents of its target, outside the project, exactly the
+        // scenario `clean.rs`'s own `is_symlink(&build_root)` check exists
+        // for. `has_symlink_in_chain` generalises that check to every path
+        // component between `build_root` and `release_dir` (two new
+        // segments here, `release/` and `<name>-<vsn>/`, either of which
+        // could be the link), and — like `clean.rs` — refuses outright
+        // rather than offering a force flag: a symlinked `_build` is
+        // something to fix, not delete through.
+        if beamtalk_cli::path_util::has_symlink_in_chain(release_dir, &build_root)? {
+            miette::bail!(
+                "Refusing to clean: '{release_dir}' (or a directory between it and \
+                 '{build_root}') is a symlink.\n\n\
+                 \x20 Remove the symlink manually, or pass an explicit --output pointing \
+                 \x20 outside '{build_root}'."
+            );
+        }
     }
 
     std::fs::remove_dir_all(release_dir.as_std_path())
@@ -237,6 +306,67 @@ mod tests {
             err.to_string().contains("No 'beamtalk.toml' found"),
             "got: {err}"
         );
+    }
+
+    // -- validate_release_path_component --------------------------------
+
+    #[test]
+    fn validate_release_path_component_accepts_ordinary_values() {
+        validate_release_path_component("name", "orders").unwrap();
+        validate_release_path_component("version", "1.0.0-dev+38a688d").unwrap();
+    }
+
+    #[test]
+    fn validate_release_path_component_rejects_empty() {
+        let err = validate_release_path_component("name", "").unwrap_err();
+        assert!(err.to_string().contains("must not be empty"), "{err}");
+    }
+
+    #[test]
+    fn validate_release_path_component_rejects_dot_and_dotdot() {
+        assert!(validate_release_path_component("name", ".").is_err());
+        assert!(validate_release_path_component("version", "..").is_err());
+    }
+
+    #[test]
+    fn validate_release_path_component_rejects_path_traversal() {
+        let err = validate_release_path_component("version", "../../etc/passwd").unwrap_err();
+        assert!(err.to_string().contains("path segment"), "{err}");
+
+        let err = validate_release_path_component("name", "a/../../b").unwrap_err();
+        assert!(err.to_string().contains("path segment"), "{err}");
+
+        let err = validate_release_path_component("name", "a\\b").unwrap_err();
+        assert!(err.to_string().contains("path segment"), "{err}");
+    }
+
+    #[test]
+    fn validate_release_path_component_rejects_whitespace_and_control_chars() {
+        let err = validate_release_path_component("name", "orders\nextra_flag").unwrap_err();
+        assert!(err.to_string().contains("-sname"), "{err}");
+
+        let err = validate_release_path_component("name", "orders evil").unwrap_err();
+        assert!(err.to_string().contains("-sname"), "{err}");
+    }
+
+    /// A malicious `[release] name`/`[package] version` must be refused
+    /// before it ever reaches path construction or the generated `.rel`
+    /// term — the concrete attack vectors coordinator review flagged:
+    /// embedded `"` (breaks out of the `.rel` term's Erlang string
+    /// literal), `/` (path traversal into `rel_file`/`releases/<vsn>/`),
+    /// and embedded whitespace (extra `vm.args` flags via `-sname`).
+    #[test]
+    fn validate_release_path_component_rejects_malicious_values() {
+        for malicious in [
+            "orders\", {evil, true}, {x, \"",
+            "../../../etc/cron.d/evil",
+            "orders\nextra_flag value",
+        ] {
+            assert!(
+                validate_release_path_component("name", malicious).is_err(),
+                "expected '{malicious}' to be rejected"
+            );
+        }
     }
 
     // -- ensure_clean_release_dir --------------------------------------
@@ -309,5 +439,45 @@ mod tests {
         // release-shape check and no --force-output needed.
         ensure_clean_release_dir(&target, false, false, &layout).unwrap();
         assert!(!target.exists());
+    }
+
+    /// A symlinked `_build` must be refused, not followed —
+    /// `remove_dir_all` on a computed sub-path underneath it would
+    /// otherwise traverse the link and delete the *target* directory's
+    /// contents, which can be anywhere on disk. `starts_with` alone can't
+    /// see this (it's a purely lexical check), which is exactly why
+    /// `ensure_clean_release_dir` also calls `has_symlink_in_chain`.
+    #[test]
+    #[cfg(unix)]
+    fn ensure_clean_release_dir_refuses_symlinked_build_root() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // A real directory elsewhere that must survive untouched.
+        let real_target = root.join("outside_build_root");
+        fs::create_dir_all(real_target.join("release/orders-1.0.0").as_std_path()).unwrap();
+        fs::write(
+            real_target
+                .join("release/orders-1.0.0/precious.txt")
+                .as_std_path(),
+            "do not delete me",
+        )
+        .unwrap();
+
+        // `_build` itself is a symlink into that other directory.
+        let build_root = root.join("_build");
+        std::os::unix::fs::symlink(real_target.as_std_path(), build_root.as_std_path()).unwrap();
+
+        let layout = BuildLayout::new(&root);
+        let target = layout.release_dir("orders", "1.0.0");
+
+        let err = ensure_clean_release_dir(&target, false, false, &layout).unwrap_err();
+        assert!(err.to_string().contains("symlink"), "{err}");
+        assert!(
+            real_target
+                .join("release/orders-1.0.0/precious.txt")
+                .is_file(),
+            "the symlink target's contents must be untouched"
+        );
     }
 }

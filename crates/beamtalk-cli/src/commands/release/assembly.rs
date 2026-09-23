@@ -397,6 +397,8 @@ fn build_assembly_eval(
             escape_erlang_string(to_forward_slash(rel_file.as_str()).trim_end_matches(".rel")),
         release_dir_abs = escape_erlang_string(&to_forward_slash(release_dir_abs.as_str())),
         releases_root = escape_erlang_string(&to_forward_slash(releases_root.as_str())),
+        release_name = escape_erlang_string(release_name),
+        release_vsn = escape_erlang_string(release_vsn),
     )
 }
 
@@ -714,6 +716,38 @@ mod tests {
             "malicious staged app name must be a single escaped quoted atom: {eval}"
         );
         assert!(!eval.contains(&malicious_name), "{eval}");
+    }
+
+    /// Defense-in-depth: even though `build_release` (`mod.rs`) now refuses
+    /// a `[release] name`/`[package] version` containing `"` before this
+    /// function ever runs (`validate_release_path_component`), the splice
+    /// site itself must also escape them — the same belt-and-suspenders
+    /// treatment `host_apps`/`staged_apps`/`bind` already got, in case a
+    /// caller ever reaches this function with an unvalidated value.
+    #[test]
+    fn build_assembly_eval_escapes_release_name_and_vsn_with_embedded_quote() {
+        let malicious_name = "orders\", {evil, true}, {x, \"";
+        let malicious_vsn = "1.0.0\", {evil, true}, {y, \"";
+        let eval = build_assembly_eval(
+            malicious_name,
+            malicious_vsn,
+            &[],
+            &[],
+            &Utf8PathBuf::from("/rel/releases/1.0.0/orders.rel"),
+            &Utf8PathBuf::from("/rel"),
+            &Utf8PathBuf::from("/rel/releases"),
+            &[],
+        );
+        assert!(
+            eval.contains(&format!(
+                "{{release, {{\"{}\", \"{}\"}}",
+                escape_erlang_string(malicious_name),
+                escape_erlang_string(malicious_vsn)
+            )),
+            "release name/vsn must be escaped inside the .rel term: {eval}"
+        );
+        assert!(!eval.contains(malicious_name), "{eval}");
+        assert!(!eval.contains(malicious_vsn), "{eval}");
     }
 
     #[test]
