@@ -150,7 +150,27 @@ init(Config) ->
     %% The two-clause match is intentionally fail-loud — an unexpected value is
     %% a programming error, not a runtime input, so it should crash rather than
     %% be silently coerced.
-    case starts_compiler(Mode, Config) of
+    StartsCompiler = starts_compiler(Mode, Config),
+    %% A release built with `include-compiler` opted into a live-patchable
+    %% production image (ADR 0125 §1.5) — name the three risks that decision
+    %% carries every time this node boots, not just at build time, so an
+    %% operator inspecting logs sees it even if they weren't the one who
+    %% built the release.
+    case {Mode, StartsCompiler} of
+        {release, true} ->
+            ?LOG_WARNING(
+                "Release built with [release] include-compiler = true: this production node "
+                "ships a compiler and can be sent live code. (1) A compiler is now reachable "
+                "past the ADR 0058 trust boundary, widening what an authenticated caller can "
+                "do. (2) Live patches bypass the release artifact and are lost on the next "
+                "redeploy — the running node can silently diverge from beamtalk-provenance.json. "
+                "(3) A class recompiled live loses its provenance stamp. See ADR 0125 §1.5.",
+                #{domain => [beamtalk, runtime]}
+            );
+        _ ->
+            ok
+    end,
+    case StartsCompiler of
         false ->
             ok;
         true ->

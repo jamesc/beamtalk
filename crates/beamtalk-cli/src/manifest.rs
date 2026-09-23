@@ -190,8 +190,11 @@ pub struct ReleaseConfig {
     /// closure (`beamtalk_runtime`/`beamtalk_stdlib`/`beamtalk_workspace`
     /// and their declared deps).
     pub apps: Vec<String>,
-    /// Bundle this machine's ERTS into the release. Parsed now; consumed by
-    /// the ERTS-bundling issue (ADR 0125 §1.3, BT-3571).
+    /// Bundle this machine's ERTS into the release (ADR 0125 §1.3, BT-3571):
+    /// `release::assembly::copy_erts` copies it on disk into
+    /// `erts-<vsn>/`, and `release::assembly::make_tarball` embeds it in the
+    /// tarball. `beamtalk release --no-include-erts` overrides this to
+    /// `false` for one build without editing the manifest.
     pub include_erts: bool,
     /// Start the REPL/remote-console WebSocket listener.
     pub console: bool,
@@ -204,13 +207,17 @@ pub struct ReleaseConfig {
     /// Path (relative to the project root) to a user `vm.args` fragment
     /// merged into the generated one.
     pub vm_args: String,
-    /// Drop `debug_info` chunks from staged beams. Parsed now; consumed by
-    /// the ERTS-bundling issue (ADR 0125 §1.3, BT-3571).
+    /// Drop `debug_info` chunks from staged beams (ADR 0125 §1.3/§3.3,
+    /// BT-3571) via `beam_lib:strip_release/1`
+    /// (`release::assembly::strip_release_beams`); refused in combination
+    /// with `include_compiler` (`ReleaseConfigError::StripBeamsWithIncludeCompiler`,
+    /// above).
     pub strip_beams: bool,
-    /// Ship `beamtalk_compiler` in the release (a live, patchable image).
-    /// Parsed now; the compiler-port binary bundling itself is consumed by
-    /// BT-3571 — this issue only uses the flag to decide whether
-    /// `beamtalk_compiler` joins the app closure.
+    /// Ship `beamtalk_compiler` in the release (a live, patchable image,
+    /// ADR 0125 §1.3/§1.5): joins the app closure (`closure.rs`), and
+    /// BT-3571 additionally stages the compiler port binary itself
+    /// (`release::assembly::stage_compiler_port_binary`) and sets
+    /// `include_compiler => true` in the generated `sys.config`.
     pub include_compiler: bool,
 }
 

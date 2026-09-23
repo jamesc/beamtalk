@@ -10,6 +10,12 @@ Tests workspace supervisor behavior, child specifications, and startup.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
+%% Exported for `logger:add_handler/3` to call back into
+%% (`release_mode_include_compiler_logs_boot_warning_test` et al. below) —
+%% eunit's auto-export parse transform only exports test functions, and a
+%% logger handler callback is invoked as an ordinary cross-module call.
+-export([log/2]).
+
 %%====================================================================
 %% Tests
 %%====================================================================
@@ -646,6 +652,63 @@ workspace_mode_records_capabilities_test() ->
         _ = child_ids(test_config()),
         ?assertMatch(#{mode := workspace}, beamtalk_capability:current())
     end).
+
+%% ADR 0125 §1.5: a release built with `include-compiler` must log a
+%% warning naming the three risks every time it boots, not just once at
+%% build time — an operator reading logs must see it even if they weren't
+%% the one who set the flag.
+release_mode_include_compiler_logs_boot_warning_test() ->
+    with_capabilities_restored(fun() ->
+        Parent = self(),
+        HandlerId = release_include_compiler_warning_test_handler,
+        ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
+        try
+            _ = child_ids((release_mode_config())#{include_compiler => true}),
+            ?assert(receive_include_compiler_warning(500))
+        after
+            _ = logger:remove_handler(HandlerId)
+        end
+    end).
+
+release_mode_without_include_compiler_logs_no_boot_warning_test() ->
+    with_capabilities_restored(fun() ->
+        Parent = self(),
+        HandlerId = release_no_include_compiler_warning_test_handler,
+        ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
+        try
+            _ = child_ids(release_mode_config()),
+            ?assertNot(receive_include_compiler_warning(200))
+        after
+            _ = logger:remove_handler(HandlerId)
+        end
+    end).
+
+%% Minimal logger handler callback (ADR 0125 §1.5 boot-warning test only):
+%% forwards every log event's formatted message to the test process.
+-doc "logger handler callback — forwards formatted messages to `Config`.".
+log(#{msg := Msg} = Event, #{config := Parent}) ->
+    Parent ! {sup_log_event, format_msg(Msg, Event)},
+    ok.
+
+format_msg({string, Str}, _Event) ->
+    Str;
+format_msg({report, Report}, _Event) when is_map(Report) ->
+    io_lib:format("~p", [Report]);
+format_msg({Format, Args}, _Event) ->
+    io_lib:format(Format, Args);
+format_msg(Msg, _Event) ->
+    io_lib:format("~p", [Msg]).
+
+receive_include_compiler_warning(Timeout) ->
+    receive
+        {sup_log_event, Msg} ->
+            case string:find(unicode:characters_to_list(Msg), "include-compiler") of
+                nomatch -> receive_include_compiler_warning(Timeout);
+                _ -> true
+            end
+    after Timeout ->
+        false
+    end.
 
 run_mode_no_tcp_port_required_test() ->
     %% Starting in run mode with no tcp_port should succeed.

@@ -87,7 +87,13 @@ build fixtures that way. Both walks share `beamtalk_hierarchy:walk_ancestors/3`
 (the one depth-guarded ancestor-walk primitive every hierarchy walker in this
 codebase is built on), so the two are a shared-leaf-module split on *how a
 node is probed* (registry pid vs. metadata row), not two independent
-reimplementations of *how to walk and merge*.
+reimplementations of *how to walk and merge*. The walk-and-merge itself now
+lives one level further down, as `beamtalk_class_metadata:
+flatten_ancestor_map/2` (ADR 0125 §2.2/§3.4) — this module's
+`ancestor_field_map/2` is a thin wrapper over it, and the build-time
+`beamtalk_release_shapes` extractor is the other caller, so there is exactly
+one "merge ancestor field maps, closer wins" implementation for both the live
+and the disk-derived flatten.
 
 `prime/1`/`capture/1` now store and return a `generation()` — the flattened
 `shape()` plus the two `'shape_version'`/`'shape_migrations'` keys BT-3537's
@@ -444,51 +450,16 @@ and `ancestor_field_kinds/1` are both thin wrappers over.
 """.
 -spec ancestor_field_map(atom(), atom()) -> #{atom() => atom()}.
 ancestor_field_map(ClassAtom, MetaKey) ->
-    case beamtalk_class_metadata:lookup_superclass(ClassAtom) of
-        {ok, none} -> #{};
-        {ok, Super} -> merge_ancestor_field_map(Super, MetaKey, #{});
-        not_found -> #{}
-    end.
-
--doc """
-Walk from `StartSuper` up to the hierarchy root via
-`beamtalk_hierarchy:walk_ancestors/3` (the shared depth-guarded ancestor
-walker every hierarchy walk in this codebase is built on), merging each
-level's own `MetaKey` map into `AccSoFar` — `AccSoFar` (the more-derived
-levels already folded in) always wins a conflict, `maps:merge/2`'s "second
-argument wins" applied with the accumulator as the second argument at every
-step. Degrades to the partial merge on a hierarchy cycle
-(`?MAX_HIERARCHY_DEPTH` exceeded), logging a warning naming the cycle point —
-the same degrade `beamtalk_behaviour_intrinsics:walk_hierarchy/3` uses.
-""".
--spec merge_ancestor_field_map(atom(), atom(), #{atom() => atom()}) -> #{atom() => atom()}.
-merge_ancestor_field_map(StartSuper, MetaKey, AccSoFar) ->
-    StepFun = fun({CurrentClass, Acc}, _Depth) ->
-        NewAcc = maps:merge(ancestor_own_field_map(CurrentClass, MetaKey), Acc),
-        case beamtalk_class_metadata:lookup_superclass(CurrentClass) of
-            {ok, none} -> {found, NewAcc};
-            {ok, Super} -> {next, {Super, NewAcc}};
-            not_found -> {found, NewAcc}
-        end
-    end,
-    case beamtalk_hierarchy:walk_ancestors({StartSuper, AccSoFar}, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, Result} ->
-            Result;
-        {max_depth_exceeded, {CycleClass, Partial}} ->
-            ?LOG_WARNING(
-                "Shape flatten: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleClass],
-                #{domain => [beamtalk, runtime]}
-            ),
-            Partial;
-        not_found ->
-            %% Unreachable: StepFun above always resolves to {found, _} — a
-            %% `none` superclass or an unregistered ancestor is translated to
-            %% a terminal {found, _}. walk_ancestors/3 only returns not_found
-            %% for a `none` StartNode, and every caller here only invokes
-            %% this with a real (non-`none`) StartSuper.
-            AccSoFar
-    end.
+    %% The walk-and-merge itself is `beamtalk_class_metadata:
+    %% flatten_ancestor_map/2` — the one ancestor-flatten primitive this
+    %% module and the build-time `beamtalk_release_shapes` extractor
+    %% (ADR 0125 §2.2/§3.4) both call, rather than two independent
+    %% implementations of "merge ancestor field maps, closer wins" (CLAUDE.md's
+    %% no-duplicate-implementations rule). Only the per-level reader
+    %% (`ancestor_own_field_map/2`, a *live* `__beamtalk_meta/0` read) differs.
+    beamtalk_class_metadata:flatten_ancestor_map(
+        ClassAtom, fun(Ancestor) -> ancestor_own_field_map(Ancestor, MetaKey) end
+    ).
 
 -doc """
 An ancestor's own `MetaKey` map (`field_types` or `field_kinds`), tolerant of

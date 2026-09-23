@@ -93,6 +93,11 @@ enum Command {
         /// look like a previous `beamtalk release` output
         #[arg(long)]
         force_output: bool,
+
+        /// Skip bundling this machine's ERTS (slim image; requires a host
+        /// OTP install within the artifact's `required_otp` range)
+        #[arg(long)]
+        no_include_erts: bool,
     },
 
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
@@ -627,6 +632,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             output,
             force,
             force_output,
+            no_include_erts,
         } => {
             let options = beamtalk_core::CompilerOptions {
                 workspace_mode: false,
@@ -639,6 +645,7 @@ fn dispatch_command(command: Command) -> Result<()> {
                 &options,
                 force,
                 force_output,
+                no_include_erts,
             )
         }
         Command::BuildStdlib {

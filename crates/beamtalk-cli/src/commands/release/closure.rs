@@ -60,6 +60,32 @@ pub struct AppClosure {
     pub staged_apps: Vec<StagedApp>,
 }
 
+/// The runtime closure's own application names, in the order
+/// `compute_app_closure` stages them (leaves first) — `beamtalk_compiler`
+/// only joins it when `include_compiler` is set. The single declared list
+/// [`is_runtime_app`] checks against, so a caller that needs to tell a
+/// runtime-closure app from a project/dependency one (the shape extractor's
+/// `RuntimeLibDirs`/`EmitLibDirs` split, ADR 0125 §2.2 — `assembly.rs`'s
+/// `write_shapes_json` caller) never re-derives this set by hand.
+pub const RUNTIME_APP_NAMES: &[&str] = &[
+    "cowlib",
+    "ranch",
+    "cowboy",
+    "telemetry",
+    "telemetry_poller",
+    "beamtalk_runtime",
+    "beamtalk_stdlib",
+    "beamtalk_workspace",
+    "beamtalk_compiler",
+];
+
+/// Whether `app_name` is one of the runtime closure's own applications
+/// (never a project app, an ADR 0070 dependency, or a `[release] apps`
+/// extra) — see [`RUNTIME_APP_NAMES`].
+pub fn is_runtime_app(app_name: &str) -> bool {
+    RUNTIME_APP_NAMES.contains(&app_name)
+}
+
 /// Compute the release's app closure (ADR 0125 §1.2).
 ///
 /// `project_root` must already be built (`beamtalk build`) so the project's
@@ -457,6 +483,30 @@ mod tests {
         .unwrap();
         let err = read_staged_app("bad", &[ebin]).unwrap_err();
         assert!(err.to_string().contains("no `{vsn"), "got: {err}");
+    }
+
+    #[test]
+    fn is_runtime_app_recognises_the_runtime_closure() {
+        for name in [
+            "cowlib",
+            "ranch",
+            "cowboy",
+            "telemetry",
+            "telemetry_poller",
+            "beamtalk_runtime",
+            "beamtalk_stdlib",
+            "beamtalk_workspace",
+            "beamtalk_compiler",
+        ] {
+            assert!(is_runtime_app(name), "{name} should be a runtime app");
+        }
+    }
+
+    #[test]
+    fn is_runtime_app_rejects_project_and_dependency_apps() {
+        for name in ["orders", "some_hex_dep", "beamtalk_test_support"] {
+            assert!(!is_runtime_app(name), "{name} should not be a runtime app");
+        }
     }
 
     #[test]
