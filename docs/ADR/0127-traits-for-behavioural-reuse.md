@@ -327,8 +327,11 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
 Grammar of a `uses:` line:
 
 ```
-uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)] [overriding: #(#sel, …)] [aliasing: #{#newSel => #traitSel, …}]
+uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)] [overriding: #(#sel, …)]
 ```
+
+Post-v1 (Phase 7) adds one more optional clause, `[aliasing: #{#newSel => #traitSel, …}]`.
+In v1 the keyword is reserved and rejected with a "not yet supported" error.
 
 `package@` qualifies a protocol from another package, as `json@Parser` does for
 a superclass (ADR 0070). Inside a protocol body, `uses:`, `excluding:` and
@@ -372,11 +375,10 @@ A class that uses traits **means exactly the class with the provided methods
 written into its body**, after these steps, in order:
 
 1. Expand each used trait transitively (a trait's own `uses:` first).
-2. Per `uses:` line, apply `aliasing:` first, reading from the trait's
-   *original* provisions, then `excluding:`. An alias therefore survives
-   the exclusion of the selector it copies, which is what
-   `excluding: #(#printString) aliasing: #{#describeString => #printString}`
-   (§4) relies on.
+2. Per `uses:` line, apply `excluding:`. (Post-v1, `aliasing:` runs
+   first, reading from the trait's *original* provisions, so an alias
+   survives the exclusion of the selector it copies:
+   `excluding: #(#printString) aliasing: #{#describeString => #printString}`.)
 3. Merge the provisions of all used traits into one set, detecting
    conflicts (§4).
 4. Drop every trait provision whose selector (same side) the class body
@@ -525,10 +527,20 @@ Value subclass: Report
   //     uses: Describable excluding: #(#printString)
 ```
 
-There is no "call both" or `Trait.super` (Java 8's `A.super.m()`). A class
-that wants both bodies keeps one under an alias and calls it. `aliasing:` is
-post-v1; until it ships, the class excludes one provision and writes the
-combined method itself:
+There is no "call both" or `Trait.super` (Java 8's `A.super.m()`). In v1 a
+class that wants behaviour from both writes the method itself; its own
+definition wins over both provisions, so no exclusion is needed:
+
+```beamtalk
+Value subclass: Report
+  uses: Printable
+  uses: Describable
+
+  printString -> String => self title ++ " " ++ self summary
+```
+
+Post-v1, `aliasing:` lets the class keep one provision under a new name and
+call it, instead of rewriting its body:
 
 ```beamtalk
 Value subclass: Report
@@ -987,7 +999,8 @@ implementation in the existing `E`/`W` series.
 | `uses:` names an unknown name | Error | "unknown protocol `T`" + nearest-name hint |
 | `uses:` after a slot or method | Error | "`uses:` lines must come before state and method declarations" |
 | Unknown keyword line in a class body | Error | "unexpected `foo:` in class body" (replaces the silent end-of-body) |
-| `excluding:`/`aliasing:` names a selector T does not provide | Error | "T does not provide `sel`" |
+| `excluding:` names a selector T does not provide | Error | "T does not provide `sel`" |
+| `aliasing:` in v1 | Error | "`aliasing:` is not yet supported" (the check itself, "T does not provide `sel`", arrives with Phase 7) |
 | `excluding:` a required selector | Error | "`sel` is required by T, not provided; requirements cannot be excluded" |
 | `state:`/`field:`/`classState:` or `self.slot` in a protocol | Error | "protocols are stateless — declare `slot -> Type` as a required method" |
 | Protocol `uses:` cycle | Error | "protocol A uses itself through B" |
@@ -1278,9 +1291,9 @@ Rejected: Beamtalk compiles classes; a conflict is known at compile time and
 should be an error there, per the diagnostic policy of ADR 0100.
 
 ### `Trait.super` / `A.super.m()` for calling an overridden provision
-Java 8's escape hatch. Rejected in favour of `aliasing:` (§4): it keeps the
-flattening property (nothing trait-shaped survives compilation) and needs no
-new send form.
+Java 8's escape hatch. Rejected in favour of writing the method in the class
+(v1) and `aliasing:` (post-v1) (§4): both keep the flattening property
+(nothing trait-shaped survives compilation) and need no new send form.
 
 ### Do nothing
 The BT-274 cancellation position ("the class hierarchy handles behavior
@@ -1390,8 +1403,8 @@ assumption this ADR could not verify from source.
 | Phase | Scope | Components | Size | Depends on |
 |---|---|---|---|---|
 | 0 | **Spike**: (a) confirm inherited actor method self-send binding (lexical `<module>:safe_dispatch` vs. `__class_mod__`), since §6 rests on self-sends resolving in the *using* class's module; (b) re-run the BT-3580 probe and record whether block-taking actor provisions are safe. Record both in `docs/development/debugging.md` | runtime, codegen (read-only) | S | — |
-| 1 | **Syntax**: `ProtocolDefinition` gains `provided_methods` and `uses` (`ast/class.rs`); `ClassDefinition.uses: Vec<ProtocolUse { protocol, type_args, excluding, overriding, aliasing, span }>`; `parse_protocol_body` accepts provided methods (a signature followed by `=>`) through the class method parser, and reserves `uses:`/`excluding:`/`overriding:`/`aliasing:`; `package@Protocol`; `uses:` in the class-body loop with ordering and unknown-keyword errors; unparse round-trip; no new top-level form, so one-definition-per-file and ADR 0119 naming are unchanged; lexer nothing (contextual keywords) | `beamtalk-core` source_analysis, ast, unparse | M | — |
-| 2 | **Semantics**: `protocol_registry.rs` extended with provided signatures, `uses:` edges and a cycle check; `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, aliasing, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; `ProtocolInfo` conformance over required ∪ provided; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
+| 1 | **Syntax**: `ProtocolDefinition` gains `provided_methods` and `uses` (`ast/class.rs`); `ClassDefinition.uses: Vec<ProtocolUse { protocol, type_args, excluding, overriding, span }>`; `parse_protocol_body` accepts provided methods (a signature followed by `=>`) through the class method parser, and reserves `uses:`/`excluding:`/`overriding:`/`aliasing:` (`aliasing:` parses to a "not yet supported" error until Phase 7); `package@Protocol`; `uses:` in the class-body loop with ordering and unknown-keyword errors; unparse round-trip; no new top-level form, so one-definition-per-file and ADR 0119 naming are unchanged; lexer nothing (contextual keywords) | `beamtalk-core` source_analysis, ast, unparse | M | — |
+| 2 | **Semantics**: `protocol_registry.rs` extended with provided signatures, `uses:` edges and a cycle check; `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; `ProtocolInfo` conformance over required ∪ provided; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
 | 3 | **Codegen & build graph**: feed the flattened `ClassDefinition` to the existing generators (no change to `merge_method`); `methodXref` provenance/origin; `methodSource` as the trait's source slice; `uses => [{Name, Hash}]` in user meta; protocol module emission extended with provisions (`generate_protocol_registrations`, `'__beamtalk_protocol_source'/0`); every §10a entry point (CLI cache key, `build_stdlib` protocol pre-pass keeping full ASTs and `generated_builtins.rs`, compiler port, `dependency_classes.rs`, `ProjectIndex` edges); conformance fixture for the extended protocol registration shape | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-cli`, `beamtalk-language-service`, `build_stdlib` | L | 2 |
 | 4 | **Runtime & reflection**: `beamtalk_protocol_registry.erl` gains provided selectors and a users index; `Protocol providedMethods:`/`usersOf:`; `Behaviour usedProtocols/allUsedProtocols/usesProtocol:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := protocol`; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
 | 5 | **Live system**: trait file reload → two-stage user recompile fan-out in the workspace loader (compile all, load only if all succeed, roll back loaded modules on a load failure; source-backed, non-stdlib users only; stdlib traits read-only); `Describable >> sel => …` and `removeSelector:` live patching on protocols; required-selector rename/remove refusal and `save-section` routing (§11); provided methods in `Protocol define:` at the REPL; ADR 0105 re-check hookup; flush of protocol files (ADR 0113); LSP go-to-definition and completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
