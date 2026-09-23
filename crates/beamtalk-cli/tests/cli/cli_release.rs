@@ -68,27 +68,12 @@ fn release_builds_staged_tree_and_boot_artifacts() {
     make_releasable(project.path());
 
     let output_dir = project.path().join("dist");
-    let release_assert = cli_common::beamtalk()
+    cli_common::beamtalk()
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&output_dir)
         .timeout(std::time::Duration::from_secs(180))
-        .assert();
-    // `beamtalk release`'s own stderr (including the `DEBUG systools
-    // path-open probe` line `assembly.rs` always prints — see
-    // `write_rel_and_boot_script`) is otherwise invisible on a *passing*
-    // `assert()` below: `assert_cmd` captures it purely for assertion
-    // purposes and only surfaces it if an assertion here fails, but the
-    // failure this diagnostic targets happens later, at the separate boot
-    // step. `eprintln!`ing it unconditionally, from the test's own
-    // process, puts it under cargo test's normal output capturing so it
-    // shows up whenever *this test* fails, not just when this specific
-    // `assert()` does.
-    eprintln!(
-        "beamtalk release stderr:\n{}",
-        String::from_utf8_lossy(&release_assert.get_output().stderr)
-    );
-    release_assert
+        .assert()
         .success()
         .stdout(contains("Built release cli_subprocess_fixture-0.1.0"));
 

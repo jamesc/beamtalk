@@ -233,14 +233,6 @@ pub fn write_rel_and_boot_script(
         .into_diagnostic()
         .wrap_err("Failed to run erl to assemble the release (is Erlang/OTP installed?)")?;
 
-    // The `DEBUG systools path-open probe` line above is diagnostic-only
-    // (narrowing the Windows `ranch_app:start/2` undef — see
-    // `resolve_long_path`'s doc comment) and always printed, success or
-    // failure, since assembly itself succeeds even when the boot script it
-    // produces ends up unbootable; TODO(BT-3570): remove once the Windows
-    // boot-script path-resolution root cause is confirmed and fixed.
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
-
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -257,7 +249,6 @@ pub fn write_rel_and_boot_script(
 /// the building ERTS version, writes the `.rel`, and calls
 /// `systools:make_script/2` + `release_handler:create_RELEASES/4`.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_lines)] // TODO(BT-3570): drop with the temporary DEBUG path-open probe
 fn build_assembly_eval(
     release_name: &str,
     release_vsn: &str,
@@ -377,15 +368,6 @@ fn build_assembly_eval(
          RelTerm = {{release, {{\"{release_name}\", \"{release_vsn}\"}}, {{erts, ErtsVsn}}, AllAppVsns}}, \
          RelFileNoExt = \"{rel_file_no_ext}\", \
          ok = file:write_file(RelFileNoExt ++ \".rel\", io_lib:format(\"~p.~n\", [RelTerm])), \
-         DebugPathOpen = file:path_open([{ebin_path_list}], \"ranch.app\", [read]), \
-         DebugFound = case DebugPathOpen of \
-             {{ok, DebugIoDev, DebugFullName}} -> file:close(DebugIoDev), DebugFullName; \
-             DebugErr -> DebugErr \
-         end, \
-         io:format(standard_error, \
-             \"DEBUG systools path-open probe: ranch.app found via file:path_open/3 at ~p \
-              (RELEASE_DIR variable is ~p)~n\", \
-             [DebugFound, \"{release_dir_abs}\"]), \
          MakeResult = systools:make_script(RelFileNoExt, [{{path, [{ebin_path_list}]}}, \
              {{variables, [{{\"RELEASE_DIR\", \"{release_dir_abs}\"}}]}}, silent]), \
          case MakeResult of \
@@ -481,8 +463,11 @@ pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
 /// boot for whichever staged `permanent`-type application starts first
 /// (`ranch_app:start/2` in the fixture release, since `ranch` is early in
 /// `cowboy`'s dependency chain). Resolving to the long-path form up front
-/// makes both sides of that prefix check agree, since the filesystem-read
-/// path already converges there.
+/// makes both sides of that prefix check agree on the short-vs-long-name
+/// component, since the filesystem-read path already converges there — a
+/// second, independent mismatch on the drive letter's *case*
+/// (`std::fs::canonicalize` uppercases it; Erlang's own path resolution
+/// lowercases it) is handled separately, just below.
 #[cfg(windows)]
 pub(crate) fn resolve_long_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
     let canonical = std::fs::canonicalize(path.as_std_path())
@@ -498,7 +483,29 @@ pub(crate) fn resolve_long_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
         .map(|rest| format!(r"\\{rest}"))
         .or_else(|| canonical.strip_prefix(r"\\?\").map(str::to_owned))
         .unwrap_or_else(|| canonical.clone().into_owned());
-    Utf8PathBuf::from_path_buf(std::path::PathBuf::from(stripped))
+    // `std::fs::canonicalize` normalizes the drive letter to *uppercase*
+    // (`C:\...`); Erlang's own `file:path_open/3` (what
+    // `systools_make.erl` uses to resolve `App#application.dir` — see the
+    // doc comment above) normalizes it to *lowercase* (`c:/...`) instead,
+    // confirmed against a real Windows CI failure's `DEBUG systools
+    // path-open probe` output. `lists:prefix/2` is a plain
+    // case-sensitive character comparison, so a single-character case
+    // mismatch on the drive letter alone is enough to fail the match and
+    // trigger the same `$ROOT` fallback this whole function exists to
+    // avoid. Lowercase it here so this side agrees with what Erlang's
+    // path resolution reports, matching the convention Erlang itself
+    // uses rather than the one `std::fs` uses.
+    let lowercased_drive = match stripped.as_bytes() {
+        [drive @ (b'A'..=b'Z' | b'a'..=b'z'), b':', ..] => {
+            format!(
+                "{}{}",
+                (*drive as char).to_ascii_lowercase(),
+                &stripped[1..]
+            )
+        }
+        _ => stripped,
+    };
+    Utf8PathBuf::from_path_buf(std::path::PathBuf::from(lowercased_drive))
         .map_err(|p| miette::miette!("Resolved path '{}' is not valid UTF-8", p.display()))
 }
 
