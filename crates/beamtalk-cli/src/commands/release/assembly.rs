@@ -233,6 +233,14 @@ pub fn write_rel_and_boot_script(
         .into_diagnostic()
         .wrap_err("Failed to run erl to assemble the release (is Erlang/OTP installed?)")?;
 
+    // The `DEBUG systools path-open probe` line above is diagnostic-only
+    // (narrowing the Windows `ranch_app:start/2` undef — see
+    // `resolve_long_path`'s doc comment) and always printed, success or
+    // failure, since assembly itself succeeds even when the boot script it
+    // produces ends up unbootable; TODO(BT-3570): remove once the Windows
+    // boot-script path-resolution root cause is confirmed and fixed.
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -249,6 +257,7 @@ pub fn write_rel_and_boot_script(
 /// the building ERTS version, writes the `.rel`, and calls
 /// `systools:make_script/2` + `release_handler:create_RELEASES/4`.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // TODO(BT-3570): drop with the temporary DEBUG path-open probe
 fn build_assembly_eval(
     release_name: &str,
     release_vsn: &str,
@@ -368,6 +377,15 @@ fn build_assembly_eval(
          RelTerm = {{release, {{\"{release_name}\", \"{release_vsn}\"}}, {{erts, ErtsVsn}}, AllAppVsns}}, \
          RelFileNoExt = \"{rel_file_no_ext}\", \
          ok = file:write_file(RelFileNoExt ++ \".rel\", io_lib:format(\"~p.~n\", [RelTerm])), \
+         DebugPathOpen = file:path_open([{ebin_path_list}], \"ranch.app\", [read]), \
+         DebugFound = case DebugPathOpen of \
+             {{ok, DebugIoDev, DebugFullName}} -> file:close(DebugIoDev), DebugFullName; \
+             DebugErr -> DebugErr \
+         end, \
+         io:format(standard_error, \
+             \"DEBUG systools path-open probe: ranch.app found via file:path_open/3 at ~p \
+              (RELEASE_DIR variable is ~p)~n\", \
+             [DebugFound, \"{release_dir_abs}\"]), \
          MakeResult = systools:make_script(RelFileNoExt, [{{path, [{ebin_path_list}]}}, \
              {{variables, [{{\"RELEASE_DIR\", \"{release_dir_abs}\"}}]}}, silent]), \
          case MakeResult of \
