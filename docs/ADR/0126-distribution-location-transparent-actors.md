@@ -5,15 +5,15 @@ Accepted (2026-09-22). The Phase 0.5 wire-check spike (BT-3579; see
 Implementation and the Amendment section) confirmed four of this ADR's five
 load-bearing runtime assumptions (with API corrections) and found one
 (non-local return across a remote block invocation, §5.5) does not hold
-today. Phases 1–7 are filed against the corrected ADR once that gap is
-fixed (tracked against the epic, BT-3577).
+today. Phases 1–7 are filed against the corrected ADR once that gap
+(BT-3582) is fixed.
 
 ## Implementation Tracking
 
 **Epic:** BT-3577
 **Issues:** BT-3578 (Phase 0), BT-3579 (Phase 0.5 spike, done — see
-Amendment). Phases 1–7 are filed once the (c) NLR-relay gap the spike found
-is fixed.
+Amendment), BT-3582 (the NLR-relay bug the spike found; prerequisite for
+Phase 3). Phases 1–7 are filed once BT-3582 is fixed.
 **Status:** Planned
 
 ## Context
@@ -1240,8 +1240,8 @@ purely local cross-actor block invocation — this is a pre-existing ADR
 further sends after the miscategorised reply). **This blocks Phase 3.**
 Before any block may legitimately cross a node boundary and be invoked
 there, `dispatch_user_method/4` needs the same `?IS_NLR` relay
-`beamtalk_class_dispatch.erl` already has — filed as a prerequisite,
-tracked against this ADR's epic (BT-3577).
+`beamtalk_class_dispatch.erl` already has — filed as BT-3582, a
+prerequisite tracked against this ADR's epic (BT-3577).
 
 **(d) Async futures resolve across nodes — holds, with two usage notes
 (§5.1).** An async send from A to an actor on B resolves A's future with
@@ -1304,7 +1304,9 @@ changes for code already using distribution via FFI:
 ## References
 - Related issues: BT-3527 (this ADR), BT-3524 (versioned state), BT-3525
   (slots), BT-3528 (OTP releases), BT-2530 (announcements remote-pid fix),
-  BT-3536 (shape chain/migration modules), BT-3574 (release shape preflight)
+  BT-3536 (shape chain/migration modules), BT-3574 (release shape preflight),
+  BT-3578 (Phase 0 harness), BT-3579 (Phase 0.5 spike), BT-3582 (NLR-relay
+  bug the spike found, blocks Phase 3)
 - Related ADRs: 0020 (connection security), 0043 (sync-by-default
   messaging), 0058 (platform security), 0059 / 0092 (supervision + introspection),
   0060 (Result), 0069 (observability), 0079 (named registration), 0091

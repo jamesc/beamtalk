@@ -113,6 +113,7 @@ only reach it the way `do_class_self_named_spawn/6` already does. The ADR
 text names `safe_spawn_named/3` itself; see the Phase 0.5 amendment for
 this correction.
 """.
+-spec spawn_via_erpc(atom(), boolean()) -> pid().
 spawn_via_erpc(Name, DoUnlink) ->
     {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
     case DoUnlink of
@@ -125,14 +126,17 @@ named_spawn_survives_when_unlinked(PeerNode) ->
     Name = unique_name("bt3579a_pos"),
     Pid = erpc:call(PeerNode, ?MODULE, spawn_via_erpc, [Name, true]),
     ?assert(is_pid(Pid)),
-    %% The erpc worker that ran spawn_via_erpc/2 has, by construction,
-    %% already returned by the time erpc:call/4 replies here — no sleep
-    %% needed to "let it exit"; the question is only whether the actor
-    %% noticed that exit.
-    ?assert(rpc:call(PeerNode, erlang, is_process_alive, [Pid])),
-    ?assertEqual(Pid, rpc:call(PeerNode, erlang, whereis, [Name])),
-    ?assertEqual(10, beamtalk_actor:sync_send(Pid, getValue, []) + 10),
-    rpc:call(PeerNode, gen_server, stop, [Pid]).
+    try
+        %% The erpc worker that ran spawn_via_erpc/2 has, by construction,
+        %% already returned by the time erpc:call/4 replies here — no
+        %% sleep needed to "let it exit"; the question is only whether the
+        %% actor noticed that exit.
+        ?assert(rpc:call(PeerNode, erlang, is_process_alive, [Pid])),
+        ?assertEqual(Pid, rpc:call(PeerNode, erlang, whereis, [Name])),
+        ?assertEqual(10, beamtalk_actor:sync_send(Pid, getValue, []) + 10)
+    after
+        rpc:call(PeerNode, gen_server, stop, [Pid])
+    end.
 
 -doc """
 Negative case: same sequence, no `unlink/1`. ADR 0126 §3 asserts the actor
@@ -147,10 +151,12 @@ named_spawn_without_unlink(PeerNode) ->
     %% Unlike the positive case, there is a real race here: the actor's
     %% exit (if any) is triggered by an EXIT signal delivered asynchronously
     %% after the erpc worker's own exit, which happens strictly after
-    %% erpc:call/4 has already returned to us. Poll briefly rather than
-    %% asserting instantaneously.
+    %% erpc:call/4 has already returned to us. Poll rather than asserting
+    %% instantaneously — up to 2s total, generous for a loaded CI runner,
+    %% since a false "still alive" here would misreport the finding, not
+    %% just flake a green test.
     Alive = wait_until_settled(
-        fun() -> rpc:call(PeerNode, erlang, is_process_alive, [Pid]) end, 20
+        fun() -> rpc:call(PeerNode, erlang, is_process_alive, [Pid]) end, 80
     ),
     %% Record the finding either way; see the ADR amendment for the
     %% narrative. If this ever flips to `true` on some OTP/platform
@@ -174,6 +180,8 @@ wait_until_settled(Fun, Retries) ->
 %%====================================================================
 
 -doc "Invoke `Fun(Arg)`, capturing the class/reason/stacktrace instead of letting it crash the caller.".
+-spec invoke_and_capture(fun((term()) -> term()), term()) ->
+    {ok, term()} | {caught, atom(), term(), list()}.
 invoke_and_capture(Fun, Arg) ->
     try Fun(Arg) of
         Result -> {ok, Result}
@@ -361,6 +369,8 @@ a *different* node is rewritten to `{'$beamtalk_class_ref', ClassName}`.
 Real codegen would apply this at the wire-encode boundary (§5.1); here it
 is a plain function so the spike can call it directly.
 """.
+-spec rewrite_class_ref(#beamtalk_object{}) ->
+    #beamtalk_object{} | {'$beamtalk_class_ref', atom()}.
 rewrite_class_ref(#beamtalk_object{pid = Pid} = Obj) ->
     case node(Pid) =:= node() of
         true ->
@@ -382,6 +392,8 @@ point" gap `spawn_via_erpc/2`'s doc notes for (a)'s `safe_spawn_named/3`.
 This spike reimplements the four lines rather than export the internal
 function purely for the test — see the ADR amendment.
 """.
+-spec resolve_class_ref({'$beamtalk_class_ref', atom()} | #beamtalk_object{}) ->
+    #beamtalk_object{} | nil.
 resolve_class_ref({'$beamtalk_class_ref', ClassName}) ->
     class_object_for(ClassName);
 resolve_class_ref(Obj) ->
