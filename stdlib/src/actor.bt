@@ -170,6 +170,109 @@ Object subclass: Actor
   class sealed allRegistered -> List(Actor) =>
     (Erlang beamtalk_actor) allRegistered: self
 
+  // === Remote spawn and lookup (ADR 0126 §3, Phase 2) ===
+  //
+  // Every selector above gains an `on:` variant here. Syntax, return types,
+  // and error kinds mirror the local form exactly — the only additions are
+  // the network failures (`node_down`, and `class_not_found` now reachable
+  // remotely). Unlike their local counterparts, remote spawn always answers
+  // `Result` (ADR 0060: reaching another node is an expected failure, not a
+  // programming error).
+  //
+  // Remote spawn is **not idempotent**: a timeout after the far-side spawn
+  // succeeded leaves an unowned actor running on the target node. A named
+  // spawn (`spawnAs:on:`) retried after `name_registered` can be resolved
+  // with `named:on:` instead of retried blindly; an anonymous `spawnOn:`
+  // has no such recovery.
+  //
+  // Remote spawn creates **no link and no local tracking**: the spawned
+  // actor is never linked to this caller — a link across a node boundary
+  // would turn every partition into a crash here — and this workspace does
+  // not track it (`ActorSpawned` fires on the target node, not here), so it
+  // outlives this session until something else stops it.
+  //
+  // Sends to a remotely-spawned actor still carry only argument-free
+  // selectors for now — `spawnWith:on:`/`spawnWith:as:on:` (Value
+  // arguments) need the wire encoder and ship in a later phase.
+
+  /// Spawn a new actor process on `node`, with default state.
+  ///
+  /// Same contract as `spawn`, except the actor process starts on `node`
+  /// instead of here — `initialize`, reserved-name checks, and
+  /// `ActorSpawned` all fire there. See "Remote spawn and lookup" above for
+  /// the idempotency and linking caveats.
+  ///
+  /// Error cases:
+  /// - `node_down` — `node` is unreachable
+  /// - `class_not_found` — the class is not loaded on `node`
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker := (Node named: #'worker@localhost') unwrap
+  /// c := (Counter spawnOn: worker) unwrap
+  /// c node          // => Node(worker@localhost)
+  /// ```
+  class sealed spawnOn: node :: Node -> Result(Self, Error) =>
+    (Erlang beamtalk_actor) doSpawnOn: self on: node
+
+  /// Atomically spawn a new actor on `node` and register it under `name`
+  /// there.
+  ///
+  /// Same contract as `spawnAs:`, except the actor process (and its
+  /// registration) both happen on `node` instead of here. See "Remote
+  /// spawn and lookup" above for the idempotency and linking caveats.
+  ///
+  /// Error cases: as `spawnAs:`, plus `node_down` (`node` is unreachable)
+  /// and `class_not_found` (the class is not loaded on `node`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker := (Node named: #'worker@localhost') unwrap
+  /// (Counter spawnAs: #hits on: worker) unwrap
+  /// ```
+  class sealed spawnAs: name :: Symbol on: node :: Node -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doSpawnAsOn: self
+      withName: name
+      on: node
+
+  /// Look up a registered actor by name on `node`, checked against the
+  /// receiver class.
+  ///
+  /// Same contract as `named:`, checked against `node`'s registry instead
+  /// of this node's. The returned reference is node-qualified: it keeps
+  /// resolving against `node` regardless of which node later sends to it.
+  ///
+  /// Error cases: as `named:`, plus `node_down` (`node` is unreachable).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker := (Node named: #'worker@localhost') unwrap
+  /// hits := (Counter named: #hits on: worker) unwrap
+  /// hits increment   // => 1 — sent to worker, not resolved locally
+  /// ```
+  class sealed named: name :: Symbol on: node :: Node -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doNamedOn: self
+      withName: name
+      on: node
+
+  /// Return every currently-registered Beamtalk actor on `node` as `Actor`
+  /// proxies.
+  ///
+  /// Same contract as `allRegistered`, listing `node`'s registered actors
+  /// instead of this node's. Unlike the local, network-free
+  /// `allRegistered`, this answers a `Result` — reaching another node is an
+  /// expected-failure operation (ADR 0060).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker := (Node named: #'worker@localhost') unwrap
+  /// (Actor allRegisteredOn: worker) unwrap  // => #(an Actor(Counter), ...)
+  /// ```
+  class sealed allRegisteredOn: node :: Node -> Result(List(Actor), Error) =>
+    (Erlang beamtalk_actor) doAllRegisteredOn: self on: node
+
   // === Supervision defaults ===
 
   /// Default OTP restart policy for this actor class.
