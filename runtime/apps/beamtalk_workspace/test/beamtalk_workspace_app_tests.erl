@@ -120,6 +120,77 @@ maybe_start_workspace_bad_config_returns_error_test_() ->
         end}.
 
 %%====================================================================
+%% start/2 — orphaned-supervisor cleanup on a failed workspace start
+%%====================================================================
+
+%% A failed maybe_start_workspace/0 must not leave beamtalk_workspace_app_sup
+%% running. application:start/2 only links to (and so only cleans up) the
+%% Pid start/2 successfully *returns*; a normal {error, _} return from
+%% start/2 does not, by itself, propagate through the link to the
+%% supervisor start/2 already started via beamtalk_workspace_app_sup:
+%% start_link/0. Left alone, that supervisor would survive registered under
+%% its own name — orphaned, unsupervised, and permanently blocking every
+%% later application:start(beamtalk_workspace) retry with
+%% {error, {already_started, OldPid}} until the node restarts. Proven two
+%% ways below: the registered name is free again immediately after the
+%% failed start/2 call, and a second start/2 call can retry — failing again
+%% for the *same* config reason, never {already_started, _}.
+%%
+%% Some other suite in this shared EUnit node keeps a *real*
+%% `beamtalk_workspace` application running for the rest of the test run
+%% (e.g. beamtalk_repl_server_tests.erl, via ensure_all_started, never
+%% torn down) — many later tests (workspace_meta's package name, etc.)
+%% depend on that instance's accumulated state surviving. Stopping and
+%% restarting the whole application here to get a "clean slate" was tried
+%% and rejected: it reset that shared state and broke unrelated suites
+%% (verified empirically). Instead, this test only ever touches the
+%% *name* `beamtalk_workspace_app_sup` is registered under, briefly:
+%% unregister it (the real process, if any, keeps running completely
+%% undisturbed — application_master holds its Pid directly, not the name),
+%% run beamtalk_workspace_app:start/2 as a fresh, isolated instance under
+%% that now-free name, then restore the original registration (or confirm
+%% our own instance is gone, if there was none) in cleanup.
+start_cleans_up_orphaned_supervisor_on_failed_workspace_start_test_() ->
+    {setup,
+        fun() ->
+            PriorPid = whereis(beamtalk_workspace_app_sup),
+            case PriorPid of
+                undefined -> ok;
+                Pid when is_pid(Pid) -> true = erlang:unregister(beamtalk_workspace_app_sup)
+            end,
+            clear_env(),
+            ok = application:set_env(beamtalk_workspace, mode, release),
+            ok = application:set_env(beamtalk_workspace, console, true),
+            %% Deliberately no tcp_port set.
+            PriorPid
+        end,
+        fun(PriorPid) ->
+            clear_env(),
+            case whereis(beamtalk_workspace_app_sup) of
+                undefined -> ok;
+                OwnPid -> ok = proc_lib:stop(OwnPid, shutdown, 5000)
+            end,
+            case PriorPid of
+                undefined -> ok;
+                Pid when is_pid(Pid) -> true = erlang:register(beamtalk_workspace_app_sup, Pid)
+            end
+        end,
+        fun(_PriorPid) ->
+            [
+                ?_test(begin
+                    ?assertMatch({error, _}, beamtalk_workspace_app:start(normal, [])),
+                    ?assertEqual(undefined, whereis(beamtalk_workspace_app_sup))
+                end),
+                ?_test(begin
+                    Result = beamtalk_workspace_app:start(normal, []),
+                    ?assertMatch({error, _}, Result),
+                    ?assertNotMatch({error, {already_started, _}}, Result),
+                    ?assertEqual(undefined, whereis(beamtalk_workspace_app_sup))
+                end)
+            ]
+        end}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -147,11 +218,17 @@ ensure_workspace_app_sup() ->
             not_owned
     end.
 
+-doc """
+Synchronous, unlike a bare `exit(Pid, shutdown)` — waits (via
+`proc_lib:stop/3`) for the process to actually terminate and unregister
+before returning, so a later test's own `whereis(beamtalk_workspace_app_sup)`
+check can't race an async shutdown left over from this one.
+""".
 -spec stop_owned_workspace_app_sup(owned | not_owned) -> ok.
 stop_owned_workspace_app_sup(owned) ->
     case whereis(beamtalk_workspace_app_sup) of
         undefined -> ok;
-        Pid -> exit(Pid, shutdown)
+        Pid -> ok = proc_lib:stop(Pid, shutdown, 5000)
     end,
     ok;
 stop_owned_workspace_app_sup(not_owned) ->

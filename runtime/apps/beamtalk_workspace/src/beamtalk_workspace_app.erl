@@ -66,14 +66,46 @@ start(_StartType, _StartArgs) ->
 
     %% Start the workspace supervisor tree
     case beamtalk_workspace_app_sup:start_link() of
-        {ok, _Pid} = Ok ->
+        {ok, SupPid} = Ok ->
             case maybe_start_workspace() of
-                ok -> Ok;
-                {error, _} = Err -> Err
+                ok ->
+                    Ok;
+                {error, _} = Err ->
+                    %% A normal {error, _} return from start/2 does not, by
+                    %% itself, take down a process this callback already
+                    %% link-started: application_master only links to (and
+                    %% so only cleans up) the Pid start/2 successfully
+                    %% returns. Left alone, SupPid would survive registered
+                    %% under its own name — orphaned, unsupervised, and
+                    %% blocking every later `application:start(beamtalk_
+                    %% workspace)` retry with `{error, {already_started,
+                    %% SupPid}}` until the node restarts. Stop it ourselves
+                    %% before reporting the failure.
+                    stop_orphaned_app_sup(SupPid),
+                    Err
             end;
         Err ->
             Err
     end.
+
+-doc """
+Synchronously stop `beamtalk_workspace_app_sup` after a failed
+`maybe_start_workspace/0` (see the comment at its call site), via
+`proc_lib:stop/3` — the generic synchronous-stop-and-wait every `proc_lib`
+process gets regardless of behaviour, and (unlike `supervisor`, which has
+no `stop/1,3` of its own) works directly on a supervisor pid; used here
+rather than `gen_server:stop/1` only because that name would misleadingly
+suggest `beamtalk_workspace_app_sup` were a `gen_server` — it delegates to
+this exact same function underneath (`gen_server:stop/1` → `gen:stop/1` →
+`proc_lib:stop/3`), so either spelling stops it identically. Unlinks first
+so the shutdown does not also deliver an EXIT signal to this process —
+`start/2`'s caller handles the `{error, _}` it is about to return; it
+should not additionally receive one.
+""".
+-spec stop_orphaned_app_sup(pid()) -> ok.
+stop_orphaned_app_sup(SupPid) ->
+    true = erlang:unlink(SupPid),
+    ok = proc_lib:stop(SupPid, shutdown, 5000).
 
 -doc """
 Start a workspace under `beamtalk_workspace_app_sup` when the
@@ -127,9 +159,11 @@ env(Key, Default) ->
 
 -doc """
 Parse the `[release] bind` manifest string into an `inet:ip4_address()`.
-Never raises: a malformed `sys.config` value (wrong type, unparseable
-string) falls back to loopback with a warning rather than crashing the
-whole `start/2` — a config typo should not take the release down.
+Never raises: a malformed `sys.config` value — wrong type, an unparseable
+string, or a tuple that is not a well-formed 4-tuple of `0..255` integers
+(wrong arity, a non-integer element, or an out-of-range byte) — falls back
+to loopback with a warning rather than crashing the whole `start/2` — a
+config typo should not take the release down.
 """.
 -spec parse_bind_addr(term()) -> inet:ip4_address().
 parse_bind_addr({A, B, C, D} = Addr) when
