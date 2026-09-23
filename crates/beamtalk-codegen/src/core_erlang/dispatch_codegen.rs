@@ -183,8 +183,11 @@ impl CoreErlangGenerator {
     /// `wrap_body_with_nlr_catch`), so it would never see it: the tuple
     /// would surface to the original caller as an opaque `RuntimeError`
     /// value instead of unwinding as the non-local return it is. A leading
-    /// clause matches that exact shape and re-raises with `primop
-    /// 'raw_raise'`, preserving the `throw` class and stacktrace so the
+    /// clause matches that exact shape and re-raises via the shared
+    /// [`Self::emit_raw_raise`] helper (`control_flow/exception_handling.rs`
+    /// — binding the literal `'throw'` class and the reconstructed NLR
+    /// tuple to fresh vars first, since the helper always emits `leaf::var`
+    /// references), preserving the `throw` class and stacktrace so the
     /// enclosing method's catch (whether it owns this token or is itself
     /// just another self-dispatch hop relaying it further up) sees it
     /// unchanged — the same relay `beamtalk_class_dispatch.erl` already
@@ -195,7 +198,9 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// <{'error', {'throw', {'$bt_nlr', NlrTok, NlrVal, NlrSt}, NlrStack}, _}> when 'true' ->
-    ///     primop 'raw_raise'('throw', {'$bt_nlr', NlrTok, NlrVal, NlrSt}, NlrStack)
+    ///     let NlrClass = 'throw' in
+    ///     let Nlr = {'$bt_nlr', NlrTok, NlrVal, NlrSt} in
+    ///     primop 'raw_raise'(NlrClass, Nlr, NlrStack)
     /// <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
     ///     let Class = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in
     ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace,
@@ -218,6 +223,8 @@ impl CoreErlangGenerator {
         let nlr_value_var = self.fresh_var(&format!("{var_prefix}NlrVal"));
         let nlr_state_var = self.fresh_var(&format!("{var_prefix}NlrSt"));
         let nlr_stack_var = self.fresh_var(&format!("{var_prefix}NlrStack"));
+        let nlr_class_var = self.fresh_var(&format!("{var_prefix}NlrClass"));
+        let nlr_var = self.fresh_var(&format!("{var_prefix}Nlr"));
         let type_var = self.fresh_var(&format!("{var_prefix}Type"));
         let reason_var = self.fresh_var(&format!("{var_prefix}Reason"));
         let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
@@ -240,11 +247,15 @@ impl CoreErlangGenerator {
             nlr_tuple_doc(),
             ", ",
             leaf::var(nlr_stack_var.clone()),
-            "}, _}> when 'true' -> primop 'raw_raise'('throw', ",
+            "}, _}> when 'true' -> let ",
+            leaf::var(nlr_class_var.clone()),
+            " = 'throw' in let ",
+            leaf::var(nlr_var.clone()),
+            " = ",
             nlr_tuple_doc(),
-            ", ",
-            leaf::var(nlr_stack_var),
-            ") ",
+            " in ",
+            Self::emit_raw_raise(nlr_class_var, nlr_var, nlr_stack_var),
+            " ",
             "<{'error', {",
             leaf::var(type_var.clone()),
             ", ",
