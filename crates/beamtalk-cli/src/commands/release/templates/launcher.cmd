@@ -67,16 +67,26 @@ for /f "tokens=1 delims=-" %%A in ("%BUILT_OTP%") do set "BUILT_MAJOR=%%A"
 if not defined REQ_MIN exit /b 0
 if not defined REQ_MAX exit /b 0
 set "HOST_MAJOR="
-rem The extra outer quote pair around the whole inner command is required:
-rem this command starts with a quoted "%ERL%" and contains more than two
-rem `"` characters overall, which trips a documented `cmd.exe /c` quirk
-rem (see `cmd /?`) where, unless a command line has *exactly* two quote
-rem characters, cmd strips the *first and last* quote of the entire line
-rem instead of preserving it — silently mangling this call so it produces
-rem no output, leaving HOST_MAJOR unset and the OTP-window check a no-op.
-rem Wrapping the command in one more quote pair makes that bogus strip
-rem remove the added quotes instead, leaving the real ones intact.
-for /f "delims=" %%A in ('""%ERL%" -noshell -eval "io:format(\"~s\", [erlang:system_info(otp_release)]), halt()." 2^>nul"') do set "HOST_MAJOR=%%A"
+rem Deliberately *not* `for /f "..." %%A in ('"%ERL%" ...') do ...` here:
+rem that hands the quoted command to a *second*, freshly spawned cmd.exe
+rem via its own `/c` argument-line re-parsing, which has its own quote
+rem toggling rules — a command starting with a quoted "%ERL%" and holding
+rem several more `"` characters (one pair per quoted piece) ends up with
+rem some of those pairs re-associating across piece boundaries once that
+rem second parse re-scans the line, which can strip real quotes, leave
+rem `(`/`)`/`[`/`]` unexpectedly unquoted, or both — either way silently
+rem breaking the call (this bit us twice: first as HOST_MAJOR staying
+rem unset, then as a `cmd.exe` syntax error, from two different attempts
+rem to patch the quoting of that nested re-parse). Redirecting `%ERL%`'s
+rem output straight to a file and reading it back with `set /p` instead
+rem runs erl as an ordinary line of *this* already-running script — no
+rem second cmd.exe re-parses it, so there's nothing for that quoting
+rem hazard to bite. `io:put_chars` (rather than `io:format`'s `"~s"`)
+rem also keeps the `-eval` argument itself free of embedded quotes.
+set "OTP_PROBE=%TEMP%\beamtalk_otp_probe_%RANDOM%.tmp"
+"%ERL%" -noshell -eval "io:put_chars(erlang:system_info(otp_release)), halt()." >"%OTP_PROBE%" 2>nul
+if exist "%OTP_PROBE%" set /p HOST_MAJOR=<"%OTP_PROBE%"
+del "%OTP_PROBE%" >nul 2>&1
 if not defined HOST_MAJOR exit /b 0
 if %HOST_MAJOR% LSS %REQ_MIN% goto :otp_window_fail
 if %HOST_MAJOR% GTR %REQ_MAX% goto :otp_window_fail
