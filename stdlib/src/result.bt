@@ -65,11 +65,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result error: Error new    // => Result error: <Error>
   /// ```
   /// To capture a raised exception as a Result, use `Result tryDo: [Error signal: "oops"]`.
-  ///
-  /// Stays inline FFI (not `self delegate`): the backing function is named
-  /// `makeError:`, not `error:`.
-  class error: reason :: E -> Result(T, E) =>
-    (Erlang beamtalk_result) makeError: reason
+  class error: reason :: E -> Result(T, E) => self delegate
 
   /// Evaluate a block and return a Result (class method).
   ///
