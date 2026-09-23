@@ -18,8 +18,8 @@ provided methods were written in its own body, so `ThreadedIr`, the class-kind
 calling convention, `super`, sealed self-send optimisation, xref, and hot
 reload all see ordinary methods. A class's own method beats a trait's, and a
 trait's beats an inherited one **only when the using class says so** with an
-`overriding:` clause (§3a), so neither a trait release nor a superclass
-release can silently replace behaviour. Two traits providing the same
+`overriding:` clause (§3a), so no provision silently replaces an inherited
+method in a closed-world build, from either side of a release. Two traits providing the same
 selector is a compile error unless the class defines it or excludes one. A
 protocol's type is its required ∪ provided selectors, so the structural
 conformance rule of ADR 0068 is unchanged for protocols without provisions,
@@ -40,7 +40,10 @@ is written up):
    can conform without `uses:` and so without the provisions, and a
    required-only type would let it through to code that then sends
    `max:` and fails with `does_not_understand` at run time. Required ∪
-   provided reports that case as a conformance warning instead.
+   provided reports that case as a conformance warning instead. Pony is
+   the precedent: its structural `interface` may carry default bodies,
+   includes them in the type, and delivers them only to types that declare
+   `is I`.
 3. ~~**One keyword or two.**~~ **Decided (2026-09-23): one keyword.**
    `Protocol define:` may carry method bodies; there is no `Trait define:`.
    With decision 2 settled, a second keyword would only signal whether a
@@ -52,7 +55,8 @@ is written up):
    send") and principle 8 ("Reflection as Primitive") make them part of the
    feature, and the in-image reload fan-out needs the users index to find
    its targets. Deferred past v1: `aliasing:`, class-side provisions,
-   browse grouping by trait, and protocol-wide rename.
+   browse grouping by trait, protocol-wide rename, and LSP hover
+   provenance.
 
 All four decisions are resolved; the ADR is ready for an acceptance
 review.
@@ -147,7 +151,7 @@ What inheritance cannot fix at all is the rest of the reason for this ADR:
    structural, not a count, and it is weaker than it looks: block-taking
    methods that call each other through actor self-sends are broken today
    (BT-3580, §9), and blocks passed to an actor run in the actor's process
-   (ADR 0104). Traits whose provisions do not pass blocks through self-sends
+   (language guide § Checked boundaries; ADR 0103). Traits whose provisions do not pass blocks through self-sends
    (`Comparable`, `Counting`, snapshot-based `Enumerable`, §9) are unaffected.
 3. **A superclass slot already taken.** User classes subclass `TestCase`,
    `Error`, `Supervisor` or an application base actor. Their superclass is
@@ -270,7 +274,8 @@ The body grammar is the protocol body grammar (ADR 0068) plus method bodies:
 |---|---|
 | `selector :: … -> T` (no `=>`) | **Required** method — the using class, its superclass chain, or another used trait must provide it |
 | `selector … => body` | **Provided** method — flattened into every user |
-| `class selector …` (either shape) | The same, on the class side (ADR 0013 `class` prefix, the syntax in force while ADR 0048 is deferred) |
+| `class selector …` without `=>` | Class-side **requirement**, as protocols already allow (ADR 0068, BT-1611) |
+| `class selector … => body` | Class-side **provision** — post-v1 (Phase 7); in v1 an error, "class-side provided methods are not yet supported" |
 | `sealed` / `internal` before the selector | **Rejected in v1** (§13). `sealed` cannot stop the using class from overriding (class wins, §3), and `internal` in a trait has no well-defined package once flattened into a user in another package (ADR 0071) |
 | `uses: OtherProtocol …` | Composition (§2) — a protocol may use protocols |
 | `// === Name ===` | Category divider (`method_category.rs`), kept with the trait's source |
@@ -294,7 +299,21 @@ subclasses would claim to return the receiver's subclass while returning
 subclass narrowing a parameter type) does not arise, because the substituted
 type is the using class, fixed at flattening, and subclasses inherit it
 unchanged as they inherit any hand-written method. Required signatures keep
-`Self` unsubstituted; they are checked like protocol requirements (§5).
+`Self` unsubstituted; they are checked like protocol requirements (§5). For a
+generic user (`Pair(A, B) uses: Comparable`), `Self` becomes the user with
+its own type parameters, `Pair(A, B)`.
+
+**No primitives in provisions.** A provided method may not use `@primitive`
+or `@intrinsic`. Provisions are flattened into user classes compiled in
+project mode, which cannot reproduce stdlib-mode primitives (the reason the
+workspace refuses stdlib patches, `beamtalk_repl_eval.erl:927-938`).
+
+**Which mechanism to use.** A **superclass** says what a class *is* and
+shares representation and state. A **protocol with provisions** is a
+capability derived from a few required methods and usable across kinds and
+hierarchies. An **extension method** adds one behaviour to one existing
+class, typically one you don't own. The language guide (Phase 6) states
+this rule.
 
 A protocol with provisions still has no header modifiers, no superclass, no
 `state:` / `field:` / `classState:` (§7), and no `native:`. It stays one
@@ -304,10 +323,16 @@ to one module by the ADR 0119 rule. There is no new top-level form.
 Names are protocol names (`Comparable`, `Enumerable`), not Pharo's
 `TComparable`: there is one construct, and it is a type.
 
-**`uses:` of a protocol with no provisions** is a warning, not an error:
-"`Printable` provides no methods, so `uses:` adds nothing; conformance is
-structural (ADR 0068). Remove it." This keeps `uses:` from becoming the
-nominal `implements:` that ADR 0068 rejected. When a protocol later gains
+**`uses:` of a protocol with no provisions** is a hint, not an error or a
+warning: "`Printable` provides no methods, so `uses:` only checks its
+requirements here; conformance is structural (ADR 0068)." Its one effect is
+to check the requirements at the class definition, the "assert conformance
+here" idiom. That is none of the things ADR 0068 rejected `implements:` for:
+it is optional, adds no nominal typing, and never breaks when a protocol is
+added later. A hint rather than a warning also avoids churn, because a
+protocol gaining or losing its last provision would otherwise flip every
+user between clean and warning, which fails builds under
+`--warnings-as-errors`. When a protocol later gains
 its first provided method, the classes that should receive it add
 `uses:`; structural conformers are affected as §8 describes.
 
@@ -320,8 +345,9 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
 
   < other :: DateTime -> Boolean =>
     (Erlang beamtalk_datetime) lt: self with: other
-  // `>`, `<=`, `>=` deleted — provided by Comparable.
-  // `between:and:`, `min:`, `max:` gained.
+  // `>`, `<=`, `>=` stay: each is its own FFI call, and the class body
+  // wins over a provision (§3, §9).
+  // Gained from Comparable: `between:and:`, `min:`, `max:`.
 ```
 
 Grammar of a `uses:` line:
@@ -334,8 +360,12 @@ Post-v1 (Phase 7) adds one more optional clause, `[aliasing: #{#newSel => #trait
 In v1 the keyword is reserved and rejected with a "not yet supported" error.
 
 `package@` qualifies a protocol from another package, as `json@Parser` does for
-a superclass (ADR 0070). Inside a protocol body, `uses:`, `excluding:` and
-`aliasing:` are reserved: today `parse_protocol_method_signature_with_doc`
+a superclass (ADR 0070). Inside a protocol body only `uses:` is reserved,
+and only at the start of a line that has no `=>` (a method *named* `uses:`
+has a body, as ADR 0071 distinguishes `internal`). `excluding:` and the
+other clause keywords appear only after it on the same line, so they stay
+usable in ordinary selectors (`system_navigation.bt:1890`). Without the
+reservation today `parse_protocol_method_signature_with_doc`
 would read `uses: Comparable` as a required keyword signature with a
 parameter named `Comparable`, so the protocol-body parser must check for them
 first, as it already does for `extending:`. `overriding:` is reserved the
@@ -375,6 +405,10 @@ A class that uses traits **means exactly the class with the provided methods
 written into its body**, after these steps, in order:
 
 1. Expand each used trait transitively (a trait's own `uses:` first).
+   Within a protocol, its own provisions beat those of protocols it uses
+   (class-wins applied recursively). `excluding:` is allowed on a
+   protocol's `uses:` line; `overriding:` there is an error, because a
+   protocol has no superclass.
 2. Per `uses:` line, apply `excluding:`. (Post-v1, `aliasing:` runs
    first, reading from the trait's *original* provisions, so an alias
    survives the exclusion of the selector it copies:
@@ -431,9 +465,29 @@ It must be **hygienic**: a trait provision's method-local type variables are
 alpha-renamed before substitution, so `Pair(A, B) uses: Enumerable(A)` does
 not capture the `A` in `inject: initial :: A into: …` as the class's `A`.
 
+**Name resolution.** Free class and protocol names in a provision are
+resolved **in the protocol's package** at expansion time and emitted
+package-qualified, and `internal` visibility (ADR 0071) of anything a
+provision references is checked against the protocol's package. Without
+this, a provision from package `json` flattened into a user would resolve
+`Parser` in the user's package (ADR 0070 resolves names lazily at the use
+site): `json`'s own internals would become visibility errors, and a
+same-named class in the user's package would capture the reference.
+
+**Source locations.** A flattened method keeps the source identity of its
+protocol. Today `Span` carries only offsets (`span.rs:35`) and codegen
+maps spans to lines through one source text per module (`options.rs:40`),
+so a copied provision's spans must be tagged with their file. Diagnostics
+whose span lies in a protocol are reported **in the protocol file, once**,
+de-duplicated across users, with a note "while flattening into A, B, …";
+BEAM line annotations and stack traces for a flattened method point at the
+protocol's lines.
+
 **Synthesised methods rank as class body.** A `Value` class's auto-generated
 field accessors and `with*:` setters are suppressed today whenever
-`class.methods` already has the selector (`value_accessors.rs:63-92`). A
+`class.methods` already has the selector (`value_accessors.rs:63-92`). The
+expansion pass takes the synthesised-selector set from the existing shared
+module `crates/beamtalk-core/src/synthetic_selectors.rs`, not a copy. A
 trait provision must not suppress them: synthesised accessors count as
 class body for step 4, so `field: size` beats a trait's `size`.
 
@@ -477,12 +531,18 @@ argument behind C#'s explicit `override`/`new`.
 
 **Details.**
 
-- **Kind roots are exempt.** Methods inherited from `ProtoObject`,
-  `Object`, `Value` or `Actor` (and, class side, `Behaviour`, `Class` and
-  `Metaclass`) are defaults meant to be replaced, such as `printString`,
-  `displayString` and `hash`. Requiring `overriding:` for them would put the
-  clause on nearly every use of `Printable`-like traits and teach users to
-  write it without reading it.
+- **A short allowlist is exempt, not whole root classes.** Only
+  `printString`, `displayString`, `hash` and `equals:` inherited from
+  `Object` or `Value` (`object.bt:140, 163, 204, 244`; `value.bt:83`) are
+  exempt: they are the defaults a class is expected to replace. Every other
+  root method (`isNil`, `ifNil:`, `inspect`, `terminate:`, …) needs
+  `overriding:` like any inherited method. Exempting whole root classes
+  would reopen the motivating case: `Describable` v2 adding `printString`
+  would still silently replace `Value>>printString` on every direct `Value`
+  user. Scala and Kotlin require explicit `override` even on `toString`;
+  the allowlist is this ADR's concession to how often those four are
+  replaced. A protocol that provides exactly one of `equals:` and `hash`
+  gets a warning.
 - **Sealed inherited methods** stay an error whether or not they are
   acknowledged (§13), exactly as for a class-body method.
 - **Open world.** When the superclass chain leaves the indexed world
@@ -500,7 +560,19 @@ argument behind C#'s explicit `override`/`new`.
   stale.
 - **Only provisions are checked.** A method written in the class body
   overrides an inherited one silently, as it does today; the class's own
-  source is where that decision is visible.
+  source is where that decision is visible. This leaves one versioning gap
+  §3a does not close: a superclass release that adds a method a subclass
+  body already defines changes the subclass silently. That is C#'s
+  `new`/`override` case, and closing it needs an opt-in lint in the style of
+  TypeScript's `noImplicitOverride`, a separate decision.
+- **Same origin is exempt.** If the inherited method and the provision come
+  from the same protocol (a superclass started to `uses:` a protocol the
+  subclass also uses), and the superclass has not customised the selector,
+  they are identical and §3a does not fire. If the superclass customised
+  it, §3a applies.
+- **Foreign extensions count as inherited.** An ADR 0066 extension on a
+  superclass is part of what the class inherits, so a provision replacing
+  it needs `overriding:` too.
 - **Timing.** The check needs the superclass chain, so it runs in the
   post-`ClassHierarchy` half of the pass, beside the requirement check (§3,
   §5).
@@ -513,16 +585,18 @@ error** in the using class, unless one of:
 - the class body defines that selector (the class wins, §3 step 4);
 - one use excludes it (`excluding:`);
 - both provisions are the *same* method reached through two paths (a trait
-  used directly and via another trait). Same origin is not a conflict —
+  used directly and via another trait). "Same" means the same protocol and
+  selector, not the same content hash, so a reload in progress cannot turn a
+  diamond into a conflict. Same origin is not a conflict —
   Schärli's rule, which keeps diamond-shaped trait composition harmless.
 
 An aliased copy is a provision like any other and can conflict.
 
 ```beamtalk
 Value subclass: Report
-  uses: Printable
+  uses: Labelled
   uses: Describable
-  // error: `printString` is provided by both Printable and Describable in Report.
+  // error: `printString` is provided by both Labelled and Describable in Report.
   //   Define `printString` in Report, or exclude one:
   //     uses: Describable excluding: #(#printString)
 ```
@@ -533,7 +607,7 @@ definition wins over both provisions, so no exclusion is needed:
 
 ```beamtalk
 Value subclass: Report
-  uses: Printable
+  uses: Labelled
   uses: Describable
 
   printString -> String => self title ++ " " ++ self summary
@@ -544,7 +618,7 @@ call it, instead of rewriting its body:
 
 ```beamtalk
 Value subclass: Report
-  uses: Printable
+  uses: Labelled
   uses: Describable excluding: #(#printString) aliasing: #{#describeString => #printString}
 
   printString -> String => self describeString ++ " " ++ self summary
@@ -569,6 +643,25 @@ Value subclass: Version
 // error: Version uses Comparable but does not implement required `<`
 //   hint: Comparable requires `< other :: Self -> Boolean`
 ```
+
+**Provisions are checked once, in the protocol.** Each provision is
+type-checked in the protocol file with `self` bounded by the protocol's
+required ∪ provided selectors plus `Object`'s. A self-send outside that set
+is an error: "`foo` is sent by `max:` but is neither required nor provided
+by Comparable; declare it as required." This is Schärli's rule that the
+required set covers every self-send, and it means a protocol with no users
+is still checked. Per-user checking after flattening then reports only
+diagnostics that depend on the user, once each.
+
+**Excluding can break conformance.** `uses: T excluding: #(#x)`, where the
+class neither defines nor inherits `x`, leaves the class not conforming to
+`T`, the protocol it names. That is a warning: "C uses T but does not
+conform to T: it excludes `x` without defining or inheriting it."
+
+**`extending:` a protocol with provisions.** When `Q extending: P` and `P`
+has provisions, `P`'s provided selectors are requirements for classes that
+`uses: Q`, because `Q`'s type includes them (§8) and `extending:` brings no
+bodies.
 
 A required signature is checked like a protocol requirement: selector and
 arity are mandatory; declared types are compared by the type checker and
@@ -632,13 +725,13 @@ Rationale, in order of weight:
    accessors; Pharo shipped that for a decade before adding stateful traits,
    and its `TSlot`/`TraitedClass` machinery is the part that keeps breaking.
 4. **`Object` subclasses cannot hold state at all** (ADR 0067), yet should be
-   able to use class-side traits (§9).
+   able to use class-side traits (§9, post-v1).
 
 **Selectors a trait may not provide.** Some selectors change what the
 compiler or runtime does with a class, not just what it answers, so a trait
 providing them would change a class's shape or dispatch behind a `uses:`
 line. A provision (not a requirement) of any of these is an error (§13):
-`initialize`, `migrateFromV<N>:` (ADR 0123's migration chain,
+`initialize`, `terminate:` (the actor lifecycle hook), `migrateFromV<N>:` (ADR 0123's migration chain,
 `ast/class.rs:350`), `doesNotUnderstand:args:` (open-world conformance,
 ADR 0068/0100), and `supervisionPolicy` / `supervisionSpec`
 (`actor_codegen.rs:337-349`). The statelessness check is syntactic
@@ -683,7 +776,9 @@ Consequences:
   break as adding a required selector to a protocol today (ADR 0068), and it
   is the price of the required ∪ provided rule (decided, §Status 2). The
   cost is smaller than "breaking" suggests: ADR 0068 makes conformance
-  problems warnings, not errors, so adding a provision never fails a build.
+  problems warnings, not errors, so adding a provision never fails a build
+  unless the project builds with `--warnings-as-errors`, as the stdlib
+  does (`Justfile:584`).
   It adds warnings exactly where a structural conformer reaches code typed
   against the trait, which are the places that would fail at run time if
   that code sent the new selector. This matches TypeScript, where adding a
@@ -704,7 +799,7 @@ nothing else (ADR 0068). `uses: P` flattens P's *provisions* into this
 protocol, which also brings them into its type. A protocol that wants P's
 bodies uses it; one that only wants to be a subtype of P extends it.
 
-### 9. All three class kinds can use traits
+### 9. Traits across the class kinds
 
 **Value** — `DateTime`, above (§2). The same change applies to `Duration`,
 `Uuid` and `String`. Each keeps its primitive `<` and should keep its
@@ -751,7 +846,7 @@ typed Actor subclass: WorkerPool
   elements -> List(Worker) => self.workers
 
   add: w :: Worker -> Nil => self.workers := self.workers add: w
-  idle -> List(Worker) => self select: [:w | w isIdle]
+  idle -> List(Worker) => self elements select: [:w | w isIdle]
 ```
 
 The snapshot design is deliberate, and it replaces an earlier draft whose
@@ -766,7 +861,7 @@ on actors:
 
 - **Blocks run in the actor's process.** `pool select: [...]` sends the
   block to the actor, as any block argument to an actor method does
-  (ADR 0104). Captured-variable writes in it do not reach the caller, and a
+  (language guide § Checked boundaries; ADR 0103). Captured-variable writes in it do not reach the caller, and a
   re-entrant send to `pool` from inside it deadlocks or raises
   `calling_self`. Callers that want caller-side semantics use
   `pool elements select: [...]`, and the trait makes `elements` the
@@ -776,16 +871,24 @@ on actors:
 
 Adoption is per class, not mechanical. `SupervisionTree` and `ChangeLog`
 are one-line forwarders to an inner list already, so they become
-`elements => self nodes` and `elements => self activeEntries`. But
+`elements => self flatNodes` (not `nodes`, which is an FFI enrich pass,
+`supervision_tree.bt:40-41`) and `elements => self activeEntries`. But
 `ChangeLog select:` deliberately ranges over *all* `entries`, including
 orphans (`change_log.bt:36-44, 96-106`), so it keeps its own `select:`
 (class wins), and `SupervisionTree do:` answers `self`, not `nil`, so it
-keeps its own `do:` and the override check (§8) warns until its return type
-is reconciled. **`Collection` does not adopt `Enumerable` in v1**: its
+keeps its own `do:`. Its return type (`SupervisionTree`, not `Nil`) must be
+reconciled in Phase 6 itself, because the §8 override warning would fail
+the stdlib build under `--warnings-as-errors`: either change it to `Nil`
+after auditing callers, or `uses: Enumerable(SupervisionNode) excluding:
+#(#do:)`. **`Collection` does not *use* `Enumerable` in v1**: its
 `select:`/`collect:` answer `Self` via `species`, and every enumeration
-method it has is already inherited by its subclasses.
+method it has is already inherited by its subclasses. But Phase 6 adds
+`elements -> List(E) => self asList` to `Collection`, so every list, set and
+array **conforms** to `Enumerable` structurally, and `x :: Enumerable(E)`
+accepts them. Without it the name would promise the Ruby/Elixir
+`Enumerable` while no collection satisfied it.
 
-**Object** (class-side provisions are **post-v1**, §Implementation) — instance methods on an uninstantiable class are pointless, so
+**Object** (class-side provisions are **post-v1**, §Implementation; in v1 an `Object` subclass can use only instance-side provisions, which is rarely useful) — instance methods on an uninstantiable class are pointless, so
 `Object subclass:` users compose **class-side** traits:
 
 ```beamtalk
@@ -889,10 +992,17 @@ entry point changes as follows:
 missing protocol module at run time affects reflection only, never
 dispatch.
 
+**Binary-only dependencies.** Outside the REPL, building a user of a
+dependency's protocol needs that protocol's source: from the dependency's
+source checkout, or from `'__beamtalk_protocol_source'/0` on its compiled
+module. A dependency that ships neither cannot have its provisions
+flattened, and `uses:` of such a protocol is an error naming the missing
+source.
+
 **Packages and releases.** A dependency's trait bodies become part of each
 downstream user's compiled code. A patch release of a dependency that
 changes a provision has no effect downstream until the downstream package is
-rebuilt. The `traits => [{Name, Hash}]` meta entry (§10) lets `beamtalk
+rebuilt. The `uses => [{Name, Hash}]` meta entry (§10) lets `beamtalk
 build` warn when a dependency's trait hash differs from the one a user was
 compiled against, and lets ADR 0125's appup generation see that a user
 module changed.
@@ -902,8 +1012,9 @@ module changed.
 - **Stdlib traits are read-only**, like stdlib classes: the workspace
   already refuses to patch a class compiled in stdlib mode
   (`beamtalk_repl_eval.erl:927-938`), and re-expanding a stdlib user would
-  recompile `DateTime` or `String`. `Comparable >> max: …` at the REPL is
-  refused with that existing error.
+  recompile `DateTime` or `String`. The existing refusal looks up classes,
+  not protocols, so `Comparable >> max: …` at the REPL needs a **new**
+  refusal message; as REPL output it needs sign-off before implementation.
 - **Editing a user-package trait file** recompiles the trait and **every
   loaded, source-backed, non-stdlib user**, then reloads each user through
   the existing `update_class` path. Users without source in the workspace
@@ -957,7 +1068,9 @@ module changed.
   trait-provided is an error: "`max:` is provided by trait Comparable;
   exclude it with `uses: Comparable excluding: #(#max:)` or remove it from the
   trait". A class's own override of a trait selector can be removed as
-  usual, which re-exposes the provision.
+  usual, which re-exposes the provision; if the re-exposed provision would
+  fail §3a (it replaces an inherited non-allowlisted method the class does
+  not acknowledge), the removal is refused with the §3a hint.
 - **Renaming or removing a *required* selector on one user** —
   `DateTime renameSelector: #< to: #precedes:` — is refused while any used
   trait requires or sends it, because the sites that send it live in trait
@@ -975,14 +1088,14 @@ module changed.
 
 | Surface | Addition |
 |---|---|
-| `Protocol` (`protocol.bt`) | `Protocol providedMethods: #Comparable` and `Protocol usersOf: #Comparable` beside the existing `requiredMethods:` and `conformingClasses:`. `usersOf:` answers the classes that `uses:` it; `conformingClasses:` still answers every structural conformer |
-| `Behaviour` | `usedProtocols` (directly used, in `uses:` order), `allUsedProtocols` (transitive, including superclasses'), `usesProtocol: #Comparable` — distinct from the existing `protocols`, which answers structural conformance; `methods` still answers local selectors and **includes** flattened ones, because they are local |
-| `CompiledMethod` | `origin` → the protocol name or `nil`; `source` is the trait's text; `respondsTo:`, `canUnderstand:`, `includesSelector:` need no change — the method is there |
+| `Protocol` (`protocol.bt`) | `Protocol providedMethods: #Comparable` and `Protocol usersOf: #Comparable` (answering `List(Behaviour)`, order unspecified; `SystemNavigation usersOf:` shares its implementation) beside the existing `requiredMethods:` and `conformingClasses:`. `usersOf:` answers the classes that `uses:` it; `conformingClasses:` still answers every structural conformer |
+| `Behaviour` | `usedProtocols -> List(Symbol)` (directly used, in `uses:` order), `allUsedProtocols` (transitive, including superclasses'), `usesProtocol: #Comparable` — distinct from the existing `protocols`, which answers structural conformance; `methods` still answers local selectors and **includes** flattened ones, because they are local |
+| `CompiledMethod` | `origin -> Symbol | Nil` → the protocol name or `nil`; `source` is the trait's text; `respondsTo:`, `canUnderstand:`, `includesSelector:` need no change — the method is there |
 | `SystemNavigation` | `usersOf: #Comparable`; `implementorsOf: #between:and:` lists every user (true — each *does* implement it) and each row's `origin` says which trait |
-| Browse / categories (**post-v1**) | Flattened methods appear in the class under their trait's own `// === ===` dividers, prefixed with the trait name (`Comparable › Derived ordering`), via a new `provenance := protocol` branch beside the existing `extension → "extensions"` one (`protocol_from_source/4`, `beamtalk_repl_ops_browse.erl:2284-2287`) |
+| Browse / categories (grouping **post-v1**; in v1 flattened methods are listed under their protocol's own dividers, unprefixed) | Flattened methods appear in the class under their trait's own `// === ===` dividers, prefixed with the trait name (`Comparable › Derived ordering`), via a new `provenance := protocol` branch beside the existing `extension → "extensions"` one (`protocol_from_source/4`, `beamtalk_repl_ops_browse.erl:2284-2287`) |
 | Xref (ADR 0087, 0115) | `beamtalk_xref_methods` rows: `provenance := protocol`, `origin := ProtocolName`. Sender rows inside a flattened body are indexed per user, `recv_type` per ADR 0115, so `sendersOf:` on `<` finds `DateTime`'s copy of `between:and:` — correct, because that copy really sends `<` to a `DateTime` |
-| Rename (ADR 0114; protocol-wide rename is **post-v1**) | `renameSelector:to:` on a trait-provided selector of a **class** is refused with a hint to rename on the trait; on the **trait** the site closure is the trait body ∪ the union of every user's ADR 0114 closure, one ChangeLog entry. `renameTo:` on a trait adds `uses:` lines to `referencesTo:` (a new `uses_protocol` reference row) and moves the file like a class rename does |
-| LSP | Go-to-definition on a flattened method jumps to the trait; completion on a receiver of a using class lists trait methods (they are in `ClassInfo.methods`); hover shows `from Comparable` |
+| Rename (ADR 0114; protocol-wide rename is **post-v1**; in v1 a class rename also rewrites type arguments in `uses:` lines, e.g. `uses: Enumerable(Worker)`, via `referencesTo:`) | `renameSelector:to:` on a trait-provided selector of a **class** is refused with a hint to rename on the trait; on the **trait** the site closure is the trait body ∪ the union of every user's ADR 0114 closure, one ChangeLog entry. `renameTo:` on a trait adds `uses:` lines to `referencesTo:` (a new `uses_protocol` reference row) and moves the file like a class rename does |
+| LSP | Go-to-definition on a flattened method jumps to the trait; completion on a receiver of a using class lists trait methods (they are in `ClassInfo.methods`); hover shows `from Comparable` (hover: post-v1) |
 | Extension conflict (ADR 0066) | An extension `DateTime >> max:` on a trait-provided selector is the existing "cannot override a method defined in the class body" error, because after flattening it *is* in the body |
 
 ### 13. Diagnostics
@@ -1012,7 +1125,15 @@ implementation in the existing `E`/`W` series.
 | The same, where the superclass chain is open-world (ADR 0100) | Hint | §3a |
 | An `overriding:` entry that replaces nothing | Warning | "`sel` in `overriding:` does not override an inherited method; remove it" |
 | `overriding:` names a selector T does not provide | Error | "T does not provide `sel`" |
-| A class `uses:` a trait its superclass already uses | Warning | "C's superclass already uses T; this re-flattens T's methods over the superclass's customisations" |
+| A class `uses:` a trait its superclass already uses, and the superclass has not customised any of its selectors | Hint | "C's superclass already uses T; this `uses:` is redundant" (same origin, §3a) |
+| The same, where the superclass customised a selector T provides | Error | §3a — the provision would replace the superclass's customisation; acknowledge with `overriding:` or `excluding:` |
+| A provision sends a selector that is neither required nor provided (nor `Object`'s) | Error | "`foo` is sent by `max:` but is neither required nor provided by T; declare it as required" (§5) |
+| A provision references a name not resolvable from the protocol's package | Error | reported once, in the protocol file (§3, "Name resolution") |
+| `uses: T excluding: #(#x)` leaves the class not conforming to T | Warning | "C uses T but does not conform to T: it excludes `x` without defining or inheriting it" (§5) |
+| A protocol provides exactly one of `equals:` and `hash` | Warning | §3a |
+| `overriding:` on a protocol's own `uses:` line | Error | "a protocol has no superclass; `overriding:` has no meaning here" (§3 step 1) |
+| A provision uses `@primitive` or `@intrinsic` | Error | "provided methods cannot use primitives" (§1) |
+| A class-side provision (`class sel … =>`) in v1 | Error | "class-side provided methods are not yet supported" (§1) |
 | A class-body override is not override-compatible with the provision it replaces | Warning | §8 |
 | Renaming or removing a required selector on a user | Runtime error | §11 |
 | A trait edit that makes any source-backed user fail to compile | Runtime error (edit rejected, nothing loaded) | §11 — lists every failing user with its diagnostic |
@@ -1022,7 +1143,7 @@ implementation in the existing `E`/`W` series.
 
 ### REPL session
 
-With `comparable.bt` and this `version.bt` loaded:
+With this `version.bt` loaded (`Comparable` is a stdlib protocol):
 
 ```beamtalk
 typed Value subclass: Version
@@ -1038,14 +1159,16 @@ typed Value subclass: Version
 v := Version major: 1 minor: 4
 v between: (Version major: 1 minor: 0) and: (Version major: 2 minor: 0)   // => true
 v max: (Version major: 1 minor: 9)                       // => Version(major: 1, minor: 9)
-Version usedProtocols                                     // => [Comparable]
+Version usedProtocols                                     // => [#Comparable]
 Version conformsTo: #Comparable                           // => true
-Integer conformsTo: #Comparable                           // => true — structurally, no uses:
-(Version >> #max:) origin                                 // => Comparable
+// Integer conforms structurally, without uses:
+Integer conformsTo: #Comparable                           // => true
+(Version >> #max:) origin                                 // => #Comparable
 (Version >> #<) origin                                    // => nil
-Protocol usersOf: #Comparable                             // => [Version, DateTime, Duration, Uuid, String]
+(Protocol usersOf: #Comparable) size                      // => 5
 Comparable >> max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]
-// => error: Comparable is a stdlib trait and cannot be patched in the workspace
+// => error: Comparable is a stdlib protocol and cannot be patched in the workspace
+//    (new message; REPL output needs sign-off, §11)
 Version removeSelector: #max:
 // => error: `max:` is provided by trait Comparable; exclude it with
 //    `uses: Comparable excluding: #(#max:)` or remove it from the trait
@@ -1077,23 +1200,26 @@ Version removeSelector: #max:
 
 | Language | Mechanism | Composition | Conflicts | State | Taken / rejected |
 |---|---|---|---|---|---|
-| **Smalltalk-80 / Squeak / Pharo ≤ 6** | Traits (Schärli, Ducasse, Nierstrasz, Black, ECOOP 2003): `Object subclass: #C uses: TA + TB - {#x} @ {#y -> #x}` | Flattened; class wins; `+`/`-`/`@` | Explicit exclusion or alias; unresolved conflict is a method that errors when called | Stateless, required accessors | **Adopted** wholesale: flattening, precedence, exclusion, alias, required/provided, same-origin-is-not-a-conflict. Adapted: keyword clauses instead of `+ - @` operators; conflict is a *compile* error, not a runtime `traitConflict`; no `T` prefix |
+| **Smalltalk-80 / Squeak / Pharo ≤ 6** | Traits (Schärli, Ducasse, Nierstrasz, Black, ECOOP 2003): `Object subclass: #C uses: TA + TB - {#x} @ {#y -> #x}` | Flattened; class wins; `+`/`-`/`@` | Explicit exclusion or alias; unresolved conflict is a method that errors when called | Stateless, required accessors | **Adopted** wholesale: flattening, precedence, exclusion, required/provided, same-origin-is-not-a-conflict (alias post-v1). Adapted: keyword clauses instead of `+ - @` operators; conflict is a *compile* error, not a runtime `traitConflict`; no `T` prefix |
 | **Pharo 7+** | Stateful traits (`TraitedClass`, `TSlot`) | as above + slots | as above | Slots | **Deferred** (§7) — kind-specific slots need a threading story |
-| **Newspeak** | Mixins: `Superclass mixin |> C`; every class body is a mixin | Linearised application creates a class per use | Latest application wins (order) | Yes | **Rejected** (§Alternatives) — order-dependent, one registry class + module per application, extra chain steps per send |
-| **Scala** | `trait` with linearisation; `with A with B` | Linearised; `super` chains through traits | Order decides; `abstract override` | Yes | Rejected as mixins; but Scala's "trait is also a type" is our §8 |
+| **Newspeak** | Mixins: every class declaration denotes a mixin that can be applied to a superclass to create a class | Linearised application creates a class per use | Latest application wins (order) | Yes | **Rejected** (§Alternatives) — order-dependent, one registry class + module per application, extra chain steps per send |
+| **Scala** | `trait` with linearisation; `with A with B` | Linearised; `super` chains through traits | Two unrelated traits with the same concrete member are a compile error unless the class overrides; `override` is required on every concrete override, including `toString` | Yes | Rejected as mixins. Adopted: "trait is also a type" (§8), conflicts as compile errors (§4), and explicit override with no root-class exemption beyond §3a's short allowlist |
 | **TypeScript** | No traits; a `class` used as a type includes all its members; `override` keyword and `noImplicitOverride` (4.3) | Structural | n/a | n/a | Adopted: a type made of every member, implemented or not, is our required ∪ provided rule (§8), and adding a member is a reported break for structural implementers. `noImplicitOverride` is the same concern as `overriding:` (§3a) |
-| **Rust** | `trait` with default methods, `impl T for S` | Static, type-directed; orphan rules | Disambiguation by qualified path | None (associated fns only) | Adopted: required vs. default methods as the two body shapes. Rejected: nominal `impl` — ADR 0068 chose structural |
+| **Rust** | `trait` with default methods, `impl T for S` | Static, type-directed; orphan rules | Disambiguation by qualified path | None (associated functions, consts and types only) | Adopted: required vs. default methods as the two body shapes. Rejected: nominal `impl` — ADR 0068 chose structural |
 | **Swift** | Protocol extensions with default implementations | Static dispatch for non-requirement extension methods | Ambiguity error | None | Rejected: the static/dynamic dispatch split is a well-known footgun; Beamtalk has one dispatch (ADR 0006) |
 | **C# 8** | Default interface methods; `override` / `new` on class members | Class wins over interface defaults; a class member hiding a base member without `new` or `override` warns | Must override | None | Adopted: the versioning stance. C# makes replacing inherited behaviour an explicit act so a base-type release cannot silently change a subclass; `overriding:` (§3a) is that rule applied to trait provisions |
-| **Java 8 / Kotlin** | Interface default methods | Flattened-ish; class wins, then explicit `A.super.m()` (Java) / `super<A>.m()` (Kotlin) | Must override | None | Adopted: class wins. Rejected: the qualified-super call; we alias instead (§4) |
-| **Pony** | `trait` (nominal, default methods) + `interface` (structural) | Nominal `is T` | Must override | None | Closest match to §8: nominal *composition* declaration + structural *type*. Pony has no exclusion/alias; we keep Pharo's |
-| **Dart** | `mixin` with `on` constraints, `with` | Linearised | Order decides | Yes | Rejected as mixins; `on` is our required-methods list |
+| **Java 8** | Interface default methods | Class wins, **including inherited superclass methods**, which beat interface defaults; `A.super.m()` to pick a default | Two defaults with the same signature must be overridden | None | Adopted: the class body wins. Diverged: here a provision beats an inherited method, but only with `overriding:` (§3a). Rejected: the qualified-super call; the class writes the method (v1) or aliases (post-v1) (§4) |
+| **Kotlin** | Interface default methods; `by` delegation | A superclass method and an interface default with the same signature is a compile error ("must override … inherits many implementations"); `super<A>.m()` | Must override | None | Direct precedent for §3a: an overlap between an inherited method and a default is an error until the class says what it wants. `by` delegation is the snapshot `Enumerable` design (§9) in language form |
+| **Pony** | `trait` (nominal, default methods) + `interface` (structural, may also carry default bodies) | Only types that declare `is I` receive the bodies; structural conformers do not | Must override | None | The strongest precedent for §8 and decision 2: a structural type that includes defaulted methods, with bodies delivered only by an explicit declaration. Pony has no exclusion/alias; we keep Pharo's |
+| **Dart** | `mixin` with `on` constraints, `with` | Linearised | Order decides | Yes | Rejected as mixins. A mixin's abstract members are its required methods; `on` constrains the superclass type so `super` calls type-check |
 | **Ruby** | `module` + `include` / `prepend` | Linearised into the ancestor chain | Order decides | Instance vars by convention | Rejected as mixins; `Comparable`/`Enumerable` are the canonical examples and the names we use |
 | **Perl Moose / Raku** | Roles: `with 'R' => { -excludes => …, -alias => … }` | Flattened (roles are traits) | Compile-time conflict unless resolved | Attributes allowed | Confirms exclusion/alias as keyword clauses read fine outside Smalltalk |
 | **Elixir** | `use M` → `__using__` macro injects code; `defprotocol` for dispatch | Textual injection | Injected and local clauses of the same name/arity merge (with a "clause cannot match" warning) unless the injector marks them `defoverridable` | n/a | `use` is unchecked injection; our flattening is checked injection, and `defoverridable` is our class-wins rule made opt-in. Protocols ≈ our ADR 0068. `Enumerable` is the reference API |
-| **Erlang / OTP** | `-behaviour(M)` callbacks; `-extends` parse transform | Contract only | n/a | n/a | Behaviours ≈ protocols; no body sharing — the gap this ADR fills |
+| **Erlang / OTP** | `-behaviour(M)` callbacks; the experimental, since-removed `-extends` module attribute | Contract only | n/a | n/a | Behaviours ≈ protocols; no body sharing — the gap this ADR fills |
 | **LFE Flavors** | Mixins (`(defflavor … (:mixins …))`) | Linearised | Order | Yes | Rejected as mixins |
 | **Gleam** | None; modules and functions | n/a | n/a | n/a | Not applicable |
+| **PHP** | `trait` + `use`, abstract members as requirements | Flattened; class > trait > inherited | `insteadof` / `as` resolve conflicts | Properties allowed | The closest mainstream match to this ADR's model, and it shows the silent override of inherited methods that §3a exists to prevent |
+| **Go** | Structural interfaces, deliberately without default methods; embedding for reuse | n/a | n/a | n/a | Supports decision 2's reasoning: in a structural system, defaults that structural conformers never receive are a trap, so Go has none |
 
 **A note on the word "protocol".** In Pharo a *protocol* is a method
 category — `accessing`, `printing` — with no required-selector set and no
@@ -1110,7 +1236,7 @@ Scala and Pony, not Pharo.
 Ruby's `include Comparable` and Python's `class V(Comparable)`, and the
 required/provided split is the Java-interface-with-defaults they know. The
 errors name the fix (`define it in C, or exclude one: …`). They discover it
-by `Version usedProtocols` and by `browse` showing `Comparable › Derived ordering`.
+by `Version usedProtocols`, `CompiledMethod origin`, and (post-v1) `browse` grouping `Comparable › Derived ordering`.
 The one surprise is that `Integer conformsTo: #Comparable` is true without
 `uses:` — the same structural surprise ADR 0068 already documents.
 
@@ -1154,28 +1280,38 @@ in protocol bodies and `uses:` lines.
 - 🎩 **Smalltalk purist**: "This is Schärli's paper with keyword syntax. Flattening keeps the class the unit of meaning; `super` still means the superclass; conflicts are mine to resolve, not the runtime's to guess."
 - ⚙️ **BEAM veteran**: "Flattened methods are plain functions in plain modules. No macro magic, no extra hop, and `Module:module_info(exports)` tells the truth."
 - 🏭 **Operator**: "Zero dispatch cost and zero shape migrations. A trait edit is N method reloads I can already observe."
-- 🎨 **Language designer**: "One construct — a protocol, which may provide bodies. One body grammar, one namespace, one conformance rule. The design adds a composition declaration and nothing else to the type system."
+- 🎨 **Language designer**: "One construct — a protocol, which may provide bodies — so there is one body grammar, one namespace and one conformance rule. The type-system additions are small and local: `Self` substitution in provisions and an override check against a dropped provision. `overriding:` makes replacing inherited behaviour an explicit act, so a release on either side can't silently make a provision replace inherited behaviour, and errors in a provision are reported once, in the protocol file."
 
-### Option B: Protocols with default bodies (`Protocol define:` grows `=>`)
-- 🧑‍💻 **Newcomer**: "One concept instead of two — Swift and Java do it this way."
-- 🎩 **Smalltalk purist**: "Smalltalk never had protocols as types; a trait is the nearest thing, so one keyword should do."
-- ⚙️ **BEAM veteran**: "Elixir has one `defprotocol`; two keywords for one idea is Java-brained."
-- 🏭 **Operator**: "Fewer file kinds to reason about in a deploy."
-- 🎨 **Language designer**: "Since a trait *is* a protocol (§8), the keyword is the only difference. And Java 8 added default methods precisely so interfaces could evolve without breaking implementers — which §8's required ∪ provided rule gives up."
-- *The retroactive form is rejected; the opt-in form is not.* Conformance is automatic, so a protocol whose bodies landed on every structural conformer would inject methods into classes across packages that never asked — Swift's retroactive protocol extensions. Any safe form needs an opt-in `uses:` line to attach exclusion and aliasing to.
+### Option B: Retroactive default bodies (every structural conformer receives them)
+Provisions apply to every class that structurally conforms, with no `uses:` line, as Swift protocol extensions do.
+- 🧑‍💻 **Newcomer**: "Write `max:` once and every ordered type has it, including ones I didn't write. No declaration to forget."
+- 🎩 **Smalltalk purist**: "Duck typing all the way: if it has `<`, it's comparable, and it should get what comparable things get. A `uses:` line is a nominal island in a structural language."
+- ⚙️ **BEAM veteran**: "No class-to-protocol build edges, no N recompiles on a protocol edit; the behaviour lives in one place."
+- 🏭 **Operator**: "One module to reload when the protocol changes."
+- 🎨 **Language designer**: "It is the only design where required ∪ provided and painless evolution both hold: adding a provision breaks nobody, because every conformer receives it."
+- *Why rejected*: bodies land on classes that never asked, across packages. `Integer` would receive `Comparable>>max:` and change its tie semantics (§9). The body cannot be flattened into classes compiled before the protocol, so B needs Option E's shared module plus a dispatch step that checks conformance at run time on every miss. And exclusion and `overriding:` have no line to attach to. Swift's version resolves extension methods statically, which is how it avoids that run-time check; Beamtalk sends are dynamic, so it cannot.
+
+### Option B″: Extension methods on a protocol (C#-style)
+Allow `Comparable >> max: … => …` as an extension whose receiver is any class conforming to `Comparable`, as C# extension methods on an interface (the design behind LINQ) do.
+- 🧑‍💻 **Newcomer**: "It's just an extension method with a protocol as the target. I already know `>>`."
+- 🎩 **Smalltalk purist**: "Extensions are the Smalltalk way to add behaviour; widening their target from a class to a protocol is a small step."
+- ⚙️ **BEAM veteran**: "One copy in one module, registered like today's foreign extensions."
+- 🏭 **Operator**: "Nothing is copied into my classes; nothing recompiles when the protocol changes."
+- 🎨 **Language designer**: "This is how a mainstream OO language added LINQ without traits: behaviour attached to an interface type, one definition, one location for errors and go-to-definition."
+- *Why rejected*: C# resolves extension methods **statically**, from the declared type of the receiver expression, so there is no run-time cost and no ambiguity. Beamtalk sends are dynamic and the static type is often `Dynamic`, so a protocol extension would have to be found at run time by checking structural conformance on every lookup miss, and two protocols extending the same selector would be ambiguous at run time rather than a compile error. It is Option B with a different spelling.
 
 ### Option B′: One keyword, opt-in, required-only type (type rule rejected; single keyword adopted)
 `Protocol define:` may carry bodies; a class opts in with `uses:`; the protocol's type is its *requirements* only, so provisions can be added without breaking structural conformers.
-- 🧑‍💻 **Newcomer**: "Exactly Java/Kotlin interfaces with defaults. One word."
-- 🎩 **Smalltalk purist**: "Smalltalk never had two type-like keywords, and Pharo's 'protocol' was never a type anyway."
-- ⚙️ **BEAM veteran**: "One `defprotocol`-like construct, and adding a default is never a breaking change."
-- 🏭 **Operator**: "A dependency adding a default method can't break my conformance checks."
-- 🎨 **Language designer**: "It keeps everything A gets right — opt-in, flattening, class-wins — and fixes A's one evolvability flaw."
-- *Why the required-only type is rejected* (decided 2026-09-23, §Status 2): Java 8's evolvable-interface rule depends on nominal typing, where every implementer inherits the defaults. Under structural conformance a class with only `<` conforms without `uses:` and never receives `max:`. A required-only type admits it into `clamp: x :: Comparable …`, which then fails with `does_not_understand` at run time; required ∪ provided reports the same case as a conformance warning at the call site. B′'s evolution advantage is also smaller than it looks, since conformance problems are warnings (ADR 0068) and adding a provision never breaks a build under A either. It also makes provisions nearly useless to generic code, which can only safely send the required selectors.
+- 🧑‍💻 **Newcomer**: "It's exactly Java and Kotlin: the interface lists what I must write, and the defaults are extras."
+- 🎩 **Smalltalk purist**: "A protocol is what you must implement; what you are given for free isn't the contract."
+- ⚙️ **BEAM veteran**: "A behaviour's contract is its callbacks; what `__using__` injects isn't part of it."
+- 🏭 **Operator**: "A dependency adding a default method can't change whether my classes conform."
+- 🎨 **Language designer**: "It keeps everything A gets right — opt-in, flattening, class-wins — and makes a protocol evolvable without warnings anywhere."
+- *Why the required-only type is rejected* (decided 2026-09-23, §Status 2): Java 8's evolvable-interface rule depends on nominal typing, where every implementer inherits the defaults. Under structural conformance a class with only `<` conforms without `uses:` and never receives `max:`. A required-only type admits it into `clamp: x :: Comparable …`, which then fails with `does_not_understand` at run time; required ∪ provided reports the same case as a conformance warning at the call site. B′'s evolution advantage is also smaller than it looks, since conformance problems are warnings (ADR 0068), so adding a provision breaks a build under A only where the project opts into `--warnings-as-errors`. It also makes provisions nearly useless to generic code, which can only safely send the required selectors.
 - *What was adopted* (decided 2026-09-23, §Status 3): the single-keyword half. One `Protocol define:` that may carry bodies, with A's type rule, is Option A as this ADR now specifies it.
 
 ### Option C: Newspeak-style mixins (class-in-the-chain)
-- 🧑‍💻 **Newcomer**: "Dart and Ruby do it this way; `with` reads fine."
+- 🧑‍💻 **Newcomer**: "Ruby's `include` and Dart's `with` work this way, and I already understand them."
 - 🎩 **Smalltalk purist**: "Newspeak's insight that every class body is a mixin is deeper than traits — one concept for inheritance *and* composition."
 - ⚙️ **BEAM veteran**: "Each application is a real module, so `super` chains naturally and hot reload is per mixin."
 - 🏭 **Operator**: "Nothing is copied; one edit, one reload."
@@ -1198,11 +1334,13 @@ in protocol bodies and `uses:` lines.
 - 🎨 **Language designer**: "Composition without a new construct."
 - *Why rejected*: extensions attach a body to one named class, so reuse across N classes is N copies. Nothing checks requirements, conflicts between two extension files are undetectable until load, and every extension call pays the ETS probe. The stdlib duplication in §Context is hand-written in class bodies, not extensions, so it is evidence for the problem, not for this option.
 
-### Option E: Shared trait module + dispatch step (implementation variant of A)
-- ⚙️ **BEAM veteran**: "One copy of the bytecode; reload the trait module and every user sees it instantly, like a superclass method today."
-- 🏭 **Operator**: "N users, one reload."
-- 🎨 **Language designer**: "Foreign extensions already do this; reuse it."
-- *Why rejected*: actor self-sends compile against the lexical module (§10); a trait module has no gen_server. Two calling conventions means two bodies per method. Every send pays a probe. `super`, sealed self-sends, `late` guards and error hints bake in the lexical class. The "instant reload" advantage is real and is the price paid in §Consequences.
+### Option E: Shared code + dispatch step (implementation variant of A)
+Keep `uses:` opt-in, but compile each provision once, into the protocol's module, and reach it through a dispatch step, as foreign extensions (ADR 0066) are reached today.
+- 🧑‍💻 **Newcomer**: "A protocol method lives in one place, so the debugger and stack traces show one place."
+- ⚙️ **BEAM veteran**: "One copy of the bytecode; reload the protocol module and every user sees it, like a superclass method today. Foreign extensions already do this, for actors too, with a three-argument fun that threads the actor's state."
+- 🏭 **Operator**: "N users, one reload, and no build-graph edges."
+- 🎨 **Language designer**: "One definition: errors reported once, one go-to-definition target, trivial live patching, and none of §10a's invalidation machinery."
+- *Why rejected*: shared code is possible, since foreign extensions prove it, but each provision needs one compiled body per class kind, every lookup miss pays the registry probe at each hierarchy level (the chain walk ADR 0032 kept short), and a shared body loses what the flattened method knows about its class: `super`, sealed self-sends, `late` guards and class-specific error hints. Block and state threading across that fun boundary is also where BT-1512 and BT-3580 live. The designer's strongest points, errors once and one source location, are kept by §3's source-location rule and §5's check-once rule, so flattening pays only the recompile cost (§Consequences).
 
 ### Option F: Stateful traits (Pharo 7 style)
 - 🧑‍💻 **Newcomer**: "A `Counting` trait that can't hold `count` feels crippled."
@@ -1211,14 +1349,18 @@ in protocol bodies and `uses:` lines.
 - *Why deferred*: state declarations are per-kind (ADR 0067), so a stateful trait is either kind-specific (and cannot cross the wall it exists to cross) or needs a fourth `ThreadedIr` storage input. No stdlib evidence needs it; §7 leaves the door open.
 
 ### Option G: Multiple inheritance
-- 🎨 **Language designer**: "CLOS/Dylan-style MI with a linearisation is the general solution."
+- 🧑‍💻 **Newcomer**: "Python does this: `class V(Ordered, Collection)`, with C3 ordering. I'd guess it."
+- 🎩 **Smalltalk purist**: "Some Smalltalks experimented with it; the purist case is weak, which is itself telling."
+- ⚙️ **BEAM veteran**: "Nothing on the BEAM helps or hinders it; it is a lookup-order question."
+- 🏭 **Operator**: "One mechanism for all reuse, instead of classes plus protocols."
+- 🎨 **Language designer**: "CLOS/Dylan-style MI with a linearisation is the general solution; traits are a restricted MI."
 - *Why rejected*: ADR 0005 Q8 decided single dispatch and single inheritance; MI cannot cross class kinds; the diamond problem is exactly what traits were invented to remove.
 
 ### Tension points
-- **One keyword and the type rule (A vs. B′).** B′ differed from A in keyword count and in whether provisions are part of the type. The type rule is settled for A, because under structural conformance B′'s rule trades a compile-time warning for a run-time `does_not_understand`. The keyword count was then settled for one keyword.
+- **Keyword count and type rule (A vs. B′).** B′ differed from A in keyword count and in whether provisions are part of the type. The type rule went to A, because under structural conformance B′'s rule trades a compile-time warning for a run-time `does_not_understand`. The keyword count went to B′: once the type rule was settled, a separate `Trait define:` only signalled whether a file had bodies, and changing a file's keyword when its first body is added is friction for no semantic gain (§Status 3).
+- **One copy vs. many (A vs. E, B″).** A language designer values one definition with errors reported once. Flattening keeps that for diagnostics (§3, §5) and pays for it in recompiles; the shared-code designs keep it everywhere and pay on every send.
 - **Evidence vs. modelling (A vs. H).** The stdlib count is mostly answerable by inheritance, so reviewers who weigh measured duplication alone would prefer H. The decision went to A because the hierarchy should record kinds and traits should record capabilities; H would encode ordering and enumeration as kinds.
-- **One keyword vs. two.** A separate `Trait define:` would tell a reader whether a file carries code. Resolved for one keyword (§Status 3): once the type rule was settled, that was the only difference, and changing a file's keyword when its first body is added is friction for no semantic gain.
-- **Copy vs. share (A vs. E).** Operators want E's one-reload; the compiler's lexical assumptions make A the only one that works without re-architecting self-sends. Resolved for A; the N-recompile cost is accepted and bounded (§Consequences).
+- **One reload vs. N (A vs. E).** Operators want E's one reload. Resolved for A: flattened methods keep their class-bound facts and pay nothing per send; the N-recompile cost is accepted and bounded by the all-or-nothing reload (§11, §Consequences).
 - **Stateless vs. stateful (A vs. F).** Newcomers and Pharo 7 users want F; the class-kind split makes A the only kind-neutral choice today. Deferred, not closed.
 - **Header vs. body `uses:`.** Pharo puts it in the header; Beamtalk's header tail is already order-fragile and cannot hold exclusion/alias clauses. Body lines chosen.
 
@@ -1235,6 +1377,21 @@ whose superclass is already spent (§Context, "What inheritance cannot fix").
 It is also rejected as an interim stdlib refactor (decided 2026-09-23): it
 would model capabilities as kinds (§Context, "Kinds versus capabilities")
 and then have to be unwound when traits land.
+
+### Extension methods on a protocol (C#-style)
+`Comparable >> max: … => …` applying to every conformer, as C# extension
+methods on an interface do. Rejected because C# resolves them statically
+from the receiver's declared type, and Beamtalk's dynamic sends would need
+a run-time conformance check on every lookup miss and would turn
+cross-protocol ambiguity into a run-time question (§Steelman B″).
+
+### Delegation (Kotlin `by`)
+Forward a set of selectors to a member object: `Enumerable` by
+`self.workers`. The snapshot `Enumerable` (§9) is this pattern expressed
+as a protocol with provisions. A general delegation form would need a
+per-kind way to name the delegate (a slot on actors and values, nothing on
+`Object` subclasses) and adds no capability that `elements`-style required
+methods lack. Not pursued.
 
 ### Protocols with default method bodies
 `Protocol define: Comparable` gaining `=>` bodies. The **retroactive** form,
@@ -1298,14 +1455,14 @@ Java 8's escape hatch. Rejected in favour of writing the method in the class
 ### Do nothing
 The BT-274 cancellation position ("the class hierarchy handles behavior
 sharing adequately for current needs"). The stdlib count alone does not
-refute it: eight classes and ~25 hand-written methods a trait would provide
-(12 derived ordering operators across four classes, four `min:`/`max:`
-copies, ten enumeration and emptiness methods across `SupervisionTree`,
-`ChangeLog` and `String`), most of which inheritance could also remove
-(see "Inheritance only" above). Rejected because capabilities should not
-be modelled as kinds, and because the three cases inheritance cannot reach
-— two concerns on one class, the actor/value wall, and a spent superclass
-slot — are permanent properties of the language, not of today's corpus.
+refute it: v1 removes about eight enumeration forwarders from
+`SupervisionTree` and `ChangeLog`, and adds `between:and:`, `min:` and
+`max:` to four classes that lack them today. The ordering operators stay,
+and the `Integer`/`Float` `min:`/`max:` copy is fixed by inheritance.
+Rejected because the value is the mechanism, not the line count:
+capabilities should not be modelled as kinds, and the cases inheritance
+cannot reach at all — two concerns on one class, the actor/value wall, and
+a spent superclass slot — are permanent properties of the language.
 
 ## Consequences
 
@@ -1318,10 +1475,13 @@ slot — are permanent properties of the language, not of today's corpus.
   shape.
 - Conflicts and missing requirements are **compile errors with a named fix**,
   where Pharo gives a runtime error and Elixir gives a warning.
-- **No silent override on upgrade** (§3a). Neither a new trait provision
-  nor a new superclass method can change a class's behaviour without an
-  error at that class's next build, which removes the fragile-base-class
-  problem that plain trait precedence makes worse.
+- **No silent override by a provision** (§3a). In a closed-world build,
+  neither a new provision nor a new superclass method can make a provision
+  replace an inherited method (outside the four allowlisted defaults)
+  without an error at that class's next build. That removes the
+  fragile-base-class problem plain trait precedence adds. It does not close
+  the pre-existing case of a class-body method silently overriding a newly
+  added superclass method (§3a).
 - **One construct.** Protocols gain bodies; there is no new top-level
   keyword, file kind or registry, and ADR 0068's structural rule is
   untouched for protocols without provisions (§8).
@@ -1338,8 +1498,8 @@ slot — are permanent properties of the language, not of today's corpus.
   superclass release that introduces such an overlap breaks downstream
   builds until each user decides. That is intended; the cost is the break.
 - **Bytecode duplication**: one copy of each provided method per user. For
-  `Comparable` (six methods × five users) and `Enumerable` (~ten × three)
-  this is a few KB. A trait used by hundreds of classes would be measurable;
+  `Comparable` (three flattened methods × four stdlib users) and
+  `Enumerable` (about ten × two) this is a few KB. A trait used by hundreds of classes would be measurable;
   the mitigation is that provided methods are usually one-liners over
   required ones.
 - **N recompiles on trait edit** (§11). Editing a trait recompiles every
@@ -1348,12 +1508,13 @@ slot — are permanent properties of the language, not of today's corpus.
   per user.
 - **Reflection must say where a method came from** or `implementorsOf:` looks
   wrong. `origin` on `CompiledMethod` and xref rows is mandatory, not
-  optional, and the browse layer must group by trait.
+  optional; grouping by trait in browse follows post-v1.
 - **No stateful traits** — the `Counting` example needs two required
   accessors the user must write. Deferred with a stated extension path.
 - **Adding a provision to a trait is a breaking change** for classes that
   conform to its protocol structurally without `uses:`. They get conformance
-  warnings, not build failures (§8, decided §Status 2).
+  warnings, which fail the build only under `--warnings-as-errors` (§8,
+  decided §Status 2).
 - **Trait bodies are compile-time ABI across packages** (§10a). A
   dependency's trait change reaches downstream code only on rebuild; the
   meta hash makes staleness visible but does not remove it.
@@ -1377,9 +1538,14 @@ slot — are permanent properties of the language, not of today's corpus.
 - Method categories remain source-only (`method_category.rs`); flattened
   methods take their trait's dividers.
 - Extension methods and traits compose: an extension may target a using
-  class for any selector the flattened body does not define. An extension
-  still cannot target a protocol, with or without provisions; to add a
-  provided method, edit the protocol.
+  class for any selector the flattened body does not define. A file-level
+  `P >> sel =>` extension on a protocol is an error. At the REPL,
+  `P >> sel =>` edits the protocol's own source: it adds or replaces a
+  provision, is recorded in the ChangeLog as a protocol patch, and is
+  flushed to the protocol file (§11).
+- **`Comparable`'s required `<` is its most permanent API.** Changing the
+  requirement later, for example to a three-way `compare:`, breaks every
+  user. Phase 6 should settle that choice before the protocol ships.
 - `Comparable` has no equality requirement: `=:=` is hard-lowered and cannot
   be overridden (`date_time.bt:291-296`). Where `<` compares something
   coarser than structure (`DateTime` compares instants, while `=:=` is
@@ -1404,11 +1570,11 @@ assumption this ADR could not verify from source.
 |---|---|---|---|---|
 | 0 | **Spike**: (a) confirm inherited actor method self-send binding (lexical `<module>:safe_dispatch` vs. `__class_mod__`), since §6 rests on self-sends resolving in the *using* class's module; (b) re-run the BT-3580 probe and record whether block-taking actor provisions are safe. Record both in `docs/development/debugging.md` | runtime, codegen (read-only) | S | — |
 | 1 | **Syntax**: `ProtocolDefinition` gains `provided_methods` and `uses` (`ast/class.rs`); `ClassDefinition.uses: Vec<ProtocolUse { protocol, type_args, excluding, overriding, span }>`; `parse_protocol_body` accepts provided methods (a signature followed by `=>`) through the class method parser, and reserves `uses:`/`excluding:`/`overriding:`/`aliasing:` (`aliasing:` parses to a "not yet supported" error until Phase 7); `package@Protocol`; `uses:` in the class-body loop with ordering and unknown-keyword errors; unparse round-trip; no new top-level form, so one-definition-per-file and ADR 0119 naming are unchanged; lexer nothing (contextual keywords) | `beamtalk-core` source_analysis, ast, unparse | M | — |
-| 2 | **Semantics**: `protocol_registry.rs` extended with provided signatures, `uses:` edges and a cycle check; `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; `ProtocolInfo` conformance over required ∪ provided; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
-| 3 | **Codegen & build graph**: feed the flattened `ClassDefinition` to the existing generators (no change to `merge_method`); `methodXref` provenance/origin; `methodSource` as the trait's source slice; `uses => [{Name, Hash}]` in user meta; protocol module emission extended with provisions (`generate_protocol_registrations`, `'__beamtalk_protocol_source'/0`); every §10a entry point (CLI cache key, `build_stdlib` protocol pre-pass keeping full ASTs and `generated_builtins.rs`, compiler port, `dependency_classes.rs`, `ProjectIndex` edges); conformance fixture for the extended protocol registration shape | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-cli`, `beamtalk-language-service`, `build_stdlib` | L | 2 |
+| 2 | **Semantics**: `protocol_registry.rs` extended with provided signatures, `uses:` edges and a cycle check; `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; `ProtocolInfo` conformance over required ∪ provided; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class; name resolution in the protocol's package (§3); provisions checked once in the protocol with the self-send rule (§5); `excluding:` conformance warning; `extending:` of a protocol with provisions (§5); protocol-internal precedence (§3 step 1); same-origin exemption and kind-root allowlist (§3a); diagnostics tagged with the protocol's source identity and de-duplicated across users (§3) | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
+| 3 | **Codegen & build graph**: feed the flattened `ClassDefinition` to the existing generators (no change to `merge_method`); `methodXref` provenance/origin; `methodSource` as the trait's source slice; `uses => [{Name, Hash}]` in user meta; protocol module emission extended with provisions (`generate_protocol_registrations`, `'__beamtalk_protocol_source'/0`); every §10a entry point (CLI cache key, `build_stdlib` protocol pre-pass keeping full ASTs and `generated_builtins.rs`, compiler port, `dependency_classes.rs`, `ProjectIndex` edges); conformance fixture for the extended protocol registration shape; codegen maps lines per method source so BEAM line annotations for flattened methods point at the protocol file (§3) | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-cli`, `beamtalk-language-service`, `build_stdlib` | L | 2 |
 | 4 | **Runtime & reflection**: `beamtalk_protocol_registry.erl` gains provided selectors and a users index; `Protocol providedMethods:`/`usersOf:`; `Behaviour usedProtocols/allUsedProtocols/usesProtocol:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := protocol`; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
 | 5 | **Live system**: trait file reload → two-stage user recompile fan-out in the workspace loader (compile all, load only if all succeed, roll back loaded modules on a load failure; source-backed, non-stdlib users only; stdlib traits read-only); `Describable >> sel => …` and `removeSelector:` live patching on protocols; required-selector rename/remove refusal and `save-section` routing (§11); provided methods in `Protocol define:` at the REPL; ADR 0105 re-check hookup; flush of protocol files (ADR 0113); LSP go-to-definition and completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
-| 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String` (each keeps its primitive operators); `Enumerable(E)` on `SupervisionTree` and `ChangeLog` per §9 (`ChangeLog` keeps its all-entries `select:`, and keeps its public `notEmpty` as the one-line method `notEmpty -> Boolean => self isNotEmpty`; `SupervisionTree` keeps its `do:`); separately, move `Integer`/`Float` `min:`/`max:` up to `Number` (inheritance, not traits); BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9 | stdlib, docs | M | 5 |
+| 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String` (each keeps its primitive operators); `Enumerable(E)` on `SupervisionTree` and `ChangeLog` per §9 (`ChangeLog` keeps its all-entries `select:`, and keeps its public `notEmpty` as the one-line method `notEmpty -> Boolean => self isNotEmpty`; `SupervisionTree` keeps its `do:`); separately, move `Integer`/`Float` `min:`/`max:` up to `Number` (inheritance, not traits); BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9; add `elements -> List(E) => self asList` to `Collection` so every collection conforms to `Enumerable`; reconcile `SupervisionTree do:`'s return type before adoption (the stdlib builds with `--warnings-as-errors`); list the selectors added per class in the release notes (§Migration Path) | stdlib, docs | M | 5 |
 | 7 | **Post-v1** (one issue each, any order): `aliasing:` (parser clause, alias-before-exclude semantics, conflict rules, §2/§4); class-side provisions (§9); browse grouping by trait (§12); protocol-wide rename (ADR 0114 `renameSelector:to:` redirection and protocol `renameTo:` with `uses_protocol` reference rows); LSP hover provenance | core, workspace, LSP | M | 6 |
 
 **Tests per phase.**
@@ -1417,7 +1583,7 @@ assumption this ADR could not verify from source.
 |---|---|
 | 0 | A BUnit fixture in `stdlib/test/` pinning the observed self-send binding: a subclass override called from an inherited actor method |
 | 1 | Parser unit tests and snapshots in `beamtalk-core`, unparse round-trip, and diagnostics for misplaced `uses:` and unknown keyword lines |
-| 2 | Semantic-analysis unit tests for each §13 row, both §3a directions (trait grows, superclass grows), the same-origin diamond, class-wins, `Self` substitution, and generic `E` substitution |
+| 2 | Semantic-analysis unit tests for each §13 row, both §3a directions (trait grows, superclass grows), the same-origin diamond, class-wins, `Self` substitution, and generic `E` substitution, a type error in a provision shared by two users reported once at the protocol's line, a self-send outside the declared set, and a same-named class in the user's package not capturing a provision's reference |
 | 3 | `test-package-compiler` codegen snapshots for one user of each class kind, `just verify-threaded-ir` over the flattened stdlib, and the trait-meta conformance fixture |
 | 4 | Runtime EUnit for the extended `beamtalk_protocol_registry`, BUnit reflection tests (`usedProtocols`, `origin`, `usersOf:`), and xref tests for `provenance := protocol` |
 | 5 | `tests/repl-protocol/cases/` for trait reload fan-out, a rejected edit that loads nothing and names the failing user, `Describable >> sel` live patching, `removeSelector:` refusal, and rename; plus LSP tests |
@@ -1461,6 +1627,11 @@ Additive for language semantics; three notes for adopters:
   add `=>` bodies to existing signatures, with no consumer changes (§8),
   then add `uses:` to the classes that should receive them. Adding *new*
   provisions adds conformance warnings for structural conformers (§8).
+- **User extensions that Phase 6 turns into errors.** An extension such as
+  `DateTime >> max:` or `String >> between:and:` (plausible today, since
+  those methods are missing) becomes the ADR 0066 "cannot override a method
+  defined in the class body" error once `Comparable` is flattened in. The
+  release notes must list the added selectors per class.
 - **New stdlib names.** Stdlib `Comparable` and `Enumerable` collide with any
   user protocol or class of the same name through the existing
   class/protocol name-collision error. Phase 6 must check the known
