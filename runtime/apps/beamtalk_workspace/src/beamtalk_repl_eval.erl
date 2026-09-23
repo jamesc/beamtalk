@@ -20,6 +20,8 @@ module loading to beamtalk_repl_loader.
     do_eval/2, do_eval/3,
     do_eval_trace/2,
     do_dispatch/5,
+    dispatch_sync/3,
+    validate_run_entry/3,
     do_show_codegen/2,
     handle_load/2, handle_load/3,
     handle_load_source/3
@@ -441,6 +443,108 @@ resolve_entry(ClassNameBin, SelectorBin) ->
 %% via `beamtalk_runtime_api` instead of duplicating it.
 -spec is_keyword_selector(binary()) -> boolean().
 is_keyword_selector(SelectorBin) -> beamtalk_runtime_api:is_keyword_selector(SelectorBin).
+
+-doc """
+Synchronous run-entry dispatch (ADR 0125 §1.7) — the shared core `do_dispatch/5`
+also runs, minus the async-streaming/IO-capture plumbing that only a REPL
+session needs. Used by `beamtalk_release_launcher`'s `eval`/`rpc` launcher
+verbs (BT-3573), which have no subscriber to stream to: `eval` runs in a
+throwaway VM and inherits the VM's own stdout, and `rpc`'s caller only wants
+the final result. Resolves `ClassNameBin`/`SelectorBin` via the same
+`resolve_entry/2` + `is_keyword_selector/1` this module already uses, and maps
+`Program exit: N` (`throw({beamtalk_script_exit, N})`) to `{script_exit, N}`
+rather than letting it propagate — so a caller on the *dispatching* side (the
+`eval` VM, or the process `rpc:call/5` spawns on the target node) always gets
+back data, never an exception.
+""".
+-spec dispatch_sync(binary(), binary(), [binary()]) ->
+    {ok, term()} | {script_exit, integer()} | {error, #beamtalk_error{} | term()}.
+dispatch_sync(ClassNameBin, SelectorBin, Argv) ->
+    case resolve_entry(ClassNameBin, SelectorBin) of
+        {ok, ClassPid, Selector} ->
+            DispatchArgs =
+                case is_keyword_selector(SelectorBin) of
+                    true -> [Argv];
+                    false -> []
+                end,
+            try beamtalk_class_dispatch:class_send(ClassPid, Selector, DispatchArgs) of
+                RawResult ->
+                    case maybe_await_future(RawResult) of
+                        {future_rejected, FutureReason} ->
+                            {error, beamtalk_exception_handler:ensure_wrapped(FutureReason)};
+                        Value ->
+                            {ok, Value}
+                    end
+            catch
+                throw:{beamtalk_script_exit, Code} ->
+                    {script_exit, Code};
+                Class:Reason:Stacktrace ->
+                    {error, beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace)}
+            end;
+        {error, Err} ->
+            {error, Err}
+    end.
+
+-doc """
+Validate the run-entry shape (`ClassBin`/`SelectorBin`/`RawArgs`) shared by
+every run-entry consumer — the WebSocket `run-entry` op
+(`beamtalk_ws_handler:handle_run_entry_async/3`) and the release launcher's
+`eval`/`rpc` verbs (BT-3573). `class`/`selector` must be non-empty binaries,
+`selector` must be a unary selector or a single arity-1 keyword selector, and
+`args` must be a (possibly empty) list of binaries. Moved here (from
+`beamtalk_ws_handler`, its sole caller until BT-3573) rather than duplicated —
+see `docs/development/architecture-principles.md` § Duplication.
+""".
+-spec validate_run_entry(term(), term(), term()) ->
+    {ok, [binary()]} | {error, #beamtalk_error{}}.
+validate_run_entry(ClassBin, SelectorBin, RawArgs) when
+    is_binary(ClassBin), ClassBin =/= <<>>, is_binary(SelectorBin), SelectorBin =/= <<>>
+->
+    case is_valid_run_entry_selector(SelectorBin) of
+        true ->
+            case run_entry_args(RawArgs, []) of
+                {ok, Argv} ->
+                    {ok, Argv};
+                error ->
+                    Err = beamtalk_error:new(invalid_argument, 'Program'),
+                    Err1 = beamtalk_error:with_message(
+                        Err, <<"run-entry `args` must be a list of strings">>
+                    ),
+                    {error, Err1}
+            end;
+        false ->
+            Err = beamtalk_error:new(invalid_argument, 'Program'),
+            Err1 = beamtalk_error:with_message(
+                Err,
+                <<
+                    "Invalid run-entry selector: only a unary selector (e.g. `run`) "
+                    "or a single arity-1 keyword selector (e.g. `main:`) is accepted"
+                >>
+            ),
+            {error, Err1}
+    end;
+validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
+    Err = beamtalk_error:new(invalid_argument, 'Program'),
+    Err1 = beamtalk_error:with_message(
+        Err, <<"run-entry requires non-empty `class` and `selector` strings">>
+    ),
+    {error, Err1}.
+
+%% True when `SelectorBin` has a valid run-entry shape — a unary selector (no
+%% `:`) or a single arity-1 keyword selector (exactly one `:`, trailing, e.g.
+%% `main:`). See `validate_run_entry/3`'s doc for callers.
+-spec is_valid_run_entry_selector(binary()) -> boolean().
+is_valid_run_entry_selector(SelectorBin) ->
+    case binary:matches(SelectorBin, <<":">>) of
+        [] -> true;
+        [{Pos, _Len}] -> Pos =:= byte_size(SelectorBin) - 1;
+        _ -> false
+    end.
+
+-spec run_entry_args(term(), [binary()]) -> {ok, [binary()]} | error.
+run_entry_args([], Acc) -> {ok, lists:reverse(Acc)};
+run_entry_args([Arg | Rest], Acc) when is_binary(Arg) -> run_entry_args(Rest, [Arg | Acc]);
+run_entry_args(_, _Acc) -> error.
 
 -spec dispatch_class_not_found_error(binary()) -> #beamtalk_error{}.
 dispatch_class_not_found_error(ClassNameBin) ->
