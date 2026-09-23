@@ -487,14 +487,14 @@ Actor subclass: MutationCorpusActor
   // (metamorphic_threading_test.bt) cover it too. Actor-only: a self-send
   // that mutates actor state has no Value/class-method analogue.
   binaryOperandSelfSendReadWrite =>
-    n := 1 + (self bump)
+    n := 1 + self bump
     n
 
   keywordArgumentSelfSendReadWrite => #(10, 20, 30) at: (self bump)
 
   assignRhsSubExprSelfSendReadWrite =>
     n := 0
-    n := 100 + (self bump)
+    n := 100 + self bump
     n
 
   cascadeOnSelfReadWrite =>
@@ -511,6 +511,6 @@ Actor subclass: MutationCorpusActor
 
   matchArmSelfSendReadWrite: v =>
     v match: [
-      1 -> 1 + (self bump);
+      1 -> 1 + self bump;
       _ -> 0
     ]

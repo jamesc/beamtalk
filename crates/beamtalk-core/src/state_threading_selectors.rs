@@ -166,10 +166,10 @@ pub fn is_conditional_selector(sel: &str) -> bool {
 /// `CoreErlangGenerator::enumeration_threads_actor_state` in
 /// `beamtalk-codegen`); the threaded block is the *receiver*, not an
 /// argument (`whileTrue:`/`whileFalse:`'s condition block, `on:do:`/
-/// `ensure:`'s try/protected block) — receiver-position threading is
-/// decided separately by each caller (codegen already special-cases the
-/// receiver for these selectors; the lint never inspects a receiver block
-/// at all); or (`detect:ifNone:`'s `ifNone:` handler, index 1) the
+/// `ensure:`'s try/protected block, `value`/`value:`'s block) — receiver
+/// position is a separate table, [`is_state_threaded_block_receiver`],
+/// which this one never answers for; or (`detect:ifNone:`'s `ifNone:`
+/// handler, index 1) the
 /// argument's own local-variable writes simply aren't part of the fold this
 /// table tracks, even though the block itself is still compiled inline
 /// (not a closure) once codegen detects a mutation in *either* argument —
@@ -207,6 +207,48 @@ pub fn state_threaded_block_arg_indices(sel: &str) -> &'static [usize] {
 #[must_use]
 pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
     state_threaded_block_arg_indices(selector).contains(&arg_index)
+}
+
+/// The receiver-position companion to [`state_threaded_block_arg_indices`]:
+/// returns `true` if a block *literal* that is the **receiver** of `selector`
+/// has its outer-local mutations threaded back to the caller, so a
+/// reassignment inside it is visible after the send returns.
+///
+/// Codegen inlines the receiver block for each of these instead of
+/// compiling it as a closure:
+///
+/// - `value`, `value:`, `value:value:`, `value:value:value:` (the arities
+///   `Block` defines) — `generate_block_value_inline_with_mutations`
+///   (`beamtalk-codegen`'s `intrinsics.rs`), reached from both the unary and
+///   keyword `value` handlers whenever the literal captures and mutates an
+///   outer local.
+/// - `on:do:` / `ensure:` — the try/protected body in
+///   `generate_on_do_with_mutations` / `generate_ensure_with_mutations`
+///   (`control_flow/exception_handling.rs`).
+///
+/// Deliberately **not** listed: `valueWithArguments:` (its receiver goes
+/// through `thread_value_call_receiver` — a runtime `apply`, never inlined);
+/// `repeat` and the unary `whileTrue`/`whileFalse` (no receiver inlining
+/// path in codegen today); and the keyword `whileTrue:`/`whileFalse:`
+/// CONDITION block — ADR 0118 phase 3 routes a condition-only self-send or
+/// field write through `generate_while_loop_with_mutations`, but a plain
+/// outer-*local* write in the condition (`[i := i + 1. i < 3] whileTrue:
+/// [nil]` in a Value/`TestCase` context) still compiles the condition as a
+/// Tier 2 closure and crashes at runtime with "function expects 1 arguments
+/// but was called with 0", so the lint must keep flagging it. A block
+/// literal that is merely *stored* and later sent `value` is not a literal
+/// receiver at all and is likewise outside this table — `beamtalk-lint`'s
+/// `DeadAssignment` check keeps flagging it.
+///
+/// Runtime pins: `stdlib/test/dead_assignment_receiver_threading_test.bt`
+/// asserts every selector listed here actually threads, so this table and
+/// the codegen it describes cannot silently drift apart.
+#[must_use]
+pub fn is_state_threaded_block_receiver(selector: &str) -> bool {
+    matches!(
+        selector,
+        "value" | "value:" | "value:value:" | "value:value:value:" | "on:do:" | "ensure:"
+    )
 }
 
 #[cfg(test)]
@@ -321,6 +363,38 @@ mod tests {
             );
             assert!(is_state_threaded_block_arg(sel, 0), "{sel:?} arg 0");
             assert!(!is_state_threaded_block_arg(sel, 1), "{sel:?} arg 1");
+        }
+    }
+
+    #[test]
+    fn threaded_block_receiver_selectors() {
+        for sel in [
+            "value",
+            "value:",
+            "value:value:",
+            "value:value:value:",
+            "on:do:",
+            "ensure:",
+        ] {
+            assert!(is_state_threaded_block_receiver(sel), "{sel:?}");
+        }
+        // Documented exclusions: never inlined at the receiver position
+        // (`value:value:value:value:` is not a `Block` selector at all; a
+        // keyword `whileTrue:`/`whileFalse:` condition with a local write
+        // crashes at runtime — see the function's doc comment).
+        for sel in [
+            "value:value:value:value:",
+            "valueWithArguments:",
+            "repeat",
+            "whileTrue",
+            "whileFalse",
+            "whileTrue:",
+            "whileFalse:",
+            "perform:",
+            "do:",
+            "ifTrue:",
+        ] {
+            assert!(!is_state_threaded_block_receiver(sel), "{sel:?}");
         }
     }
 

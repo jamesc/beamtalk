@@ -501,7 +501,18 @@ pub fn compute_diagnostics_with_known_vars(
 /// calls `run_lint_passes` first, e.g. the MCP server's own lint-equivalent
 /// path) should keep calling plain [`apply_expect_directives`], which
 /// validates every category unconditionally.
-const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] = &[DiagnosticCategory::DeadAssignment];
+///
+/// [`DiagnosticCategory::Lint`] is here for the same reason: every
+/// `beamtalk lint` pass (`beamtalk-lint`'s trailing-caret, unnecessary-parens,
+/// cascade-candidate, … checks) reports under it, and none of those passes
+/// run anywhere else. Unlike `dead_assignment` there is no cheap structural
+/// gate (`contains_block`) that separates the lint-pass-only shapes from the
+/// few `Lint`-category advisories `analyse_full` itself emits (unreachable
+/// code after `^`, shadowed variables, unattached doc comments), so an
+/// `@expect lint` is left alone unconditionally by the excluding variant —
+/// `beamtalk lint` still validates it in full.
+const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] =
+    &[DiagnosticCategory::DeadAssignment, DiagnosticCategory::Lint];
 
 /// Returns `true` if this specific directive's staleness cannot be evaluated
 /// because the check that could confirm or refute it was never run in this
@@ -540,6 +551,8 @@ fn expect_category_unchecked(
         ExpectCategory::DeadAssignment => {
             contains_block && unchecked.contains(&DiagnosticCategory::DeadAssignment)
         }
+        // No structural gate — see `LINT_PASS_ONLY_CATEGORIES`'s doc.
+        ExpectCategory::Lint => unchecked.contains(&DiagnosticCategory::Lint),
         // Every other category (including `all`, deliberately — see this
         // function's doc) is produced by `analyse_full`'s semantic analysis,
         // which every caller of this function always runs, so none of them
@@ -766,6 +779,7 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::DeadAssignment,
                     Some(DiagnosticCategory::DeadAssignment)
                 )
+                | (ExpectCategory::Lint, Some(DiagnosticCategory::Lint))
                 | (
                     ExpectCategory::Deprecation,
                     Some(DiagnosticCategory::Deprecation)
@@ -1306,8 +1320,9 @@ dnu = "error"
     /// This scoping applies only to categories that are genuinely lint-only: a
     /// category `beamtalk build` DOES check via `analyse_full` (`dnu`, here)
     /// must still be validated for staleness by the excluding variant, same
-    /// as plain `apply_expect_directives` — only `dead_assignment` (today's
-    /// sole [`LINT_PASS_ONLY_CATEGORIES`] entry) is exempted.
+    /// as plain `apply_expect_directives` — only the
+    /// [`LINT_PASS_ONLY_CATEGORIES`] entries (`dead_assignment`, `lint`) are
+    /// exempted.
     #[test]
     fn apply_expect_directives_excluding_lint_only_still_flags_other_categories_stale() {
         let source = "@expect dnu\n42";
@@ -1357,6 +1372,92 @@ dnu = "error"
                 .any(|d| d.message.contains("stale @expect")),
             "got: {diagnostics:?}"
         );
+    }
+
+    // ── `@expect lint` — the other lint-pass-only category ──
+
+    /// `beamtalk lint` (plain `apply_expect_directives`) runs every
+    /// `beamtalk-lint` pass first, so an `@expect lint` with nothing to
+    /// suppress is genuinely stale there.
+    #[test]
+    fn apply_expect_directives_lint_stale_when_no_diagnostic() {
+        let source = "@expect lint\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives(&module, &mut diagnostics);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect lint")),
+            "plain apply_expect_directives should flag @expect lint stale \
+             when no diagnostic exists, got: {diagnostics:?}"
+        );
+    }
+
+    /// `beamtalk build`/`test`/the LSP/the REPL never run the lint passes,
+    /// so the `Lint`-category diagnostic an `@expect lint` exists to
+    /// suppress (e.g. a deliberately redundant trailing `^` in a codegen
+    /// fixture) can never be in their list — the directive must be left
+    /// alone, not reported stale, exactly like `dead_assignment`.
+    #[test]
+    fn apply_expect_directives_excluding_lint_only_does_not_flag_lint_stale() {
+        let source = "@expect lint\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect")),
+            "apply_expect_directives_excluding_lint_only must leave @expect lint \
+             alone, got: {diagnostics:?}"
+        );
+    }
+
+    /// A real `Lint`-category diagnostic on the target is suppressed by
+    /// `@expect lint` on both entry points, and only that category — a
+    /// `Type` diagnostic on the same target survives.
+    #[test]
+    fn apply_expect_directives_lint_suppresses_only_lint_category() {
+        for excluding in [false, true] {
+            let source = "@expect lint\n42";
+            let tokens = lex_with_eof(source);
+            let (module, parse_diags) = parse(tokens);
+            let mut diagnostics = parse_diags;
+            let target_span = module.expressions.last().unwrap().expression.span();
+            diagnostics.push(Diagnostic::lint("test style lint", target_span));
+            diagnostics.push(
+                Diagnostic::hint("test type", target_span).with_category(DiagnosticCategory::Type),
+            );
+            if excluding {
+                apply_expect_directives_excluding_lint_only(&module, &mut diagnostics);
+            } else {
+                apply_expect_directives(&module, &mut diagnostics);
+            }
+
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d.category == Some(DiagnosticCategory::Lint)),
+                "excluding={excluding}: the Lint diagnostic must be suppressed, got: {diagnostics:?}"
+            );
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d.category == Some(DiagnosticCategory::Type)),
+                "excluding={excluding}: @expect lint must not touch a Type diagnostic, got: {diagnostics:?}"
+            );
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("stale @expect")),
+                "excluding={excluding}: got: {diagnostics:?}"
+            );
+        }
     }
 
     // ── combined `@expect cat1, cat2` form ──

@@ -12,6 +12,7 @@ Actor subclass: ActorNlrTier2
   compute: n =>
     total := 0
     n <= 0 ifTrue: [^"skipped"]
+    @expect lint "trailing ^ is the early-return-with-tier2-value arm under test"
     ^[
       total := total + n
       total

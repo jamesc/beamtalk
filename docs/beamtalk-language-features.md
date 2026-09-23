@@ -6380,7 +6380,11 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `unused` | Unused variable warnings |
 | `type_annotation` | Missing or redundant type annotation warnings in typed classes |
 | `inheritance` | Sealed-class/sealed-method constraint errors |
+| `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |
+| `lint` | Style/redundancy findings: `beamtalk lint`'s unnecessary-parentheses, redundant trailing `^`, cascade-candidate, … passes, plus the unreachable-code / shadowed-variable / unattached-doc-comment advisories *(lint-only, see below)* |
 | `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |
+
+**Lint-only categories (`dead_assignment`, `lint`):** the diagnostics these suppress are produced only by `beamtalk lint`'s dedicated passes, which `beamtalk build`/`beamtalk test`, the LSP, and the REPL never run. Those surfaces therefore leave such a directive alone — neither satisfied nor reported stale — and only `beamtalk lint` validates it (BT-3384). `@expect lint` exists for test fixtures that deliberately pin a codegen shape the style lint would otherwise tell you to rewrite (e.g. a trailing `^` whose explicit-return lowering is the thing under test); ordinary code should just take the lint's advice.
 
 **`@expect type` for method-not-found diagnostics:**
 

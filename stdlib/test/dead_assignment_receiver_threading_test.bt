@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Runtime pins for `beamtalk_core::state_threading_selectors::
+// is_state_threaded_block_receiver` — the selectors whose block-LITERAL
+// receiver codegen inlines, so a captured outer local reassigned inside it
+// is visible after the send returns. `beamtalk lint`'s `DeadAssignment`
+// check (`crates/beamtalk-lint/src/dead_block_assignment.rs`,
+// `threaded_receiver_block_no_warn`) exempts exactly these positions on the
+// strength of this file: every selector listed in that table has a test
+// here, in a `TestCase` (value semantics — no Actor state threading to
+// mask a lost mutation), so the table and the codegen it describes cannot
+// drift apart unnoticed.
+//
+// The argument-position half of the same table is pinned by
+// `bt3385dead_assignment_test.bt` and the `do_accumulator_*` corpora.
+//
+// NOT pinned here, deliberately: a keyword `whileTrue:`/`whileFalse:`
+// CONDITION block that writes an outer local (`[i := i + 1. i < 3]
+// whileTrue: [nil]`) is compiled as a Tier 2 closure in this context and
+// crashes at runtime ("function expects 1 arguments but was called with
+// 0"), so that receiver position stays OUT of the table and the lint
+// keeps flagging it — see `is_state_threaded_block_receiver`'s doc.
+
+TestCase subclass: DeadAssignmentReceiverThreadingTest
+
+  // ── value / value:* ─────────────────────────────────────────────────────
+  testUnaryValueReceiverThreads =>
+    count := 0
+    [count := count + 1] value
+    self assert: count equals: 1
+
+  testValueColonReceiverThreads =>
+    total := 0
+    [:n | total := total + n] value: 7
+    self assert: total equals: 7
+
+  testValueValueReceiverThreads =>
+    total := 0
+    [:a :b | total := total + a + b] value: 1 value: 2
+    self assert: total equals: 3
+
+  testValueValueValueReceiverThreads =>
+    total := 0
+    [:a :b :c | total := total + a + b + c]
+      value: 1
+      value: 2
+      value: 3
+    self assert: total equals: 6
+
+  // ── ensure: / on:do: try bodies ─────────────────────────────────────────
+  testEnsureReceiverThreads =>
+    sum := 0
+    [sum := sum + 5] ensure: [nil]
+    self assert: sum equals: 5
+
+  testOnDoReceiverThreads =>
+    sum := 0
+    [sum := sum + 5] on: Error do: [:e | nil]
+    self assert: sum equals: 5
+
+  testEnsureReceiverThreadsInsideDoLoop =>
+    sum := 0
+    #(1, 2, 3) do: [:each | [sum := sum + each] ensure: [nil]]
+    self assert: sum equals: 6
+
+  testOnDoReceiverThreadsInsideDoLoop =>
+    sum := 0
+    #(1, 2, 3) do: [:each | [sum := sum + each] on: Error do: [:e | nil]]
+    self assert: sum equals: 6

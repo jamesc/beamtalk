@@ -97,6 +97,7 @@ TestCase subclass: BlocksTest
     // has no such state, so this now raises a clear, purpose-built error
     // instead of the wrong-selector does_not_understand it used to.
     count := 0
+    @expect dead_assignment
     statefulBlock := [:x | count := count + x]
     self should: [
       statefulBlock perform: #value: withArguments: #(3)
@@ -123,6 +124,7 @@ TestCase subclass: BlocksTest
     // hides it from the call-site Tier 2 tracking (it's neither a block
     // literal nor a local assigned one), so the runtime guard is what fires.
     count := 0
+    @expect dead_assignment
     statefulBlock := [count := count + 1]
     laundered := #(statefulBlock) first
     self should: [laundered value] raise: #stateful_block_dispatch
@@ -144,6 +146,7 @@ TestCase subclass: BlocksTest
     // exact kind, since the precise kind is an accident of unrelated
     // machinery, not a designed contract.
     count := 0
+    @expect dead_assignment
     statefulZeroArgBlock := [count := count + 1]
     caught := [
       statefulZeroArgBlock perform: #value: withArguments: #(42)
@@ -228,10 +231,12 @@ TestCase subclass: BlocksTest
     // Exact repro from docs/beamtalk-language-features.md's former "known
     // limitation" note.
     i := 0
+    @expect dead_assignment
     self should: [
       [i < 3] perform: #whileTrue: withArguments: #([i := i + 1])
     ] raise: #stateful_block_dispatch
     count := 0
+    @expect dead_assignment
     statefulBody := [count := count + 1]
     self should: [
       [false] perform: #whileTrue: withArguments: #(statefulBody)
@@ -244,10 +249,12 @@ TestCase subclass: BlocksTest
     // BT-2908: same Tier 2 gap as the loop family above, for on:do:/ensure:'s
     // receiver, handler, and cleanup blocks.
     count := 0
+    @expect dead_assignment
     statefulReceiver := [count := count + 1]
     self should: [
       statefulReceiver perform: #on:do: withArguments: #(Error, [:e | "unused"])
     ] raise: #stateful_block_dispatch
+    @expect dead_assignment
     self should: [
       [
         1 / 0
@@ -321,6 +328,7 @@ TestCase subclass: BlocksTest
     // arity check already exists for value:/etc. via BT-2812), but the
     // silent-data-loss shape is worth flagging for whoever picks up BT-2892.
     count := 0
+    @expect dead_assignment
     statefulZeroArgHandler := [count := count + 1]
     result := [
       1 / 0
