@@ -91,7 +91,9 @@ beamtalk_wire_test_() ->
             {"decode refuses an envelope ahead of this node's known shape version",
                 fun test_decode_rejects_shape_version_ahead/0},
             {"pack_wire/1 allows a SendableRef field pack/1 rejects",
-                fun test_pack_wire_allows_sendable_ref_field/0}
+                fun test_pack_wire_allows_sendable_ref_field/0},
+            {"pack_wire/1 node-qualifies a registered ref inside a SendableRef field",
+                fun test_pack_wire_qualifies_registered_ref_in_sendable_ref_field/0}
         ]
     end}.
 
@@ -332,3 +334,22 @@ test_pack_wire_allows_sendable_ref_field() ->
         #beamtalk_error{kind = not_serialisable, class = 'ShapeHazardCart', selector = worker},
         Reason
     ).
+
+test_pack_wire_qualifies_registered_ref_in_sendable_ref_field() ->
+    %% A locally-registered actor ref (ADR 0079) reached through a
+    %% sendable_ref-tier field must be node-qualified exactly like an actor
+    %% ref the generic wire walk meets directly (ADR 0126 §3/§5.1) —
+    %% otherwise it resolves via a local whereis/1 on the receiver instead
+    %% of the sender's registry.
+    Worker = #beamtalk_object{
+        class = 'ShapeHazardWorker', class_mod = shape_hazard_worker, pid = {registered, worker1}
+    },
+    Instance = #{
+        '$beamtalk_class' => 'ShapeHazardCart',
+        '__shape_version__' => 1,
+        worker => Worker,
+        label => <<"cart">>
+    },
+    {ok, Envelope} = beamtalk_shape_migration:pack_wire(Instance),
+    {beamtalk_shape, 'ShapeHazardCart', 1, #{worker := PackedWorker}} = Envelope,
+    ?assertEqual({registered, worker1, node()}, PackedWorker#beamtalk_object.pid).

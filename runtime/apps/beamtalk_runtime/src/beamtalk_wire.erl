@@ -281,17 +281,10 @@ encode_beamtalk_object(#beamtalk_object{pid = Pid} = Obj, _Path) ->
             {ok, Obj#beamtalk_object{pid = encode_actor_pid(Pid)}}
     end.
 
-%% A local `{registered, Name}` ref (ADR 0079) is node-qualified with the
-%% sender's own node, so the receiver knows which node's registry it names
-%% (ADR 0126 §3/§5.1). A ref already node-qualified (relayed from elsewhere)
-%% and an ordinary pid (already node-qualified natively by BEAM) pass
-%% through unchanged.
 -spec encode_actor_pid(pid() | {registered, atom()} | {registered, atom(), node()}) ->
     pid() | {registered, atom(), node()}.
-encode_actor_pid({registered, Name}) when is_atom(Name) ->
-    {registered, Name, node()};
 encode_actor_pid(Pid) ->
-    Pid.
+    beamtalk_pid:qualify_registered_ref(Pid).
 
 %%====================================================================
 %% encode/1 — NLR relay

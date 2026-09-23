@@ -641,9 +641,14 @@ reject_tier(handle_scoped, _Policy) -> {true, <<"HandleScoped">>};
 reject_tier(_Tier, _Policy) -> false.
 
 %% Recurse into a Value-kind field's actual value when it is itself a tagged
-%% instance — every other tier (passthrough, or a `wire`-allowed
-%% sendable_ref) carries the raw value through unchanged, including builtin
-%% Array/Dictionary/String maps (ADR 0090).
+%% instance. A `sendable_ref`-tier field (only reachable under `wire` —
+%% `reject_tier/2` rejects it under `persist`) holds an actor reference,
+%% which needs the same registered-ref node-qualification the generic wire
+%% walk applies when it meets an actor ref directly (ADR 0126 §3/§5.1);
+%% `beamtalk_pid:qualify_registered_ref/1` is the shared leaf both paths
+%% call, so this can't drift from `beamtalk_wire`'s own rewrite. Every other
+%% tier (passthrough) carries the raw value through unchanged, including
+%% builtin Array/Dictionary/String maps (ADR 0090).
 -spec pack_field_value(
     sendable_ref | value_nested | passthrough, term(), pack_policy(), non_neg_integer()
 ) ->
@@ -653,6 +658,8 @@ pack_field_value(value_nested, Value, Policy, Depth) when is_map(Value) ->
         true -> pack(Value, Policy, Depth + 1);
         false -> {ok, Value}
     end;
+pack_field_value(sendable_ref, #beamtalk_object{pid = Pid} = Value, _Policy, _Depth) ->
+    {ok, Value#beamtalk_object{pid = beamtalk_pid:qualify_registered_ref(Pid)}};
 pack_field_value(_Tier, Value, _Policy, _Depth) ->
     {ok, Value}.
 
