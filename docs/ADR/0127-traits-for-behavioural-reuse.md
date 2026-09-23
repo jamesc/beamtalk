@@ -1,7 +1,7 @@
 # ADR 0127: Traits — Protocols with Provided Methods, Flattened into Users
 
 ## Status
-Proposed (2026-09-22)
+Accepted (2026-09-23)
 
 Closes the question ADR 0005 left open as Q9 ("Mixins/traits: deferred to a
 future ADR") and BT-274 (cancelled 2026-04-01 as "not pressing"; reopened by
@@ -79,7 +79,7 @@ Decided after the second review (2026-09-23):
    stdlib protocol 'Comparable': built-in protocols are read-only.",
    mirroring the existing stdlib-class message (§11).
 
-All decisions are resolved; the ADR is ready for an acceptance review.
+All decisions are resolved; accepted 2026-09-23.
 
 ## Context
 
