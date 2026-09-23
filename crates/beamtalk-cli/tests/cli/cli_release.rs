@@ -710,6 +710,7 @@ fn release_launcher_version_verb_test() {
 /// throwaway VM, `rpc` dispatches into the **running** node over
 /// distribution, and `stop` shuts it down gracefully (ADR 0125 §1.7).
 #[test]
+#[allow(clippy::too_many_lines)]
 fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     let project = cli_common::fixture_project();
     let output_dir = project.path().join("dist");
@@ -777,10 +778,28 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         last_ping_output = Some(ping);
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
-    assert!(
-        pinged,
-        "node never came up in time for `ping` to succeed; last ping attempt: {last_ping_output:?}"
-    );
+    if !pinged {
+        // Kill the still-running foreground node first so its pipes close
+        // and whatever it already wrote (a distribution/boot error, if
+        // any) can be read back in full, instead of guessing blind at a
+        // second CI-only failure mode.
+        let _ = foreground.0.kill();
+        let _ = foreground.0.wait();
+        let mut fg_stdout = String::new();
+        let mut fg_stderr = String::new();
+        if let Some(mut out) = foreground.0.stdout.take() {
+            let _ = std::io::Read::read_to_string(&mut out, &mut fg_stdout);
+        }
+        if let Some(mut err) = foreground.0.stderr.take() {
+            let _ = std::io::Read::read_to_string(&mut err, &mut fg_stderr);
+        }
+        panic!(
+            "node never came up in time for `ping` to succeed; \
+             cookie={cookie:?}; last ping attempt: {last_ping_output:?}; \
+             foreground stdout so far={fg_stdout:?}; \
+             foreground stderr so far={fg_stderr:?}"
+        );
+    }
 
     // `eval` — a separate VM, dispatch `Smoke run`, halt with the outcome.
     let eval = launcher_command(&output_dir, name)
