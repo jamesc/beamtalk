@@ -172,6 +172,19 @@ impl BuildLayout {
     pub fn registry_index_dir(&self) -> Utf8PathBuf {
         self.registry_dir().join("index")
     }
+
+    // ── Release (ADR 0125) ──────────────────────────────────────────────
+
+    /// `_build/release/` — top-level release output root.
+    pub fn release_root(&self) -> Utf8PathBuf {
+        self.build_root().join("release")
+    }
+
+    /// `_build/release/<name>-<vsn>/` — the staged, versioned release tree
+    /// for a single `beamtalk release` build (ADR 0125 §1.3).
+    pub fn release_dir(&self, name: &str, vsn: &str) -> Utf8PathBuf {
+        self.release_root().join(format!("{name}-{vsn}"))
+    }
 }
 
 #[cfg(test)]
