@@ -55,7 +55,7 @@ sealed typed Object subclass: Console native: beamtalk_console
   /// Console printLine: "hello"
   /// // => nil
   /// ```
-  class sealed printLine: aValue :: Printable -> Nil => self delegate
+  class sealed printLine: aValue :: Object -> Nil => self delegate
 
   /// Write a value to stdout with no trailing newline. Returns nil.
   ///
@@ -64,7 +64,7 @@ sealed typed Object subclass: Console native: beamtalk_console
   /// Console print: "hello"
   /// // => nil
   /// ```
-  class sealed print: aValue :: Printable -> Nil => self delegate
+  class sealed print: aValue :: Object -> Nil => self delegate
 
   /// Write a value to stderr followed by a newline. Returns nil.
   ///
@@ -73,7 +73,7 @@ sealed typed Object subclass: Console native: beamtalk_console
   /// Console errorLine: "boom"
   /// // => nil
   /// ```
-  class sealed errorLine: aValue :: Printable -> Nil => self delegate
+  class sealed errorLine: aValue :: Object -> Nil => self delegate
 
   /// Write a value to stderr with no trailing newline. Returns nil.
   ///
@@ -82,7 +82,7 @@ sealed typed Object subclass: Console native: beamtalk_console
   /// Console error: "boom"
   /// // => nil
   /// ```
-  class sealed error: aValue :: Printable -> Nil => self delegate
+  class sealed error: aValue :: Object -> Nil => self delegate
 
   /// Flush buffered output. Returns nil.
   ///

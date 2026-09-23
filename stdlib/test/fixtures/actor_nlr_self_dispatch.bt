@@ -13,6 +13,7 @@ Actor subclass: ActorNlrSelfDispatch
   // ^ self bump — should use dispatch open + reply pattern
   bumpIfPositive: n =>
     n <= 0 ifTrue: [^"skipped"]
+    @expect lint "trailing ^ is the early-return-with-self-dispatch arm under test"
     ^self bump
 
   getValue => self.value

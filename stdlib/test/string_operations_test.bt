@@ -75,6 +75,7 @@ TestCase subclass: StringOperationsTest
     // applies to String, since the guard is keyed on selector name, not
     // receiver class.
     count := 0
+    @expect dead_assignment
     statefulBlock := [:ch |
       count := count + 1
       ch uppercase

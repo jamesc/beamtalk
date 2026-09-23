@@ -13,10 +13,16 @@ BT3057Ancestor subclass: BT3057Middle
 
   class selfSuperclassImplicitReturn => self superclass
 
+  // The explicit `^` variants below pin the class-method return path
+  // (`generate_class_method_return`) around the same reflective fast path;
+  // the implicit-return method above is their control.
+  @expect lint "trailing ^ pins the explicit class-method return path"
   class explicitClassNameSuperclass => ^BT3057Middle superclass
 
+  @expect lint "trailing ^ pins the explicit class-method return path"
   class selfIncludesDescribe => ^self includesSelector: #describe
 
+  @expect lint "trailing ^ pins the explicit class-method return path"
   class selfIncludesBogus => ^self includesSelector: #bogusNotAMethod
 
   describe -> Symbol => #described
