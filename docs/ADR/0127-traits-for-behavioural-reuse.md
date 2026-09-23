@@ -25,12 +25,11 @@ becomes a nominal `implements:`.
 **Open decisions for the author** (raised by review; the draft takes the
 first position in each and says where the alternative is written up):
 
-1. **Now, or inheritance first?** Most measured stdlib duplication is
-   removable by single inheritance (§Context, Option H). Traits are
-   justified by what inheritance cannot express — two concerns on one
-   class, and a spent superclass slot. Adopting traits now versus doing
-   Option H now and traits when the first such user lands is a scheduling
-   call, not a design one.
+1. ~~**Now, or inheritance first?**~~ **Decided (2026-09-23): traits now.**
+   `Magnitude` and an abstract enumerable class would remove most of the
+   measured duplication, but they model *capabilities* as *kinds*
+   (§Context, "Kinds versus capabilities"). The stdlib is not refactored
+   into an inheritance-based interim first; Option H is rejected.
 2. **The implied protocol's selector set** — required ∪ provided (draft) or
    required only (§8). The first types `x :: Comparable` richly but makes
    adding a provision a breaking change for structural conformers; the
@@ -104,10 +103,23 @@ the ADR should be judged knowing that. `DateTime`, `Duration`, `Uuid` and
 `Magnitude` Value class above them would remove the ordering copies for
 everything except `String`. `SupervisionTree` and `ChangeLog` also subclass
 `Value` directly, so an abstract enumerable Value class (with `Collection`
-under it) would remove the enumeration copies. §Alternatives treats this as
-the strongest rival, not a strawman.
+under it) would remove the enumeration copies. §Alternatives treats this
+seriously as Option H, and rejects it on modelling grounds, not on counts.
 
-What inheritance cannot fix is the reason for this ADR:
+**Kinds versus capabilities.** Even where inheritance *could* remove the
+duplication, it would be modelling the wrong thing. A superclass says what
+a class *is*: `Integer` is a `Number`, `Array` is a `Collection`. "Can be
+ordered" and "can be enumerated" are not kinds; they are capabilities, and
+their natural names are adjectives (`Comparable`, `Enumerable`), not nouns.
+Putting `DateTime`, `Duration` and `Uuid` under a `Magnitude` superclass
+would spend each class's only superclass slot on a capability, and would
+claim a kinship between a timestamp, a length of time and an identifier
+that exists only because they share `<`. Smalltalk-80's `Magnitude` is a
+class because the language had nowhere else to put shared behaviour, not
+because ordering is a kind. Traits give capabilities their own home, and
+leave the hierarchy to say what things are.
+
+What inheritance cannot fix at all is the rest of the reason for this ADR:
 
 1. **A class that needs two concerns.** `String` is a `Collection` (via
    `Binary`) *and* is ordered. Under inheritance it can have `Magnitude` or
@@ -1017,7 +1029,7 @@ and `uses:` lines.
 - ⚙️ **BEAM veteran**: "No compiler pass, no new module kind, no N-way recompile on edit."
 - 🏭 **Operator**: "Nothing new to observe; hot reload of `Magnitude` is one module."
 - 🎨 **Language designer**: "It removes most of the measured duplication with zero surface area. Add traits when the first actor needs enumeration, not before."
-- *Why not chosen*: every argument is correct for the stdlib as it stands. It fails `String`, every `Actor`, and every class whose superclass is spent, and those failures are built into single inheritance plus class kinds. It stays the recommended fallback if this ADR is deferred.
+- *Why not chosen*: the arguments are correct about the stdlib's line count, but the design is wrong about what the hierarchy means. `Magnitude` and an abstract enumerable class are capabilities dressed as kinds (§Context, "Kinds versus capabilities"), and they spend each class's one superclass slot on them. It also fails `String`, every `Actor`, and every class whose superclass is already spent. Decided against on 2026-09-23 (§Status, decision 1).
 
 ### Option D: Extension methods only (`Comparable+DateTime.bt` per class)
 - 🧑‍💻 **Newcomer**: "It already works today; I just copy a file."
@@ -1045,7 +1057,7 @@ and `uses:` lines.
 
 ### Tension points
 - **One keyword and the type rule (A vs. B′).** B′ is the strongest rival: it differs from A only in keyword count and in whether provisions are part of the type. Reviewers who value interface evolution will prefer B′.
-- **Evidence vs. structure (A vs. H).** The stdlib count is mostly answerable by inheritance; the case for traits rests on what single inheritance plus class kinds structurally cannot express. Reviewers who weigh measured duplication over structural capability will reasonably prefer H now and A later.
+- **Evidence vs. modelling (A vs. H).** The stdlib count is mostly answerable by inheritance, so reviewers who weigh measured duplication alone would prefer H. The decision went to A because the hierarchy should record kinds and traits should record capabilities; H would encode ordering and enumeration as kinds.
 - **One concept vs. two (A vs. B).** Language designers and Elixir users lean B; Smalltalkers and the "honesty of form" rule lean A. Resolved for A because the keyword carries information (bodies present or not) and the two are convertible in place.
 - **Copy vs. share (A vs. E).** Operators want E's one-reload; the compiler's lexical assumptions make A the only one that works without re-architecting self-sends. Resolved for A; the N-recompile cost is accepted and bounded (§Consequences).
 - **Stateless vs. stateful (A vs. F).** Newcomers and Pharo 7 users want F; the class-kind split makes A the only kind-neutral choice today. Deferred, not closed.
@@ -1061,9 +1073,9 @@ Add `abstract typed Value subclass: Magnitude` (Pharo's own home for
 of the §Context duplication today. Rejected as the *mechanism* because it
 cannot serve `String` (ordered *and* a collection), any `Actor`, or any class
 whose superclass is already spent (§Context, "What inheritance cannot fix").
-It is **not** rejected as a stdlib refactor: if this ADR is declined or
-deferred, doing it is the right fallback, and nothing here conflicts with it
-later (a `Magnitude` class could itself `uses: Comparable`).
+It is also rejected as an interim stdlib refactor (decided 2026-09-23): it
+would model capabilities as kinds (§Context, "Kinds versus capabilities")
+and then have to be unwound when traits land.
 
 ### Protocols with default method bodies
 `Protocol define: Comparable` gaining `=>` bodies. The **retroactive** form,
@@ -1123,10 +1135,10 @@ refute it: eight classes and ~25 hand-written methods a trait would provide
 (12 derived ordering operators across four classes, four `min:`/`max:`
 copies, ten enumeration and emptiness methods across `SupervisionTree`,
 `ChangeLog` and `String`), most of which inheritance could also remove
-(see "Inheritance only" above). Rejected because the three cases
-inheritance cannot reach — two concerns on one class, the actor/value wall,
-and a spent superclass slot — are permanent properties of the language, not
-of today's corpus.
+(see "Inheritance only" above). Rejected because capabilities should not
+be modelled as kinds, and because the three cases inheritance cannot reach
+— two concerns on one class, the actor/value wall, and a spent superclass
+slot — are permanent properties of the language, not of today's corpus.
 
 ## Consequences
 
