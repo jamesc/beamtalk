@@ -196,26 +196,39 @@ fn dep_app_name(dep_ebin: &Utf8Path) -> Result<String> {
 /// resolve — `app_file.rs`'s output and rebar3's resolved `.app` are the
 /// only valid staging sources).
 ///
-/// Also verifies every module the `.app` declares in `{modules, […]}` has
-/// a matching `<Module>.beam` somewhere in `source_ebins` — searched across
-/// *all* of them, since `stage_one_app` copies from all of them, not just
-/// the one the `.app` itself was found in (the multi-source case, e.g.
-/// `beamtalk_stdlib`'s class beams and rebar3-built modules living in two
-/// separate directories). Catches a partial/stale build — declared but
-/// never actually compiled, or compiled into a directory `stage_one_app`
-/// won't see — at the earliest point that can name the exact missing
-/// module, instead of a `beam_file_not_found`/`undef` crash at boot with no
-/// indication of which staged app or module was actually incomplete. See
-/// `docs/development/debugging.md` for why an `undef` at boot is expensive
-/// to trace back to a staging defect otherwise.
+/// Also verifies every module declared in `{modules, […]}` across *every*
+/// source ebin that has an `<name>.app` file — not just the first one found
+/// — has a matching `<Module>.beam` somewhere in `source_ebins`. The
+/// multi-source case (e.g. `beamtalk_stdlib`) can have a *different* `.app`
+/// file in each source ebin (the class-beam dir's own generated `.app`, and
+/// the rebar3-built one for its Erlang FFI modules), each declaring a
+/// disjoint module list — checking only the first-found `.app` would leave
+/// the second one's modules (and any build defect in them) completely
+/// unchecked, silently passing the exact partial-build scenario this check
+/// exists to catch. `stage_one_app` copies files from every source ebin,
+/// so `.beam` presence is searched across all of them too. Catches a
+/// partial/stale build — a module declared but never actually compiled, or
+/// compiled into a directory `stage_one_app` won't see — at the earliest
+/// point that can name the exact missing module, instead of a `undef`
+/// crash at boot with no indication of which staged app or module was
+/// actually incomplete. See `docs/development/debugging.md` for why an
+/// `undef` at boot is expensive to trace back to a staging defect
+/// otherwise.
 fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp> {
     let mut found = None;
+    let mut all_modules: Vec<String> = Vec::new();
     for ebin in source_ebins {
         let app_path = ebin.join(format!("{name}.app"));
-        if app_path.is_file() {
-            let content = std::fs::read_to_string(app_path.as_std_path())
-                .into_diagnostic()
-                .wrap_err_with(|| format!("Failed to read '{app_path}'"))?;
+        if !app_path.is_file() {
+            continue;
+        }
+        let content = std::fs::read_to_string(app_path.as_std_path())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read '{app_path}'"))?;
+        // vsn/applications come from the *first* `.app` found only —
+        // `stage_one_app`'s own precedent for which one "wins" when more
+        // than one source ebin has a same-named `.app` file.
+        if found.is_none() {
             let vsn = extract_erlang_string_field(&content, "vsn").ok_or_else(|| {
                 miette::miette!(
                     "'{app_path}' has no `{{vsn, \"…\"}}` field — is it a valid .app file?"
@@ -223,12 +236,17 @@ fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp
             })?;
             let declared_deps =
                 extract_erlang_atom_list_field(&content, "applications").unwrap_or_default();
-            let modules = extract_erlang_atom_list_field(&content, "modules").unwrap_or_default();
-            found = Some((vsn, declared_deps, modules, app_path));
-            break;
+            found = Some((vsn, declared_deps, app_path));
         }
+        // `{modules, […]}`, in contrast, is merged from *every* `.app`
+        // found — each source ebin's `.app` only declares the modules
+        // that live alongside it, so skipping any of them after the first
+        // would leave that ebin's modules (and any build defect in them)
+        // unchecked. Duplicates across ebins are harmless — the presence
+        // check below just re-verifies the same module twice.
+        all_modules.extend(extract_erlang_atom_list_field(&content, "modules").unwrap_or_default());
     }
-    let (vsn, declared_deps, modules, app_path) = found.ok_or_else(|| {
+    let (vsn, declared_deps, app_path) = found.ok_or_else(|| {
         miette::miette!(
             "Could not find '{name}.app' in any of: {}\n\
              Run `beamtalk build` first (for the project app or its \
@@ -241,7 +259,7 @@ fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp
         )
     })?;
 
-    let missing: Vec<&String> = modules
+    let missing: Vec<&String> = all_modules
         .iter()
         .filter(|module| {
             !source_ebins
@@ -251,13 +269,14 @@ fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp
         .collect();
     if !missing.is_empty() {
         miette::bail!(
-            "'{app_path}' declares {} module(s) with no matching `.beam` file in: {}\n\
+            "'{name}' declares {} module(s) (across {}) with no matching `.beam` file in: {}\n\
              \x20 missing: {}\n\n\
-             \x20 This is a partial or stale build, not a beamtalk-release bug — the .app was \
-             \x20 generated (or cached) from a build that never finished compiling every module \
-             \x20 it declares. Run `just clean && just build` (or, in CI, clear the cached \
-             \x20 runtime build) and retry.",
+             \x20 This is a partial or stale build, not a beamtalk-release bug — one of the \
+             \x20 app's `.app` files was generated (or cached) from a build that never finished \
+             \x20 compiling every module it declares. Run `just clean && just build` (or, in CI, \
+             \x20 clear the cached runtime build) and retry.",
             missing.len(),
+            app_path,
             source_ebins
                 .iter()
                 .map(|p| p.as_str())
@@ -531,6 +550,79 @@ mod tests {
 
         let app = read_staged_app("beamtalk_stdlib", &[first, second]).unwrap();
         assert_eq!(app.vsn, "0.4.0");
+    }
+
+    /// The realistic multi-source shape: `beamtalk_stdlib` in a dev
+    /// checkout has *two separate* `.app` files, one per source ebin — the
+    /// class-beam dir's own generated `.app` (declaring only `bt@…`
+    /// modules) and the rebar3-built `.app` (declaring the Erlang FFI
+    /// modules, e.g. `beamtalk_json`) — each with its own disjoint
+    /// `{modules, …}` list, unlike the single-`.app`-declares-both-lists
+    /// synthetic fixture above. Both `.app` files' declared modules must be
+    /// checked, not just the first one found.
+    #[test]
+    fn read_staged_app_checks_modules_from_every_apps_file_not_just_the_first() {
+        let dir = TempDir::new().unwrap();
+        let classes = Utf8PathBuf::from_path_buf(dir.path().join("classes")).unwrap();
+        let erlang = Utf8PathBuf::from_path_buf(dir.path().join("erlang")).unwrap();
+        fs::create_dir_all(classes.as_std_path()).unwrap();
+        fs::create_dir_all(erlang.as_std_path()).unwrap();
+        // The class-beam dir's own `.app` — found first — declares only
+        // the compiled `.bt` class module.
+        fs::write(
+            classes.join("beamtalk_stdlib.app").as_std_path(),
+            r#"{application, beamtalk_stdlib, [{vsn, "0.4.0"}, {modules, [bt_stdlib_object]}]}."#,
+        )
+        .unwrap();
+        fs::write(classes.join("bt_stdlib_object.beam").as_std_path(), b"b").unwrap();
+        // The rebar3-built `.app` — a *second*, different `.app` file —
+        // declares the Erlang FFI modules and is compiled/present here.
+        fs::write(
+            erlang.join("beamtalk_stdlib.app").as_std_path(),
+            r#"{application, beamtalk_stdlib, [{vsn, "0.4.0"}, {modules, [beamtalk_json, beamtalk_regex]}]}."#,
+        )
+        .unwrap();
+        fs::write(erlang.join("beamtalk_json.beam").as_std_path(), b"b").unwrap();
+        fs::write(erlang.join("beamtalk_regex.beam").as_std_path(), b"b").unwrap();
+
+        let app = read_staged_app("beamtalk_stdlib", &[classes, erlang]).unwrap();
+        assert_eq!(app.vsn, "0.4.0");
+    }
+
+    /// The exact bug the review flagged: a module missing its `.beam` but
+    /// declared only in the *second* source ebin's `.app` file (not the
+    /// first-found one) must still be caught — this is precisely the shape
+    /// a partial/stale `beamtalk_stdlib` FFI build would take, and a check
+    /// that only reads the first-found `.app` would pass it vacuously.
+    #[test]
+    fn read_staged_app_rejects_missing_module_declared_only_in_a_later_apps_file() {
+        let dir = TempDir::new().unwrap();
+        let classes = Utf8PathBuf::from_path_buf(dir.path().join("classes")).unwrap();
+        let erlang = Utf8PathBuf::from_path_buf(dir.path().join("erlang")).unwrap();
+        fs::create_dir_all(classes.as_std_path()).unwrap();
+        fs::create_dir_all(erlang.as_std_path()).unwrap();
+        fs::write(
+            classes.join("beamtalk_stdlib.app").as_std_path(),
+            r#"{application, beamtalk_stdlib, [{vsn, "0.4.0"}, {modules, [bt_stdlib_object]}]}."#,
+        )
+        .unwrap();
+        fs::write(classes.join("bt_stdlib_object.beam").as_std_path(), b"b").unwrap();
+        // The second `.app` declares beamtalk_json, but its .beam is
+        // missing — a partial rebar3 build of the FFI modules.
+        fs::write(
+            erlang.join("beamtalk_stdlib.app").as_std_path(),
+            r#"{application, beamtalk_stdlib, [{vsn, "0.4.0"}, {modules, [beamtalk_json, beamtalk_regex]}]}."#,
+        )
+        .unwrap();
+        fs::write(erlang.join("beamtalk_regex.beam").as_std_path(), b"b").unwrap();
+        // beamtalk_json.beam intentionally not written.
+
+        let err = read_staged_app("beamtalk_stdlib", &[classes, erlang]).unwrap_err();
+        assert!(err.to_string().contains("beamtalk_json"), "got: {err}");
+        assert!(
+            err.to_string().contains("partial or stale build"),
+            "got: {err}"
+        );
     }
 
     #[test]
