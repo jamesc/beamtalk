@@ -2,24 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `beamtalk release`: assemble a standard OTP release directory bootable
-//! with `erl -boot` (ADR 0125 Part 1, Phase 1 / BT-3570).
+//! with `erl -boot` (ADR 0125 Part 1, Phases 1/2 — BT-3570/BT-3571).
 //!
 //! **DDD Context:** Build System — Packaging
 //!
 //! Compiles the project, computes the app closure (`closure.rs`), stages
 //! every app into `lib/<app>-<vsn>/ebin/`, and writes `.rel`/`start.boot`/
-//! `releases/RELEASES`/`sys.config`/`vm.args` (`assembly.rs`). Ships without
-//! a launcher, ERTS bundling, or the tarball — `erl -boot … -boot_var
-//! RELEASE_DIR <dir>` boots it directly; those pieces are BT-3571/BT-3573.
+//! `releases/RELEASES`/`sys.config`/`vm.args` (`assembly.rs`, BT-3570).
+//! BT-3571 adds ERTS bundling (`[release] include-erts`, the default),
+//! `strip-beams`/`include-compiler`'s compiler-port staging, the
+//! `<name>-<vsn>.tar.gz` tarball (`systools:make_tar/2`), and the two
+//! self-describing manifests every release carries:
+//! `releases/<vsn>/beamtalk-provenance.json` (`provenance.rs`) and
+//! `releases/<vsn>/shapes.json` (`assembly::write_shapes_json`, driving
+//! `beamtalk_release_shapes` in `beamtalk_runtime`). Still no launcher —
+//! `erl -boot … -boot_var RELEASE_DIR <dir>` boots the unpacked directory
+//! directly; `bin/<name>`/`bin/<name>.cmd` are BT-3573.
 
 pub mod assembly;
 pub mod closure;
+pub mod provenance;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::info;
 
 use super::build_layout::BuildLayout;
+use super::build_stamp;
 use super::manifest;
 
 /// Build a release for the project at `project_root`.
@@ -31,12 +40,20 @@ use super::manifest;
 /// does not look like a prior `beamtalk release` output — see
 /// [`ensure_clean_release_dir`]'s doc comment for why that distinction
 /// exists.
+///
+/// `no_include_erts` is `--no-include-erts` (ADR 0125 §1.1): when set, it
+/// overrides `[release] include-erts` to `false` regardless of the
+/// manifest — a CLI flag is a one-shot override, so it can only turn the
+/// manifest's default *off*, never force it *on* (`[release] include-erts
+/// = false` already does that from the manifest side).
+#[allow(clippy::too_many_lines)] // one straight-line assembly pipeline; splitting hurts readability
 pub fn build_release(
     project_root: &Utf8Path,
     output: Option<&str>,
     options: &beamtalk_core::CompilerOptions,
     force: bool,
     force_output: bool,
+    no_include_erts: bool,
 ) -> Result<()> {
     let Some(parsed) = manifest::find_manifest_full(project_root)? else {
         miette::bail!(
@@ -124,6 +141,8 @@ pub fn build_release(
     // reports, still uses.
     let release_dir = assembly::resolve_long_path(&release_dir)?;
 
+    let include_erts = release_cfg.include_erts && !no_include_erts;
+
     eprintln!("Computing app closure...");
     let app_closure = closure::compute_app_closure(&layout, &parsed.package, release_cfg)?;
 
@@ -132,6 +151,27 @@ pub fn build_release(
         app_closure.staged_apps.len()
     );
     let staged_ebins = assembly::stage_apps(&release_dir, &app_closure)?;
+
+    // Every staged app's own lib dir — the shape extractor needs the whole
+    // closure *loaded* for ancestor resolution, but only classifies the
+    // non-runtime-closure subset as `emit_dirs` (`closure::is_runtime_app`,
+    // ADR 0125 §2.2's own project/dependency-vs-toolchain distinction).
+    let mut runtime_dirs: Vec<Utf8PathBuf> = Vec::new();
+    let mut emit_dirs: Vec<Utf8PathBuf> = Vec::new();
+    for (app, ebin) in app_closure.staged_apps.iter().zip(staged_ebins.iter()) {
+        if closure::is_runtime_app(&app.name) {
+            runtime_dirs.push(ebin.clone());
+        } else {
+            emit_dirs.push(ebin.clone());
+        }
+    }
+
+    eprintln!("Discovering ERTS...");
+    let (erts_root, erts_version) = assembly::discover_erts_info()?;
+    if include_erts {
+        eprintln!("Copying ERTS {erts_version}...");
+        assembly::copy_erts(&release_dir, &erts_root, &erts_version)?;
+    }
 
     let release_config_dir = release_dir.join("releases").join(&release_vsn);
     std::fs::create_dir_all(release_config_dir.as_std_path())
@@ -144,6 +184,7 @@ pub fn build_release(
         &release_cfg.sys_config,
         release_cfg.console,
         &release_cfg.bind,
+        release_cfg.include_compiler,
     )?;
     assembly::generate_vm_args(
         project_root,
@@ -151,6 +192,11 @@ pub fn build_release(
         &release_cfg.vm_args,
         &release_name,
     )?;
+
+    if release_cfg.include_compiler {
+        eprintln!("Staging compiler port binary...");
+        assembly::stage_compiler_port_binary(&release_dir)?;
+    }
 
     eprintln!("Writing .rel / start.boot / RELEASES...");
     assembly::write_rel_and_boot_script(
@@ -160,6 +206,74 @@ pub fn build_release(
         &app_closure,
         &staged_ebins,
     )?;
+
+    if release_cfg.strip_beams {
+        eprintln!("Stripping debug_info...");
+        assembly::strip_release_beams(&release_dir)?;
+    }
+
+    eprintln!("Writing provenance/shape manifests...");
+    let otp_release = build_stamp::current_otp_version().ok_or_else(|| {
+        miette::miette!(
+            "Could not determine the building OTP version (erl probe failed) — \
+             beamtalk-provenance.json needs it for `required_otp`."
+        )
+    })?;
+    provenance::write_provenance_json(
+        &release_config_dir,
+        &release_name,
+        &release_vsn,
+        build_stamp::current_beamtalk_version(),
+        otp_release,
+        include_erts,
+        &erts_version,
+        &provenance::current_platform(),
+        &app_closure,
+    )?;
+    assembly::write_shapes_json(
+        &runtime_dirs,
+        &emit_dirs,
+        &release_config_dir.join("shapes.json"),
+        &release_vsn,
+    )?;
+
+    eprintln!("Building tarball...");
+    let tar_out_dir = release_dir
+        .parent()
+        .map_or_else(|| release_dir.clone(), Utf8Path::to_path_buf);
+    let (tar_path, tar_size) = assembly::make_tarball(
+        &release_dir,
+        &release_name,
+        &release_vsn,
+        &staged_ebins,
+        &tar_out_dir,
+        include_erts,
+        &erts_root,
+    )?;
+
+    let platform = provenance::current_platform();
+    let erts_note = if include_erts {
+        format!("with ERTS {erts_version}, {platform}")
+    } else {
+        format!("no ERTS bundled, {platform}")
+    };
+    let trailer = if include_erts {
+        format!(
+            "This release bundles ERTS and runs only on {platform}.\n\
+             Build on the target platform, or use --no-include-erts to require a host \
+             Erlang/OTP {min}, {mid} or {max} (ADR 0125 §3.2).",
+            min = otp_release_major_or_unknown(otp_release),
+            mid = otp_release_major_or_unknown(otp_release) + 1,
+            max = otp_release_major_or_unknown(otp_release) + 2,
+        )
+    } else {
+        format!(
+            "This release ships no ERTS — requires a host Erlang/OTP {min}, {mid} or {max}.",
+            min = otp_release_major_or_unknown(otp_release),
+            mid = otp_release_major_or_unknown(otp_release) + 1,
+            max = otp_release_major_or_unknown(otp_release) + 2,
+        )
+    };
 
     // `assembly.rs` bakes the `RELEASE_DIR` build-time prefix into the
     // `.script`/`.boot` as a forward-slashed string (the same Windows fix
@@ -171,12 +285,46 @@ pub fn build_release(
     // command a Windows user copy-pastes actually boots.
     let release_dir_fwd = beamtalk_cli::path_util::to_forward_slash(release_dir.as_str());
     println!(
-        "Built release {release_name}-{release_vsn}\n  → {release_dir}\n\n\
+        "Built release {release_name}-{release_vsn} ({erts_note}).\n\
+         \x20 → {release_dir}\n\
+         \x20 → {tar_path}  ({tar_size})\n\n\
+         {trailer}\n\n\
          Boot it: erl -boot {release_config_dir}/start -boot_var RELEASE_DIR {release_dir_fwd} \
-         -config {release_config_dir}/sys"
+         -config {release_config_dir}/sys",
+        tar_size = format_bytes(tar_size),
     );
     info!(name = %release_name, vsn = %release_vsn, dir = %release_dir, "release built");
     Ok(())
+}
+
+/// Parse the OTP build major out of `otp_release` (the compound
+/// `<major>-<erts>` string), falling back to `0` — only reachable if
+/// `build_stamp::current_otp_version()` ever returned a string in a
+/// different shape than its own contract, so this is a display-only
+/// fallback, never a silent correctness gap (the same value already went
+/// through [`provenance::write_provenance_json`]'s own, error-returning
+/// parse of the identical string moments earlier in this same call).
+fn otp_release_major_or_unknown(otp_release: &str) -> u32 {
+    build_stamp::otp_build_major(otp_release).unwrap_or(0)
+}
+
+/// Render a byte count as a human-readable size (`"48.2 MB"`,
+/// `"512.0 KB"`) for the command's own printed tarball size — informational
+/// only, so plain decimal (MB = `1_000_000` bytes) rather than binary
+/// (MiB = `1_048_576`) matches what `ls -lh`/most package managers already
+/// show a user for a download size.
+fn format_bytes(bytes: u64) -> String {
+    const MB: f64 = 1_000_000.0;
+    const KB: f64 = 1_000.0;
+    #[allow(clippy::cast_precision_loss)] // display-only; no correctness dependency on precision
+    let bytes_f = bytes as f64;
+    if bytes_f >= MB {
+        format!("{:.1} MB", bytes_f / MB)
+    } else if bytes_f >= KB {
+        format!("{:.1} KB", bytes_f / KB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 /// ADR 0125 §3.1: refuse to produce a release on an OTP major outside the
@@ -337,7 +485,7 @@ mod tests {
         .unwrap();
 
         let options = beamtalk_core::CompilerOptions::default();
-        let err = build_release(&root, None, &options, false, false).unwrap_err();
+        let err = build_release(&root, None, &options, false, false, false).unwrap_err();
         assert!(
             err.to_string().contains("requires a root supervisor"),
             "got: {err}"
@@ -354,7 +502,7 @@ mod tests {
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
         let options = beamtalk_core::CompilerOptions::default();
-        let err = build_release(&root, None, &options, false, false).unwrap_err();
+        let err = build_release(&root, None, &options, false, false, false).unwrap_err();
         assert!(
             err.to_string().contains("No 'beamtalk.toml' found"),
             "got: {err}"

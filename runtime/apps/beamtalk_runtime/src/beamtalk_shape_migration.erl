@@ -39,7 +39,9 @@ from `beamtalk_shape_chain:migrate/4`, wrapped here as
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1]).
+-export([
+    migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1, resolve_migrations/1
+]).
 
 -ifdef(TEST).
 %% Export field_tier/1 for the BT-3542 cross-boundary conformance test
@@ -134,7 +136,10 @@ Resolve `Class`'s compiled `Module`, its full `__beamtalk_meta/0` map, and
 its `'shape_migrations'` table (default `#{}`) in one lookup — the
 resolution sequence `migrate/4` and `check_stray_migrations/1` both need,
 extracted so a future change to it (an inherited-chain lookup, a different
-fallback) only needs updating here.
+fallback) only needs updating here. Also the resolution `beamtalk_release_shapes`
+(ADR 0125 §2.2/§3.4, BT-3571) uses for a build-time-loaded class, and the
+per-level reader its ancestor-flatten walk calls — exported (not
+`-ifdef(TEST)`-gated) for exactly that cross-module reuse.
 """.
 -spec resolve_migrations(atom()) -> {ok, module(), map(), map()} | not_found.
 resolve_migrations(Class) ->

@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3571 (ADR 0125 §2.2/§3.4) fixture: a subclass of ReleaseShapesRoot
+// declaring `shapeVersion: 2` and `migrateFromV1:`, so
+// `beamtalk_release_shapes_tests` can assert `class_shape_entry/1`
+// reports the declared version, the migration table, and the *flattened*
+// field map (this class's own `qty` merged with the inherited `label`).
+
+ReleaseShapesRoot subclass: ReleaseShapesLeaf
+  shapeVersion: 2
+  state: qty :: Integer = 0
+
+  class migrateFromV1: old :: Dictionary -> Dictionary =>
+    Erlang maps
+      put: #qty
+      value: 0
+      in: old

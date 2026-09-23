@@ -73,6 +73,24 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
                 continue;
             }
             let file_name = entry.file_name().to_string_lossy().into_owned();
+            // Only `.beam` and the app's own `.app` file are runtime
+            // artifacts (ADR 0125's own staged-tree shape: "the project's
+            // `bt@orders@*.beam` + `orders.app`"). A project's own
+            // `layout.ebin_dir()` doubles as its `.core`-compile build dir
+            // (`BuildEnvironment::build_dir`), so a source ebin can also
+            // hold `.core` intermediates and the generated `.erl` app
+            // callback module's own source (`outputs.rs`'s "write the .erl
+            // source next to the .core files") — neither belongs in a
+            // release, and shipping the `.core` alongside the `.beam` it
+            // compiled from previously left two files matching any
+            // `*fixture_sup*` name-based lookup (`fn is_runtime_app`'s
+            // sibling problem, one level down).
+            let is_beam = std::path::Path::new(&file_name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("beam"));
+            if file_name != app_file_name && !is_beam {
+                continue;
+            }
             if file_name == app_file_name {
                 if app_file_staged {
                     continue;
@@ -93,9 +111,12 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
 
 /// Generate `releases/<vsn>/sys.config` — the `beamtalk_workspace`
 /// application env `beamtalk_workspace_app:start/2` reads (BT-3569):
-/// `mode => release`, `console`, `bind`. A user `[release] sys-config` file,
-/// if present at `<project_root>/<sys_config_path>`, is merged in: any
-/// top-level app key it declares is deep-appended after ours (a later
+/// `mode => release`, `console`, `bind`, and (BT-3571, ADR 0125 §1.5)
+/// `include_compiler` — `beamtalk_workspace_sup:starts_compiler/2` reads
+/// this key to decide whether to start `beamtalk_compiler` and log the
+/// boot warning naming its three risks. A user `[release] sys-config`
+/// file, if present at `<project_root>/<sys_config_path>`, is merged in:
+/// any top-level app key it declares is deep-appended after ours (a later
 /// duplicate key wins under `file:consult/1`'s "last one wins" reading —
 /// same convention as an OTP `sys.config` overlay).
 pub fn generate_sys_config(
@@ -104,6 +125,7 @@ pub fn generate_sys_config(
     sys_config_rel_path: &str,
     console: bool,
     bind: &str,
+    include_compiler: bool,
 ) -> Result<Utf8PathBuf> {
     let escaped_bind = escape_erlang_string(bind);
     let mut content = format!(
@@ -112,6 +134,7 @@ pub fn generate_sys_config(
          \x20   {{mode, release}},\n\
          \x20   {{console, {console}}},\n\
          \x20   {{bind, \"{escaped_bind}\"}},\n\
+         \x20   {{include_compiler, {include_compiler}}},\n\
          \x20   {{auto_cleanup, false}}\n\
          \x20 ]}}"
     );
@@ -306,16 +329,7 @@ fn build_assembly_eval(
     // same reasoning (and the same shared `to_forward_slash` leaf) as
     // `repl_startup.rs`'s `beam_pa_args` and `run.rs`'s eval-string path
     // splicing use for the identical problem.
-    let ebin_path_list = staged_ebins
-        .iter()
-        .map(|p| {
-            format!(
-                "\"{}\"",
-                escape_erlang_string(&to_forward_slash(p.as_str()))
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let ebin_path_list = erlang_string_list(staged_ebins);
 
     // Host apps are resolved with a live transitive closure, not a flat
     // list: a *staged* app (e.g. `ranch`) can declare a host-only
@@ -425,6 +439,429 @@ pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
     Utf8PathBuf::from_path_buf(cwd)
         .map(|cwd| cwd.join(path))
         .map_err(|p| miette::miette!("Current directory '{}' is not valid UTF-8", p.display()))
+}
+
+/// Probe the building machine's ERTS root directory and version via a
+/// throwaway `erl -noshell` (ADR 0125 §1.3: "the ERTS tree reported by
+/// `code:root_dir/0` + `erlang:system_info(version)`") — the same two calls
+/// `build_assembly_eval` already makes for the `.rel`'s `{erts, ErtsVsn}`
+/// tuple, factored out here because the ERTS-copy step
+/// ([`copy_erts`]) needs the *root* directory too, and needs both values
+/// **before** staging (the destination directory name is `erts-<vsn>/`).
+///
+/// # Errors
+///
+/// Returns an error if `erl` cannot be spawned or exits non-zero.
+pub fn discover_erts_info() -> Result<(Utf8PathBuf, String)> {
+    let output = Command::new("erl")
+        .arg("-noshell")
+        .arg("-noinput")
+        .arg("-eval")
+        .arg("io:format(\"~s~n~s~n\", [code:root_dir(), erlang:system_info(version)]), halt(0).")
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erl to discover the ERTS root/version")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        miette::bail!(
+            "Failed to discover the ERTS root/version:\n{}",
+            stderr.trim_end()
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines();
+    let root_dir = lines
+        .next()
+        .ok_or_else(|| miette::miette!("erl produced no output discovering the ERTS root"))?;
+    let erts_version = lines
+        .next()
+        .ok_or_else(|| miette::miette!("erl produced no output discovering the ERTS version"))?;
+
+    Ok((Utf8PathBuf::from(root_dir), erts_version.to_string()))
+}
+
+/// Copy `<erts_root>/erts-<erts_version>` into `<release_dir>/erts-<erts_version>/`
+/// (ADR 0125 §1.3, `[release] include-erts = true`, the default) — a plain
+/// recursive directory copy, since this is copying a *built* ERTS tree
+/// (binaries, not something to compile or stage-and-validate the way
+/// [`stage_apps`] handles an application's `.app`/`.beam` set).
+///
+/// # Errors
+///
+/// Returns an error if `<erts_root>/erts-<erts_version>` does not exist, or
+/// on any I/O failure while copying.
+pub fn copy_erts(
+    release_dir: &Utf8Path,
+    erts_root: &Utf8Path,
+    erts_version: &str,
+) -> Result<Utf8PathBuf> {
+    let src = erts_root.join(format!("erts-{erts_version}"));
+    if !src.is_dir() {
+        miette::bail!(
+            "ERTS directory '{src}' not found — expected `code:root_dir/0` ('{erts_root}') \
+             to contain an 'erts-{erts_version}' subdirectory."
+        );
+    }
+    let dest = release_dir.join(format!("erts-{erts_version}"));
+    copy_dir_recursive(&src, &dest)?;
+    Ok(dest)
+}
+
+/// Recursively copy every file and subdirectory under `src` into `dest`
+/// (created if absent), preserving Unix executable permissions (ERTS's
+/// `bin/` binaries must stay executable) — the one recursive-copy leaf
+/// [`copy_erts`] uses; nothing else in `beamtalk-cli` currently needs one, so
+/// this stays private rather than moving to `path_util.rs`'s shared-leaf
+/// surface pre-emptively.
+fn copy_dir_recursive(src: &Utf8Path, dest: &Utf8Path) -> Result<()> {
+    std::fs::create_dir_all(dest.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create '{dest}'"))?;
+    for entry in std::fs::read_dir(src.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{src}'"))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        let src_path = src.join(file_name.as_ref());
+        let dest_path = dest.join(file_name.as_ref());
+        let file_type = entry.file_type().into_diagnostic()?;
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else if file_type.is_symlink() {
+            // Preserve symlinks as symlinks (ERTS trees carry a few, e.g.
+            // versioned .so aliases) rather than following and duplicating
+            // their target's contents.
+            #[cfg(unix)]
+            {
+                let target = std::fs::read_link(src_path.as_std_path()).into_diagnostic()?;
+                std::os::unix::fs::symlink(&target, dest_path.as_std_path())
+                    .into_diagnostic()
+                    .wrap_err_with(|| {
+                        format!("Failed to symlink '{dest_path}' -> {}", target.display())
+                    })?;
+            }
+            // Non-Unix targets have no symlink to preserve — `fs::copy` reads
+            // through the symlink and copies its target's actual bytes.
+            #[cfg(not(unix))]
+            std::fs::copy(src_path.as_std_path(), dest_path.as_std_path())
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to copy '{src_path}' to '{dest_path}'"))
+                .map(|_| ())?;
+        } else {
+            std::fs::copy(src_path.as_std_path(), dest_path.as_std_path())
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to copy '{src_path}' to '{dest_path}'"))?;
+            #[cfg(unix)]
+            {
+                let perms = std::fs::metadata(src_path.as_std_path())
+                    .into_diagnostic()?
+                    .permissions();
+                std::fs::set_permissions(dest_path.as_std_path(), perms).into_diagnostic()?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Strip `debug_info` chunks from every staged application's beams
+/// (`[release] strip-beams = true`, ADR 0125 §1.3/§3.3) via
+/// `beam_lib:strip_release/1`, run against the already-assembled release
+/// directory (it reads `releases/<vsn>/<name>.rel` to find every
+/// application to strip). `__beamtalk_meta/0` survives untouched — it is a
+/// compiled function, not a `debug_info` chunk (ADR 0125 §2.2's own
+/// reasoning for why `beam_lib` can't *read* it, but the flip side is that
+/// stripping can't touch it either).
+///
+/// # Errors
+///
+/// Returns an error if `erl` cannot be spawned or `beam_lib:strip_release/1`
+/// reports a failure.
+pub fn strip_release_beams(release_dir: &Utf8Path) -> Result<()> {
+    let release_dir_abs = absolutize(release_dir)?;
+    let eval = format!(
+        "case beam_lib:strip_release(\"{dir}\") of \
+             {{ok, _Modules}} -> ok; \
+             StripErr -> \
+                 io:format(standard_error, \"beam_lib:strip_release failed: ~p~n\", [StripErr]), \
+                 halt(1) \
+         end, \
+         halt(0).",
+        dir = escape_erlang_string(&to_forward_slash(release_dir_abs.as_str())),
+    );
+    let output = Command::new("erl")
+        .arg("-noshell")
+        .arg("-noinput")
+        .arg("-eval")
+        .arg(&eval)
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erl to strip release beams")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!(
+            "strip-beams failed:\n{}",
+            format!("{stdout}{stderr}").trim_end()
+        );
+    }
+    Ok(())
+}
+
+/// Package the assembled release directory into `<name>-<vsn>.tar.gz` via
+/// `systools:make_tar/2` (ADR 0125 §1.3). `include_erts`, when set, passes
+/// `{erts, ErtsRootDir}` so `make_tar` embeds `erts-<vsn>/` in the tarball
+/// itself, copying it fresh from the building host's own OTP install —
+/// independent of, and not reused from, [`copy_erts`]'s separate on-disk
+/// copy into the release directory (ADR 0125 §1.1's acceptance criterion
+/// wants the *unpacked* directory to be bootable on its own, so that copy
+/// has to exist regardless of what ships inside the tarball).
+///
+/// Returns the tarball's path and size in bytes.
+///
+/// # Errors
+///
+/// Returns an error if `erl` cannot be spawned, `systools:make_tar/2`
+/// fails, or the resulting file cannot be stat'd.
+pub fn make_tarball(
+    release_dir: &Utf8Path,
+    release_name: &str,
+    release_vsn: &str,
+    staged_ebins: &[Utf8PathBuf],
+    tar_out_dir: &Utf8Path,
+    include_erts: bool,
+    erts_root: &Utf8Path,
+) -> Result<(Utf8PathBuf, u64)> {
+    let release_dir_abs = absolutize(release_dir)?;
+    let rel_file_no_ext = release_dir_abs
+        .join("releases")
+        .join(release_vsn)
+        .join(release_name);
+    let ebin_path_list = erlang_string_list(staged_ebins);
+    let erts_opt = if include_erts {
+        format!(
+            ", {{erts, \"{}\"}}",
+            escape_erlang_string(&to_forward_slash(erts_root.as_str()))
+        )
+    } else {
+        String::new()
+    };
+    std::fs::create_dir_all(tar_out_dir.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create '{tar_out_dir}'"))?;
+    let eval = format!(
+        "MakeTarResult = systools:make_tar(\"{rel_file_no_ext}\", \
+             [{{path, [{ebin_path_list}]}}, {{outdir, \"{tar_out_dir}\"}}{erts_opt}]), \
+         case MakeTarResult of \
+             ok -> ok; \
+             {{ok, _Mod, _Warnings}} -> ok; \
+             TarOther -> \
+                 io:format(standard_error, \"systools:make_tar failed: ~p~n\", [TarOther]), \
+                 halt(1) \
+         end, \
+         halt(0).",
+        rel_file_no_ext = escape_erlang_string(&to_forward_slash(rel_file_no_ext.as_str())),
+        tar_out_dir = escape_erlang_string(&to_forward_slash(tar_out_dir.as_str())),
+    );
+    let output = Command::new("erl")
+        .arg("-noshell")
+        .arg("-noinput")
+        .arg("-eval")
+        .arg(&eval)
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erl to build the release tarball")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!(
+            "Release tarball assembly failed:\n{}",
+            format!("{stdout}{stderr}").trim_end()
+        );
+    }
+
+    // `systools:make_tar/2` names the tarball after `RelFileNoExt`'s
+    // basename (the .rel's own name, e.g. `orders.tar.gz`) inside
+    // `{outdir, tar_out_dir}` — matches ADR §1.1's
+    // `_build/release/<name>-<vsn>.tar.gz` only when `release_name` already
+    // *is* `<name>-<vsn>` at the `.rel`'s basename, which it is not
+    // (`rel_file_no_ext`'s basename is plain `release_name`). Rename to the
+    // ADR-specified name.
+    let produced = tar_out_dir.join(format!("{release_name}.tar.gz"));
+    let wanted = tar_out_dir.join(format!("{release_name}-{release_vsn}.tar.gz"));
+    if produced != wanted {
+        std::fs::rename(produced.as_std_path(), wanted.as_std_path())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to rename '{produced}' to '{wanted}'"))?;
+    }
+
+    let size = std::fs::metadata(wanted.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stat '{wanted}'"))?
+        .len();
+
+    Ok((wanted, size))
+}
+
+/// Stage the compiler port binary (`beamtalk-compiler-port`[`.exe`]) into
+/// `<release_dir>/bin/` (`[release] include-compiler = true`, ADR 0125
+/// §1.3/§1.5) — `closure.rs` already stages the `beamtalk_compiler` OTP
+/// application's `.beam`s; this is the other half, the native port
+/// executable `beamtalk_compiler_port_server` spawns.
+///
+/// Discovery mirrors `startup_command.rs`'s: `BEAMTALK_COMPILER_PORT_BIN`
+/// when set (a Nix/Homebrew wrapper's override), else the file next to this
+/// process's own executable — the single place both look, so a build
+/// running under either wrapper finds the same binary the CLI itself would
+/// launch. `<release_dir>/bin/` is deliberately the same directory a future
+/// launcher (`bin/<name>`, BT-3573) will occupy: `startup_command.rs`'s own
+/// discovery convention (`bin_dir.join(compiler_name)`, `bin_dir` = the
+/// running executable's parent) finds it there for free once that launcher
+/// exists, with no new discovery code needed.
+///
+/// Returns `Ok(None)` (not an error) if no compiler port binary can be
+/// found — the message names exactly what `startup_command.rs`'s own
+/// discovery already accepts as "missing" (a dev checkout that never built
+/// the port binary), so a release built with `include-compiler` in that
+/// situation gets a clear staging error naming the fix, rather than an
+/// opaque one only surfacing much later at boot.
+///
+/// # Errors
+///
+/// Returns an error if the binary is found but cannot be copied.
+pub fn stage_compiler_port_binary(release_dir: &Utf8Path) -> Result<Utf8PathBuf> {
+    let found = if let Ok(user_path) = std::env::var("BEAMTALK_COMPILER_PORT_BIN") {
+        Some(Utf8PathBuf::from(user_path))
+    } else {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                let bin_dir = exe.parent()?;
+                let compiler_name = if cfg!(windows) {
+                    "beamtalk-compiler-port.exe"
+                } else {
+                    "beamtalk-compiler-port"
+                };
+                let candidate = bin_dir.join(compiler_name);
+                candidate.is_file().then_some(candidate)
+            })
+            .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+    };
+
+    let Some(src) = found else {
+        miette::bail!(
+            "[release] include-compiler = true, but no compiler port binary was found.\n\n\
+             \x20 Set BEAMTALK_COMPILER_PORT_BIN to its path, or build it alongside the CLI \
+             \x20 (cargo build --bin beamtalk-compiler-port) so it sits next to the beamtalk \
+             \x20 executable."
+        );
+    };
+
+    let bin_dir = release_dir.join("bin");
+    std::fs::create_dir_all(bin_dir.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create '{bin_dir}'"))?;
+    let dest = bin_dir.join(src.file_name().unwrap_or("beamtalk-compiler-port"));
+    std::fs::copy(src.as_std_path(), dest.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stage compiler port binary '{src}' to '{dest}'"))?;
+    #[cfg(unix)]
+    {
+        let perms = std::fs::metadata(src.as_std_path())
+            .into_diagnostic()?
+            .permissions();
+        std::fs::set_permissions(dest.as_std_path(), perms).into_diagnostic()?;
+    }
+    Ok(dest)
+}
+
+/// Write `releases/<vsn>/shapes.json` (ADR 0125 §2.2/§3.4) via
+/// `beamtalk_release_shapes:write_shapes_json/4` (`beamtalk_runtime`),
+/// through a single `erl -noshell` invocation — the build-time shape
+/// extractor described in that module's own moduledoc.
+///
+/// `runtime_lib_dirs` are staged ebin dirs the extractor needs *loaded* for
+/// ancestor resolution (the runtime closure: `beamtalk_runtime`,
+/// `beamtalk_stdlib`, `beamtalk_workspace`, `cowboy`/`cowlib`/`ranch`/
+/// `telemetry`/`telemetry_poller`, and `beamtalk_compiler` when staged) but
+/// never emits a shapes.json entry for; `emit_lib_dirs` are the project's
+/// own app, its ADR 0070 dependencies, and any `[release] apps` extras —
+/// every class here gets an entry.
+///
+/// # Errors
+///
+/// Returns an error if `erl` cannot be spawned or the extractor reports a
+/// failure (`beamtalk_stdlib` — and so `beamtalk_runtime` — could not be
+/// started; nothing can be extracted without it).
+pub fn write_shapes_json(
+    runtime_lib_dirs: &[Utf8PathBuf],
+    emit_lib_dirs: &[Utf8PathBuf],
+    out_path: &Utf8Path,
+    release_vsn: &str,
+) -> Result<()> {
+    let runtime_dirs_term = erlang_string_list(runtime_lib_dirs);
+    let emit_dirs_term = erlang_string_list(emit_lib_dirs);
+    let eval = format!(
+        "case beamtalk_release_shapes:write_shapes_json([{runtime_dirs}], [{emit_dirs}], \
+             \"{out_path}\", <<\"{vsn}\">>) of \
+             ok -> ok; \
+             ShapesErr -> \
+                 io:format(standard_error, \"shapes.json extraction failed: ~p~n\", [ShapesErr]), \
+                 halt(1) \
+         end, \
+         halt(0).",
+        runtime_dirs = runtime_dirs_term,
+        emit_dirs = emit_dirs_term,
+        out_path = escape_erlang_string(&to_forward_slash(out_path.as_str())),
+        vsn = escape_erlang_string(release_vsn),
+    );
+    // `beamtalk_release_shapes` itself (and the modules it calls —
+    // `beamtalk_module_activation`, `beamtalk_shape_migration`,
+    // `beamtalk_class_metadata`) live in the staged `beamtalk_runtime` ebin,
+    // one of `runtime_lib_dirs` — but that directory is only *known to the
+    // eval string*, not yet on this fresh `erl` process's own code path, so
+    // the call inside the eval would itself be `undef` without these `-pa`
+    // flags. The eval's own `code:add_pathz` calls (inside
+    // `extract_shapes/2`) are for the modules that get *loaded and
+    // registered* during extraction; this `-pa` is for the extractor module
+    // itself, needed before the eval string can even start running.
+    let mut cmd = Command::new("erl");
+    cmd.arg("-noshell").arg("-noinput");
+    for dir in runtime_lib_dirs {
+        cmd.arg("-pa").arg(dir.as_std_path());
+    }
+    cmd.arg("-eval").arg(&eval);
+    let output = cmd
+        .output()
+        .into_diagnostic()
+        .wrap_err("Failed to run erl to extract shapes.json (is the runtime built?)")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!(
+            "shapes.json extraction failed:\n{}",
+            format!("{stdout}{stderr}").trim_end()
+        );
+    }
+    Ok(())
+}
+
+/// Render `dirs` as a comma-separated Erlang string-literal list body (no
+/// enclosing brackets — callers splice it directly into a `[…]` list
+/// literal), forward-slashed and escaped exactly as `ebin_path_list` above.
+fn erlang_string_list(dirs: &[Utf8PathBuf]) -> String {
+    dirs.iter()
+        .map(|p| {
+            format!(
+                "\"{}\"",
+                escape_erlang_string(&to_forward_slash(p.as_str()))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Resolve `path` (which must already exist — call this only after
@@ -562,6 +999,51 @@ mod tests {
         );
     }
 
+    /// The exact shape a project's own build produces: `layout.ebin_dir()`
+    /// doubles as the `.core` compile output dir (`BuildEnvironment::build_dir`)
+    /// and holds the generated `.app` callback module's `.erl` source
+    /// alongside the `.beam`/`.app` a release actually needs — neither
+    /// intermediate belongs in the staged tree (ADR 0125's staged-tree shape
+    /// is "the project's `bt@orders@*.beam` + `orders.app`" only).
+    #[test]
+    fn stage_apps_excludes_core_and_erl_intermediates() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = root.join("src_ebin");
+        fs::create_dir_all(src.as_std_path()).unwrap();
+        fs::write(src.join("orders.app").as_std_path(), "app content").unwrap();
+        fs::write(src.join("bt@orders@main.beam").as_std_path(), b"beam").unwrap();
+        fs::write(
+            src.join("bt@orders@main.core").as_std_path(),
+            b"core source",
+        )
+        .unwrap();
+        fs::write(
+            src.join("beamtalk_orders_app.erl").as_std_path(),
+            b"erl source",
+        )
+        .unwrap();
+
+        let release_dir = root.join("release");
+        let closure = AppClosure {
+            host_apps: vec!["kernel".to_string()],
+            staged_apps: vec![app("orders", "1.0.0", &src)],
+        };
+        stage_apps(&release_dir, &closure).unwrap();
+
+        let dest = release_dir.join("lib").join("orders-1.0.0").join("ebin");
+        assert!(dest.join("orders.app").is_file());
+        assert!(dest.join("bt@orders@main.beam").is_file());
+        assert!(
+            !dest.join("bt@orders@main.core").exists(),
+            ".core intermediate must not be staged into a release"
+        );
+        assert!(
+            !dest.join("beamtalk_orders_app.erl").exists(),
+            ".erl source must not be staged into a release"
+        );
+    }
+
     #[test]
     fn stage_apps_merges_multiple_source_ebins() {
         // Mirrors beamtalk_stdlib in a dev checkout: class beams in one
@@ -648,12 +1130,24 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let path =
-            generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1").unwrap();
+            generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1", false)
+                .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
         assert!(content.contains("{mode, release}"), "{content}");
         assert!(content.contains("{console, false}"), "{content}");
         assert!(content.contains("{bind, \"127.0.0.1\"}"), "{content}");
+        assert!(content.contains("{include_compiler, false}"), "{content}");
         assert!(content.trim_end().ends_with('.'), "{content}");
+    }
+
+    #[test]
+    fn generate_sys_config_sets_include_compiler() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let path = generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1", true)
+            .unwrap();
+        let content = fs::read_to_string(path.as_std_path()).unwrap();
+        assert!(content.contains("{include_compiler, true}"), "{content}");
     }
 
     #[test]
@@ -668,7 +1162,8 @@ mod tests {
         )
         .unwrap();
 
-        let path = generate_sys_config(&root, &root, "config/sys.config", true, "0.0.0.0").unwrap();
+        let path =
+            generate_sys_config(&root, &root, "config/sys.config", true, "0.0.0.0", false).unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
         assert!(content.contains("{mode, release}"), "{content}");
         assert!(content.contains("{console, true}"), "{content}");
@@ -679,7 +1174,8 @@ mod tests {
     fn generate_sys_config_absent_user_file_is_not_an_error() {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let result = generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1");
+        let result =
+            generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1", false);
         assert!(result.is_ok());
     }
 
@@ -848,8 +1344,15 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let malicious_bind = "127.0.0.1\"}, {evil, true}, {bind, \"0.0.0.0";
-        let path =
-            generate_sys_config(&root, &root, "config/sys.config", false, malicious_bind).unwrap();
+        let path = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            false,
+            malicious_bind,
+            false,
+        )
+        .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
         // The embedded `"` must come out escaped (`\"`), so the whole
         // malicious value stays inert text inside one string literal
