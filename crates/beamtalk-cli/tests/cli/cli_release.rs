@@ -732,10 +732,11 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
 
     // Poll `ping` until the node is live (or the child exited early, which
     // is itself a failure worth surfacing directly rather than timing out).
-    // 60s, not 30s: under CI's full parallel test suite (every other test
-    // binary's process competing for CPU), a cold node boot has been
-    // observed taking well over 30s even though it boots in ~1s locally.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    // 120s, not 30s: under CI's full parallel test suite (every other test
+    // binary's process competing for a runner's few cores), a cold node
+    // boot has been observed taking well over 60s even though it boots in
+    // ~1s locally with no contention.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     let mut pinged = false;
     while std::time::Instant::now() < deadline {
         if let Ok(Some(status)) = foreground.0.try_wait() {

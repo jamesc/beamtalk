@@ -148,6 +148,7 @@ fn set_executable(path: &Utf8Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)] // shares its signature with the `unix` fallible variant above
 fn set_executable(_path: &Utf8Path) -> Result<()> {
     // Windows has no POSIX executable bit; `bin/<name>.cmd` is directly
     // runnable and `bin/<name>` is only ever invoked on a POSIX host.
