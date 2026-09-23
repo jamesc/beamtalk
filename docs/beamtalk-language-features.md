@@ -5329,6 +5329,8 @@ The system event classes (all `Announcement` subclasses):
 | `ObjectStateChanged` | `pid`, `actorClass`, `changedSlots` | a *watched* actor commits a state write (opt-in via `beamtalk_object_watch`) |
 | `SupervisionChildAdded` | (see ADR 0092) | a supervised child is added |
 | `SupervisionChildCrashed` | (see ADR 0092) | a supervised child crashes |
+| `NodeUp` | `node` | a visible node connects (ADR 0126 §8; hidden nodes never announce) |
+| `NodeDown` | `node`, `reason` | a visible node's connection is lost (`reason` is OTP's `nodedown_reason`, or `#unknown`) |
 
 `SystemAnnouncer` is **async-only**: `announceAndWait:` raises
 `UnsupportedOperation`, because the shared system bus can have many subscribers

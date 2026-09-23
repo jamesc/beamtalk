@@ -617,6 +617,24 @@ async_send(ActorPid, isAlive, [], FuturePid) ->
     Result = beamtalk_pid:is_alive(ActorPid),
     beamtalk_future:resolve(FuturePid, Result),
     ok;
+async_send(ActorPid, isRemote, [], FuturePid) ->
+    %% isRemote must compare against the *caller's* node, so it cannot run
+    %% in the actor — see is_remote/1.
+    try sync_send(ActorPid, isRemote, []) of
+        Result -> beamtalk_future:resolve(FuturePid, Result)
+    catch
+        error:#beamtalk_error{} = Error ->
+            beamtalk_future:reject(FuturePid, Error);
+        error:#{error := #beamtalk_error{} = Error} ->
+            beamtalk_future:reject(FuturePid, Error);
+        Class:Reason ->
+            Error = beamtalk_error:with_details(
+                beamtalk_error:new(runtime_error, unknown, isRemote),
+                #{original_class => Class, original_reason => Reason}
+            ),
+            beamtalk_future:reject(FuturePid, Error)
+    end,
+    ok;
 async_send(ActorPid, stop, [], FuturePid) ->
     %% stop is handled locally - gracefully stops the actor process
     %% No send-site telemetry for stop — terminate/2 handles it
@@ -782,6 +800,8 @@ Handles lifecycle methods locally without involving the actor process:
 - `pid` - returns the raw Erlang PID backing the actor
 - `isAlive` - checks if process is alive, returns boolean
   (remote pid: always `true`, ADR 0126 §7.3 — see moduledoc)
+- `isRemote` - asks the actor for its `node` and compares it with the
+  caller's node (ADR 0126 §2 — see is_remote/1)
 - `monitor` - creates a monitor reference, returns ref
 - `onExit:` - monitors actor and calls block on exit
 - `stop` - gracefully stops the actor process, returns ok
@@ -810,6 +830,8 @@ sync_send({registered, Name} = Ref, Selector, Args) when is_atom(Name) ->
     end;
 sync_send(ActorPid, isAlive, []) ->
     beamtalk_pid:is_alive(ActorPid);
+sync_send(ActorPid, isRemote, []) ->
+    is_remote(sync_send(ActorPid, node, []));
 sync_send(ActorPid, stop, []) ->
     %% stop is handled locally - gracefully stops the actor process
     %% No send-site telemetry for stop — terminate/2 handles it
@@ -1032,6 +1054,8 @@ sync_send({registered, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) 
         Pid when is_pid(Pid) ->
             sync_send(Pid, Selector, Args, Timeout)
     end;
+sync_send(ActorPid, isRemote, [], Timeout) ->
+    is_remote(sync_send(ActorPid, node, [], Timeout));
 sync_send(ActorPid, Selector, Args, Timeout) when
     is_integer(Timeout), Timeout >= 0;
     Timeout =:= infinity
@@ -1258,6 +1282,18 @@ able to tell the two apart.
 -spec raise_node_down(node(), atom()) -> no_return().
 raise_node_down(Node, Selector) ->
     beamtalk_exception_handler:reraise(node_down_error_record(Node, Selector)).
+
+-doc """
+Answer an actor's `isRemote` (ADR 0126 §2) from the `Node` its `node` send
+returned: `true` iff that node is not the *caller's*. This is why `isRemote`
+is intercepted in `sync_send/3,4` / `async_send/4` rather than dispatched to
+the actor — inside the actor, `node()` is always the actor's own node. Going
+through the `node` send (not `node(ActorPid)`) lets a `TimeoutProxy` report
+its target's node (§6).
+""".
+-spec is_remote(beamtalk_node:t()) -> boolean().
+is_remote(Node) ->
+    beamtalk_node:name(Node) =/= node().
 
 -doc "Construct a structured node_down error record for the given node and selector.".
 -spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.

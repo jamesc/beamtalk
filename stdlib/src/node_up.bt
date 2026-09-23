@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// NodeUp — system event announced when a visible node connects to this one
+/// (ADR 0126 §8).
+///
+/// Published on `SystemAnnouncer current` by the runtime's
+/// `beamtalk_node_monitor`, which re-announces `net_kernel:monitor_nodes/2`
+/// events. Hidden (tooling) nodes never announce, and announcements stay
+/// node-local: each node announces its own view of cluster membership.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: NodeUp do: [:e |
+///   Transcript showLine: "joined " ++ e node name asString
+/// ]
+/// ```
+sealed typed Announcement subclass: NodeUp
+  field: node :: Node

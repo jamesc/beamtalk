@@ -38,6 +38,7 @@ code through (see start_peer/1's doc).
     ensure_distribution/0,
     start_peer/0,
     start_peer/1,
+    start_peer/2,
     stop_peer/1
 ]).
 
@@ -92,18 +93,37 @@ last case the peer is stopped before returning so no orphaned node leaks.
 """.
 -spec start_peer(string()) -> {ok, peer:server_ref(), node()} | {error, term()}.
 start_peer(NamePrefix) ->
+    start_peer(NamePrefix, #{}).
+
+-doc """
+start_peer/1 with options:
+
+- `extra_args` — extra `erl` arguments for the peer (e.g. `["-hidden"]`).
+- `connection` — `peer`'s control-channel option. The default (a
+  distribution-based channel) halts the peer as soon as this node
+  disconnects from it, so a test that disconnects on purpose and expects
+  the peer to survive (e.g. to reconnect) passes `standard_io`.
+""".
+-spec start_peer(string(), #{extra_args => [string()], connection => standard_io}) ->
+    {ok, peer:server_ref(), node()} | {error, term()}.
+start_peer(NamePrefix, Opts) ->
     ensure_distribution(),
     {ok, Host} = inet:gethostname(),
     PeerName = unique_short_name(NamePrefix),
     CodePathArgs = lists:append([["-pa", Dir] || Dir <- code:get_path()]),
     CookieArgs = ["-setcookie", atom_to_list(erlang:get_cookie())],
-    case
-        peer:start(#{
-            name => PeerName,
-            host => Host,
-            args => CookieArgs ++ CodePathArgs
-        })
-    of
+    ExtraArgs = maps:get(extra_args, Opts, []),
+    PeerOpts0 = #{
+        name => PeerName,
+        host => Host,
+        args => CookieArgs ++ ExtraArgs ++ CodePathArgs
+    },
+    PeerOpts =
+        case Opts of
+            #{connection := Connection} -> PeerOpts0#{connection => Connection};
+            #{} -> PeerOpts0
+        end,
+    case peer:start(PeerOpts) of
         {ok, Peer, PeerNode} ->
             case net_adm:ping(PeerNode) of
                 pong ->
