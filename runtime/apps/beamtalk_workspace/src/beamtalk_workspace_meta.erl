@@ -69,7 +69,7 @@ and can be queried by other components (e.g., idle monitor).
     last_activity :: integer(),
     node_name :: atom(),
     repl_port :: inet:port_number() | undefined,
-    repl :: boolean(),
+    mode :: beamtalk_capability:mode(),
     supervised_actors :: [pid()],
     loaded_modules :: #{atom() => string() | undefined},
     class_sources :: #{binary() => string()},
@@ -86,14 +86,14 @@ and can be queried by other components (e.g., idle monitor).
 }).
 
 %% init_metadata/0 is the input contract for start_link/1.
-%% It extends metadata() with init-only fields (repl) that are consumed during
+%% It extends metadata() with init-only fields (mode) that are consumed during
 %% initialisation and not exposed through get_metadata/0.
 -type init_metadata() :: #{
     workspace_id := binary(),
     project_path => binary() | undefined,
     created_at := integer(),
     repl_port => inet:port_number() | undefined,
-    repl => boolean()
+    mode => beamtalk_capability:mode()
 }.
 
 %% metadata/0 is the output contract returned by get_metadata/0.
@@ -437,7 +437,7 @@ init(InitialMetadata) ->
     PackageName = detect_package_name(ProjectPath),
     CreatedAt = maps:get(created_at, InitialMetadata),
     ReplPort = maps:get(repl_port, InitialMetadata, undefined),
-    ReplMode = maps:get(repl, InitialMetadata, true),
+    Mode = init_mode(InitialMetadata),
     Now = erlang:system_time(second),
 
     %% Create ETS table for workspace registry (if not already exists)
@@ -451,12 +451,15 @@ init(InitialMetadata) ->
             ok
     end,
 
-    %% Compute metadata path — undefined in run mode (repl=false) so no disk registration.
+    %% Compute metadata path — undefined in run and release modes so no disk
+    %% registration (ADR 0125 §1.4: only workspace mode writes artifacts).
     MetadataPath =
-        case ReplMode of
-            false ->
+        case Mode of
+            run ->
                 undefined;
-            true ->
+            release ->
+                undefined;
+            workspace ->
                 case beamtalk_platform:home_dir() of
                     false ->
                         CacheDir = filename:basedir(user_cache, "beamtalk"),
@@ -485,7 +488,7 @@ init(InitialMetadata) ->
         last_activity = Now,
         node_name = node(),
         repl_port = ReplPort,
-        repl = ReplMode,
+        mode = Mode,
         supervised_actors = [],
         loaded_modules = #{},
         class_sources = #{},
@@ -1055,6 +1058,21 @@ source_file_newer_than(SourcePath, SnapshotMtime) when is_list(SourcePath) ->
     case filelib:last_modified(SourcePath) of
         0 -> false;
         Mtime -> Mtime > SnapshotMtime
+    end.
+
+-doc """
+Read the workspace `mode` (ADR 0125 §1.4) from the start_link/1 map,
+defaulting to `workspace`. The removed `repl => boolean()` key fails loudly
+rather than being silently ignored — a stale `repl => false` caller would
+otherwise get workspace mode and write metadata to disk.
+""".
+-spec init_mode(map()) -> beamtalk_capability:mode().
+init_mode(#{repl := _}) ->
+    erlang:error({bad_config, {removed_key, repl, use_mode}});
+init_mode(InitialMetadata) ->
+    case maps:get(mode, InitialMetadata, workspace) of
+        Mode when Mode =:= run; Mode =:= workspace; Mode =:= release -> Mode;
+        Other -> erlang:error({bad_config, {invalid_mode, Other}})
     end.
 
 -doc """

@@ -13,9 +13,15 @@ This supervisor manages workspace supervisors dynamically.
 Each workspace is supervised independently and can be started/stopped
 on demand.
 
-Currently, the CLI starts workspaces directly via beamtalk_workspace_sup:start_link/1
-without going through this supervisor. This is a transitional state - future
-work (ADR 0004) will move to dynamic workspace supervision under this tree.
+The CLI's `run`/`workspace`/escript paths still start
+`beamtalk_workspace_sup` directly via an `-eval` string, entirely outside
+this tree — a transitional state future work (ADR 0004) may replace. A
+release, however, sets `mode` in the `beamtalk_workspace` application env
+(`sys.config`), and `beamtalk_workspace_app:start/2` starts a single
+workspace under this supervisor via `start_workspace/1` (ADR 0125 §1.4) —
+so `init/1` still returns no *static* children, but `start_workspace/1`
+adds one dynamically the way ADR 0004's future work eventually generalises
+to many.
 
 Architecture:
 ```
@@ -31,13 +37,33 @@ beamtalk_workspace_app_sup (one_for_one)
 ```
 """.
 
--export([start_link/0]).
+-export([start_link/0, start_workspace/1]).
 -export([init/1]).
 
 -doc "Start the workspace root supervisor.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+-doc """
+Start `beamtalk_workspace_sup` as a dynamic child of this supervisor
+(ADR 0125 §1.4). Called only by `beamtalk_workspace_app:start/2`, and only
+when the `beamtalk_workspace` application env declares a `mode` — the CLI's
+run/workspace/escript paths keep starting `beamtalk_workspace_sup` directly,
+outside this tree, so they never reach this function.
+""".
+-spec start_workspace(beamtalk_workspace_sup:workspace_config()) ->
+    {ok, pid()} | {error, term()}.
+start_workspace(Config) ->
+    ChildSpec = #{
+        id => beamtalk_workspace_sup,
+        start => {beamtalk_workspace_sup, start_link, [Config]},
+        restart => permanent,
+        shutdown => infinity,
+        type => supervisor,
+        modules => [beamtalk_workspace_sup]
+    },
+    supervisor:start_child(?MODULE, ChildSpec).
 
 init([]) ->
     SupFlags = #{

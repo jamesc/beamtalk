@@ -416,7 +416,7 @@ recheck_setup() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    %% `repl => false` (run mode) is load-bearing for test isolation, not
+    %% `mode => run` (run mode) is load-bearing for test isolation, not
     %% just tidiness: in REPL mode (the default) `beamtalk_workspace_meta`
     %% persists `class_sources` to
     %% `~/.beamtalk/workspaces/<workspace_id>/metadata.json` and *reloads* it
@@ -428,7 +428,7 @@ recheck_setup() ->
         workspace_id => <<"recheck_test_ws">>,
         project_path => undefined,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     clear_xref(),
     beamtalk_compiler_server:clear_classes(),

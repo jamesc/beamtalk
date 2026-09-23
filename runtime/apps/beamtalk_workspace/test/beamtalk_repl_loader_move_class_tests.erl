@@ -70,7 +70,7 @@ setup() ->
         workspace_id => <<"move_class_test_ws">>,
         project_path => list_to_binary(ProjDir),
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     beamtalk_compiler_server:clear_classes(),
     State0 = beamtalk_repl_state:new(undefined, 0),
@@ -233,7 +233,7 @@ setup_dynamic() ->
         workspace_id => <<"move_class_dyn_test_ws">>,
         project_path => list_to_binary(ProjDir),
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     beamtalk_compiler_server:clear_classes(),
     State = #{
@@ -315,7 +315,7 @@ setup_dependency() ->
         workspace_id => <<"move_class_dep_test_ws">>,
         project_path => list_to_binary(ProjDir),
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     beamtalk_compiler_server:clear_classes(),
     State0 = beamtalk_repl_state:new(undefined, 0),

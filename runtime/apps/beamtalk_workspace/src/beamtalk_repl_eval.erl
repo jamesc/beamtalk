@@ -653,6 +653,15 @@ etc.). `Path` is a project-relative `.bt` path (the same form git restored).
 """.
 -spec reload_file(string()) -> {ok, [binary()]} | {error, term()}.
 reload_file(Path) ->
+    %% Called over RPC from the LiveView client, bypassing the REPL op seam,
+    %% so it consults the capability check itself (ADR 0125 §1.5).
+    case beamtalk_capability:check(reload, 'Workspace', <<"Reloading a file">>) of
+        ok -> do_reload_file(Path);
+        {error, _} = Refusal -> Refusal
+    end.
+
+-spec do_reload_file(string()) -> {ok, [binary()]} | {error, term()}.
+do_reload_file(Path) ->
     case beamtalk_repl_loader:reload_class_file(Path) of
         {ok, ClassNames} ->
             repopulate_class_sources(Path, ClassNames),
@@ -744,6 +753,16 @@ runtime keeps no compile-time dependency on beamtalk_workspace.
 -spec eval_with_self(term(), binary() | string()) ->
     {ok, term()} | {error, #beamtalk_error{}}.
 eval_with_self(Self, Source) ->
+    %% Compiles source, so a release without a compiler refuses it
+    %% (ADR 0125 §1.5) — this entry point bypasses the REPL op seam.
+    case beamtalk_capability:check('evaluate:', 'Inspector', <<"Inspector evaluate:">>) of
+        ok -> do_eval_with_self(Self, Source);
+        {error, _} = Refusal -> Refusal
+    end.
+
+-spec do_eval_with_self(term(), binary() | string()) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+do_eval_with_self(Self, Source) ->
     SourceStr = unicode:characters_to_list(Source),
     %% Reuse a per-process module name (minted once, cached in the process
     %% dictionary) instead of a fresh atom per call, so a hot `evaluate:` loop in

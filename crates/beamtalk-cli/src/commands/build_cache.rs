@@ -678,7 +678,7 @@ fn build_cache_entries(
 
         // Compute the expected module name for this file
         let module_name = match super::build::compute_relative_module(file, source_root) {
-            Ok(rel) => format!("bt@{pkg_name}@{rel}"),
+            Ok(rel) => super::util::bt_qualified_module_name(pkg_name, &rel),
             Err(_) => continue,
         };
 

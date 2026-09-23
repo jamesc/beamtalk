@@ -800,24 +800,11 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:record_backing_module_entry(ClassName, Meta, self()),
 
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
-    %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
-    %% Use Meta map availability (not function_exported, which returns false during on_load).
-    %% Wrap in try/catch so an undef crash (e.g., beamtalk_compiler_server
-    %% not on code path) doesn't kill the class process during on_load.
+    %% Use Meta map availability (not function_exported, which returns false
+    %% during on_load).
     case Meta of
         CompilerMeta when is_map(CompilerMeta), map_size(CompilerMeta) > 0 ->
-            try
-                beamtalk_compiler_server:register_class(ClassName, CompilerMeta)
-            catch
-                error:undef ->
-                    ?LOG_WARNING(#{
-                        event => register_class_undef,
-                        class => ClassName,
-                        reason => "beamtalk_compiler_server:register_class/2 not available",
-                        domain => [beamtalk, runtime]
-                    }),
-                    ok
-            end;
+            notify_compiler_server_register(ClassName, CompilerMeta);
         _ ->
             ok
     end,
@@ -1331,7 +1318,14 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                 true ->
                     try NewModule:'__beamtalk_meta'() of
                         Meta when is_map(Meta) ->
-                            beamtalk_compiler_server:register_class(ClassName, Meta);
+                            %% This `update_class` path is hit by ordinary
+                            %% stdlib bootstrap too (the metaclass-tower
+                            %% stubs are registered, then `update_class`'d
+                            %% when their compiled `.bt` modules load) — not
+                            %% just live hot-reload — so it needs the same
+                            %% "compiler server may be absent" guard as the
+                            %% on_load registration path above.
+                            notify_compiler_server_register(ClassName, Meta);
                         _ ->
                             ok
                     catch
@@ -1586,6 +1580,34 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+-doc """
+ADR 0050 Phase 3: notify the compiler server of a class (re)registration —
+shared by the on_load registration path (`handle_call({start, …})`) and the
+hot-reload/redefinition path (`handle_call({update_class, …})`), which both
+call this with the class's fresh `__beamtalk_meta/0` map.
+
+Cast is fire-and-forget — silently dropped if the compiler server is not
+running. `beamtalk_compiler` is not started at all in release/escript mode
+(ADR 0099 §4 / ADR 0125 §1.5's default), and the hot-reload path is hit by
+ordinary stdlib bootstrap too (the metaclass-tower stubs are registered,
+then `update_class`'d when their compiled `.bt` modules load) — not just
+live hot-reload — so an `undef` here must never crash the class process.
+""".
+-spec notify_compiler_server_register(class_name(), map()) -> ok.
+notify_compiler_server_register(ClassName, Meta) ->
+    try
+        beamtalk_compiler_server:register_class(ClassName, Meta)
+    catch
+        error:undef ->
+            ?LOG_WARNING(#{
+                event => register_class_undef,
+                class => ClassName,
+                reason => "beamtalk_compiler_server:register_class/2 not available",
+                domain => [beamtalk, runtime]
+            }),
+            ok
+    end.
 
 -doc """
 True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on

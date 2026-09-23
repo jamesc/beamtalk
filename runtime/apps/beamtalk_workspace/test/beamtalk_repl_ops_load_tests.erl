@@ -1829,7 +1829,7 @@ setup_project_class(ClassName, Src) ->
         workspace_id => <<"section_ws">>,
         project_path => list_to_binary(Proj),
         created_at => erlang:system_time(second),
-        %% `repl => false` is "run mode" (see `beamtalk_workspace_meta:init/1`):
+        %% `mode => run` is "run mode" (see `beamtalk_workspace_meta:init/1`):
         %% it skips computing a `metadata_path` under the real
         %% `~/.beamtalk/workspaces/<id>/metadata.json`, so `init/1`'s
         %% `load_metadata_from_disk/1` never re-loads a STALE `project_path`
@@ -1838,7 +1838,7 @@ setup_project_class(ClassName, Src) ->
         %% clobbers the freshly-passed `project_path` with whatever an earlier
         %% run last persisted — a real bug found while writing this test, not
         %% a hypothetical.
-        repl => false
+        mode => run
     }),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, State0),

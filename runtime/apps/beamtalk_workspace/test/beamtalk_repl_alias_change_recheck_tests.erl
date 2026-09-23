@@ -52,7 +52,7 @@ alias_recheck_setup() ->
         workspace_id => <<"alias_change_recheck_test_ws">>,
         project_path => undefined,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     %% Clears the compiler_server's ambient class *and* alias caches (ADR
     %% 0108 — clear_classes/0 now clears both, see its doc).

@@ -1780,6 +1780,20 @@ releases asserting §2.3's report verbatim.
   be pruned to the transitively-reachable set (a large artifact-size win,
   but it breaks `Object allSubclasses` reflection and DNU-based dynamic
   dispatch). Out of scope for v1; recorded as a size optimisation.
+- **New, from BT-3569's wire check:** `peer:stop/1` against a peer booted
+  with `connection => standard_io` must pass `shutdown => close`, not the
+  default `halt` (or a numeric-timeout variant) — those are documented in
+  terms of *waiting for the Erlang distribution connection to close*, and a
+  `standard_io`-connected peer has no distribution connection to wait on.
+  Against a `run`-mode peer with nothing much running this went unnoticed;
+  against a full `mode => release` boot (cowboy, `telemetry_poller`, the
+  workspace supervision tree) it reliably hung `peer:stop/1` with no error,
+  no timeout, and no output — the calling node's `-noshell` VM simply never
+  returned from `peer:stop/1`. `close` just tears down the control port and
+  returns, which is what a wire check (and Phase 3's `eval`/launcher tests)
+  actually want. Left for Phase 3 to confirm this also holds for the
+  launcher's own use of `peer` (if any) or a real `-boot`'d subprocess
+  started via `erl -boot` directly rather than `peer`.
 
 ---
 
@@ -1801,6 +1815,27 @@ transitional boolean clause** (the same discipline ADR 0123 applied to the
 `code_change/3` `Extra` tuple).
 
 ---
+
+## Implementation Tracking
+
+**Epic:** [BT-3567](https://linear.app/beamtalk/issue/BT-3567)
+**Status:** Planned
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| A (ADR Phase 2) | [BT-3568](https://linear.app/beamtalk/issue/BT-3568) | `mode => run \| workspace \| release` on `beamtalk_workspace_sup` + §1.5 capability refusals | M | – |
+| A (ADR Phases 0 + 2) | [BT-3569](https://linear.app/beamtalk/issue/BT-3569) | App-env start of `beamtalk_workspace_sup` + `start.boot` wire-check test | M | BT-3568 |
+| B (ADR Phase 1) | [BT-3570](https://linear.app/beamtalk/issue/BT-3570) | `beamtalk release` assembly: `[release]`, closure, staging, `.rel`, boot script | M | BT-3569 |
+| B (ADR Phase 1) | [BT-3571](https://linear.app/beamtalk/issue/BT-3571) | ERTS, tarball, provenance, shape extractor → `shapes.json` | M | BT-3570 |
+| C (ADR Phase 3) | [BT-3573](https://linear.app/beamtalk/issue/BT-3573) | Launcher `bin/<name>` + `.cmd`, all verbs, OTP boot check | M | BT-3571 |
+| C (ADR Phase 4) | [BT-3575](https://linear.app/beamtalk/issue/BT-3575) | Release console + `Beamtalk releaseInfo` / `shapeManifest` | M | BT-3568, BT-3573 |
+| D (ADR Phase 5) | [BT-3572](https://linear.app/beamtalk/issue/BT-3572) | `otp-support.toml`, doctor/build/release consumers, CI matrix | M | BT-3570 |
+| E (ADR Phase 6) | [BT-3574](https://linear.app/beamtalk/issue/BT-3574) | `beamtalk release --upgrade-from` preflight | M | BT-3571 |
+| F | [BT-3576](https://linear.app/beamtalk/issue/BT-3576) | `deploying.md`, ADR 0061 amendment, end-to-end release test | S | BT-3572, BT-3574, BT-3575 |
+
+Phase 7 (relup) is a separate, not-yet-filed epic; `unpack_strict/1` is
+owned by BT-3527.
 
 ## References
 

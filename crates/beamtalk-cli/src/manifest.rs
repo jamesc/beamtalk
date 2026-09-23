@@ -81,6 +81,14 @@ pub struct Manifest {
     /// Use [`parse_manifest_full`] to get a validated [`DiagnosticsTable`].
     #[serde(default)]
     diagnostics: Option<toml::Value>,
+    /// The optional `[release]` section — `beamtalk release` configuration
+    /// (ADR 0125 §1.2). Stored as raw TOML for lazy parsing so an invalid
+    /// key (e.g. `version`) gets [`ReleaseConfigError`]'s structured
+    /// diagnostic rather than a generic serde error.
+    ///
+    /// Use [`parse_manifest_full`] to get a validated [`ReleaseConfig`].
+    #[serde(default)]
+    release: Option<toml::Value>,
 }
 
 /// The `[native]` section of `beamtalk.toml`.
@@ -164,6 +172,219 @@ pub struct ApplicationConfig {
     /// Beamtalk class name of the root `Supervisor subclass:` for this OTP application
     /// (e.g. `"AppSup"`). The generated `start/2` callback calls its `start_link`.
     pub supervisor: String,
+}
+
+/// `beamtalk release` configuration from the `[release]` section of
+/// `beamtalk.toml` (ADR 0125 §1.2). Every key is optional; a missing
+/// `[release]` section is [`ReleaseConfig::default`].
+///
+/// There is deliberately no `version` field — the release version is always
+/// `[package] version` ([`ReleaseConfigError::VersionKeyNotAllowed`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // orthogonal [release] flags, each independently toggled
+pub struct ReleaseConfig {
+    /// Release name; defaults to `[package] name` when `None`.
+    pub name: Option<String>,
+    /// Extra OTP applications to add to the computed closure, beyond the
+    /// project app, its ADR 0070 dependency closure, and the runtime
+    /// closure (`beamtalk_runtime`/`beamtalk_stdlib`/`beamtalk_workspace`
+    /// and their declared deps).
+    pub apps: Vec<String>,
+    /// Bundle this machine's ERTS into the release. Parsed now; consumed by
+    /// the ERTS-bundling issue (ADR 0125 §1.3, BT-3571).
+    pub include_erts: bool,
+    /// Start the REPL/remote-console WebSocket listener.
+    pub console: bool,
+    /// Bind address for the console listener; only meaningful when
+    /// `console = true`.
+    pub bind: String,
+    /// Path (relative to the project root) to a user `sys.config` fragment
+    /// merged into the generated one.
+    pub sys_config: String,
+    /// Path (relative to the project root) to a user `vm.args` fragment
+    /// merged into the generated one.
+    pub vm_args: String,
+    /// Drop `debug_info` chunks from staged beams. Parsed now; consumed by
+    /// the ERTS-bundling issue (ADR 0125 §1.3, BT-3571).
+    pub strip_beams: bool,
+    /// Ship `beamtalk_compiler` in the release (a live, patchable image).
+    /// Parsed now; the compiler-port binary bundling itself is consumed by
+    /// BT-3571 — this issue only uses the flag to decide whether
+    /// `beamtalk_compiler` joins the app closure.
+    pub include_compiler: bool,
+}
+
+impl Default for ReleaseConfig {
+    fn default() -> Self {
+        Self {
+            name: None,
+            apps: Vec::new(),
+            include_erts: true,
+            console: false,
+            bind: "127.0.0.1".to_string(),
+            sys_config: "config/sys.config".to_string(),
+            vm_args: "config/vm.args".to_string(),
+            strip_beams: false,
+            include_compiler: false,
+        }
+    }
+}
+
+/// Errors parsing a `beamtalk.toml` `[release]` table (ADR 0125 §1.2).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum ReleaseConfigError {
+    /// `[release]` is present but is not a table.
+    #[error("[release] must be a table, not a {found}")]
+    NotATable {
+        /// The TOML value kind actually found (e.g. `"string"`).
+        found: &'static str,
+    },
+    /// `[release]` declares a `version` key.
+    #[error("[release] must not declare 'version'")]
+    #[diagnostic(help(
+        "The release version is always [package] version, the same single \
+         source of truth every other Beamtalk artifact uses — see \
+         docs/development/releasing.md. Remove the 'version' key from \
+         [release]."
+    ))]
+    VersionKeyNotAllowed,
+    /// A `[release]` key is not one of the recognised keys.
+    #[error("[release] has unknown key '{key}'")]
+    #[diagnostic(help(
+        "Expected one of: name, apps, include-erts, console, bind, \
+         sys-config, vm-args, strip-beams, include-compiler (ADR 0125 §1.2)."
+    ))]
+    UnknownKey {
+        /// The offending key as written in the manifest.
+        key: String,
+    },
+    /// A `[release]` value has the wrong TOML type for its key.
+    #[error("[release] '{key}' must be a {expected}, not a {found}")]
+    WrongType {
+        /// The key whose value has the wrong type.
+        key: &'static str,
+        /// The TOML type this key expects.
+        expected: &'static str,
+        /// The TOML value kind actually found.
+        found: &'static str,
+    },
+    /// `[release] apps` contains a non-string element.
+    #[error("[release] apps' entries must all be strings, found a {found}")]
+    AppsEntryWrongType {
+        /// The TOML value kind actually found.
+        found: &'static str,
+    },
+    /// `strip-beams = true` and `include-compiler = true` together.
+    #[error("[release] strip-beams = true together with include-compiler = true is refused")]
+    #[diagnostic(help(
+        "include-compiler ships a live compiler port, which needs \
+         debug_info-bearing beams to recompile against (ADR 0075); \
+         strip-beams drops that chunk. Set at most one of the two to true."
+    ))]
+    StripBeamsWithIncludeCompiler,
+}
+
+/// Validate that `value` is a string, for a `[release]` key expecting one.
+fn release_config_expect_string(
+    key: &'static str,
+    value: &toml::Value,
+) -> std::result::Result<String, ReleaseConfigError> {
+    value
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| ReleaseConfigError::WrongType {
+            key,
+            expected: "string",
+            found: value_type_name(value),
+        })
+}
+
+/// Validate that `value` is a boolean, for a `[release]` key expecting one.
+fn release_config_expect_bool(
+    key: &'static str,
+    value: &toml::Value,
+) -> std::result::Result<bool, ReleaseConfigError> {
+    value
+        .as_bool()
+        .ok_or_else(|| ReleaseConfigError::WrongType {
+            key,
+            expected: "boolean",
+            found: value_type_name(value),
+        })
+}
+
+/// Parse and validate the `[release]` section of a manifest (ADR 0125 §1.2).
+///
+/// `release` is the raw TOML value of the `[release]` key, already extracted
+/// from a deserialized [`Manifest`]. Returns [`ReleaseConfig::default`] when
+/// the section is absent.
+///
+/// # Errors
+///
+/// Returns [`ReleaseConfigError`] if `[release]` is present but is not a
+/// table, declares `version`, has an unrecognised key, has a value of the
+/// wrong type for its key, or sets both `strip-beams` and
+/// `include-compiler` to `true`.
+pub fn parse_release_config(
+    release: Option<&toml::Value>,
+) -> std::result::Result<ReleaseConfig, ReleaseConfigError> {
+    let mut config = ReleaseConfig::default();
+    let Some(raw_value) = release else {
+        return Ok(config);
+    };
+
+    let table = raw_value
+        .as_table()
+        .ok_or_else(|| ReleaseConfigError::NotATable {
+            found: value_type_name(raw_value),
+        })?;
+
+    for (key, value) in table {
+        match key.as_str() {
+            "version" => return Err(ReleaseConfigError::VersionKeyNotAllowed),
+            "name" => config.name = Some(release_config_expect_string("name", value)?),
+            "apps" => {
+                let array = value
+                    .as_array()
+                    .ok_or_else(|| ReleaseConfigError::WrongType {
+                        key: "apps",
+                        expected: "array",
+                        found: value_type_name(value),
+                    })?;
+                let mut apps = Vec::with_capacity(array.len());
+                for entry in array {
+                    apps.push(entry.as_str().map(str::to_string).ok_or_else(|| {
+                        ReleaseConfigError::AppsEntryWrongType {
+                            found: value_type_name(entry),
+                        }
+                    })?);
+                }
+                config.apps = apps;
+            }
+            "include-erts" => {
+                config.include_erts = release_config_expect_bool("include-erts", value)?;
+            }
+            "console" => config.console = release_config_expect_bool("console", value)?,
+            "bind" => config.bind = release_config_expect_string("bind", value)?,
+            "sys-config" => config.sys_config = release_config_expect_string("sys-config", value)?,
+            "vm-args" => config.vm_args = release_config_expect_string("vm-args", value)?,
+            "strip-beams" => config.strip_beams = release_config_expect_bool("strip-beams", value)?,
+            "include-compiler" => {
+                config.include_compiler = release_config_expect_bool("include-compiler", value)?;
+            }
+            other => {
+                return Err(ReleaseConfigError::UnknownKey {
+                    key: other.to_string(),
+                });
+            }
+        }
+    }
+
+    if config.strip_beams && config.include_compiler {
+        return Err(ReleaseConfigError::StripBeamsWithIncludeCompiler);
+    }
+
+    Ok(config)
 }
 
 /// Package metadata from `beamtalk.toml`.
@@ -672,6 +893,8 @@ pub struct ParsedManifest {
     /// The optional `[stubs]` section — where this package's own FFI type
     /// stubs live (`None` if the package ships no stubs).
     pub stubs: Option<StubsConfig>,
+    /// The `[release]` section (ADR 0125 §1.2), defaulted when absent.
+    pub release: ReleaseConfig,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -720,6 +943,9 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let diagnostics = parse_diagnostics_table(manifest.diagnostics.as_ref())
         .wrap_err_with(|| format!("Failed to parse [diagnostics] in '{path}'"))?;
 
+    let release = parse_release_config(manifest.release.as_ref())
+        .wrap_err_with(|| format!("Failed to parse [release] in '{path}'"))?;
+
     Ok(ParsedManifest {
         package: manifest.package,
         application: manifest.application,
@@ -728,6 +954,7 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
         diagnostics,
         registry: manifest.registry,
         stubs: manifest.stubs,
+        release,
     })
 }
 
@@ -2783,5 +3010,148 @@ dnu = "error"
         assert!(manifest.dependencies.is_empty());
         assert!(manifest.native_dependencies.is_empty());
         assert_eq!(manifest.diagnostics.len(), 1);
+    }
+
+    // --- [release] parsing (ADR 0125 §1.2) ---
+
+    #[test]
+    fn test_parse_release_config_absent_returns_defaults() {
+        let config = parse_release_config(None).unwrap();
+        assert_eq!(config, ReleaseConfig::default());
+        assert!(config.name.is_none());
+        assert!(config.apps.is_empty());
+        assert!(config.include_erts);
+        assert!(!config.console);
+        assert_eq!(config.bind, "127.0.0.1");
+        assert_eq!(config.sys_config, "config/sys.config");
+        assert_eq!(config.vm_args, "config/vm.args");
+        assert!(!config.strip_beams);
+        assert!(!config.include_compiler);
+    }
+
+    #[test]
+    fn test_parse_release_config_every_key() {
+        let toml_str = r#"
+name = "orders"
+apps = ["gproc"]
+include-erts = false
+console = true
+bind = "0.0.0.0"
+sys-config = "config/prod.sys.config"
+vm-args = "config/prod.vm.args"
+strip-beams = true
+include-compiler = false
+"#;
+        let value: toml::Value = toml::from_str(toml_str).unwrap();
+        let config = parse_release_config(Some(&value)).unwrap();
+        assert_eq!(config.name.as_deref(), Some("orders"));
+        assert_eq!(config.apps, vec!["gproc".to_string()]);
+        assert!(!config.include_erts);
+        assert!(config.console);
+        assert_eq!(config.bind, "0.0.0.0");
+        assert_eq!(config.sys_config, "config/prod.sys.config");
+        assert_eq!(config.vm_args, "config/prod.vm.args");
+        assert!(config.strip_beams);
+        assert!(!config.include_compiler);
+    }
+
+    #[test]
+    fn test_parse_release_config_rejects_version_key() {
+        let value: toml::Value = toml::from_str(r#"version = "1.4.0""#).unwrap();
+        let err = parse_release_config(Some(&value)).unwrap_err();
+        assert_eq!(err, ReleaseConfigError::VersionKeyNotAllowed);
+        assert!(err.to_string().contains("must not declare 'version'"));
+    }
+
+    #[test]
+    fn test_parse_release_config_rejects_strip_beams_with_include_compiler() {
+        let value: toml::Value =
+            toml::from_str("strip-beams = true\ninclude-compiler = true\n").unwrap();
+        let err = parse_release_config(Some(&value)).unwrap_err();
+        assert_eq!(err, ReleaseConfigError::StripBeamsWithIncludeCompiler);
+    }
+
+    #[test]
+    fn test_parse_release_config_rejects_unknown_key() {
+        let value: toml::Value = toml::from_str(r#"typo-key = "x""#).unwrap();
+        let err = parse_release_config(Some(&value)).unwrap_err();
+        assert_eq!(
+            err,
+            ReleaseConfigError::UnknownKey {
+                key: "typo-key".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_release_config_rejects_wrong_type() {
+        let value: toml::Value = toml::from_str("console = \"yes\"").unwrap();
+        let err = parse_release_config(Some(&value)).unwrap_err();
+        assert_eq!(
+            err,
+            ReleaseConfigError::WrongType {
+                key: "console",
+                expected: "boolean",
+                found: "string"
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_release_config_rejects_non_string_apps_entry() {
+        let value: toml::Value = toml::from_str("apps = [1, 2]").unwrap();
+        let err = parse_release_config(Some(&value)).unwrap_err();
+        assert_eq!(
+            err,
+            ReleaseConfigError::AppsEntryWrongType { found: "integer" }
+        );
+    }
+
+    #[test]
+    fn test_parse_release_config_rejects_non_table() {
+        let value = toml::Value::String("nope".to_string());
+        let err = parse_release_config(Some(&value)).unwrap_err();
+        assert_eq!(err, ReleaseConfigError::NotATable { found: "string" });
+    }
+
+    #[test]
+    fn test_parse_manifest_full_surfaces_release_error_with_hint() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[release]
+version = "1.4.0"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("must not declare 'version'"), "got: {err}");
+        assert!(
+            err.contains("[package] version"),
+            "hint should point at [package] version: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_manifest_full_defaults_release_config_when_absent() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.release, ReleaseConfig::default());
     }
 }

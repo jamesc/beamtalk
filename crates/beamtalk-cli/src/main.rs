@@ -74,6 +74,27 @@ enum Command {
         output: Option<String>,
     },
 
+    /// Assemble a standard OTP release, bootable with `erl -boot` (ADR 0125)
+    Release {
+        /// Project directory to release
+        #[arg(default_value = ".")]
+        path: String,
+
+        /// Override the release output directory (defaults to
+        /// `_build/release/<name>-<vsn>/`)
+        #[arg(long)]
+        output: Option<String>,
+
+        /// Force recompilation of all files, bypassing change detection
+        #[arg(long)]
+        force: bool,
+
+        /// Delete a pre-existing --output directory even if it doesn't
+        /// look like a previous `beamtalk release` output
+        #[arg(long)]
+        force_output: bool,
+    },
+
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
     #[command(hide = true)]
     BuildStdlib {
@@ -449,6 +470,15 @@ enum Command {
     /// isn't built yet (see `run()`'s doc comment for the one exception).
     #[command(hide = true)]
     WarmOtpCache,
+
+    /// Print the declared OTP support window (ADR 0125 §3.1) as a JSON
+    /// array of majors, e.g. `["27","28"]`
+    ///
+    /// The single consumer of `otp-support.toml` for CI: `just otp-matrix`
+    /// runs this and feeds the result to `ci.yml`'s `matrix.otp`, so the
+    /// workflow never hardcodes the window itself.
+    #[command(hide = true)]
+    OtpMatrix,
 }
 
 /// The default stack size (1 MiB on Windows) is too small for deep AST recursion
@@ -601,6 +631,25 @@ fn dispatch_command(command: Command) -> Result<()> {
                 commands::build::build(&path, &options, force)
             }
         }
+        Command::Release {
+            path,
+            output,
+            force,
+            force_output,
+        } => {
+            let options = beamtalk_core::CompilerOptions {
+                workspace_mode: false,
+                ..Default::default()
+            };
+            let project_root = camino::Utf8PathBuf::from(&path);
+            commands::release::build_release(
+                &project_root,
+                output.as_deref(),
+                &options,
+                force,
+                force_output,
+            )
+        }
         Command::BuildStdlib {
             quiet,
             warnings_as_errors,
@@ -738,6 +787,10 @@ fn dispatch_command(command: Command) -> Result<()> {
             class_filter,
         } => commands::type_coverage::run(&path, detail, format, at_least, class_filter.as_deref()),
         Command::WarmOtpCache => commands::warm_otp_cache::run(),
+        Command::OtpMatrix => {
+            println!("{}", beamtalk_cli::otp_support::majors_as_json_array());
+            Ok(())
+        }
     }
 }
 
