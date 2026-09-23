@@ -139,7 +139,12 @@ case "$VERB" in
     stop)
         check_otp_window
         SNAME=$(client_sname stop)
-        NODE="$RELEASE_NAME@$(uname -n | cut -d. -f1)"
+        # `@localhost`, not the OS hostname — see `generate_vm_args`'s same
+        # choice for `foreground`'s own `-sname` (assembly.rs): loopback
+        # distribution needs a name both ends can actually resolve, and a
+        # host's own hostname isn't always resolvable (e.g. some CI
+        # runners), unlike `localhost`.
+        NODE="$RELEASE_NAME@localhost"
         # shellcheck disable=SC2046,SC2086
         exec "$ERL" -noshell -hidden -sname "$SNAME" $(cookie_args) $(minimal_boot_args) $(lib_pa_args) \
             -eval "beamtalk_release_launcher:stop_client_main()." \
@@ -148,7 +153,12 @@ case "$VERB" in
     ping)
         check_otp_window
         SNAME=$(client_sname ping)
-        NODE="$RELEASE_NAME@$(uname -n | cut -d. -f1)"
+        # `@localhost`, not the OS hostname — see `generate_vm_args`'s same
+        # choice for `foreground`'s own `-sname` (assembly.rs): loopback
+        # distribution needs a name both ends can actually resolve, and a
+        # host's own hostname isn't always resolvable (e.g. some CI
+        # runners), unlike `localhost`.
+        NODE="$RELEASE_NAME@localhost"
         # shellcheck disable=SC2046,SC2086
         exec "$ERL" -noshell -hidden -sname "$SNAME" $(cookie_args) $(minimal_boot_args) $(lib_pa_args) \
             -eval "beamtalk_release_launcher:ping_client_main()." \
@@ -157,7 +167,12 @@ case "$VERB" in
     remote_console)
         check_otp_window
         SNAME=$(client_sname rc)
-        NODE="$RELEASE_NAME@$(uname -n | cut -d. -f1)"
+        # `@localhost`, not the OS hostname — see `generate_vm_args`'s same
+        # choice for `foreground`'s own `-sname` (assembly.rs): loopback
+        # distribution needs a name both ends can actually resolve, and a
+        # host's own hostname isn't always resolvable (e.g. some CI
+        # runners), unlike `localhost`.
+        NODE="$RELEASE_NAME@localhost"
         # ADR 0091: same-host attach only — plain loopback distribution, no
         # further authentication beyond the cookie handshake (ADR 0058).
         # shellcheck disable=SC2046,SC2086
@@ -201,7 +216,12 @@ case "$VERB" in
         SELECTOR="$2"
         shift 2
         SNAME=$(client_sname rpc)
-        NODE="$RELEASE_NAME@$(uname -n | cut -d. -f1)"
+        # `@localhost`, not the OS hostname — see `generate_vm_args`'s same
+        # choice for `foreground`'s own `-sname` (assembly.rs): loopback
+        # distribution needs a name both ends can actually resolve, and a
+        # host's own hostname isn't always resolvable (e.g. some CI
+        # runners), unlike `localhost`.
+        NODE="$RELEASE_NAME@localhost"
         # shellcheck disable=SC2046,SC2086
         exec "$ERL" -noshell -hidden -sname "$SNAME" $(cookie_args) $(minimal_boot_args) $(lib_pa_args) \
             -eval "beamtalk_release_launcher:rpc_client_main()." \

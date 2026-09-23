@@ -127,7 +127,8 @@ call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
 set "SNAME=%RELEASE_NAME%_stop_%RANDOM%"
-set "NODE=%RELEASE_NAME%@%COMPUTERNAME%"
+rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
+set "NODE=%RELEASE_NAME%@localhost"
 "%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
@@ -139,7 +140,8 @@ call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
 set "SNAME=%RELEASE_NAME%_ping_%RANDOM%"
-set "NODE=%RELEASE_NAME%@%COMPUTERNAME%"
+rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
+set "NODE=%RELEASE_NAME%@localhost"
 "%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
@@ -150,7 +152,8 @@ if errorlevel 1 exit /b 1
 call :cookie_args
 call :minimal_boot_args
 set "SNAME=%RELEASE_NAME%_rc_%RANDOM%"
-set "NODE=%RELEASE_NAME%@%COMPUTERNAME%"
+rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
+set "NODE=%RELEASE_NAME%@localhost"
 "%ERL%" -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% -remsh "%NODE%"
 exit /b %errorlevel%
 
@@ -190,7 +193,8 @@ call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
 set "SNAME=%RELEASE_NAME%_rpc_%RANDOM%"
-set "NODE=%RELEASE_NAME%@%COMPUTERNAME%"
+rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
+set "NODE=%RELEASE_NAME%@localhost"
 "%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%
