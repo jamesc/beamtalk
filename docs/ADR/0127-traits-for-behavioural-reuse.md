@@ -32,13 +32,18 @@ first position in each and says where the alternative is written up):
    measured duplication, but they model *capabilities* as *kinds*
    (§Context, "Kinds versus capabilities"). The stdlib is not refactored
    into an inheritance-based interim first; Option H is rejected.
-2. **The implied protocol's selector set** — required ∪ provided (draft) or
-   required only (§8). The first types `x :: Comparable` richly but makes
-   adding a provision a breaking change for structural conformers; the
-   second is the Java 8 "evolvable interface" rule.
+2. ~~**The implied protocol's selector set.**~~ **Decided (2026-09-23):
+   required ∪ provided** (§8). The required-only alternative (Option B′)
+   borrows Java 8's rule, which works only because Java is nominal: every
+   implementer inherits the defaults. Under structural conformance a class
+   can conform without `uses:` and so without the provisions, and a
+   required-only type would let it through to code that then sends
+   `max:` and fails with `does_not_understand` at run time. Required ∪
+   provided reports that case as a conformance warning instead.
 3. **One keyword or two** — `Trait define:` beside `Protocol define:` (draft)
-   or one `Protocol define:` that may carry bodies, opted into with `uses:`
-   (Option B′).
+   or one `Protocol define:` that may carry bodies, opted into with `uses:`.
+   With decision 2 settled this is a readability question only: the
+   semantics are identical either way.
 4. **v1 scope** — the draft specifies `aliasing:`, class-side traits, live
    patching of trait methods, and a runtime trait registry. A minimal v1
    (`excluding:` only, file-reload editing, reflection via xref `origin`)
@@ -640,10 +645,14 @@ Every trait `T` registers a protocol `T` whose required selectors are `T`'s
   provision is not**: it enlarges the implied protocol, so every class that
   conformed structurally without `uses:` stops conforming. That is the same
   break as adding a required selector to a protocol today (ADR 0068), and it
-  is the price of the required ∪ provided rule. The required-only rule
-  avoids it (open decision 2): the implied protocol would be the trait's
-  requirements, provisions could be added freely, and `x :: Comparable`
-  callers sending `max:` would get ADR 0068's protocol-receiver hint.
+  is the price of the required ∪ provided rule (decided, §Status 2). The
+  cost is smaller than "breaking" suggests: ADR 0068 makes conformance
+  problems warnings, not errors, so adding a provision never fails a build.
+  It adds warnings exactly where a structural conformer reaches code typed
+  against the trait, which are the places that would fail at run time if
+  that code sent the new selector. This matches TypeScript, where adding a
+  member to an interface is a breaking change for structural implementers
+  and is reported, not silently accepted.
   The reverse conversion (trait → protocol) breaks users' `uses:` lines and
   is an ordinary deprecation.
 - **An override of a provision is checked against it.** Class-wins drops the
@@ -1001,6 +1010,7 @@ Version removeSelector: #max:
 | **Pharo 7+** | Stateful traits (`TraitedClass`, `TSlot`) | as above + slots | as above | Slots | **Deferred** (§7) — kind-specific slots need a threading story |
 | **Newspeak** | Mixins: `Superclass mixin |> C`; every class body is a mixin | Linearised application creates a class per use | Latest application wins (order) | Yes | **Rejected** (§Alternatives) — order-dependent, one registry class + module per application, extra chain steps per send |
 | **Scala** | `trait` with linearisation; `with A with B` | Linearised; `super` chains through traits | Order decides; `abstract override` | Yes | Rejected as mixins; but Scala's "trait is also a type" is our §8 |
+| **TypeScript** | No traits; a `class` used as a type includes all its members; `override` keyword and `noImplicitOverride` (4.3) | Structural | n/a | n/a | Adopted: a type made of every member, implemented or not, is our required ∪ provided rule (§8), and adding a member is a reported break for structural implementers. `noImplicitOverride` is the same concern as `overriding:` (§3a) |
 | **Rust** | `trait` with default methods, `impl T for S` | Static, type-directed; orphan rules | Disambiguation by qualified path | None (associated fns only) | Adopted: required vs. default methods as the two body shapes. Rejected: nominal `impl` — ADR 0068 chose structural |
 | **Swift** | Protocol extensions with default implementations | Static dispatch for non-requirement extension methods | Ambiguity error | None | Rejected: the static/dynamic dispatch split is a well-known footgun; Beamtalk has one dispatch (ADR 0006) |
 | **C# 8** | Default interface methods; `override` / `new` on class members | Class wins over interface defaults; a class member hiding a base member without `new` or `override` warns | Must override | None | Adopted: the versioning stance. C# makes replacing inherited behaviour an explicit act so a base-type release cannot silently change a subclass; `overriding:` (§3a) is that rule applied to trait provisions |
@@ -1082,14 +1092,15 @@ and `uses:` lines.
 - 🎨 **Language designer**: "Since a trait *is* a protocol (§8), the keyword is the only difference. And Java 8 added default methods precisely so interfaces could evolve without breaking implementers — which §8's required ∪ provided rule gives up."
 - *The retroactive form is rejected; the opt-in form is not.* Conformance is automatic, so a protocol whose bodies landed on every structural conformer would inject methods into classes across packages that never asked — Swift's retroactive protocol extensions. Any safe form needs an opt-in `uses:` line to attach exclusion and aliasing to.
 
-### Option B′: One keyword, opt-in, required-only type (strongest rival to A)
+### Option B′: One keyword, opt-in, required-only type (type rule rejected; keyword open)
 `Protocol define:` may carry bodies; a class opts in with `uses:`; the protocol's type is its *requirements* only, so provisions can be added without breaking structural conformers.
 - 🧑‍💻 **Newcomer**: "Exactly Java/Kotlin interfaces with defaults. One word."
 - 🎩 **Smalltalk purist**: "Smalltalk never had two type-like keywords, and Pharo's 'protocol' was never a type anyway."
 - ⚙️ **BEAM veteran**: "One `defprotocol`-like construct, and adding a default is never a breaking change."
 - 🏭 **Operator**: "A dependency adding a default method can't break my conformance checks."
 - 🎨 **Language designer**: "It keeps everything A gets right — opt-in, flattening, class-wins — and fixes A's one evolvability flaw."
-- *Why A is still the draft's choice*: the keyword tells a reader whether a file carries code, and required ∪ provided lets `x :: Comparable` call `max:` without a hint. Both are judgement calls; this is open decisions 2 and 3 in §Status.
+- *Why the required-only type is rejected* (decided 2026-09-23, §Status 2): Java 8's evolvable-interface rule depends on nominal typing, where every implementer inherits the defaults. Under structural conformance a class with only `<` conforms without `uses:` and never receives `max:`. A required-only type admits it into `clamp: x :: Comparable …`, which then fails with `does_not_understand` at run time; required ∪ provided reports the same case as a conformance warning at the call site. B′'s evolution advantage is also smaller than it looks, since conformance problems are warnings (ADR 0068) and adding a provision never breaks a build under A either. It also makes provisions nearly useless to generic code, which can only safely send the required selectors.
+- *What remains open*: the single-keyword half of B′. One `Protocol define:` that may carry bodies, with A's type rule, is semantically identical to A; the choice is readability (§Status 3).
 
 ### Option C: Newspeak-style mixins (class-in-the-chain)
 - 🧑‍💻 **Newcomer**: "Dart and Ruby do it this way; `with` reads fine."
@@ -1132,7 +1143,7 @@ and `uses:` lines.
 - *Why rejected*: ADR 0005 Q8 decided single dispatch and single inheritance; MI cannot cross class kinds; the diamond problem is exactly what traits were invented to remove.
 
 ### Tension points
-- **One keyword and the type rule (A vs. B′).** B′ is the strongest rival: it differs from A only in keyword count and in whether provisions are part of the type. Reviewers who value interface evolution will prefer B′.
+- **One keyword and the type rule (A vs. B′).** B′ differed from A in keyword count and in whether provisions are part of the type. The type rule is settled for A, because under structural conformance B′'s rule trades a compile-time warning for a run-time `does_not_understand`. The keyword count remains a readability judgement.
 - **Evidence vs. modelling (A vs. H).** The stdlib count is mostly answerable by inheritance, so reviewers who weigh measured duplication alone would prefer H. The decision went to A because the hierarchy should record kinds and traits should record capabilities; H would encode ordering and enumeration as kinds.
 - **One concept vs. two (A vs. B).** Language designers and Elixir users lean B; Smalltalkers and the "honesty of form" rule lean A. Resolved for A because the keyword carries information (bodies present or not) and the two are convertible in place.
 - **Copy vs. share (A vs. E).** Operators want E's one-reload; the compiler's lexical assumptions make A the only one that works without re-architecting self-sends. Resolved for A; the N-recompile cost is accepted and bounded (§Consequences).
@@ -1157,8 +1168,9 @@ and then have to be unwound when traits land.
 `Protocol define: Comparable` gaining `=>` bodies. The **retroactive** form,
 where bodies apply to every structural conformer, is rejected: it injects
 methods into classes that never opted in (§Steelman B). The **opt-in** form,
-B′ (`uses:` required, type = requirements only), is a live alternative and
-is open decisions 2 and 3.
+B′ (`uses:` required, type = requirements only), is rejected for its type
+rule (§Steelman B′, §Status 2). Its single-keyword syntax, with A's type
+rule, remains open (§Status 3).
 
 ### Newspeak / Ruby / Dart / Scala mixins
 Linearised application inserting a class per use. Rejected: order-dependent
@@ -1262,7 +1274,8 @@ slot — are permanent properties of the language, not of today's corpus.
 - **A second `define:` keyword** next to `Protocol define:`. Mitigated by
   identical body grammar and in-place convertibility (open decision 3).
 - **Adding a provision to a trait is a breaking change** for classes that
-  conform to its protocol structurally without `uses:` (§8, open decision 2).
+  conform to its protocol structurally without `uses:`. They get conformance
+  warnings, not build failures (§8, decided §Status 2).
 - **Trait bodies are compile-time ABI across packages** (§10a). A
   dependency's trait change reaches downstream code only on rebuild; the
   meta hash makes staleness visible but does not remove it.
