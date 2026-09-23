@@ -54,12 +54,32 @@ is written up):
    the users index, because principle 11 ("Live patching is a message
    send") and principle 8 ("Reflection as Primitive") make them part of the
    feature, and the in-image reload fan-out needs the users index to find
-   its targets. Deferred past v1: `aliasing:`, class-side provisions,
+   its targets. Deferred past v1: `aliasing:`, a protocol using another
+   protocol (§Status 8), class-side provisions,
    browse grouping by trait, protocol-wide rename, and LSP hover
    provenance.
 
-All four decisions are resolved; the ADR is ready for an acceptance
-review.
+Decided after the second review (2026-09-23):
+
+5. **`overriding:` exempts only `printString` and `displayString`** (§3a).
+   `equals:` and `hash` need an explicit `overriding:`, because silently
+   replacing a value's equality changes how its instances behave in sets
+   and dictionaries.
+6. **`uses:` of a protocol with no provisions is a hint** (§1), not a
+   warning, so a protocol gaining or losing its last body never fails a
+   `--warnings-as-errors` build.
+7. **`Comparable` requires `<`**, not a three-way `compare:` (§1, §9): it is
+   Pharo's `Magnitude` contract, every intended user already has it, and a
+   three-way protocol can be added separately later.
+8. **A protocol `uses:`-ing another protocol is post-v1** (Phase 7). No
+   stdlib protocol needs it, and cutting it removes transitive expansion,
+   cycle detection, protocol-internal precedence and same-origin diamonds
+   from v1. `extending:` still composes types.
+9. **The stdlib-protocol patch refusal** reads "Cannot patch 'max:' on
+   stdlib protocol 'Comparable': built-in protocols are read-only.",
+   mirroring the existing stdlib-class message (§11).
+
+All decisions are resolved; the ADR is ready for an acceptance review.
 
 ## Context
 
@@ -277,7 +297,7 @@ The body grammar is the protocol body grammar (ADR 0068) plus method bodies:
 | `class selector …` without `=>` | Class-side **requirement**, as protocols already allow (ADR 0068, BT-1611) |
 | `class selector … => body` | Class-side **provision** — post-v1 (Phase 7); in v1 an error, "class-side provided methods are not yet supported" |
 | `sealed` / `internal` before the selector | **Rejected in v1** (§13). `sealed` cannot stop the using class from overriding (class wins, §3), and `internal` in a trait has no well-defined package once flattened into a user in another package (ADR 0071) |
-| `uses: OtherProtocol …` | Composition (§2) — a protocol may use protocols |
+| `uses: OtherProtocol …` | Composition — a protocol using another protocol's provisions. **Post-v1** (Phase 7, §Status 8); in v1 a `uses:` line in a protocol body is a "not yet supported" error |
 | `// === Name ===` | Category divider (`method_category.rs`), kept with the trait's source |
 | `/// doc` | Doc comment, carried onto the flattened method and shown by `browse` |
 
@@ -404,11 +424,11 @@ order-sensitive, and exclusion/aliasing clauses do not fit on one line
 A class that uses traits **means exactly the class with the provided methods
 written into its body**, after these steps, in order:
 
-1. Expand each used trait transitively (a trait's own `uses:` first).
-   Within a protocol, its own provisions beat those of protocols it uses
-   (class-wins applied recursively). `excluding:` is allowed on a
-   protocol's `uses:` line; `overriding:` there is an error, because a
-   protocol has no superclass.
+1. Collect each used protocol's provisions. (Post-v1, when a protocol may
+   `uses:` another, expansion is transitive; a protocol's own provisions
+   beat those of protocols it uses, `excluding:` is allowed on its `uses:`
+   lines, and `overriding:` there is an error because a protocol has no
+   superclass.)
 2. Per `uses:` line, apply `excluding:`. (Post-v1, `aliasing:` runs
    first, reading from the trait's *original* provisions, so an alias
    survives the exclusion of the selector it copies:
@@ -531,16 +551,19 @@ argument behind C#'s explicit `override`/`new`.
 
 **Details.**
 
-- **A short allowlist is exempt, not whole root classes.** Only
-  `printString`, `displayString`, `hash` and `equals:` inherited from
-  `Object` or `Value` (`object.bt:140, 163, 204, 244`; `value.bt:83`) are
-  exempt: they are the defaults a class is expected to replace. Every other
-  root method (`isNil`, `ifNil:`, `inspect`, `terminate:`, …) needs
-  `overriding:` like any inherited method. Exempting whole root classes
+- **A two-selector allowlist is exempt, not whole root classes.** Only
+  `printString` and `displayString` inherited from `Object` or `Value`
+  (`object.bt:140, 163`; `value.bt:83`) are exempt: they are cosmetic
+  defaults a class is expected to replace. Every other root method needs
+  `overriding:` like any inherited method, including `equals:` and `hash`
+  (`object.bt:204, 244`): a provision that silently replaced a value's
+  structural equality would change how its instances behave in sets and
+  dictionaries (decided, §Status 5). So do `isNil`, `ifNil:`, `inspect`,
+  `terminate:` and the rest. Exempting whole root classes
   would reopen the motivating case: `Describable` v2 adding `printString`
   would still silently replace `Value>>printString` on every direct `Value`
   user. Scala and Kotlin require explicit `override` even on `toString`;
-  the allowlist is this ADR's concession to how often those four are
+  the allowlist is this ADR's concession to how often those two are
   replaced. A protocol that provides exactly one of `equals:` and `hash`
   gets a warning.
 - **Sealed inherited methods** stay an error whether or not they are
@@ -554,10 +577,10 @@ argument behind C#'s explicit `override`/`new`.
   defining the selector itself, so class-wins removes the provision before
   §3a runs. The list stays an accurate record of what
   the class knowingly replaces.
-- **Diamonds.** When one provision reaches the class through several
-  `uses:` lines (the same-origin case of §4), acknowledging it on any one of
-  those lines is enough. Listing it on more than one is allowed and is not
-  stale.
+- **Diamonds (post-v1).** Once a protocol may use another, one provision
+  can reach the class through several `uses:` lines (the same-origin case
+  of §4); acknowledging it on any one of those lines is enough, and listing
+  it on more than one is allowed and is not stale.
 - **Only provisions are checked.** A method written in the class body
   overrides an inherited one silently, as it does today; the class's own
   source is where that decision is visible. This leaves one versioning gap
@@ -584,8 +607,10 @@ error** in the using class, unless one of:
 
 - the class body defines that selector (the class wins, §3 step 4);
 - one use excludes it (`excluding:`);
-- both provisions are the *same* method reached through two paths (a trait
-  used directly and via another trait). "Same" means the same protocol and
+- (post-v1) both provisions are the *same* method reached through two
+  paths (a trait used directly and via another trait). In v1 no protocol
+  uses another, so any two protocols providing the same selector conflict.
+  "Same" means the same protocol and
   selector, not the same content hash, so a reload in progress cannot turn a
   diamond into a conflict. Same origin is not a conflict —
   Schärli's rule, which keeps diamond-shaped trait composition harmless.
@@ -793,8 +818,8 @@ Consequences:
   this, a class could replace `Enumerable>>select: -> List(E)` with
   `select: -> Set(E)` while the protocol's type still promised `List(E)`.
 
-`extending:` and `uses:` can both appear in a protocol body and stay
-distinct. `extending: P` adds P's selectors to this protocol's *type* and
+`extending:` and (post-v1) `uses:` can both appear in a protocol body and
+stay distinct. `extending: P` adds P's selectors to this protocol's *type* and
 nothing else (ADR 0068). `uses: P` flattens P's *provisions* into this
 protocol, which also brings them into its type. A protocol that wants P's
 bodies uses it; one that only wants to be a subtype of P extends it.
@@ -934,7 +959,7 @@ can detect a user compiled against a stale trait.
 registers the protocol on load (`generate_protocol_registrations`,
 `class_registry.rs:699`). With provisions it still contains **no dispatch
 and no callable methods**. Its registration additionally records the
-provided signatures on both sides, `uses:` edges, per-method source, docs
+provided signatures, per-method source, docs
 and categories, and the runtime `beamtalk_protocol_registry` gains a
 provided-selector set and a users index. There is no second registry.
 
@@ -1013,8 +1038,10 @@ module changed.
   already refuses to patch a class compiled in stdlib mode
   (`beamtalk_repl_eval.erl:927-938`), and re-expanding a stdlib user would
   recompile `DateTime` or `String`. The existing refusal looks up classes,
-  not protocols, so `Comparable >> max: …` at the REPL needs a **new**
-  refusal message; as REPL output it needs sign-off before implementation.
+  not protocols, so `Comparable >> max: …` at the REPL gets a new message,
+  approved to mirror the existing stdlib-class one (§Status 9):
+  "Cannot patch 'max:' on stdlib protocol 'Comparable': built-in protocols
+  are read-only."
 - **Editing a user-package trait file** recompiles the trait and **every
   loaded, source-backed, non-stdlib user**, then reloads each user through
   the existing `update_class` path. Users without source in the workspace
@@ -1116,7 +1143,7 @@ implementation in the existing `E`/`W` series.
 | `aliasing:` in v1 | Error | "`aliasing:` is not yet supported" (the check itself, "T does not provide `sel`", arrives with Phase 7) |
 | `excluding:` a required selector | Error | "`sel` is required by T, not provided; requirements cannot be excluded" |
 | `state:`/`field:`/`classState:` or `self.slot` in a protocol | Error | "protocols are stateless — declare `slot -> Type` as a required method" |
-| Protocol `uses:` cycle | Error | "protocol A uses itself through B" |
+| A `uses:` line in a protocol body (v1) | Error | "a protocol using another protocol is not yet supported" (post-v1 it becomes composition, and a cycle is an error: "protocol A uses itself through B") |
 | Protocol modifier (`sealed Protocol define:`) | Error | "protocols take no modifiers" |
 | `sealed` or `internal` on a provided method | Error | "`sealed`/`internal` are not supported on provided methods in v1" |
 | A protocol provides `initialize`, `migrateFromV<N>:`, `doesNotUnderstand:args:`, `supervisionPolicy` or `supervisionSpec` | Error | "a protocol cannot provide `sel`; it changes how the class is built or dispatched. Declare it as a required method instead" |
@@ -1131,7 +1158,7 @@ implementation in the existing `E`/`W` series.
 | A provision references a name not resolvable from the protocol's package | Error | reported once, in the protocol file (§3, "Name resolution") |
 | `uses: T excluding: #(#x)` leaves the class not conforming to T | Warning | "C uses T but does not conform to T: it excludes `x` without defining or inheriting it" (§5) |
 | A protocol provides exactly one of `equals:` and `hash` | Warning | §3a |
-| `overriding:` on a protocol's own `uses:` line | Error | "a protocol has no superclass; `overriding:` has no meaning here" (§3 step 1) |
+| `overriding:` on a protocol's own `uses:` line (post-v1) | Error | "a protocol has no superclass; `overriding:` has no meaning here" (§3 step 1) |
 | A provision uses `@primitive` or `@intrinsic` | Error | "provided methods cannot use primitives" (§1) |
 | A class-side provision (`class sel … =>`) in v1 | Error | "class-side provided methods are not yet supported" (§1) |
 | A class-body override is not override-compatible with the provision it replaces | Warning | §8 |
@@ -1167,8 +1194,7 @@ Integer conformsTo: #Comparable                           // => true
 (Version >> #<) origin                                    // => nil
 (Protocol usersOf: #Comparable) size                      // => 5
 Comparable >> max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]
-// => error: Comparable is a stdlib protocol and cannot be patched in the workspace
-//    (new message; REPL output needs sign-off, §11)
+// => error: Cannot patch 'max:' on stdlib protocol 'Comparable': built-in protocols are read-only.
 Version removeSelector: #max:
 // => error: `max:` is provided by trait Comparable; exclude it with
 //    `uses: Comparable excluding: #(#max:)` or remove it from the trait
@@ -1186,8 +1212,8 @@ Version removeSelector: #max:
   and emitted through the existing protocol registration codegen.
   `beamtalk_protocol_registry.erl` stores the result and a users index; it
   never recomputes the rule.
-- **The extended protocol registration shape** (provided signatures, `uses:`
-  edges, users) crosses the Rust→Erlang boundary as *data*. It gets a
+- **The extended protocol registration shape** (provided signatures and
+  users) crosses the Rust→Erlang boundary as *data*. It gets a
   conformance fixture under
   `runtime/apps/beamtalk_runtime/test/fixtures/` like the other meta shapes
   (architecture-principles §7 "Keep" disposition), not a hand-mirrored
@@ -1477,7 +1503,7 @@ a spent superclass slot — are permanent properties of the language.
   where Pharo gives a runtime error and Elixir gives a warning.
 - **No silent override by a provision** (§3a). In a closed-world build,
   neither a new provision nor a new superclass method can make a provision
-  replace an inherited method (outside the four allowlisted defaults)
+  replace an inherited method (outside the two allowlisted printing defaults)
   without an error at that class's next build. That removes the
   fragile-base-class problem plain trait precedence adds. It does not close
   the pre-existing case of a class-body method silently overriding a newly
@@ -1543,9 +1569,9 @@ a spent superclass slot — are permanent properties of the language.
   `P >> sel =>` edits the protocol's own source: it adds or replaces a
   provision, is recorded in the ChangeLog as a protocol patch, and is
   flushed to the protocol file (§11).
-- **`Comparable`'s required `<` is its most permanent API.** Changing the
-  requirement later, for example to a three-way `compare:`, breaks every
-  user. Phase 6 should settle that choice before the protocol ships.
+- **`Comparable`'s required `<` is its most permanent API**, and is decided
+  (§Status 7): changing the requirement later would break every user, so a
+  three-way comparison, if wanted, arrives as a separate protocol.
 - `Comparable` has no equality requirement: `=:=` is hard-lowered and cannot
   be overridden (`date_time.bt:291-296`). Where `<` compares something
   coarser than structure (`DateTime` compares instants, while `=:=` is
@@ -1569,13 +1595,13 @@ assumption this ADR could not verify from source.
 | Phase | Scope | Components | Size | Depends on |
 |---|---|---|---|---|
 | 0 | **Spike**: (a) confirm inherited actor method self-send binding (lexical `<module>:safe_dispatch` vs. `__class_mod__`), since §6 rests on self-sends resolving in the *using* class's module; (b) re-run the BT-3580 probe and record whether block-taking actor provisions are safe. Record both in `docs/development/debugging.md` | runtime, codegen (read-only) | S | — |
-| 1 | **Syntax**: `ProtocolDefinition` gains `provided_methods` and `uses` (`ast/class.rs`); `ClassDefinition.uses: Vec<ProtocolUse { protocol, type_args, excluding, overriding, span }>`; `parse_protocol_body` accepts provided methods (a signature followed by `=>`) through the class method parser, and reserves `uses:`/`excluding:`/`overriding:`/`aliasing:` (`aliasing:` parses to a "not yet supported" error until Phase 7); `package@Protocol`; `uses:` in the class-body loop with ordering and unknown-keyword errors; unparse round-trip; no new top-level form, so one-definition-per-file and ADR 0119 naming are unchanged; lexer nothing (contextual keywords) | `beamtalk-core` source_analysis, ast, unparse | M | — |
-| 2 | **Semantics**: `protocol_registry.rs` extended with provided signatures, `uses:` edges and a cycle check; `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; `ProtocolInfo` conformance over required ∪ provided; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class; name resolution in the protocol's package (§3); provisions checked once in the protocol with the self-send rule (§5); `excluding:` conformance warning; `extending:` of a protocol with provisions (§5); protocol-internal precedence (§3 step 1); same-origin exemption and kind-root allowlist (§3a); diagnostics tagged with the protocol's source identity and de-duplicated across users (§3) | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
+| 1 | **Syntax**: `ProtocolDefinition` gains `provided_methods` (`ast/class.rs`; a `uses:` line in a protocol body is a "not yet supported" error in v1); `ClassDefinition.uses: Vec<ProtocolUse { protocol, type_args, excluding, overriding, span }>`; `parse_protocol_body` accepts provided methods (a signature followed by `=>`) through the class method parser, and reserves `uses:`/`excluding:`/`overriding:`/`aliasing:` (`aliasing:` parses to a "not yet supported" error until Phase 7); `package@Protocol`; `uses:` in the class-body loop with ordering and unknown-keyword errors; unparse round-trip; no new top-level form, so one-definition-per-file and ADR 0119 naming are unchanged; lexer nothing (contextual keywords) | `beamtalk-core` source_analysis, ast, unparse | M | — |
+| 2 | **Semantics**: `protocol_registry.rs` extended with provided signatures; `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; `ProtocolInfo` conformance over required ∪ provided; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class; name resolution in the protocol's package (§3); provisions checked once in the protocol with the self-send rule (§5); `excluding:` conformance warning; `extending:` of a protocol with provisions (§5); same-origin exemption and kind-root allowlist (§3a); diagnostics tagged with the protocol's source identity and de-duplicated across users (§3) | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
 | 3 | **Codegen & build graph**: feed the flattened `ClassDefinition` to the existing generators (no change to `merge_method`); `methodXref` provenance/origin; `methodSource` as the trait's source slice; `uses => [{Name, Hash}]` in user meta; protocol module emission extended with provisions (`generate_protocol_registrations`, `'__beamtalk_protocol_source'/0`); every §10a entry point (CLI cache key, `build_stdlib` protocol pre-pass keeping full ASTs and `generated_builtins.rs`, compiler port, `dependency_classes.rs`, `ProjectIndex` edges); conformance fixture for the extended protocol registration shape; codegen maps lines per method source so BEAM line annotations for flattened methods point at the protocol file (§3) | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-cli`, `beamtalk-language-service`, `build_stdlib` | L | 2 |
 | 4 | **Runtime & reflection**: `beamtalk_protocol_registry.erl` gains provided selectors and a users index; `Protocol providedMethods:`/`usersOf:`; `Behaviour usedProtocols/allUsedProtocols/usesProtocol:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := protocol`; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
 | 5 | **Live system**: trait file reload → two-stage user recompile fan-out in the workspace loader (compile all, load only if all succeed, roll back loaded modules on a load failure; source-backed, non-stdlib users only; stdlib traits read-only); `Describable >> sel => …` and `removeSelector:` live patching on protocols; required-selector rename/remove refusal and `save-section` routing (§11); provided methods in `Protocol define:` at the REPL; ADR 0105 re-check hookup; flush of protocol files (ADR 0113); LSP go-to-definition and completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
 | 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String` (each keeps its primitive operators); `Enumerable(E)` on `SupervisionTree` and `ChangeLog` per §9 (`ChangeLog` keeps its all-entries `select:`, and keeps its public `notEmpty` as the one-line method `notEmpty -> Boolean => self isNotEmpty`; `SupervisionTree` keeps its `do:`); separately, move `Integer`/`Float` `min:`/`max:` up to `Number` (inheritance, not traits); BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9; add `elements -> List(E) => self asList` to `Collection` so every collection conforms to `Enumerable`; reconcile `SupervisionTree do:`'s return type before adoption (the stdlib builds with `--warnings-as-errors`); list the selectors added per class in the release notes (§Migration Path) | stdlib, docs | M | 5 |
-| 7 | **Post-v1** (one issue each, any order): `aliasing:` (parser clause, alias-before-exclude semantics, conflict rules, §2/§4); class-side provisions (§9); browse grouping by trait (§12); protocol-wide rename (ADR 0114 `renameSelector:to:` redirection and protocol `renameTo:` with `uses_protocol` reference rows); LSP hover provenance | core, workspace, LSP | M | 6 |
+| 7 | **Post-v1** (one issue each, any order): a protocol `uses:`-ing another (transitive expansion, cycle check, protocol-internal precedence, same-origin diamonds, §3 step 1, §4, §3a); `aliasing:` (parser clause, alias-before-exclude semantics, conflict rules, §2/§4); class-side provisions (§9); browse grouping by trait (§12); protocol-wide rename (ADR 0114 `renameSelector:to:` redirection and protocol `renameTo:` with `uses_protocol` reference rows); LSP hover provenance | core, workspace, LSP | M | 6 |
 
 **Tests per phase.**
 
@@ -1583,12 +1609,12 @@ assumption this ADR could not verify from source.
 |---|---|
 | 0 | A BUnit fixture in `stdlib/test/` pinning the observed self-send binding: a subclass override called from an inherited actor method |
 | 1 | Parser unit tests and snapshots in `beamtalk-core`, unparse round-trip, and diagnostics for misplaced `uses:` and unknown keyword lines |
-| 2 | Semantic-analysis unit tests for each §13 row, both §3a directions (trait grows, superclass grows), the same-origin diamond, class-wins, `Self` substitution, and generic `E` substitution, a type error in a provision shared by two users reported once at the protocol's line, a self-send outside the declared set, and a same-named class in the user's package not capturing a provision's reference |
+| 2 | Semantic-analysis unit tests for each §13 row, both §3a directions (trait grows, superclass grows), class-wins, `Self` substitution, and generic `E` substitution, a type error in a provision shared by two users reported once at the protocol's line, a self-send outside the declared set, and a same-named class in the user's package not capturing a provision's reference |
 | 3 | `test-package-compiler` codegen snapshots for one user of each class kind, `just verify-threaded-ir` over the flattened stdlib, and the trait-meta conformance fixture |
 | 4 | Runtime EUnit for the extended `beamtalk_protocol_registry`, BUnit reflection tests (`usedProtocols`, `origin`, `usersOf:`), and xref tests for `provenance := protocol` |
 | 5 | `tests/repl-protocol/cases/` for trait reload fan-out, a rejected edit that loads nothing and names the failing user, `Describable >> sel` live patching, `removeSelector:` refusal, and rename; plus LSP tests |
 | 6 | Existing `just test-stdlib` and `just test-bunit` stay green with the duplicates deleted, plus new BUnit tests for `between:and:`/`min:`/`max:` on each new user |
-| 7 | Per feature: parser and semantic tests for `aliasing:`, BUnit for class-side provisions, REPL-protocol tests for rename and browse grouping |
+| 7 | Per feature: protocol-uses-protocol expansion, cycles and same-origin diamonds; parser and semantic tests for `aliasing:`, BUnit for class-side provisions, REPL-protocol tests for rename and browse grouping |
 
 Phase 1 alone is mergeable (a parsed but unexpanded `uses:` is a "not yet
 supported" error); phases 2–3 together give a working compiler; phase 4 is
