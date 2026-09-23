@@ -4,10 +4,11 @@
 // BT-3580: a block passed to a user-defined higher-order method THROUGH a
 // self-send loses both non-local return (^) and captured-local mutation.
 // `do:` here is the "self do:" hop every Enumerable-style trait provision
-// needs (ADR 0127 §7/§9) — `detect:ifNone:` and `inject:into:` route their
-// caller-supplied block through it via a self-send rather than calling
-// `self.items do:` directly, which is the exact shape that lost `^` and
-// captured writes before the fix.
+// would need (per BT-3580's own context: found while reviewing the draft
+// traits ADR, not yet merged into docs/ADR/) — `detect:ifNone:` and
+// `inject:into:` route their caller-supplied block through it via a
+// self-send rather than calling `self.items do:` directly, which is the
+// exact shape that lost `^` and captured writes before the fix.
 //
 // See `self_send_hom_sackful.bt` for the Value-class twin (same
 // method bodies), which already worked before this fix and pins that it
