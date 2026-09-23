@@ -21,6 +21,7 @@
 
 pub mod assembly;
 pub mod closure;
+pub mod launcher;
 pub mod provenance;
 pub mod upgrade;
 
@@ -213,12 +214,22 @@ pub fn build_release(
         &release_vsn,
         &app_closure,
         &staged_ebins,
+        include_erts,
     )?;
 
     if release_cfg.strip_beams {
         eprintln!("Stripping debug_info...");
         assembly::strip_release_beams(&release_dir)?;
     }
+
+    eprintln!("Writing launcher scripts...");
+    launcher::write_launcher_scripts(
+        &release_dir,
+        &release_name,
+        &release_vsn,
+        &erts_version,
+        include_erts,
+    )?;
 
     eprintln!("Writing provenance/shape manifests...");
     let otp_release = build_stamp::current_otp_version().ok_or_else(|| {
@@ -315,22 +326,24 @@ pub fn build_release(
         )
     };
 
-    // `assembly.rs` bakes the `RELEASE_DIR` build-time prefix into the
-    // `.script`/`.boot` as a forward-slashed string (the same Windows fix
-    // `ebin_path_list` uses — see its doc comment): the `-boot_var
-    // RELEASE_DIR` value a caller passes at boot time must be normalised
-    // the same way, or `$RELEASE_DIR` substitution silently fails on
-    // Windows and the release falls back to build-time absolute paths that
-    // don't resolve. Print the same forward-slashed form here so the
-    // command a Windows user copy-pastes actually boots.
-    let release_dir_fwd = beamtalk_cli::path_util::to_forward_slash(release_dir.as_str());
+    // The launcher (`bin/<name>`/`bin/<name>.cmd`, ADR 0125 §1.6/§1.7,
+    // BT-3573) resolves the release root relative to its own location, so —
+    // unlike the raw `erl -boot ... -boot_var RELEASE_DIR <dir>` invocation
+    // this message used to print — the printed command needs no
+    // Windows-forward-slash normalisation of `release_dir`. It does need the
+    // right *launcher* extension per platform: `bin/<name>` (no extension,
+    // a POSIX `sh` script) is not runnable as printed on Windows, and
+    // `bin/<name>.cmd` is unnecessary noise on Unix — `beamtalk release`
+    // itself only ever runs on the platform it's building for (cross-compile
+    // is unsupported, §1.3), so `cfg!(windows)` here is the same "this build
+    // machine" scope the rest of this function already assumes.
+    let launcher_suffix = if cfg!(windows) { ".cmd" } else { "" };
     println!(
         "Built release {release_name}-{release_vsn} ({erts_note}).\n\
          \x20 → {release_dir}\n\
          \x20 → {tar_path}  ({tar_size})\n\n\
          {trailer}\n\n\
-         Boot it: erl -boot {release_config_dir}/start -boot_var RELEASE_DIR {release_dir_fwd} \
-         -config {release_config_dir}/sys",
+         Run it: {release_dir}/bin/{release_name}{launcher_suffix} foreground",
         tar_size = format_bytes(tar_size),
     );
     info!(name = %release_name, vsn = %release_vsn, dir = %release_dir, "release built");

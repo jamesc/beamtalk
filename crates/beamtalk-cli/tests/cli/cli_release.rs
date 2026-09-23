@@ -545,6 +545,408 @@ fn release_strip_beams_removes_debug_info_but_keeps_meta_test() {
     assert!(status.success(), "stripped beam check failed");
 }
 
+// ─── Launcher (bin/<name> / bin/<name>.cmd) — ADR 0125 §1.6/§1.7, BT-3573 ──
+
+/// Kills and reaps a spawned `bin/<name> foreground` child on drop, so a
+/// test's early `panic!`/`assert!` before its explicit `stop` sequence
+/// cannot leave a zombie process behind (`clippy::zombie_processes`).
+struct ForegroundGuard(std::process::Child);
+impl Drop for ForegroundGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Add a `Smoke` class with a unary entry method (`class run => 21 + 21`,
+/// the exact pattern `cli_run.rs`'s script-mode test already uses) — the
+/// launcher's `eval`/`rpc` verbs dispatch `Smoke run` against it.
+fn add_smoke_class(project: &std::path::Path) {
+    std::fs::write(
+        project.join("src/Smoke.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Smoke\n\
+         \n\
+         \x20\x20class run => 21 + 21\n",
+    )
+    .expect("write src/Smoke.bt");
+}
+
+/// Add an `Exiter` class whose `run` entry calls `Program exit: 3` — used to
+/// verify `eval`'s exit-code adoption (ADR 0125 §1.7: `eval` sets
+/// `node_owning = true`, so `Program exit: N` halts that throwaway VM with
+/// `N` directly, the same contract the escript boot module uses).
+fn add_exiter_class(project: &std::path::Path) {
+    std::fs::write(
+        project.join("src/Exiter.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Exiter\n\
+         \n\
+         \x20\x20class run => Program exit: 3\n",
+    )
+    .expect("write src/Exiter.bt");
+}
+
+/// ADR 0125 §1.7: `eval`'s throwaway VM sets `node_owning = true`, so a
+/// `Program exit: N` inside the dispatched entry halts that VM directly
+/// with `N` — the launcher adopts it as its own exit code.
+#[test]
+fn release_launcher_eval_adopts_program_exit_code_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    make_releasable(project.path());
+    add_exiter_class(project.path());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&output_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success();
+
+    let out = launcher_command(&output_dir, "cli_subprocess_fixture")
+        .args(["eval", "Exiter run"])
+        .output()
+        .expect("spawn bin/<name> eval");
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "expected `Program exit: 3` to become the launcher's exit code; \
+         stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// The launcher script to run on this platform: `bin/<name>` (POSIX `sh`,
+/// directly executable) on Unix, `bin/<name>.cmd` on Windows.
+#[cfg(unix)]
+fn launcher_command(release_dir: &std::path::Path, name: &str) -> Command {
+    Command::new(release_dir.join("bin").join(name))
+}
+
+#[cfg(windows)]
+fn launcher_command(release_dir: &std::path::Path, name: &str) -> Command {
+    Command::new(release_dir.join("bin").join(format!("{name}.cmd")))
+}
+
+/// Build a releasable fixture (with `Smoke`) at `output_dir`, returning it.
+fn build_release_fixture(project: &std::path::Path, output_dir: &std::path::Path) {
+    make_releasable(project);
+    add_smoke_class(project);
+    cli_common::beamtalk()
+        .current_dir(project)
+        .args(["release", "--output"])
+        .arg(output_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success();
+}
+
+#[test]
+fn release_writes_launcher_scripts_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    build_release_fixture(project.path(), &output_dir);
+
+    let sh_path = output_dir.join("bin").join("cli_subprocess_fixture");
+    let cmd_path = output_dir.join("bin").join("cli_subprocess_fixture.cmd");
+    assert!(sh_path.is_file(), "missing {sh_path:?}");
+    assert!(cmd_path.is_file(), "missing {cmd_path:?}");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&sh_path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755, "bin/<name> must be executable");
+    }
+
+    let sh_content = std::fs::read_to_string(&sh_path).unwrap();
+    for verb in [
+        "foreground",
+        "stop",
+        "ping",
+        "remote_console",
+        "eval",
+        "rpc",
+        "version",
+    ] {
+        assert!(
+            sh_content.contains(verb),
+            "bin/<name> missing verb '{verb}'"
+        );
+    }
+    // Neither script hardcodes the build machine's own release path — both
+    // resolve `ROOT` relative to their own location at runtime.
+    assert!(!sh_content.contains(output_dir.to_str().unwrap()));
+    let cmd_content = std::fs::read_to_string(&cmd_path).unwrap();
+    assert!(!cmd_content.contains(output_dir.to_str().unwrap()));
+}
+
+#[test]
+fn release_launcher_version_verb_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    build_release_fixture(project.path(), &output_dir);
+
+    let out = launcher_command(&output_dir, "cli_subprocess_fixture")
+        .arg("version")
+        .output()
+        .expect("spawn bin/<name> version");
+    assert!(out.status.success(), "{out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("cli_subprocess_fixture") && stdout.contains("0.1.0"),
+        "unexpected `version` output: {stdout}"
+    );
+}
+
+/// Full launcher lifecycle over a real, running release node: `foreground`
+/// boots it, `ping` observes it live, `eval` dispatches into a **separate**
+/// throwaway VM, `rpc` dispatches into the **running** node over
+/// distribution, and `stop` shuts it down gracefully (ADR 0125 §1.7).
+#[test]
+#[allow(clippy::too_many_lines)]
+fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    build_release_fixture(project.path(), &output_dir);
+
+    let name = "cli_subprocess_fixture";
+    // An explicit, per-test cookie: with none set, `stop`/`ping`/`rpc`'s
+    // client nodes and the `foreground` node all fall back to the shared
+    // `$HOME/.erlang.cookie` file, auto-generated on first use — under
+    // CI's fully-parallel test suite, another test's node can race to
+    // create/rewrite that same file between this node's boot (which reads
+    // it once and caches the value for the life of the VM) and a later
+    // `ping`/`rpc` invocation (which re-reads the file fresh each time),
+    // permanently desynchronizing the two and producing an unauthenticated
+    // `pang` that never recovers — this is what caused this test's
+    // observed CI-only "node never came up" failures. An explicit cookie
+    // removes the shared file from the picture entirely.
+    let cookie = format!("bt3573_test_cookie_{}", std::process::id());
+    let child = launcher_command(&output_dir, name)
+        .arg("foreground")
+        .env("RELEASE_COOKIE", &cookie)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn bin/<name> foreground");
+    // Guarantees `wait()` runs on every exit path (including an early
+    // `panic!`/`assert!` below) — an unreaped child a test process spawned
+    // is exactly the zombie-process hazard `clippy::zombie_processes` warns
+    // about, and this test has several early-return branches before the
+    // explicit `stop`-then-`wait()` sequence at the bottom reaps it in the
+    // ordinary case.
+    let mut foreground = ForegroundGuard(child);
+
+    // Poll `ping` until the node is live (or the child exited early, which
+    // is itself a failure worth surfacing directly rather than timing out).
+    // 60s, not the pre-fix 30s: cheap insurance in case a slow CI boot
+    // under contention was ever a real, independent factor alongside the
+    // cookie desync this fix addresses.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut pinged = false;
+    let mut last_ping_output: Option<std::process::Output> = None;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(status)) = foreground.0.try_wait() {
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            if let Some(mut out) = foreground.0.stdout.take() {
+                let _ = std::io::Read::read_to_string(&mut out, &mut stdout);
+            }
+            if let Some(mut err) = foreground.0.stderr.take() {
+                let _ = std::io::Read::read_to_string(&mut err, &mut stderr);
+            }
+            panic!(
+                "bin/<name> foreground exited early: {status:?}\nstdout={stdout}\nstderr={stderr}"
+            );
+        }
+        let ping = launcher_command(&output_dir, name)
+            .arg("ping")
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .expect("spawn bin/<name> ping");
+        if ping.status.success() {
+            pinged = true;
+            break;
+        }
+        last_ping_output = Some(ping);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    if !pinged {
+        // Kill the still-running foreground node first so its pipes close
+        // and whatever it already wrote (a distribution/boot error, if
+        // any) can be read back in full, instead of guessing blind at a
+        // second CI-only failure mode.
+        let _ = foreground.0.kill();
+        let _ = foreground.0.wait();
+        let mut fg_stdout = String::new();
+        let mut fg_stderr = String::new();
+        if let Some(mut out) = foreground.0.stdout.take() {
+            let _ = std::io::Read::read_to_string(&mut out, &mut fg_stdout);
+        }
+        if let Some(mut err) = foreground.0.stderr.take() {
+            let _ = std::io::Read::read_to_string(&mut err, &mut fg_stderr);
+        }
+        panic!(
+            "node never came up in time for `ping` to succeed; \
+             cookie={cookie:?}; last ping attempt: {last_ping_output:?}; \
+             foreground stdout so far={fg_stdout:?}; \
+             foreground stderr so far={fg_stderr:?}"
+        );
+    }
+
+    // `eval` — a separate VM, dispatch `Smoke run`, halt with the outcome.
+    let eval = launcher_command(&output_dir, name)
+        .args(["eval", "Smoke run"])
+        .output()
+        .expect("spawn bin/<name> eval");
+    assert!(
+        eval.status.success(),
+        "eval failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&eval.stdout),
+        String::from_utf8_lossy(&eval.stderr)
+    );
+
+    // `rpc` — dispatch into the *running* node over distribution and print
+    // the result (`Smoke run` => `21 + 21` => `42`).
+    let rpc = launcher_command(&output_dir, name)
+        .args(["rpc", "Smoke run"])
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> rpc");
+    assert!(
+        rpc.status.success(),
+        "rpc failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&rpc.stdout),
+        String::from_utf8_lossy(&rpc.stderr)
+    );
+    let rpc_stdout = String::from_utf8_lossy(&rpc.stdout);
+    assert!(
+        rpc_stdout.contains("42"),
+        "expected `Smoke run`'s result (42) in rpc output: {rpc_stdout}"
+    );
+
+    // `stop` — graceful `init:stop()` over distribution; the foreground
+    // process must exit on its own shortly after.
+    let stop = launcher_command(&output_dir, name)
+        .arg("stop")
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> stop");
+    assert!(
+        stop.status.success(),
+        "stop failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
+
+    let stop_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut stopped = false;
+    while std::time::Instant::now() < stop_deadline {
+        if let Ok(Some(_status)) = foreground.0.try_wait() {
+            stopped = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    assert!(stopped, "bin/<name> foreground did not exit after `stop`");
+}
+
+/// The `eval` verb's separate throwaway VM never starts the project's own
+/// root supervisor (ADR 0125 §1.7) — verified by checking a fixture class
+/// registered with the OTP application controller (`FixtureSup`, the root
+/// supervisor `make_releasable` declares) never comes up, while `eval`
+/// still dispatches successfully against a plain class (`Smoke`).
+#[test]
+fn release_launcher_eval_does_not_start_project_app_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    build_release_fixture(project.path(), &output_dir);
+
+    let name = "cli_subprocess_fixture";
+    let eval = launcher_command(&output_dir, name)
+        .args(["eval", "Smoke run"])
+        .output()
+        .expect("spawn bin/<name> eval");
+    assert!(
+        eval.status.success(),
+        "eval failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&eval.stdout),
+        String::from_utf8_lossy(&eval.stderr)
+    );
+    // A second, independent `eval` call must also succeed: if the first one
+    // had left a `-sname`'d/distribution-bound node behind (e.g. because it
+    // wrongly started the project's own app, which nothing here supervises
+    // past this call), a stray port/name clash would be the likely symptom
+    // on the second attempt.
+    let eval2 = launcher_command(&output_dir, name)
+        .args(["eval", "Smoke run"])
+        .output()
+        .expect("spawn bin/<name> eval (second run)");
+    assert!(
+        eval2.status.success(),
+        "second eval failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&eval2.stdout),
+        String::from_utf8_lossy(&eval2.stderr)
+    );
+}
+
+/// ADR 0125 §3.2's OTP-major boot check, exercised end-to-end via the
+/// launcher: a faked out-of-range `required_otp` in `beamtalk-provenance.json`
+/// under `--no-include-erts` (host ERTS) refuses to boot with the ADR's
+/// named-versions message, and exits non-zero.
+#[test]
+fn release_launcher_refuses_out_of_range_otp_via_provenance_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    make_releasable(project.path());
+    add_smoke_class(project.path());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--no-include-erts", "--output"])
+        .arg(&output_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success();
+
+    let provenance_path = output_dir
+        .join("releases")
+        .join("0.1.0")
+        .join("beamtalk-provenance.json");
+    let mut provenance: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&provenance_path).unwrap()).unwrap();
+    // Force a window this host's OTP cannot possibly be inside.
+    provenance["required_otp"]["min"] = serde_json::json!(1);
+    provenance["required_otp"]["max"] = serde_json::json!(2);
+    std::fs::write(
+        &provenance_path,
+        serde_json::to_string_pretty(&provenance).unwrap(),
+    )
+    .unwrap();
+
+    let name = "cli_subprocess_fixture";
+    let out = launcher_command(&output_dir, name)
+        .arg("ping")
+        .output()
+        .expect("spawn bin/<name> ping");
+    assert!(
+        !out.status.success(),
+        "expected the OTP boot check to refuse and exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cannot start on Erlang/OTP"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(stderr.contains("Required: Erlang/OTP 1-2"), "{stderr}");
+}
+
 /// ADR 0125 §2.3 (BT-3574): `beamtalk release --upgrade-from` builds the
 /// 1.4.0 release, then compares it against a real, previously built 1.3.0
 /// release directory — a `shapeVersion:` bump with no `migrateFromV1:`
