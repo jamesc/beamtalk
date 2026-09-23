@@ -470,6 +470,15 @@ enum Command {
     /// isn't built yet (see `run()`'s doc comment for the one exception).
     #[command(hide = true)]
     WarmOtpCache,
+
+    /// Print the declared OTP support window (ADR 0125 §3.1) as a JSON
+    /// array of majors, e.g. `["27","28"]`
+    ///
+    /// The single consumer of `otp-support.toml` for CI: `just otp-matrix`
+    /// runs this and feeds the result to `ci.yml`'s `matrix.otp`, so the
+    /// workflow never hardcodes the window itself.
+    #[command(hide = true)]
+    OtpMatrix,
 }
 
 /// The default stack size (1 MiB on Windows) is too small for deep AST recursion
@@ -778,6 +787,10 @@ fn dispatch_command(command: Command) -> Result<()> {
             class_filter,
         } => commands::type_coverage::run(&path, detail, format, at_least, class_filter.as_deref()),
         Command::WarmOtpCache => commands::warm_otp_cache::run(),
+        Command::OtpMatrix => {
+            println!("{}", beamtalk_cli::otp_support::majors_as_json_array());
+            Ok(())
+        }
     }
 }
 

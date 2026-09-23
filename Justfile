@@ -701,6 +701,14 @@ check-surface-drift:
     @echo "🔎 Checking surface parity drift..."
     @cargo run -p beamtalk-surface-drift --quiet
 
+# Print the declared OTP support window (ADR 0125 §3.1, otp-support.toml)
+# as a JSON array of majors, e.g. ["27","28"]. Consumed by ci.yml's
+# matrix.otp so the workflow never hardcodes the window itself; a drift
+# test (crates/beamtalk-cli/tests/cli/cli_otp_matrix.rs) asserts this output
+# equals the declared window.
+otp-matrix:
+    @cargo run --bin beamtalk --quiet -- otp-matrix
+
 # Evaluate search quality from structured MCP server logs (ADR 0062)
 # Usage: just search-eval /path/to/mcp-server.log
 [unix]

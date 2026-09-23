@@ -136,7 +136,7 @@ This installs to `~/.beamtalk/bin/`. You can customise the location:
 curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh -s -- --prefix /usr/local
 ```
 
-**Prerequisite:** [Erlang/OTP 27+](https://www.erlang.org/downloads) must be installed with `erl` on PATH.
+**Prerequisite:** [Erlang/OTP 27 or 28](https://www.erlang.org/downloads) must be installed with `erl` on PATH — the supported window (current major + previous major, minimum 27) is declared once in [`otp-support.toml`](otp-support.toml); `beamtalk doctor` checks against it.
 
 <details>
 <summary>Installing Erlang/OTP</summary>
@@ -173,7 +173,7 @@ beamtalk repl
 <summary>Prerequisites for building from source</summary>
 
 - **Rust** (latest stable) — [rustup.rs](https://rustup.rs/)
-- **Erlang/OTP 27+** with `erl` and `erlc` on PATH
+- **Erlang/OTP 27 or 28** with `erl` and `erlc` on PATH (the supported window — see [`otp-support.toml`](otp-support.toml))
 - **rebar3** — Erlang build tool ([rebar3.org](https://rebar3.org/))
 - **Just** — command runner (`cargo install just`)
 - **Node.js LTS** (optional) — only for building the VS Code extension
