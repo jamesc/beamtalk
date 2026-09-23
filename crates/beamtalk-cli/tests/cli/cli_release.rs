@@ -528,6 +528,17 @@ fn release_strip_beams_removes_debug_info_but_keeps_meta_test() {
 
 // ─── Launcher (bin/<name> / bin/<name>.cmd) — ADR 0125 §1.6/§1.7, BT-3573 ──
 
+/// Kills and reaps a spawned `bin/<name> foreground` child on drop, so a
+/// test's early `panic!`/`assert!` before its explicit `stop` sequence
+/// cannot leave a zombie process behind (`clippy::zombie_processes`).
+struct ForegroundGuard(std::process::Child);
+impl Drop for ForegroundGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Add a `Smoke` class with a unary entry method (`class run => 21 + 21`,
 /// the exact pattern `cli_run.rs`'s script-mode test already uses) — the
 /// launcher's `eval`/`rpc` verbs dispatch `Smoke run` against it.
@@ -666,7 +677,7 @@ fn release_launcher_version_verb_test() {
         .arg("version")
         .output()
         .expect("spawn bin/<name> version");
-    assert!(out.status.success(), "{:?}", out);
+    assert!(out.status.success(), "{out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("cli_subprocess_fixture") && stdout.contains("0.1.0"),
@@ -685,19 +696,26 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     build_release_fixture(project.path(), &output_dir);
 
     let name = "cli_subprocess_fixture";
-    let mut foreground = launcher_command(&output_dir, name)
+    let child = launcher_command(&output_dir, name)
         .arg("foreground")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("spawn bin/<name> foreground");
+    // Guarantees `wait()` runs on every exit path (including an early
+    // `panic!`/`assert!` below) — an unreaped child a test process spawned
+    // is exactly the zombie-process hazard `clippy::zombie_processes` warns
+    // about, and this test has several early-return branches before the
+    // explicit `stop`-then-`wait()` sequence at the bottom reaps it in the
+    // ordinary case.
+    let mut foreground = ForegroundGuard(child);
 
     // Poll `ping` until the node is live (or the child exited early, which
     // is itself a failure worth surfacing directly rather than timing out).
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut pinged = false;
     while std::time::Instant::now() < deadline {
-        if let Ok(Some(status)) = foreground.try_wait() {
+        if let Ok(Some(status)) = foreground.0.try_wait() {
             panic!("bin/<name> foreground exited early: {status:?}");
         }
         let ping = launcher_command(&output_dir, name)
@@ -758,16 +776,13 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     let stop_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut stopped = false;
     while std::time::Instant::now() < stop_deadline {
-        if let Ok(Some(_status)) = foreground.try_wait() {
+        if let Ok(Some(_status)) = foreground.0.try_wait() {
             stopped = true;
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
-    if !stopped {
-        let _ = foreground.kill();
-        panic!("bin/<name> foreground did not exit after `stop`");
-    }
+    assert!(stopped, "bin/<name> foreground did not exit after `stop`");
 }
 
 /// The `eval` verb's separate throwaway VM never starts the project's own
