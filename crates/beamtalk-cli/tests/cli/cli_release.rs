@@ -738,6 +738,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // ~1s locally with no contention.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     let mut pinged = false;
+    let mut last_ping_output: Option<std::process::Output> = None;
     while std::time::Instant::now() < deadline {
         if let Ok(Some(status)) = foreground.0.try_wait() {
             let mut stdout = String::new();
@@ -760,9 +761,13 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
             pinged = true;
             break;
         }
+        last_ping_output = Some(ping);
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
-    assert!(pinged, "node never came up in time for `ping` to succeed");
+    assert!(
+        pinged,
+        "node never came up in time for `ping` to succeed; last ping attempt: {last_ping_output:?}"
+    );
 
     // `eval` — a separate VM, dispatch `Smoke run`, halt with the outcome.
     let eval = launcher_command(&output_dir, name)
