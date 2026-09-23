@@ -245,9 +245,38 @@ fn release_builds_staged_tree_and_boot_artifacts() {
         .arg(boot_eval)
         .status()
         .expect("spawn erl to boot the release");
-    assert!(
-        status.success(),
-        "release failed to boot from {}",
-        boot_path.display()
-    );
+    if !status.success() {
+        // The pre-boot `-pa` check above already confirmed the staged
+        // ranch_app module is present and loadable outside the boot
+        // script, so a failure here points specifically at how the
+        // generated `.script` embeds/resolves its own code paths (the
+        // `{path, […]}` boot instructions and their `$RELEASE_DIR`
+        // substitution). Dump the actual baked-in path entries so a CI
+        // failure shows the literal string this boot attempt was working
+        // with, rather than requiring another guess-and-push round.
+        let script_path = rel_dir.join(format!(
+            "{}.script",
+            rel_file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+        ));
+        let script_dump = std::fs::read_to_string(&script_path).map_or_else(
+            |e| format!("(failed to read {}: {e})", script_path.display()),
+            |content| {
+                content
+                    .lines()
+                    .filter(|line| line.contains("ranch") || line.contains("RELEASE_DIR"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            },
+        );
+        panic!(
+            "release failed to boot from {}\n\n\
+             boot_var RELEASE_DIR was: {release_dir_for_boot_var}\n\n\
+             ranch/RELEASE_DIR-related lines from {}:\n{script_dump}",
+            boot_path.display(),
+            script_path.display(),
+        );
+    }
 }
