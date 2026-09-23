@@ -23,6 +23,14 @@ pub enum ExpectCategory {
     Unused,
     /// Suppress dead-block-assignment warnings.
     DeadAssignment,
+    /// Suppress style/redundancy lint findings (`DiagnosticCategory::Lint`):
+    /// `beamtalk lint`'s dedicated passes (unnecessary parentheses,
+    /// redundant trailing `^`, cascade candidates, …) plus the few
+    /// `Lint`-category advisories semantic analysis itself emits
+    /// (unreachable code after `^`, shadowed variables, unattached doc
+    /// comments). Intended for test fixtures that deliberately pin a
+    /// codegen shape the style lint would otherwise rewrite away.
+    Lint,
     /// Suppress deprecation warnings — wrong keyword/class-kind.
     Deprecation,
     /// Suppress actor-new errors — using `new`/`new:` on an Actor subclass.
@@ -57,6 +65,7 @@ impl ExpectCategory {
             "type" => Some(Self::Type),
             "unused" => Some(Self::Unused),
             "dead_assignment" => Some(Self::DeadAssignment),
+            "lint" => Some(Self::Lint),
             "deprecation" => Some(Self::Deprecation),
             "actor_new" => Some(Self::ActorNew),
             "visibility" => Some(Self::Visibility),
@@ -80,6 +89,7 @@ impl ExpectCategory {
             Self::Type => "type",
             Self::Unused => "unused",
             Self::DeadAssignment => "dead_assignment",
+            Self::Lint => "lint",
             Self::Deprecation => "deprecation",
             Self::ActorNew => "actor_new",
             Self::Visibility => "visibility",
@@ -102,6 +112,7 @@ impl ExpectCategory {
             "type",
             "unused",
             "dead_assignment",
+            "lint",
             "deprecation",
             "actor_new",
             "visibility",

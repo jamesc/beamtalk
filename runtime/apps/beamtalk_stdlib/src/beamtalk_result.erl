@@ -32,6 +32,11 @@ Field names match the `state:` declarations in `stdlib/src/result.bt`.
 """.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% `error/1` shadows the auto-imported `erlang:error/1` BIF; this module never
+%% calls it unqualified (raises go through the Beamtalk exception machinery,
+%% not `erlang:error/1`).
+-compile({no_auto_import, [error/1]}).
+
 -export([
     from_tagged_tuple/1,
     'ok:'/1,
@@ -64,11 +69,18 @@ ok-value and error-reason types are known:
 %% suffix from keyword selectors (e.g. 'ok:' → ok). Each shim delegates to
 %% the canonical quoted function that is the real implementation.
 -export([ok/1, makeError/1, fromTuple/1, tryDo/1, unwrapError/1]).
+%% `error/1` is a same-named alias for `self delegate` on `Result class
+%% error:` to reach — kept separate from `makeError/1` (used by
+%% `beamtalk_erlang_proxy:selector_to_function/1`'s keyword-FFI shim
+%% convention) purely so the exported name matches the Beamtalk selector.
+-export([error/1]).
 
 -spec ok(term()) -> t().
 ok(Value) -> 'ok:'(Value).
 -spec makeError(term()) -> t().
 makeError(Reason) -> 'makeError:'(Reason).
+-spec error(term()) -> t().
+error(Reason) -> makeError(Reason).
 -spec fromTuple(tuple()) -> t().
 fromTuple(Tuple) -> 'fromTuple:'(Tuple).
 -spec tryDo(function()) -> t().

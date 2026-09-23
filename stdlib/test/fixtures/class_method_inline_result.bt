@@ -31,4 +31,4 @@ Object subclass: ClassMethodInlineResult
   class multiSend: x :: Integer -> String =>
     val1 := (self helper: x) printString
     val2 := self helper: 0
-    val1 ++ (val2 printString)
+    val1 ++ val2 printString

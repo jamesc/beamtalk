@@ -209,9 +209,8 @@ that satisfy the first-keyword + `self`-threading rule.
 **Why shipped `native:` came in below the estimate (23 classes / 170 methods, not
 ~45 / 310):** BT-2731 (Resolved Decision 5) deliberately kept a set of classes on
 inline `(Erlang …)` FFI where a clean first-keyword rename is blocked or wrong —
-`Ets` (`at:`/`at:put:` first-keyword+arity collision), `AtomicCounter` (`value`
-intercepted by block-eval codegen), `DateTime` (`<=` has no same-named Erlang
-function — Erlang spells "less-or-equal" `=<`, not `<=`), `Timer` (`after:` is reserved), `Announcer` (`when:`
+`Ets` (`at:put:`/`at:ifAbsent:` first-keyword+arity collision), `AtomicCounter` (`value`
+intercepted by block-eval codegen), `Timer` (`after:` is reserved), `Announcer` (`when:`
 collision/reserved), `TestCase` (`fail:`/`skip:` don't thread `self`), and the
 `BeamtalkInterface`/`WorkspaceInterface` receiver-ignoring singletons. These stay
 inline but are **wrapped-by-default** since Part 2, so they still never leak raw
@@ -377,9 +376,9 @@ These forks were raised in review and resolved:
 5. **BT-2731 — remaining FFI Object classes: convert vs. stay-inline.** BT-2721 migrated the pure-delegate methods whose backing function already satisfied the first-keyword + `self`-threading rule under its `.bt`-only scope. BT-2731 reconsidered the rest, now permitted to rename backing `.erl` exports.
    - **Converted** (clean first-keyword renames; blast radius = tests only): **SupervisionNode** (6 `*Of` accessors → `native: beamtalk_process_navigation`; `status` stays inline — it threads `self pid`, not `self`), **Random** (instance `next`/`nextInteger:` → backing `next/1`/`nextInteger/2`, coexisting with the class-side `next/0`/`nextInteger/1` by arity), **Session** (7 `*For`/`*Of` instance methods → first-keyword names), **BindingsView** (7 `view_*` methods → `native: beamtalk_session_primitives`; `at:`/`at:put:` map to `at/2`/`at/3` — distinct arities, no collision).
    - **Deliberately stays inline FFI** (already wrapped-by-default since BT-2722; a clean rename is blocked or semantically wrong):
-     - **Ets** — `at:`/`at:put:`/`at:ifAbsent:` share the first keyword `at`, and `at:put:`/`at:ifAbsent:` both want `at/3` (irreducible first-keyword + arity collision, per Part 1 case (a)); `size`/`delete` would shadow the auto-imported `erlang:size/1` / clash with `ets:delete`.
+     - **Ets** — `at:put:`/`at:ifAbsent:` both want `at/3` (irreducible first-keyword + arity collision, per Part 1 case (a)); `size`/`delete` would shadow the auto-imported `erlang:size/1` / clash with `ets:delete`. (`at:` itself was converted to `self delegate` in BT-3597, via a same-named `at/2` alias next to `lookup/2` — the collision is only between `at:put:` and `at:ifAbsent:`.)
      - **AtomicCounter** — `value`: the unary `value` selector is intercepted by block-evaluation codegen (BT-1260), so the backing fn is deliberately `readValue`.
-     - **DateTime** — `<`, `>`, `>=` are `self delegate` (the backing module already exports same-named `'<'`/`'>'`/`'>='` functions — a quoted atom is a perfectly valid Erlang function name, so operator selectors are not categorically excluded). Only `<=` stays inline FFI: Erlang spells "less-or-equal" `=<`, not `<=`, so there is no same-named function for `self delegate` to reach (the `lte` shim exists for that FFI path only). `=:=`/`=/=`/`/=` are not overridable at all — ADR 0002 hard-lowers them to raw Erlang term comparison with no method dispatch.
+     - **DateTime** — `<`, `>`, `>=`, `<=` are all `self delegate` (the backing module exports same-named functions — a quoted atom is a perfectly valid Erlang function name, so operator selectors are not categorically excluded; `'<='/2` was added as a small alias next to `'=<'/2` in BT-3597 since Erlang spells "less-or-equal" `=<`). `=:=`/`=/=`/`/=` are not overridable at all — ADR 0002 hard-lowers them to raw Erlang term comparison with no method dispatch.
      - **Timer** — `after:do:`: `after` is an Erlang reserved word (rejected by the native_validators reserved-word check).
      - **Announcer** — `when:do:`/`when:doOnce:` both collapse to `when/3` (collision; `when` is also reserved), and `announce` would collide with the module's Layer-1 global `announce/2,3` bus API.
      - **TestCase** — `fail:`/`skip:` do not thread `self`, and `suiteFixture` lacks a return type; not worth `native:` on the heavily-subclassed base test class for one method.

@@ -142,11 +142,8 @@ sealed typed Value subclass: Uuid native: beamtalk_uuid
   /// True if this Uuid sorts after `other` (byte-wise on the raw 16 bytes).
   > other :: Uuid -> Boolean => self delegate
 
-  /// True if this Uuid sorts before or the same as `other`. Stays inline FFI
-  /// (not `self delegate`): Erlang spells "less-or-equal" `=<`, not `<=`, so
-  /// there is no `beamtalk_uuid:'<='/2` for `self delegate` to reach — it
-  /// dispatches through the `lte` shim instead.
-  <= other :: Uuid -> Boolean => (Erlang beamtalk_uuid) lte: self with: other
+  /// True if this Uuid sorts before or the same as `other`.
+  <= other :: Uuid -> Boolean => self delegate
 
   /// True if this Uuid sorts after or the same as `other`.
   >= other :: Uuid -> Boolean => self delegate

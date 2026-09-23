@@ -366,7 +366,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 show: "value: "
   /// ```
-  show: aValue :: Printable -> Self =>
+  show: aValue :: Object -> Self =>
     TranscriptStream current ifNotNil: [:t | t show: aValue]
     self
 
@@ -378,7 +378,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 showCr: "hello world"
   /// ```
-  showCr: aValue :: Printable -> Self =>
+  showCr: aValue :: Object -> Self =>
     TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
     self
 

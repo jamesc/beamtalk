@@ -67,6 +67,7 @@ TestCase subclass: DictionaryTest
     // to Dictionary, since the guard is keyed on selector name, not receiver
     // class.
     count := 0
+    @expect dead_assignment
     statefulBlock := [:v | count := count + v]
     self should: [
       #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)
@@ -80,12 +81,14 @@ TestCase subclass: DictionaryTest
     // keysAndValuesDo: delegates to doWithKey: (`self doWithKey: block` in
     // dictionary.bt), so it inherits the same fix.
     count := 0
+    @expect dead_assignment
     statefulBlock := [:k :v | count := count + v]
     self should: [
       #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulBlock)
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulBlock2 := [:k :v | count := count + v]
     self
       should: [

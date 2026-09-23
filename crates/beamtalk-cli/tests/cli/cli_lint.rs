@@ -340,6 +340,43 @@ fn expect_dead_assignment_not_stale_across_lint_build_and_test_bt_3384() {
         .stderr(contains("stale @expect").not());
 }
 
+/// BT-3597 follow-up: `beamtalk lint stdlib/src` must type FFI calls into
+/// stdlib's own backing Erlang modules the same way `beamtalk build-stdlib`
+/// does (ADR 0075's `extract_stdlib_type_specs`), not fall back to `Dynamic`
+/// just because stdlib has no `beamtalk.toml` to anchor the ordinary
+/// `package_root`-gated registry lookup on.
+///
+/// `is_under_stdlib_src_dir` is purely path-shape based (any ancestor
+/// `stdlib/src` pair), so a hermetic temp dir shaped that way exercises the
+/// same code path as the real `stdlib/src` without depending on it.
+/// `beamtalk_uuid:'isValid:'/1` is a real exported function in this repo's
+/// own built runtime (pinned via `BEAMTALK_RUNTIME_DIR`, see
+/// `cli_common::beamtalk`), so a correctly-populated registry infers its
+/// return type instead of reporting the expression Dynamic.
+#[test]
+fn lint_types_ffi_calls_into_stdlibs_own_backing_modules_bt_3597() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let stdlib_src = temp.path().join("stdlib").join("src");
+    std::fs::create_dir_all(&stdlib_src).unwrap();
+    std::fs::write(
+        stdlib_src.join("FfiTypeSpecStdlib.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Object subclass: FfiTypeSpecStdlib\n\
+         \n\
+         \x20\x20check: x :: String -> Boolean => (Erlang beamtalk_uuid) isValid: x\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .args(["lint", stdlib_src.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(contains("inferred as Dynamic").not())
+        .stderr(contains("untyped FFI").not());
+}
+
 #[test]
 fn lint_missing_path_exits_nonzero() {
     let project = cli_common::fixture_project();

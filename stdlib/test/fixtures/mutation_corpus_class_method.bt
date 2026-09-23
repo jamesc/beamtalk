@@ -465,7 +465,7 @@ Object subclass: MutationCorpusClassMethod
     self.runs := 0
     _t := 0
     [
-      _t := 1 + (self bump)
+      _t := 1 + self bump
       nil
     ] ensure: [nil]
     self.runs

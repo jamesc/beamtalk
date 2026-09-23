@@ -139,7 +139,7 @@ Actor subclass: SelfSendPositionCounter
 
   // map literal value
   mapLiteralSelfSend =>
-    m := #{#bumped => (self bumpCount)}
+    m := #{#bumped => self bumpCount}
     m at: #bumped
 
   // string interpolation (self-send is the ONLY effect in the segment)
@@ -172,15 +172,17 @@ Actor subclass: SelfSendPositionCounter
   // pin). At runtime the conditional still leaks its `{Result, State}`
   // tuple into `+` (ADR 0118 phase 4; gated in the test file). The `^` is
   // deliberate (it is the method-body early-return lowering arm under
-  // test), and it is the sole statement so nothing follows it.
+  // test), and it is the sole statement so nothing follows it — hence the
+  // `@expect lint` on the trailing-`^` style finding.
   earlyReturnConditionalReceiverSelfSend =>
+    @expect lint "trailing ^ is the method-body early-return lowering arm under test"
     ^1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])
 
   // BT-3415: the ADR 0118 acceptance shape — an operand that may RAISE
   // precedes the self-send. `at:` runs first (temp-bound ahead of the
   // dispatch): in range, `bumpCount`'s mutation threads; out of range,
   // `at:` raises before `bumpCount` ever runs.
-  raisingOperandBeforeSelfSend: idx => (self.items at: idx) + (self bumpCount)
+  raisingOperandBeforeSelfSend: idx => (self.items at: idx) + self bumpCount
 
   // and:/or: receiver and block argument
   andReceiverSelfSend => (self flagTrue) and: [true]
@@ -248,7 +250,7 @@ Actor subclass: SelfSendPositionCounter
   // Silent drop, no warning — ifNil:ifNotNil: block argument (ADR 0118
   // phase 2).
   ifNilIfNotNilBlockArgSelfSend: v =>
-    v ifNil: [0] ifNotNil: [:x | x + (self bumpCount)]
+    v ifNil: [0] ifNotNil: [:x | x + self bumpCount]
 
   // BT-3420: self-send in the ifNil: (nil) block specifically, rather than
   // the ifNotNil: block above.
@@ -257,12 +259,12 @@ Actor subclass: SelfSendPositionCounter
   // Silent drop, no warning — match: scrutinee and arm (ADR 0118 phase 2).
   matchArmSelfSend: v =>
     v match: [
-      1 -> 1 + (self bumpCount);
+      1 -> 1 + self bumpCount;
       _ -> 0
     ]
 
   matchScrutineeSelfSend =>
-    (self bumpCount) match: [
+    self bumpCount match: [
       1 -> #one;
       _ -> #other
     ]
@@ -281,20 +283,20 @@ Actor subclass: SelfSendPositionCounter
   // Silent drop, no warning — do: body, field-assignment RHS (ADR 0118
   // phase 2).
   doLoopFieldAssignRhsSelfSend =>
-    self.items do: [:x | self.count := self.count + (self bumpCount)]
+    self.items do: [:x | self.count := self.count + self bumpCount]
     self.count
 
   // Silent drop, BT-3399 warning today — do: body, local-assignment RHS
   // binary-op operand (ADR 0118 phase 1a/1b).
   doLoopLocalAssignRhsSelfSend =>
     y := 0
-    self.items do: [:x | y := 1 + (self bumpCount)]
+    self.items do: [:x | y := 1 + self bumpCount]
     y
 
   // Was a silent drop with a BT-3399 warning — local-assignment RHS
   // binary-op operand; threaded since ADR 0118 phase 1a (BT-3415).
   assignRhsBinaryOpSelfSend =>
-    total := self.items size + (self bumpCount)
+    total := self.items size + self bumpCount
     total
 
   // Silent drop, BT-3399 warning today — string-interpolation segment that

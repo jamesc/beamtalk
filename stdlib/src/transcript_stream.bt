@@ -52,7 +52,7 @@ typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
   /// Transcript show: "hello"
   /// Transcript show: 42
   /// ```
-  show: value :: Printable -> Nil => self delegate
+  show: value :: Object -> Nil => self delegate
 
   /// Write a newline to the transcript.
   ///

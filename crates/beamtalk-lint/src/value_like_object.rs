@@ -65,6 +65,16 @@ fn check_class(
         return;
     }
 
+    // `hierarchy` is built from this module plus the builtins only, so a
+    // superclass declared in another file is unresolvable here and
+    // `resolve_class_kind` has just defaulted it to `Object` — the class may
+    // really be an Actor/Value subclass (e.g. a cross-file test fixture whose
+    // parent is `Actor subclass: SomeBaseActor`). Only flag a class whose
+    // whole ancestor chain is known to bottom out in `Object`.
+    if !superclass_chain_is_fully_known(hierarchy, &class.name.name) {
+        return;
+    }
+
     // Must have at least one instance method to be interesting
     if class.methods.is_empty() {
         return;
@@ -93,6 +103,16 @@ fn check_class(
              `initWith:` constructors, and value equality",
         ),
     );
+}
+
+/// Returns `true` if every class on `class_name`'s superclass chain is
+/// registered in `hierarchy` — i.e. the chain reaches a builtin root rather
+/// than stopping at a name this module (and the builtins) never declared.
+fn superclass_chain_is_fully_known(hierarchy: &ClassHierarchy, class_name: &str) -> bool {
+    hierarchy
+        .superclass_chain(class_name)
+        .iter()
+        .all(|ancestor| hierarchy.get_class(ancestor).is_some())
 }
 
 /// Returns `true` if `method` is a unary getter that returns `self.field`
@@ -237,6 +257,22 @@ mod tests {
         assert!(
             diags.is_empty(),
             "Value subclass should not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// A superclass this module never declares (it lives in another file —
+    /// the usual shape for `stdlib/test/fixtures/*` children of a base
+    /// Actor/Value fixture) is unresolvable from a single-module hierarchy,
+    /// so its kind is unknown, not `Object`: the lint must stay silent
+    /// rather than tell an Actor subclass to become a `Value subclass:`.
+    #[test]
+    fn unknown_cross_file_superclass_not_flagged() {
+        let diags = value_like_lints(
+            "SomeBaseActorFromAnotherFile subclass: Child\n  state: extra = 0\n  getExtra => self.extra\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "class with an unresolvable superclass should not be flagged, got: {diags:?}"
         );
     }
 

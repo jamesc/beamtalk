@@ -92,6 +92,7 @@ TestCase subclass: SetTest
     // BT-2888: the do: stateful_block_dispatch guard also applies
     // to Set, since the guard is keyed on selector name, not receiver class.
     count := 0
+    @expect dead_assignment
     statefulBlock := [:x | count := count + x]
     self should: [
       ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: #(statefulBlock)
