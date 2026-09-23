@@ -312,7 +312,6 @@ impl CoreErlangGenerator {
             docvec![
                 "letrec '__nlr_body'/0 = fun () ->\n",
                 rendered_body,
-                "\n",
                 "in apply '__nlr_body'/0 ()",
             ]
         } else {

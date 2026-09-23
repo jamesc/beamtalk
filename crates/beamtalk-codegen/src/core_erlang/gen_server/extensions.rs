@@ -33,7 +33,7 @@
 //! shape.
 
 use super::super::method_frame::{MethodBoundary, MethodFrame};
-use super::super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{MethodKind, Module, StandaloneMethodDefinition};
@@ -312,7 +312,7 @@ impl CoreErlangGenerator {
                             "\n",
                             catch_vars.format_try_prefix(),
                             body_doc,
-                            catch_vars.format_catch_suffix(),
+                            catch_vars.format_catch_suffix(NlrBoundary::ValueType),
                         ]
                     } else {
                         docvec![
