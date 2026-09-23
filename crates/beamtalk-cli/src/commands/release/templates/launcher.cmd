@@ -32,6 +32,10 @@ if not defined ERL (
     exit /b 1
 )
 
+rem Pin epmd to loopback (ADR 0125 §1.6) for every verb that can start
+rem distribution or epmd itself — see launcher.sh's identical comment.
+set "ERL_EPMD_ADDRESS=127.0.0.1"
+
 set "VERB=%~1"
 if "%VERB%"=="" set "VERB=foreground"
 if not "%VERB%"=="" shift

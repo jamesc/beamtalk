@@ -33,6 +33,15 @@ else
     USING_HOST_ERTS=true
 fi
 
+# Pin epmd to loopback (ADR 0125 §1.6: distribution is always loopback-bound)
+# for every verb below that can start distribution or epmd itself — epmd is
+# a shared, per-host daemon that keeps whichever bind address the *first*
+# thing to start it gave it, so this must be set before any `-sname` erl
+# invocation, not just `foreground`'s. Mirrors `startup_command.rs`'s
+# identical `ERL_EPMD_ADDRESS` pin for the dev workspace/REPL launchers.
+ERL_EPMD_ADDRESS=127.0.0.1
+export ERL_EPMD_ADDRESS
+
 # ADR 0125 §3.2 — under a host ERTS, refuse to boot outside the OTP major
 # window this artifact's BEAM files are guaranteed to load on
 # (host_major in [build_major, build_major + 2]). Not applicable when the
