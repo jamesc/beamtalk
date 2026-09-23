@@ -230,15 +230,18 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
     let Self = call 'beamtalk_actor':'make_self'(State) in
     try call 'state_and_self_sequential_mutations':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
+    catch <Type, Error, Stacktrace> -> case {Type, Error} of
+        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
+        <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
+    end
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'incrementTwice'> when 'true' ->
-            let _Val1 = call 'erlang':'+'(call 'maps':'get'('n', State), 1) in let State1 = call 'maps':'put'('n', _Val1, State) in let _Val2 = call 'erlang':'+'(call 'maps':'get'('n', State1), 1) in let State2 = call 'maps':'put'('n', _Val2, State1) in let _Result = call 'maps':'get'('n', State2) in {'reply', _Result, State2}
+            let _Val4 = call 'erlang':'+'(call 'maps':'get'('n', State), 1) in let State1 = call 'maps':'put'('n', _Val4, State) in let _Val5 = call 'erlang':'+'(call 'maps':'get'('n', State1), 1) in let State2 = call 'maps':'put'('n', _Val5, State1) in let _Result = call 'maps':'get'('n', State2) in {'reply', _Result, State2}
         <'resetAndBump'> when 'true' ->
-            let _Val3 = 0 in let State1 = call 'maps':'put'('n', _Val3, State) in let _Val4 = #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}# in let State2 = call 'maps':'put'('label', _Val4, State1) in let _Val5 = call 'erlang':'+'(call 'maps':'get'('n', State2), 1) in let State3 = call 'maps':'put'('n', _Val5, State2) in let _Result = call 'maps':'get'('n', State3) in {'reply', _Result, State3}
+            let _Val6 = 0 in let State1 = call 'maps':'put'('n', _Val6, State) in let _Val7 = #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}# in let State2 = call 'maps':'put'('label', _Val7, State1) in let _Val8 = call 'erlang':'+'(call 'maps':'get'('n', State2), 1) in let State3 = call 'maps':'put'('n', _Val8, State2) in let _Result = call 'maps':'get'('n', State3) in {'reply', _Result, State3}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('SeqStateCtr', OtherSelector)
