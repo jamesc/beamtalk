@@ -135,9 +135,9 @@ pub(crate) fn compute_file_module_pairs(
         // ADR 0016: Single-file mode uses bt@{module} naming
         let module_name = if let Some(pkg) = pkg_manifest {
             let relative_module = compute_relative_module(file, env.source_root.as_deref())?;
-            format!("bt@{}@{}", pkg.name, relative_module)
+            crate::commands::util::bt_qualified_module_name(&pkg.name, &relative_module)
         } else {
-            format!("bt@{}", beamtalk_codegen::core_erlang::to_module_name(stem))
+            crate::commands::util::bt_module_name_from_stem(stem)
         };
         let core_file = env.build_dir.join(format!("{module_name}.core"));
         pairs.push((file.clone(), module_name, core_file));

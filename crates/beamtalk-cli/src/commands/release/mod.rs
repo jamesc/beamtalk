@@ -76,6 +76,12 @@ pub fn build_release(
         );
     }
 
+    // ADR 0125 §3.1: a release is an artifact whose validity the operator
+    // cannot state if it was produced on an OTP major outside the declared
+    // support window — unlike `beamtalk build`'s warning (`build::
+    // warn_if_otp_out_of_window`), this is a hard error naming the window.
+    check_otp_window()?;
+
     // Compile the project first — the release stages its **generated** .app
     // (ADR 0125 §1.3), and the app closure needs it and every dependency's
     // .app to already exist under `_build/`.
@@ -321,6 +327,35 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// ADR 0125 §3.1: refuse to produce a release on an OTP major outside the
+/// declared support window (`otp-support.toml`). A no-op (never errors) when
+/// the OTP major cannot be probed — fails open, matching every other
+/// consumer of `build::current_otp_major`'s probe.
+fn check_otp_window() -> Result<()> {
+    if let Some(msg) = otp_out_of_window_error(super::build::current_otp_major()) {
+        miette::bail!(msg);
+    }
+    Ok(())
+}
+
+/// Pure message-builder behind [`check_otp_window`], split out so the error
+/// text is testable without depending on the host's actual OTP installation.
+fn otp_out_of_window_error(major: Option<u32>) -> Option<String> {
+    let major = major?;
+    let window = beamtalk_cli::otp_support::window();
+    if window.contains(major) {
+        return None;
+    }
+    Some(format!(
+        "Erlang/OTP {major} is outside the supported window ({}) declared in \
+         otp-support.toml.\n\n\
+         \x20 `beamtalk release` produces an artifact whose validity cannot be stated \
+         \x20 when built outside the supported window. Install a supported OTP major, \
+         \x20 or use `beamtalk build` to keep developing ahead of it.",
+        window.display_range()
+    ))
+}
+
 /// Validate that `value` (a `[release] name` or `[package] version`) is
 /// safe to use as a single filesystem path segment and, for `name`, as a
 /// `vm.args` `-sname` — never empty, never `.`/`..`, no path separator, and
@@ -472,6 +507,35 @@ mod tests {
             err.to_string().contains("No 'beamtalk.toml' found"),
             "got: {err}"
         );
+    }
+
+    // -- otp_out_of_window_error -----------------------------------------
+
+    #[test]
+    fn otp_out_of_window_error_none_when_major_unknown() {
+        assert_eq!(otp_out_of_window_error(None), None);
+    }
+
+    #[test]
+    fn otp_out_of_window_error_none_when_major_in_window() {
+        let window = beamtalk_cli::otp_support::window();
+        assert_eq!(otp_out_of_window_error(Some(window.min_major)), None);
+        assert_eq!(otp_out_of_window_error(Some(window.max_major)), None);
+    }
+
+    #[test]
+    fn otp_out_of_window_error_below_window() {
+        let window = beamtalk_cli::otp_support::window();
+        let msg = otp_out_of_window_error(Some(window.min_major - 1)).expect("should error");
+        assert!(msg.contains("outside the supported window"), "{msg}");
+        assert!(msg.contains(&window.display_range()), "{msg}");
+    }
+
+    #[test]
+    fn otp_out_of_window_error_above_window() {
+        let window = beamtalk_cli::otp_support::window();
+        let msg = otp_out_of_window_error(Some(window.max_major + 1)).expect("should error");
+        assert!(msg.contains("outside the supported window"), "{msg}");
     }
 
     // -- validate_release_path_component --------------------------------

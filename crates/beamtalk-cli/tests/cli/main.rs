@@ -28,6 +28,7 @@ mod cli_fmt;
 mod cli_lint;
 mod cli_logs;
 mod cli_new;
+mod cli_otp_matrix;
 mod cli_release;
 mod cli_run;
 mod cli_test;

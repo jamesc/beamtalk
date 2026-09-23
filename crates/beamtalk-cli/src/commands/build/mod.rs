@@ -108,6 +108,8 @@ struct BuildPassesResult {
 pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
 
+    warn_if_otp_out_of_window();
+
     let env = setup_build_environment(path)?;
 
     // A package directory build walks every project source file
@@ -399,6 +401,43 @@ fn execute_build_passes(
     })
 }
 
+/// ADR 0125 §3.1: warn (not fail) when the running OTP major falls outside
+/// the declared support window (`otp-support.toml`) — `beamtalk build` may
+/// be developing ahead of or behind the window; `beamtalk release` turns the
+/// same check into a build-blocking error (`release::check_otp_window`).
+/// Silent when the OTP major cannot be probed (fails open, matching the
+/// provenance stamp's own probe-failure handling).
+fn warn_if_otp_out_of_window() {
+    if let Some(msg) = otp_out_of_window_warning(current_otp_major()) {
+        eprintln!("warning: {msg}");
+    }
+}
+
+/// Pure message-builder behind [`warn_if_otp_out_of_window`], split out so
+/// the warning text is testable without depending on the host's actual OTP
+/// installation.
+pub(crate) fn otp_out_of_window_warning(major: Option<u32>) -> Option<String> {
+    let major = major?;
+    let window = beamtalk_cli::otp_support::window();
+    if window.contains(major) {
+        return None;
+    }
+    Some(format!(
+        "Erlang/OTP {major} is outside the supported window ({}) declared in \
+         otp-support.toml — this build may not be representative of a supported deployment.",
+        window.display_range()
+    ))
+}
+
+/// The running toolchain's OTP major, or `None` if it could not be probed.
+/// Shared by [`warn_if_otp_out_of_window`] and `release::check_otp_window`,
+/// so both read the same probe [`build_stamp::current_otp_version`] already
+/// uses for provenance stamping.
+pub(crate) fn current_otp_major() -> Option<u32> {
+    crate::commands::build_stamp::current_otp_version()
+        .and_then(beamtalk_cli::otp_support::major_from_version_str)
+}
+
 /// ADR 0098 Phase 1: project provenance gate.
 ///
 /// Returns `true` when the project's build scope was produced by a different
@@ -486,3 +525,35 @@ fn post_process_package_artifacts(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod otp_window_tests {
+    use super::otp_out_of_window_warning;
+
+    #[test]
+    fn none_when_major_unknown() {
+        assert_eq!(otp_out_of_window_warning(None), None);
+    }
+
+    #[test]
+    fn none_when_major_in_window() {
+        let window = beamtalk_cli::otp_support::window();
+        assert_eq!(otp_out_of_window_warning(Some(window.min_major)), None);
+        assert_eq!(otp_out_of_window_warning(Some(window.max_major)), None);
+    }
+
+    #[test]
+    fn warns_below_window() {
+        let window = beamtalk_cli::otp_support::window();
+        let msg = otp_out_of_window_warning(Some(window.min_major - 1)).expect("should warn");
+        assert!(msg.contains("outside the supported window"), "{msg}");
+        assert!(msg.contains(&window.display_range()), "{msg}");
+    }
+
+    #[test]
+    fn warns_above_window() {
+        let window = beamtalk_cli::otp_support::window();
+        let msg = otp_out_of_window_warning(Some(window.max_major + 1)).expect("should warn");
+        assert!(msg.contains("outside the supported window"), "{msg}");
+    }
+}
