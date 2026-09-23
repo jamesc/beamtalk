@@ -108,6 +108,15 @@ pub fn build_release(
     std::fs::create_dir_all(release_dir.as_std_path())
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create release dir '{release_dir}'"))?;
+    // Windows only, and only now that the directory exists (see
+    // `resolve_long_path`'s doc comment): rebind to the OS's own long-path
+    // form so every path derived below — staging, `.rel`/`start.boot`
+    // writing — agrees with what `systools:make_script/2`'s own
+    // filesystem-backed `path` search reports for each staged app's
+    // directory, instead of retaining a short-name (`RUNNER~1`-style)
+    // component that only this string, and nothing the filesystem itself
+    // reports, still uses.
+    let release_dir = assembly::resolve_long_path(&release_dir)?;
 
     eprintln!("Computing app closure...");
     let app_closure = closure::compute_app_closure(&layout, &parsed.package, release_cfg)?;

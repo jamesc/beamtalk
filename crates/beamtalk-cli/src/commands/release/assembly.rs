@@ -427,6 +427,74 @@ pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
         .map_err(|p| miette::miette!("Current directory '{}' is not valid UTF-8", p.display()))
 }
 
+/// Resolve `path` (which must already exist — call this only after
+/// `create_dir_all`, never in place of [`absolutize`], which deliberately
+/// runs *before* the release directory exists) to the OS's own long-path
+/// form, undoing any Windows 8.3 short-name component such as `RUNNER~1`
+/// for `runneradmin`.
+///
+/// This is **not** the same mistake `absolutize`'s doc comment warns
+/// about — a *second*, independently-derived absolute form of the same
+/// directory breaking the literal string-prefix match
+/// `systools:make_script/2`'s `RELEASE_DIR` substitution depends on. That
+/// bug came from canonicalizing on only *one* side of the prefix
+/// relationship (the staged-ebin side) while leaving the other (the
+/// `RELEASE_DIR` variable itself) un-canonicalized, so a symlinked temp
+/// dir (macOS's `/tmp` → `/private/tmp`) matched on one side and not the
+/// other. Here there is only one call site: `release_dir` is rebound to
+/// this resolved form immediately, in `run`, before *anything* downstream
+/// (staging, `.rel`/`start.boot` writing) derives a path from it — so
+/// every path this module produces already carries the resolved form, the
+/// same discipline `absolutize` itself uses, just with a resolution step
+/// that has to wait until the directory exists.
+///
+/// Why it's needed at all: `systools:make_script/2`'s `path` option is
+/// searched via `filelib:wildcard/1` and `file:path_open/3`, which read
+/// the actual directory entries on disk — on Windows CI runners, whose
+/// `%TEMP%` resolves to a short-name path (`C:\Users\RUNNER~1\...`) by
+/// default, that filesystem read silently returns the *long*-name form
+/// (`C:\Users\runneradmin\...`) for `App#application.dir`. Our
+/// `RELEASE_DIR` variable, passed straight through as the short-name
+/// string, then fails the boot-script generator's literal
+/// `lists:prefix/2` check against that long-name directory, and every
+/// staged (non-host) application silently falls back to the default
+/// `$ROOT/lib/App-Vsn/ebin` — a directory that doesn't exist, since these
+/// apps were never part of the host OTP install — producing an `undef` at
+/// boot for whichever staged `permanent`-type application starts first
+/// (`ranch_app:start/2` in the fixture release, since `ranch` is early in
+/// `cowboy`'s dependency chain). Resolving to the long-path form up front
+/// makes both sides of that prefix check agree, since the filesystem-read
+/// path already converges there.
+#[cfg(windows)]
+pub(crate) fn resolve_long_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
+    let canonical = std::fs::canonicalize(path.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to resolve the long-path form of '{path}'"))?;
+    let canonical = canonical.to_string_lossy();
+    // `std::fs::canonicalize` on Windows returns the `\\?\`-prefixed
+    // "verbatim" form; strip it back to an ordinary drive-letter path (or
+    // UNC path) so it still looks like — and string-prefixes the same way
+    // as — every other path this module produces.
+    let stripped = canonical
+        .strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .or_else(|| canonical.strip_prefix(r"\\?\").map(str::to_owned))
+        .unwrap_or_else(|| canonical.clone().into_owned());
+    Utf8PathBuf::from_path_buf(std::path::PathBuf::from(stripped))
+        .map_err(|p| miette::miette!("Resolved path '{}' is not valid UTF-8", p.display()))
+}
+
+/// Every other platform: a no-op. Only Windows's default-short-name
+/// `%TEMP%` behaviour (see the `#[cfg(windows)]` doc comment above) needs
+/// this resolved at all — `absolutize`'s plain join is already sufficient
+/// everywhere else, matching `absolutize`'s own non-canonicalizing
+/// discipline.
+#[cfg(not(windows))]
+#[allow(clippy::unnecessary_wraps)] // signature must match the `#[cfg(windows)]` version above
+pub(crate) fn resolve_long_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
+    Ok(path.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::closure::StagedApp;
