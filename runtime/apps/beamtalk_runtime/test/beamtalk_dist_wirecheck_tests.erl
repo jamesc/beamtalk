@@ -237,8 +237,8 @@ block_missing_module_raises(PeerNode) ->
         %% from the `undef` term itself.
         ?assertEqual({module, ModName}, erlang:fun_info(Fun, module))
     after
-        code:purge(ModName),
-        code:delete(ModName)
+        code:delete(ModName),
+        code:purge(ModName)
     end.
 
 block_different_version_raises(PeerNode) ->
@@ -261,10 +261,10 @@ block_different_version_raises(PeerNode) ->
         {caught, error, {badfun, CaughtFun}, _} = Capture,
         ?assertEqual({module, ModName}, erlang:fun_info(CaughtFun, module))
     after
-        code:purge(ModName),
         code:delete(ModName),
-        rpc:call(PeerNode, code, purge, [ModName]),
-        rpc:call(PeerNode, code, delete, [ModName])
+        code:purge(ModName),
+        rpc:call(PeerNode, code, delete, [ModName]),
+        rpc:call(PeerNode, code, purge, [ModName])
     end.
 
 %%====================================================================
