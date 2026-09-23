@@ -38,9 +38,12 @@ Phase 4.
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
-    %% Names this VM itself has been distributed under — their own
-    %% `nodeup`/`nodedown` are not membership changes and never announce.
-    local_names = [] :: [node()]
+    %% This VM's own current distributed identity, pending its matching
+    %% `nodedown` — not a membership change and never announced. Only the
+    %% single most recent self-identity is tracked (not a growing history):
+    %% if distribution restarts under a different name later, a genuine peer
+    %% that reuses an old self-name must still be able to announce.
+    own_name = undefined :: node() | undefined
 }).
 
 %%% ============================================================================
@@ -69,12 +72,12 @@ normalize_reason(_Reason) -> unknown.
 init([]) ->
     beamtalk_logging_config:set_domain(runtime),
     ok = net_kernel:monitor_nodes(true, [nodedown_reason]),
-    Local =
+    OwnName =
         case is_alive() of
-            true -> [node()];
-            false -> []
+            true -> node();
+            false -> undefined
         end,
-    {ok, #state{local_names = Local}}.
+    {ok, #state{own_name = OwnName}}.
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
@@ -82,24 +85,22 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({nodeup, Node, _Info}, #state{local_names = Local} = State) when
-    Node =:= node()
-->
+handle_info({nodeup, Node, _Info}, State) when Node =:= node() ->
     %% This VM just became distributed. Remember the name: by the time the
     %% matching `nodedown` arrives (`net_kernel:stop/0`), `node()` has
-    %% already reverted to `nonode@nohost`.
-    {noreply, State#state{local_names = lists:usort([Node | Local])}};
+    %% already reverted to `nonode@nohost`. Only the current identity is
+    %% tracked, not a history, so a later genuine peer that reuses an old
+    %% self-name still announces normally.
+    {noreply, State#state{own_name = Node}};
 handle_info({nodeup, Node, _Info}, State) ->
     announce('NodeUp', #{node => beamtalk_node:from_atom(Node)}),
     {noreply, State};
-handle_info({nodedown, Node, Info}, #state{local_names = Local} = State) ->
-    case Node =:= node() orelse lists:member(Node, Local) of
-        true ->
-            ok;
-        false ->
-            Reason = normalize_reason(proplists:get_value(nodedown_reason, Info, unknown)),
-            announce('NodeDown', #{node => beamtalk_node:from_atom(Node), reason => Reason})
-    end,
+handle_info({nodedown, Node, _Info}, #state{own_name = Node} = State) ->
+    %% Own pending self-nodedown — clear it, not a membership change.
+    {noreply, State#state{own_name = undefined}};
+handle_info({nodedown, Node, Info}, State) ->
+    Reason = normalize_reason(proplists:get_value(nodedown_reason, Info, unknown)),
+    announce('NodeDown', #{node => beamtalk_node:from_atom(Node), reason => Reason}),
     {noreply, State};
 handle_info(_Msg, State) ->
     {noreply, State}.

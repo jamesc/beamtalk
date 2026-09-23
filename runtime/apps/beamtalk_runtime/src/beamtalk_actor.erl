@@ -619,7 +619,7 @@ async_send(ActorPid, isAlive, [], FuturePid) ->
     ok;
 async_send(ActorPid, isRemote, [], FuturePid) ->
     %% isRemote must compare against the *caller's* node, so it cannot run
-    %% in the actor — see is_remote/1.
+    %% in the actor — see is_remote/2.
     try sync_send(ActorPid, isRemote, []) of
         Result -> beamtalk_future:resolve(FuturePid, Result)
     catch
@@ -801,7 +801,7 @@ Handles lifecycle methods locally without involving the actor process:
 - `isAlive` - checks if process is alive, returns boolean
   (remote pid: always `true`, ADR 0126 §7.3 — see moduledoc)
 - `isRemote` - asks the actor for its `node` and compares it with the
-  caller's node (ADR 0126 §2 — see is_remote/1)
+  caller's node (ADR 0126 §2 — see is_remote/2)
 - `monitor` - creates a monitor reference, returns ref
 - `onExit:` - monitors actor and calls block on exit
 - `stop` - gracefully stops the actor process, returns ok
