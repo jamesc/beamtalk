@@ -86,12 +86,14 @@ TestCase subclass: ArrayTest
     // name, not receiver class. (Array has no reject: primitive, so that
     // selector isn't guarded here.)
     count := 0
+    @expect dead_assignment
     statefulDoBlock := [:x | count := count + x]
     self should: [
       #[1, 2, 3] perform: #do: withArguments: #(statefulDoBlock)
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulBlock := [:x |
       count := count + 1
       x * 2
@@ -101,6 +103,7 @@ TestCase subclass: ArrayTest
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulSelectBlock := [:x |
       count := count + 1
       x > 1
@@ -110,6 +113,7 @@ TestCase subclass: ArrayTest
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulInjectBlock := [:acc :x |
       count := count + 1
       acc + x

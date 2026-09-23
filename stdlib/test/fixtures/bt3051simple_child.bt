@@ -10,4 +10,5 @@
 
 BT3047Ancestor subclass: BT3051SimpleChild
 
+  @expect lint "trailing ^ is the plain-return lowering path under test"
   class returnFoo -> Symbol => ^self foo

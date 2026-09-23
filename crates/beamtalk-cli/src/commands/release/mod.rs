@@ -437,6 +437,14 @@ fn validate_release_path_component(kind: &str, value: &str) -> Result<()> {
              characters could inject additional flags."
         );
     }
+    if value.contains('@') {
+        miette::bail!(
+            "[release] {kind} '{value}' must not contain '@' — `name` is written into \
+             `vm.args` as `-sname {value}@localhost` (ADR 0125 §1.6), and a second '@' in \
+             the name would make that an invalid, two-'@' short name the release could \
+             never boot with."
+        );
+    }
     Ok(())
 }
 
@@ -630,6 +638,15 @@ mod tests {
 
         let err = validate_release_path_component("name", "orders evil").unwrap_err();
         assert!(err.to_string().contains("-sname"), "{err}");
+    }
+
+    /// `generate_vm_args` writes `-sname {name}@localhost` (ADR 0125
+    /// §1.6); a `name` that itself contains `@` would produce a two-`@`
+    /// short name `erl` refuses to boot with at all.
+    #[test]
+    fn validate_release_path_component_rejects_at_sign() {
+        let err = validate_release_path_component("name", "orders@evil").unwrap_err();
+        assert!(err.to_string().contains('@'), "{err}");
     }
 
     /// A malicious `[release] name`/`[package] version` must be refused

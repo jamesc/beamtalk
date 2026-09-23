@@ -29,4 +29,4 @@ Value subclass: Fraction
   ///
   /// Overrides `Object>>equals:`, which defaults to `=:=`.
   equals: other :: Fraction -> Boolean =>
-    (self.numer * (other denom)) =:= ((other numer) * self.denom)
+    (self.numer * other denom) =:= (other numer * self.denom)

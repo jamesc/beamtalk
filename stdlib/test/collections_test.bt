@@ -177,6 +177,7 @@ TestCase subclass: CollectionsTest
     // `type_error`, ...) instead of the clear stateful_block_dispatch error
     // BT-2812 established for the same situation on Block's value*.
     count := 0
+    @expect dead_assignment
     statefulBlock := [:x |
       count := count + 1
       x * 2
@@ -186,12 +187,14 @@ TestCase subclass: CollectionsTest
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulDoBlock := [:x | count := count + x]
     self should: [
       #(1, 2, 3) perform: #do: withArguments: #(statefulDoBlock)
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulSelectBlock := [:x |
       count := count + 1
       x > 1
@@ -201,6 +204,7 @@ TestCase subclass: CollectionsTest
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulRejectBlock := [:x |
       count := count + 1
       x > 1
@@ -210,6 +214,7 @@ TestCase subclass: CollectionsTest
     ] raise: #stateful_block_dispatch
 
     count := 0
+    @expect dead_assignment
     statefulInjectBlock := [:acc :x |
       count := count + 1
       acc + x
@@ -227,6 +232,7 @@ TestCase subclass: CollectionsTest
     // stateful_block_dispatch error. The guard now lives in the generic
     // value-send fallback, so any self-hosted iteration method gets it.
     count := 0
+    @expect dead_assignment
     statefulBlock := [:x :i | count := count + x]
     self should: [
       #(1, 2, 3) perform: #eachWithIndex: withArguments: #(statefulBlock)
