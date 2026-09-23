@@ -410,11 +410,20 @@ jobs:
         with:
           toolchain: stable
 
+      # erlef/setup-beam errors if both `version-file` (which has its own
+      # `erlang` line) and an explicit `otp-version` are given, so read just
+      # `rebar3`'s pinned version out of .tool-versions and pass both
+      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
+      # stays the repo's single pinned version on every leg.
+      - name: Read rebar3 version from .tool-versions
+        id: tool-versions
+        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
-          version-file: .tool-versions
           otp-version: ${{ matrix.otp }}
+          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
           version-type: loose
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -485,11 +494,20 @@ jobs:
         with:
           toolchain: stable
 
+      # erlef/setup-beam errors if both `version-file` (which has its own
+      # `erlang` line) and an explicit `otp-version` are given, so read just
+      # `rebar3`'s pinned version out of .tool-versions and pass both
+      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
+      # stays the repo's single pinned version on every leg.
+      - name: Read rebar3 version from .tool-versions
+        id: tool-versions
+        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
-          version-file: .tool-versions
           otp-version: ${{ matrix.otp }}
+          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
           version-type: loose
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -536,11 +554,20 @@ jobs:
         with:
           toolchain: stable
 
+      # erlef/setup-beam errors if both `version-file` (which has its own
+      # `erlang` line) and an explicit `otp-version` are given, so read just
+      # `rebar3`'s pinned version out of .tool-versions and pass both
+      # versions explicitly — `otp-version` varies per matrix leg, `rebar3`
+      # stays the repo's single pinned version on every leg.
+      - name: Read rebar3 version from .tool-versions
+        id: tool-versions
+        run: echo "rebar3=$(awk '/^rebar /{print $2}' .tool-versions)" >> "$GITHUB_OUTPUT"
+
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
-          version-file: .tool-versions
           otp-version: ${{ matrix.otp }}
+          rebar3-version: ${{ steps.tool-versions.outputs.rebar3 }}
           version-type: loose
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
