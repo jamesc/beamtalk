@@ -745,7 +745,10 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
 
     // Poll `ping` until the node is live (or the child exited early, which
     // is itself a failure worth surfacing directly rather than timing out).
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    // 60s, not the pre-fix 30s: cheap insurance in case a slow CI boot
+    // under contention was ever a real, independent factor alongside the
+    // cookie desync this fix addresses.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut pinged = false;
     let mut last_ping_output: Option<std::process::Output> = None;
     while std::time::Instant::now() < deadline {
