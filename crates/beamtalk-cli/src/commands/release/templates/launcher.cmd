@@ -107,7 +107,11 @@ exit /b 0
 :foreground
 call :check_otp_window
 if errorlevel 1 exit /b 1
-"%ERL%" -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
+rem -noshell -noinput: see launcher.sh's foreground comment — no
+rem interactive shell attaches stdin, so a supervisor with no tty
+rem (a Windows service, a container) does not make the node see EOF
+rem and terminate right after boot. Console output is unaffected.
+"%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
     -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args"
 exit /b %errorlevel%
 

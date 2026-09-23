@@ -114,8 +114,17 @@ fi
 case "$VERB" in
     foreground)
         check_otp_window
+        # `-noshell -noinput`: a service has no interactive tty attached
+        # (ADR 0125 §1.7 — "Stdout is the container's stdout", not an Erlang
+        # shell prompt). Without these, `erl` attaches an interactive shell
+        # that reads stdin; under a process supervisor (systemd, Docker,
+        # `nohup`) stdin is typically closed or not a tty, so the shell sees
+        # immediate EOF and the whole node terminates seconds after boot —
+        # `Console` output (ADR 0099) is unaffected: it still goes to
+        # stdout/stderr normally, this only turns off the interactive
+        # `1> ` prompt reading from stdin.
         # shellcheck disable=SC2086
-        exec "$ERL" -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
+        exec "$ERL" -noshell -noinput -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
             -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args"
         ;;
     stop)
