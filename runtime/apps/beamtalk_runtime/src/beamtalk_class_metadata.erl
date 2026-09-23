@@ -99,7 +99,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     delete_class_method_funs/1,
     has_runtime_class_methods/1,
     set_runtime_class_methods/2,
-    reset_runtime_class_methods/1
+    reset_runtime_class_methods/1,
+    %% ADR 0125 §2.2/§3.4, BT-3574: the `field_types`/`field_kinds` ->
+    %% `beamtalk_shape_diff:shape()`-shaped normalisation shared by the live
+    %% (`beamtalk_workspace_shape_store`) and build-time
+    %% (`beamtalk_release_shapes`) flatteners — see `normalize_field_shape/2`.
+    normalize_field_shape/2,
+    field_type_to_binary/1,
+    field_kind_to_binary/1
 ]).
 
 -define(TABLE, beamtalk_class_metadata).
@@ -117,6 +124,19 @@ a table deleted between an existence check and the op (teardown/shutdown).
 -type superclass() :: class_name() | none.
 -type selector() :: atom().
 -type class_method_fun_info() :: #{block := fun(), arity := non_neg_integer()}.
+
+%% A class's flattened field shape: field name -> `{DeclaredType, Kind}`,
+%% rendered exactly as `beamtalk_shape_diff:shape()` (ADR 0105 Phase 2)
+%% specifies — `<<"Dynamic">>` for an untyped field, `<<"eager">>`/
+%% `<<"late">>` for `Kind` (ADR 0124 §9/B9), never omitted. This is the
+%% one normalisation both the live flattener
+%% (`beamtalk_workspace_shape_store`) and the build-time, disk-derived
+%% flattener (`beamtalk_release_shapes`, ADR 0125 §2.2) produce, so a
+%% conformance test can assert their outputs are structurally identical for
+%% the same class (CLAUDE.md's no-duplicate-implementations rule — this is
+%% the shared leaf both apps depend on, `beamtalk_workspace` -> `beamtalk_runtime`).
+-type field_shape() :: #{binary() => {DeclaredType :: binary(), Kind :: binary()}}.
+-export_type([field_shape/0]).
 
 -record(class_metadata, {
     name :: class_name(),
@@ -447,6 +467,53 @@ merge_ancestor_map(StartSuper, ReadOwnMapFun, AccSoFar) ->
             %% with StartSuper = none.
             AccSoFar
     end.
+
+-doc """
+Zip a flattened `field_types` map with its matching `field_kinds` map into a
+`field_shape()` — binary field name -> `{binary type name, binary kind}`
+(ADR 0124 §9/B9). A field present in `FieldTypes` but absent from
+`FieldKinds` (a class/level predating B5a's `field_kinds` meta, or a
+dynamic/ClassBuilder-built level) defaults to `eager`. This is the shared
+leaf both `beamtalk_workspace_shape_store:normalize_shape/2` (live) and
+`beamtalk_release_shapes` (build-time, ADR 0125 §2.2/§3.4, BT-3574)
+delegate to, rather than each keeping its own copy of this zip (CLAUDE.md's
+no-duplicate-implementations rule) — see `field_type_to_binary/1`/
+`field_kind_to_binary/1`, this function's two per-value normalisers.
+""".
+-spec normalize_field_shape(#{atom() => atom()}, #{atom() => atom()}) -> field_shape().
+normalize_field_shape(FieldTypes, FieldKinds) ->
+    maps:fold(
+        fun(FieldAtom, TypeAtom, Acc) ->
+            KindAtom = maps:get(FieldAtom, FieldKinds, eager),
+            Acc#{
+                atom_to_binary(FieldAtom, utf8) =>
+                    {field_type_to_binary(TypeAtom), field_kind_to_binary(KindAtom)}
+            }
+        end,
+        #{},
+        FieldTypes
+    ).
+
+-doc """
+The `none` -> `<<"Dynamic">>` sentinel normalisation every `field_types`
+read in this codebase's shape flatteners uses. Exported for the same reason
+`normalize_field_shape/2` is — see its doc.
+""".
+-spec field_type_to_binary(atom()) -> binary().
+field_type_to_binary(none) -> <<"Dynamic">>;
+field_type_to_binary(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8).
+
+-doc """
+`field_kinds`' `'eager'`/`'late'` atom -> binary normalisation
+`normalize_field_shape/2` uses for a `field_shape()` value's `Kind` half.
+Any other atom (a class/level with no `field_kinds` entry for this field at
+all, which `normalize_field_shape/2` already defaults to the atom `eager`
+before calling this) also normalises to `<<"eager">>` — `late` is the only
+kind that ever needs a non-default answer here.
+""".
+-spec field_kind_to_binary(eager | late) -> binary().
+field_kind_to_binary(late) -> <<"late">>;
+field_kind_to_binary(_) -> <<"eager">>.
 
 -doc """
 Look up whether a class is abstract (ADR 0109 amendment).

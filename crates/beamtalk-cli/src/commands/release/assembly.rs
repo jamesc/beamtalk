@@ -706,6 +706,89 @@ pub fn make_tarball(
     Ok((wanted, size))
 }
 
+/// Append `releases/<vsn>/shapes.json` and `releases/<vsn>/beamtalk-
+/// provenance.json` into an already-built tarball (ADR 0125 §2.3, BT-3574).
+///
+/// `systools:make_tar/2` archives only the modules each staged app's
+/// generated `.app` declares (`{modules, […]}`) plus the `.rel`/`.boot` —
+/// **not** arbitrary extra files this command writes alongside them
+/// (verified: `shapes.json`/`beamtalk-provenance.json` are absent from a
+/// freshly built tarball even though both exist on disk next to the `.rel`
+/// they sit beside). Without this step, `beamtalk release --upgrade-from
+/// <tarball>` (`upgrade.rs`) would *always* take the "previous release has
+/// no shapes.json" on-the-fly-extraction fallback for a tarball input —
+/// and that fallback itself depends on the tarball's `lib/*/ebin` carrying
+/// every module the extractor's `beamtalk_stdlib` boot needs, which the
+/// same `{modules, […]}` pruning is not guaranteed to satisfy (a module a
+/// staged app never lists — e.g. one it only reaches indirectly — is
+/// silently absent from the tar the same way the manifests are). Shipping
+/// both manifests inside the tarball itself sidesteps that gap entirely: a
+/// tarball built by *this* version of the command always carries a
+/// `shapes.json` `--upgrade-from` can read directly, no fallback needed.
+///
+/// Implemented via the `tar` binary (already a build-time dependency of
+/// this command, `beamtalk-cli`'s tarball-inspection tests) rather than a
+/// new Rust tar-writing crate dependency: `gzip -d` to a plain `.tar`,
+/// `tar -rf` to append the two files at their `releases/<vsn>/` path
+/// (relative to `release_dir`, matching every other entry's path inside
+/// the archive), then `gzip` to recompress.
+///
+/// # Errors
+///
+/// Returns an error if `gzip`/`tar` cannot be spawned or either step fails.
+pub fn append_shape_manifests_to_tarball(
+    tar_path: &Utf8Path,
+    release_dir: &Utf8Path,
+    release_vsn: &str,
+) -> Result<()> {
+    let plain_tar = tar_path.with_extension("");
+    let status = Command::new("gzip")
+        .arg("-d")
+        .arg("-f")
+        .arg(tar_path.as_std_path())
+        .status()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to spawn gzip to decompress '{tar_path}'"))?;
+    if !status.success() {
+        miette::bail!("Failed to decompress '{tar_path}' (gzip exited with {status})");
+    }
+
+    let shapes_rel = Utf8PathBuf::from("releases")
+        .join(release_vsn)
+        .join("shapes.json");
+    let provenance_rel = Utf8PathBuf::from("releases")
+        .join(release_vsn)
+        .join("beamtalk-provenance.json");
+    let status = Command::new("tar")
+        .arg("-rf")
+        .arg(plain_tar.as_std_path())
+        .arg("-C")
+        .arg(release_dir.as_std_path())
+        .arg(shapes_rel.as_std_path())
+        .arg(provenance_rel.as_std_path())
+        .status()
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!("Failed to spawn tar to append the manifests to '{plain_tar}'")
+        })?;
+    if !status.success() {
+        miette::bail!(
+            "Failed to append shape manifests to '{plain_tar}' (tar exited with {status})"
+        );
+    }
+
+    let status = Command::new("gzip")
+        .arg("-f")
+        .arg(plain_tar.as_std_path())
+        .status()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to spawn gzip to recompress '{plain_tar}'"))?;
+    if !status.success() {
+        miette::bail!("Failed to recompress '{plain_tar}' (gzip exited with {status})");
+    }
+    Ok(())
+}
+
 /// Stage the compiler port binary (`beamtalk-compiler-port`[`.exe`]) into
 /// `<release_dir>/bin/` (`[release] include-compiler = true`, ADR 0125
 /// §1.3/§1.5) — `closure.rs` already stages the `beamtalk_compiler` OTP

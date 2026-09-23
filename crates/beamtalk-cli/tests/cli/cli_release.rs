@@ -345,6 +345,25 @@ fn release_default_build_has_erts_tarball_provenance_and_shapes_test() {
             .any(|e| e.file_name().to_string_lossy().starts_with("erts-")),
         "unpacked tarball missing erts-*/"
     );
+    // ADR 0125 §2.3 (BT-3574): both manifests are appended into the
+    // tarball itself (`systools:make_tar/2` does not archive them), so a
+    // tarball alone is a valid `--upgrade-from` input.
+    assert!(
+        unpack_dir
+            .join("releases")
+            .join("0.1.0")
+            .join("shapes.json")
+            .is_file(),
+        "unpacked tarball missing releases/0.1.0/shapes.json"
+    );
+    assert!(
+        unpack_dir
+            .join("releases")
+            .join("0.1.0")
+            .join("beamtalk-provenance.json")
+            .is_file(),
+        "unpacked tarball missing releases/0.1.0/beamtalk-provenance.json"
+    );
 
     // beamtalk-provenance.json
     let rel_config_dir = output_dir.join("releases").join("0.1.0");
@@ -524,4 +543,204 @@ fn release_strip_beams_removes_debug_info_but_keeps_meta_test() {
         .status()
         .expect("spawn erl to check the stripped beam");
     assert!(status.success(), "stripped beam check failed");
+}
+
+/// ADR 0125 §2.3 (BT-3574): `beamtalk release --upgrade-from` builds the
+/// 1.4.0 release, then compares it against a real, previously built 1.3.0
+/// release directory — a `shapeVersion:` bump with no `migrateFromV1:`
+/// (**error**) and a deleted class (**warning**) — and asserts the printed
+/// report verbatim, plus the non-zero exit code an error finding requires.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn release_upgrade_from_reports_missing_migration_and_removed_class_verbatim() {
+    let project = cli_common::fixture_project();
+    make_releasable(project.path());
+    std::fs::write(
+        project.path().join("src/Widget.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Actor subclass: Widget\n\
+         \x20\x20state: id :: String = \"\"\n",
+    )
+    .expect("write src/Widget.bt");
+    std::fs::write(
+        project.path().join("src/LegacyQuote.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Actor subclass: LegacyQuote\n\
+         \x20\x20state: notes :: String = \"\"\n",
+    )
+    .expect("write src/LegacyQuote.bt");
+    let manifest_path = project.path().join("beamtalk.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"0.1.0\"", "version = \"1.3.0\""),
+    )
+    .unwrap();
+
+    // Build the 1.3.0 release — the "previous" release the upgrade check
+    // compares against.
+    let prev_dir = project.path().join("dist-1.3.0");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&prev_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success()
+        .stdout(contains("Built release cli_subprocess_fixture-1.3.0"));
+
+    // Move to 1.4.0: Widget gains `shapeVersion: 2` with no
+    // `migrateFromV1:` (an unmigrated bump — an **error**), LegacyQuote is
+    // deleted (a **warning**).
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"1.3.0\"", "version = \"1.4.0\""),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/Widget.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Actor subclass: Widget\n\
+         \x20\x20shapeVersion: 2\n\
+         \x20\x20state: id :: String = \"\"\n",
+    )
+    .expect("rewrite src/Widget.bt");
+    std::fs::remove_file(project.path().join("src/LegacyQuote.bt")).expect("delete LegacyQuote.bt");
+
+    // Build the 1.4.0 release with --upgrade-from pointed at the real 1.3.0
+    // release directory just built above.
+    let new_dir = project.path().join("dist-1.4.0");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&new_dir)
+        .arg("--upgrade-from")
+        .arg(&prev_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .failure()
+        .stdout(contains(
+            "Upgrade check: cli_subprocess_fixture 1.3.0 → 1.4.0",
+        ))
+        .stdout(contains("Shape changes requiring migration"))
+        .stdout(contains("Widget"))
+        .stdout(contains("v1 → v2   migrateFromV1: MISSING   error"))
+        .stdout(contains("Removed classes"))
+        .stdout(contains("LegacyQuote"))
+        .stdout(contains("warning"))
+        .stdout(contains("Toolchain"))
+        .stdout(contains("1 error, 1 warning."))
+        .stderr(contains("Upgrade check found blocking shape errors"));
+}
+
+/// The "no shapes.json on the previous release" fallback (ADR 0125 §2.3):
+/// pointing `--upgrade-from` at a release directory with no
+/// `releases/<vsn>/shapes.json` still produces a real report, via the §2.2
+/// extractor run over that release's own staged `lib/*/ebin` on the fly —
+/// never "unknown".
+#[test]
+fn release_upgrade_from_falls_back_to_on_the_fly_extraction_when_shapes_json_is_missing() {
+    let project = cli_common::fixture_project();
+    make_releasable(project.path());
+    let manifest_path = project.path().join("beamtalk.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"0.1.0\"", "version = \"1.3.0\""),
+    )
+    .unwrap();
+
+    let prev_dir = project.path().join("dist-1.3.0");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&prev_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success();
+
+    // Simulate a release built before ADR 0125 shipped shapes.json.
+    let prev_shapes_json = prev_dir.join("releases").join("1.3.0").join("shapes.json");
+    assert!(prev_shapes_json.is_file());
+    std::fs::remove_file(&prev_shapes_json).unwrap();
+
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"1.3.0\"", "version = \"1.4.0\""),
+    )
+    .unwrap();
+
+    let new_dir = project.path().join("dist-1.4.0");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&new_dir)
+        .arg("--upgrade-from")
+        .arg(&prev_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success()
+        .stdout(contains(
+            "Upgrade check: cli_subprocess_fixture 1.3.0 → 1.4.0",
+        ))
+        .stdout(contains("0 errors, 0 warnings."));
+}
+
+/// `--upgrade-from` also accepts a `.tar.gz` tarball of a previous release
+/// (ADR 0125 §2.3), not just an unpacked directory — the tarball is the
+/// artifact `beamtalk release` actually distributes, so pointing at the
+/// directory alone would leave the more common real-world input untested.
+#[test]
+fn release_upgrade_from_accepts_a_tarball() {
+    let project = cli_common::fixture_project();
+    make_releasable(project.path());
+    let manifest_path = project.path().join("beamtalk.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"0.1.0\"", "version = \"1.3.0\""),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(project.path().join("dist-1.3.0"))
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success();
+    let prev_tarball = project.path().join("cli_subprocess_fixture-1.3.0.tar.gz");
+    assert!(
+        prev_tarball.is_file(),
+        "expected a tarball at {prev_tarball:?}"
+    );
+
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"1.3.0\"", "version = \"1.4.0\""),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(project.path().join("dist-1.4.0"))
+        .arg("--upgrade-from")
+        .arg(&prev_tarball)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success()
+        .stdout(contains(
+            "Upgrade check: cli_subprocess_fixture 1.3.0 → 1.4.0",
+        ))
+        .stdout(contains("0 errors, 0 warnings."));
 }

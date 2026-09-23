@@ -98,6 +98,13 @@ enum Command {
         /// OTP install within the artifact's `required_otp` range)
         #[arg(long)]
         no_include_erts: bool,
+
+        /// Run the shape-compatibility preflight (ADR 0125 §2.3) against a
+        /// previously built release directory or `.tar.gz`/`.tgz` tarball,
+        /// after this build finishes. Exits non-zero if it finds an
+        /// unmigrated shape change.
+        #[arg(long, value_name = "PREV_RELEASE_DIR_OR_TARBALL")]
+        upgrade_from: Option<String>,
     },
 
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
@@ -642,6 +649,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             force,
             force_output,
             no_include_erts,
+            upgrade_from,
         } => {
             let options = beamtalk_core::CompilerOptions {
                 workspace_mode: false,
@@ -655,6 +663,7 @@ fn dispatch_command(command: Command) -> Result<()> {
                 force,
                 force_output,
                 no_include_erts,
+                upgrade_from.as_deref(),
             )
         }
         Command::BuildStdlib {
