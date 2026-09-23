@@ -11,9 +11,10 @@
 // see. The two oracles are only jointly complete because they share one
 // fragment corpus:
 //
-//   stdlib/test/fixtures/mutation_corpus_value.bt          (Value subclass context)
-//   stdlib/test/fixtures/mutation_corpus_actor.bt          (Actor context)
-//   stdlib/test/fixtures/mutation_corpus_class_method.bt   (class-method context, BT-2360)
+//   stdlib/test/fixtures/mutation_corpus_value.bt               (Value subclass context)
+//   stdlib/test/fixtures/mutation_corpus_actor.bt               (Actor context)
+//   stdlib/test/fixtures/mutation_corpus_class_method.bt        (class-method context, BT-2360)
+//   stdlib/test/fixtures/mutation_corpus_actor_class_method.bt  (Actor class-method context, BT-3581)
 //
 // plus the TestCase-context fragments defined as `frag*` helpers in this file.
 // BT-2345, when it lands, consumes the same fragment names for its equality
@@ -886,6 +887,29 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testEnsureNestedConditionalLastReadWriteFalseClassMethod =>
     self assert: (MutationCorpusClassMethod ensureNestedConditionalLastReadWrite: false) equals: 1
+
+  // BT-3581: the Actor-rooted class-method twin of the ClassMethod cells
+  // above — see mutation_corpus_actor_class_method.bt's own comment for why
+  // this cell was never previously represented in the matrix.
+  testEnsureLocalOnlyReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod ensureLocalOnlyReadWrite equals: 1
+
+  testOnDoLocalOnlyReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod onDoLocalOnlyReadWrite equals: 1
+
+  testEnsureNestedConditionalLastReadWriteTrueActorClassMethod =>
+    self assert: (MutationCorpusActorClassMethod ensureNestedConditionalLastReadWrite: true) equals: 11
+
+  testEnsureNestedConditionalLastReadWriteFalseActorClassMethod =>
+    self assert: (MutationCorpusActorClassMethod ensureNestedConditionalLastReadWrite: false) equals: 1
+
+  // BT-3581: `is_actor_self_send` gap — a same-class self-send inside an
+  // Actor class method's loop body or `on:do:` try body (never `safe_dispatch`).
+  testSelfSendWhileTrueNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod selfSendWhileTrueNonLastReadWrite equals: 5
+
+  testOnDoSelfSendLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod onDoSelfSendLastReadWrite equals: 1
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 4 — class-var / state-field mutation, threaded the same

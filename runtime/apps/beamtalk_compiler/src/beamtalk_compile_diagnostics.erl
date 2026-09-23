@@ -70,29 +70,73 @@ single human-readable binary, one line per underlying error, each
 carrying whatever identifying detail the originating lint pass reports
 (e.g. the unbound variable's name and the enclosing function/arity for
 `core_lint').
+
+Prepends [`bug_header/0`](`bug_header/0`) — every error reachable here is,
+per this module's moduledoc, an internal-compiler bug by construction, so
+the message says so up front instead of leaving the reader to guess
+whether their `.bt` source is at fault. `format_messages/2' (shared with
+[`format_warnings/1`](`format_warnings/1`)) does the `'class_<selector>''
+demangling.
 """.
 -spec format_errors([{file:filename() | string() | binary(), [tuple()]}]) -> binary().
 format_errors(Errors) when is_list(Errors) ->
-    format_messages(Errors, "").
+    case format_messages(Errors, "") of
+        <<>> ->
+            <<>>;
+        Body ->
+            <<(bug_header())/binary, Body/binary>>
+    end.
+
+-doc """
+Header prepended to every non-empty [`format_errors/1`](`format_errors/1`)
+result. This pipeline stage only ever compiles Core Erlang the beamtalk
+compiler itself generated (never user source directly), so a failure here
+always means codegen produced invalid output — see this module's moduledoc.
+""".
+-spec bug_header() -> binary().
+bug_header() ->
+    <<
+        "Beamtalk compiler bug: code generation produced Core Erlang that "
+        "does not compile. This is a bug in the beamtalk compiler itself, "
+        "NOT an error in your .bt source; please file an issue with a "
+        "minimal repro: https://github.com/jamesc/beamtalk/issues/new\n\n"
+    >>.
+
+-doc """
+Best-effort readability pass over already-formatted `sys_messages' text:
+rewrites every `'class_<selector>'' occurrence (the Core Erlang export name
+a beamtalk class-side method compiles to, ADR 0032) to `class method
+'<selector>''. Purely cosmetic — falls back to the original text unchanged
+if the pattern isn't present, so it can never turn a formattable message
+into an unformattable one.
+""".
+-spec demangle_class_methods(binary()) -> binary().
+demangle_class_methods(Text) ->
+    re:replace(Text, "'class_([^']*)'", "class method '\\1'", [global, {return, binary}]).
 
 -doc """
 Turn a `compile:forms/2' `Warnings' list (from `return_warnings') into a
 single human-readable binary, one line per underlying warning, prefixed
 `"Warning: "' — matching the wording `report_warnings' would have
 printed, and what `compile.escript''s `print_messages/2' already prints
-for the escript backend.
+for the escript backend. Demangled the same way `format_errors/1' is (see
+`format_messages/2'), for surface parity between the two: a warning about
+a class-side method reads `class method '<selector>'' regardless of which
+backend/call path produced it.
 """.
 -spec format_warnings([{file:filename() | string() | binary(), [tuple()]}]) -> binary().
 format_warnings(Warnings) when is_list(Warnings) ->
     format_messages(Warnings, "Warning: ").
 
+%% Shared by format_errors/1 and format_warnings/1: renders via
+%% sys_messages:format_messages/4, then demangle_class_methods/1.
 format_messages(Messages, Prefix) ->
     Lines = [
         Text
      || {File, ErrorInfos} <- Messages,
         {_Loc, Text} <- sys_messages:format_messages(to_filename(File), Prefix, ErrorInfos, [])
     ],
-    unicode:characters_to_binary(Lines).
+    demangle_class_methods(unicode:characters_to_binary(Lines)).
 
 -doc """
 Print a `compile:forms/2' `Warnings' list (from `return_warnings') to

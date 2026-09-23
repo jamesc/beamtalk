@@ -230,10 +230,7 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
     let Self = call 'beamtalk_actor':'make_self'(State) in
     try call 'nlr_matching_token_class_method':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> case {Type, Error} of
-        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
-        <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
-    end
+    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
@@ -315,16 +312,17 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
     end
 
 
-'class_findFirstOver:in:'/4 = fun (ClassSelf, ClassVars, _threshold4, _coll5) ->
-    let _NlrToken6 = call 'erlang':'make_ref'() in
-try
-let _seq7 = let _temp8 = _coll5 in let _temp9 = fun (_each10) -> call 'beamtalk_message_dispatch':'send'(let _BinLeft11 = _each10 in let _BinRight12 = _threshold4 in case call 'beamtalk_primitive':'is_object'(_BinLeft11) of <'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft11, '>', [_BinRight12]) <'false'> when 'true' -> call 'erlang':'>'(_BinLeft11, _BinRight12) <_BinOpNoMatch13> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch13}) end, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken6, _each10, ClassVars})]) in case call 'erlang':'is_list'(_temp8) of <'true'> when 'true' -> call 'lists':'foreach'(_temp9, _temp8) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp8, 'do:', [_temp9]) end in let _Ret14 = 0 in _Ret14
-of _NlrResult15 -> _NlrResult15
-catch <_NlrCls16, _NlrErr17, _NlrStk18> ->
-  case {_NlrCls16, _NlrErr17} of
-    <{'throw', {'$bt_nlr', _CatchTok19, _NlrVal20, _NlrState21}}> when call 'erlang':'=:='(_CatchTok19, _NlrToken6) -> _NlrVal20
-    <_OtherPair22> when 'true' -> primop 'raw_raise'(_NlrCls16, _NlrErr17, _NlrStk18)
-  end
+'class_findFirstOver:in:'/4 = fun (ClassSelf, ClassVars, _threshold1, _coll2) ->
+        let _NlrToken3 = call 'erlang':'make_ref'() in
+        try
+    let _seq4 = let _temp5 = _coll2 in let _temp6 = fun (_each7) -> call 'beamtalk_message_dispatch':'send'(let _BinLeft8 = _each7 in let _BinRight9 = _threshold1 in case call 'beamtalk_primitive':'is_object'(_BinLeft8) of <'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft8, '>', [_BinRight9]) <'false'> when 'true' -> call 'erlang':'>'(_BinLeft8, _BinRight9) <_BinOpNoMatch10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch10}) end, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken3, _each7, ClassVars})]) in case call 'erlang':'is_list'(_temp5) of <'true'> when 'true' -> call 'lists':'foreach'(_temp6, _temp5) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp5, 'do:', [_temp6]) end in let _Ret11 = 0 in _Ret11
+        of _NlrResult12 -> _NlrResult12
+        catch <_NlrCls13, _NlrErr14, _NlrStk15> ->
+          case {_NlrCls13, _NlrErr14} of
+            <{'throw', {'$bt_nlr', _CatchTok16, _NlrVal17, _NlrState18}}> when call 'erlang':'=:='(_CatchTok16, _NlrToken3) -> _NlrVal17
+            <_OtherPair19> when 'true' -> primop 'raw_raise'(_NlrCls13, _NlrErr14, _NlrStk15)
+          end
+    
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
     let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
