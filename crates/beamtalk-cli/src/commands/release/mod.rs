@@ -146,9 +146,18 @@ pub fn build_release(
         &staged_ebins,
     )?;
 
+    // `assembly.rs` bakes the `RELEASE_DIR` build-time prefix into the
+    // `.script`/`.boot` as a forward-slashed string (the same Windows fix
+    // `ebin_path_list` uses — see its doc comment): the `-boot_var
+    // RELEASE_DIR` value a caller passes at boot time must be normalised
+    // the same way, or `$RELEASE_DIR` substitution silently fails on
+    // Windows and the release falls back to build-time absolute paths that
+    // don't resolve. Print the same forward-slashed form here so the
+    // command a Windows user copy-pastes actually boots.
+    let release_dir_fwd = beamtalk_cli::path_util::to_forward_slash(release_dir.as_str());
     println!(
         "Built release {release_name}-{release_vsn}\n  → {release_dir}\n\n\
-         Boot it: erl -boot {release_config_dir}/start -boot_var RELEASE_DIR {release_dir} \
+         Boot it: erl -boot {release_config_dir}/start -boot_var RELEASE_DIR {release_dir_fwd} \
          -config {release_config_dir}/sys"
     );
     info!(name = %release_name, vsn = %release_vsn, dir = %release_dir, "release built");

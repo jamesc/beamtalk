@@ -176,6 +176,19 @@ fn release_builds_staged_tree_and_boot_artifacts() {
              false -> io:format(standard_error, \"boot check failed: ~p ~p ~p~n\", [Ok1, Ok2, Ok3]), halt(1) \
          end.";
 
+    // `assembly.rs` bakes the `RELEASE_DIR` build-time prefix into the
+    // `.script`/`.boot` as a forward-slashed string (`to_forward_slash`,
+    // the same Windows fix `ebin_path_list` uses) — the `-boot_var
+    // RELEASE_DIR` value supplied here at boot time must be normalised the
+    // same way, or `$RELEASE_DIR` substitution silently fails on Windows
+    // (a native, backslash-separated value never appears as a match for
+    // anything the boot script is looking to replace) and the release
+    // falls back to build-time absolute paths that don't resolve, exactly
+    // the `ranch_app:start/2 undef` symptom the macOS symlink-prefix bug
+    // produced before `absolutize` was made consistent on both sides.
+    let release_dir_for_boot_var = beamtalk_cli::path_util::to_forward_slash(
+        output_dir.to_str().expect("output_dir must be UTF-8"),
+    );
     let status = Command::new("erl")
         .arg("-noshell")
         .arg("-noinput")
@@ -183,7 +196,7 @@ fn release_builds_staged_tree_and_boot_artifacts() {
         .arg(&boot_path)
         .arg("-boot_var")
         .arg("RELEASE_DIR")
-        .arg(&output_dir)
+        .arg(&release_dir_for_boot_var)
         .arg("-config")
         .arg(&sys_config_noext)
         .arg("-eval")
