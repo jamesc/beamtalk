@@ -887,12 +887,47 @@ module changed.
   change (§7), no `sys:change_code`, no migration, no
   `hot_reload_descendants`. ADR 0105's re-check then runs on the users'
   senders as it does for any method change.
-- **Live-patching a trait method** — `Comparable >> max: other => …` — is a
+- **A trait edit is all-or-nothing: compile everything, then load.** A
+  trait change can be valid on its own and still break one of its users:
+  a new provision may conflict with another trait that user has (§4), fail
+  that user's `overriding:` check (§3a), or leave a requirement unmet
+  (§5). Reloading users one at a time would leave some classes on the new
+  trait and some on the old. So every trait edit — a file reload,
+  `Trait >> sel => …`, or `Trait removeSelector:` — runs in two stages:
+  1. **Compile** the trait and every source-backed user in memory. Nothing
+     is loaded yet.
+  2. **If every compile succeeds** (warnings allowed), load the trait
+     module first, then each user through `update_class`. **If any
+     compile fails,** load nothing: the edit is rejected, the trait keeps
+     its previous definition in the image, and the error lists every
+     failing user with its own diagnostic and fix:
+
+  ```
+  error: Describable edit rejected — 1 of 4 users fails to compile.
+    AuditRecord: Describable provides `summary`, which AuditRecord would
+      otherwise inherit from Record.
+      hint: uses: Describable overriding: #(#summary)
+            or: uses: Describable excluding: #(#summary)
+  ```
+
+  The guarantee covers compilation, which is where every trait-induced
+  failure is detected. Loading is per module, so for the few milliseconds
+  of stage 2 a process can observe some users on the new code and some on
+  the old, as it can today when a class and its subclass are reloaded
+  together. Suspending processes to close that window is out of scope. If
+  a load in stage 2 fails, the modules already loaded in that edit are
+  reloaded from their previous binaries. The same two-stage behaviour
+  applies on every surface (REPL, MCP, LSP-driven save), recorded in
+  `docs/development/surface-parity.md`.
+- **Live-patching a trait method** — `Describable >> summary => …` — is a
   message send (principle 11): it replaces the method in the trait's
-  registry entry and re-expands users, the same whole-class recompile that
-  `Foo >> bar => …` performs today (ADR 0066 §REPL).
-- **`Comparable removeSelector: #max:`** (ADR 0112) removes the provision and
-  re-expands users. **`DateTime removeSelector: #max:`** where `max:` is
+  registry entry and re-expands users through the two-stage rule above,
+  the same whole-class recompile that `Foo >> bar => …` performs today
+  (ADR 0066 §REPL).
+- **`Describable removeSelector: #summary`** (ADR 0112) removes the
+  provision and re-expands users, also through the two-stage rule; it is
+  rejected if a user relied on the removed provision to satisfy another
+  trait's requirement. **`DateTime removeSelector: #max:`** where `max:` is
   trait-provided is an error: "`max:` is provided by trait Comparable;
   exclude it with `uses: Comparable excluding: #(#max:)` or remove it from the
   trait". A class's own override of a trait selector can be removed as
@@ -953,6 +988,7 @@ implementation in the existing `E`/`W` series.
 | A class `uses:` a trait its superclass already uses | Warning | "C's superclass already uses T; this re-flattens T's methods over the superclass's customisations" |
 | A class-body override is not override-compatible with the provision it replaces | Warning | §8 |
 | Renaming or removing a required selector on a user | Runtime error | §11 |
+| A trait edit that makes any source-backed user fail to compile | Runtime error (edit rejected, nothing loaded) | §11 — lists every failing user with its diagnostic |
 | `Self` as a parameter type in a class body method | Error | unchanged (`check_no_self_in_params`); the hint mentions traits when the method's class uses one |
 | Type mismatch between a required signature and the class's method | Warning | as ADR 0025 protocol/type warnings |
 | `removeSelector:` on a trait-provided method of a class | Runtime error | see §11 |
@@ -1336,7 +1372,7 @@ assumption this ADR could not verify from source.
 | 2 | **Semantics**: `semantic_analysis/trait_registry.rs` (mirrors `protocol_registry.rs`: registration, name collision, cycle check); `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, aliasing, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; implied-protocol registration into `ProtocolInfo`; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
 | 3 | **Codegen & build graph**: feed the flattened `ClassDefinition` to the existing generators (no change to `merge_method`); `methodXref` provenance/origin; `methodSource` as the trait's source slice; `traits => [{Name, Hash}]` in user meta; trait module emission (`__beamtalk_meta`, `'__beamtalk_trait_source'/0`, `register_trait/0`, implied protocol via `generate_protocol_registrations`) loaded before classes like `protocol_modules`; every §10a entry point (CLI cache key, `build_stdlib` trait pre-pass and `generated_builtins.rs`, compiler port, `dependency_classes.rs`, `ProjectIndex` edges); conformance fixture for the trait meta shape | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-cli`, `beamtalk-language-service`, `build_stdlib` | L | 2 |
 | 4 | **Runtime & reflection**: `beamtalk_trait_registry.erl` (ETS, mirrors protocol registry); `stdlib/src/trait.bt`; `Behaviour traits/allTraits/usesTrait:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := trait` + browse grouping; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
-| 5 | **Live system**: trait file reload → user recompile fan-out in the workspace loader (source-backed, non-stdlib users only; stdlib traits read-only); `Trait >> sel => …` and `Trait removeSelector:` live patching; required-selector rename/remove refusal and `save-section` routing (§11); `Trait define:` at the REPL; ADR 0105 re-check hookup; ADR 0114 rename (`renameSelector:to:` redirection, trait `renameTo:` with `uses:` reference rows); flush of trait files (ADR 0113); LSP go-to-definition/hover/completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
+| 5 | **Live system**: trait file reload → two-stage user recompile fan-out in the workspace loader (compile all, load only if all succeed, roll back loaded modules on a load failure; source-backed, non-stdlib users only; stdlib traits read-only); `Trait >> sel => …` and `Trait removeSelector:` live patching; required-selector rename/remove refusal and `save-section` routing (§11); `Trait define:` at the REPL; ADR 0105 re-check hookup; ADR 0114 rename (`renameSelector:to:` redirection, trait `renameTo:` with `uses:` reference rows); flush of trait files (ADR 0113); LSP go-to-definition/hover/completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
 | 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String` (each keeps its primitive operators); `Enumerable(E)` on `SupervisionTree` and `ChangeLog` per §9 (`ChangeLog` keeps its all-entries `select:`, and keeps its public `notEmpty` with `uses: Enumerable(ChangeEntry) aliasing: #{#notEmpty => #isNotEmpty}`; `SupervisionTree` keeps its `do:`); separately, move `Integer`/`Float` `min:`/`max:` up to `Number` (inheritance, not traits); BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9 | stdlib, docs | M | 5 |
 
 **Tests per phase.**
@@ -1348,7 +1384,7 @@ assumption this ADR could not verify from source.
 | 2 | Semantic-analysis unit tests for each §13 row, both §3a directions (trait grows, superclass grows), the same-origin diamond, class-wins, `Self` substitution, and generic `E` substitution |
 | 3 | `test-package-compiler` codegen snapshots for one user of each class kind, `just verify-threaded-ir` over the flattened stdlib, and the trait-meta conformance fixture |
 | 4 | Runtime EUnit for `beamtalk_trait_registry`, BUnit reflection tests (`traits`, `origin`, `usersOf:`), and xref tests for `provenance := trait` |
-| 5 | `tests/repl-protocol/cases/` for trait reload fan-out, `Trait >> sel` live patching, `removeSelector:` refusal, and rename; plus LSP tests |
+| 5 | `tests/repl-protocol/cases/` for trait reload fan-out, a rejected edit that loads nothing and names the failing user, `Trait >> sel` live patching, `removeSelector:` refusal, and rename; plus LSP tests |
 | 6 | Existing `just test-stdlib` and `just test-bunit` stay green with the duplicates deleted, plus new BUnit tests for `between:and:`/`min:`/`max:` on each new user |
 
 Phase 1 alone is mergeable (a parsed but unexpanded `uses:` is a "not yet
