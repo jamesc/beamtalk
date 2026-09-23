@@ -132,9 +132,9 @@ case "$VERB" in
         # `Console` output (ADR 0099) is unaffected: it still goes to
         # stdout/stderr normally, this only turns off the interactive
         # `1> ` prompt reading from stdin.
-        # shellcheck disable=SC2086
+        # shellcheck disable=SC2046,SC2086
         exec "$ERL" -noshell -noinput -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
-            -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args"
+            -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args" $(cookie_args)
         ;;
     stop)
         check_otp_window

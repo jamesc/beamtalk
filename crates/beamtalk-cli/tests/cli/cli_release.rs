@@ -716,8 +716,21 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     build_release_fixture(project.path(), &output_dir);
 
     let name = "cli_subprocess_fixture";
+    // An explicit, per-test cookie: with none set, `stop`/`ping`/`rpc`'s
+    // client nodes and the `foreground` node all fall back to the shared
+    // `$HOME/.erlang.cookie` file, auto-generated on first use — under
+    // CI's fully-parallel test suite, another test's node can race to
+    // create/rewrite that same file between this node's boot (which reads
+    // it once and caches the value for the life of the VM) and a later
+    // `ping`/`rpc` invocation (which re-reads the file fresh each time),
+    // permanently desynchronizing the two and producing an unauthenticated
+    // `pang` that never recovers — this is what caused this test's
+    // observed CI-only "node never came up" failures. An explicit cookie
+    // removes the shared file from the picture entirely.
+    let cookie = format!("bt3573_test_cookie_{}", std::process::id());
     let child = launcher_command(&output_dir, name)
         .arg("foreground")
+        .env("RELEASE_COOKIE", &cookie)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -732,11 +745,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
 
     // Poll `ping` until the node is live (or the child exited early, which
     // is itself a failure worth surfacing directly rather than timing out).
-    // 120s, not 30s: under CI's full parallel test suite (every other test
-    // binary's process competing for a runner's few cores), a cold node
-    // boot has been observed taking well over 60s even though it boots in
-    // ~1s locally with no contention.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut pinged = false;
     let mut last_ping_output: Option<std::process::Output> = None;
     while std::time::Instant::now() < deadline {
@@ -755,6 +764,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         }
         let ping = launcher_command(&output_dir, name)
             .arg("ping")
+            .env("RELEASE_COOKIE", &cookie)
             .output()
             .expect("spawn bin/<name> ping");
         if ping.status.success() {
@@ -785,6 +795,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // the result (`Smoke run` => `21 + 21` => `42`).
     let rpc = launcher_command(&output_dir, name)
         .args(["rpc", "Smoke run"])
+        .env("RELEASE_COOKIE", &cookie)
         .output()
         .expect("spawn bin/<name> rpc");
     assert!(
@@ -803,6 +814,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // process must exit on its own shortly after.
     let stop = launcher_command(&output_dir, name)
         .arg("stop")
+        .env("RELEASE_COOKIE", &cookie)
         .output()
         .expect("spawn bin/<name> stop");
     assert!(
