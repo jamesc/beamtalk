@@ -952,8 +952,13 @@ compile_core_forms(CoreModule, Options) ->
         {ok, ModuleName, Binary, Warnings} ->
             beamtalk_compile_diagnostics:print_warnings(Warnings),
             {ok, ModuleName, Binary};
-        {error, Errors, Warnings} ->
-            beamtalk_compile_diagnostics:print_warnings(Warnings),
+        {error, Errors, _Warnings} ->
+            %% Warnings deliberately NOT printed here (unlike the two `ok'
+            %% arms above): every one of them is about some OTHER,
+            %% successfully-compiled function in this module — when the
+            %% module fails to compile at all, they are pure noise burying
+            %% the actual error, not actionable information. See
+            %% `beamtalk_compile_diagnostics:format_errors/1's bug_header.
             {error,
                 {core_compile_error, #{
                     message => beamtalk_compile_diagnostics:format_errors(Errors),

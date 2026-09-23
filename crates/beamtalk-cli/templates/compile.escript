@@ -155,8 +155,13 @@ worker_loop(Parent, OutDir) ->
                     inject_docs_chunk(CoreFile, ModuleName, OutDir),
                     erlang:send(Parent, {compiled, ModuleName}),
                     worker_loop(Parent, OutDir);
-                {error, Errors, Warnings} ->
-                    print_messages(Warnings, "Warning: "),
+                {error, Errors, _Warnings} ->
+                    %% Warnings deliberately NOT printed here: every one of
+                    %% them is about some OTHER, successfully-compiled
+                    %% function in this module — when the module fails to
+                    %% compile at all, they are pure noise burying the
+                    %% actual error, not actionable information.
+                    print_bug_header(),
                     print_messages(Errors, ""),
                     erlang:send(Parent, failed),
                     worker_loop(Parent, OutDir);
@@ -173,17 +178,42 @@ worker_loop(Parent, OutDir) ->
 %% before) and print each line to `standard_error' explicitly, instead of
 %% letting `compile:file/2' print it to the default group leader (stdout —
 %% see `worker_loop/2's doc for why that loses the message entirely).
+%%
+%% Best-effort demangles every `'class_<selector>'' Core Erlang export name
+%% (ADR 0032) into `class method '<selector>'' — purely cosmetic, falls
+%% back to the original text unchanged when the pattern isn't present.
+%% Mirrors `beamtalk_compile_diagnostics:demangle_class_methods/1', which
+%% this escript cannot depend on (see this file's moduledoc: escripts run
+%% standalone with no project code path).
 print_messages([], _Prefix) ->
     ok;
 print_messages(Messages, Prefix) ->
     lists:foreach(
         fun({File, Infos}) ->
             lists:foreach(
-                fun({_Loc, Text}) -> io:put_chars(standard_error, Text) end,
+                fun({_Loc, Text}) ->
+                    Demangled = re:replace(
+                        Text, "'class_([^']*)'", "class method '\\1'", [global, {return, list}]
+                    ),
+                    io:put_chars(standard_error, Demangled)
+                end,
                 sys_messages:format_messages(File, Prefix, Infos, [])
             )
         end,
         Messages
+    ).
+
+%% This pipeline stage only ever compiles Core Erlang the beamtalk compiler
+%% itself generated (never user source directly), so an error here always
+%% means codegen produced invalid output — never that the user wrote bad
+%% Beamtalk. Mirrors `beamtalk_compile_diagnostics:bug_header/0'.
+print_bug_header() ->
+    io:put_chars(
+        standard_error,
+        "Beamtalk compiler bug: code generation produced Core Erlang that "
+        "does not compile. This is a bug in the beamtalk compiler itself, "
+        "NOT an error in your .bt source; please file an issue with a "
+        "minimal repro: https://github.com/jamesc/beamtalk/issues/new\n\n"
     ).
 
 %% BT-499: Inject EEP-48 doc chunk into compiled .beam file.

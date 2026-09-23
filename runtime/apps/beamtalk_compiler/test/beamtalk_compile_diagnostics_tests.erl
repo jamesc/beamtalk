@@ -19,7 +19,43 @@ format_errors_unbound_var_test() ->
     ?assertNotEqual(nomatch, binary:match(Formatted, <<"unbound variable">>)),
     ?assertNotEqual(nomatch, binary:match(Formatted, <<"'State'">>)),
     ?assertNotEqual(nomatch, binary:match(Formatted, <<"foo/1">>)),
-    ?assertEqual(<<"my_module: unbound variable 'State' in foo/1\n">>, Formatted).
+    ?assertEqual(
+        <<
+            "Beamtalk compiler bug: code generation produced Core Erlang that does not "
+            "compile. This is a bug in the beamtalk compiler itself, NOT an error in your "
+            ".bt source; please file an issue with a minimal repro: "
+            "https://github.com/jamesc/beamtalk/issues/new\n\n"
+            "my_module: unbound variable 'State' in foo/1\n"
+        >>,
+        Formatted
+    ).
+
+%% Every non-empty result is prefixed with a clear "this is a compiler bug,
+%% not your source" header — the whole point of BT-3581's follow-up.
+format_errors_prepends_bug_header_test() ->
+    Errors = [{"my_module", [{none, core_lint, {unbound_var, 'State', {foo, 1}}}]}],
+    Formatted = beamtalk_compile_diagnostics:format_errors(Errors),
+    ?assertNotEqual(nomatch, binary:match(Formatted, <<"Beamtalk compiler bug">>)),
+    ?assertNotEqual(nomatch, binary:match(Formatted, <<"NOT an error in your .bt source">>)),
+    %% The header must come first, before any per-error detail.
+    {Start, _Len} = binary:match(Formatted, <<"Beamtalk compiler bug">>),
+    ?assertEqual(0, Start).
+
+%% A `'class_<selector>'' Core Erlang export name (ADR 0032 — what a
+%% class-side method actually compiles to) is demangled to `class method
+%% '<selector>''` so the message names what the `.bt` author wrote, not the
+%% internal export.
+format_errors_demangles_class_method_test() ->
+    Errors = [
+        {"my_module", [
+            {none, core_lint, {unbound_var, 'State', {'class_handleCancel:engine:', 4}}}
+        ]}
+    ],
+    Formatted = beamtalk_compile_diagnostics:format_errors(Errors),
+    ?assertNotEqual(
+        nomatch, binary:match(Formatted, <<"class method 'handleCancel:engine:'">>)
+    ),
+    ?assertEqual(nomatch, binary:match(Formatted, <<"'class_handleCancel:engine:'">>)).
 
 %% Multiple errors across files/lines all render, one line each.
 format_errors_multiple_test() ->
