@@ -54,7 +54,7 @@ adopted.
 -export([year/1, month/1, day/1, hour/1, minute/1, second/1, 'offsetMinutes'/1]).
 -export(['asTimestamp'/1, 'asString'/1, 'printString'/1]).
 -export(['addSeconds:'/2, 'addDays:'/2, 'addDuration:'/2, 'diffSeconds:'/2]).
--export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '-'/2]).
+-export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '-'/2, '<='/2, 'sameInstant'/2]).
 -export(['toUtc'/1, 'toOffset:'/2, 'format:'/2]).
 
 %% FFI shims for (Erlang beamtalk_datetime) dispatch — also the functions
@@ -431,6 +431,12 @@ Difference between two DateTimes as a Duration.
 '>='(_, _) ->
     raise_type_error('>=', <<"Argument must be a DateTime">>).
 
+%% Beamtalk spells "less-or-equal" `<=`, not `=<` — this is the same-named
+%% function `self delegate` needs to reach for the `<=` method (a quoted
+%% atom is a valid Erlang function name for any selector, operators included).
+-spec '<='(t(), t()) -> boolean().
+'<='(Self, Other) -> '=<'(Self, Other).
+
 -spec '=:='(t(), t()) -> boolean().
 '=:='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =:= 'asTimestamp'(Other);
@@ -523,6 +529,10 @@ gte(Self, Other) -> '>='(Self, Other).
 %% `eql:with:` → strips to `eql`, arity 2
 -spec eql(t(), t()) -> boolean().
 eql(Self, Other) -> '=:='(Self, Other).
+
+%% `sameInstant:` → strips to `sameInstant`, arity 2
+-spec 'sameInstant'(t(), t()) -> boolean().
+'sameInstant'(Self, Other) -> eql(Self, Other).
 
 %% `neq:with:` → strips to `neq`, arity 2
 -spec neq(t(), t()) -> boolean().

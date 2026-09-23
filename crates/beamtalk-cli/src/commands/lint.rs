@@ -294,7 +294,22 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // auto-extracted ones. These loaders print their own diagnostics
     // (skipped signatures, version drift) directly; they are not folded into
     // `all_diags` below, which is scoped to `.bt` diagnostics.
-    let native_type_registry = package_root.as_deref().and_then(|root| {
+    //
+    // Stdlib has no `beamtalk.toml` (see `stdlib_mode`'s doc above), so
+    // `package_root` is always `None` when linting it — falling all the way
+    // through to `beamtalk build-stdlib`'s own extractor
+    // (`extract_stdlib_type_specs`, which scans `runtime/apps/beamtalk_stdlib`'s
+    // compiled `.beam` files, ADR 0075) instead of leaving the registry
+    // `None`. Without this, every `(Erlang m) f:` call in `stdlib/src`
+    // reported `Dynamic (untyped FFI)` in `beamtalk lint` even though
+    // `beamtalk build-stdlib` already infers it correctly — a lint-only
+    // false positive with no `@expect` that could satisfy both passes.
+    let is_stdlib_lint_target = package_root.is_none()
+        && source_files
+            .iter()
+            .any(|f| package::is_under_stdlib_src_dir(f.as_std_path()));
+
+    let native_type_registry = if let Some(root) = package_root.as_deref() {
         let layout = crate::commands::build_layout::BuildLayout::new(root);
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
@@ -320,7 +335,11 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             Some(merged)
         }
         .map(std::sync::Arc::new)
-    });
+    } else if is_stdlib_lint_target {
+        super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
+    } else {
+        None
+    };
 
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;

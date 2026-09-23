@@ -35,7 +35,7 @@ would be dead code).
 
 %% Instance methods
 -export(['asString'/1, 'asBinary'/1, version/1, 'printString'/1]).
--export(['<'/2, '>'/2, '=<'/2, '>='/2]).
+-export(['<'/2, '>'/2, '=<'/2, '>='/2, '<='/2]).
 
 %% FFI shims for (Erlang beamtalk_uuid) dispatch — also the functions
 %% `self delegate` actually calls for keyword selectors (first keyword,
@@ -185,6 +185,12 @@ version(#{'$beamtalk_class' := 'Uuid', bytes := <<_:48, Version:4, _:76>>}) ->
     A >= B;
 '>='(_, _) ->
     raise_type_error('>=', <<"Argument must be a Uuid">>).
+
+%% Beamtalk spells "less-or-equal" `<=`, not `=<` — this is the same-named
+%% function `self delegate` needs to reach for the `<=` method (a quoted
+%% atom is a valid Erlang function name for any selector, operators included).
+-spec '<='(t(), t()) -> boolean().
+'<='(Self, Other) -> '=<'(Self, Other).
 
 %%% ============================================================================
 %%% FFI Shims — (Erlang beamtalk_uuid) dispatch
