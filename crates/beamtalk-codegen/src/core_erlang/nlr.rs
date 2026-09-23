@@ -313,8 +313,8 @@ mod tests {
         assert_eq!(doc.to_pretty_string(), "{V, S}");
     }
 
-    fn make_test_vars() -> NlrValueTypeCatchVars {
-        NlrValueTypeCatchVars {
+    fn make_test_vars() -> NlrCatchVars {
+        NlrCatchVars {
             token_var: "Tok0".to_string(),
             result_var: "Res0".to_string(),
             cls_var: "Cls0".to_string(),
@@ -346,7 +346,9 @@ mod tests {
 
     #[test]
     fn format_catch_suffix_passthrough_arm_uses_result_var() {
-        let doc = make_test_vars().format_catch_suffix().to_pretty_string();
+        let doc = make_test_vars()
+            .format_catch_suffix(NlrBoundary::ValueType)
+            .to_pretty_string();
         // The `of` arm passes through non-throw results unchanged: `of Res0 -> Res0`.
         assert!(
             doc.contains("of Res0 -> Res0"),
@@ -356,7 +358,9 @@ mod tests {
 
     #[test]
     fn format_catch_suffix_nlr_arm_yields_value_state_pair() {
-        let doc = make_test_vars().format_catch_suffix().to_pretty_string();
+        let doc = make_test_vars()
+            .format_catch_suffix(NlrBoundary::ValueType)
+            .to_pretty_string();
         // Matching NLR throw: pattern must name the '$bt_nlr' tag.
         assert!(
             doc.contains("'$bt_nlr'"),
@@ -376,7 +380,9 @@ mod tests {
 
     #[test]
     fn format_catch_suffix_reraises_non_nlr_exceptions() {
-        let doc = make_test_vars().format_catch_suffix().to_pretty_string();
+        let doc = make_test_vars()
+            .format_catch_suffix(NlrBoundary::ValueType)
+            .to_pretty_string();
         // Non-NLR exceptions fall through to the wildcard arm and are re-raised.
         assert!(
             doc.contains("primop 'raw_raise'(Cls0, Err0, Stk0)"),
