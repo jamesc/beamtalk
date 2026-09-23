@@ -195,6 +195,19 @@ fn dep_app_name(dep_ebin: &Utf8Path) -> Result<String> {
 /// file, never `.app.src`'s `{vsn, {cmd, …}}` (which `systools` cannot
 /// resolve — `app_file.rs`'s output and rebar3's resolved `.app` are the
 /// only valid staging sources).
+///
+/// Also verifies every module the `.app` declares in `{modules, […]}` has
+/// a matching `<Module>.beam` somewhere in `source_ebins` — searched across
+/// *all* of them, since `stage_one_app` copies from all of them, not just
+/// the one the `.app` itself was found in (the multi-source case, e.g.
+/// `beamtalk_stdlib`'s class beams and rebar3-built modules living in two
+/// separate directories). Catches a partial/stale build — declared but
+/// never actually compiled, or compiled into a directory `stage_one_app`
+/// won't see — at the earliest point that can name the exact missing
+/// module, instead of a `beam_file_not_found`/`undef` crash at boot with no
+/// indication of which staged app or module was actually incomplete. See
+/// `docs/development/debugging.md` for why an `undef` at boot is expensive
+/// to trace back to a staging defect otherwise.
 fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp> {
     let mut found = None;
     for ebin in source_ebins {
@@ -210,11 +223,12 @@ fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp
             })?;
             let declared_deps =
                 extract_erlang_atom_list_field(&content, "applications").unwrap_or_default();
-            found = Some((vsn, declared_deps));
+            let modules = extract_erlang_atom_list_field(&content, "modules").unwrap_or_default();
+            found = Some((vsn, declared_deps, modules, app_path));
             break;
         }
     }
-    let (vsn, declared_deps) = found.ok_or_else(|| {
+    let (vsn, declared_deps, modules, app_path) = found.ok_or_else(|| {
         miette::miette!(
             "Could not find '{name}.app' in any of: {}\n\
              Run `beamtalk build` first (for the project app or its \
@@ -226,6 +240,36 @@ fn read_staged_app(name: &str, source_ebins: &[Utf8PathBuf]) -> Result<StagedApp
                 .join(", ")
         )
     })?;
+
+    let missing: Vec<&String> = modules
+        .iter()
+        .filter(|module| {
+            !source_ebins
+                .iter()
+                .any(|ebin| ebin.join(format!("{module}.beam")).is_file())
+        })
+        .collect();
+    if !missing.is_empty() {
+        miette::bail!(
+            "'{app_path}' declares {} module(s) with no matching `.beam` file in: {}\n\
+             \x20 missing: {}\n\n\
+             \x20 This is a partial or stale build, not a beamtalk-release bug — the .app was \
+             \x20 generated (or cached) from a build that never finished compiling every module \
+             \x20 it declares. Run `just clean && just build` (or, in CI, clear the cached \
+             \x20 runtime build) and retry.",
+            missing.len(),
+            source_ebins
+                .iter()
+                .map(|p| p.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            missing
+                .iter()
+                .map(|m| m.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
 
     Ok(StagedApp {
         name: name.to_string(),
@@ -420,6 +464,73 @@ mod tests {
         assert_eq!(app.name, "beamtalk_stdlib");
         assert_eq!(app.vsn, "0.4.0");
         assert_eq!(app.source_ebins, vec![first, second]);
+    }
+
+    #[test]
+    fn read_staged_app_accepts_when_every_declared_module_has_a_beam() {
+        let dir = TempDir::new().unwrap();
+        let ebin = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        fs::write(
+            ebin.join("ranch.app").as_std_path(),
+            r#"{application, ranch, [{vsn, "1.8.0"}, {modules, [ranch_app, ranch_sup]}]}."#,
+        )
+        .unwrap();
+        fs::write(ebin.join("ranch_app.beam").as_std_path(), b"beam").unwrap();
+        fs::write(ebin.join("ranch_sup.beam").as_std_path(), b"beam").unwrap();
+
+        let app = read_staged_app("ranch", &[ebin]).unwrap();
+        assert_eq!(app.vsn, "1.8.0");
+    }
+
+    /// The exact failure class this check exists for: a `.app` file
+    /// declaring a module that was never actually compiled/staged (a
+    /// partial or stale build) — must be caught here, at build time, with
+    /// the specific missing module named, rather than surfacing three
+    /// layers away as a bare `undef` when the release tries to boot.
+    #[test]
+    fn read_staged_app_rejects_declared_module_with_no_beam_file() {
+        let dir = TempDir::new().unwrap();
+        let ebin = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        fs::write(
+            ebin.join("ranch.app").as_std_path(),
+            r#"{application, ranch, [{vsn, "1.8.0"}, {modules, [ranch_app, ranch_sup]}]}."#,
+        )
+        .unwrap();
+        // Only ranch_sup.beam actually exists — ranch_app.beam is missing,
+        // simulating a partial/stale build.
+        fs::write(ebin.join("ranch_sup.beam").as_std_path(), b"beam").unwrap();
+
+        let err = read_staged_app("ranch", &[ebin]).unwrap_err();
+        assert!(err.to_string().contains("ranch_app"), "got: {err}");
+        assert!(
+            err.to_string().contains("partial or stale build"),
+            "got: {err}"
+        );
+    }
+
+    /// The multi-source case (`beamtalk_stdlib`): a module declared in the
+    /// `.app` found in the first source ebin, but only physically present
+    /// in the *second* source ebin, must still count as present — modules
+    /// are searched across every source ebin, matching what
+    /// `stage_one_app` actually copies from.
+    #[test]
+    fn read_staged_app_finds_module_beam_in_a_later_source_ebin() {
+        let dir = TempDir::new().unwrap();
+        let first = Utf8PathBuf::from_path_buf(dir.path().join("first")).unwrap();
+        let second = Utf8PathBuf::from_path_buf(dir.path().join("second")).unwrap();
+        fs::create_dir_all(first.as_std_path()).unwrap();
+        fs::create_dir_all(second.as_std_path()).unwrap();
+        fs::write(
+            first.join("beamtalk_stdlib.app").as_std_path(),
+            r#"{application, beamtalk_stdlib, [{vsn, "0.4.0"}, {modules, [bt_class, beamtalk_json]}]}."#,
+        )
+        .unwrap();
+        fs::write(first.join("bt_class.beam").as_std_path(), b"beam").unwrap();
+        // beamtalk_json.beam only exists in the second source ebin.
+        fs::write(second.join("beamtalk_json.beam").as_std_path(), b"beam").unwrap();
+
+        let app = read_staged_app("beamtalk_stdlib", &[first, second]).unwrap();
+        assert_eq!(app.vsn, "0.4.0");
     }
 
     #[test]

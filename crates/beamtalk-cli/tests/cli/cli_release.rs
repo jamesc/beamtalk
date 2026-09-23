@@ -161,6 +161,48 @@ fn release_builds_staged_tree_and_boot_artifacts() {
     let vm_content = std::fs::read_to_string(&vm_args).unwrap();
     assert!(vm_content.contains("-mode interactive"), "{vm_content}");
 
+    // Isolate a staging-copy defect from a boot-script path-resolution
+    // defect *before* attempting the full boot: the full boot's failure
+    // mode (a `permanent`-type application crashing during boot script
+    // execution) brings the whole node down before any `-eval` code can
+    // run, so a diagnostic embedded in the boot's own `-eval` never
+    // executes on this exact failure. Instead, point a throwaway `erl`
+    // directly at the *staged* (post-copy) ranch ebin dir with `-pa` — no
+    // boot script, no `$RELEASE_DIR` substitution involved at all — and
+    // ask whether `ranch_app` is loadable from there. A failure here means
+    // `stage_apps`'s copy step is not producing a loadable module (a
+    // staging/build defect); a pass here means the copied files are fine
+    // and the defect is specifically in how the generated boot script
+    // resolves its own code paths.
+    let ranch_lib_entry = std::fs::read_dir(&lib_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("ranch-"))
+        .expect("a staged ranch-* dir must exist (checked above)");
+    let ranch_staged_ebin = ranch_lib_entry.path().join("ebin");
+    let ranch_load_check = Command::new("erl")
+        .arg("-noshell")
+        .arg("-noinput")
+        .arg("-pa")
+        .arg(&ranch_staged_ebin)
+        .arg("-eval")
+        .arg(
+            "case code:which(ranch_app) of \
+                 non_existing -> halt(1); \
+                 _ -> halt(0) \
+             end.",
+        )
+        .status()
+        .expect("spawn erl to check the staged ranch module is loadable");
+    assert!(
+        ranch_load_check.success(),
+        "staged ranch_app module is not loadable directly from the staged ebin dir {} \
+         (via `-pa`, no boot script involved) — this is a staging/copy defect, not a boot-script \
+         path-resolution one; check that {}'s source ebin actually contains ranch_app.beam",
+        ranch_staged_ebin.display(),
+        ranch_staged_ebin.display(),
+    );
+
     // Now boot it: `erl -boot … -boot_var RELEASE_DIR …`, assert the root
     // supervisor is running and the fixture class is registered — the
     // BT-3569 wire check's own acceptance criterion, against the real
