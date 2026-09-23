@@ -211,7 +211,14 @@ fn find_release_version_dir(prev_root: &Utf8Path) -> Result<(String, Utf8PathBuf
             Some((vsn, path))
         })
         .collect();
-    candidates.sort_by(|a, b| a.0.cmp(&b.0));
+    // Numeric, not lexicographic: `"1.10.0" < "1.9.0"` under plain string
+    // `Ord` (`'1' < '9'` at the second segment), which would pick the wrong
+    // "most recent" generation once any segment reaches two digits — the
+    // exact bug `crate::commands::deps::registry::compare_versions` exists
+    // to avoid (its own `test_compare_versions_numeric_not_lexicographic`),
+    // reused here rather than re-deriving it (CLAUDE.md's
+    // no-duplicate-implementations rule).
+    candidates.sort_by(|a, b| crate::commands::deps::registry::compare_versions(&a.0, &b.0));
     candidates.pop().ok_or_else(|| {
         miette::miette!(
             "'{releases_dir}' has no version subdirectory — is '{prev_root}' a valid \
@@ -533,6 +540,23 @@ fn describe_field_change(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    /// Regression test: `find_release_version_dir` must pick `1.10.0` over
+    /// `1.9.0` as "most recent" — plain lexicographic `str` `Ord` gets this
+    /// backwards (`'1' < '9'` at the second segment), which would silently
+    /// diff a next upgrade against the wrong prior generation.
+    #[test]
+    fn find_release_version_dir_orders_numerically_not_lexicographically() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        for vsn in ["1.9.0", "1.10.0", "1.2.0"] {
+            std::fs::create_dir_all(root.join("releases").join(vsn).as_std_path()).unwrap();
+        }
+        let (vsn, dir) = find_release_version_dir(&root).unwrap();
+        assert_eq!(vsn, "1.10.0");
+        assert_eq!(dir, root.join("releases").join("1.10.0"));
+    }
 
     /// One test fixture class entry: `(class, version, fields, migrations)`.
     type FixtureEntry<'a> = (

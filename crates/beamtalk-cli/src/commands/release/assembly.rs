@@ -726,30 +726,59 @@ pub fn make_tarball(
 /// tarball built by *this* version of the command always carries a
 /// `shapes.json` `--upgrade-from` can read directly, no fallback needed.
 ///
-/// Implemented via the `tar` binary (already a build-time dependency of
-/// this command, `beamtalk-cli`'s tarball-inspection tests) rather than a
-/// new Rust tar-writing crate dependency: `gzip -d` to a plain `.tar`,
-/// `tar -rf` to append the two files at their `releases/<vsn>/` path
-/// (relative to `release_dir`, matching every other entry's path inside
-/// the archive), then `gzip` to recompress.
+/// Implemented via the `tar`/`gzip` binaries (already a build-time
+/// dependency of this command, `beamtalk-cli`'s tarball-inspection tests)
+/// rather than a new Rust tar-writing crate dependency: decompress to a
+/// **scratch copy** (never the original), `tar -rf` the scratch copy to
+/// append the two files at their `releases/<vsn>/` path (relative to
+/// `release_dir`, matching every other entry's path inside the archive),
+/// recompress the scratch copy to a second scratch file, then
+/// `fs::rename` that over `tar_path` only once both steps have already
+/// succeeded.
+///
+/// **Atomic with respect to `tar_path`:** the original, already-valid
+/// tarball `make_tarball` produced is read but never written to until the
+/// very last step — if `tar`/`gzip` fails partway through, `tar_path`
+/// still holds the original, complete tarball rather than a
+/// partially-decompressed or truncated one. An in-place `gzip -d -f
+/// tar_path` (deleting the original before the append/recompress steps
+/// that can still fail) was the original, non-atomic shape of this
+/// function; this replaces it.
 ///
 /// # Errors
 ///
-/// Returns an error if `gzip`/`tar` cannot be spawned or either step fails.
+/// Returns an error if `gzip`/`tar` cannot be spawned, either step fails,
+/// or the final rename fails — in every failure case, `tar_path` is left
+/// exactly as `make_tarball` produced it.
 pub fn append_shape_manifests_to_tarball(
     tar_path: &Utf8Path,
     release_dir: &Utf8Path,
     release_vsn: &str,
 ) -> Result<()> {
-    let plain_tar = tar_path.with_extension("");
+    // Both scratch files live next to `tar_path` (not a separate temp
+    // dir) so the final `fs::rename` is same-filesystem and therefore
+    // atomic; `.tar.gz` -> `.tar.gz.scratch`/`.tar.gz.scratch.gz` keeps
+    // them visually paired with the archive they're building, and neither
+    // name collides with `tar_path` itself.
+    let scratch_plain = Utf8PathBuf::from(format!("{tar_path}.scratch"));
+    let scratch_gz = Utf8PathBuf::from(format!("{tar_path}.scratch.gz"));
+    let cleanup = |path: &Utf8Path| {
+        let _ = std::fs::remove_file(path.as_std_path());
+    };
+
+    let plain_file = std::fs::File::create(scratch_plain.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create scratch file '{scratch_plain}'"))?;
     let status = Command::new("gzip")
         .arg("-d")
-        .arg("-f")
+        .arg("-c")
         .arg(tar_path.as_std_path())
+        .stdout(plain_file)
         .status()
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to spawn gzip to decompress '{tar_path}'"))?;
     if !status.success() {
+        cleanup(&scratch_plain);
         miette::bail!("Failed to decompress '{tar_path}' (gzip exited with {status})");
     }
 
@@ -761,7 +790,7 @@ pub fn append_shape_manifests_to_tarball(
         .join("beamtalk-provenance.json");
     let status = Command::new("tar")
         .arg("-rf")
-        .arg(plain_tar.as_std_path())
+        .arg(scratch_plain.as_std_path())
         .arg("-C")
         .arg(release_dir.as_std_path())
         .arg(shapes_rel.as_std_path())
@@ -769,23 +798,34 @@ pub fn append_shape_manifests_to_tarball(
         .status()
         .into_diagnostic()
         .wrap_err_with(|| {
-            format!("Failed to spawn tar to append the manifests to '{plain_tar}'")
+            format!("Failed to spawn tar to append the manifests to '{scratch_plain}'")
         })?;
     if !status.success() {
+        cleanup(&scratch_plain);
         miette::bail!(
-            "Failed to append shape manifests to '{plain_tar}' (tar exited with {status})"
+            "Failed to append shape manifests to '{scratch_plain}' (tar exited with {status})"
         );
     }
 
+    let gz_file = std::fs::File::create(scratch_gz.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create scratch file '{scratch_gz}'"))?;
     let status = Command::new("gzip")
-        .arg("-f")
-        .arg(plain_tar.as_std_path())
+        .arg("-c")
+        .arg(scratch_plain.as_std_path())
+        .stdout(gz_file)
         .status()
         .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to spawn gzip to recompress '{plain_tar}'"))?;
+        .wrap_err_with(|| format!("Failed to spawn gzip to recompress '{scratch_plain}'"))?;
+    cleanup(&scratch_plain);
     if !status.success() {
-        miette::bail!("Failed to recompress '{plain_tar}' (gzip exited with {status})");
+        cleanup(&scratch_gz);
+        miette::bail!("Failed to recompress '{scratch_plain}' (gzip exited with {status})");
     }
+
+    std::fs::rename(scratch_gz.as_std_path(), tar_path.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to move '{scratch_gz}' into place at '{tar_path}'"))?;
     Ok(())
 }
 
