@@ -160,8 +160,13 @@ super(Selector, Args, Self, State, CurrentClass) ->
             %% Class not found - return error
             {error, beamtalk_error:new(class_not_found, CurrentClass, Selector)};
         ClassPid ->
-            %% Get the superclass
-            case beamtalk_object_class:superclass(ClassPid) of
+            %% Get the superclass. `superclass_safe/1' (not the raw
+            %% `superclass/1') so a hierarchy walk reached from a class's own
+            %% process (or a process it is synchronously blocked on) resolves
+            %% via metadata instead of a `gen_server:call' that would
+            %% deadlock and surface only as an opaque `{calling_self, ...}'
+            %% exit — see `beamtalk_object_class:superclass_safe/1's doc.
+            case beamtalk_object_class:superclass_safe(ClassPid) of
                 none ->
                     %% No superclass - method not found
                     Error = beamtalk_error:new(
@@ -314,7 +319,7 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
                     invoke_step(ClassName, ClassPid, Selector, Args, Self, State);
                 false ->
                     %% Not found in this class - try superclass
-                    case beamtalk_object_class:superclass(ClassPid) of
+                    case beamtalk_object_class:superclass_safe(ClassPid) of
                         none ->
                             %% Reached root without finding method
                             ?LOG_DEBUG("Method not found in hierarchy", #{
@@ -383,7 +388,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
     case beamtalk_object_class:module_name_safe(ClassPid) of
         undefined ->
             %% Dynamic class or no module — continue to superclass
-            {continue, beamtalk_object_class:superclass(ClassPid)};
+            {continue, beamtalk_object_class:superclass_safe(ClassPid)};
         ModuleName ->
             %% Ensure the module is loaded before checking exports.
             %% BEAM lazy-loads modules, and function_exported/3 only checks
@@ -395,7 +400,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
             case erlang:function_exported(ModuleName, dispatch, 4) of
                 false ->
                     %% Module exists but lacks dispatch/4 — continue to superclass
-                    {continue, beamtalk_object_class:superclass(ClassPid)};
+                    {continue, beamtalk_object_class:superclass_safe(ClassPid)};
                 true ->
                     %% Intercept printString/displayString/inspect for actor and
                     %% supervisor instances and route them to beamtalk_object_ops —

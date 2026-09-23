@@ -81,6 +81,49 @@ compile_core_erlang_unbound_var_test() ->
     ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
     ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
 
+%% Review finding (#3997): beamtalk_build_worker/beamtalk_compiler_server/
+%% compile.escript all drop Warnings on the error path, reasoning (in each
+%% one's own comment) that Warnings is unconditionally [] whenever Errors
+%% is non-empty for this from_core pipeline — because core_lint_module is
+%% literally the FIRST pass in core_passes(non_verified_core), before
+%% sys_core_prepare/sys_core_fold/anything else that can emit a warning,
+%% and compile:forms aborts on its first failing pass. Pins that OTP
+%% behavior directly (independent of the beamtalk_build_worker wrapper,
+%% which doesn't expose Warnings) with a module shaped to trigger BOTH a
+%% core_lint error (foo/1's unbound 'State') AND a sys_core_fold warning
+%% (bar/0's discarded call result) if the pipeline reached the later pass
+%% — so a future OTP pass-order change that made this assumption false
+%% would fail this test, not silently lose warning information in
+%% production.
+compile_forms_error_implies_no_warnings_test() ->
+    CoreErlang = error_and_would_be_warning_core_erlang_source(),
+    CoreErlangStr = binary_to_list(CoreErlang),
+    {ok, Tokens, _} = core_scan:string(CoreErlangStr),
+    {ok, CoreModule} = core_parse:parse(Tokens),
+    Result = compile:forms(CoreModule, [
+        from_core, binary, return_errors, return_warnings, debug_info, clint
+    ]),
+    ?assertMatch({error, [_ | _], []}, Result).
+
+%% Core Erlang that combines the two shapes above (unbound_var_core_erlang_source
+%% / warning_core_erlang_source) into ONE module: foo/1 has an unbound
+%% variable (core_lint error); bar/0 discards a call's result via a `do'
+%% sequence (a sys_core_fold warning, IF that pass ever ran).
+error_and_would_be_warning_core_erlang_source() ->
+    <<
+        "module 'bt_bw_err_and_warn' ['foo'/1, 'bar'/0]\n"
+        "  attributes []\n"
+        "  'foo'/1 = fun (X) ->\n"
+        "    let Y = call 'erlang':'+' (X, State)\n"
+        "    in Y\n"
+        "  'bar'/0 =\n"
+        "    fun () ->\n"
+        "        do\n"
+        "            call 'erlang':'+' (1, 2)\n"
+        "        'ok'\n"
+        "end\n"
+    >>.
+
 %% Core Erlang that compiles *successfully* but produces a
 %% compile:forms warning (sys_core_fold's "ignored result of a call"
 %% warning, triggered by a `do' whose first expression's value is
