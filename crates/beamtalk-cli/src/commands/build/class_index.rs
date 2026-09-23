@@ -289,7 +289,8 @@ pub(crate) fn build_class_module_index(
 
     for file in source_files {
         let relative_module = super::sources::compute_relative_module(file, source_root)?;
-        let module_name = format!("bt@{pkg_name}@{relative_module}");
+        let module_name =
+            crate::commands::util::bt_qualified_module_name(pkg_name, &relative_module);
 
         let source = match fs::read_to_string(file) {
             Ok(s) => s,
