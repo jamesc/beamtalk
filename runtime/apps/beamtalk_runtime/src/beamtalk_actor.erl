@@ -831,7 +831,7 @@ sync_send({registered, Name} = Ref, Selector, Args) when is_atom(Name) ->
 sync_send(ActorPid, isAlive, []) ->
     beamtalk_pid:is_alive(ActorPid);
 sync_send(ActorPid, isRemote, []) ->
-    is_remote(sync_send(ActorPid, node, []));
+    is_remote(ActorPid, fun() -> sync_send(ActorPid, node, []) end);
 sync_send(ActorPid, stop, []) ->
     %% stop is handled locally - gracefully stops the actor process
     %% No send-site telemetry for stop — terminate/2 handles it
@@ -1055,7 +1055,7 @@ sync_send({registered, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) 
             sync_send(Pid, Selector, Args, Timeout)
     end;
 sync_send(ActorPid, isRemote, [], Timeout) ->
-    is_remote(sync_send(ActorPid, node, [], Timeout));
+    is_remote(ActorPid, fun() -> sync_send(ActorPid, node, [], Timeout) end);
 sync_send(ActorPid, Selector, Args, Timeout) when
     is_integer(Timeout), Timeout >= 0;
     Timeout =:= infinity
@@ -1290,10 +1290,25 @@ is intercepted in `sync_send/3,4` / `async_send/4` rather than dispatched to
 the actor — inside the actor, `node()` is always the actor's own node. Going
 through the `node` send (not `node(ActorPid)`) lets a `TimeoutProxy` report
 its target's node (§6).
+
+Falls back to the pid's own node when the actor cannot answer `node` with a
+`Node` — a user class that overrides `node` for its own meaning (a graph
+walker's current node, say), or a `native:` actor whose backing module does
+not implement it — so `isRemote` never crashes on a well-formed actor.
 """.
--spec is_remote(beamtalk_node:t()) -> boolean().
-is_remote(Node) ->
-    beamtalk_node:name(Node) =/= node().
+-spec is_remote(pid(), fun(() -> term())) -> boolean().
+is_remote(ActorPid, AskNode) ->
+    NodeName =
+        try AskNode() of
+            #{'$beamtalk_class' := 'Node', name := Name} when is_atom(Name) -> Name;
+            _NotANode -> node(ActorPid)
+        catch
+            error:#beamtalk_error{kind = does_not_understand} ->
+                node(ActorPid);
+            error:#{error := #beamtalk_error{kind = does_not_understand}} ->
+                node(ActorPid)
+        end,
+    NodeName =/= node().
 
 -doc "Construct a structured node_down error record for the given node and selector.".
 -spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.

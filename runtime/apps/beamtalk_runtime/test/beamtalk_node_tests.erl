@@ -279,6 +279,10 @@ remote_actor_node_and_is_remote() ->
         ?assert(beamtalk_actor:sync_send(RemotePid, isRemote, [])),
         ?assert(beamtalk_actor:sync_send(RemotePid, isRemote, [], 5000)),
         ?assertNot(beamtalk_actor:sync_send(LocalPid, isRemote, [])),
+        %% An actor with no `node` method (DNU) falls back to the pid's node
+        %% rather than crashing isRemote.
+        {ok, NoNodePid} = rpc:call(PeerNode, test_wirecheck_actor, start, [0]),
+        ?assert(beamtalk_actor:sync_send(NoNodePid, isRemote, [])),
         ?assertEqual(
             beamtalk_node:from_atom(PeerNode), beamtalk_node:ofPid(RemotePid)
         )

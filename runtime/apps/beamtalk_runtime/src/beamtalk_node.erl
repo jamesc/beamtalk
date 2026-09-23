@@ -300,11 +300,7 @@ is_this_host(Host) ->
 
 -spec own_host_names() -> [string()].
 own_host_names() ->
-    Hostname =
-        case inet:gethostname() of
-            {ok, H} -> [string:lowercase(H)];
-            _ -> []
-        end,
+    {ok, Hostname} = inet:gethostname(),
     %% `nonode@nohost`'s "nohost" is not a real host name — only count this
     %% node's own host part once distribution is actually up.
     OwnNodeHost =
@@ -312,7 +308,7 @@ own_host_names() ->
             true -> [string:lowercase(host_part(node()))];
             false -> []
         end,
-    ["localhost" | Hostname ++ OwnNodeHost].
+    ["localhost", string:lowercase(Hostname) | OwnNodeHost].
 
 -spec resolves_locally(string()) -> boolean().
 resolves_locally(Host) ->
