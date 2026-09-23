@@ -46,7 +46,8 @@ first position in each and says where the alternative is written up):
    semantics are identical either way.
 4. **v1 scope** — the draft specifies `aliasing:`, class-side traits, live
    patching of trait methods, and a runtime trait registry. A minimal v1
-   (`excluding:` only, file-reload editing, reflection via xref `origin`)
+   (`excluding:` and `overriding:` only, file-reload editing, reflection
+   via xref `origin`)
    would cut Phases 4–5 roughly in half (§Implementation).
 
 ## Context
@@ -473,9 +474,15 @@ argument behind C#'s explicit `override`/`new`.
   (ADR 0100), the check cannot know what is inherited, so an unacknowledged
   override there is a hint, not an error.
 - **Stale acknowledgements.** An `overriding:` entry that no longer replaces
-  anything, because the superclass dropped the method or the trait dropped
-  the provision, is a warning. The list stays an accurate record of what
+  anything is a warning. It goes stale in three ways: the superclass drops
+  the method, the trait drops the provision, or the class body starts
+  defining the selector itself, so class-wins removes the provision before
+  §3a runs. The list stays an accurate record of what
   the class knowingly replaces.
+- **Diamonds.** When one provision reaches the class through several
+  `uses:` lines (the same-origin case of §4), acknowledging it on any one of
+  those lines is enough. Listing it on more than one is allowed and is not
+  stale.
 - **Only provisions are checked.** A method written in the class body
   overrides an inherited one silently, as it does today; the class's own
   source is where that decision is visible.
@@ -1351,7 +1358,9 @@ without `origin` misleads.
 
 **Minimal v1 (open decision 4).** If the author prefers a smaller first
 cut, the natural boundary is: Phases 0–3 plus, from Phase 4, only xref
-`origin` and `CompiledMethod origin`; `uses:` with `excluding:` only;
+`origin` and `CompiledMethod origin`; `uses:` with `excluding:` and
+`overriding:` only (§3a is not optional: without it, a minimal v1 would
+ship the silent-override problem it exists to prevent);
 trait edits as file reloads; no `aliasing:`, no class-side traits, no
 `Trait >>` live patching, no `beamtalk_trait_registry`. `aliasing:` then
 waits for a second use beyond `ChangeLog notEmpty`, which a one-line
