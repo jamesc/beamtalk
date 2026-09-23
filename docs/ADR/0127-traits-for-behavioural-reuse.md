@@ -25,8 +25,8 @@ protocol's type is its required ∪ provided selectors, so the structural
 conformance rule of ADR 0068 is unchanged for protocols without provisions,
 and `uses:` never becomes a nominal `implements:`.
 
-**Open decisions for the author** (raised by review; the draft takes the
-first position in each and says where the alternative is written up):
+**Decisions taken after review** (each records the alternative and where it
+is written up):
 
 1. ~~**Now, or inheritance first?**~~ **Decided (2026-09-23): traits now.**
    `Magnitude` and an abstract enumerable class would remove most of the
@@ -46,11 +46,16 @@ first position in each and says where the alternative is written up):
    With decision 2 settled, a second keyword would only signal whether a
    file has bodies, and adding a protocol's first body would force a
    keyword change for no semantic gain.
-4. **v1 scope** — the draft specifies `aliasing:`, class-side traits, live
-   patching of protocol methods, and a runtime users index. A minimal v1
-   (`excluding:` and `overriding:` only, file-reload editing, reflection
-   via xref `origin`)
-   would cut Phases 4–5 roughly in half (§Implementation).
+4. ~~**v1 scope.**~~ **Decided (2026-09-23)** (§Implementation, "v1
+   scope"). v1 ships everything the semantics need plus live patching and
+   the users index, because principle 11 ("Live patching is a message
+   send") and principle 8 ("Reflection as Primitive") make them part of the
+   feature, and the in-image reload fan-out needs the users index to find
+   its targets. Deferred past v1: `aliasing:`, class-side provisions,
+   browse grouping by trait, and protocol-wide rename.
+
+All four decisions are resolved; the ADR is ready for an acceptance
+review.
 
 ## Context
 
@@ -346,7 +351,7 @@ same way.
 - `overriding:` acknowledges provided selectors that replace a method the
   class inherits from its superclass chain (§3a). It has no Pharo
   equivalent; it plays the role of C#'s `override`.
-- `aliasing:` adds each trait-provided `#traitSel` to the class *also* under
+- `aliasing:` (**post-v1**, §Implementation) adds each trait-provided `#traitSel` to the class *also* under
   `#newSel` (Pharo `@`). The alias always copies the trait's original
   provision, even when `#traitSel` is also excluded; the original name stays
   unless excluded. The
@@ -521,7 +526,9 @@ Value subclass: Report
 ```
 
 There is no "call both" or `Trait.super` (Java 8's `A.super.m()`). A class
-that wants both bodies keeps one under an alias and calls it:
+that wants both bodies keeps one under an alias and calls it. `aliasing:` is
+post-v1; until it ships, the class excludes one provision and writes the
+combined method itself:
 
 ```beamtalk
 Value subclass: Report
@@ -766,7 +773,7 @@ is reconciled. **`Collection` does not adopt `Enumerable` in v1**: its
 `select:`/`collect:` answer `Self` via `species`, and every enumeration
 method it has is already inherited by its subclasses.
 
-**Object** — instance methods on an uninstantiable class are pointless, so
+**Object** (class-side provisions are **post-v1**, §Implementation) — instance methods on an uninstantiable class are pointless, so
 `Object subclass:` users compose **class-side** traits:
 
 ```beamtalk
@@ -960,9 +967,9 @@ module changed.
 | `Behaviour` | `usedProtocols` (directly used, in `uses:` order), `allUsedProtocols` (transitive, including superclasses'), `usesProtocol: #Comparable` — distinct from the existing `protocols`, which answers structural conformance; `methods` still answers local selectors and **includes** flattened ones, because they are local |
 | `CompiledMethod` | `origin` → the protocol name or `nil`; `source` is the trait's text; `respondsTo:`, `canUnderstand:`, `includesSelector:` need no change — the method is there |
 | `SystemNavigation` | `usersOf: #Comparable`; `implementorsOf: #between:and:` lists every user (true — each *does* implement it) and each row's `origin` says which trait |
-| Browse / categories | Flattened methods appear in the class under their trait's own `// === ===` dividers, prefixed with the trait name (`Comparable › Derived ordering`), via a new `provenance := protocol` branch beside the existing `extension → "extensions"` one (`protocol_from_source/4`, `beamtalk_repl_ops_browse.erl:2284-2287`) |
+| Browse / categories (**post-v1**) | Flattened methods appear in the class under their trait's own `// === ===` dividers, prefixed with the trait name (`Comparable › Derived ordering`), via a new `provenance := protocol` branch beside the existing `extension → "extensions"` one (`protocol_from_source/4`, `beamtalk_repl_ops_browse.erl:2284-2287`) |
 | Xref (ADR 0087, 0115) | `beamtalk_xref_methods` rows: `provenance := protocol`, `origin := ProtocolName`. Sender rows inside a flattened body are indexed per user, `recv_type` per ADR 0115, so `sendersOf:` on `<` finds `DateTime`'s copy of `between:and:` — correct, because that copy really sends `<` to a `DateTime` |
-| Rename (ADR 0114) | `renameSelector:to:` on a trait-provided selector of a **class** is refused with a hint to rename on the trait; on the **trait** the site closure is the trait body ∪ the union of every user's ADR 0114 closure, one ChangeLog entry. `renameTo:` on a trait adds `uses:` lines to `referencesTo:` (a new `uses_protocol` reference row) and moves the file like a class rename does |
+| Rename (ADR 0114; protocol-wide rename is **post-v1**) | `renameSelector:to:` on a trait-provided selector of a **class** is refused with a hint to rename on the trait; on the **trait** the site closure is the trait body ∪ the union of every user's ADR 0114 closure, one ChangeLog entry. `renameTo:` on a trait adds `uses:` lines to `referencesTo:` (a new `uses_protocol` reference row) and moves the file like a class rename does |
 | LSP | Go-to-definition on a flattened method jumps to the trait; completion on a receiver of a using class lists trait methods (they are in `ClassInfo.methods`); hover shows `from Comparable` |
 | Extension conflict (ADR 0066) | An extension `DateTime >> max:` on a trait-provided selector is the existing "cannot override a method defined in the class body" error, because after flattening it *is* in the body |
 
@@ -1386,9 +1393,10 @@ assumption this ADR could not verify from source.
 | 1 | **Syntax**: `ProtocolDefinition` gains `provided_methods` and `uses` (`ast/class.rs`); `ClassDefinition.uses: Vec<ProtocolUse { protocol, type_args, excluding, overriding, aliasing, span }>`; `parse_protocol_body` accepts provided methods (a signature followed by `=>`) through the class method parser, and reserves `uses:`/`excluding:`/`overriding:`/`aliasing:`; `package@Protocol`; `uses:` in the class-body loop with ordering and unknown-keyword errors; unparse round-trip; no new top-level form, so one-definition-per-file and ADR 0119 naming are unchanged; lexer nothing (contextual keywords) | `beamtalk-core` source_analysis, ast, unparse | M | — |
 | 2 | **Semantics**: `protocol_registry.rs` extended with provided signatures, `uses:` edges and a cycle check; `trait_expansion.rs` implementing §3–§5 as a new pass with explicit inputs (expansion before `ClassHierarchy`, requirement check after; exclusion, aliasing, conflict, class-wins, same-origin rule, synthesised accessors ranked as class body); `MethodInfo.origin` with `defined_in` left as the using class; `ProtocolInfo` conformance over required ∪ provided; hygienic type-param and `Self` substitution; reserved-selector and override-compatibility checks; the §3a unacknowledged-override check with kind-root exemption and stale-entry warning; statelessness validator (§7); all §13 diagnostics; `typed` check on the flattened class | `beamtalk-core` semantic_analysis, type_checker | L | 1 |
 | 3 | **Codegen & build graph**: feed the flattened `ClassDefinition` to the existing generators (no change to `merge_method`); `methodXref` provenance/origin; `methodSource` as the trait's source slice; `uses => [{Name, Hash}]` in user meta; protocol module emission extended with provisions (`generate_protocol_registrations`, `'__beamtalk_protocol_source'/0`); every §10a entry point (CLI cache key, `build_stdlib` protocol pre-pass keeping full ASTs and `generated_builtins.rs`, compiler port, `dependency_classes.rs`, `ProjectIndex` edges); conformance fixture for the extended protocol registration shape | `beamtalk-codegen`, `beamtalk-compiler-port`, `beamtalk-cli`, `beamtalk-language-service`, `build_stdlib` | L | 2 |
-| 4 | **Runtime & reflection**: `beamtalk_protocol_registry.erl` gains provided selectors and a users index; `Protocol providedMethods:`/`usersOf:`; `Behaviour usedProtocols/allUsedProtocols/usesProtocol:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := protocol` + browse grouping; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
-| 5 | **Live system**: trait file reload → two-stage user recompile fan-out in the workspace loader (compile all, load only if all succeed, roll back loaded modules on a load failure; source-backed, non-stdlib users only; stdlib traits read-only); `Describable >> sel => …` and `removeSelector:` live patching on protocols; required-selector rename/remove refusal and `save-section` routing (§11); provided methods in `Protocol define:` at the REPL; ADR 0105 re-check hookup; ADR 0114 rename (`renameSelector:to:` redirection, protocol `renameTo:` with `uses:` reference rows); flush of trait files (ADR 0113); LSP go-to-definition/hover/completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
-| 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String` (each keeps its primitive operators); `Enumerable(E)` on `SupervisionTree` and `ChangeLog` per §9 (`ChangeLog` keeps its all-entries `select:`, and keeps its public `notEmpty` with `uses: Enumerable(ChangeEntry) aliasing: #{#notEmpty => #isNotEmpty}`; `SupervisionTree` keeps its `do:`); separately, move `Integer`/`Float` `min:`/`max:` up to `Number` (inheritance, not traits); BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9 | stdlib, docs | M | 5 |
+| 4 | **Runtime & reflection**: `beamtalk_protocol_registry.erl` gains provided selectors and a users index; `Protocol providedMethods:`/`usersOf:`; `Behaviour usedProtocols/allUsedProtocols/usesProtocol:`; `CompiledMethod origin`; `SystemNavigation usersOf:`; xref `provenance := protocol`; `removeSelector:` guard (§11); `beamtalk_xref_methods` schema bump; surface-parity table rows | runtime, stdlib, `docs/development/surface-parity.md` | M | 3 |
+| 5 | **Live system**: trait file reload → two-stage user recompile fan-out in the workspace loader (compile all, load only if all succeed, roll back loaded modules on a load failure; source-backed, non-stdlib users only; stdlib traits read-only); `Describable >> sel => …` and `removeSelector:` live patching on protocols; required-selector rename/remove refusal and `save-section` routing (§11); provided methods in `Protocol define:` at the REPL; ADR 0105 re-check hookup; flush of protocol files (ADR 0113); LSP go-to-definition and completion on `origin`; REPL-protocol tests | workspace, REPL, LSP | L | 4 |
+| 6 | **Stdlib adoption** (one issue per trait): `Comparable` on `DateTime`, `Duration`, `Uuid`, `String` (each keeps its primitive operators); `Enumerable(E)` on `SupervisionTree` and `ChangeLog` per §9 (`ChangeLog` keeps its all-entries `select:`, and keeps its public `notEmpty` as the one-line method `notEmpty -> Boolean => self isNotEmpty`; `SupervisionTree` keeps its `do:`); separately, move `Integer`/`Float` `min:`/`max:` up to `Number` (inheritance, not traits); BUnit tests in `stdlib/test/`; `docs/beamtalk-language-features.md` § Traits; close ADR 0005 Q9 | stdlib, docs | M | 5 |
+| 7 | **Post-v1** (one issue each, any order): `aliasing:` (parser clause, alias-before-exclude semantics, conflict rules, §2/§4); class-side provisions (§9); browse grouping by trait (§12); protocol-wide rename (ADR 0114 `renameSelector:to:` redirection and protocol `renameTo:` with `uses_protocol` reference rows); LSP hover provenance | core, workspace, LSP | M | 6 |
 
 **Tests per phase.**
 
@@ -1401,21 +1409,29 @@ assumption this ADR could not verify from source.
 | 4 | Runtime EUnit for the extended `beamtalk_protocol_registry`, BUnit reflection tests (`usedProtocols`, `origin`, `usersOf:`), and xref tests for `provenance := protocol` |
 | 5 | `tests/repl-protocol/cases/` for trait reload fan-out, a rejected edit that loads nothing and names the failing user, `Describable >> sel` live patching, `removeSelector:` refusal, and rename; plus LSP tests |
 | 6 | Existing `just test-stdlib` and `just test-bunit` stay green with the duplicates deleted, plus new BUnit tests for `between:and:`/`min:`/`max:` on each new user |
+| 7 | Per feature: parser and semantic tests for `aliasing:`, BUnit for class-side provisions, REPL-protocol tests for rename and browse grouping |
 
 Phase 1 alone is mergeable (a parsed but unexpanded `uses:` is a "not yet
 supported" error); phases 2–3 together give a working compiler; phase 4 is
 required before the feature is documented as available, because reflection
 without `origin` misleads.
 
-**Minimal v1 (open decision 4).** If the author prefers a smaller first
-cut, the natural boundary is: Phases 0–3 plus, from Phase 4, only xref
-`origin` and `CompiledMethod origin`; `uses:` with `excluding:` and
-`overriding:` only (§3a is not optional: without it, a minimal v1 would
-ship the silent-override problem it exists to prevent);
-trait edits as file reloads; no `aliasing:`, no class-side traits, no
-live patching of protocol methods, no users index in the protocol registry. `aliasing:` then
-waits for a second use beyond `ChangeLog notEmpty`, which a one-line
-`notEmpty => self isNotEmpty` covers.
+**v1 scope (decided 2026-09-23, §Status 4).** Phases 0–6 as listed above
+make up v1. Phase 7 is the post-v1 work.
+
+| In v1 | Post-v1 (Phase 7) |
+|---|---|
+| `Protocol define:` with provided methods; `uses:` with `excluding:` and `overriding:` (§3a is not optional: without it v1 would ship the silent-override problem it exists to prevent) | `aliasing:` (§2); `ChangeLog` keeps `notEmpty` as a one-line method instead |
+| Flattening, conflicts, requirements, reserved selectors, statelessness, `Self` and type-parameter substitution | Class-side provisions (§9, `Versioned`) |
+| Required ∪ provided type (§8) | Browse grouping by trait (§12) |
+| All-or-nothing reload of every user (§11) | Protocol-wide rename across all users (ADR 0114 redirection, protocol `renameTo:`) |
+| Live patching: `P >> sel => …` and `P removeSelector:` (principle 11) | LSP hover "from Comparable" polish beyond go-to-definition |
+| Users index; `Protocol usersOf:`/`providedMethods:`; `Behaviour usedProtocols` (principle 8, and the reload fan-out's source of targets) | |
+| `origin` on `CompiledMethod` and xref rows; refusal to rename or remove a trait-provided method on one class | |
+| Stdlib: `Comparable` on `DateTime`, `Duration`, `Uuid`, `String`; `Enumerable` on `SupervisionTree`, `ChangeLog` | |
+
+`aliasing:` returns when a second use appears beyond `ChangeLog notEmpty`.
+Every post-v1 item is additive: none changes the meaning of v1 code.
 
 Deferred to follow-up ADRs, explicitly: stateful traits (§7); trait-level
 modifiers; `sealed` traits for whole-program optimisation (BT-274's last
