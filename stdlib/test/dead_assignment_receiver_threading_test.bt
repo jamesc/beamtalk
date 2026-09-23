@@ -20,7 +20,8 @@
 // whileTrue: [nil]`) is compiled as a Tier 2 closure in this context and
 // crashes at runtime ("function expects 1 arguments but was called with
 // 0"), so that receiver position stays OUT of the table and the lint
-// keeps flagging it — see `is_state_threaded_block_receiver`'s doc.
+// keeps flagging it until BT-3607 lands — see
+// `is_state_threaded_block_receiver`'s doc.
 
 TestCase subclass: DeadAssignmentReceiverThreadingTest
 

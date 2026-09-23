@@ -1012,8 +1012,8 @@ sealed typed Value subclass: Foo
     /// selector, `perform:`, `valueWithArguments:`, unary `whileTrue`) is a
     /// closure whose mutation is lost, so the lint still fires. A keyword
     /// `whileTrue:`/`whileFalse:` CONDITION block with a local write is the
-    /// worst case — it crashes at runtime today (see the shared table's doc
-    /// comment) — so it stays flagged too.
+    /// worst case — it crashes at runtime today (BT-3607; see the shared
+    /// table's doc comment) — so it stays flagged too.
     #[test]
     fn unrecognized_receiver_selector_still_warns() {
         for src in [
