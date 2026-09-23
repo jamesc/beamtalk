@@ -16,6 +16,7 @@
 /// Timer sleep: (Duration milliseconds: 50)       // sleep 50ms
 /// ```
 sealed typed Object subclass: Timer native: beamtalk_timer
+  handleScope: #node
 
   // ===== Class Methods =====
 

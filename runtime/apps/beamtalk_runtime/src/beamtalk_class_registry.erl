@@ -33,6 +33,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     live_class_entries/0,
     user_classes/0,
     class_object_from_pid/1,
+    resolve_class_object/1,
     registry_name/1,
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
@@ -188,6 +189,34 @@ class_object_from_pid(Pid) when is_pid(Pid) ->
     ModuleName = beamtalk_object_class:module_name_safe(Pid),
     ClassTag = class_object_tag(ClassName),
     #beamtalk_object{class = ClassTag, class_mod = ModuleName, pid = Pid}.
+
+-doc """
+Resolve a class name atom to a class object (`#beamtalk_object{}`), or
+`undefined` if the class is not registered.
+
+Promoted from `beamtalk_behaviour_intrinsics:atom_to_class_object/1`'s body
+(ADR 0126 Phase 0.5 finding (e), Amendment section — this module already owns
+both `whereis_class/1` and `class_object_tag/1`, the more DDD-appropriate
+home than exporting an intrinsics-module internal). `atom_to_class_object/1`
+is now a thin wrapper over this, converting `undefined` to the Beamtalk `nil`
+sentinel it has always returned; this function stays in this module's own
+`undefined`-for-absent convention (matching `whereis_class/1`).
+
+Also `beamtalk_wire:decode/1`'s resolve step for a `{'\$beamtalk_class_ref',
+ClassName}` (ADR 0126 §5.1/§5.5): a class object rewritten to a by-name
+reference on encode is resolved back to **this** (the receiving) node's class
+of the same name here, never a reference into the sending node.
+""".
+-spec resolve_class_object(class_name()) -> #beamtalk_object{} | undefined.
+resolve_class_object(ClassName) when is_atom(ClassName) ->
+    case whereis_class(ClassName) of
+        undefined ->
+            undefined;
+        ClassPid ->
+            Module = gen_server:call(ClassPid, module_name),
+            Tag = class_object_tag(ClassName),
+            #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
+    end.
 
 -doc "Compute the Erlang registry name for a class.".
 -spec registry_name(class_name()) -> atom().
