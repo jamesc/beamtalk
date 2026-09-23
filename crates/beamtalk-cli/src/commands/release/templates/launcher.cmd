@@ -83,7 +83,13 @@ rem runs erl as an ordinary line of *this* already-running script — no
 rem second cmd.exe re-parses it, so there's nothing for that quoting
 rem hazard to bite. `io:put_chars` (rather than `io:format`'s `"~s"`)
 rem also keeps the `-eval` argument itself free of embedded quotes.
-set "OTP_PROBE=%TEMP%\beamtalk_otp_probe_%RANDOM%.tmp"
+rem `%RANDOM%` three times over (each expansion redraws, 0-32767) rather
+rem than once: a single draw is only 15 bits, which two `launcher.cmd`
+rem invocations started close together (e.g. a health check calling
+rem `ping` while another calls `stop`) can collide on in `%TEMP%`, letting
+rem one process's `del`/`erl.exe` remove or truncate the file out from
+rem under the other's `set /p` read.
+set "OTP_PROBE=%TEMP%\beamtalk_otp_probe_%RANDOM%%RANDOM%%RANDOM%.tmp"
 "%ERL%" -noshell -eval "io:put_chars(erlang:system_info(otp_release)), halt()." >"%OTP_PROBE%" 2>nul
 if exist "%OTP_PROBE%" set /p HOST_MAJOR=<"%OTP_PROBE%"
 del "%OTP_PROBE%" >nul 2>&1
