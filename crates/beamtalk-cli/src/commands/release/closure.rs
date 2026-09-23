@@ -104,37 +104,17 @@ pub fn compute_app_closure(
 
     let mut staged = Vec::new();
 
-    // Runtime closure, in dependency order (leaves first).
-    staged.push(read_staged_app("cowlib", &[to_utf8(&paths.cowlib_ebin)?])?);
-    staged.push(read_staged_app("ranch", &[to_utf8(&paths.ranch_ebin)?])?);
-    staged.push(read_staged_app("cowboy", &[to_utf8(&paths.cowboy_ebin)?])?);
-    staged.push(read_staged_app(
-        "telemetry",
-        &[to_utf8(&paths.telemetry_ebin)?],
-    )?);
-    staged.push(read_staged_app(
-        "telemetry_poller",
-        &[to_utf8(&paths.telemetry_poller_ebin)?],
-    )?);
-    staged.push(read_staged_app(
-        "beamtalk_runtime",
-        &[to_utf8(&paths.runtime_ebin)?],
-    )?);
-    staged.push(read_staged_app(
-        "beamtalk_stdlib",
-        &[
-            to_utf8(&paths.stdlib_ebin)?,
-            to_utf8(&paths.stdlib_erlang_ebin)?,
-        ],
-    )?);
-    staged.push(read_staged_app(
-        "beamtalk_workspace",
-        &[to_utf8(&paths.workspace_ebin)?],
-    )?);
-    if release_cfg.include_compiler {
+    // Runtime closure, in dependency order (leaves first) — staged directly
+    // from [`RUNTIME_APP_NAMES`], the single declared list, so the two can
+    // never drift: `beamtalk_compiler` is the one entry skipped unless
+    // `include_compiler` is set.
+    for &name in RUNTIME_APP_NAMES {
+        if name == "beamtalk_compiler" && !release_cfg.include_compiler {
+            continue;
+        }
         staged.push(read_staged_app(
-            "beamtalk_compiler",
-            &[to_utf8(&paths.compiler_ebin)?],
+            name,
+            &runtime_app_source_ebins(name, &paths)?,
         )?);
     }
 
@@ -193,6 +173,35 @@ pub fn compute_app_closure(
     Ok(AppClosure {
         host_apps,
         staged_apps: staged,
+    })
+}
+
+/// The source ebin director(y/ies) for one [`RUNTIME_APP_NAMES`] entry, from
+/// the runtime's own `-pa` paths (`repl_startup::beam_paths_for_layout`).
+/// The only multi-source case is `beamtalk_stdlib` (see [`StagedApp::source_ebins`]).
+fn runtime_app_source_ebins(
+    name: &str,
+    paths: &repl_startup::BeamPaths,
+) -> Result<Vec<Utf8PathBuf>> {
+    Ok(match name {
+        "cowlib" => vec![to_utf8(&paths.cowlib_ebin)?],
+        "ranch" => vec![to_utf8(&paths.ranch_ebin)?],
+        "cowboy" => vec![to_utf8(&paths.cowboy_ebin)?],
+        "telemetry" => vec![to_utf8(&paths.telemetry_ebin)?],
+        "telemetry_poller" => vec![to_utf8(&paths.telemetry_poller_ebin)?],
+        "beamtalk_runtime" => vec![to_utf8(&paths.runtime_ebin)?],
+        "beamtalk_stdlib" => vec![
+            to_utf8(&paths.stdlib_ebin)?,
+            to_utf8(&paths.stdlib_erlang_ebin)?,
+        ],
+        "beamtalk_workspace" => vec![to_utf8(&paths.workspace_ebin)?],
+        "beamtalk_compiler" => vec![to_utf8(&paths.compiler_ebin)?],
+        other => {
+            miette::bail!(
+                "'{other}' is in RUNTIME_APP_NAMES but has no known source ebin — \
+                 add it to `runtime_app_source_ebins`."
+            )
+        }
     })
 }
 

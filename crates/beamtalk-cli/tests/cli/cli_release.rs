@@ -481,7 +481,17 @@ fn release_strip_beams_removes_debug_info_but_keeps_meta_test() {
         .find(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("bt@") && n.contains("fixture_sup"))
+                // `.beam` only — a staged ebin can also hold this module's
+                // own `.core` (kept out of a release by `stage_one_app`'s
+                // filter, but this must not silently pass if that filter
+                // regresses) which would otherwise match the same prefix.
+                .is_some_and(|n| {
+                    n.starts_with("bt@")
+                        && n.contains("fixture_sup")
+                        && std::path::Path::new(n)
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("beam"))
+                })
         })
         .unwrap_or_else(|| panic!("no bt@*fixture_sup*.beam found under {ebin_dir:?}"));
 

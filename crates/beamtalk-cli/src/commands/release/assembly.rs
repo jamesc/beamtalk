@@ -73,6 +73,24 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
                 continue;
             }
             let file_name = entry.file_name().to_string_lossy().into_owned();
+            // Only `.beam` and the app's own `.app` file are runtime
+            // artifacts (ADR 0125's own staged-tree shape: "the project's
+            // `bt@orders@*.beam` + `orders.app`"). A project's own
+            // `layout.ebin_dir()` doubles as its `.core`-compile build dir
+            // (`BuildEnvironment::build_dir`), so a source ebin can also
+            // hold `.core` intermediates and the generated `.erl` app
+            // callback module's own source (`outputs.rs`'s "write the .erl
+            // source next to the .core files") — neither belongs in a
+            // release, and shipping the `.core` alongside the `.beam` it
+            // compiled from previously left two files matching any
+            // `*fixture_sup*` name-based lookup (`fn is_runtime_app`'s
+            // sibling problem, one level down).
+            let is_beam = std::path::Path::new(&file_name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("beam"));
+            if file_name != app_file_name && !is_beam {
+                continue;
+            }
             if file_name == app_file_name {
                 if app_file_staged {
                     continue;
@@ -517,13 +535,17 @@ fn copy_dir_recursive(src: &Utf8Path, dest: &Utf8Path) -> Result<()> {
             // Preserve symlinks as symlinks (ERTS trees carry a few, e.g.
             // versioned .so aliases) rather than following and duplicating
             // their target's contents.
-            let target = std::fs::read_link(src_path.as_std_path()).into_diagnostic()?;
             #[cfg(unix)]
-            std::os::unix::fs::symlink(&target, dest_path.as_std_path())
-                .into_diagnostic()
-                .wrap_err_with(|| {
-                    format!("Failed to symlink '{dest_path}' -> {}", target.display())
-                })?;
+            {
+                let target = std::fs::read_link(src_path.as_std_path()).into_diagnostic()?;
+                std::os::unix::fs::symlink(&target, dest_path.as_std_path())
+                    .into_diagnostic()
+                    .wrap_err_with(|| {
+                        format!("Failed to symlink '{dest_path}' -> {}", target.display())
+                    })?;
+            }
+            // Non-Unix targets have no symlink to preserve — `fs::copy` reads
+            // through the symlink and copies its target's actual bytes.
             #[cfg(not(unix))]
             std::fs::copy(src_path.as_std_path(), dest_path.as_std_path())
                 .into_diagnostic()
@@ -974,6 +996,51 @@ mod tests {
         assert_eq!(
             fs::read_to_string(dest.join("orders.app").as_std_path()).unwrap(),
             "app content"
+        );
+    }
+
+    /// The exact shape a project's own build produces: `layout.ebin_dir()`
+    /// doubles as the `.core` compile output dir (`BuildEnvironment::build_dir`)
+    /// and holds the generated `.app` callback module's `.erl` source
+    /// alongside the `.beam`/`.app` a release actually needs — neither
+    /// intermediate belongs in the staged tree (ADR 0125's staged-tree shape
+    /// is "the project's `bt@orders@*.beam` + `orders.app`" only).
+    #[test]
+    fn stage_apps_excludes_core_and_erl_intermediates() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = root.join("src_ebin");
+        fs::create_dir_all(src.as_std_path()).unwrap();
+        fs::write(src.join("orders.app").as_std_path(), "app content").unwrap();
+        fs::write(src.join("bt@orders@main.beam").as_std_path(), b"beam").unwrap();
+        fs::write(
+            src.join("bt@orders@main.core").as_std_path(),
+            b"core source",
+        )
+        .unwrap();
+        fs::write(
+            src.join("beamtalk_orders_app.erl").as_std_path(),
+            b"erl source",
+        )
+        .unwrap();
+
+        let release_dir = root.join("release");
+        let closure = AppClosure {
+            host_apps: vec!["kernel".to_string()],
+            staged_apps: vec![app("orders", "1.0.0", &src)],
+        };
+        stage_apps(&release_dir, &closure).unwrap();
+
+        let dest = release_dir.join("lib").join("orders-1.0.0").join("ebin");
+        assert!(dest.join("orders.app").is_file());
+        assert!(dest.join("bt@orders@main.beam").is_file());
+        assert!(
+            !dest.join("bt@orders@main.core").exists(),
+            ".core intermediate must not be staged into a release"
+        );
+        assert!(
+            !dest.join("beamtalk_orders_app.erl").exists(),
+            ".erl source must not be staged into a release"
         );
     }
 
