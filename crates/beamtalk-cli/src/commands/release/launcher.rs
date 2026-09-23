@@ -90,7 +90,10 @@ fn render_template(
         .replace("__RELEASE_NAME__", release_name)
         .replace("__RELEASE_VSN__", release_vsn)
         .replace("__ERTS_VERSION__", erts_version)
-        .replace("__INCLUDE_ERTS__", if include_erts { "true" } else { "false" })
+        .replace(
+            "__INCLUDE_ERTS__",
+            if include_erts { "true" } else { "false" },
+        )
 }
 
 /// Normalise `content` to `\r\n` line endings — first strip any `\r` that
@@ -247,6 +250,9 @@ mod tests {
         let (root, _temp) = write_scripts(true);
         let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
         assert!(sh.contains("USING_HOST_ERTS"), "{sh}");
-        assert!(sh.contains("required_otp") || sh.contains("check_otp_window"), "{sh}");
+        assert!(
+            sh.contains("required_otp") || sh.contains("check_otp_window"),
+            "{sh}"
+        );
     }
 }

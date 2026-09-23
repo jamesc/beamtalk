@@ -635,9 +635,7 @@ fn release_writes_launcher_scripts_test() {
     build_release_fixture(project.path(), &output_dir);
 
     let sh_path = output_dir.join("bin").join("cli_subprocess_fixture");
-    let cmd_path = output_dir
-        .join("bin")
-        .join("cli_subprocess_fixture.cmd");
+    let cmd_path = output_dir.join("bin").join("cli_subprocess_fixture.cmd");
     assert!(sh_path.is_file(), "missing {sh_path:?}");
     assert!(cmd_path.is_file(), "missing {cmd_path:?}");
 
@@ -658,7 +656,10 @@ fn release_writes_launcher_scripts_test() {
         "rpc",
         "version",
     ] {
-        assert!(sh_content.contains(verb), "bin/<name> missing verb '{verb}'");
+        assert!(
+            sh_content.contains(verb),
+            "bin/<name> missing verb '{verb}'"
+        );
     }
     // Neither script hardcodes the build machine's own release path — both
     // resolve `ROOT` relative to their own location at runtime.

@@ -285,8 +285,7 @@ pub fn write_rel_and_boot_script(
                 continue;
             };
             let mut parts = rest.splitn(3, ' ');
-            let (Some(name), Some(vsn), Some(lib_dir)) =
-                (parts.next(), parts.next(), parts.next())
+            let (Some(name), Some(vsn), Some(lib_dir)) = (parts.next(), parts.next(), parts.next())
             else {
                 continue;
             };
@@ -567,11 +566,12 @@ pub fn copy_erts(
     let start_clean_src = erts_root.join("bin").join("start_clean.boot");
     if start_clean_src.is_file() {
         let start_clean_dest = dest.join("bin").join("start_clean.boot");
-        std::fs::copy(start_clean_src.as_std_path(), start_clean_dest.as_std_path())
-            .into_diagnostic()
-            .wrap_err_with(|| {
-                format!("Failed to copy '{start_clean_src}' to '{start_clean_dest}'")
-            })?;
+        std::fs::copy(
+            start_clean_src.as_std_path(),
+            start_clean_dest.as_std_path(),
+        )
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to copy '{start_clean_src}' to '{start_clean_dest}'"))?;
     }
 
     Ok(dest)
