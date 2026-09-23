@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// NodeDown — system event announced when a visible node's connection to this
+/// one is lost (ADR 0126 §8).
+///
+/// Published on `SystemAnnouncer current` by the runtime's
+/// `beamtalk_node_monitor`. The `reason` field carries OTP's
+/// `nodedown_reason` (`#connection_closed`, `#disconnect`,
+/// `#net_tick_timeout`, …), or `#unknown`. Hidden (tooling) nodes never
+/// announce.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: NodeDown do: [:e |
+///   Transcript showLine: "lost " ++ e node name asString ++ " (" ++ e reason asString ++ ")"
+/// ]
+/// ```
+sealed typed Announcement subclass: NodeDown
+  field: node :: Node
+  field: reason :: Symbol = #unknown

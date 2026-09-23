@@ -372,6 +372,33 @@ Object subclass: Actor
   /// ```
   sealed pid -> Pid => @intrinsic "actorPid"
 
+  /// The Node this actor lives on (ADR 0126 §2).
+  ///
+  /// Answered by the actor itself, so a `TimeoutProxy` reports its target's
+  /// node rather than its own (ADR 0126 §6).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter node               // => Node(nonode@nohost)
+  /// counter node isCurrent     // => true
+  /// ```
+  node -> Node => Node current
+
+  /// Whether this actor lives on a different node from the caller
+  /// (ADR 0126 §2).
+  ///
+  /// The runtime answers a send of `isRemote` in the *caller's* process —
+  /// asking the actor for its `node` and comparing it with the caller's node —
+  /// because the actor itself can only ever see its own node. This body only
+  /// runs for a self-send, where the caller *is* the actor, so it is always
+  /// `false` there.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// counter isRemote           // => false
+  /// ```
+  isRemote -> Boolean => self node isCurrent not
+
   /// Create an Erlang monitor on this actor's process.
   ///
   /// Returns a Reference that can be used to cancel the monitor via

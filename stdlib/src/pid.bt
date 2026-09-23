@@ -63,6 +63,17 @@ sealed typed Object subclass: Pid
   /// Return a hash value for the pid.
   hash -> Integer => @primitive
 
+  // === Distribution ===
+
+  /// The Node this process lives on (`erlang:node/1`, ADR 0126 §2).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid node               // => Node(nonode@nohost)
+  /// pid node isCurrent     // => true
+  /// ```
+  node -> Node => (Erlang beamtalk_node) ofPid: self
+
   // === Process Control ===
 
   /// Test if the process referred to by this pid is alive.
