@@ -72,7 +72,11 @@ check covers both.
 %% Exported for EUnit coverage of the app-env-driven start path
 %% (ADR 0125 §1.4) without booting a whole node.
 -export([
-    env_workspace_config/1, parse_bind_addr/1, maybe_start_workspace/0, ensure_console_cookie/1
+    env_workspace_config/1,
+    parse_bind_addr/1,
+    maybe_start_workspace/0,
+    ensure_console_cookie/1,
+    release_workspace_id/0
 ]).
 -endif.
 
@@ -214,7 +218,7 @@ parsed into the `inet:ip4_address()` `beamtalk_workspace_sup` expects.
     beamtalk_workspace_sup:workspace_config().
 env_workspace_config(Mode) ->
     #{
-        workspace_id => env(workspace_id, <<"release">>),
+        workspace_id => release_workspace_id(),
         project_path => env(project_path, undefined),
         mode => Mode,
         console => env(console, false),
@@ -223,6 +227,25 @@ env_workspace_config(Mode) ->
         bind_addr => parse_bind_addr(env(bind, "127.0.0.1")),
         auto_cleanup => env(auto_cleanup, false)
     }.
+
+-doc """
+This node's `workspace_id` — the `RELEASE_NODE` environment variable when
+set, else the sys.config-baked `workspace_id` (the release's own name,
+`generate_sys_config`). `RELEASE_NODE` is the launcher's own `-sname`
+override (`launcher.sh`'s `node_sname`, mirroring `RELEASE_COOKIE` and
+`mix release`'s identically-named variable) — reading the same env var here
+means one setting scopes both the distribution node name *and* the REPL
+port file (`~/.beamtalk/workspaces/<workspace_id>/port`), so two instances
+of the same release started with different `RELEASE_NODE` values on one
+host never collide on either.
+""".
+-spec release_workspace_id() -> binary().
+release_workspace_id() ->
+    case os:getenv("RELEASE_NODE") of
+        false -> env(workspace_id, <<"release">>);
+        "" -> env(workspace_id, <<"release">>);
+        NodeStr -> list_to_binary(NodeStr)
+    end.
 
 -spec env(atom(), term()) -> term().
 env(Key, Default) ->

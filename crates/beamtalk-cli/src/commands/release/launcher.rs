@@ -273,6 +273,39 @@ mod tests {
         }
     }
 
+    /// The exact bug this guards against: `-sname` used to be baked into
+    /// `vm.args` at build time — `erl` keeps the *first* `-sname` it sees
+    /// and warns on a duplicate, so nothing the launcher passed afterwards
+    /// could ever override it, making it impossible to run two instances
+    /// of the same release on one host (ADR 0126 §9's "development,
+    /// testing" same-host clustering). Both launchers must compute
+    /// `-sname` themselves from `RELEASE_NODE` (falling back to the
+    /// release name), and `foreground` must actually pass it on the `erl`
+    /// command line — not just the client verbs.
+    #[test]
+    fn write_launcher_scripts_support_release_node_override() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        assert!(
+            sh.contains("RELEASE_NODE"),
+            "launcher.sh must read RELEASE_NODE: {sh}"
+        );
+        assert!(
+            sh.contains("-sname \"$(node_sname)\""),
+            "launcher.sh's foreground verb must pass -sname on the erl command line: {sh}"
+        );
+
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        assert!(
+            cmd.contains("RELEASE_NODE"),
+            "launcher.cmd must read RELEASE_NODE: {cmd}"
+        );
+        assert!(
+            cmd.contains("-sname \"%THIS_NODE%\""),
+            "launcher.cmd's foreground verb must pass -sname on the erl command line: {cmd}"
+        );
+    }
+
     #[test]
     fn write_launcher_scripts_cmd_uses_crlf_line_endings() {
         let (root, _temp) = write_scripts(true);
