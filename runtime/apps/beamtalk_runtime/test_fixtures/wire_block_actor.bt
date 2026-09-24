@@ -6,6 +6,13 @@
 // classification against a genuinely compiled actor's generated dispatch
 // (not just the hand-written __methods__ fixture test_wire_actor.erl's own
 // 'invokeBlockWith:' already covers) — BT-3613.
+//
+// makeHandle also exercises ADR 0126 §5.1's not_serialisable reply contract
+// against a compiled actor's own generated handle_call_dispatch_case: an Ets
+// handle is a node-bound HandleScoped value that beamtalk_wire:encode/1
+// rejects, so a remote caller of makeHandle must see that rejection raised,
+// not silently returned as a normal value (BT-3613).
 
 Actor subclass: WireBlockActor
   invokeBlockWith: aBlock => aBlock value: 1
+  makeHandle => Ets new: #wireBlockActorHandle type: #set

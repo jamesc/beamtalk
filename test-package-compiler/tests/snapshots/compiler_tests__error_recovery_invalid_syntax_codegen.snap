@@ -192,12 +192,20 @@ module 'error_recovery_invalid_syntax' ['start_link'/1, 'start_link'/2, 'init'/1
                 <{'reply', Result, NewState}> when 'true' ->
                     let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
                     let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
-                    let EncodedResult = call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) in
-                    {'reply', {'ok', EncodedResult}, CleanNewState}
+                    case call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, CleanNewState}
+                        <EncodedResult> when 'true' ->
+                            {'reply', {'ok', EncodedResult}, CleanNewState}
+                    end
                 <{'error', Error, ErrState}> when 'true' ->
                     let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
-                    let EncodedError = call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) in
-                    {'reply', {'error', EncodedError}, ErrState}
+                    case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, ErrState}
+                        <EncodedError> when 'true' ->
+                            {'reply', {'error', EncodedError}, ErrState}
+                    end
             end
         <{Selector, Args}> when 'true' ->
             let _OldState = call 'erlang':'get'('$bt_actor_state') in
@@ -214,12 +222,20 @@ module 'error_recovery_invalid_syntax' ['start_link'/1, 'start_link'/2, 'init'/1
                 <{'reply', Result, NewState}> when 'true' ->
                     let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
                     let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
-                    let EncodedResult = call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) in
-                    {'reply', {'ok', EncodedResult}, CleanNewState}
+                    case call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, CleanNewState}
+                        <EncodedResult> when 'true' ->
+                            {'reply', {'ok', EncodedResult}, CleanNewState}
+                    end
                 <{'error', Error, ErrState}> when 'true' ->
                     let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
-                    let EncodedError = call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) in
-                    {'reply', {'error', EncodedError}, ErrState}
+                    case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, ErrState}
+                        <EncodedError> when 'true' ->
+                            {'reply', {'error', EncodedError}, ErrState}
+                    end
             end
     end
 

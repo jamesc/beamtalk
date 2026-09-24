@@ -2107,12 +2107,23 @@ Errors in async-with-future are communicated via future rejection.
 %% message to re-dispatch through the ordinary clauses below, or has
 %% already logged/rejected a decode or version failure itself (cast
 %% direction, §5.2: "there is no caller to tell").
-handle_cast({'$beamtalk_wire', _, _, _, _, _} = Msg, State) ->
+%%
+%% The `kind` element is matched as the literal atom `cast`/`async` here
+%% (mirroring the generated compiled-actor clause) rather than as a
+%% wildcard: decode_wire_cast/1's catch-all echoes back any message it
+%% doesn't recognise unchanged, so a wildcard `kind` here would let a
+%% wire-shaped message of an unexpected kind (or a future wire version's
+%% new kind) round-trip through decode_wire_cast/1 unchanged and re-enter
+%% this same clause with the identical term — a self-tail-call BEAM's LCO
+%% turns into a livelock, not a crash. Restricting `kind` here means any
+%% such message instead falls through to the ordinary "unknown cast
+%% message" catch-all below (log and ignore).
+handle_cast({'$beamtalk_wire', _, cast, _, _, _} = Msg, State) ->
     case decode_wire_cast(Msg) of
         {redispatch, Msg2} -> handle_cast(Msg2, State);
         noreply -> {noreply, State}
     end;
-handle_cast({'$beamtalk_wire', _, _, _, _, _, _} = Msg, State) ->
+handle_cast({'$beamtalk_wire', _, async, _, _, _, _} = Msg, State) ->
     case decode_wire_cast(Msg) of
         {redispatch, Msg2} -> handle_cast(Msg2, State);
         noreply -> {noreply, State}
@@ -2215,7 +2226,15 @@ Dispatches to method and returns result immediately.
 %% a decode/version failure — request-direction skew (§5.2): the reply is
 %% an error and this actor's state is untouched, since it never reaches
 %% dispatch/4.
-handle_call({'$beamtalk_wire', _, _, _, _, _} = Msg, From, State) ->
+%%
+%% The `kind` element is matched as the literal atom `call` here (mirroring
+%% the generated compiled-actor clause), not as a wildcard — see the
+%% matching comment on the `handle_cast/2` wire clauses above for why: a
+%% wildcard `kind` would let decode_wire_call/1's catch-all echo an
+%% unexpected-kind message back unchanged, re-entering this same clause
+%% with the identical term and livelocking (worse here, since the caller
+%% also blocks forever in `gen_server:call` waiting on a reply).
+handle_call({'$beamtalk_wire', _, call, _, _, _} = Msg, From, State) ->
     case decode_wire_call(Msg) of
         {redispatch, Msg2} -> handle_call(Msg2, From, State);
         {reply, ReplyVal} -> {reply, ReplyVal, State}

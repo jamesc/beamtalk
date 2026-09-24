@@ -99,6 +99,12 @@ compiled_actor_wire_test_() ->
                     "remote_code_mismatch (badfun): a block whose module is a "
                     "different version on a compiled actor's node",
                     fun() -> remote_code_mismatch_badfun_compiled(PeerNode) end
+                },
+                {
+                    "an encode failure on a compiled actor's successful reply "
+                    "raises not_serialisable rather than returning it as a "
+                    "normal value",
+                    fun() -> handle_scoped_reply_raises_not_serialisable(PeerNode) end
                 }
             ]
         end}}.
@@ -215,5 +221,32 @@ remote_code_mismatch_badfun_compiled(PeerNode) ->
         code:purge(ModName),
         rpc:call(PeerNode, code, delete, [ModName]),
         rpc:call(PeerNode, code, purge, [ModName]),
+        rpc:call(PeerNode, gen_server, stop, [Pid])
+    end.
+
+%%====================================================================
+%% Encode-failure reply contract (ADR 0126 §5.1) against a compiled
+%% actor's generated handle_call_dispatch_case success arm.
+%%====================================================================
+
+handle_scoped_reply_raises_not_serialisable(PeerNode) ->
+    Pid = spawn_remote(PeerNode, 'WireBlockActor'),
+    try
+        %% makeHandle returns an Ets handle — a node-bound HandleScoped
+        %% value beamtalk_wire:encode/1 always rejects. Before this fix,
+        %% handle_call_dispatch_case's success arm unconditionally wrapped
+        %% encode_reply_for/3's result as {'ok', EncodedResult}, so an
+        %% encode failure ({'error', EncErr}) became {'ok', {'error',
+        %% EncErr}} on the wire — which decodes and unwraps back to the
+        %% plain tuple {error, EncErr} as a *successful* method return
+        %% value instead of raising.
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = not_serialisable}
+            },
+            beamtalk_actor:sync_send(Pid, makeHandle, [])
+        )
+    after
         rpc:call(PeerNode, gen_server, stop, [Pid])
     end.

@@ -1527,6 +1527,23 @@ impl CoreErlangGenerator {
     /// reclassifies a stale-block badfun/undef as `remote_code_mismatch`
     /// before that same encode step, leaving every other error shape
     /// untouched.
+    ///
+    /// The success arm branches on `encode_reply_for/3`'s own result rather
+    /// than unconditionally wrapping it as `{'ok', EncodedResult}`: a
+    /// wire-encode failure (e.g. the method returned a `HandleScoped` value
+    /// to a remote caller) makes `encode_reply_for/3` return `{'error',
+    /// EncErr}` instead of the encoded payload, per its own doc ("An encode
+    /// failure never crashes the callee: it replaces the reply with
+    /// `{error, #beamtalk_error{}}` instead"). Wrapping that in `{'ok', ...}`
+    /// would hand the caller `{'ok', {'error', EncErr}}` — which decodes and
+    /// unwraps back to the plain tuple `{'error', EncErr}` as a
+    /// *successful* method return value instead of raising, silently
+    /// breaking ADR 0126 §5.1's documented `not_serialisable` contract. The
+    /// hand-written `beamtalk_actor:handle_call/3` never has this problem
+    /// because it doesn't add an extra `{'ok', ...}` wrapper around
+    /// `encode_reply_for/3`'s result at all; mirroring that unwrapped shape
+    /// here (rather than introducing a second, codegen-only reply
+    /// convention) keeps the two paths' wire contracts identical.
     fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
@@ -1564,16 +1581,46 @@ impl CoreErlangGenerator {
                             line(),
                             "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in",
                             // wire-encode the reply when the caller is remote
-                            // (no-op locally — see this function's doc).
+                            // (no-op locally — see this function's doc), then
+                            // branch on whether encoding itself failed rather
+                            // than unconditionally wrapping as {'ok', ...} —
+                            // see this function's doc for why.
                             line(),
-                            "let EncodedResult = call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) in",
+                            "case call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'error', EncErr}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'error', EncErr}, CleanNewState}",
+                                        ]
+                                    ),
+                                    line(),
+                                    "<EncodedResult> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'ok', EncodedResult}, CleanNewState}",
+                                        ]
+                                    ),
+                                ]
+                            ),
                             line(),
-                            "{'reply', {'ok', EncodedResult}, CleanNewState}",
+                            "end",
                         ]
                     ),
                     // Error case: reclassify a stale-block badfun/undef, then
                     // pass the (possibly reclassified) error opaquely to the
-                    // caller, wire-encoded when remote.
+                    // caller, wire-encoded when remote. Same branch-not-wrap
+                    // reasoning as the success arm above: an encode failure
+                    // here would otherwise double-wrap as
+                    // {'error', {'error', EncErr}} instead of the flat
+                    // {'error', EncErr} shape decode_call_result expects.
                     line(),
                     "<{'error', Error, ErrState}> when 'true' ->",
                     nest(
@@ -1582,9 +1629,29 @@ impl CoreErlangGenerator {
                             line(),
                             "let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in",
                             line(),
-                            "let EncodedError = call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) in",
+                            "case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'error', EncErr}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![line(), "{'reply', {'error', EncErr}, ErrState}",]
+                                    ),
+                                    line(),
+                                    "<EncodedError> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'error', EncodedError}, ErrState}",
+                                        ]
+                                    ),
+                                ]
+                            ),
                             line(),
-                            "{'reply', {'error', EncodedError}, ErrState}",
+                            "end",
                         ]
                     ),
                 ]

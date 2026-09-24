@@ -114,6 +114,17 @@ wire_test_() ->
                     "beamtalk_error:raise/1 on itself rejects with the wrapped map buried in "
                     "details.original_reason, not the bare record",
                     fun() -> async_future_rejection_double_wrap(PeerNode) end
+                },
+                {
+                    "a wire-tagged cast of an unrecognised kind is dropped, not "
+                    "tail-recursed into forever (BT-3613 livelock guard)",
+                    fun() -> unrecognised_kind_cast_does_not_livelock(PeerNode) end
+                },
+                {
+                    "a wire-tagged call of an unrecognised kind falls through to "
+                    "the ordinary unknown-message reply, not tail-recursed into "
+                    "forever (BT-3613 livelock guard)",
+                    fun() -> unrecognised_kind_call_does_not_livelock(PeerNode) end
                 }
             ]
         end}}.
@@ -406,6 +417,63 @@ async_future_rejection_double_wrap(PeerNode) ->
             }},
             beamtalk_future:await(Future, 5000)
         )
+    after
+        rpc:call(PeerNode, gen_server, stop, [RemotePid])
+    end.
+
+%%====================================================================
+%% Livelock guard (BT-3613): a wire-tagged message of a `kind` the
+%% receiving direction doesn't expect must fall through to the ordinary
+%% local catch-all, not re-enter the same wire clause with an unchanged
+%% message. `beamtalk_actor:decode_wire_call/1` and `decode_wire_cast/1`'s
+%% catch-all clauses echo back any message they don't recognise
+%% unchanged — `handle_call/3`/`handle_cast/2` must constrain `kind`
+%% before delegating to them, or a self-tail-call livelocks the actor
+%% forever under BEAM's last-call optimization (a hang, not a crash: the
+%% process stays "alive" so a supervisor never restarts it). Only
+%% `beamtalk_actor.erl`'s own hand-written clauses (used here by
+%% `test_wire_actor`, this module's fixture) were ever at risk — the
+%% generated compiled-actor `handle_call`/`handle_cast` (BT-3613,
+%% `beamtalk_dist_wire_compiled_actor_tests.erl`) already constrained
+%% `kind` to the literal atom from the start.
+%%====================================================================
+
+unrecognised_kind_cast_does_not_livelock(PeerNode) ->
+    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
+    try
+        %% A wire-shaped 6-tuple whose `kind` is neither `cast` nor
+        %% `async` — e.g. a `call`-kind envelope delivered via cast, or a
+        %% corrupted/future-version message. Sent directly with
+        %% gen_server:cast/2 rather than through cast_send/3, since no
+        %% legitimate sender ever wire-tags a cast this way.
+        Bogus = {'$beamtalk_wire', 1, bogus_kind, getValue, <<>>, #{}},
+        ok = gen_server:cast(RemotePid, Bogus),
+        %% If handle_cast/2 livelocked on Bogus, this call would time out
+        %% (the actor's process never reaches its mailbox again) rather
+        %% than answering promptly and unchanged.
+        ?assertEqual(0, beamtalk_actor:sync_send(RemotePid, getValue, []))
+    after
+        rpc:call(PeerNode, gen_server, stop, [RemotePid])
+    end.
+
+unrecognised_kind_call_does_not_livelock(PeerNode) ->
+    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
+    try
+        %% Same shape, sent via gen_server:call/3 with a bounded timeout:
+        %% before the fix this blocks forever (the caller waits on a
+        %% reply from a callee that livelocked on itself); the fix routes
+        %% it to handle_call/3's ordinary "Unknown call message format"
+        %% catch-all, which replies immediately with a bare
+        %% does_not_understand error (sent directly via gen_server:call,
+        %% bypassing sync_send's caller-side exception-wrapping, so the
+        %% raw {error, #beamtalk_error{}} reply is asserted unwrapped).
+        Bogus = {'$beamtalk_wire', 1, bogus_kind, getValue, <<>>, #{}},
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            gen_server:call(RemotePid, Bogus, 5000)
+        ),
+        %% The actor survived and is still responsive.
+        ?assertEqual(0, beamtalk_actor:sync_send(RemotePid, getValue, []))
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
