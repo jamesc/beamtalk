@@ -763,6 +763,10 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // writeback pass can consume them instead of re-running inference.
     result.method_return_types = type_checker.take_method_return_types();
     let type_map = type_checker.take_type_map();
+    // ADR 0126 §6: known-remote provenance recorded during the pass just
+    // taken above — consumed below by the block-argument Hint check, which
+    // runs after inference with no live `TypeEnv`.
+    let known_remote_spans = type_checker.take_known_remote_spans();
 
     // Lint redundant local-variable type annotations using the
     // populated TypeMap. Must run before the Analyser consumes `type_map`.
@@ -782,6 +786,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         analyser.type_map(),
         &analyser.result.block_info,
         Some(&result.alias_registry),
+        &known_remote_spans,
         &mut result.diagnostics,
     );
     // ADR 0115 Phase 2: recover the `TypeMap` by destructuring

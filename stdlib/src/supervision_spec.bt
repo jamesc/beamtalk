@@ -9,9 +9,9 @@
 /// you need per-child overrides for id, restart policy, or startup args.
 ///
 /// The auto-generated API (from `field:` declarations) includes:
-/// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`, `classMethod`, `name`
-/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`, `withClassMethod:`, `withName:`
-/// - Keyword constructor: `id:actorClass:restart:args:shutdown:classMethod:name:`
+/// - Getters: `id`, `actorClass`, `restart`, `args`, `shutdown`, `classMethod`, `name`, `scope`
+/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`, `withShutdown:`, `withClassMethod:`, `withName:`, `withScope:`
+/// - Keyword constructor: `id:actorClass:restart:args:shutdown:classMethod:name:scope:`
 ///
 /// See ADR 0059 for the full design.
 ///
@@ -84,6 +84,18 @@ typed Value subclass: SupervisionSpec
   /// supervisor attempts to start the child. Setting `name` on a spec used in a
   /// live supervisor will therefore currently fail at child start.
   field: name :: Symbol | Nil = nil
+  /// Cluster scope for `name` — `#local` (default) or `#global` (ADR 0126
+  /// §4, Phase 5).
+  ///
+  /// When `name` is set and `scope` is `#global`, `childSpec` emits a
+  /// startFn of `#spawnAs:scope:` (or `#spawnWith:as:scope:` when `args` is
+  /// present) so the supervisor registers the child with OTP's `global`
+  /// module instead of the local process registry — cluster-unique rather
+  /// than node-unique. `#local` is an explicit no-op alias for the plain
+  /// `#spawnAs:` / `#spawnWith:as:` forms already documented on `name`
+  /// above. Any other scope Symbol raises `#beamtalk_error{kind =
+  /// type_error}` from `childSpec`.
+  field: scope :: Symbol = #local
 
   // === Multi-keyword fluent overrides ===
   // (Single-field variants withId:, withRestart:, withArgs:, withName: are auto-generated.)
@@ -115,6 +127,16 @@ typed Value subclass: SupervisionSpec
   /// Return a new spec with name, restart, and args all overridden.
   withName: aName :: Symbol withRestart: policy :: RestartStrategy withArgs: someArgs :: Object -> SupervisionSpec =>
     ((self withName: aName) withRestart: policy) withArgs: someArgs
+
+  /// Return a new spec with name and cluster scope overridden (ADR 0126 §4,
+  /// Phase 5).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Scheduler supervisionSpec withName: #scheduler scope: #global
+  /// ```
+  withName: aName :: Symbol scope: aScope :: Symbol -> SupervisionSpec =>
+    (self withName: aName) withScope: aScope
 
   // === Display ===
 
@@ -167,13 +189,29 @@ typed Value subclass: SupervisionSpec
       ifTrue: [
         self error: "SupervisionSpec>>childSpec: name and classMethod cannot both be set"
       ]
+    // Validate: scope must be #local or #global (ADR 0126 §4, Phase 5).
+    (self scope =:= #local or: [self scope =:= #global])
+      ifFalse: [
+        Exception
+          signalKind: #type_error
+          class: #SupervisionSpec
+          selector: #childSpec
+          hint: "scope must be #local or #global"
+      ]
+    isGlobalScope := self scope =:= #global
     startFn := self classMethod isNil
       ifTrue: [
-        self name isNil ifTrue: [
-          self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
-        ] ifFalse: [
-          self args isNil ifTrue: [#spawnAs:] ifFalse: [#spawnWith:as:]
-        ]
+        self name isNil
+          ifTrue: [self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]]
+          ifFalse: [
+            isGlobalScope ifTrue: [
+              self args isNil ifTrue: [
+                #spawnAs:scope:
+              ] ifFalse: [#spawnWith:as:scope:]
+            ] ifFalse: [
+              self args isNil ifTrue: [#spawnAs:] ifFalse: [#spawnWith:as:]
+            ]
+          ]
       ]
       ifFalse: [#classMethod]
     // Validate: when classMethod is set, args must be nil or a List — not a Dictionary

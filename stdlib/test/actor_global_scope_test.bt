@@ -1,0 +1,147 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Actor cluster-unique names, `scope: #global` (ADR 0126 §4,
+// Phase 5, BT-3603). Single-node coverage: reserved-name/duplicate/wrong-class
+// error shapes, `scope: #local` as a no-op alias, and invalid-scope
+// rejection. Two-node round-trip and netsplit-heal conflict resolution are
+// covered by `beamtalk_dist_global_scope_tests.erl` (runtime EUnit, the
+// existing BT-3578 `peer` harness) — `global` itself is a single, cluster-wide
+// registry, so a lone node already exercises every code path this suite
+// checks; only cross-node visibility and conflict resolution genuinely need a
+// second node.
+//
+// Fixtures: stdlib/test/fixtures/named_counter.bt, named_greeter.bt (shared
+// with actor_named_test.bt).
+
+TestCase subclass: ActorGlobalScopeTest
+
+  // === scope: #local is an explicit no-op alias (ADR 0126 §4) ===
+  testSpawnAsScopeLocalMatchesUnscoped =>
+    name := #bt3603_spawnas_local
+    result := NamedCounter spawnAs: name scope: #local
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor registeredName equals: name
+    self assert: actor isRegistered
+    self assert: actor increment equals: 1
+    actor stop
+
+  testSpawnWithAsScopeLocalMatchesUnscoped =>
+    name := #bt3603_spawnwithas_local
+    result := NamedCounter
+      spawnWith: #{#value => 10}
+      as: name
+      scope: #local
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor getValue equals: 10
+    actor stop
+
+  testNamedScopeLocalMatchesUnscoped =>
+    name := #bt3603_named_local
+    registered := (NamedCounter spawnAs: name scope: #local) unwrap
+    lookup := NamedCounter named: name scope: #local
+    self assert: lookup isOk
+    registered stop
+
+  testSpawnAsScopeLocalReservedName =>
+    result := NamedCounter spawnAs: #logger scope: #local
+    self assert: result isError
+    self assert: result error kind equals: #reserved_name
+
+  // === scope: #global ===
+  testSpawnAsScopeGlobalSuccess =>
+    name := #bt3603_spawnas_global
+    result := NamedCounter spawnAs: name scope: #global
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor increment equals: 1
+    self assert: actor registeredName equals: name
+    self assert: actor isRegistered
+    actor stop
+
+  testSpawnWithAsScopeGlobalSuccess =>
+    name := #bt3603_spawnwithas_global
+    result := NamedCounter
+      spawnWith: #{#value => 10}
+      as: name
+      scope: #global
+    self assert: result isOk
+    actor := result unwrap
+    self assert: actor getValue equals: 10
+    self assert: actor registeredName equals: name
+    actor stop
+
+  testSpawnAsScopeGlobalDuplicateRegistration =>
+    name := #bt3603_spawnas_global_dup
+    first := (NamedCounter spawnAs: name scope: #global) unwrap
+    second := NamedCounter spawnAs: name scope: #global
+    self assert: second isError
+    self assert: second error kind equals: #name_registered
+    first stop
+
+  testSpawnAsScopeGlobalReservedName =>
+    result := NamedCounter spawnAs: #logger scope: #global
+    self assert: result isError
+    self assert: result error kind equals: #reserved_name
+
+  testNamedScopeGlobalSuccess =>
+    name := #bt3603_named_global
+    registered := (NamedCounter spawnAs: name scope: #global) unwrap
+    registered increment
+    lookup := NamedCounter named: name scope: #global
+    self assert: lookup isOk
+    resolved := lookup unwrap
+    self assert: resolved getValue equals: 1
+    registered stop
+
+  testNamedScopeGlobalNotRegistered =>
+    result := NamedCounter named: #bt3603_named_global_missing scope: #global
+    self assert: result isError
+    self assert: result error kind equals: #name_not_registered
+
+  testNamedScopeGlobalWrongClass =>
+    name := #bt3603_named_global_wrongclass
+    actor := (NamedGreeter spawnAs: name scope: #global) unwrap
+    result := NamedCounter named: name scope: #global
+    self assert: result isError
+    self assert: result error kind equals: #wrong_class
+    actor stop
+
+  // === A #global registration is invisible to a plain (local-scope) lookup,
+  // and vice versa — the two scopes are genuinely separate registries. ===
+  testGlobalScopeNotVisibleToLocalNamed =>
+    name := #bt3603_global_not_local
+    actor := (NamedCounter spawnAs: name scope: #global) unwrap
+    result := NamedCounter named: name
+    self assert: result isError
+    self assert: result error kind equals: #name_not_registered
+    actor stop
+
+  testLocalScopeNotVisibleToGlobalNamed =>
+    name := #bt3603_local_not_global
+    actor := (NamedCounter spawnAs: name) unwrap
+    result := NamedCounter named: name scope: #global
+    self assert: result isError
+    self assert: result error kind equals: #name_not_registered
+    actor stop
+
+  // === Invalid scope symbol -> type_error (ADR 0126 §4) ===
+  testSpawnAsInvalidScopeRaisesTypeError =>
+    result := NamedCounter spawnAs: #bt3603_bad_scope1 scope: #banana
+    self assert: result isError
+    self assert: result error kind equals: #type_error
+
+  testSpawnWithAsInvalidScopeRaisesTypeError =>
+    result := NamedCounter
+      spawnWith: #{}
+      as: #bt3603_bad_scope2
+      scope: #banana
+    self assert: result isError
+    self assert: result error kind equals: #type_error
+
+  testNamedInvalidScopeRaisesTypeError =>
+    result := NamedCounter named: #bt3603_bad_scope3 scope: #banana
+    self assert: result isError
+    self assert: result error kind equals: #type_error

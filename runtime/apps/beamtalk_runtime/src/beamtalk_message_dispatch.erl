@@ -348,11 +348,13 @@ is_actor(_) ->
 
 -doc """
 Check whether a value is a valid actor identity slot — a raw `pid()`, a
-`{registered, Name}` proxy reference (ADR 0079), or a node-qualified
-`{registered, Name, Node}` reference (ADR 0126 §3).
+`{registered, Name}` proxy reference (ADR 0079), a node-qualified
+`{registered, Name, Node}` reference (ADR 0126 §3), or a cluster-unique
+`{global, Name}` reference (ADR 0126 §4, Phase 5, BT-3603).
 """.
 -spec is_actor_ref(term()) -> boolean().
 is_actor_ref(Ref) when is_pid(Ref) -> true;
 is_actor_ref({registered, Name}) when is_atom(Name) -> true;
 is_actor_ref({registered, Name, Node}) when is_atom(Name), is_atom(Node) -> true;
+is_actor_ref({global, Name}) when is_atom(Name) -> true;
 is_actor_ref(_) -> false.

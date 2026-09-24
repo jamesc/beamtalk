@@ -116,6 +116,21 @@ sealed typed Value subclass: Node native: beamtalk_node
   /// ```
   ping -> Boolean => self delegate
 
+  // === Reflection (ADR 0126 §5.3, Phase 4) ===
+
+  /// This node's shape manifest (ADR 0125 §3.4), fetched via `erpc`: the
+  /// same `className -> #{#version, #fields, #migrations}` projection
+  /// `Beamtalk shapeManifest` exposes locally, never re-derived. Applies
+  /// the same §9 host policy as `connect`: an off-host node without TLS
+  /// distribution answers `kind = insecure_distribution` without an erpc
+  /// attempt. An unreachable node answers `kind = node_down`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current shapeManifest isOk            // => true
+  /// ```
+  shapeManifest -> Result(Dictionary, Error) => self delegate
+
   // === Printing ===
 
   /// Human-readable representation: `Node(name@host)`.
