@@ -193,6 +193,13 @@ named_scope_global_resolves_remote_registrant(PeerNode) ->
         %% peer-resident actor.
         ?assertEqual(5, beamtalk_actor:sync_send(Obj#beamtalk_object.pid, getValue, []))
     after
+        %% Unlike beamtalk_dist_remote_spawn_tests:register_counter_class/1
+        %% (which registers on the PEER's own table), this inserts into
+        %% THIS node's shared beamtalk_class_metadata — a singleton ETS
+        %% table other EUnit modules in the same VM also read — so it must
+        %% be cleaned up here, mirroring beamtalk_class_metadata_tests.erl
+        %% and beamtalk_supervisor_tests.erl's own after-block convention.
+        beamtalk_class_metadata:delete('Counter'),
         rpc:call(PeerNode, gen_server, stop, [PeerPid])
     end.
 

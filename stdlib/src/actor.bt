@@ -167,11 +167,23 @@ Object subclass: Actor
   /// Atomically spawn a new actor and register it under `name`, in the
   /// requested cluster scope.
   ///
-  /// `scope: #local` behaves identically to `spawnAs:`. `scope: #global`
-  /// registers with OTP's `global` module instead — the name is unique
-  /// across the whole connected cluster and resolves the same way from
-  /// every node, via `global:whereis_name/1` on each send rather than a
-  /// per-node lookup.
+  /// `scope: #local` behaves identically to `spawnAs:` — genuinely atomic:
+  /// a losing race never runs `initialize` at all (OTP reserves the local
+  /// name as part of the process start itself). `scope: #global` registers
+  /// with OTP's `global` module instead — the name is unique across the
+  /// whole connected cluster and resolves the same way from every node,
+  /// via `global:whereis_name/1` on each send rather than a per-node
+  /// lookup — but is NOT atomic in the same way: `global` has no
+  /// custom-resolver variant of an atomic "start-and-register", so the
+  /// actor is started (and `initialize` runs to completion) *before* the
+  /// name is registered. If that registration then loses the race, the
+  /// already-initialized actor is torn down and `name_registered` is
+  /// returned — but any side effect `initialize` already performed (I/O,
+  /// messaging another actor, etc.) already happened, even though the
+  /// caller sees the same clean failure `#local` would give without ever
+  /// running `initialize`. Idempotent `initialize` overrides are
+  /// unaffected; one with externally-visible side effects should account
+  /// for this under `scope: #global`.
   ///
   /// Returns `Result ok: actor` on success, or `Result error:` with one of:
   /// - `name_registered` — another process is already registered under
