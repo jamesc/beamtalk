@@ -1573,6 +1573,36 @@ impl CoreErlangGenerator {
                             let core_var = self
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            // BT-3615: `r := self hom: [:x | n := n + x]` — a
+                            // self-send carrying a Tier 2 block argument needs
+                            // the SAME pack-captured-locals / extract-after
+                            // wrapping the bare-statement `Tier2SelfSend` arm
+                            // below gets (`generate_tier2_self_send_open`);
+                            // the plain dispatch path would neither seed
+                            // `__local__n` into `State` nor read it back, so
+                            // the block's captured-local writes were silently
+                            // dropped whenever the call's result was assigned.
+                            if let Some(tier2_args) = self.detect_tier2_self_send(value) {
+                                let (doc, dispatch_var) =
+                                    self.generate_tier2_self_send_open(value, &tier2_args)?;
+                                stmts.push(ThreadedStmt::Statement(doc, span));
+                                self.bind_var(var_name, &core_var);
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec![
+                                        "let ",
+                                        leaf::var(core_var),
+                                        " = call 'erlang':'element'(1, ",
+                                        leaf::var(dispatch_var),
+                                        ") in "
+                                    ],
+                                    span,
+                                ));
+                                if is_last {
+                                    let reply = self.pure_reply_doc();
+                                    stmts.push(ThreadedStmt::Statement(reply, span));
+                                }
+                                continue;
+                            }
                             // ADR 0118 phase 1a: `v := self log: (self nextId)`
                             // — the producer's `Statement` + real `Bind`
                             // (its arguments sequenced first), then the
@@ -3651,39 +3681,30 @@ impl CoreErlangGenerator {
             return false;
         }
 
-        // ADR 0128 / BT-3583: `do:`/`collect:`/`select:` forwarding a
-        // non-literal (opaque) callable — its tier is unknown until
-        // runtime, so conservatively require StateAcc threading;
-        // `generate_simple_list_op`'s non-literal branch now always folds
-        // with a runtime-discriminated accumulator. Scoped to exactly the
-        // three selectors `generate_simple_list_op` covers — not widened to
-        // other ControlFlow selectors (`ifTrue:`/`whileTrue:`/`on:do:`/…),
-        // which have their own literal-block-only analysis above and are
-        // out of this ADR's scope.
+        // ADR 0128 / BT-3583 / BT-3615: a collection HOM (`do:`/`collect:`/
+        // `select:`/`inject:into:`/`detect:`/`detect:ifNone:`/`count:`/
+        // `anySatisfy:`/`allSatisfy:`) forwarding a non-literal (opaque)
+        // callable — its tier is unknown until runtime, so conservatively
+        // require StateAcc threading; the operator's codegen folds with a
+        // runtime-discriminated accumulator (`list_ops/opaque_fold.rs`).
+        // Scoped to exactly the selectors `opaque_fold_callable_arg` lists —
+        // not widened to other ControlFlow selectors (`ifTrue:`/
+        // `whileTrue:`/`on:do:`/`reject:`/…), which have their own
+        // literal-block-only analysis and are out of this ADR's scope.
         //
-        // Gated on `opaque_callable_list_op_needs_state_fold()`
-        // (`control_flow/list_ops/mod.rs`) — the SAME predicate
-        // `generate_simple_list_op` uses to decide whether it actually
-        // builds the `{Result, NewState}`-tuple fold, so this classifier
-        // and that codegen decision cannot drift apart (see the predicate's
-        // own doc comment: the class-method crash fixed on PR #4030 arose
-        // from exactly two hand-duplicated copies of this condition going
-        // out of sync). `false` for `ValueType` (no `State` map to thread)
-        // and for a class method (`class_<selector>(ClassSelf, ClassVars,
-        // Args...)` has no `State`/`StateAcc` parameter — class-side
-        // threading goes through `ClassVars`) — both still compile to a
-        // plain (non-tuple) value, so without this gate a loop forwarding
-        // an opaque callable to `do:`/`collect:`/`select:` in either
-        // context would get classified as needing a tuple unwrap the
-        // codegen never produces.
-        if matches!(sel_str.as_str(), "do:" | "collect:" | "select:")
-            && self.opaque_callable_list_op_needs_state_fold()
-        {
-            if let Some(arg) = arguments.first() {
-                if Self::extract_block_literal(arg).is_none() {
-                    return true;
-                }
-            }
+        // Decided by `opaque_callable_fold_needs_threading` — the SAME
+        // predicate the ADR 0118 expression-position producer uses, built on
+        // the SAME table and `routes_through_opaque_callable_fold` gate every
+        // covered operator's codegen call site uses to decide whether it
+        // actually builds the `{Result, NewState}`-tuple fold, so this
+        // classifier and that codegen decision cannot drift apart (the
+        // class-method crash fixed on PR #4030 arose from exactly two
+        // hand-duplicated copies of this condition going out of sync).
+        // `false` outside an Actor instance method (`ValueType`, REPL, class
+        // methods — none compiles the fold) and for a `self`/`super`
+        // receiver (dispatched as a send, never through the list intrinsic).
+        if self.opaque_callable_fold_needs_threading(expr) {
+            return true;
         }
 
         // Standard check: analyse argument blocks for mutations.

@@ -35,7 +35,7 @@
 //! `classify_body_expr` route the enclosing statement through the same
 //! `{Result, NewState}` unpacking as `ifTrue:`/`ifFalse:`).
 
-use crate::ast::WellKnownSelector;
+use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 
 /// Returns `true` if `sel` is a state-threading keyword selector.
 ///
@@ -251,9 +251,150 @@ pub fn is_state_threaded_block_receiver(selector: &str) -> bool {
     )
 }
 
+/// ADR 0128 (BT-3583, BT-3615): the single "which collection HOM, which
+/// argument position" table for the opaque-callable fold — returns the
+/// callable argument of a `do:`/`collect:`/`select:`/`inject:into:`/
+/// `detect:`/`detect:ifNone:`/`count:`/`anySatisfy:`/`allSatisfy:` send, or
+/// `None` for any other selector (or the wrong argument count).
+///
+/// Consumed by `beamtalk-codegen`'s `control_flow_has_mutations` classifier
+/// and opaque-fold lowering (`list_ops/opaque_fold.rs`), and by
+/// [`is_opaque_callable_hom_send`] below (the block-analysis fact), so the
+/// three can never disagree about which sends are covered.
+#[must_use]
+pub fn opaque_fold_callable_arg<'a>(
+    selector: &str,
+    arguments: &'a [Expression],
+) -> Option<&'a Expression> {
+    match (selector, arguments) {
+        (
+            "do:" | "collect:" | "select:" | "detect:" | "count:" | "anySatisfy:" | "allSatisfy:",
+            [callable],
+        )
+        | ("detect:ifNone:", [callable, _])
+        | ("inject:into:", [_, callable]) => Some(callable),
+        _ => None,
+    }
+}
+
+/// ADR 0128 (BT-3615): `true` if `expr` (paren-unwrapped) is a collection-HOM
+/// send ([`opaque_fold_callable_arg`]) whose callable argument is NOT a
+/// block literal — an opaque callable (a parameter, a local, any other
+/// expression) whose Tier 1/Tier 2 nature is only known at runtime, so the
+/// send may thread actor state.
+///
+/// Purely syntactic; whether the current codegen context actually threads a
+/// `State` map through it (Actor/REPL instance code, not a `Value` method or
+/// a class method) is `beamtalk-codegen`'s decision on top of this. A
+/// bare-`self` receiver is excluded — semantic analysis classifies it as a
+/// `SelfSend` (dispatched through the actor's own method table), never as
+/// this list-op fold — as are a `super` receiver (compiled as a super send)
+/// and a cast (`!`) send.
+#[must_use]
+pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
+    let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Keyword(parts),
+        arguments,
+        is_cast: false,
+        ..
+    } = expr.unwrap_parens()
+    else {
+        return false;
+    };
+    if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+        || matches!(receiver.as_ref(), Expression::Super(_))
+    {
+        return false;
+    }
+    let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+    opaque_fold_callable_arg(&sel, arguments)
+        .is_some_and(|callable| !matches!(callable.unwrap_parens(), Expression::Block(_)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_expr(src: &str) -> Expression {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        assert!(diagnostics.is_empty(), "{src}: {diagnostics:?}");
+        module
+            .expressions
+            .into_iter()
+            .next()
+            .expect("one expression")
+            .expression
+    }
+
+    #[test]
+    fn opaque_fold_callable_arg_picks_block_position() {
+        for (src, callable) in [
+            ("items do: blk", "blk"),
+            ("items collect: blk", "blk"),
+            ("items select: blk", "blk"),
+            ("items detect: blk", "blk"),
+            ("items count: blk", "blk"),
+            ("items anySatisfy: blk", "blk"),
+            ("items allSatisfy: blk", "blk"),
+            ("items detect: blk ifNone: other", "blk"),
+            ("items inject: seed into: blk", "blk"),
+        ] {
+            let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = parse_expr(src)
+            else {
+                panic!("{src}: not a message send");
+            };
+            let arg = opaque_fold_callable_arg(&selector.name(), &arguments)
+                .unwrap_or_else(|| panic!("{src}: expected a callable argument"));
+            assert!(
+                matches!(arg, Expression::Identifier(id) if id.name == callable),
+                "{src}: picked {arg:?}"
+            );
+        }
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = parse_expr("items reject: blk")
+        else {
+            panic!("not a message send");
+        };
+        assert!(opaque_fold_callable_arg(&selector.name(), &arguments).is_none());
+    }
+
+    #[test]
+    fn is_opaque_callable_hom_send_requires_non_literal_non_self() {
+        assert!(is_opaque_callable_hom_send(&parse_expr("items do: blk")));
+        assert!(is_opaque_callable_hom_send(&parse_expr(
+            "items inject: 0 into: blk"
+        )));
+        assert!(is_opaque_callable_hom_send(&parse_expr(
+            "(items detect: blk ifNone: [0])"
+        )));
+        // A literal block (even parenthesized) is analysed statically instead.
+        assert!(!is_opaque_callable_hom_send(&parse_expr(
+            "items do: [:x | x]"
+        )));
+        assert!(!is_opaque_callable_hom_send(&parse_expr(
+            "items do: ([:x | x])"
+        )));
+        // `inject:into:`'s callable is the SECOND argument.
+        assert!(!is_opaque_callable_hom_send(&parse_expr(
+            "items inject: seed into: [:a :b | a]"
+        )));
+        // A bare-`self` receiver is a self-send, not the list-op fold.
+        assert!(!is_opaque_callable_hom_send(&parse_expr("self do: blk")));
+        assert!(!is_opaque_callable_hom_send(&parse_expr("super do: blk")));
+        // Not a covered selector.
+        assert!(!is_opaque_callable_hom_send(&parse_expr(
+            "items reject: blk"
+        )));
+    }
 
     #[test]
     fn keyword_selectors() {

@@ -202,7 +202,15 @@ from_list_like_list_receiver_test() ->
     %% Raw Erlang list receiver → list result, unchanged.
     ?assertEqual([2, 4, 6], beamtalk_collection:from_list_like([1, 2, 3], [2, 4, 6])).
 
+from_list_like_set_receiver_test() ->
+    %% BT-3615: Set receiver → Set result (matches the pure collect:/select:
+    %% path's species answer), deduplicating.
+    Set = beamtalk_set:from_list([1, 2, 3]),
+    ?assertEqual(
+        beamtalk_set:from_list([2, 4]), beamtalk_collection:from_list_like(Set, [2, 4, 2])
+    ).
+
 from_list_like_other_receiver_test() ->
-    %% Non-Array, non-binary, non-list receiver (e.g. a Set map) → list unchanged.
-    Set = #{'$beamtalk_class' => 'Set', data => #{}},
-    ?assertEqual([1, 2], beamtalk_collection:from_list_like(Set, [1, 2])).
+    %% Non-Array, non-Set, non-binary, non-list receiver (e.g. a Bag map) → list unchanged.
+    Bag = #{'$beamtalk_class' => 'Bag', counts => #{}},
+    ?assertEqual([1, 2], beamtalk_collection:from_list_like(Bag, [1, 2])).

@@ -1,0 +1,225 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3615 (ADR 0128 scope extension): `self_send_hom_pool.bt`'s shape —
+// an Actor whose user-defined HOM forwards an OPAQUE (non-literal) block
+// across a self-send straight to a stdlib collection primitive — for the
+// operators BT-3583 did not cover (`inject:into:`, `detect:`,
+// `detect:ifNone:`, `count:`, `anySatisfy:`, `allSatisfy:`) and for
+// `Array`/`Set` receivers. Before the fix every one of the six operators
+// CRASHED when the forwarded block was a Tier 2 (captured-local-mutating)
+// block — `badarity` for `inject:into:`, `function_clause` inside
+// `lists:any/all/filter`, a type error inside `beamtalk_list:detect` — and
+// a `Set` `collect:`/`select:` answered a `List`.
+
+Actor subclass: SelfSendHomFoldPool
+  state: items = #(1, 2, 3, 4)
+  state: arr = #[1, 2, 3, 4]
+  state: set = #(1, 2, 3, 4) asSet
+  state: total = 0
+
+  // ── forwarding HOMs: opaque `block` straight to the primitive ─────────────
+  fwdInject: initial into: block => self.items inject: initial into: block
+
+  fwdDetect: block => self.items detect: block
+
+  fwdDetect: block ifNone: noneBlock =>
+    self.items detect: block ifNone: noneBlock
+
+  fwdCount: block => self.items count: block
+
+  fwdAnySatisfy: block => self.items anySatisfy: block
+
+  fwdAllSatisfy: block => self.items allSatisfy: block
+
+  arrDo: block => self.arr do: block
+
+  arrCollect: block => self.arr collect: block
+
+  arrInject: initial into: block => self.arr inject: initial into: block
+
+  setDo: block => self.set do: block
+
+  setCollect: block => self.set collect: block
+
+  setSelect: block => self.set select: block
+
+  setInject: initial into: block => self.set inject: initial into: block
+
+  // Opaque-callable folds in expression position (a receiver, a binary
+  // operand, a conditional receiver) and inside a conditional arm / loop
+  // body — each must unwrap the fold's `{Result, NewState}` tuple and
+  // thread its `State`, not leak the tuple as a value or drop the state.
+  nestedCollectSize: block => (self.items collect: block) size
+
+  nestedInjectPlusOne: block => (self.items inject: 0 into: block) + 1
+
+  nestedAnyAnswer: block =>
+    (self.items anySatisfy: block) ifTrue: ["yes"] ifFalse: ["no"]
+
+  doWhen: flag with: block =>
+    flag ifTrue: [self.items do: block]
+    nil
+
+  injectTwice: block =>
+    t := 0
+    1 to: 2 do: [:_k | t := t + (self.items inject: 0 into: block)]
+    t
+
+  countUpWhile: block =>
+    i := 0
+    [(self.items count: block) > i] whileTrue: [i := i + 1]
+    i
+
+  // ── callers: a Tier 2 block (captured-local write) through the self-send ──
+  // Each answers `#(touches, result)` — `touches` is the captured local the
+  // block increments, which must survive the self-send round trip.
+  injectTouches =>
+    n := 0
+    r := self
+      fwdInject: 0
+      into: [:a :b |
+        n := n + 1
+        a + b
+      ]
+    #(n, r)
+
+  injectTouchesStatement =>
+    n := 0
+    self
+      fwdInject: 0
+      into: [:a :b |
+        n := n + 1
+        a + b
+      ]
+    n
+
+  detectTouches =>
+    n := 0
+    r := self
+      fwdDetect: [:x |
+        n := n + 1
+        x > 2
+      ]
+    #(n, r)
+
+  detectIfNoneTouches =>
+    n := 0
+    r := self
+      fwdDetect: [:x |
+        n := n + 1
+        x > 20
+      ]
+      ifNone: [0]
+    #(n, r)
+
+  countTouches =>
+    n := 0
+    r := self
+      fwdCount: [:x |
+        n := n + 1
+        x > 2
+      ]
+    #(n, r)
+
+  anySatisfyTouches =>
+    n := 0
+    r := self
+      fwdAnySatisfy: [:x |
+        n := n + 1
+        x > 1
+      ]
+    #(n, r)
+
+  allSatisfyTouches =>
+    n := 0
+    r := self
+      fwdAllSatisfy: [:x |
+        n := n + 1
+        x < 2
+      ]
+    #(n, r)
+
+  // A block that writes BOTH `self.field` and a captured local.
+  injectFieldAndLocal =>
+    self.total := 0
+    n := 0
+    r := self
+      fwdInject: 100
+      into: [:a :b |
+        self.total := self.total + b
+        n := n + 1
+        a + b
+      ]
+    #(self.total, n, r)
+
+  arrDoTouches =>
+    n := 0
+    self arrDo: [:x | n := n + x]
+    n
+
+  arrCollectTouches =>
+    n := 0
+    r := self
+      arrCollect: [:x |
+        n := n + x
+        x * 2
+      ]
+    #(n, r)
+
+  arrInjectTouches =>
+    n := 0
+    r := self
+      arrInject: 0
+      into: [:a :b |
+        n := n + 1
+        a + b
+      ]
+    #(n, r)
+
+  setDoTouches =>
+    n := 0
+    self setDo: [:x | n := n + x]
+    n
+
+  setCollectTouches =>
+    n := 0
+    r := self
+      setCollect: [:x |
+        n := n + x
+        x * 2
+      ]
+    #(n, r class, r size)
+
+  setInjectTouches =>
+    n := 0
+    r := self
+      setInject: 0
+      into: [:a :b |
+        n := n + 1
+        a + b
+      ]
+    #(n, r)
+
+  doWhenTouches =>
+    n := 0
+    self doWhen: true with: [:x | n := n + x]
+    n
+
+  injectTwiceTouches =>
+    n := 0
+    r := self
+      injectTwice: [:a :b |
+        n := n + 1
+        a + b
+      ]
+    #(n, r)
+
+  whileConditionTouches =>
+    n := 0
+    r := self
+      countUpWhile: [:x |
+        n := n + 1
+        x > 2
+      ]
+    #(n, r)

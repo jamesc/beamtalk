@@ -200,6 +200,8 @@ the receiver's representation:
 
 - String receiver (binary) → binary (`iolist_to_binary/1`)
 - Array receiver → `Array` (`beamtalk_array:from_list/1`)
+- Set receiver → `Set` (`beamtalk_set:from_list/1`, deduplicating) — the
+  species `Set>>collect:`/`select:` answer on the pure path (BT-3615)
 - anything else (already an Erlang list, or another collection) → the list as-is
 
 Called from compiler-generated Core Erlang (`list_ops`).
@@ -209,6 +211,8 @@ from_list_like(Recv, List) when is_binary(Recv) ->
     erlang:iolist_to_binary(List);
 from_list_like(#{'$beamtalk_class' := 'Array'}, List) ->
     beamtalk_array:from_list(List);
+from_list_like(#{'$beamtalk_class' := 'Set'}, List) ->
+    beamtalk_set:from_list(List);
 from_list_like(_Recv, List) ->
     List.
 

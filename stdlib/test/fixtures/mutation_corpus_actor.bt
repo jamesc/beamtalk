@@ -514,3 +514,191 @@ Actor subclass: MutationCorpusActor
       1 -> 1 + self bump;
       _ -> 0
     ]
+
+  // ── opaque (non-literal) callable forwarded to a collection HOM (BT-3615) ──
+  // ADR 0128 / BT-3583 / BT-3615: each `opaque*:` helper forwards its block
+  // parameter — opaque at the primitive's call site — straight to
+  // `do:`/`collect:`/`select:`/`inject:into:`/`detect:`/`detect:ifNone:`/
+  // `count:`/`anySatisfy:`/`allSatisfy:`. In Actor instance context that
+  // lowers to ADR 0128's `State`-threading `lists:foldl`; in value-type and
+  // class-method context to the plain-value path (no `State` map). The
+  // `opaque*NonLastReadWrite` fragments pass a PURE block (the one shape
+  // every context supports) and thread the HOM's answer into an outer local
+  // — through a loop, a conditional or a `do:` over the answer — so a leaked
+  // `{Result, State}` tuple or a wrong answer in any context shows up as a
+  // wrong ground-truth value.
+  // (`opaqueDoNonLastReadWrite` checks only that threading survives the
+  // send: an inline `lists:foreach` `do:` answers `ok`, not `nil` — a
+  // separate, pre-existing, REPL-visible inconsistency left for follow-up.)
+  // The answer is bound to `r` before a loop/conditional/`do:` consumes
+  // it (keeping every self-send at a statement's top level, so the
+  // class-method loop-body family detectors agree — see
+  // `family_detector_differential.rs`); besides, a
+  // same-class class-method self-send used DIRECTLY as the receiver of a
+  // threaded `do:`/`ifTrue:` in a class with a `classState:` is a separate,
+  // pre-existing compiler crash (`unbound variable 'ClassVars1'`) — see
+  // ADR 0128's Scope section.
+  opaqueDo: block => #(1, 2, 3) do: block
+
+  opaqueCollect: block => #(1, 2, 3) collect: block
+
+  opaqueSelect: block => #(1, 2, 3) select: block
+
+  opaqueInject: initial into: block => #(1, 2, 3) inject: initial into: block
+
+  opaqueDetect: block => #(1, 2, 3) detect: block
+
+  opaqueDetect: block ifNone: noneBlock =>
+    #(1, 2, 3) detect: block ifNone: noneBlock
+
+  opaqueCount: block => #(1, 2, 3) count: block
+
+  opaqueAnySatisfy: block => #(1, 2, 3) anySatisfy: block
+
+  opaqueAllSatisfy: block => #(1, 2, 3) allSatisfy: block
+
+  opaqueDoNonLastReadWrite =>
+    n := 0
+    1
+      to: 2
+      do: [:_k |
+        self opaqueDo: [:i | i]
+        n := n + 1
+      ]
+    n
+
+  opaqueCollectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueCollect: [:i | i * 2]
+    r do: [:x | sum := sum + x]
+    sum
+
+  opaqueSelectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueSelect: [:i | i > 1]
+    r do: [:x | sum := sum + x]
+    sum
+
+  opaqueInjectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueInject: 0 into: [:a :b | a + b]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  opaqueDetectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueDetect: [:i | i > 1]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  opaqueDetectIfNoneNonLastReadWrite =>
+    sum := 0
+    r := self opaqueDetect: [:i | i > 10] ifNone: [5]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  opaqueCountNonLastReadWrite =>
+    sum := 0
+    r := self opaqueCount: [:i | i > 1]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  opaqueAnySatisfyNonLastReadWrite =>
+    n := 0
+    r := self opaqueAnySatisfy: [:i | i > 2]
+    r ifTrue: [n := n + 1]
+    n
+
+  opaqueAllSatisfyNonLastReadWrite =>
+    n := 0
+    r := self opaqueAllSatisfy: [:i | i > 0]
+    r ifTrue: [n := n + 1]
+    n
+
+  // ── BT-3615: Tier 2 block through a self-send HOM (Actor only) ────────────
+  // The ADR 0128 case proper: the block passed to the `opaque*:` helper
+  // writes a captured outer local, so it crosses the self-send as a Tier 2
+  // closure and the helper's primitive must thread the actor `State` map
+  // (where the captured local lives) through every element. Actor-only: a
+  // value-type or class-method context has no channel to thread a Tier 2
+  // block's captured-local writes back through ANY user-defined HOM
+  // (`block value: x` inside the HOM already fails there) — see ADR 0128's
+  // Scope section.
+  opaqueDoSelfSendReadWrite =>
+    n := 0
+    self opaqueDo: [:i | n := n + i]
+    n
+
+  opaqueCollectSelfSendReadWrite =>
+    n := 0
+    self
+      opaqueCollect: [:i |
+        n := n + i
+        i
+      ]
+    n
+
+  opaqueSelectSelfSendReadWrite =>
+    n := 0
+    self
+      opaqueSelect: [:i |
+        n := n + 1
+        i > 1
+      ]
+    n
+
+  opaqueInjectSelfSendReadWrite =>
+    n := 0
+    self
+      opaqueInject: 0
+      into: [:a :b |
+        n := n + 1
+        a + b
+      ]
+    n
+
+  opaqueDetectSelfSendReadWrite =>
+    n := 0
+    self
+      opaqueDetect: [:i |
+        n := n + 1
+        i > 1
+      ]
+    n
+
+  opaqueDetectIfNoneSelfSendReadWrite =>
+    n := 0
+    self
+      opaqueDetect: [:i |
+        n := n + 1
+        i > 10
+      ]
+      ifNone: [0]
+    n
+
+  opaqueCountSelfSendReadWrite =>
+    n := 0
+    self
+      opaqueCount: [:i |
+        n := n + 1
+        i > 1
+      ]
+    n
+
+  opaqueAnySatisfySelfSendReadWrite =>
+    n := 0
+    self
+      opaqueAnySatisfy: [:i |
+        n := n + 1
+        i > 1
+      ]
+    n
+
+  opaqueAllSatisfySelfSendReadWrite =>
+    n := 0
+    self
+      opaqueAllSatisfy: [:i |
+        n := n + 1
+        i < 2
+      ]
+    n

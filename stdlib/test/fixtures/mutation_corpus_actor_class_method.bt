@@ -142,3 +142,104 @@ Actor subclass: MutationCorpusActorClassMethod
         x
       ]
     self.runs
+
+  // ── opaque (non-literal) callable forwarded to a collection HOM (BT-3615) ──
+  // ADR 0128 / BT-3583 / BT-3615: each `opaque*:` helper forwards its block
+  // parameter — opaque at the primitive's call site — straight to
+  // `do:`/`collect:`/`select:`/`inject:into:`/`detect:`/`detect:ifNone:`/
+  // `count:`/`anySatisfy:`/`allSatisfy:`. In Actor instance context that
+  // lowers to ADR 0128's `State`-threading `lists:foldl`; in value-type and
+  // class-method context to the plain-value path (no `State` map). The
+  // `opaque*NonLastReadWrite` fragments pass a PURE block (the one shape
+  // every context supports) and thread the HOM's answer into an outer local
+  // — through a loop, a conditional or a `do:` over the answer — so a leaked
+  // `{Result, State}` tuple or a wrong answer in any context shows up as a
+  // wrong ground-truth value.
+  // (`opaqueDoNonLastReadWrite` checks only that threading survives the
+  // send: an inline `lists:foreach` `do:` answers `ok`, not `nil` — a
+  // separate, pre-existing, REPL-visible inconsistency left for follow-up.)
+  // The answer is bound to `r` before a loop/conditional/`do:` consumes
+  // it (keeping every self-send at a statement's top level, so the
+  // class-method loop-body family detectors agree — see
+  // `family_detector_differential.rs`); besides, a
+  // same-class class-method self-send used DIRECTLY as the receiver of a
+  // threaded `do:`/`ifTrue:` in a class with a `classState:` is a separate,
+  // pre-existing compiler crash (`unbound variable 'ClassVars1'`) — see
+  // ADR 0128's Scope section.
+  class opaqueDo: block => #(1, 2, 3) do: block
+
+  class opaqueCollect: block => #(1, 2, 3) collect: block
+
+  class opaqueSelect: block => #(1, 2, 3) select: block
+
+  class opaqueInject: initial into: block =>
+    #(1, 2, 3) inject: initial into: block
+
+  class opaqueDetect: block => #(1, 2, 3) detect: block
+
+  class opaqueDetect: block ifNone: noneBlock =>
+    #(1, 2, 3) detect: block ifNone: noneBlock
+
+  class opaqueCount: block => #(1, 2, 3) count: block
+
+  class opaqueAnySatisfy: block => #(1, 2, 3) anySatisfy: block
+
+  class opaqueAllSatisfy: block => #(1, 2, 3) allSatisfy: block
+
+  class opaqueDoNonLastReadWrite =>
+    n := 0
+    1
+      to: 2
+      do: [:_k |
+        self opaqueDo: [:i | i]
+        n := n + 1
+      ]
+    n
+
+  class opaqueCollectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueCollect: [:i | i * 2]
+    r do: [:x | sum := sum + x]
+    sum
+
+  class opaqueSelectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueSelect: [:i | i > 1]
+    r do: [:x | sum := sum + x]
+    sum
+
+  class opaqueInjectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueInject: 0 into: [:a :b | a + b]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  class opaqueDetectNonLastReadWrite =>
+    sum := 0
+    r := self opaqueDetect: [:i | i > 1]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  class opaqueDetectIfNoneNonLastReadWrite =>
+    sum := 0
+    r := self opaqueDetect: [:i | i > 10] ifNone: [5]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  class opaqueCountNonLastReadWrite =>
+    sum := 0
+    r := self opaqueCount: [:i | i > 1]
+    1 to: 2 do: [:_k | sum := sum + r]
+    sum
+
+  class opaqueAnySatisfyNonLastReadWrite =>
+    n := 0
+    r := self opaqueAnySatisfy: [:i | i > 2]
+    r ifTrue: [n := n + 1]
+    n
+
+  class opaqueAllSatisfyNonLastReadWrite =>
+    n := 0
+    r := self opaqueAllSatisfy: [:i | i > 0]
+    r ifTrue: [n := n + 1]
+    n

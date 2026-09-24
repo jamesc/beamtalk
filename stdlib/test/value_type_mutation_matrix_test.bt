@@ -1194,3 +1194,146 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testMatchArmSelfSendReadWriteActorWildcard =>
     self assert: (self actorCorpus matchArmSelfSendReadWrite: 2) equals: 0
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BT-3615 (ADR 0128) — opaque (non-literal) callable forwarded through a
+  //  same-class HOM to each collection primitive. Pure-block cells run in
+  //  all four contexts (fragments in every mutation_corpus_*.bt); the
+  //  `*SelfSend*` cells are Actor-only (a Tier 2 block's captured-local
+  //  writes cannot cross a user HOM in value-type/class-method context —
+  //  see ADR 0128's Scope section).
+  // ════════════════════════════════════════════════════════════════════════
+  testOpaqueDoNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueDoNonLastReadWrite equals: 2
+
+  testOpaqueDoNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueDoNonLastReadWrite equals: 2
+
+  testOpaqueDoNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueDoNonLastReadWrite equals: 2
+
+  testOpaqueDoNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueDoNonLastReadWrite equals: 2
+
+  testOpaqueCollectNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueCollectNonLastReadWrite equals: 12
+
+  testOpaqueCollectNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueCollectNonLastReadWrite equals: 12
+
+  testOpaqueCollectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueCollectNonLastReadWrite equals: 12
+
+  testOpaqueCollectNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueCollectNonLastReadWrite equals: 12
+
+  testOpaqueSelectNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueSelectNonLastReadWrite equals: 5
+
+  testOpaqueSelectNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueSelectNonLastReadWrite equals: 5
+
+  testOpaqueSelectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueSelectNonLastReadWrite equals: 5
+
+  testOpaqueSelectNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueSelectNonLastReadWrite equals: 5
+
+  testOpaqueInjectNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueInjectNonLastReadWrite equals: 12
+
+  testOpaqueInjectNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueInjectNonLastReadWrite equals: 12
+
+  testOpaqueInjectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueInjectNonLastReadWrite equals: 12
+
+  testOpaqueInjectNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueInjectNonLastReadWrite equals: 12
+
+  testOpaqueDetectNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueDetectNonLastReadWrite equals: 4
+
+  testOpaqueDetectNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueDetectNonLastReadWrite equals: 4
+
+  testOpaqueDetectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueDetectNonLastReadWrite equals: 4
+
+  testOpaqueDetectNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueDetectNonLastReadWrite equals: 4
+
+  testOpaqueDetectIfNoneNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueDetectIfNoneNonLastReadWrite equals: 10
+
+  testOpaqueDetectIfNoneNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueDetectIfNoneNonLastReadWrite equals: 10
+
+  testOpaqueDetectIfNoneNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueDetectIfNoneNonLastReadWrite equals: 10
+
+  testOpaqueDetectIfNoneNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueDetectIfNoneNonLastReadWrite equals: 10
+
+  testOpaqueCountNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueCountNonLastReadWrite equals: 4
+
+  testOpaqueCountNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueCountNonLastReadWrite equals: 4
+
+  testOpaqueCountNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueCountNonLastReadWrite equals: 4
+
+  testOpaqueCountNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueCountNonLastReadWrite equals: 4
+
+  testOpaqueAnySatisfyNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueAnySatisfyNonLastReadWrite equals: 1
+
+  testOpaqueAnySatisfyNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueAnySatisfyNonLastReadWrite equals: 1
+
+  testOpaqueAnySatisfyNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueAnySatisfyNonLastReadWrite equals: 1
+
+  testOpaqueAnySatisfyNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueAnySatisfyNonLastReadWrite equals: 1
+
+  testOpaqueAllSatisfyNonLastReadWriteValue =>
+    self assert: self valueCorpus opaqueAllSatisfyNonLastReadWrite equals: 1
+
+  testOpaqueAllSatisfyNonLastReadWriteActor =>
+    self assert: self actorCorpus opaqueAllSatisfyNonLastReadWrite equals: 1
+
+  testOpaqueAllSatisfyNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod opaqueAllSatisfyNonLastReadWrite equals: 1
+
+  testOpaqueAllSatisfyNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod opaqueAllSatisfyNonLastReadWrite equals: 1
+
+  testOpaqueDoSelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueDoSelfSendReadWrite equals: 6
+
+  testOpaqueCollectSelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueCollectSelfSendReadWrite equals: 6
+
+  testOpaqueSelectSelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueSelectSelfSendReadWrite equals: 3
+
+  testOpaqueInjectSelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueInjectSelfSendReadWrite equals: 3
+
+  testOpaqueDetectSelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueDetectSelfSendReadWrite equals: 2
+
+  testOpaqueDetectIfNoneSelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueDetectIfNoneSelfSendReadWrite equals: 3
+
+  testOpaqueCountSelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueCountSelfSendReadWrite equals: 3
+
+  testOpaqueAnySatisfySelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueAnySatisfySelfSendReadWrite equals: 2
+
+  testOpaqueAllSatisfySelfSendReadWriteActor =>
+    self assert: self actorCorpus opaqueAllSatisfySelfSendReadWrite equals: 2
