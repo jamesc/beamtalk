@@ -25,26 +25,41 @@
 %%   call 'erlang':'element'(4, Obj)
 %%
 %% Following LFE Flavors' #flavor-instance{} pattern.
-%% ADR 0079: The `pid` field carries either:
-%%   - a raw `pid()` for ordinary actor handles, or
-%%   - a `{registered, Name :: atom()}` tuple for name-resolving proxies.
-%% The send-site dispatch in `beamtalk_actor` recognises both shapes; the
-%% latter re-resolves the registered name to a pid on every send (via
-%% `whereis/1` + `gen_server:call(Pid, ...)`) so that the held reference
-%% survives the actor being restarted under its registered name.
+%% ADR 0079 / ADR 0126 §3: The `pid` field carries one of:
+%%   - a raw `pid()` for ordinary actor handles (local or remote — a remote
+%%     pid crosses transparently, `node/1` names its node),
+%%   - a `{registered, Name :: atom()}` tuple for a *local* name-resolving
+%%     proxy (ADR 0079), or
+%%   - a `{registered, Name :: atom(), Node :: node()}` tuple for a
+%%     node-qualified proxy — returned by `named:on:`/`allRegisteredOn:`
+%%     (ADR 0126 §3) and by rewriting a `{registered, Name}` ref that
+%%     crosses a node boundary, so it keeps resolving against its *origin*
+%%     node rather than silently re-resolving against whichever node reads
+%%     it. `{global, Name :: atom()}` is reserved for the opt-in
+%%     cluster-unique `scope: #global` names (ADR 0126 §4) — no code
+%%     constructs or matches it yet.
+%% The send-site dispatch in `beamtalk_actor` recognises all shapes; a
+%% `registered` tuple re-resolves the name to a pid on every send (via
+%% `whereis/1`, or an `erpc` `whereis/1` on `Node` for the qualified shape)
+%% + `gen_server:call(Pid, ...)`, so the held reference survives the actor
+%% being restarted under its registered name.
 -record(beamtalk_object, {
     % Class name (e.g., 'Counter')
     class :: atom(),
     % Class module (e.g., 'counter')
     class_mod :: atom(),
-    % The actor process or a `{registered, Name}` reference (ADR 0079)
-    pid :: pid() | {registered, atom()}
+    % The actor process or a `{registered, Name}` / `{registered, Name, Node}`
+    % / `{global, Name}` reference (ADR 0079, ADR 0126 §3/§4)
+    pid :: pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}
 }).
 
-%% Helper macro to recognise the name-resolving identity shape (ADR 0079).
+%% Helper macro to recognise the name-resolving identity shape (ADR 0079 /
+%% ADR 0126 §3): both the local `{registered, Name}` and the node-qualified
+%% `{registered, Name, Node}` forms.
 -define(IS_REGISTERED_REF(X),
-    (is_tuple(X) andalso tuple_size(X) =:= 2 andalso element(1, X) =:= registered andalso
-        is_atom(element(2, X)))
+    (is_tuple(X) andalso element(1, X) =:= registered andalso
+        ((tuple_size(X) =:= 2 andalso is_atom(element(2, X))) orelse
+            (tuple_size(X) =:= 3 andalso is_atom(element(2, X)) andalso is_atom(element(3, X)))))
 ).
 
 %% @doc Structured error record for runtime errors.

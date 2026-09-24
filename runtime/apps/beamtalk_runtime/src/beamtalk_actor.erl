@@ -198,6 +198,12 @@ handle_getValue([], State) ->
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% ADR 0126 §3: timeout for the `erpc:call/5` a remote spawn/lookup/list
+%% makes to the target node — matches `gen_server:call/2`'s own 5000ms
+%% default so a stuck remote op fails on the same order of magnitude as a
+%% stuck local one, rather than hanging indefinitely (erpc's own default).
+-define(BT_REMOTE_CALL_TIMEOUT, 5000).
+
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
 -export([await_initialize/1, safe_spawn/2]).
@@ -285,6 +291,28 @@ handle_getValue([], State) ->
     isRegistered/1,
     named/2,
     allRegistered/1
+]).
+
+%% Remote spawn and lookup (ADR 0126 §3, Phase 2, BT-3599). `remote_spawn/4`
+%% and `remote_named/3` are the origin-node entry points (erpc caller);
+%% `remote_spawn_target/2` and `remote_named_target/2` are exported so
+%% `erpc:call/5` can reach them — they run ON the target node, in the
+%% temporary process `erpc` spawns to execute the call.
+-export([
+    remote_spawn/4,
+    remote_spawn_target/2,
+    remote_named/3,
+    remote_named_target/2,
+    remote_all_registered/1
+]).
+
+%% Beamtalk stdlib FFI shims for actor.bt remote spawn/lookup (ADR 0126 §3,
+%% Phase 2, BT-3599) — mirrors the doSpawnAs/2 etc. shims above.
+-export([
+    doSpawnOn/2,
+    doSpawnAsOn/3,
+    doNamedOn/3,
+    doAllRegisteredOn/2
 ]).
 
 %% Lifecycle telemetry (called from compiled actor init/terminate)
@@ -589,7 +617,10 @@ For all other messages, checks if the actor is alive first:
 - If alive, sends via gen_server:cast (normal async path)
 - If dead, rejects the Future with an `actor_dead` error
 """.
--spec async_send(pid() | {registered, atom()}, atom(), list(), pid()) -> ok.
+-spec async_send(
+    pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list(), pid()
+) ->
+    ok.
 %% ADR 0079: name-resolving proxy fan-out. Name-only selectors
 %% answer from the proxy itself; other selectors resolve the name to the
 %% currently-registered pid and re-enter the pid-based clauses below.
@@ -611,6 +642,35 @@ async_send({registered, Name} = Ref, Selector, Args, FuturePid) when is_atom(Nam
             ok;
         Pid when is_pid(Pid) ->
             async_send(Pid, Selector, Args, FuturePid)
+    end;
+%% ADR 0126 §3: node-qualified proxy fan-out (`named:on:`/`allRegisteredOn:`,
+%% or a local `{registered, Name}` rewritten crossing a node boundary) —
+%% mirrors the two-tuple clauses above, resolving via `resolve_remote_registered/2`
+%% (a remote `erpc` `whereis/1` when `Node` is not this node) instead of a
+%% bare local `whereis/1`.
+async_send({registered, Name, Node}, isAlive, [], FuturePid) when is_atom(Name), is_atom(Node) ->
+    Result = is_pid(resolve_remote_registered(Name, Node)),
+    beamtalk_future:resolve(FuturePid, Result),
+    ok;
+async_send({registered, _Name, _Node}, isRegistered, [], FuturePid) ->
+    beamtalk_future:resolve(FuturePid, true),
+    ok;
+async_send({registered, Name, _Node}, registeredName, [], FuturePid) when is_atom(Name) ->
+    beamtalk_future:resolve(FuturePid, Name),
+    ok;
+async_send({registered, Name, Node} = Ref, Selector, Args, FuturePid) when
+    is_atom(Name), is_atom(Node)
+->
+    case resolve_remote_registered(Name, Node) of
+        Pid when is_pid(Pid) ->
+            async_send(Pid, Selector, Args, FuturePid);
+        undefined ->
+            Error = no_such_process_error(Ref, Selector),
+            beamtalk_future:reject(FuturePid, Error),
+            ok;
+        node_down ->
+            beamtalk_future:reject(FuturePid, node_down_error_record(Node, Selector)),
+            ok
     end;
 async_send(ActorPid, isAlive, [], FuturePid) ->
     %% isAlive is handled locally - no message to the actor
@@ -767,7 +827,7 @@ Checks if the actor is alive before sending. If dead, silently returns ok
 WARNING: Race condition! beamtalk_pid:is_alive/1 is a snapshot check.
 The actor could die between the alive check and the gen_server:cast.
 """.
--spec cast_send(pid() | {registered, atom()}, atom(), list()) -> ok.
+-spec cast_send(pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list()) -> ok.
 %% ADR 0079: name-resolving proxy fan-out for fire-and-forget
 %% sends. If the name is not currently registered, silently drop the cast
 %% (consistent with cast_send's existing `actor dead -> ok` semantics).
@@ -775,6 +835,15 @@ cast_send({registered, Name}, Selector, Args) when is_atom(Name) ->
     case erlang:whereis(Name) of
         undefined -> ok;
         Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args)
+    end;
+%% ADR 0126 §3: node-qualified proxy — see async_send/4's matching clause.
+%% A `node_down` here is silently dropped too, matching the "actor dead ->
+%% ok" fire-and-forget contract this function already has for a stale name.
+cast_send({registered, Name, Node}, Selector, Args) when is_atom(Name), is_atom(Node) ->
+    case resolve_remote_registered(Name, Node) of
+        Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args);
+        undefined -> ok;
+        node_down -> ok
     end;
 cast_send(ActorPid, Selector, Args) ->
     %% Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
@@ -811,7 +880,8 @@ For all other messages, checks if the actor is alive first:
 - If dead, raises `#beamtalk_error{kind = actor_dead}`
 - If timeout, raises `#beamtalk_error{kind = timeout}`
 """.
--spec sync_send(pid() | {registered, atom()}, atom(), list()) -> term().
+-spec sync_send(pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list()) ->
+    term().
 %% ADR 0079: name-resolving proxy fan-out. Name-only methods
 %% answer from the proxy itself; other methods resolve to the currently-
 %% registered pid, raising `no_such_process` if the name has vanished.
@@ -825,6 +895,26 @@ sync_send({registered, Name} = Ref, Selector, Args) when is_atom(Name) ->
     case erlang:whereis(Name) of
         undefined ->
             raise_no_such_process(Ref, Selector);
+        Pid when is_pid(Pid) ->
+            sync_send(Pid, Selector, Args)
+    end;
+%% ADR 0126 §3: node-qualified proxy fan-out — see async_send/4's matching
+%% clause for the shared `resolve_remote_registered/2` helper. Answers
+%% `isAlive`/`isRegistered`/`registeredName` without a network hop except
+%% for `isAlive`, which genuinely needs to know whether the name still
+%% resolves on `Node`.
+sync_send({registered, Name, Node}, isAlive, []) when is_atom(Name), is_atom(Node) ->
+    is_pid(resolve_remote_registered(Name, Node));
+sync_send({registered, _Name, _Node}, isRegistered, []) ->
+    true;
+sync_send({registered, Name, _Node}, registeredName, []) when is_atom(Name) ->
+    Name;
+sync_send({registered, Name, Node} = Ref, Selector, Args) when is_atom(Name), is_atom(Node) ->
+    case resolve_remote_registered(Name, Node) of
+        undefined ->
+            raise_no_such_process(Ref, Selector);
+        node_down ->
+            raise_node_down(Node, Selector);
         Pid when is_pid(Pid) ->
             sync_send(Pid, Selector, Args)
     end;
@@ -1038,7 +1128,10 @@ Same as sync_send/3 but passes the given Timeout to gen_server:call/3.
 Timeout is a non-negative integer (milliseconds) or the atom `infinity`.
 Used by TimeoutProxy to forward messages with a custom timeout.
 """.
--spec sync_send(pid() | {registered, atom()}, atom(), list(), timeout()) -> term().
+-spec sync_send(
+    pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list(), timeout()
+) ->
+    term().
 %% ADR 0079: name-resolving proxy fan-out for the explicit-
 %% timeout path. Mirror sync_send/3's name-only handling and resolution.
 sync_send({registered, Name}, isAlive, [], _Timeout) when is_atom(Name) ->
@@ -1051,6 +1144,25 @@ sync_send({registered, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) 
     case erlang:whereis(Name) of
         undefined ->
             raise_no_such_process(Ref, Selector);
+        Pid when is_pid(Pid) ->
+            sync_send(Pid, Selector, Args, Timeout)
+    end;
+%% ADR 0126 §3: node-qualified proxy fan-out for the explicit-timeout path —
+%% see sync_send/3's matching clause.
+sync_send({registered, Name, Node}, isAlive, [], _Timeout) when is_atom(Name), is_atom(Node) ->
+    is_pid(resolve_remote_registered(Name, Node));
+sync_send({registered, _Name, _Node}, isRegistered, [], _Timeout) ->
+    true;
+sync_send({registered, Name, _Node}, registeredName, [], _Timeout) when is_atom(Name) ->
+    Name;
+sync_send({registered, Name, Node} = Ref, Selector, Args, Timeout) when
+    is_atom(Name), is_atom(Node)
+->
+    case resolve_remote_registered(Name, Node) of
+        undefined ->
+            raise_no_such_process(Ref, Selector);
+        node_down ->
+            raise_node_down(Node, Selector);
         Pid when is_pid(Pid) ->
             sync_send(Pid, Selector, Args, Timeout)
     end;
@@ -1322,18 +1434,55 @@ node_down_error_record(Node, Selector) ->
     beamtalk_error:with_details(Error, #{node => Node}).
 
 -doc """
+ADR 0126 §3: resolve a `{registered, Name, Node}` proxy's live pid.
+
+`Node =:= node()` degrades to the ordinary local `erlang:whereis/1` the
+two-tuple `{registered, Name}` clauses already use — a node-qualified ref
+that happens to name the caller's own node (e.g. `named:on:` targeting the
+caller's node) needs no network hop. Otherwise resolves via `erpc:call/5`,
+which also surfaces a genuinely unreachable `Node` as `node_down` rather
+than letting the caller misreport it as `no_such_process` (the name may well
+be registered there — the node just cannot be asked).
+""".
+-spec resolve_remote_registered(atom(), node()) -> pid() | undefined | node_down.
+resolve_remote_registered(Name, Node) when Node =:= node() ->
+    erlang:whereis(Name);
+resolve_remote_registered(Name, Node) ->
+    try erpc:call(Node, erlang, whereis, [Name], ?BT_REMOTE_CALL_TIMEOUT) of
+        Pid when is_pid(Pid) -> Pid;
+        undefined -> undefined
+    catch
+        %% Every erpc-level failure (an unusual reason, or the remote
+        %% erlang:whereis/1 itself somehow raising) collapses to the same
+        %% node_down sentinel this function already returns for the common
+        %% noconnection/timeout cases: this is a best-effort existence
+        %% check, not a Result-returning API, so there is no richer outcome
+        %% to report — "could not determine" and "node unreachable" are the
+        %% same actionable fact to every call site here.
+        error:{erpc, _ErpcReason} -> node_down;
+        error:{exception, _Reason, _Stack} -> node_down;
+        exit:{exception, _Reason} -> node_down
+    end.
+
+-doc """
 ADR 0079: raise a `no_such_process` error for sends through a
 name-resolving proxy when the registered name no longer points at any
 process. Distinct from `actor_dead`, which fires when a held pid points
 at a dead process — `no_such_process` says the *name* failed to resolve.
 """.
--spec raise_no_such_process({registered, atom()}, atom()) -> no_return().
+-spec raise_no_such_process({registered, atom()} | {registered, atom(), node()}, atom()) ->
+    no_return().
 raise_no_such_process({registered, Name}, Selector) ->
+    beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector));
+raise_no_such_process({registered, Name, _Node}, Selector) ->
     beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector)).
 
 -doc "Construct a structured `no_such_process` error for the given proxy ref.".
--spec no_such_process_error({registered, atom()}, atom()) -> #beamtalk_error{}.
+-spec no_such_process_error({registered, atom()} | {registered, atom(), node()}, atom()) ->
+    #beamtalk_error{}.
 no_such_process_error({registered, Name}, Selector) ->
+    no_such_process_error_record(Name, Selector);
+no_such_process_error({registered, Name, _Node}, Selector) ->
     no_such_process_error_record(Name, Selector).
 
 -spec no_such_process_error_record(atom(), atom()) -> #beamtalk_error{}.
@@ -3024,18 +3173,72 @@ registerAs(Self, _Name) ->
 FFI shim for `unregister -> Symbol`.
 
 Idempotent: returns `#ok` even if the receiver was not registered or was
-already unregistered. Only raises on real failures (reserved-name, type error).
+already unregistered. Only raises on real failures (reserved-name, type
+error) — and, for a node-qualified proxy pointing at a genuinely remote
+node (ADR 0126 §3), `node_down`/`timeout` when that node cannot be reached
+to find out, since the name may still be registered there.
 """.
 -spec unregister(#beamtalk_object{}) -> ok.
+unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
+    is_atom(Name0), is_atom(Node0), Node0 =/= node()
+->
+    %% ADR 0126 §3: a genuinely remote node-qualified proxy. `erlang:
+    %% process_info/2` (`registered_name_for_pid/1`'s TOCTOU guard below,
+    %% via unregister_resolved/2) only accepts *local* pids — badarg for a
+    %% pid on another node — so the whole read-check-unregister sequence
+    %% must run on `Node0` itself, via a plain two-tuple recursive call to
+    %% this same function there, not here.
+    %% Unlike the sibling remote ops (remote_spawn/4, remote_named/3,
+    %% remote_all_registered/1), an unreachable node here is NOT coerced to
+    %% a quiet `ok`: `unregister`'s "only raises on real failures" contract
+    %% means idempotent success is reserved for "already unregistered",
+    %% never for "couldn't find out" — the actor may still be registered on
+    %% Node0. Raise the same node_down/timeout error the siblings surface.
+    try
+        erpc:call(
+            Node0,
+            ?MODULE,
+            unregister,
+            [Self#beamtalk_object{pid = {registered, Name0}}],
+            ?BT_REMOTE_CALL_TIMEOUT
+        )
+    of
+        ok -> ok
+    catch
+        error:{erpc, noconnection} ->
+            beamtalk_error:raise(
+                (node_down_error_record(Node0, unregister))#beamtalk_error{
+                    class = Self#beamtalk_object.class
+                }
+            );
+        error:{erpc, timeout} ->
+            beamtalk_error:raise(
+                (remote_timeout_error_record(Self#beamtalk_object.class, unregister, true))
+            );
+        error:{erpc, ErpcReason} ->
+            beamtalk_error:raise(
+                generic_remote_error(Self#beamtalk_object.class, unregister, {erpc, ErpcReason})
+            );
+        error:{exception, Reason, _Stack} ->
+            beamtalk_error:raise(remote_unregister_error(Self#beamtalk_object.class, Reason));
+        exit:{exception, Reason} ->
+            beamtalk_error:raise(remote_unregister_error(Self#beamtalk_object.class, Reason))
+    end;
 unregister(Self) when is_record(Self, beamtalk_object) ->
-    %% ADR 0079: name-resolving proxies (`pid = {registered, N}`)
-    %% derive the pid via `whereis/1`. If the name has gone, treat as
-    %% idempotent — there is nothing to unregister.
+    %% ADR 0079: name-resolving proxies (`pid = {registered, N}`, including
+    %% a node-qualified ref whose Node is *this* node) derive the pid via
+    %% `whereis/1`. If the name has gone, treat as idempotent — there is
+    %% nothing to unregister.
     Pid =
         case Self#beamtalk_object.pid of
             P when is_pid(P) ->
                 P;
             {registered, Name0} when is_atom(Name0) ->
+                case erlang:whereis(Name0) of
+                    undefined -> dead;
+                    Live when is_pid(Live) -> Live
+                end;
+            {registered, Name0, Node0} when is_atom(Name0), Node0 =:= node() ->
                 case erlang:whereis(Name0) of
                     undefined -> dead;
                     Live when is_pid(Live) -> Live
@@ -3104,6 +3307,10 @@ registeredName(Self) when is_record(Self, beamtalk_object) ->
             %% identity slot directly — survives the registered actor
             %% being restarted under the same name.
             Name;
+        {registered, Name, _Node} when is_atom(Name) ->
+            %% ADR 0126 §3: node-qualified proxy — same, answers from the
+            %% identity slot (the Symbol is node-independent).
+            Name;
         Pid when is_pid(Pid) ->
             registered_name_for_pid(Pid)
     end;
@@ -3121,6 +3328,9 @@ isRegistered(Self) when is_record(Self, beamtalk_object) ->
             %% construction registered. The proxy stays "registered"
             %% across restarts because the supervisor re-registers
             %% the name on each restart.
+            true;
+        {registered, _Name, _Node} ->
+            %% ADR 0126 §3: node-qualified proxy — same reasoning.
             true;
         Pid when is_pid(Pid) ->
             registered_name_for_pid(Pid) =/= nil
@@ -3142,90 +3352,7 @@ receiver class. Returns structured errors for the `name_not_registered`,
 named(Self, Name) when is_atom(Name) ->
     case class_self_to_name_and_module(Self) of
         {ok, ReceiverClass, _ReceiverModule} ->
-            %% Hoisted out so error cases below can reference it uniformly.
-            _ = ReceiverClass,
-            case erlang:whereis(Name) of
-                undefined ->
-                    {error,
-                        beamtalk_error:with_hint(
-                            beamtalk_error:new(
-                                name_not_registered, ReceiverClass, 'named:'
-                            ),
-                            iolist_to_binary(
-                                io_lib:format(
-                                    "No actor is registered under name '~ts'",
-                                    [Name]
-                                )
-                            )
-                        )};
-                Pid when is_pid(Pid) ->
-                    case pid_class_name(Pid) of
-                        nil ->
-                            {error,
-                                beamtalk_error:with_hint(
-                                    beamtalk_error:new(
-                                        wrong_class, ReceiverClass, 'named:'
-                                    ),
-                                    iolist_to_binary(
-                                        io_lib:format(
-                                            "Name '~ts' is registered to a non-Beamtalk "
-                                            "process",
-                                            [Name]
-                                        )
-                                    )
-                                )};
-                        ActualClass ->
-                            case class_matches(ActualClass, ReceiverClass) of
-                                true ->
-                                    case class_mod_for(ActualClass) of
-                                        {ok, ActualModule} ->
-                                            %% ADR 0079: return a
-                                            %% name-resolving proxy whose
-                                            %% identity slot is `{registered,
-                                            %% Name}`. The send-site re-
-                                            %% resolves the name on every
-                                            %% message, so the reference
-                                            %% survives restarts.
-                                            _ = Pid,
-                                            {ok, #beamtalk_object{
-                                                class = ActualClass,
-                                                class_mod = ActualModule,
-                                                pid = {registered, Name}
-                                            }};
-                                        not_found ->
-                                            {error,
-                                                beamtalk_error:with_hint(
-                                                    beamtalk_error:new(
-                                                        wrong_class,
-                                                        ReceiverClass,
-                                                        'named:'
-                                                    ),
-                                                    iolist_to_binary(
-                                                        io_lib:format(
-                                                            "Registered actor class "
-                                                            "'~ts' has no loaded module",
-                                                            [ActualClass]
-                                                        )
-                                                    )
-                                                )}
-                                    end;
-                                false ->
-                                    {error,
-                                        beamtalk_error:with_hint(
-                                            beamtalk_error:new(
-                                                wrong_class, ReceiverClass, 'named:'
-                                            ),
-                                            iolist_to_binary(
-                                                io_lib:format(
-                                                    "Name '~ts' is registered to a "
-                                                    "~ts, not a ~ts",
-                                                    [Name, ActualClass, ReceiverClass]
-                                                )
-                                            )
-                                        )}
-                            end
-                    end
-            end;
+            named_lookup(ReceiverClass, Name, 'named:');
         {error, #beamtalk_error{} = Err} ->
             {error, beamtalk_error:with_selector(Err, 'named:')}
     end;
@@ -3239,6 +3366,97 @@ named(_Self, Name) ->
                 )
             )
         )}.
+
+-doc """
+Shared implementation behind `named/2` (local `named:`) and
+`remote_named_target/2` (`named:on:`, ADR 0126 §3, BT-3599) — the actual
+by-name lookup + class check, parameterised on `ReceiverClass` (rather than
+a `#beamtalk_object{}` self to resolve it from) so the remote path can pass
+the class name shipped over `erpc` directly, and on `Selector` so error
+records name whichever public selector the caller actually used.
+""".
+-spec named_lookup(atom(), atom(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+named_lookup(ReceiverClass, Name, Selector) ->
+    case erlang:whereis(Name) of
+        undefined ->
+            {error,
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(name_not_registered, ReceiverClass, Selector),
+                    iolist_to_binary(
+                        io_lib:format(
+                            "No actor is registered under name '~ts'",
+                            [Name]
+                        )
+                    )
+                )};
+        Pid when is_pid(Pid) ->
+            case pid_class_name(Pid) of
+                nil ->
+                    {error,
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(wrong_class, ReceiverClass, Selector),
+                            iolist_to_binary(
+                                io_lib:format(
+                                    "Name '~ts' is registered to a non-Beamtalk "
+                                    "process",
+                                    [Name]
+                                )
+                            )
+                        )};
+                ActualClass ->
+                    case class_matches(ActualClass, ReceiverClass) of
+                        true ->
+                            case class_mod_for(ActualClass) of
+                                {ok, ActualModule} ->
+                                    %% ADR 0079: return a
+                                    %% name-resolving proxy whose
+                                    %% identity slot is `{registered,
+                                    %% Name}`. The send-site re-
+                                    %% resolves the name on every
+                                    %% message, so the reference
+                                    %% survives restarts. `remote_named/3`
+                                    %% (ADR 0126 §3) node-qualifies this
+                                    %% to `{registered, Name, Node}` for the
+                                    %% `named:on:` caller.
+                                    _ = Pid,
+                                    {ok, #beamtalk_object{
+                                        class = ActualClass,
+                                        class_mod = ActualModule,
+                                        pid = {registered, Name}
+                                    }};
+                                not_found ->
+                                    {error,
+                                        beamtalk_error:with_hint(
+                                            beamtalk_error:new(
+                                                wrong_class,
+                                                ReceiverClass,
+                                                Selector
+                                            ),
+                                            iolist_to_binary(
+                                                io_lib:format(
+                                                    "Registered actor class "
+                                                    "'~ts' has no loaded module",
+                                                    [ActualClass]
+                                                )
+                                            )
+                                        )}
+                            end;
+                        false ->
+                            {error,
+                                beamtalk_error:with_hint(
+                                    beamtalk_error:new(wrong_class, ReceiverClass, Selector),
+                                    iolist_to_binary(
+                                        io_lib:format(
+                                            "Name '~ts' is registered to a "
+                                            "~ts, not a ~ts",
+                                            [Name, ActualClass, ReceiverClass]
+                                        )
+                                    )
+                                )}
+                    end
+            end
+    end.
 
 -doc """
 FFI shim for `class allRegistered -> List(Actor)`.
@@ -3279,6 +3497,408 @@ allRegistered(_Self) ->
         end,
         all_registered()
     ).
+
+%%% ============================================================================
+%%% Remote spawn and lookup (ADR 0126 §3, Phase 2, BT-3599)
+%%%
+%%% Backs `stdlib/src/actor.bt`'s `spawnOn:`, `spawnAs:on:`, `named:on:`, and
+%%% `allRegisteredOn:` — the `on:` (argument-free) variant of every local
+%%% spawn/lookup selector above. `Node`'s host policy (ADR 0126 §9 item 2) is
+%%% applied via `beamtalk_node:connect_policy/2` before any `erpc` call, per
+%%% that function's own doc ("later remote spawn/lookup selectors ... apply
+%%% the same rule rather than re-deriving it").
+%%%
+%%% Every entry point below is a pair: an origin-side function (`remote_*`,
+%%% called locally by the `do*On` FFI shims) that applies the host policy,
+%%% makes the `erpc:call/5`, and maps `erpc`/connection failures to
+%%% `#beamtalk_error{}`; and, for spawn/lookup, a `*_target` function
+%%% (`-export`ed so `erpc` can reach it) that actually runs ON the target
+%%% node, in the temporary process `erpc` spawns to execute the call.
+%%% ============================================================================
+
+-doc """
+Origin-side entry point for `spawnOn:`/`spawnAs:on:` (ADR 0126 §3).
+
+`ClassName` is resolved **on the target node** by `remote_spawn_target/2` —
+the caller's own compiled module is never shipped (ADR 0126 §3
+"Implementation shape"), only the class name, so a class loaded under a
+different module name (or a different version) on the target node still
+resolves there. `NameOrUndefined` is `undefined` for an anonymous `spawnOn:`
+or the requested name (already reserved-name-checked, on the target node,
+by `'spawnAs'/3`) for `spawnAs:on:`.
+
+**Not idempotent.** A `timeout` here does not mean the spawn failed — the
+`erpc` call may have completed on the target node after the local timeout
+fired. Retrying an anonymous `spawnOn:` risks a duplicate actor; a named
+`spawnAs:on:` retried after `name_registered` can be resolved with
+`named:on:` instead of retried blindly (ADR 0126 §3).
+""".
+-spec remote_spawn(node(), atom(), atom() | undefined, atom()) ->
+    {ok, pid()} | {error, #beamtalk_error{}}.
+remote_spawn(Node, ClassName, NameOrUndefined, Selector) ->
+    case beamtalk_node:connect_policy(Node, beamtalk_node:tls_distribution()) of
+        {error, #beamtalk_error{} = Refused} ->
+            {error, Refused#beamtalk_error{class = ClassName, selector = Selector}};
+        ok ->
+            try
+                erpc:call(
+                    Node,
+                    ?MODULE,
+                    remote_spawn_target,
+                    [ClassName, NameOrUndefined],
+                    ?BT_REMOTE_CALL_TIMEOUT
+                )
+            of
+                {ok, Pid} ->
+                    {ok, Pid};
+                {error, #beamtalk_error{} = Err} ->
+                    {error, Err#beamtalk_error{class = ClassName, selector = Selector}};
+                {error, Reason} ->
+                    {error, generic_spawn_error(ClassName, Selector, Reason)}
+            catch
+                error:{erpc, noconnection} ->
+                    {error, node_down_error_record(Node, Selector)};
+                error:{erpc, timeout} ->
+                    {error, remote_timeout_error_record(ClassName, Selector, false)};
+                error:{erpc, ErpcReason} ->
+                    {error, generic_spawn_error(ClassName, Selector, {erpc, ErpcReason})};
+                error:{exception, Reason, _Stack} ->
+                    {error, generic_spawn_error(ClassName, Selector, Reason)};
+                exit:{exception, Reason} ->
+                    {error, generic_spawn_error(ClassName, Selector, Reason)}
+            end
+    end.
+
+-doc """
+Runs ON the target node, in the `erpc` worker process `remote_spawn/4`'s
+call spawns there (ADR 0126 §3).
+
+Resolves `ClassName` to its module via `class_mod_for/1` — the *target*
+node's own class metadata, matching "the class is resolved by name on the
+target node" — answering `class_not_found` (an existing kind, now reachable
+remotely) when it is not loaded there, exactly as the local instantiation
+path already does before ever reaching a spawn primitive.
+
+An anonymous spawn (`NameOrUndefined =:= undefined`) delegates to
+`safe_spawn/2`, which (outside a supervisor context, never the case for an
+`erpc` worker) uses `gen_server:start/3` — already unlinked, so no
+unlink-after-start dance is needed there. A named spawn delegates to the
+public `'spawnAs'/3` wrapper (reserved-name check + `safe_spawn_named/3`,
+BT-3579's Phase 0.5 correction to this ADR — `safe_spawn_named/3` itself is
+not `-export`ed) and **unlinks immediately** after a successful start: the
+calling `erpc` worker process exits with a non-`normal` reason once this
+function returns, and a still-linked actor would die right along with it
+(mirrors `beamtalk_class_instantiation:do_class_self_named_spawn/6`'s own
+unlink for the local class-method `self spawnAs:` path).
+""".
+-spec remote_spawn_target(atom(), atom() | undefined) ->
+    {ok, pid()} | {error, term()}.
+remote_spawn_target(ClassName, NameOrUndefined) ->
+    case class_mod_for(ClassName) of
+        not_found ->
+            {error, beamtalk_error:new(class_not_found, ClassName)};
+        {ok, Module} ->
+            case NameOrUndefined of
+                undefined ->
+                    safe_spawn(Module, #{});
+                Name when is_atom(Name) ->
+                    case 'spawnAs'(Name, Module, #{}) of
+                        {ok, Pid} ->
+                            unlink(Pid),
+                            {ok, Pid};
+                        {error, _} = Err ->
+                            Err
+                    end
+            end
+    end.
+
+-doc """
+Origin-side entry point for `named:on:` (ADR 0126 §3).
+
+Runs the actual lookup (`named_lookup/3`) on the target node via `erpc` —
+the `'$beamtalk_actor'` class-marker read it needs is local-only
+(`process_info/2`) — then node-qualifies the returned proxy's identity slot
+to `{registered, Name, Node}` (`qualify_registered_ref/2`) so it keeps
+resolving against `Node`, its origin, rather than whichever node next reads
+it (ADR 0126 §3 "Registered refs are node-qualified on the wire").
+""".
+-spec remote_named(node(), atom(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+remote_named(Node, ReceiverClass, Name) ->
+    Selector = 'named:on:',
+    case beamtalk_node:connect_policy(Node, beamtalk_node:tls_distribution()) of
+        {error, #beamtalk_error{} = Refused} ->
+            {error, Refused#beamtalk_error{class = ReceiverClass, selector = Selector}};
+        ok ->
+            try
+                erpc:call(
+                    Node,
+                    ?MODULE,
+                    remote_named_target,
+                    [ReceiverClass, Name],
+                    ?BT_REMOTE_CALL_TIMEOUT
+                )
+            of
+                {ok, Obj} ->
+                    {ok, qualify_registered_ref(Obj, Node)};
+                {error, #beamtalk_error{}} = Err ->
+                    Err
+            catch
+                error:{erpc, noconnection} ->
+                    {error, node_down_error_record(Node, Selector)};
+                error:{erpc, timeout} ->
+                    {error, remote_timeout_error_record(ReceiverClass, Selector, true)};
+                error:{erpc, ErpcReason} ->
+                    {error, generic_remote_error(ReceiverClass, Selector, {erpc, ErpcReason})};
+                error:{exception, Reason, _Stack} ->
+                    {error, generic_remote_error(ReceiverClass, Selector, Reason)};
+                exit:{exception, Reason} ->
+                    {error, generic_remote_error(ReceiverClass, Selector, Reason)}
+            end
+    end.
+
+-doc """
+Runs ON the target node via `erpc` (`named:on:`, ADR 0126 §3) — thin wrapper
+around `named_lookup/3` (shared with the local `named/2`) so the class check
+(`'$beamtalk_actor'` marker via `process_info/2`) runs where the actor
+actually lives.
+""".
+-spec remote_named_target(atom(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+remote_named_target(ReceiverClass, Name) ->
+    named_lookup(ReceiverClass, Name, 'named:on:').
+
+-doc """
+Origin-side entry point for `allRegisteredOn:` (ADR 0126 §3).
+
+Reuses the public `allRegistered/1` FFI shim as the `erpc` target directly
+(its `Self` argument is already ignored — `allRegistered(_Self) -> ...` —
+so any placeholder value works), then node-qualifies every returned proxy
+the same way `remote_named/3` does, for the same reason.
+""".
+-spec remote_all_registered(node()) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+remote_all_registered(Node) ->
+    Selector = 'allRegisteredOn:',
+    case beamtalk_node:connect_policy(Node, beamtalk_node:tls_distribution()) of
+        {error, #beamtalk_error{} = Refused} ->
+            {error, Refused#beamtalk_error{class = 'Actor', selector = Selector}};
+        ok ->
+            try erpc:call(Node, ?MODULE, allRegistered, [undefined], ?BT_REMOTE_CALL_TIMEOUT) of
+                List when is_list(List) ->
+                    {ok, [qualify_registered_ref(Obj, Node) || Obj <- List]}
+            catch
+                error:{erpc, noconnection} ->
+                    {error, node_down_error_record(Node, Selector)};
+                error:{erpc, timeout} ->
+                    {error, remote_timeout_error_record('Actor', Selector, true)};
+                error:{erpc, ErpcReason} ->
+                    {error, generic_remote_error('Actor', Selector, {erpc, ErpcReason})};
+                error:{exception, Reason, _Stack} ->
+                    {error, generic_remote_error('Actor', Selector, Reason)};
+                exit:{exception, Reason} ->
+                    {error, generic_remote_error('Actor', Selector, Reason)}
+            end
+    end.
+
+-doc """
+Node-qualify a `#beamtalk_object{}` proxy returned by a remote lookup
+(`remote_named/3`, `remote_all_registered/1`): rewrites a local
+`{registered, Name}` identity slot to `{registered, Name, Node}` so it keeps
+resolving against `Node` — its origin — wherever it is read next (ADR 0126
+§3). A pid identity (never produced by `named/2`/`allRegistered/1` today,
+but harmless if it ever were) passes through unchanged — a pid already
+carries its node.
+""".
+-spec qualify_registered_ref(#beamtalk_object{}, node()) -> #beamtalk_object{}.
+qualify_registered_ref(#beamtalk_object{pid = {registered, Name}} = Obj, Node) when is_atom(Name) ->
+    Obj#beamtalk_object{pid = {registered, Name, Node}};
+qualify_registered_ref(Obj, _Node) ->
+    Obj.
+
+-doc """
+Construct a structured `timeout` error for a remote spawn/lookup/list/
+unregister op (ADR 0126 §3). `Idempotent` picks the hint: `spawnOn:`/
+`spawnAs:on:` are genuinely non-idempotent (a timeout may mean the far side
+already spawned), while `named:on:`/`allRegisteredOn:` (read-only lookups)
+and `unregister` (already idempotent locally) are always safe to retry —
+the generic "not guaranteed to be safe" wording would be actively
+misleading for those.
+""".
+-spec remote_timeout_error_record(atom(), atom(), boolean()) -> #beamtalk_error{}.
+remote_timeout_error_record(ClassName, Selector, false) ->
+    beamtalk_error:new(
+        timeout,
+        ClassName,
+        Selector,
+        <<
+            "Remote operation did not complete within the timeout; the target node may or "
+            "may not have applied it; a retry is not guaranteed to be safe (see the ADR "
+            "0126 idempotency note)"
+        >>
+    );
+remote_timeout_error_record(ClassName, Selector, true) ->
+    beamtalk_error:new(
+        timeout,
+        ClassName,
+        Selector,
+        <<"Remote operation did not complete within the timeout; safe to retry">>
+    ).
+
+-doc "Resolve a `node :: Node` FFI argument to its underlying node atom.".
+-spec node_arg_to_atom(term()) -> {ok, node()} | {error, #beamtalk_error{}}.
+node_arg_to_atom(#{'$beamtalk_class' := 'Node', name := Name}) when is_atom(Name) ->
+    {ok, Name};
+node_arg_to_atom(Other) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor'),
+            iolist_to_binary(io_lib:format("Expected a Node value, got ~tp", [Other]))
+        )}.
+
+-doc """
+FFI shim for `class spawnOn: node :: Node -> Result(Self, Error)` (ADR 0126
+§3, Phase 2, BT-3599).
+
+Anonymous remote spawn: same contract as `spawn`, but the actor process
+starts on `node` instead of here. **Not idempotent** — see `remote_spawn/4`'s
+doc. **No links, no local tracking**: the spawned actor is never linked to
+this caller (a link across a node boundary would turn a partition into a
+crash here) and this workspace does not track it — `ActorSpawned` fires on
+`node`, not here, so the actor outlives this session unless something else
+stops it.
+
+## Examples
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+c := (Counter spawnOn: worker) unwrap
+c node        // => Node(worker@localhost)
+```
+""".
+-spec doSpawnOn(#beamtalk_object{}, term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnOn(Self, NodeArg) ->
+    do_remote_spawn(Self, undefined, NodeArg, 'spawnOn:').
+
+-doc """
+FFI shim for `class spawnAs: name :: Symbol on: node :: Node ->
+Result(Self, Error)` (ADR 0126 §3, Phase 2, BT-3599).
+
+Same contract as `spawnAs:`, plus the target `node`: the reserved-name check
+and the atomic name registration both run on `node`, through the same
+public `'spawnAs'/3` the local selector uses. **Not idempotent** — a timeout
+after the far-side spawn succeeded leaves an unowned, named actor running;
+retry with `named:on:` instead of calling `spawnAs:on:` again (see
+`remote_spawn/4`'s doc). **No links, no local tracking** — see `spawnOn:`.
+
+## Examples
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+(Counter spawnAs: #hits on: worker) unwrap
+hits := (Counter named: #hits on: worker) unwrap
+```
+""".
+-spec doSpawnAsOn(#beamtalk_object{}, term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnAsOn(Self, Name, NodeArg) when is_atom(Name) ->
+    do_remote_spawn(Self, Name, NodeArg, 'spawnAs:on:');
+doSpawnAsOn(Self, Name, _NodeArg) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ClassName, _Module} ->
+            {error,
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(type_error, ClassName, 'spawnAs:on:'),
+                    iolist_to_binary(
+                        io_lib:format("spawnAs:on: expects a Symbol name, got ~tp", [Name])
+                    )
+                )};
+        {error, #beamtalk_error{} = Err} ->
+            {error, beamtalk_error:with_selector(Err, 'spawnAs:on:')}
+    end.
+
+%% Shared implementation for doSpawnOn/2 and doSpawnAsOn/3.
+-spec do_remote_spawn(#beamtalk_object{}, atom() | undefined, term(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+do_remote_spawn(Self, NameOrUndefined, NodeArg, Selector) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ClassName, Module} ->
+            case node_arg_to_atom(NodeArg) of
+                {ok, Node} ->
+                    case remote_spawn(Node, ClassName, NameOrUndefined, Selector) of
+                        {ok, Pid} ->
+                            {ok, #beamtalk_object{class = ClassName, class_mod = Module, pid = Pid}};
+                        {error, #beamtalk_error{} = Err} ->
+                            {error, Err#beamtalk_error{class = ClassName, selector = Selector}}
+                    end;
+                {error, #beamtalk_error{} = Err} ->
+                    {error, Err#beamtalk_error{class = ClassName, selector = Selector}}
+            end;
+        {error, #beamtalk_error{} = Err} ->
+            {error, beamtalk_error:with_selector(Err, Selector)}
+    end.
+
+-doc """
+FFI shim for `class named: name :: Symbol on: node :: Node ->
+Result(Self, Error)` (ADR 0126 §3, Phase 2, BT-3599).
+
+Same contract as `named:`, run against `node`'s registry instead of this
+node's. Returns a proxy whose identity slot is node-qualified
+(`{registered, name, node}`) — see `remote_named/3`'s doc.
+
+## Examples
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+hits := (Counter named: #hits on: worker) unwrap
+hits increment   // => 1 — sent to worker, not resolved against this node
+```
+""".
+-spec doNamedOn(#beamtalk_object{}, term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doNamedOn(Self, Name, NodeArg) when is_atom(Name) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ReceiverClass, _Module} ->
+            case node_arg_to_atom(NodeArg) of
+                {ok, Node} ->
+                    remote_named(Node, ReceiverClass, Name);
+                {error, #beamtalk_error{} = Err} ->
+                    {error, Err#beamtalk_error{class = ReceiverClass, selector = 'named:on:'}}
+            end;
+        {error, #beamtalk_error{} = Err} ->
+            {error, beamtalk_error:with_selector(Err, 'named:on:')}
+    end;
+doNamedOn(_Self, Name, _NodeArg) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', 'named:on:'),
+            iolist_to_binary(
+                io_lib:format("named:on: expects a Symbol, got ~tp", [Name])
+            )
+        )}.
+
+-doc """
+FFI shim for `class allRegisteredOn: node :: Node -> Result(List(Actor),
+Error)` (ADR 0126 §3, Phase 2, BT-3599).
+
+Same contract as `allRegistered`, listing `node`'s registered actors instead
+of this node's, wrapped in a `Result` (unlike the local, network-free
+`allRegistered`, ADR 0060: reaching another node is an expected-failure
+operation). Returns node-qualified proxies — see `remote_all_registered/1`'s
+doc.
+
+## Examples
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+(Actor allRegisteredOn: worker) unwrap  // => #(an Actor(Counter), ...)
+```
+""".
+-spec doAllRegisteredOn(#beamtalk_object{}, term()) ->
+    {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+doAllRegisteredOn(_Self, NodeArg) ->
+    case node_arg_to_atom(NodeArg) of
+        {ok, Node} ->
+            remote_all_registered(Node);
+        {error, #beamtalk_error{} = Err} ->
+            {error, Err#beamtalk_error{class = 'Actor', selector = 'allRegisteredOn:'}}
+    end.
 
 %%% Internal helpers for the FFI shims above.
 
@@ -3329,6 +3949,18 @@ proxy_pid(#beamtalk_object{pid = {registered, Name}}, Selector) when is_atom(Nam
             {error, no_such_process_error_record(Name, Selector)};
         Pid when is_pid(Pid) ->
             {ok, Pid}
+    end;
+proxy_pid(#beamtalk_object{pid = {registered, Name, Node}}, Selector) when
+    is_atom(Name), is_atom(Node)
+->
+    %% ADR 0126 §3: node-qualified proxy — see resolve_remote_registered/2.
+    case resolve_remote_registered(Name, Node) of
+        Pid when is_pid(Pid) ->
+            {ok, Pid};
+        undefined ->
+            {error, no_such_process_error_record(Name, Selector)};
+        node_down ->
+            {error, node_down_error_record(Node, Selector)}
     end;
 proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
     {error,
@@ -3407,6 +4039,41 @@ generic_spawn_error(ClassName, Selector, Reason) ->
         ),
         iolist_to_binary(io_lib:format("spawn failed: ~tp", [Reason]))
     ).
+
+-doc """
+Catch-all for an unusual `erpc`/remote-side failure on a non-spawn remote op
+(`named:on:`, `allRegisteredOn:`, remote `unregister`) — `generic_spawn_error/3`'s
+`kind = instantiation_error`/"spawn failed" wording is specific to spawn and
+would misdescribe a failed lookup or unregister, so those get this neutral
+`runtime_error` instead (ADR 0126 §3).
+""".
+-spec generic_remote_error(atom(), atom(), term()) -> #beamtalk_error{}.
+generic_remote_error(ClassName, Selector, Reason) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:with_selector(
+            beamtalk_error:new(runtime_error, ClassName),
+            Selector
+        ),
+        iolist_to_binary(io_lib:format("remote operation failed: ~tp", [Reason]))
+    ).
+
+-doc """
+`erpc:call/5` re-surfaces a remote `beamtalk_error:raise/1` as
+`error:{exception, Reason, Stacktrace}` at the origin, where `Reason` is
+`raise/1`'s own wrap: `#{'$beamtalk_class' => _, error := #beamtalk_error{}}`
+(`beamtalk_exception_handler:wrap/1`). When the remote `unregister/1` call
+(via `unregister_resolved/2`) raised a genuine structured error this way —
+`name_registered` on a lost TOCTOU race, a reserved-name/type error, etc. —
+unwrap and re-raise *that* error, with this node's own view of the class
+and `unregister` selector, so the caller sees the real `kind`/`hint` instead
+of a generic wrapper. Any other exception shape falls back to
+`generic_remote_error/3`.
+""".
+-spec remote_unregister_error(atom(), term()) -> #beamtalk_error{}.
+remote_unregister_error(ClassName, #{error := #beamtalk_error{} = Err}) ->
+    Err#beamtalk_error{class = ClassName, selector = unregister};
+remote_unregister_error(ClassName, Reason) ->
+    generic_remote_error(ClassName, unregister, Reason).
 
 -spec name_registered_error(atom()) -> {error, #beamtalk_error{}}.
 name_registered_error(Name) ->
