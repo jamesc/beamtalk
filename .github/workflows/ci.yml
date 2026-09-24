@@ -535,14 +535,6 @@ jobs:
       - name: Test Erlang runtime (unit tests)
         run: just test-runtime
 
-      # Optional: beamtalk_node_tests' two-node suite consistently times out
-      # booting its peer on CI runners, so it's skipped by test-runtime and
-      # run here without blocking the job.
-      - name: Test two-node suite (optional)
-        continue-on-error: true
-        timeout-minutes: 5
-        run: just test-two-node
-
   test-dialyzer:
     needs: otp-matrix
     strategy:
@@ -684,11 +676,11 @@ jobs:
 
       # Optional: e2e_distribution_tests boots a second, independently-spawned
       # distributed-Erlang node and consistently fails to connect back to the
-      # first on this runner (the identical constraint beamtalk_node_tests.erl's
-      # own two-node EUnit suite already documents and works around below in
-      # `otp-matrix`) — gated behind the same BEAMTALK_TWO_NODE_TESTS=1 opt-in
-      # and run here, non-blocking, rather than left in the required
-      # `just test-repl-protocol` run above.
+      # first on this runner (`Node connect` answers false) — gated behind the
+      # BEAMTALK_TWO_NODE_TESTS=1 opt-in and run here, non-blocking, rather than
+      # left in the required `just test-repl-protocol` run above. (Not the same
+      # failure as beamtalk_node_tests.erl's EUnit suite once was: that one was
+      # an EUnit 5s per-test timeout, fixed and back in `test-runtime`, BT-3609.)
       - name: Test two-node distribution e2e (optional)
         continue-on-error: true
         timeout-minutes: 5

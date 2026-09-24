@@ -32,6 +32,19 @@ cookie, then starts the `beamtalk_runtime` application there via
 `rpc:call/4` over ordinary Erlang distribution — not `peer:call/4,5`'s own
 control channel, which this module deliberately avoids driving application
 code through (see start_peer/1's doc).
+
+## EUnit timeouts
+
+Booting a peer and starting `beamtalk_runtime` on it routinely takes more
+than EUnit's 5-second *per-test* default on a shared CI runner (it is well
+under that locally, which is what makes the failure CI-only). Call
+`start_peer/0,1,2` from an untimed `setup` (as above), or — if a test body
+boots its own peer — wrap that test in its own `{timeout, Seconds, Fun}`.
+An outer `{timeout, N, {setup, ...}}` does **not** help there: it bounds
+the group, and each test inside still gets the 5-second default (BT-3609;
+see `beamtalk_node_tests:two_node_test_/0`). A test killed that way is
+reported as *cancelled* with `{timeout, #{stacktrace => ...}}` pointing
+into `peer:start_it/2` — the stacktrace only says where it was parked.
 """.
 
 -export([
@@ -41,6 +54,9 @@ code through (see start_peer/1's doc).
     start_peer/2,
     stop_peer/1
 ]).
+
+%% `peer:start/1`'s boot budget — see start_peer/2's doc.
+-define(PEER_WAIT_BOOT_MS, 60000).
 
 -doc """
 Make this (test) node distributed if it isn't already. Starts epmd first
@@ -105,13 +121,20 @@ start_peer/1 with options:
   the peer to survive (e.g. to reconnect) passes `standard_io`.
 
 `peer:start/1`'s own `wait_boot` defaults to 15 seconds
-(`peer:?WAIT_BOOT_TIMEOUT`) and raises a hard `exit(timeout)` — not a
-return value this module can turn into `{error, _}` — if the peer's `erl`
-process doesn't finish booting in time. A large `-pa` list (every path in
-this node's own `code:get_path/0`, forwarded below) makes that boot slower,
-and a shared CI runner under load can exceed 15 seconds even though it
-completes in a few seconds locally, so `wait_boot` is raised well past the
-default here rather than left to it.
+(`peer:?WAIT_BOOT_TIMEOUT`) and raises a hard `exit(timeout)` if the peer's
+`erl` process doesn't finish booting in time. A large `-pa` list (every path
+in this node's own `code:get_path/0`, forwarded below) makes that boot
+slower, and a shared CI runner under load can be much slower than a local
+machine, so `wait_boot` is raised well past the default here rather than
+left to it. Note the caller's own EUnit per-test timeout (5 seconds by
+default) is usually the tighter bound — see the moduledoc.
+
+Any boot failure — `wait_boot` expiring, the peer's `erl` exiting during
+boot, or the control process dying — is caught and returned as
+`{error, {peer_boot_failed, Details}}` rather than escaping as a bare
+`exit(timeout)`, with `Details` carrying the node name, the elapsed time
+and the boot-time budget, so a CI log shows *how long* the boot ran and
+against what limit.
 """.
 -spec start_peer(string(), #{extra_args => [string()], connection => standard_io}) ->
     {ok, peer:server_ref(), node()} | {error, term()}.
@@ -126,14 +149,14 @@ start_peer(NamePrefix, Opts) ->
         name => PeerName,
         host => Host,
         args => CookieArgs ++ ExtraArgs ++ CodePathArgs,
-        wait_boot => 60000
+        wait_boot => ?PEER_WAIT_BOOT_MS
     },
     PeerOpts =
         case Opts of
             #{connection := Connection} -> PeerOpts0#{connection => Connection};
             #{} -> PeerOpts0
         end,
-    case peer:start(PeerOpts) of
+    case boot_peer(PeerOpts) of
         {ok, Peer, PeerNode} ->
             case net_adm:ping(PeerNode) of
                 pong ->
@@ -182,6 +205,35 @@ stop_peer(Peer) ->
     ok.
 
 %%% Internal
+
+-doc """
+`peer:start/1`, with a boot failure turned into a descriptive `{error, _}`
+(see start_peer/2's doc). `peer:start/1` signals a failed boot by raising
+`exit(timeout)` (`wait_boot` expired), `exit({boot_failed, _})` (the peer
+reported a failed boot) or the control process's own exit reason (it died
+while the peer was booting) — all caught here. Only the `exit` class is
+caught: `peer:start/1` never raises `error`/`throw` for a boot problem, and
+an EUnit test-timeout kill is an exit *signal* to the test process, not an
+exception, so it is not swallowed by this `try`.
+""".
+-spec boot_peer(peer:start_options()) ->
+    {ok, peer:server_ref(), node()} | {error, term()}.
+boot_peer(#{name := Name, host := Host, wait_boot := WaitBoot} = PeerOpts) ->
+    Started = erlang:monotonic_time(millisecond),
+    try peer:start(PeerOpts) of
+        {ok, Peer, PeerNode} -> {ok, Peer, PeerNode};
+        {error, Reason} -> {error, Reason}
+    catch
+        exit:Reason ->
+            {error,
+                {peer_boot_failed, #{
+                    reason => Reason,
+                    node => list_to_atom(atom_to_list(Name) ++ "@" ++ Host),
+                    elapsed_ms => erlang:monotonic_time(millisecond) - Started,
+                    wait_boot_ms => WaitBoot,
+                    connection => maps:get(connection, PeerOpts, distribution)
+                }}}
+    end.
 
 -doc """
 Idempotent epmd start — see ensure_distribution/0's doc.

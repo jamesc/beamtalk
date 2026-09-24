@@ -161,60 +161,63 @@ normalize_reason_test_() ->
 %% Two-node: Node connected, NodeUp / NodeDown, remote actors
 %%====================================================================
 
+%% The full `beamtalk_runtime` application, not just the announcements bus
+%% and node monitor: `remote_actor_node_and_is_remote/0` gets a `Node` value
+%% back from the peer, and decoding that wire reply needs the `Node` class
+%% registered on *this* node too (`beamtalk_shape_migration:unpack_strict/1`
+%% otherwise refuses it with `class_not_found ... (while resolving
+%% 'migrate')`, `direction => reply`). With only the two bare gen_servers
+%% that passed only when an earlier suite in the same `rebar3 eunit` run
+%% happened to have started the app. Same idempotent, never-stopped start as
+%% `beamtalk_dist_shape_skew_tests:setup/0` (see its doc).
 setup() ->
     beamtalk_dist_test_helper:ensure_distribution(),
-    %% Stand up the announcements bus and the node monitor only if the
-    %% runtime supervisor isn't already running them, and stop exactly what
-    %% this suite started in cleanup — so a later
-    %% `beamtalk_runtime_sup_tests:all_children_alive_test/0` never finds a
-    %% stray registered name.
-    Bus =
-        case whereis(beamtalk_announcements) of
-            undefined ->
-                {ok, BusPid} = beamtalk_announcements:start_link(),
-                unlink(BusPid),
-                [BusPid];
-            _ ->
-                []
-        end,
-    Monitor =
-        case whereis(beamtalk_node_monitor) of
-            undefined ->
-                {ok, MonitorPid} = gen_server:start(
-                    {local, beamtalk_node_monitor}, beamtalk_node_monitor, [], []
-                ),
-                [MonitorPid];
-            _ ->
-                []
-        end,
-    Monitor ++ Bus.
+    {ok, _Started} = application:ensure_all_started(beamtalk_runtime),
+    ok.
 
-cleanup(Started) ->
-    lists:foreach(fun(Pid) -> gen_server:stop(Pid) end, Started).
+cleanup(ok) ->
+    ok.
 
-%% Opt-in: the peer this suite boots consistently times out in
-%% `peer:start/1` on CI runners, so it only runs when
-%% BEAMTALK_TWO_NODE_TESTS=1 (`just test-two-node`; a non-blocking CI step).
+%% Every two-node case boots its own peer *inside the test body* (unlike the
+%% `beamtalk_dist_*_tests` suites, which boot theirs in an untimed `setup`),
+%% so each one carries its own per-test `{timeout, ...}` (two_node_case/2).
+%% An outer `{timeout, N, {setup, ...}}` only bounds the *group*: the tests
+%% inside it still get EUnit's 5-second per-test default. That default was
+%% the whole of BT-3609 — booting a peer plus `beamtalk_runtime` on it takes
+%% well under 5s locally but longer on a shared CI runner, so EUnit killed
+%% `node_up_and_connected/0` at exactly 5s while it was still waiting in
+%% `peer:start_it/2` (reported as a *cancelled* test,
+%% `{timeout, #{stacktrace => [{peer, start_it, 2, _} | _]}}`, whose
+%% stacktrace is merely where the test process was parked when killed; the
+%% helper's own `wait_boot` never got the chance to expire).
+-define(TWO_NODE_TEST_TIMEOUT, 90).
+
 two_node_test_() ->
-    case os:getenv("BEAMTALK_TWO_NODE_TESTS") of
-        "1" -> two_node_tests();
-        _ -> []
-    end.
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            two_node_case(
+                "NodeUp fires and Node connected lists the peer once it connects",
+                fun node_up_and_connected/0
+            ),
+            two_node_case(
+                "NodeDown fires on disconnect; connect re-establishes (NodeUp again)",
+                fun node_down_then_reconnect/0
+            ),
+            two_node_case(
+                "a hidden peer never announces and is not in Node connected",
+                fun hidden_peer_is_silent/0
+            ),
+            two_node_case(
+                "isRemote/node on an actor spawned on the peer",
+                fun remote_actor_node_and_is_remote/0
+            )
+        ]
+    end}.
 
-two_node_tests() ->
-    {timeout, 120,
-        {setup, fun setup/0, fun cleanup/1, fun(_) ->
-            [
-                {"NodeUp fires and Node connected lists the peer once it connects",
-                    fun node_up_and_connected/0},
-                {"NodeDown fires on disconnect; connect re-establishes (NodeUp again)",
-                    fun node_down_then_reconnect/0},
-                {"a hidden peer never announces and is not in Node connected",
-                    fun hidden_peer_is_silent/0},
-                {"isRemote/node on an actor spawned on the peer",
-                    fun remote_actor_node_and_is_remote/0}
-            ]
-        end}}.
+%% `{timeout, T, Fun}` wrapping a single test fun sets *that test's* timeout
+%% (the form beamtalk_dist_actor_tests:node_down_on_killed_peer_test_/0 uses).
+two_node_case(Desc, Fun) ->
+    {Desc, {timeout, ?TWO_NODE_TEST_TIMEOUT, Fun}}.
 
 node_up_and_connected() ->
     Up = subscribe_self('NodeUp'),
@@ -280,8 +283,13 @@ remote_actor_node_and_is_remote() ->
     {ok, LocalPid} = test_counter:start(0),
     try
         {ok, RemotePid} = rpc:call(PeerNode, test_counter, start, [0]),
-        ?assertEqual(
-            beamtalk_node:from_atom(PeerNode), beamtalk_actor:sync_send(RemotePid, node, [])
+        %% A `Node` Value crossing the wire comes back decoded with the
+        %% codec's `'__shape_version__'` stamp (as every `Value` does — see
+        %% beamtalk_dist_wire_tests), so match the class and name rather
+        %% than exact-compare against a freshly built, unstamped one.
+        ?assertMatch(
+            #{'$beamtalk_class' := 'Node', name := PeerNode},
+            beamtalk_actor:sync_send(RemotePid, node, [])
         ),
         %% isRemote is answered in the caller's process, not the actor's —
         %% the actor itself would always see its own node.
