@@ -191,9 +191,11 @@ Object subclass: Actor
   // not track it (`ActorSpawned` fires on the target node, not here), so it
   // outlives this session until something else stops it.
   //
-  // Sends to a remotely-spawned actor still carry only argument-free
-  // selectors for now — `spawnWith:on:`/`spawnWith:as:on:` (Value
-  // arguments) need the wire encoder and ship in a later phase.
+  // Every send to a remotely-spawned actor (this section's spawns
+  // included) now goes through the wire encoder (ADR 0126 §5.1, Phase 3b,
+  // BT-3601): `spawnWith:on:`/`spawnWith:as:on:` below wire-encode
+  // `initArgs` before the `erpc` call, exactly like an ordinary
+  // Value-carrying argument on any other cross-node send.
 
   /// Spawn a new actor process on `node`, with default state.
   ///
@@ -233,6 +235,49 @@ Object subclass: Actor
   class sealed spawnAs: name :: Symbol on: node :: Node -> Result(Self, Error) =>
     (Erlang beamtalk_actor)
       doSpawnAsOn: self
+      withName: name
+      on: node
+
+  /// Spawn a new actor process on `node`, with initialization arguments.
+  ///
+  /// Same contract as `spawnWith:`, except the actor process starts on
+  /// `node` instead of here. `initArgs` is wire-encoded (ADR 0126 §5.1)
+  /// before crossing the node boundary — a `Value` nested inside it is
+  /// enveloped and version-checked like any other cross-node argument; a
+  /// `HandleScoped` value (e.g. `Ets`) is rejected here, in the sender,
+  /// before the `erpc` call. See "Remote spawn and lookup" above for the
+  /// idempotency and linking caveats.
+  ///
+  /// Error cases: as `spawnOn:`, plus `not_serialisable` (`initArgs`
+  /// contains a node-scoped handle).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker := (Node named: #'worker@localhost') unwrap
+  /// c := (Counter spawnWith: #{#count => 10} on: worker) unwrap
+  /// ```
+  class sealed spawnWith: initArgs :: Object on: node :: Node -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doSpawnWithOn: self
+      args: initArgs
+      on: node
+
+  /// Atomically spawn a new actor with init args on `node` and register it
+  /// under `name` there.
+  ///
+  /// Same contract as `spawnAs:on:` plus the initialisation arguments
+  /// passed to the actor's `init/1` callback — see `spawnWith:on:` for the
+  /// wire-encoding note.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// worker := (Node named: #'worker@localhost') unwrap
+  /// (Counter spawnWith: #{#count => 10} as: #hits on: worker) unwrap
+  /// ```
+  class sealed spawnWith: initArgs :: Object as: name :: Symbol on: node :: Node -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doSpawnWithAsOn: self
+      args: initArgs
       withName: name
       on: node
 

@@ -252,13 +252,31 @@ await_pid(Pid, Timeout) ->
 pending(Waiters) ->
     receive
         {resolve, Value} ->
-            %% Notify all waiters and execute resolved callbacks
-            notify_waiters(Waiters, resolved, Value),
-            resolved(Value);
+            %% ADR 0126 §5.1: a cross-node resolve arrives wire-encoded and
+            %% tagged (`beamtalk_actor:maybe_resolve_future/2`) — decode it
+            %% here, on the future's own (the original caller's) node, before
+            %% any waiter sees it. A reply-direction decode failure (§5.2)
+            %% surfaces as a rejection instead, with `direction => reply` —
+            %% the method already ran on the callee. A plain, never-tagged
+            %% local resolve costs one tuple-tag pattern match.
+            case decode_wire_reply(Value) of
+                {ok, Decoded} ->
+                    notify_waiters(Waiters, resolved, Decoded),
+                    resolved(Decoded);
+                {error, Err} ->
+                    notify_waiters(Waiters, rejected, Err),
+                    rejected(Err)
+            end;
         {reject, Reason} ->
-            %% Notify all waiters and execute rejected callbacks
-            notify_waiters(Waiters, rejected, Reason),
-            rejected(Reason);
+            %% See the {resolve, Value} clause above for the decode note.
+            case decode_wire_reply(Reason) of
+                {ok, Decoded} ->
+                    notify_waiters(Waiters, rejected, Decoded),
+                    rejected(Decoded);
+                {error, Err} ->
+                    notify_waiters(Waiters, rejected, Err),
+                    rejected(Err)
+            end;
         {await, Pid} ->
             %% Add to waiters list (no timeout)
             pending([{await, Pid, infinity} | Waiters]);
@@ -408,3 +426,49 @@ make_timeout_error() ->
         hint = <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>,
         details = #{}
     }.
+
+-doc """
+Decode a resolve/reject value that may have crossed a node boundary (ADR
+0126 §5.1) — `beamtalk_actor:maybe_resolve_future/2` and
+`maybe_reject_future/2` tag an encoded cross-node value as
+`{'\$beamtalk_wire_reply', Version, Encoded}` before sending it here; any
+other value (the common, local-resolve case) passes through untouched, at
+the cost of one tuple-tag pattern match. An unrecognised wire version, or a
+decode failure on a recognised one, becomes a `{error, #beamtalk_error{}}`
+so the caller rejects the future instead of resolving it with an
+undecodable value — the reply-direction skew case (§5.2), `direction =>
+reply` merged into the error's `details`.
+""".
+-spec decode_wire_reply(term()) -> {ok, term()} | {error, #beamtalk_error{}}.
+decode_wire_reply({'$beamtalk_wire_reply', Version, Encoded}) when is_integer(Version) ->
+    case Version of
+        ?BT_WIRE_VERSION ->
+            case beamtalk_wire:decode(Encoded) of
+                {ok, Decoded} ->
+                    {ok, Decoded};
+                {error, #beamtalk_error{details = Details} = Err} ->
+                    {error, Err#beamtalk_error{details = Details#{direction => reply}}}
+            end;
+        _Other ->
+            {error,
+                beamtalk_error:with_details(
+                    beamtalk_error:with_hint(
+                        beamtalk_error:new(wire_version_unsupported, 'Future'),
+                        iolist_to_binary(
+                            io_lib:format(
+                                "wire envelope version ~p is not supported by this node "
+                                "(known version ~p)",
+                                [Version, ?BT_WIRE_VERSION]
+                            )
+                        )
+                    ),
+                    #{
+                        sent => Version,
+                        known => ?BT_WIRE_VERSION,
+                        node => node(),
+                        direction => reply
+                    }
+                )}
+    end;
+decode_wire_reply(Value) ->
+    {ok, Value}.
