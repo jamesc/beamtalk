@@ -1095,11 +1095,21 @@ fn compute_native_type_registry(
     let mut merged_any = false;
     for (pkg_root, _pkg) in discovered_packages {
         let layout = BuildLayout::new(pkg_root.clone());
-        let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
+        // Resolve (fetch/compile) dependencies *before* auto-extracting FFI
+        // specs — `extract_type_specs` scans dependency `.beam` files on
+        // disk, which don't exist yet on a cold `_build/deps/` until
+        // `ensure_deps_resolved` compiles them. `beamtalk build`
+        // (`execute_build_passes`, `build/mod.rs`) resolves dependencies
+        // before its own `extract_type_specs` call for the same reason;
+        // getting this backwards would silently fall back to `Dynamic` for
+        // a dependency's native FFI calls on a fresh checkout/CI runner —
+        // exactly the `build`/`test` drift this function exists to close.
         let dep_options = beamtalk_core::CompilerOptions::default();
         let resolved_deps =
             super::deps::ensure_deps_resolved(pkg_root, &dep_options).unwrap_or_default();
+        let auto_extract = super::build::extract_type_specs(&layout, true, false);
+
         let dependency_stubs = super::build::load_dependency_stub_registries(
             &resolved_deps,
             super::build::distribution_stubs_dir().as_deref(),
