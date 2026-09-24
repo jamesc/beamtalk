@@ -404,7 +404,8 @@ process_label({beamtalk_supervisor, ClassName, _Module, Pid}) ->
 -doc """
 Format a process identity slot as the inner `X.Y.Z` form (no `#Pid<...>`).
 
-Handles raw pids and ADR 0079 name-resolving proxies (`{registered, Name}`),
+Handles raw pids, ADR 0079 name-resolving proxies (`{registered, Name}`),
+and ADR 0126 §3 node-qualified proxies (`{registered, Name, Node}`),
 falling back defensively so the formatter never crashes on a malformed slot.
 """.
 -spec identity_inner(term()) -> binary().
@@ -414,6 +415,10 @@ identity_inner(Pid) when is_pid(Pid) ->
     list_to_binary(lists:sublist(List, 2, length(List) - 2));
 identity_inner({registered, Name}) when is_atom(Name) ->
     iolist_to_binary([<<"registered, ">>, atom_to_binary(Name, utf8)]);
+identity_inner({registered, Name, Node}) when is_atom(Name), is_atom(Node) ->
+    iolist_to_binary([
+        <<"registered, ">>, atom_to_binary(Name, utf8), <<"@">>, atom_to_binary(Node, utf8)
+    ]);
 identity_inner(Other) ->
     iolist_to_binary(io_lib:format("~tp", [Other])).
 

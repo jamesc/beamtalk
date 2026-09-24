@@ -1,0 +1,126 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Node value class, Pid/Actor node accessors, and the
+// NodeUp/NodeDown announcement classes (ADR 0126 Phase 1, BT-3598).
+//
+// These run on a single node; the two-node behaviour (Node connected after a
+// peer connects, NodeUp/NodeDown firing, the insecure_distribution policy) is
+// covered by the runtime EUnit suite beamtalk_node_tests.
+
+TestCase subclass: NodeTest
+
+  // ===== Node current =====
+  testCurrentIsNode => self assert: Node current class equals: Node
+
+  testCurrentNameIsThisVmNode =>
+    self assert: Node current name equals: (Erlang erlang) node
+
+  testCurrentIsCurrent => self assert: Node current isCurrent
+
+  testCurrentIsConnected => self assert: Node current isConnected
+
+  // ===== Node named: =====
+  testNamedValid =>
+    result := Node named: #'worker@localhost'
+    self assert: result isOk
+    self assert: result unwrap class equals: Node
+    self assert: result unwrap name equals: #'worker@localhost'
+
+  testNamedAcceptsDottedHost =>
+    self assert: (Node named: #'app_1-a@host.example.com') isOk
+
+  testNamedWithoutHostIsError =>
+    result := Node named: #nohost
+    self assert: result isError
+    self assert: result error kind equals: #invalid_node_name
+
+  testNamedEmptyPartsAreErrors =>
+    self assert: (Node named: #'@host') error kind equals: #invalid_node_name
+    self assert: (Node named: #'name@') error kind equals: #invalid_node_name
+
+  testNamedTwoAtSignsIsError =>
+    self assert: (Node named: #'a@b@c') error kind equals: #invalid_node_name
+
+  testNamedBadNameCharIsError =>
+    self assert: (Node named: #'we ird@host') error kind equals: #invalid_node_name
+
+  testNamedOtherNodeIsNotCurrent =>
+    self deny: (Node named: #'somewhere_else@localhost') unwrap isCurrent
+
+  // ===== Equality (value equality on name) =====
+  testEqualNamesAreEqual =>
+    a := (Node named: #'worker@localhost') unwrap
+    b := (Node named: #'worker@localhost') unwrap
+    self assert: a =:= b
+    self assert: a hash equals: b hash
+
+  testDifferentNamesAreNotEqual =>
+    a := (Node named: #'worker@localhost') unwrap
+    b := (Node named: #'other@localhost') unwrap
+    self deny: a =:= b
+
+  testCurrentEqualsNamedCurrent =>
+    self assert: (Node named: Node current name) unwrap =:= Node current
+
+  // ===== ping / disconnect =====
+  testPingSelf => self assert: Node current ping
+
+  testDisconnectSelfIsFalse => self deny: Node current disconnect
+
+  testConnectSelfIsOk =>
+    result := Node current connect
+    self assert: result isOk
+    self assert: result unwrap =:= Node current
+
+  // ===== Node connected =====
+  testConnectedExcludesCurrent =>
+    self deny: (Node connected includes: Node current)
+
+  // ===== printString =====
+  testPrintString =>
+    n := (Node named: #'worker@localhost') unwrap
+    self assert: n printString equals: "Node(worker@localhost)"
+
+  // ===== Pid>>node =====
+  testPidNodeIsCurrent =>
+    // A short-lived raw process: erlang:node/1 works on a dead pid too.
+    pid := Erlang erlang
+      spawn: #timer
+      module: #sleep
+      args: #(0)
+    self assert: pid node =:= Node current
+
+  // ===== Actor>>node / isRemote =====
+  testActorNodeIsCurrent =>
+    c := Counter spawn
+    self assert: c node =:= Node current
+    self deny: c isRemote
+    c stop
+
+  testActorPidNodeMatchesActorNode =>
+    c := Counter spawn
+    self assert: c pid node =:= c node
+    c stop
+
+  testTimeoutProxyForwardsNode =>
+    c := Counter spawn
+    proxy := c withTimeout: 1000
+    self assert: proxy node =:= c node
+    self deny: proxy isRemote
+    proxy stop
+    c stop
+
+  // ===== NodeUp / NodeDown =====
+  testNodeEventsAreAnnouncements =>
+    self assert: ((NodeUp node: Node current) isKindOf: Announcement)
+    self assert: ((NodeDown node: Node current reason: #disconnect) isKindOf: Announcement)
+
+  testNodeUpCarriesNode =>
+    e := NodeUp node: Node current
+    self assert: e node =:= Node current
+
+  testNodeDownCarriesNodeAndReason =>
+    e := NodeDown node: Node current reason: #disconnect
+    self assert: e node =:= Node current
+    self assert: e reason equals: #disconnect

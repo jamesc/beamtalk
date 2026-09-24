@@ -26,7 +26,8 @@
     handle_getValue/2,
     'handle_setValue:'/2,
     handle_test_make_self/2,
-    'handle_slowGet:'/2
+    'handle_slowGet:'/2,
+    handle_node/2
 ]).
 
 start_link(InitialValue) ->
@@ -48,7 +49,8 @@ init(InitialValue) ->
             getValue => fun ?MODULE:handle_getValue/2,
             'setValue:' => fun ?MODULE:'handle_setValue:'/2,
             test_make_self => fun ?MODULE:handle_test_make_self/2,
-            'slowGet:' => fun ?MODULE:'handle_slowGet:'/2
+            'slowGet:' => fun ?MODULE:'handle_slowGet:'/2,
+            node => fun ?MODULE:handle_node/2
         },
         value => InitialValue
     }).
@@ -77,6 +79,13 @@ handle_decrement([], State) ->
 handle_getValue([], State) ->
     Value = maps:get(value, State),
     {reply, Value, State}.
+
+%% Mirrors the compiled `Actor>>node` (`Node current`, answered in the actor's
+%% own process) so `isRemote` — intercepted caller-side in
+%% `beamtalk_actor:sync_send/3` and answered from a `node` send — works
+%% against this raw fixture too (ADR 0126 §2, BT-3598).
+handle_node([], State) ->
+    {reply, beamtalk_node:current(), State}.
 
 'handle_setValue:'([NewValue], State) ->
     NewState = maps:put(value, NewValue, State),

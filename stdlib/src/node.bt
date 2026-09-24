@@ -1,0 +1,127 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Node — a BEAM node identity (ADR 0126 §2).
+///
+/// A Node is a **value, not a proxy**: it wraps the node's name, two Nodes
+/// are equal iff their names are equal, and a Node is `Sendable`. Creating
+/// one never touches the network — `Node named:` only checks the
+/// `name@host` shape. Effectful operations (`connect`, `disconnect`, `ping`)
+/// run from the calling process; there is no per-node process to crash or
+/// leak.
+///
+/// Node membership is observed through `SystemAnnouncer current`, not a
+/// method: subscribe to `NodeUp` / `NodeDown` (ADR 0126 §8).
+///
+/// ## Security (ADR 0126 §9)
+///
+/// `connect` (and `ping`, which connects as a side effect) to a node on
+/// another host succeeds only when this node runs TLS distribution
+/// (`-proto_dist inet_tls`); otherwise `connect` answers an
+/// `insecure_distribution` error and `ping` answers `false`. Same-host nodes
+/// (`localhost`, this machine's hostname, or a loopback / local-interface
+/// address) are always allowed. The check guards the Beamtalk API only —
+/// raw `net_kernel` calls through `Erlang` bypass it. There is no cookie API.
+///
+/// ## Examples
+/// ```beamtalk
+/// Node current                                    // => Node(nonode@nohost)
+/// worker := (Node named: #'worker@localhost') unwrap
+/// worker name                                     // => #'worker@localhost'
+/// (Node named: #nohost) isError                   // => true
+/// Node connected                                  // => #()
+/// ```
+sealed typed Value subclass: Node native: beamtalk_node
+  /// The node's full `name@host` atom.
+  field: name :: Symbol
+
+  // === Construction ===
+
+  /// The node this code is running on (`nonode@nohost` when this VM is not
+  /// distributed).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current isCurrent                        // => true
+  /// ```
+  class sealed current -> Node => self delegate
+
+  /// A Node value for `aName`. Pure: validates the `name@host` shape only and
+  /// never touches the network. A malformed name answers an error Result with
+  /// `kind = invalid_node_name`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Node named: #'worker@localhost') unwrap name  // => #'worker@localhost'
+  /// (Node named: #nohost) error kind              // => #invalid_node_name
+  /// ```
+  class sealed named: aName :: Symbol -> Result(Node, Error) => self delegate
+
+  /// Visible nodes this node is connected to. Hidden (tooling) nodes are
+  /// excluded.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node connected                                // => #()
+  /// ```
+  class sealed connected -> List(Node) => self delegate
+
+  // === Connection ===
+
+  /// Establish a connection to this node, applying the ADR 0126 §9 host
+  /// policy first. Answers `Result ok: self` on success; an error Result with
+  /// `kind = insecure_distribution` when an off-host connection is refused,
+  /// or `kind = node_down` when the node cannot be reached (or this VM is
+  /// not distributed).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Node named: #'worker@localhost') unwrap connect   // => Result ok: Node(worker@localhost)
+  /// ```
+  connect -> Result(Node, Error) => self delegate
+
+  /// Close the connection to this node. Answers `true` if a connection was
+  /// closed, `false` otherwise (including for the current node).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current disconnect                       // => false
+  /// ```
+  disconnect -> Boolean => self delegate
+
+  /// Whether this node currently has a connection to `self`. The current
+  /// node is trivially connected to itself.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current isConnected                      // => true
+  /// ```
+  isConnected -> Boolean => self delegate
+
+  /// Whether `self` is the node this code is running on.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current isCurrent                        // => true
+  /// ```
+  isCurrent -> Boolean => self delegate
+
+  /// `net_adm:ping/1` — `true` iff the node answered (and is now connected).
+  /// The current node always answers. Applies the same host policy as
+  /// `connect`: an off-host node without TLS distribution answers `false`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current ping                             // => true
+  /// ```
+  ping -> Boolean => self delegate
+
+  // === Printing ===
+
+  /// Human-readable representation: `Node(name@host)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Node named: #'worker@localhost') unwrap printString  // => "Node(worker@localhost)"
+  /// ```
+  printString -> String => self delegate

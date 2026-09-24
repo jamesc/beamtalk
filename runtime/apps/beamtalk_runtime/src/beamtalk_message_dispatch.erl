@@ -347,10 +347,12 @@ is_actor(_) ->
     false.
 
 -doc """
-Check whether a value is a valid actor identity slot — either a raw `pid()`
-or a `{registered, Name}` proxy reference (ADR 0079).
+Check whether a value is a valid actor identity slot — a raw `pid()`, a
+`{registered, Name}` proxy reference (ADR 0079), or a node-qualified
+`{registered, Name, Node}` reference (ADR 0126 §3).
 """.
 -spec is_actor_ref(term()) -> boolean().
 is_actor_ref(Ref) when is_pid(Ref) -> true;
 is_actor_ref({registered, Name}) when is_atom(Name) -> true;
+is_actor_ref({registered, Name, Node}) when is_atom(Name), is_atom(Node) -> true;
 is_actor_ref(_) -> false.

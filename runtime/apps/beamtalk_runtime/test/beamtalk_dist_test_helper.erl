@@ -38,6 +38,7 @@ code through (see start_peer/1's doc).
     ensure_distribution/0,
     start_peer/0,
     start_peer/1,
+    start_peer/2,
     stop_peer/1
 ]).
 
@@ -92,18 +93,47 @@ last case the peer is stopped before returning so no orphaned node leaks.
 """.
 -spec start_peer(string()) -> {ok, peer:server_ref(), node()} | {error, term()}.
 start_peer(NamePrefix) ->
+    start_peer(NamePrefix, #{}).
+
+-doc """
+start_peer/1 with options:
+
+- `extra_args` — extra `erl` arguments for the peer (e.g. `["-hidden"]`).
+- `connection` — `peer`'s control-channel option. The default (a
+  distribution-based channel) halts the peer as soon as this node
+  disconnects from it, so a test that disconnects on purpose and expects
+  the peer to survive (e.g. to reconnect) passes `standard_io`.
+
+`peer:start/1`'s own `wait_boot` defaults to 15 seconds
+(`peer:?WAIT_BOOT_TIMEOUT`) and raises a hard `exit(timeout)` — not a
+return value this module can turn into `{error, _}` — if the peer's `erl`
+process doesn't finish booting in time. A large `-pa` list (every path in
+this node's own `code:get_path/0`, forwarded below) makes that boot slower,
+and a shared CI runner under load can exceed 15 seconds even though it
+completes in a few seconds locally, so `wait_boot` is raised well past the
+default here rather than left to it.
+""".
+-spec start_peer(string(), #{extra_args => [string()], connection => standard_io}) ->
+    {ok, peer:server_ref(), node()} | {error, term()}.
+start_peer(NamePrefix, Opts) ->
     ensure_distribution(),
     {ok, Host} = inet:gethostname(),
     PeerName = unique_short_name(NamePrefix),
     CodePathArgs = lists:append([["-pa", Dir] || Dir <- code:get_path()]),
     CookieArgs = ["-setcookie", atom_to_list(erlang:get_cookie())],
-    case
-        peer:start(#{
-            name => PeerName,
-            host => Host,
-            args => CookieArgs ++ CodePathArgs
-        })
-    of
+    ExtraArgs = maps:get(extra_args, Opts, []),
+    PeerOpts0 = #{
+        name => PeerName,
+        host => Host,
+        args => CookieArgs ++ ExtraArgs ++ CodePathArgs,
+        wait_boot => 60000
+    },
+    PeerOpts =
+        case Opts of
+            #{connection := Connection} -> PeerOpts0#{connection => Connection};
+            #{} -> PeerOpts0
+        end,
+    case peer:start(PeerOpts) of
         {ok, Peer, PeerNode} ->
             case net_adm:ping(PeerNode) of
                 pong ->

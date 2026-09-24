@@ -71,6 +71,9 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "List"
             | "Logger"
             | "Metaclass"
+            | "Node"
+            | "NodeDown"
+            | "NodeUp"
             | "Number"
             | "OS"
             | "Object"
@@ -168,6 +171,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "terminate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Optional lifecycle hook called when the actor is shutting down.\n\nOverride in subclasses to perform cleanup such as closing resources,\nflushing buffers, or notifying dependents. Called synchronously during\ngraceful shutdown (`stop`). The `reason` parameter is an Object — it may\nbe a Symbol like `#normal` for graceful stop, but OTP can also pass\ncompound terms like `{shutdown, term}` for non-atom shutdown reasons.\n\nNot called when the actor is forcefully killed (`kill`).\nIf `terminate:` raises an error, shutdown proceeds anyway.\nActor state (`self.field`) is accessible during `terminate:`.\n\n## Examples\n```beamtalk\nActor subclass: Logger\n  state: logFile = nil\n  terminate: reason =>\n    self.logFile isNil ifFalse: [self.logFile close]\n```".into()) },
                 MethodInfo { selector: "delegate".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: None, param_types: vec![], doc: Some("Delegate message dispatch to the backing Erlang module.\n\nThis method is a sentinel — non-native Actors do not have a backing\nErlang module, so calling delegate raises an Error at runtime.\nNative Actors (declared with `native:` in ClassBuilder) override this\nintrinsic via the compiler's codegen phase.\n\nDeliberately left without a declared return type (BT-2862): the type\nchecker special-cases an unannotated `self delegate` body to stay\n`Dynamic`, since a native override's real return type depends on\nwhichever backing module it delegates to.\n\n## Examples\n```beamtalk\ncounter delegate   // => ERROR: delegate called on a non-native Actor\n```".into()) },
                 MethodInfo { selector: "pid".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Pid")), param_types: vec![], doc: Some("Return the raw Erlang PID backing this actor.\n\nUseful for FFI interop where an Erlang function expects a raw pid.\n\n## Examples\n```beamtalk\nrawPid := counter pid\nrawPid class           // => Pid\n```".into()) },
+                MethodInfo { selector: "node".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Node")), param_types: vec![], doc: Some("The Node this actor lives on (ADR 0126 §2).\n\nAnswered by the actor itself, so a `TimeoutProxy` reports its target's\nnode rather than its own (ADR 0126 §6).\n\n## Examples\n```beamtalk\ncounter node               // => Node(nonode@nohost)\ncounter node isCurrent     // => true\n```".into()) },
+                MethodInfo { selector: "isRemote".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this actor lives on a different node from the caller\n(ADR 0126 §2).\n\nThe runtime answers a send of `isRemote` in the *caller's* process —\nasking the actor for its `node` and comparing it with the caller's node —\nbecause the actor itself can only ever see its own node. This body only\nruns for a self-send, where the caller *is* the actor, so it is always\n`false` there.\n\n## Examples\n```beamtalk\ncounter isRemote           // => false\n```".into()) },
                 MethodInfo { selector: "monitor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Reference")), param_types: vec![], doc: Some("Create an Erlang monitor on this actor's process.\n\nReturns a Reference that can be used to cancel the monitor via\n`demonitor`. The caller will receive a `DOWN` message if the\nactor exits.\n\n## Examples\n```beamtalk\nref := counter monitor\nref class              // => Reference\nref demonitor          // cancel the monitor\n```".into()) },
                 MethodInfo { selector: "onExit:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Object"), DeclaredType::simple("Object")]))], doc: Some("Register a callback to be invoked when this actor exits.\n\nMonitors the actor and calls `block value: reason` when the actor\nprocess terminates. Returns `#ok` immediately. The block is called\nasynchronously from a lightweight watcher process.\n\n## Examples\n```beamtalk\nworker onExit: [:reason |\n  Logger info: \"worker exited\" metadata: #{\"reason\" => reason displayString}\n]\n```".into()) },
                 MethodInfo { selector: "stop".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Gracefully stop this actor (gen_server:stop).\n\nIdempotent: stopping an already-stopped actor succeeds silently.\nRaises an error if the actor times out during shutdown.\n\n## Examples\n```beamtalk\ncounter stop   // => ok\n```".into()) },
@@ -183,6 +188,10 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "spawnWith:as:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::SelfType, DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Object")), Some(DeclaredType::simple("Symbol"))], doc: Some("Atomically spawn a new actor with init args and register it under `name`.\n\nSame contract as `spawnAs:` plus the initialisation arguments passed to\nthe actor's `init/1` callback.\n\n## Examples\n```beamtalk\nc := (Counter spawnWith: #{#count => 10} as: #counter) unwrap\n```".into()) },
                 MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::SelfType, DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Look up a registered actor by name, checked against the receiver class.\n\nReturns `Result ok: actor` when a process is registered under `name` and\nits class is the receiver (or any subclass). `Self` resolves to the\nreceiver class at the call site, so subclasses inherit a typed lookup:\n\n```beamtalk\nCounter named: #counter           // => Result(Counter, Error)\nActor named: #anything            // => Result(Actor, Error)\n```\n\nError cases:\n- `name_not_registered` — nothing registered under `name`\n- `wrong_class` — registered, but not a (subclass of) the receiver class\n- `type_error` — `name` is not a Symbol\n\n## Examples\n```beamtalk\nengine := (WorkflowEngine named: #workflowEngine) unwrap\n(Logger named: #counter) // => Result error: (beamtalk_error wrong_class)\n```".into()) },
                 MethodInfo { selector: "allRegistered".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Actor")])), param_types: vec![], doc: Some("Return every currently-registered Beamtalk actor as `Actor` proxies.\n\nFilters out raw Erlang-registered processes (kernel, logger, user FFI\nregistrations) — only actors carrying the `'$beamtalk_actor'` marker\nappear. Each returned proxy carries its real class, so\n`Actor allRegistered first class` returns the concrete subclass, not\n`Actor`.\n\nIntended for tooling and REPL discovery; production code should use\n`Actor named:` to address known names directly.\n\n## Examples\n```beamtalk\nActor allRegistered  // => #(an Actor(Counter), an Actor(Logger))\n```".into()) },
+                MethodInfo { selector: "spawnOn:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::SelfType, DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Node"))], doc: Some("Spawn a new actor process on `node`, with default state.\n\nSame contract as `spawn`, except the actor process starts on `node`\ninstead of here — `initialize`, reserved-name checks, and\n`ActorSpawned` all fire there. See \"Remote spawn and lookup\" above for\nthe idempotency and linking caveats.\n\nError cases:\n- `node_down` — `node` is unreachable\n- `class_not_found` — the class is not loaded on `node`\n\n## Examples\n```beamtalk\nworker := (Node named: #'worker@localhost') unwrap\nc := (Counter spawnOn: worker) unwrap\nc node          // => Node(worker@localhost)\n```".into()) },
+                MethodInfo { selector: "spawnAs:on:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::SelfType, DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("Node"))], doc: Some("Atomically spawn a new actor on `node` and register it under `name`\nthere.\n\nSame contract as `spawnAs:`, except the actor process (and its\nregistration) both happen on `node` instead of here. See \"Remote\nspawn and lookup\" above for the idempotency and linking caveats.\n\nError cases: as `spawnAs:`, plus `node_down` (`node` is unreachable)\nand `class_not_found` (the class is not loaded on `node`).\n\n## Examples\n```beamtalk\nworker := (Node named: #'worker@localhost') unwrap\n(Counter spawnAs: #hits on: worker) unwrap\n```".into()) },
+                MethodInfo { selector: "named:on:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::SelfType, DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("Node"))], doc: Some("Look up a registered actor by name on `node`, checked against the\nreceiver class.\n\nSame contract as `named:`, checked against `node`'s registry instead\nof this node's. The returned reference is node-qualified: it keeps\nresolving against `node` regardless of which node later sends to it.\n\nError cases: as `named:`, plus `node_down` (`node` is unreachable).\n\n## Examples\n```beamtalk\nworker := (Node named: #'worker@localhost') unwrap\nhits := (Counter named: #hits on: worker) unwrap\nhits increment   // => 1 — sent to worker, not resolved locally\n```".into()) },
+                MethodInfo { selector: "allRegisteredOn:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::generic("List", vec![DeclaredType::simple("Actor")]), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Node"))], doc: Some("Return every currently-registered Beamtalk actor on `node` as `Actor`\nproxies.\n\nSame contract as `allRegistered`, listing `node`'s registered actors\ninstead of this node's. Unlike the local, network-free\n`allRegistered`, this answers a `Result` — reaching another node is an\nexpected-failure operation (ADR 0060).\n\n## Examples\n```beamtalk\nworker := (Node named: #'worker@localhost') unwrap\n(Actor allRegisteredOn: worker) unwrap  // => #(an Actor(Counter), ...)\n```".into()) },
                 MethodInfo { selector: "supervisionPolicy".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("RestartStrategy")), param_types: vec![], doc: Some("Default OTP restart policy for this actor class.\n\nReturns `#temporary` by default — the actor is not automatically restarted\non crash. Override in subclasses to declare a different default:\n\n- `#permanent` — always restart (e.g., a database pool)\n- `#transient` — restart only on abnormal exit (e.g., a request handler)\n- `#temporary` — never restart (the default)\n\n## Examples\n```beamtalk\nActor supervisionPolicy           // => #temporary\nDatabasePool supervisionPolicy    // => #permanent (if overridden)\n```".into()) },
                 MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this class is a supervisor.\n\nReturns `false` for Actor subclasses. Supervisor and DynamicSupervisor\nsubclasses override this to return `true`. Used by `SupervisionSpec childSpec`\nto determine OTP `type` (`#worker` vs `#supervisor`) and `shutdown` timeout.\n\n## Examples\n```beamtalk\nCounter isSupervisor   // => false\nWebApp isSupervisor    // => true (if WebApp subclasses Supervisor)\n```".into()) },
                 MethodInfo { selector: "supervisionSpec".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("SupervisionSpec")), param_types: vec![], doc: Some("Return a SupervisionSpec for this actor class with default settings.\n\nCreates a SupervisionSpec with `actorClass` set to the receiver and\n`restart` set from `supervisionPolicy`. Use the fluent `with*:` API to\noverride per-child settings:\n\n## Examples\n```beamtalk\nDatabasePool supervisionSpec\n    // => SupervisionSpec with actorClass: DatabasePool, restart: #temporary\n\nDatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}\n```".into()) },
@@ -417,7 +426,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             package: Some("stdlib".into()),
             is_value: false,
             is_native: true,
-            handle_scope: None,
+            handle_scope: Some("node".into()),
             surface_incomplete: false,
             state: vec![],
             state_types: HashMap::new(),
@@ -1658,7 +1667,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             package: Some("stdlib".into()),
             is_value: false,
             is_native: true,
-            handle_scope: None,
+            handle_scope: Some("node".into()),
             surface_incomplete: false,
             state: vec![],
             state_types: HashMap::new(),
@@ -2435,6 +2444,107 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Node".into(),
+        ClassInfo {
+            name: "Node".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: true,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec!["name".into()],
+            state_types: HashMap::from([("name".into(), DeclaredType::simple("Symbol"))]),
+            state_has_default: HashMap::from([("name".into(), false)]),
+            state_kinds: HashMap::from([("name".into(), SlotKind::Eager)]),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![
+                MethodInfo { selector: "connect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("Node"), DeclaredType::simple("Error")])), param_types: vec![], doc: Some("Establish a connection to this node, applying the ADR 0126 §9 host\npolicy first. Answers `Result ok: self` on success; an error Result with\n`kind = insecure_distribution` when an off-host connection is refused,\nor `kind = node_down` when the node cannot be reached (or this VM is\nnot distributed).\n\n## Examples\n```beamtalk\n(Node named: #'worker@localhost') unwrap connect   // => Result ok: Node(worker@localhost)\n```".into()) },
+                MethodInfo { selector: "disconnect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Close the connection to this node. Answers `true` if a connection was\nclosed, `false` otherwise (including for the current node).\n\n## Examples\n```beamtalk\nNode current disconnect                       // => false\n```".into()) },
+                MethodInfo { selector: "isConnected".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this node currently has a connection to `self`. The current\nnode is trivially connected to itself.\n\n## Examples\n```beamtalk\nNode current isConnected                      // => true\n```".into()) },
+                MethodInfo { selector: "isCurrent".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether `self` is the node this code is running on.\n\n## Examples\n```beamtalk\nNode current isCurrent                        // => true\n```".into()) },
+                MethodInfo { selector: "ping".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("`net_adm:ping/1` — `true` iff the node answered (and is now connected).\nThe current node always answers. Applies the same host policy as\n`connect`: an off-host node without TLS distribution answers `false`.\n\n## Examples\n```beamtalk\nNode current ping                             // => true\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Human-readable representation: `Node(name@host)`.\n\n## Examples\n```beamtalk\n(Node named: #'worker@localhost') unwrap printString  // => \"Node(worker@localhost)\"\n```".into()) },
+                MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Returns the `name` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withName:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Node")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Returns a new `Node` with `name` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Node")), param_types: vec![], doc: Some("The node this code is running on (`nonode@nohost` when this VM is not\ndistributed).\n\n## Examples\n```beamtalk\nNode current isCurrent                        // => true\n```".into()) },
+                MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("Node"), DeclaredType::simple("Error")])), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("A Node value for `aName`. Pure: validates the `name@host` shape only and\nnever touches the network. A malformed name answers an error Result with\n`kind = invalid_node_name`.\n\n## Examples\n```beamtalk\n(Node named: #'worker@localhost') unwrap name  // => #'worker@localhost'\n(Node named: #nohost) error kind              // => #invalid_node_name\n```".into()) },
+                MethodInfo { selector: "connected".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Node")])), param_types: vec![], doc: Some("Visible nodes this node is connected to. Hidden (tooling) nodes are\nexcluded.\n\n## Examples\n```beamtalk\nNode connected                                // => #()\n```".into()) },
+                MethodInfo { selector: "name:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Node")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Creates a new `Node`. Args: name (default: nil).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "NodeDown".into(),
+        ClassInfo {
+            name: "NodeDown".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec!["node".into(), "reason".into()],
+            state_types: HashMap::from([("node".into(), DeclaredType::simple("Node")), ("reason".into(), DeclaredType::simple("Symbol"))]),
+            state_has_default: HashMap::from([("node".into(), false), ("reason".into(), true)]),
+            state_kinds: HashMap::from([("node".into(), SlotKind::Eager), ("reason".into(), SlotKind::Eager)]),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "NodeUp".into(),
+        ClassInfo {
+            name: "NodeUp".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec!["node".into()],
+            state_types: HashMap::from([("node".into(), DeclaredType::simple("Node"))]),
+            state_has_default: HashMap::from([("node".into(), false)]),
+            state_kinds: HashMap::from([("node".into(), SlotKind::Eager)]),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "Number".into(),
         ClassInfo {
             name: "Number".into(),
@@ -2711,6 +2821,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "=/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![None], doc: Some("Test strict inequality with another pid.\n\n## Examples\n```beamtalk\npid1 =/= pid2           // => true\n```".into()) },
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![None], doc: Some("Test inequality with another pid.\n\n## Examples\n```beamtalk\npid1 /= pid2           // => true\n```".into()) },
                 MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return a hash value for the pid.".into()) },
+                MethodInfo { selector: "node".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Node")), param_types: vec![], doc: Some("The Node this process lives on (`erlang:node/1`, ADR 0126 §2).\n\n## Examples\n```beamtalk\npid node               // => Node(nonode@nohost)\npid node isCurrent     // => true\n```".into()) },
                 MethodInfo { selector: "isAlive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test if the process referred to by this pid is alive.\n\n## Examples\n```beamtalk\npid isAlive            // => true\n```".into()) },
                 MethodInfo { selector: "kill".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Forcefully terminate the process (erlang:exit(Pid, kill)).\n\nThe kill signal cannot be trapped by the target process.\nReturns true unconditionally (Erlang semantics).\n\n## Examples\n```beamtalk\npid kill               // => true\n```".into()) },
                 MethodInfo { selector: "exit:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Pid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![None], doc: Some("Send an exit signal with the given reason to the process.\n\nThe target process will terminate unless it is trapping exits.\nReturns true unconditionally (Erlang semantics).\n\n## Examples\n```beamtalk\npid exit: #shutdown    // => true\n```".into()) },
@@ -4353,6 +4464,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 MethodInfo { selector: "setTarget:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Actor")), param_types: vec![Some(DeclaredType::simple("Actor"))], doc: Some("Set the target actor to forward messages to.".into()) },
                 MethodInfo { selector: "setTimeoutMs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Timeout")), param_types: vec![Some(DeclaredType::simple("Timeout"))], doc: Some("Set the timeout in milliseconds (or `#infinity`).".into()) },
+                MethodInfo { selector: "node".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Node")), param_types: vec![], doc: Some("The target's node, not the proxy's (ADR 0126 §6): a proxy is always\nspawned locally, so answering its own node would hide a remote target.".into()) },
+                MethodInfo { selector: "isRemote".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether the target lives on a different node from the caller\n(ADR 0126 §6). A send of `isRemote` from outside is answered in the\ncaller's process from the forwarded `node` above; this body covers a\nsend from inside the proxy itself.".into()) },
                 MethodInfo { selector: "doesNotUnderstand:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "TimeoutProxy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("Array"))], doc: Some("Forward all unknown messages to the target with the configured timeout.\n\nBT-2829: moved from a statement-level `@expect type` (on the\n`perform:withArguments:timeout:` send below) to declaration-level so it\nalso covers the new whole-method \"declared -> Object, but body inferred\nas Dynamic (unannotated return)\" hint — `doesNotUnderstand:args:`\nforwarding through `perform:withArguments:timeout:` is inherently\ntype-erased (the whole point of DNU forwarding), so neither diagnostic\nis actionable here.".into()) },
             ],
             class_methods: vec![],
@@ -4375,7 +4488,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             package: Some("stdlib".into()),
             is_value: false,
             is_native: true,
-            handle_scope: None,
+            handle_scope: Some("node".into()),
             surface_incomplete: false,
             state: vec![],
             state_types: HashMap::new(),

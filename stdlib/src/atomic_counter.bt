@@ -31,6 +31,7 @@
 /// c increment
 /// ```
 typed Object subclass: AtomicCounter native: beamtalk_atomic_counter
+  handleScope: #node
 
   /// Create a new named counter starting at 0 (class method).
   ///

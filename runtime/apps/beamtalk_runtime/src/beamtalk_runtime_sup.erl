@@ -161,6 +161,18 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_file_handle_registry]
+        },
+        %% Cluster membership events (ADR 0126 §8): re-announces
+        %% `net_kernel:monitor_nodes/2` nodeup/nodedown as NodeUp/NodeDown on
+        %% the system bus, so it MUST come after beamtalk_announcements.
+        %% Starts cleanly on a non-distributed node (monitoring is VM-level).
+        #{
+            id => beamtalk_node_monitor,
+            start => {beamtalk_node_monitor, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_node_monitor]
         }
     ],
 

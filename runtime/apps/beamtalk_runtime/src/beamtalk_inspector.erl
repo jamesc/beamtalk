@@ -243,6 +243,21 @@ classify(#beamtalk_object{pid = {registered, Name}}, Parent, Path, Prov) ->
         Pid when is_pid(Pid) -> process_cursor(Pid, Parent, Path);
         _ -> value_cursor(unavailable, Parent, Path, Prov)
     end;
+%% ADR 0126 §3: a node-qualified proxy whose Node happens to be this one
+%% resolves exactly like the two-tuple case above. One on another node
+%% cannot be introspected locally at all — same "no local introspection
+%% BIF accepts a remote pid" limit `process_cursor/3`'s remote-pid guard
+%% documents below — so it degrades to an unavailable cursor without an
+%% `erpc` round trip (inspection is not worth a network call).
+classify(#beamtalk_object{pid = {registered, Name, Node}}, Parent, Path, Prov) when
+    Node =:= node()
+->
+    case erlang:whereis(Name) of
+        Pid when is_pid(Pid) -> process_cursor(Pid, Parent, Path);
+        _ -> value_cursor(unavailable, Parent, Path, Prov)
+    end;
+classify(#beamtalk_object{pid = {registered, _Name, _Node}}, Parent, Path, Prov) ->
+    value_cursor(unavailable, Parent, Path, Prov);
 classify(Subject, Parent, Path, _Prov) when is_pid(Subject) ->
     process_cursor(Subject, Parent, Path);
 classify(Subject, Parent, Path, Prov) ->
@@ -506,6 +521,16 @@ actor_pid(#beamtalk_object{pid = {registered, Name}}) ->
         Pid when is_pid(Pid) -> {ok, Pid};
         _ -> not_actor
     end;
+%% ADR 0126 §3: a node-qualified proxy — same-node resolves like the
+%% two-tuple clause above; a genuinely remote one is never drillable here
+%% (see classify/4's matching clause — not worth an `erpc` round trip).
+actor_pid(#beamtalk_object{pid = {registered, Name, Node}}) when Node =:= node() ->
+    case erlang:whereis(Name) of
+        Pid when is_pid(Pid) -> {ok, Pid};
+        _ -> not_actor
+    end;
+actor_pid(#beamtalk_object{pid = {registered, _Name, _Node}}) ->
+    not_actor;
 actor_pid(_) ->
     not_actor.
 
@@ -536,9 +561,10 @@ is_collection(Subject) when is_list(Subject) ->
     %% degrade to `#value` instead (ADR 0095 "never raises").
     is_proper_list(Subject);
 is_collection(Subject) when is_map(Subject) ->
-    lists:member(beamtalk_tagged_map:class_of(Subject, 'Dictionary'), [
-        'List', 'Array', 'Set', 'Dictionary', 'Bag'
-    ]);
+    %% 'List' has no map representation (a Beamtalk List is a bare Erlang
+    %% list, handled by the is_list/1 clause above) — the shared helper
+    %% below covers the four builtin *tagged-map* collections.
+    beamtalk_tagged_map:is_builtin_collection(Subject);
 is_collection(_) ->
     false.
 

@@ -20,7 +20,7 @@ here, and every `is_process_alive/1` guard in `beamtalk_actor.erl` calls
 `is_alive/1` instead.
 """.
 
--export([is_alive/1]).
+-export([is_alive/1, qualify_registered_ref/1]).
 
 -doc """
 Is `Pid` alive?
@@ -41,3 +41,28 @@ is_alive(Pid) when is_pid(Pid) ->
         true -> is_process_alive(Pid);
         false -> true
     end.
+
+-doc """
+Node-qualify an actor reference for a cross-node hop (ADR 0126 §3, §5.1).
+
+A local `{registered, Name}` ref (ADR 0079) resolves via `whereis/1` on
+every send, so shipping it unqualified to another node would silently
+re-resolve it against *that* node's registry instead of the sender's. This
+stamps it with the sender's own node so it keeps resolving against its
+origin. A ref already node-qualified (relayed from elsewhere) and an
+ordinary pid (already node-qualified natively by BEAM) pass through
+unchanged.
+
+The single leaf both cross-node actor-ref paths route through (CLAUDE.md
+"No duplicate implementations"): `beamtalk_wire`'s generic term walk
+(`encode_beamtalk_object/2`, for an actor ref the walk meets directly) and
+`beamtalk_shape_migration`'s `sendable_ref`-tier field packing (for an
+Actor-typed field inside a `Value` instance) both call this instead of
+each carrying their own copy of the rewrite.
+""".
+-spec qualify_registered_ref(pid() | {registered, atom()} | {registered, atom(), node()}) ->
+    pid() | {registered, atom(), node()}.
+qualify_registered_ref({registered, Name}) when is_atom(Name) ->
+    {registered, Name, node()};
+qualify_registered_ref(Pid) ->
+    Pid.
