@@ -50,6 +50,13 @@ source text) are handled via the `on_activate` callback in activation options.
 %% Exported for callers that need validation (e.g. workspace_bootstrap backwards compat).
 -export([is_valid_module_name/1]).
 
+%% Exported so `beamtalk_release:shape_manifest/0` (ADR 0125 §3.4, BT-3575) can
+%% filter a live node's registered classes down to the same "project, not
+%% stdlib" set `releases/<vsn>/shapes.json` uses (BT-3571) — the one
+%% `bt@stdlib@*`-exclusion predicate, not a second copy of the string prefix
+%% check (CLAUDE.md's no-duplicate-implementations rule).
+-export([is_release_class_module/1]).
+
 %% Maximum number of modules activated per ebin directory.
 %% Prevents atom table exhaustion if the directory contains excessive files.
 -define(MAX_MODULES, 1000).

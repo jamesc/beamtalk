@@ -40,16 +40,40 @@ run synchronously inside `start/2`, so they complete — and every class is
 registered — before OTP starts the *next* application in the `.rel`, which
 is the project's own (ADR 0125 §1.2: `app_file.rs` lists `beamtalk_workspace`
 in the project `.app`'s `{applications, …}`, right after `beamtalk_runtime`).
+
+## Console cookie check (ADR 0125 §1.6, BT-3575)
+
+`mode => release, console => true` with no cookie configured refuses to
+boot — `maybe_start_workspace/0` checks this *before* calling
+`start_workspace/1`, so a release with the console on and no cookie never
+starts `beamtalk_workspace_sup` at all: `start/2` returns `{error, Err}`
+with `Err` a structured `#beamtalk_error{}`, which fails
+`application:start(beamtalk_workspace)` and so the whole boot script — a
+release with an unauthenticated eval endpoint is refused outright, not
+booted with a warning. `ensure_console_cookie/1` checks
+`init:get_argument(setcookie)` rather than `erlang:get_cookie/0`: the latter
+is never `nocookie` on a node that ever started distribution, because OTP
+silently falls back to `$HOME/.erlang.cookie` when no `-setcookie` was
+given — exactly the "the operator never actually configured one" case this
+check exists to catch (ADR 0125 §1.6: "The cookie is read from
+`RELEASE_COOKIE`/`vm.args`, never generated into the artifact"). Whichever
+of those two sources supplied a cookie, it reaches `init`'s argument list as
+an ordinary `-setcookie` flag — the launcher's `RELEASE_COOKIE`-derived
+`cookie_args()`, or a line in a user `[release] vm-args` file — so this one
+check covers both.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([start/2, stop/1]).
 
 -ifdef(TEST).
 %% Exported for EUnit coverage of the app-env-driven start path
 %% (ADR 0125 §1.4) without booting a whole node.
--export([env_workspace_config/1, parse_bind_addr/1, maybe_start_workspace/0]).
+-export([
+    env_workspace_config/1, parse_bind_addr/1, maybe_start_workspace/0, ensure_console_cookie/1
+]).
 -endif.
 
 -doc "Start the workspace application and register actor spawn callback.".
@@ -120,16 +144,63 @@ maybe_start_workspace() ->
         undefined ->
             ok;
         {ok, Mode} ->
-            case beamtalk_workspace_app_sup:start_workspace(env_workspace_config(Mode)) of
-                {ok, _Pid} ->
-                    activate_release_modules(),
-                    ok;
-                {error, {already_started, _}} ->
-                    ok;
-                {error, Reason} ->
-                    {error, Reason}
+            Config = env_workspace_config(Mode),
+            case ensure_console_cookie(Config) of
+                ok ->
+                    start_workspace(Config);
+                {error, Err} ->
+                    {error, Err}
             end
     end.
+
+-spec start_workspace(beamtalk_workspace_sup:workspace_config()) -> ok | {error, term()}.
+start_workspace(Config) ->
+    case beamtalk_workspace_app_sup:start_workspace(Config) of
+        {ok, _Pid} ->
+            activate_release_modules(),
+            ok;
+        {error, {already_started, _}} ->
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+-doc """
+Refuse `mode => release, console => true` with no cookie configured (ADR
+0125 §1.6) — see the moduledoc's "Console cookie check" section for why
+`init:get_argument(setcookie)`, not `erlang:get_cookie/0`, is the actual
+test. A no-op for every other `{mode, console}` combination: `run`/
+`workspace` are CLI-driven and always pass an explicit cookie already, and a
+release with `console => false` opens no listener for the cookie to guard.
+""".
+-spec ensure_console_cookie(beamtalk_workspace_sup:workspace_config()) ->
+    ok | {error, #beamtalk_error{}}.
+ensure_console_cookie(#{mode := release, console := true}) ->
+    case init:get_argument(setcookie) of
+        {ok, _} -> ok;
+        error -> {error, no_console_cookie_error()}
+    end;
+ensure_console_cookie(_Config) ->
+    ok.
+
+-doc "The structured refusal `ensure_console_cookie/1` raises — see its own doc.".
+-spec no_console_cookie_error() -> #beamtalk_error{}.
+no_console_cookie_error() ->
+    Message = <<
+        "[release] console = true requires a cookie, and none is configured.\n\n"
+        "  This node ships an authenticated WebSocket console with no cookie set,\n"
+        "  which is not a smaller version of the trust boundary ADR 0058 describes;\n"
+        "  it is no boundary at all. A cookie baked into the release tarball is not\n"
+        "  an option either: that would be a shared secret sitting in a registry."
+    >>,
+    Hint = <<
+        "Set RELEASE_COOKIE before starting the release (bin/<name> foreground), "
+        "or add '-setcookie <cookie>' to a [release] vm-args file (see ADR 0125 "
+        "section 1.6)."
+    >>,
+    Err0 = beamtalk_error:new(release_console_no_cookie, 'Beamtalk'),
+    Err1 = beamtalk_error:with_message(Err0, Message),
+    beamtalk_error:with_hint(Err1, Hint).
 
 -doc """
 Build the `beamtalk_workspace_sup` config map from the `beamtalk_workspace`

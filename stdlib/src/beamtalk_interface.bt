@@ -50,6 +50,12 @@ sealed typed Object subclass: BeamtalkInterface
     self clearField: #current
     nil
 
+  /// Class-side `releaseInfo` — see the "Release reflection" note above.
+  class releaseInfo -> Dictionary => (Erlang beamtalk_release) info
+
+  /// Class-side `shapeManifest` — see the "Release reflection" note above.
+  class shapeManifest -> Dictionary => (Erlang beamtalk_release) shapeManifest
+
   // === Class registry ===
 
   /// Return a list of all registered classes as class objects.
@@ -76,6 +82,40 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk globals
   /// ```
   globals -> Dictionary => (Erlang beamtalk_interface) globals
+
+  // === Release reflection (ADR 0125 §1.8, §3.4) ===
+  //
+  // Both sends are parity-neutral, ordinary reflective sends — not new
+  // per-surface operations (docs/development/surface-parity.md) — and are
+  // declared as `class` methods (dispatched to the *class*, not the
+  // `Beamtalk` instance binding) so they are also reachable through the
+  // `run-entry` op with no compiler, on a release built without
+  // `include-compiler` (ADR 0125 §1.5/§1.7: `run-entry` only dispatches
+  // class-side methods). The instance-side sends below just delegate to
+  // them, via `self class`, so `Beamtalk releaseInfo`/`shapeManifest` (eval)
+  // and `run-entry`'s `{class: "BeamtalkInterface", selector: "releaseInfo"
+  // | "shapeManifest"}` answer the identical Dictionary.
+
+  /// Return this node's release provenance (`beamtalk-provenance.json`) as a
+  /// Dictionary. On a non-release (`run`/`workspace`) node, returns
+  /// `#{#release => nil}` — never an error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk releaseInfo
+  /// ```
+  releaseInfo -> Dictionary => self class releaseInfo
+
+  /// Return `className -> #{#version, #fields, #migrations}` for every
+  /// registered project class (ADR 0125 §3.4) — the live-node twin of a
+  /// release's `releases/<vsn>/shapes.json` (BT-3571), built from the same
+  /// projection.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk shapeManifest
+  /// ```
+  shapeManifest -> Dictionary => self class shapeManifest
 
   // === Help and documentation ===
 

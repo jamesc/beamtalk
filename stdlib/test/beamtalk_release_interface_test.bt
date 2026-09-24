@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for `Beamtalk releaseInfo` / `Beamtalk shapeManifest`
+// (ADR 0125 §1.8/§3.4, BT-3575).
+//
+// `BeamtalkInterface releaseInfo`/`shapeManifest` are declared as `class`
+// methods precisely so they are reachable without the `Beamtalk` singleton
+// binding (see stdlib/src/beamtalk_interface.bt) — which is unavailable in
+// the BUnit test context (`workspace_mode: false`), the same reason
+// `beamtalk_interface_test.bt` tests `BeamtalkInterface` directly rather
+// than through `Beamtalk`, and the same reason a `BeamtalkInterface new`
+// is not attempted here either (`Object` subclasses are not instantiable
+// from Beamtalk source — only the workspace bootstrap's Erlang-side
+// `Module:new()` call creates the singleton). Both sends run against this
+// BUnit run's own live class registry, which is exactly "a workspace node"
+// from the registry's point of view (`beamtalk_class_registry`/
+// `beamtalk_release_shapes` do not distinguish BUnit from a full REPL
+// workspace) — the instance-side `Beamtalk releaseInfo`/`shapeManifest`
+// eval form and release-mode-specific behaviour (`#{#release => nil}` on a
+// non-release node, run-entry reachability with no compiler) are covered
+// by `tests/repl-protocol/cases/release_console_default.btscript` /
+// `release_console_include_compiler.btscript` instead, which are the only
+// places a genuine `mode => release` node and a bootstrapped `Beamtalk`
+// singleton both exist.
+
+TestCase subclass: BeamtalkReleaseInterfaceTest
+
+  testIncludesSelectorReleaseInfo =>
+    self assert: (BeamtalkInterface includesSelector: #releaseInfo)
+
+  testIncludesSelectorShapeManifest =>
+    self assert: (BeamtalkInterface includesSelector: #shapeManifest)
+
+  testClassIncludesSelectorReleaseInfo =>
+    self assert: (BeamtalkInterface class includesSelector: #releaseInfo)
+
+  testClassIncludesSelectorShapeManifest =>
+    self assert: (BeamtalkInterface class includesSelector: #shapeManifest)
+
+  // This BUnit run is not an OTP release (no `-boot_var RELEASE_DIR`), so
+  // `releaseInfo` degrades to `#{#release => nil}` — never an error, and
+  // never a crash reaching all the way to this test.
+  testReleaseInfoOnNonReleaseNodeIsRelease =>
+    info := BeamtalkInterface releaseInfo
+    self assert: (info at: #release) isNil
+
+  testReleaseInfoReturnsADictionary =>
+    self assert: (BeamtalkInterface releaseInfo isKindOf: Dictionary)
+
+  testShapeManifestReturnsADictionary =>
+    self assert: (BeamtalkInterface shapeManifest isKindOf: Dictionary)

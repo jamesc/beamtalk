@@ -488,6 +488,76 @@ impl ProcessManager {
         }
     }
 
+    /// Start a `mode => release, console => true` BEAM node (ADR 0125
+    /// §1.5/§1.6, BT-3575's release-console fixture) with an OS-assigned
+    /// ephemeral port. Unlike [`Self::start`], starts no project — a
+    /// release-mode test fixture has no `_build/` to scan and no working
+    /// tree, by design (ADR 0125 §1.4).
+    ///
+    /// A distinct `-sname` (not `beamtalk_e2e_test`) and no cover
+    /// instrumentation: this fixture exists only to exercise the wire-level
+    /// refusals/reachability `#[serial(e2e)]` callers assert on, not to
+    /// double as a second coverage-instrumented node.
+    fn start_release(include_compiler: bool) -> Self {
+        let debug_output = env::var("E2E_DEBUG").is_ok();
+        eprintln!(
+            "E2E: Starting release-mode BEAM console (include_compiler={include_compiler})..."
+        );
+        let runtime = runtime_dir();
+        let paths = repl_startup::beam_paths(&runtime);
+
+        if !paths.runtime_ebin.exists() {
+            let status = Command::new("rebar3")
+                .arg("compile")
+                .current_dir(&runtime)
+                .status()
+                .expect("Failed to run rebar3 compile");
+            assert!(status.success(), "Failed to build runtime");
+        }
+
+        let eval_cmd =
+            repl_startup::build_release_console_eval_cmd(0, None, "info", include_compiler);
+
+        let mut pa_args = repl_startup::beam_pa_args(&paths);
+        pa_args.push("-eval".into());
+        pa_args.push(eval_cmd.into());
+
+        let stderr_cfg = if debug_output {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
+
+        let sname = format!("beamtalk_e2e_release_{}", std::process::id());
+        let e2e_project_dir =
+            std::env::temp_dir().join(format!("bt_e2e_release_project_{}", std::process::id()));
+        std::fs::create_dir_all(&e2e_project_dir).expect("create e2e release project dir");
+
+        let mut beam_child = Command::new("erl")
+            .arg("-noshell")
+            .arg("-sname")
+            .arg(&sname)
+            .arg("-setcookie")
+            .arg(E2E_COOKIE)
+            .args(&pa_args)
+            .current_dir(workspace_root())
+            .env("BEAMTALK_NO_FILE_LOG", "1")
+            .stdout(Stdio::piped())
+            .stderr(stderr_cfg)
+            .spawn()
+            .expect("Failed to start release-mode BEAM node");
+
+        let port = read_port_from_beam(&mut beam_child);
+        eprintln!("E2E: release-mode console ready on port {port}");
+
+        Self {
+            beam_process: Some(beam_child),
+            cover_enabled: false,
+            port,
+            project_dir: e2e_project_dir,
+        }
+    }
+
     /// Stop the BEAM if we started it.
     ///
     /// Uses SIGTERM first for graceful shutdown, then SIGKILL if needed.
@@ -907,6 +977,37 @@ impl ReplClient {
         Ok(entries.join("\n"))
     }
 
+    /// Get the list of active REPL sessions (`sessions` op) — always
+    /// available, in every mode including a release with no compiler
+    /// (ADR 0125 §1.5), so a release-mode fixture uses this to prove the
+    /// listener answers ordinary, non-compiling ops.
+    fn get_sessions(&mut self) -> Result<String, String> {
+        let response = self.send_op(&RequestBuilder::sessions())?;
+        let sessions = response.sessions.unwrap_or_default();
+        Ok(format!("{} session(s)", sessions.len()))
+    }
+
+    /// Dispatch a `run-entry` op (`Class selector [args]`, no source — ADR
+    /// 0125 §1.5/§1.7) and return the result as a string, the same
+    /// compile-free path `bin/<name> eval|rpc` and connected-mode
+    /// `beamtalk run --connect` use. Always available, including on a
+    /// release with no compiler — this is how a no-compiler release-mode
+    /// fixture reaches `BeamtalkInterface releaseInfo`/`shapeManifest`
+    /// (both `class` methods, dispatched to the class itself).
+    fn run_entry(
+        &mut self,
+        class: &str,
+        selector: &str,
+        args: &[String],
+    ) -> Result<String, String> {
+        let response = self.send_op(&RequestBuilder::run_entry(class, selector, args))?;
+        Ok(match &response.value {
+            None => "null".to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(v) => v.to_string(),
+        })
+    }
+
     /// Request completions for `code` (cursor at end) and return a comma-separated
     /// sorted list of completion strings.  Returns an empty string for no completions.
     ///
@@ -1186,11 +1287,27 @@ fn split_on_wildcard_underscores(pattern: &str) -> Vec<&str> {
 ///
 /// If the file contains `// @load <path>` directives, those files are loaded
 /// before any test cases run, making their classes available for spawning.
+fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>) {
+    run_test_file_opts(path, client, true)
+}
+
+/// Like [`run_test_file`], but with `clear_bindings` as an explicit knob:
+/// the default release-mode fixture (ADR 0125 §1.5, BT-3575) has no
+/// compiler, and `client.clear_bindings()` is itself an `eval`
+/// (`Session current clear`) — always refused there. Its own case file
+/// passes `false` so a `release_mode_no_compiler` refusal on setup doesn't
+/// abort the whole file before a single case runs; the `include-compiler`
+/// fixture, where `eval` works, passes `true` via the plain `run_test_file`
+/// wrapper, matching every other case file.
 #[expect(
     clippy::too_many_lines,
     reason = "Test runner handles many assertion types"
 )]
-fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>) {
+fn run_test_file_opts(
+    path: &PathBuf,
+    client: &mut ReplClient,
+    clear_bindings: bool,
+) -> (usize, Vec<String>) {
     let content = fs::read_to_string(path).expect("Failed to read test file");
     let test_file = parse_test_file(&content);
 
@@ -1205,9 +1322,11 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     }
 
     // Clear bindings before running file
-    if let Err(e) = client.clear_bindings() {
-        failures.push(format!("{file_name}: Failed to clear bindings: {e}"));
-        return (0, failures);
+    if clear_bindings {
+        if let Err(e) = client.clear_bindings() {
+            failures.push(format!("{file_name}: Failed to clear bindings: {e}"));
+            return (0, failures);
+        }
     }
 
     // Load any required files (relative to workspace root)
@@ -1288,6 +1407,22 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
             client.get_bindings()
         } else if case.expression == ":actors" {
             client.get_actors()
+        } else if case.expression == ":sessions" {
+            client.get_sessions()
+        } else if case.expression.starts_with(":run-entry ") {
+            // `:run-entry Class selector [arg1 arg2 …]` — the release-mode
+            // fixture's own directive (ADR 0125 §1.5/§1.7): word-split
+            // args, same shape `bin/<name> eval|rpc` and `run-entry`
+            // itself take.
+            let rest = case.expression.strip_prefix(":run-entry ").unwrap().trim();
+            let mut words = rest.split_whitespace();
+            match (words.next(), words.next()) {
+                (Some(class), Some(selector)) => {
+                    let args: Vec<String> = words.map(str::to_string).collect();
+                    client.run_entry(class, selector, &args)
+                }
+                _ => Err("Usage: :run-entry <Class> <selector> [args...]".to_string()),
+            }
         } else if case.expression == ":sync" || case.expression == ":s" {
             client.sync_project()
         } else if case.expression.starts_with(":load ") || case.expression.starts_with(":l ") {
@@ -1781,13 +1916,19 @@ fn e2e_language_tests() {
         }
     };
 
-    // Find all test files (sorted for deterministic execution order)
+    // Find all test files (sorted for deterministic execution order).
+    // `release_console_*.btscript` files are excluded here — they assert
+    // against a `mode => release` node (ADR 0125 §1.5/§1.6, BT-3575) and
+    // are run by their own dedicated test functions below, each against
+    // its own release-mode fixture, not this shared workspace-mode node.
     let mut test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
         .expect("Failed to read test cases directory")
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "btscript") {
+            if path.extension().is_some_and(|ext| ext == "btscript")
+                && !is_release_console_case(&path)
+            {
                 Some(path)
             } else {
                 None
@@ -1830,6 +1971,110 @@ fn e2e_language_tests() {
             total_tests
         );
     }
+}
+
+/// `release_console_*.btscript` files assert against a `mode => release`
+/// node instead of the shared workspace-mode one `e2e_language_tests`
+/// connects to (ADR 0125 §1.5/§1.6, BT-3575) — see `is_release_console_case`.
+fn is_release_console_case(path: &std::path::Path) -> bool {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.starts_with("release_console_"))
+}
+
+/// Run every `release_console_*.btscript` case file that matches `predicate`
+/// against a fresh `mode => release` node, and panic naming every failure —
+/// the shared body behind the two release-mode fixture tests below.
+fn run_release_console_cases(
+    manager: &ProcessManager,
+    clear_bindings: bool,
+    predicate: impl Fn(&std::path::Path) -> bool,
+) {
+    let mut client = match ReplClient::connect(manager.port) {
+        Ok(c) => c,
+        Err(e) => panic!(
+            "Failed to connect to release-mode REPL on port {}: {e}",
+            manager.port
+        ),
+    };
+
+    let cases_dir = test_cases_dir();
+    let mut test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
+        .expect("Failed to read test cases directory")
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "btscript")
+                && is_release_console_case(&path)
+                && predicate(&path)
+            {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+    test_files.sort();
+    assert!(
+        !test_files.is_empty(),
+        "no matching release_console_*.btscript case file found in {}",
+        cases_dir.display()
+    );
+
+    let mut total_passed = 0;
+    let mut all_failures = Vec::new();
+    for test_file in &test_files {
+        eprintln!("E2E: Running {}...", test_file.display());
+        let (passed, failures) = run_test_file_opts(test_file, &mut client, clear_bindings);
+        total_passed += passed;
+        all_failures.extend(failures);
+    }
+
+    let total_tests = total_passed + all_failures.len();
+    eprintln!("\nE2E release-console results: {total_passed}/{total_tests} tests passed");
+    if !all_failures.is_empty() {
+        eprintln!("\nFailures:");
+        for failure in &all_failures {
+            eprintln!("  - {failure}");
+        }
+        panic!(
+            "E2E release-console tests failed: {} of {} tests failed",
+            all_failures.len(),
+            total_tests
+        );
+    }
+}
+
+/// The default release: `console = true`, no `include-compiler` (ADR 0125
+/// §1.5). `eval`/method-definition/`reload` are refused with
+/// `release_mode_no_compiler`, `flush`/`removeFromSystem` with
+/// `release_mode_no_workspace`; `run-entry`, `inspect`, `actors` and
+/// `sessions` still answer, and `Beamtalk releaseInfo`/`shapeManifest` are
+/// reachable through `run-entry` (the only compile-free path — `class`
+/// methods on `BeamtalkInterface`, see `stdlib/src/beamtalk_interface.bt`).
+/// `release_console_default.btscript` skips `clear_bindings` (itself an
+/// `eval`) — see `run_test_file_opts`'s doc.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_release_mode_console_default_tests() {
+    let manager = ProcessManager::start_release(false);
+    run_release_console_cases(&manager, false, |p| {
+        p.file_stem().and_then(|s| s.to_str()) == Some("release_console_default")
+    });
+}
+
+/// The `include-compiler` release (ADR 0125 §1.5): `eval` works again, so
+/// `Beamtalk releaseInfo` is reachable through the ordinary `eval` path
+/// too, on top of the always-available `run-entry` one.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_release_mode_console_include_compiler_tests() {
+    let manager = ProcessManager::start_release(true);
+    run_release_console_cases(&manager, true, |p| {
+        p.file_stem().and_then(|s| s.to_str()) == Some("release_console_include_compiler")
+    });
 }
 
 #[cfg(test)]

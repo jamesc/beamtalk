@@ -186,6 +186,45 @@ pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) 
     )
 }
 
+/// Build the Erlang `-eval` command that starts a `mode => release`
+/// workspace with the console on (ADR 0125 §1.5/§1.6), for the
+/// repl-protocol test harness's release-mode fixture
+/// (`tests/repl_protocol.rs`) — `beamtalk` itself never boots a release
+/// this way; a real release boots via the generated launcher and
+/// `beamtalk_workspace_app:start/2` reading `sys.config`
+/// (`crates/beamtalk-cli/src/commands/release/`), exactly as
+/// `run`/`workspace` mode's own `start_link` call here bypasses that
+/// app-env path too (see `startup_prelude`'s doc). Starts no project OTP
+/// application: a release-mode test fixture is bare workspace/runtime
+/// classes only, dispatched via `run-entry`, with no project `.app` to
+/// start.
+pub fn build_release_console_eval_cmd(
+    port: u16,
+    bind_addr: Option<Ipv4Addr>,
+    log_level: &str,
+    include_compiler: bool,
+) -> String {
+    let bind_addr_erl = format_bind_addr_erl(bind_addr);
+    format!(
+        "logger:remove_handler(default), \
+         application:set_env(beamtalk_runtime, repl_port, {port}), \
+         application:set_env(beamtalk_runtime, log_level, {log_level}), \
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{ \
+             mode => release, \
+             workspace_id => list_to_binary(\"release_e2e_\" ++ integer_to_list(erlang:unique_integer([positive]))), \
+             project_path => undefined, \
+             console => true, \
+             include_compiler => {include_compiler}, \
+             tcp_port => {port}, \
+             bind_addr => {bind_addr_erl}, \
+             auto_cleanup => false}}), \
+         {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
+         io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
+         receive stop -> ok end."
+    )
+}
+
 /// Collect `-pa` paths as `OsString` arguments for passing to `Command::args`.
 ///
 /// Returns alternating `["-pa", "<path>", "-pa", "<path>", ...]`.
@@ -251,6 +290,27 @@ mod tests {
         let cmd = build_eval_cmd_with_node(9000, "node'inject", None, "info", None, &[]);
         assert!(cmd.contains("node\\'inject"));
         assert!(!cmd.contains("node'inject"));
+    }
+
+    #[test]
+    fn release_console_eval_cmd_starts_release_mode_with_console_on() {
+        let cmd = build_release_console_eval_cmd(9000, None, "info", false);
+        assert!(cmd.contains("mode => release"));
+        assert!(cmd.contains("console => true"));
+        assert!(cmd.contains("include_compiler => false"));
+        assert!(cmd.contains("tcp_port => 9000"));
+        assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
+        assert!(cmd.contains("beamtalk_repl_server:get_port()"));
+        assert!(cmd.contains("BEAMTALK_PORT:"));
+        assert!(cmd.contains("receive stop -> ok end"));
+        // No project application is started for the release-mode fixture.
+        assert!(!cmd.contains("ensure_all_started(Otp"));
+    }
+
+    #[test]
+    fn release_console_eval_cmd_carries_include_compiler() {
+        let cmd = build_release_console_eval_cmd(9000, None, "info", true);
+        assert!(cmd.contains("include_compiler => true"));
     }
 
     #[test]
