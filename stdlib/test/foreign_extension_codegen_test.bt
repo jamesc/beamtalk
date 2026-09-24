@@ -35,7 +35,15 @@ TestCase subclass: ForeignExtensionCodegenTest
   // Source binary argument is emitted, not just register/4. The FFI wraps the
   // Erlang `{ok, Source}` return as a `Result`.
   testForeignExtensionHasSource =>
+    // `getSource/2` is spec'd `{ok, binary()} | not_found` (Result(String |
+    // Binary) | Symbol, BT-2254). Prove it's actually a Result at runtime
+    // with a guard-and-return (BT-2825) instead of merely declaring it —
+    // fails loudly here, naming the extension, rather than a bare DNU below.
     result := (Erlang beamtalk_extensions) getSource: #String selector: #bt2250Shout
+    (result isKindOf: Result)
+      ifFalse: [
+        ^self fail: "expected a Result for #bt2250Shout's source, got {result printString}"
+      ]
     self assert: result isOk
     self assert: (result unwrap includesSubstring: "uppercase")
 

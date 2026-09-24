@@ -32,7 +32,15 @@ TestCase subclass: ClassBuilderMetadataParityTest
       methodDocs: #{#ping => "Returns the canned ping value."};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2268SigDoc
+    // `help:selector:` FFI spec returns `binary()` (String | Binary, BT-2254);
+    // the runtime always builds a UTF-8 String. Prove it at runtime — not just
+    // to the type checker — with a guard-and-return (BT-2825): this narrows
+    // `helpText` to `String` for the rest of the method, and fails loudly
+    // (instead of a downstream DNU) if the FFI ever returns raw Binary.
     helpText := (Erlang beamtalk_interface) help: #BT2268SigDoc selector: #ping
+    (helpText isKindOf: String) ifFalse: [
+      ^self fail: "expected help text to be a String, got {helpText printString}"
+    ]
     self assert: (helpText includesSubstring: "ping -> Integer")
     self assert: (helpText includesSubstring: "Returns the canned ping value.")
 
@@ -47,7 +55,11 @@ TestCase subclass: ClassBuilderMetadataParityTest
       classMethodDocs: #{#tally => "The starting tally."};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2268ClassSigDoc
+    // See BT-2254 note on the instance-side test above.
     helpText := (Erlang beamtalk_interface) help: #BT2268ClassSigDoc selector: #tally
+    (helpText isKindOf: String) ifFalse: [
+      ^self fail: "expected help text to be a String, got {helpText printString}"
+    ]
     self assert: (helpText includesSubstring: "tally -> Integer")
     self assert: (helpText includesSubstring: "The starting tally.")
 
@@ -60,7 +72,11 @@ TestCase subclass: ClassBuilderMetadataParityTest
       classDoc: "A documented builder-defined class.";
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2268ClassDoc
+    // See BT-2254 note on the instance-side test above.
     helpText := (Erlang beamtalk_interface) help: #BT2268ClassDoc
+    (helpText isKindOf: String) ifFalse: [
+      ^self fail: "expected help text to be a String, got {helpText printString}"
+    ]
     self assert: (helpText includesSubstring: "A documented builder-defined class.")
 
   // AC4 (instance side): the instance-method return-type channel is settable
@@ -97,7 +113,14 @@ TestCase subclass: ClassBuilderMetadataParityTest
       isConstructible: false;
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2268NotConstructible
+    // `whereis_class/1` is spec'd `pid() | undefined` since a class may not be
+    // registered. It was registered just above, so prove that at runtime with
+    // a guard-and-return (BT-2825) rather than merely declaring it — fails
+    // loudly here instead of a confusing DNU below if that ever stops holding.
     pid := (Erlang beamtalk_class_registry) whereis_class: #BT2268NotConstructible
+    (pid isKindOf: Pid) ifFalse: [
+      ^self fail: "expected {#BT2268NotConstructible} to be a registered class"
+    ]
     self deny: ((Erlang beamtalk_object_class) is_constructible: pid)
 
   // AC3 (true): `isConstructible: true` is honoured — the explicit flag is
@@ -108,7 +131,11 @@ TestCase subclass: ClassBuilderMetadataParityTest
       isConstructible: true;
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2268Constructible
+    // See `whereis_class/1` note on the false-case test above.
     pid := (Erlang beamtalk_class_registry) whereis_class: #BT2268Constructible
+    (pid isKindOf: Pid) ifFalse: [
+      ^self fail: "expected {#BT2268Constructible} to be a registered class"
+    ]
     self assert: ((Erlang beamtalk_object_class) is_constructible: pid)
 
   // The `meta:` channel is settable; supplying a meta map does not break

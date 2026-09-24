@@ -835,6 +835,10 @@ fn compile_load_fixtures(
             opts.no_warnings,
             opts.warnings_as_errors,
             pre_loaded_aliases,
+            // BT-3617 only wired FFI typing into `test-stdlib` proper; the
+            // metamorphic harness is a separate pipeline reusing this same
+            // helper, left out of scope here.
+            None,
         )?;
         fixture_modules.push(module_name);
     }
