@@ -692,8 +692,14 @@ impl ProcessManager {
             .arg(E2E_COOKIE)
             .arg("-eval")
             .arg(
-                "timer:sleep(200), \
-                 {ok, ActualPort} = beamtalk_repl_server:get_port(), \
+                "GetPort = fun GP() -> \
+                     try beamtalk_repl_server:get_port() of \
+                         {ok, ActualPort} -> ActualPort \
+                     catch \
+                         exit:_ -> timer:sleep(50), GP() \
+                     end \
+                 end, \
+                 ActualPort = GetPort(), \
                  io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
                  receive stop -> ok end.",
             )
