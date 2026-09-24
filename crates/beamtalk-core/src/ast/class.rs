@@ -209,6 +209,13 @@ pub struct ClassDefinition {
     /// that may reference this class's own type params (forwarded) or be a concrete type
     /// (e.g., `Integer` in `Collection(Integer) subclass: IntArray`).
     pub superclass_type_args: Vec<TypeAnnotation>,
+    /// `uses:` lines composing traits (protocols with provided methods) into
+    /// this class (ADR 0127 §2). Must come before any state or method
+    /// declaration in source; parsed and round-tripped here, but not yet
+    /// flattened into the class's methods — that is
+    /// `semantic_analysis::trait_expansion` (BT-3588). Empty for a class that
+    /// uses no traits.
+    pub uses: Vec<ProtocolUse>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -240,6 +247,7 @@ impl ClassDefinition {
             class_variables: Vec::new(),
             type_params: Vec::new(),
             superclass_type_args: Vec::new(),
+            uses: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -278,6 +286,7 @@ impl ClassDefinition {
             class_variables: Vec::new(),
             type_params: Vec::new(),
             superclass_type_args: Vec::new(),
+            uses: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
@@ -427,6 +436,16 @@ pub struct ProtocolDefinition {
     /// Defined with the `class` prefix, e.g., `class fromString: aString :: String -> Self`.
     /// Conforming classes must respond to these selectors on the class side.
     pub class_method_signatures: Vec<ProtocolMethodSignature>,
+    /// Provided (instance-side) methods — a signature with a `=>` body
+    /// (ADR 0127 §1). A protocol with at least one provided method is a
+    /// *trait*; there is no separate keyword. Parsed through the same
+    /// method-definition parser as an ordinary class method. Flattening
+    /// these into a `uses:`-ing class's own body is
+    /// `semantic_analysis::trait_expansion` (BT-3588), not a parser
+    /// concern. A class-side provision (`class sel … =>`) is a "not yet
+    /// supported" parse error in v1 (ADR 0127 §13) and is never collected
+    /// here.
+    pub provided_methods: Vec<MethodDefinition>,
     /// Non-doc comments (`//` and `/* */`) appearing before this protocol.
     pub comments: CommentAttachment,
     /// Doc comment attached to this protocol (`///` lines).
@@ -458,6 +477,47 @@ pub struct ProtocolMethodSignature {
     /// Doc comment attached to this signature (`///` lines).
     pub doc_comment: Option<String>,
     /// Source location.
+    pub span: Span,
+}
+
+/// A `uses:` line in a class body (ADR 0127 §2) — composes a protocol's
+/// provided methods into the class.
+///
+/// Example: `uses: Comparable`, or with clauses:
+/// `uses: Enumerable(Worker) excluding: #(#size) overriding: #(#printString)`.
+///
+/// Grammar: `uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)]
+/// [overriding: #(#sel, …)]`. `uses:` lines must appear immediately after
+/// the class header, before any `state:`/`field:`/`classState:` or method
+/// declaration.
+///
+/// This node only carries the *syntax* — composing these into the using
+/// class's own methods, and everything semantic (conflict detection,
+/// required-selector checking, the class-wins/overriding precedence rule)
+/// is `semantic_analysis::trait_expansion` (BT-3588), not a parser concern.
+/// Until that pass lands, a class with any `uses:` line gets a single
+/// "protocol composition is not yet supported" parse error (ADR 0127,
+/// BT-3587's acceptance criteria) — the class still parses and round-trips.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtocolUse {
+    /// The used protocol's name.
+    pub protocol: Identifier,
+    /// Optional package qualifier (ADR 0070): `json` in `uses: json@Parser`.
+    pub package: Option<Identifier>,
+    /// Type arguments applied to the protocol, e.g. `(Worker)` in
+    /// `uses: Enumerable(Worker)`. Empty when the protocol is not generic
+    /// or no arguments were written.
+    pub type_args: Vec<TypeAnnotation>,
+    /// Selectors dropped from this use (`excluding: #(#sel, …)`, Pharo `-`).
+    /// Each entry's `name` is the bare selector text (e.g. `"size"`,
+    /// `"at:put:"`), `span` the source symbol's location. Empty when no
+    /// `excluding:` clause was written.
+    pub excluding: Vec<Identifier>,
+    /// Selectors acknowledged as intentionally replacing an inherited
+    /// method (`overriding: #(#sel, …)`, ADR 0127 §3a). Same shape as
+    /// [`Self::excluding`]. Empty when no `overriding:` clause was written.
+    pub overriding: Vec<Identifier>,
+    /// Source location of the entire `uses:` line.
     pub span: Span,
 }
 

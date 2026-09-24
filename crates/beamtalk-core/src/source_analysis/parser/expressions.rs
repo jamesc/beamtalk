@@ -2551,7 +2551,12 @@ impl Parser {
     /// The `,` and `}` delimiters terminate parsing naturally: `,` has no
     /// binding power (so binary parsing stops) and `}` cannot start a message
     /// send.
-    fn parse_map_literal(&mut self) -> Expression {
+    ///
+    /// `pub(super)` so `declarations.rs`'s `uses:` line parser can consume
+    /// (and discard) an `aliasing:` clause's `#{...}` argument for parse
+    /// recovery — `aliasing:` itself is reserved but "not yet supported"
+    /// in v1 (ADR 0127 §Status 4).
+    pub(super) fn parse_map_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
@@ -2682,7 +2687,12 @@ impl Parser {
     /// so `#(obj kw: arg)` is a single-element list containing the keyword send.
     /// The `,`, `|`, and `)` delimiters terminate parsing naturally since they are
     /// not valid keyword selectors or binary selectors in element context.
-    fn parse_list_literal(&mut self) -> Expression {
+    ///
+    /// `pub(super)` so `declarations.rs`'s `uses:` line parser
+    /// (`parse_selector_symbol_list`, ADR 0127 §2) can reuse this for
+    /// `excluding:`/`overriding:` selector lists rather than duplicating
+    /// the comma/paren/cons/error-recovery handling.
+    pub(super) fn parse_list_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::ListOpen, "Expected '#('");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
 

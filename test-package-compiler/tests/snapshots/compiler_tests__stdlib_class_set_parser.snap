@@ -887,6 +887,7 @@ Module {
             shape_version: None,
             type_params: [],
             superclass_type_args: [],
+            uses: [],
             span: Span {
                 start: 215,
                 end: 903,

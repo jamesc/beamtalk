@@ -564,6 +564,7 @@ Module {
             shape_version: None,
             type_params: [],
             superclass_type_args: [],
+            uses: [],
             span: Span {
                 start: 922,
                 end: 1204,
@@ -1037,6 +1038,7 @@ Module {
             shape_version: None,
             type_params: [],
             superclass_type_args: [],
+            uses: [],
             span: Span {
                 start: 1206,
                 end: 1555,

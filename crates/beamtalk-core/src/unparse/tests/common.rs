@@ -53,3 +53,19 @@ pub(super) fn assert_identity(source: &str) {
         "formatter changed already-canonical source.\n\noriginal:\n{source}\n\nformatted:\n{formatted}"
     );
 }
+
+/// Like [`assert_identity`], but for syntax that parses to a diagnostic
+/// `Severity::Error` on purpose (a "not yet supported" placeholder, e.g. a
+/// `uses:` line before BT-3588's flattening pass exists) — `format_source`
+/// refuses to format anything with an error diagnostic, so this bypasses
+/// that gate and unparses directly via [`parse_source`]/`unparse_module`.
+/// Still checks canonical round-tripping, just without requiring a clean
+/// parse.
+#[track_caller]
+pub(super) fn assert_identity_despite_errors(source: &str) {
+    let formatted = unparse_module(&parse_source(source));
+    assert_eq!(
+        formatted, source,
+        "formatter changed already-canonical source.\n\noriginal:\n{source}\n\nformatted:\n{formatted}"
+    );
+}

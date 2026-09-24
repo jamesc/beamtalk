@@ -10,10 +10,11 @@
 
 use crate::ast::{
     ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
-    Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-    MethodKind, MethodModifiers, NativeDeclaration, ParameterDefinition, ProtocolDefinition,
-    ProtocolMethodSignature, ShapeVersionDeclaration, SlotKind, StandaloneMethodDefinition,
-    StateDeclaration, TypeAliasDefinition, TypeAnnotation, TypeParamDecl,
+    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
+    MethodDefinition, MethodKind, MethodModifiers, NativeDeclaration, ParameterDefinition,
+    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, ShapeVersionDeclaration, SlotKind,
+    StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition, TypeAnnotation,
+    TypeParamDecl,
 };
 use crate::source_analysis::{Span, TokenKind};
 use ecow::EcoString;
@@ -86,6 +87,23 @@ fn is_shape_version_keyword(kind: &TokenKind) -> bool {
     matches!(kind, TokenKind::Keyword(k) if k == "shapeVersion:")
 }
 
+/// Returns `true` if the token kind is the `uses:` keyword — the trait
+/// composition clause reserved at the start of a class-body line (ADR 0127
+/// §2), and, only when it has no `=>` following, inside a protocol body too
+/// (ADR 0127 §Status 8, §13). Single source for this keyword so
+/// [`Parser::is_at_member_boundary`], [`Parser::current_token_could_start_a_declaration`]
+/// and the `uses:`-line dispatch in [`Parser::parse_class_body`]/
+/// [`Parser::parse_protocol_body`] can't drift apart. Unlike `handleScope:`/
+/// `shapeVersion:`, `uses:` *is* added to the member-boundary set: it is a
+/// lexer keyword token, never a plain identifier, so it can never
+/// legitimately start a bare statement inside a method body — unlike
+/// `type`/`declare`, `is_at_member_boundary` needs no indentation gate here.
+/// A method or provided method literally named `uses:` (it has a `=>`) is
+/// disambiguated by callers checking `is_at_method_definition()` first.
+fn is_uses_keyword(kind: &TokenKind) -> bool {
+    matches!(kind, TokenKind::Keyword(k) if k == "uses:")
+}
+
 /// Returns `true` for a `state:`/`field:`/`classState:` keyword — the set of
 /// declaration-start keywords that (unlike `handleScope:`) can appear
 /// anywhere in a class body, not just its header. Single source for
@@ -95,6 +113,16 @@ fn is_shape_version_keyword(kind: &TokenKind) -> bool {
 fn is_state_like_declaration_keyword(kind: &TokenKind) -> bool {
     is_state_or_field_keyword(kind) || is_class_state_keyword(kind)
 }
+
+/// [`Parser::parse_class_body`]'s return shape: `(state, instance methods,
+/// class methods, class variables, uses: lines)`.
+type ClassBodyParts = (
+    Vec<StateDeclaration>,
+    Vec<MethodDefinition>,
+    Vec<MethodDefinition>,
+    Vec<StateDeclaration>,
+    Vec<ProtocolUse>,
+);
 
 /// A consumed declaration-level `@expect category`,
 /// bundled with the doc comment and plain leading comments that sat in its
@@ -387,8 +415,9 @@ impl Parser {
             self.collect_trailing_comment()
         };
 
-        // Parse class body (state declarations, instance methods, class methods, class variables)
-        let (state, methods, class_methods, class_variables) = self.parse_class_body();
+        // Parse class body (uses: lines, state declarations, instance
+        // methods, class methods, class variables)
+        let (state, methods, class_methods, class_variables, uses) = self.parse_class_body();
 
         // Determine end span: max of last instance method, class method, state, class var, or name
         let mut end = name.span;
@@ -406,6 +435,11 @@ impl Parser {
         // declaration.
         if let Some(ref sv) = shape_version {
             end = end.merge(sv.span);
+        }
+        // ADR 0127 §2: same rationale — a class whose body is only `uses:`
+        // lines (no state/methods yet) still spans its declaration.
+        if let Some(u) = uses.last() {
+            end = end.merge(u.span);
         }
         if let Some(s) = state.last() {
             end = end.merge(s.span);
@@ -444,6 +478,18 @@ impl Parser {
         class_def.backing_module = backing_module;
         class_def.handle_scope = handle_scope;
         class_def.shape_version = shape_version;
+        // ADR 0127: composing a trait's provisions into a class's own body
+        // (flattening) is BT-3588's semantic-analysis pass, not implemented
+        // yet. A class that names a `uses:` line still parses and
+        // round-trips, but gets a single placeholder error here so nothing
+        // downstream silently treats it as flattened.
+        if let Some(first_use) = uses.first() {
+            self.diagnostics.push(Diagnostic::error(
+                "protocol composition is not yet supported",
+                first_use.span,
+            ));
+        }
+        class_def.uses = uses;
         class_def
     }
 
@@ -661,23 +707,18 @@ impl Parser {
         }
     }
 
-    /// Parses the body of a class (state declarations and methods).
+    /// Parses the body of a class (`uses:` lines, state declarations, and
+    /// methods).
     ///
     /// State declarations start with `state:`.
     /// Methods are identified by having a `=>` somewhere.
     #[allow(clippy::too_many_lines)] // one dispatch loop over several declaration kinds
-    fn parse_class_body(
-        &mut self,
-    ) -> (
-        Vec<StateDeclaration>,
-        Vec<MethodDefinition>,
-        Vec<MethodDefinition>,
-        Vec<StateDeclaration>,
-    ) {
+    fn parse_class_body(&mut self) -> ClassBodyParts {
         let mut state = Vec::new();
         let mut methods = Vec::new();
         let mut class_methods = Vec::new();
         let mut class_variables = Vec::new();
+        let mut uses = Vec::new();
 
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
@@ -769,6 +810,27 @@ impl Parser {
                         methods.push(method);
                     }
                 }
+            }
+            // `uses:` composes a protocol's provided methods into this class
+            // (ADR 0127 §2). Checked *after* `is_at_method_definition()` so a
+            // keyword method literally named `uses:` (has a `=>` body) is
+            // parsed as an ordinary method above, exactly as inside a
+            // protocol body (see `parse_protocol_body`) — only a `uses:`
+            // line with no `=>` is the reserved composition clause.
+            else if is_uses_keyword(self.current_kind()) {
+                let has_prior_member = !state.is_empty()
+                    || !methods.is_empty()
+                    || !class_methods.is_empty()
+                    || !class_variables.is_empty();
+                let use_line = self.parse_protocol_use_line();
+                if has_prior_member {
+                    self.diagnostics.push(Diagnostic::error(
+                        "'uses:' lines must come before state and method declarations",
+                        use_line.span,
+                    ));
+                } else {
+                    uses.push(use_line);
+                }
             } else if is_handle_scope_keyword(self.current_kind()) {
                 // ADR 0103: `handleScope:` is a header clause parsed *before* the
                 // body (see `parse_optional_handle_scope`). Reaching it here means
@@ -797,6 +859,27 @@ impl Parser {
                 {
                     self.advance(); // consume the integer argument to recover
                 }
+            } else if let TokenKind::Keyword(kw) = self.current_kind() {
+                // An unrecognized keyword line (ADR 0127 §13) — e.g. a typo,
+                // or `excluding:`/`overriding:`/`aliasing:` written without a
+                // preceding `uses:`. Reported as a targeted error instead of
+                // silently ending the class body, which previously let
+                // everything after it (including real state/method
+                // declarations) go unparsed with no diagnostic at all.
+                let kw_text = kw.clone();
+                let span = self.current_token().span();
+                self.diagnostics.push(Diagnostic::error(
+                    format!("unexpected '{kw_text}' in class body"),
+                    span,
+                ));
+                self.advance(); // consume the offending keyword
+                // Consume one same-line argument-like token too, mirroring
+                // the handleScope:/shapeVersion: misplaced-clause recovery
+                // above, so a trailing value isn't itself mistaken for the
+                // next declaration.
+                if !self.current_token().has_leading_newline() && !self.is_at_end() {
+                    self.advance();
+                }
             } else {
                 // @expect before an invalid position (e.g., end of class body)
                 if let Some((_, _, span)) = pending.expect {
@@ -816,7 +899,135 @@ impl Parser {
         // Restore in_class_body flag
         self.in_class_body = was_in_class_body;
 
-        (state, methods, class_methods, class_variables)
+        (state, methods, class_methods, class_variables, uses)
+    }
+
+    // ========================================================================
+    // `uses:` line parsing (ADR 0127 §2)
+    // ========================================================================
+
+    /// Parses a `uses:` line: `uses: [package@]ProtocolName[(TypeArgs)]
+    /// [excluding: #(#sel, …)] [overriding: #(#sel, …)] [aliasing: #{…}]`.
+    ///
+    /// Shared by [`Self::parse_class_body`] (where a valid `uses:` line is
+    /// kept on `ClassDefinition.uses`) and [`Self::parse_protocol_body`]
+    /// (where a `uses:` line is always a "not yet supported" error —
+    /// protocol-using-protocol composition, ADR 0127 §Status 8 — and the
+    /// parsed result is only used for its span). Callers have already
+    /// confirmed the current token is the `uses:` keyword.
+    ///
+    /// `aliasing:` is reserved but rejected in v1 (ADR 0127 §Status 4): its
+    /// keyword and argument are consumed here for parse recovery, but never
+    /// stored — there is no `ProtocolUse` field for it yet.
+    fn parse_protocol_use_line(&mut self) -> ProtocolUse {
+        let start = self.current_token().span();
+        self.advance(); // consume `uses:`
+
+        let first = self.parse_identifier("Expected protocol name after 'uses:'");
+        let (protocol, package) = if matches!(self.current_kind(), TokenKind::At) {
+            // Package-qualified protocol: `json @ Parser` (ADR 0070)
+            self.advance(); // consume `@`
+            let name = self.parse_identifier("Expected protocol name after '@'");
+            (name, Some(first))
+        } else {
+            (first, None)
+        };
+
+        // Optional type arguments: `Enumerable(Worker)`. Reuses the same
+        // `(TypeArgs)` parser as a class's `Collection(E) subclass: ...`
+        // superclass type arguments — identical grammar.
+        let type_args = self.parse_optional_superclass_type_args();
+
+        let mut end = type_args.last().map_or(protocol.span, TypeAnnotation::span);
+        let mut excluding = Vec::new();
+        let mut overriding = Vec::new();
+
+        // `excluding:`/`overriding:`/`aliasing:` may appear in any order —
+        // mirrors the `handleScope:`/`shapeVersion:` header-clause loop's
+        // own order tolerance, since ADR 0127 §2 does not fix an order
+        // between them either.
+        loop {
+            match self.current_kind() {
+                TokenKind::Keyword(k) if k == "excluding:" => {
+                    self.advance(); // consume `excluding:`
+                    let (selectors, span) = self.parse_selector_symbol_list();
+                    excluding = selectors;
+                    end = span;
+                }
+                TokenKind::Keyword(k) if k == "overriding:" => {
+                    self.advance(); // consume `overriding:`
+                    let (selectors, span) = self.parse_selector_symbol_list();
+                    overriding = selectors;
+                    end = span;
+                }
+                TokenKind::Keyword(k) if k == "aliasing:" => {
+                    let kw_span = self.current_token().span();
+                    self.diagnostics.push(Diagnostic::error(
+                        "'aliasing:' is not yet supported",
+                        kw_span,
+                    ));
+                    self.advance(); // consume `aliasing:`
+                    end = if matches!(self.current_kind(), TokenKind::MapOpen) {
+                        self.parse_map_literal().span()
+                    } else {
+                        kw_span
+                    };
+                }
+                _ => break,
+            }
+        }
+
+        ProtocolUse {
+            protocol,
+            package,
+            type_args,
+            excluding,
+            overriding,
+            span: start.merge(end),
+        }
+    }
+
+    /// Parses a `#(#sel, #sel2, …)` selector-symbol list — the argument of
+    /// a `uses:` line's `excluding:`/`overriding:` clause (ADR 0127 §2).
+    ///
+    /// Reuses the general list-literal parser ([`Self::parse_list_literal`])
+    /// rather than duplicating its comma/paren/trailing-comma/error-recovery
+    /// handling,
+    /// then requires each element to be a bare symbol literal — the "list of
+    /// symbols" the ADR's grammar calls for, nothing else. A non-symbol
+    /// element or a cons tail (`#(#a | rest)`) is reported and skipped;
+    /// selector text validation (does the named protocol actually provide
+    /// it?) is a semantic-analysis concern (BT-3588), not this parser's.
+    ///
+    /// Returns the parsed selectors (as `Identifier`s carrying the bare
+    /// selector text and the source symbol's span) plus the whole list's
+    /// span, for the caller's own span bookkeeping.
+    fn parse_selector_symbol_list(&mut self) -> (Vec<Identifier>, Span) {
+        let expr = self.parse_list_literal();
+        let span = expr.span();
+        let mut selectors = Vec::new();
+        if let Expression::ListLiteral { elements, tail, .. } = expr {
+            if let Some(tail) = tail {
+                self.diagnostics.push(Diagnostic::error(
+                    "a selector list cannot have a cons tail ('|')",
+                    tail.span(),
+                ));
+            }
+            for element in elements {
+                match element {
+                    Expression::Literal(Literal::Symbol(name), sym_span) => {
+                        selectors.push(Identifier::new(name, sym_span));
+                    }
+                    other => {
+                        self.diagnostics.push(Diagnostic::error(
+                            "expected a symbol selector (e.g. #foo or #at:put:) in this list",
+                            other.span(),
+                        ));
+                    }
+                }
+            }
+        }
+        (selectors, span)
     }
 
     /// Checks whether the current token is a declaration-level
@@ -1213,6 +1424,7 @@ impl Parser {
             || self.is_at_late_modifier()
             || is_handle_scope_keyword(self.current_kind())
             || is_shape_version_keyword(self.current_kind())
+            || is_uses_keyword(self.current_kind())
             || self.is_at_method_definition()
     }
 
@@ -1980,11 +2192,11 @@ impl Parser {
 
     /// Checks whether the current position starts a new class/protocol/
     /// type-alias/method/standalone-method declaration, or a `state:`/
-    /// `field:`/`classState:` keyword — the set of tokens that always end a
-    /// method body no matter how the body was left (a trailing period, a
-    /// cast `!`, or error recovery). Factored out of `parse_method_body`
-    /// because the same six-way check is needed at three separate exit
-    /// points there.
+    /// `field:`/`classState:`/`uses:` keyword — the set of tokens that
+    /// always end a method body no matter how the body was left (a trailing
+    /// period, a cast `!`, or error recovery). Factored out of
+    /// `parse_method_body` because the same check is needed at three
+    /// separate exit points there.
     fn is_at_member_boundary(&self) -> bool {
         self.is_at_end()
             || self.is_at_class_definition()
@@ -1994,6 +2206,7 @@ impl Parser {
             || self.is_at_method_definition()
             || self.is_at_standalone_method_definition()
             || is_state_like_declaration_keyword(self.current_kind())
+            || is_uses_keyword(self.current_kind())
             || self.is_at_late_modifier()
     }
 
@@ -2086,6 +2299,7 @@ impl Parser {
             && !self.is_at_declaration_level_expect()
             && !self.is_at_standalone_method_definition()
             && !is_state_like_declaration_keyword(self.current_kind())
+            && !is_uses_keyword(self.current_kind())
             && !self.is_at_late_modifier()
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
@@ -2404,6 +2618,7 @@ impl Parser {
                 extending: None,
                 method_signatures: Vec::new(),
                 class_method_signatures: Vec::new(),
+                provided_methods: Vec::new(),
                 comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: start,
@@ -2433,8 +2648,10 @@ impl Parser {
             None
         };
 
-        // Parse protocol body (method signatures without =>)
-        let (method_signatures, class_method_signatures) = self.parse_protocol_body();
+        // Parse protocol body: required signatures (no `=>`) and provided
+        // methods (`=>` body — ADR 0127 §1).
+        let (method_signatures, class_method_signatures, provided_methods) =
+            self.parse_protocol_body();
 
         // Determine end span
         let mut end = name.span;
@@ -2450,6 +2667,9 @@ impl Parser {
         if let Some(sig) = class_method_signatures.last() {
             end = end.merge(sig.span);
         }
+        if let Some(m) = provided_methods.last() {
+            end = end.merge(m.span);
+        }
         let span = start.merge(end);
 
         ProtocolDefinition {
@@ -2458,6 +2678,7 @@ impl Parser {
             extending,
             method_signatures,
             class_method_signatures,
+            provided_methods,
             comments,
             doc_comment,
             span,
@@ -2559,12 +2780,24 @@ impl Parser {
         signatures
     }
 
-    /// Parses the body of a protocol definition (method signatures without `=>`).
+    /// Parses the body of a protocol definition: required signatures (no
+    /// `=>`) and provided methods (`=>` body — ADR 0127 §1).
     ///
-    /// Protocol method signatures have the same selector and parameter syntax as
-    /// class methods, but end before `=>`. They may include optional type annotations
-    /// and return types. Signatures prefixed with `class` are collected separately
-    /// as class method requirements.
+    /// Protocol method signatures and provided methods have the same
+    /// selector and parameter syntax as class methods. A line with `=>` is a
+    /// provided method, parsed through the ordinary class method parser
+    /// ([`Self::parse_method_definition`]); a line without one stays a
+    /// required signature. Instance-side entries of either kind go on
+    /// `signatures`/`provided_methods`; entries prefixed with `class` are
+    /// collected separately (`class_signatures` for requirements — a
+    /// class-side *provision*, `class sel … =>`, is "not yet supported" in
+    /// v1, ADR 0127 §1, §13, and is never added to any list).
+    ///
+    /// A `uses:` line (protocol-using-protocol composition) is also "not
+    /// yet supported" in v1 (ADR 0127 §Status 8, §13) — reserved only when
+    /// it has no `=>` (a method literally named `uses:` has a body and is
+    /// parsed as an ordinary provided method above it in this loop, exactly
+    /// as `uses:` is disambiguated in a class body, ADR 0127 §2).
     ///
     /// The body ends when we hit:
     /// - EOF
@@ -2572,12 +2805,17 @@ impl Parser {
     /// - A class definition (`Superclass subclass:`)
     /// - A standalone method definition (`Class >>`)
     ///
-    /// Returns `(instance_signatures, class_method_signatures)`.
+    /// Returns `(instance_signatures, class_method_signatures, provided_methods)`.
     fn parse_protocol_body(
         &mut self,
-    ) -> (Vec<ProtocolMethodSignature>, Vec<ProtocolMethodSignature>) {
+    ) -> (
+        Vec<ProtocolMethodSignature>,
+        Vec<ProtocolMethodSignature>,
+        Vec<MethodDefinition>,
+    ) {
         let mut signatures = Vec::new();
         let mut class_signatures = Vec::new();
+        let mut provided_methods = Vec::new();
 
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
@@ -2589,6 +2827,42 @@ impl Parser {
             && !self.is_at_native_declaration()
             && !self.is_at_standalone_method_definition()
         {
+            // A provided method — any selector shape ending in `=>`,
+            // possibly `class`-prefixed. Checked first (pure lookahead, no
+            // trivia consumed yet) so `parse_method_definition` itself
+            // collects the doc comment/leading comments off the right
+            // token, exactly as in a class body.
+            if self.is_at_method_definition() {
+                if let Some(method) = self.parse_method_definition() {
+                    if method.is_class_method {
+                        self.diagnostics.push(Diagnostic::error(
+                            "class-side provided methods are not yet supported",
+                            method.span,
+                        ));
+                    } else {
+                        provided_methods.push(method);
+                    }
+                } else {
+                    break;
+                }
+                while self.match_token(&TokenKind::Period) {}
+                continue;
+            }
+
+            // A reserved `uses:` line with no body — protocol-using-protocol
+            // composition (ADR 0127 §Status 8), not yet supported in v1.
+            if is_uses_keyword(self.current_kind()) {
+                let _ = self.collect_doc_comment();
+                let _ = self.collect_comment_attachment();
+                let use_line = self.parse_protocol_use_line();
+                self.diagnostics.push(Diagnostic::error(
+                    "a protocol using another protocol is not yet supported",
+                    use_line.span,
+                ));
+                while self.match_token(&TokenKind::Period) {}
+                continue;
+            }
+
             // Collect the doc comment and any non-doc leading
             // comments *before* checking for `class` prefix, because both are
             // leading trivia on the `class` token and would be lost when we
@@ -2624,7 +2898,7 @@ impl Parser {
             while self.match_token(&TokenKind::Period) {}
         }
 
-        (signatures, class_signatures)
+        (signatures, class_signatures, provided_methods)
     }
 
     /// Parses a single protocol method signature (no `=>` body).

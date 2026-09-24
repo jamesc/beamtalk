@@ -495,18 +495,21 @@ Protocol define: Comparable
 }
 
 #[test]
-fn parse_protocol_with_impl_body_error() {
-    // Protocol method signatures should NOT have `=>`
-    let diagnostics = parse_err(
-        "Protocol define: Bad
+fn parse_protocol_signature_with_impl_body_is_a_provided_method() {
+    // ADR 0127 §1: a protocol signature followed by `=>` is a *provided*
+    // method (a trait), not an error — the old "protocols only declare
+    // signatures" restriction is gone.
+    let module = parse_ok(
+        "Protocol define: Greeter
   asString => \"hello\"",
     );
+    let proto = &module.protocols[0];
     assert!(
-        diagnostics.iter().any(|d| d
-            .message
-            .contains("Protocol method signatures cannot have implementations")),
-        "Expected error about protocol implementations, got: {diagnostics:?}"
+        proto.method_signatures.is_empty(),
+        "a provided method must not also appear as a required signature"
     );
+    assert_eq!(proto.provided_methods.len(), 1);
+    assert_eq!(proto.provided_methods[0].selector.name(), "asString");
 }
 
 #[test]
