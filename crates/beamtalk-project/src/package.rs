@@ -112,6 +112,25 @@ pub fn is_under_stdlib_src_dir(file: &Path) -> bool {
     components.windows(2).any(|pair| pair == ["stdlib", "src"])
 }
 
+/// Returns `true` if `file` lives anywhere under a directory literally named
+/// `stdlib` — the monorepo's whole stdlib tree (`src/`, `test/`,
+/// `bootstrap-test/`, ...), not just [`is_under_stdlib_src_dir`]'s narrower
+/// `stdlib/src` check.
+///
+/// Used to gate the same `extract_stdlib_type_specs()` FFI-typing fallback
+/// for `stdlib/test/*.bt` that `beamtalk lint`/`build-stdlib` already apply
+/// to `stdlib/src` — a file under `stdlib/test` has no sibling `beamtalk.toml`
+/// either, so (like `is_under_stdlib_src_dir`'s doc explains) there is
+/// nothing else to anchor a containment check on.
+#[must_use]
+pub fn is_under_stdlib_dir(file: &Path) -> bool {
+    let canonical = try_canonicalize(file);
+    canonical
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .any(|c| c == "stdlib")
+}
+
 /// Collect all `.bt` files from a package's conventional source directories
 /// (`src/` and `test/`) for cross-file class resolution.
 ///
@@ -331,6 +350,39 @@ mod tests {
         fs::write(&file, "Object subclass: Foo\n").unwrap();
 
         assert!(!is_under_stdlib_src_dir(&file));
+    }
+
+    #[test]
+    fn is_under_stdlib_dir_true_for_stdlib_test_file() {
+        let tmp = TempDir::new().unwrap();
+        let stdlib_test = tmp.path().join("stdlib").join("test");
+        fs::create_dir_all(&stdlib_test).unwrap();
+        let file = stdlib_test.join("uuid_test.bt");
+        fs::write(&file, "TestCase subclass: UuidTest\n").unwrap();
+
+        assert!(is_under_stdlib_dir(&file));
+    }
+
+    #[test]
+    fn is_under_stdlib_dir_true_for_stdlib_src_file() {
+        let tmp = TempDir::new().unwrap();
+        let stdlib_src = tmp.path().join("stdlib").join("src");
+        fs::create_dir_all(&stdlib_src).unwrap();
+        let file = stdlib_src.join("uuid.bt");
+        fs::write(&file, "Value subclass: Uuid\n").unwrap();
+
+        assert!(is_under_stdlib_dir(&file));
+    }
+
+    #[test]
+    fn is_under_stdlib_dir_false_for_unrelated_project() {
+        let tmp = TempDir::new().unwrap();
+        let test_dir = tmp.path().join("test");
+        fs::create_dir_all(&test_dir).unwrap();
+        let file = test_dir.join("foo_test.bt");
+        fs::write(&file, "TestCase subclass: FooTest\n").unwrap();
+
+        assert!(!is_under_stdlib_dir(&file));
     }
 
     #[test]

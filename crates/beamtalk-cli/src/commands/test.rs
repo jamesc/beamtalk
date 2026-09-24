@@ -19,6 +19,7 @@ use crate::beam_compiler::{
 };
 use beamtalk_codegen::core_erlang::escape_atom_chars;
 use beamtalk_core::file_walker::FileWalker;
+use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
@@ -156,6 +157,7 @@ fn compile_fixtures_directory(
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
     current_package: Option<&str>,
+    native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -195,6 +197,7 @@ fn compile_fixtures_directory(
             hierarchy,
             warnings_as_errors,
             current_package,
+            native_type_registry.cloned(),
         )
         .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
         core_files.push(core_file);
@@ -219,6 +222,7 @@ fn compile_fixture(
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
     current_package: Option<&str>,
+    native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
@@ -229,6 +233,7 @@ fn compile_fixture(
         hierarchy,
         warnings_as_errors,
         current_package,
+        native_type_registry.cloned(),
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
@@ -354,6 +359,7 @@ fn generate_core_file(
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
     current_package: Option<&str>,
+    native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<Utf8PathBuf> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -370,8 +376,13 @@ fn generate_core_file(
         ..Default::default()
     };
 
+    // ADR 0075 FFI typing: without this, `beamtalk test` type-checks every
+    // `(Erlang mod) fn:` call as Dynamic regardless of the module's real
+    // `-spec`, unlike `beamtalk build`/`beamtalk lint` — see
+    // `initialize_pipeline`'s `native_type_registry` computation.
     let ctx = CompileContext {
         hierarchy: hierarchy.clone(),
+        native_type_registry,
         ..CompileContext::default()
     };
     compile_source_with_bindings(
@@ -574,6 +585,7 @@ fn discover_and_compile_doc_tests(
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
     current_package: Option<&str>,
+    native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -594,6 +606,7 @@ fn discover_and_compile_doc_tests(
         hierarchy,
         warnings_as_errors,
         current_package,
+        native_type_registry,
     )
     .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
@@ -771,6 +784,15 @@ struct TestPipeline {
     class_module_index: HashMap<String, String>,
     /// Merged class-name to superclass-name index across all packages.
     class_superclass_index: HashMap<String, String>,
+    /// ADR 0075 FFI type registry, merged across every discovered package's
+    /// auto-extracted + stub-overridden native types (mirroring `beamtalk
+    /// build`), or `extract_stdlib_type_specs()` when no package was
+    /// discovered and the test files live under `stdlib/` (mirroring
+    /// `beamtalk lint`'s stdlib fallback, BT-3606). Threaded into every
+    /// `generate_core_file`/`compile_fixture` call so `(Erlang mod) fn:`
+    /// calls type-check the same way under `beamtalk test` as they do under
+    /// `build`/`lint`, instead of always inferring `Dynamic`.
+    native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
     /// Cross-file class metadata for type checker hierarchy resolution.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Same-package `src/` (and dependency-exported) type-alias declarations
@@ -1037,6 +1059,81 @@ fn build_merged_class_indexes(
     )
 }
 
+/// Compute the ADR 0075 FFI type registry for this test run.
+///
+/// Mirrors `beamtalk build`'s per-package resolution chain (auto-extract →
+/// dependency stubs → project-local stubs, `crate::commands::build::stubs`)
+/// for every discovered package, merged together via `apply_overrides` —
+/// and `beamtalk lint`'s stdlib fallback (`extract_stdlib_type_specs`,
+/// BT-3606) when no package was discovered at all and the test files live
+/// under a `stdlib/` tree (which has no `beamtalk.toml` to discover).
+///
+/// Without this, `(Erlang mod) fn:` calls in `.bt` test files type-check as
+/// `Dynamic` under `beamtalk test` regardless of the module's real `-spec`,
+/// unlike `beamtalk build`/`beamtalk lint` — see `generate_core_file`'s
+/// `native_type_registry` param.
+///
+/// Returns `None` when neither case applies (e.g. a bare directory of
+/// `.bt` files with no `beamtalk.toml` and no `stdlib/` ancestry), matching
+/// this function's pre-existing (implicit) behaviour.
+fn compute_native_type_registry(
+    discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
+    test_files: &[Utf8PathBuf],
+) -> Option<std::sync::Arc<NativeTypeRegistry>> {
+    if discovered_packages.is_empty() {
+        let is_stdlib_target = test_files
+            .iter()
+            .any(|f| beamtalk_project::package::is_under_stdlib_dir(f.as_std_path()));
+        return if is_stdlib_target {
+            super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
+        } else {
+            None
+        };
+    }
+
+    let mut merged = NativeTypeRegistry::default();
+    let mut merged_any = false;
+    for (pkg_root, _pkg) in discovered_packages {
+        let layout = BuildLayout::new(pkg_root.clone());
+        let auto_extract = super::build::extract_type_specs(&layout, true, false);
+
+        let dep_options = beamtalk_core::CompilerOptions::default();
+        let resolved_deps =
+            super::deps::ensure_deps_resolved(pkg_root, &dep_options).unwrap_or_default();
+        let dependency_stubs = super::build::load_dependency_stub_registries(
+            &resolved_deps,
+            super::build::distribution_stubs_dir().as_deref(),
+            auto_extract.as_ref(),
+            super::OutputFormat::Text,
+        );
+        let project_stubs = super::build::load_project_stub_registry(
+            pkg_root,
+            auto_extract.as_ref(),
+            super::OutputFormat::Text,
+        );
+
+        let pkg_registry = if dependency_stubs.is_none() && project_stubs.is_none() {
+            auto_extract
+        } else {
+            let mut pkg_merged = auto_extract.unwrap_or_default();
+            if let Some((dep_registry, _diags)) = dependency_stubs {
+                pkg_merged.apply_overrides(dep_registry);
+            }
+            if let Some((stub_registry, _diags)) = project_stubs {
+                pkg_merged.apply_overrides(stub_registry);
+            }
+            Some(pkg_merged)
+        };
+
+        if let Some(reg) = pkg_registry {
+            merged.apply_overrides(reg);
+            merged_any = true;
+        }
+    }
+
+    merged_any.then(|| std::sync::Arc::new(merged))
+}
+
 /// Initialize the test pipeline: discover packages and build class indexes.
 fn initialize_pipeline(
     test_path: Utf8PathBuf,
@@ -1075,10 +1172,13 @@ fn initialize_pipeline(
             super::build::collect_all_alias_infos(&[&all_alias_infos, &extra_aliases]);
     }
 
+    let native_type_registry = compute_native_type_registry(&discovered_packages, &test_files);
+
     Ok(TestPipeline {
         test_path,
         test_files,
         build_dir,
+        native_type_registry,
         warnings_as_errors,
         discovered_packages,
         pkg_root_to_name,
@@ -1176,6 +1276,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         &fixture_hierarchy,
         pipeline.warnings_as_errors,
         fixtures_package.as_deref(),
+        pipeline.native_type_registry.as_ref(),
     )?;
     for module_name in &precompiled {
         pipeline.precompiled_modules.insert(module_name.clone());
@@ -1310,6 +1411,7 @@ fn compile_single_test_file(
             &file_hierarchy,
             pipeline.warnings_as_errors,
             test_file_package.as_deref(),
+            pipeline.native_type_registry.clone(),
         )
         .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
@@ -1329,6 +1431,7 @@ fn compile_single_test_file(
         &file_hierarchy,
         pipeline.warnings_as_errors,
         test_file_package.as_deref(),
+        pipeline.native_type_registry.as_ref(),
     )?;
     for dr in doc_results {
         // Doc test EUnit wrappers are still generated but not compiled here.
@@ -1412,6 +1515,7 @@ fn resolve_load_directives(
             hierarchy,
             pipeline.warnings_as_errors,
             fixture_package.as_deref(),
+            pipeline.native_type_registry.as_ref(),
         )?;
         pipeline.all_fixture_modules.push(module_name);
     }
