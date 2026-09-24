@@ -357,6 +357,7 @@ workflow. For AI agent contributors, see **[AGENTS.md](AGENTS.md)**.
 
 - [Architecture](docs/beamtalk-architecture.md) — Compiler pipeline, runtime, hot reload
 - [Testing Strategy](docs/development/testing-strategy.md) — How we verify compiler correctness
+- [Deploying](docs/development/deploying.md) — `beamtalk release`, the `bin/<name>` launcher, Docker/systemd, upgrades (ADR 0125)
 
 ### Tooling & Vision
 

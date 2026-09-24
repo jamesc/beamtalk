@@ -832,6 +832,43 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         "expected `Smoke run`'s result (42) in rpc output: {rpc_stdout}"
     );
 
+    // `rpc "BeamtalkInterface releaseInfo"` — ADR 0125 §1.1/§1.8's other
+    // headline example (BT-3576): a parity-neutral reflective send, always
+    // available (no compiler needed), naming the release, its version and
+    // the toolchain OTP release. `BeamtalkInterface` — not the ADR prose's
+    // `Beamtalk` — is the class run-entry actually resolves: `Beamtalk` is
+    // a *global instance* of `BeamtalkInterface` (`stdlib/src/beamtalk_
+    // interface.bt`'s moduledoc), not itself a registered class, and
+    // run-entry dispatch only resolves registered classes
+    // (`beamtalk_repl_eval:resolve_entry/2` ->
+    // `beamtalk_runtime_api:whereis_class/1`) — confirmed empirically:
+    // `rpc "Beamtalk releaseInfo"` answers `Class 'Beamtalk' is not
+    // loaded`. Filed as a follow-up (BT-3612) rather than fixed here — this
+    // issue's scope is docs/e2e coverage, not run-entry class resolution.
+    let rpc_release_info = launcher_command(&output_dir, name)
+        .args(["rpc", "BeamtalkInterface releaseInfo"])
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> rpc \"BeamtalkInterface releaseInfo\"");
+    assert!(
+        rpc_release_info.status.success(),
+        "rpc releaseInfo failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&rpc_release_info.stdout),
+        String::from_utf8_lossy(&rpc_release_info.stderr)
+    );
+    let rpc_release_info_stdout = String::from_utf8_lossy(&rpc_release_info.stdout);
+    for expected in [
+        "release => <<\"cli_subprocess_fixture\">>",
+        "release_version => <<\"0.1.0\">>",
+        "otp_release =>",
+    ] {
+        assert!(
+            rpc_release_info_stdout.contains(expected),
+            "expected {expected:?} in `rpc \"BeamtalkInterface releaseInfo\"` output: \
+             {rpc_release_info_stdout}"
+        );
+    }
+
     // `stop` — graceful `init:stop()` over distribution; the foreground
     // process must exit on its own shortly after.
     let stop = launcher_command(&output_dir, name)

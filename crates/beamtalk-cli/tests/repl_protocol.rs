@@ -34,6 +34,9 @@
 //! cargo test --test repl_protocol -- --ignored --nocapture
 //! ```
 
+#[path = "cli_common/mod.rs"]
+mod cli_common;
+
 use beamtalk_cli::repl_startup;
 use beamtalk_core::source_analysis::is_input_complete;
 use beamtalk_core::unparse::escape_string_literal;
@@ -555,6 +558,159 @@ impl ProcessManager {
             cover_enabled: false,
             port,
             project_dir: e2e_project_dir,
+        }
+    }
+
+    /// Build a **real** `beamtalk release` artifact — `[application]
+    /// supervisor`, `[release] console = true` — and boot it from its own
+    /// generated `.rel`/`start.boot`/`sys.config` via `erl -boot
+    /// … -boot_var RELEASE_DIR …`, exactly as a deployed release boots
+    /// (ADR 0125 §1.3/§1.4). Unlike [`Self::start_release`], which starts
+    /// `beamtalk_workspace_sup:start_link/1` directly by hand (BT-3575's
+    /// wire-level fixture — see that method's doc), this exercises the
+    /// real `beamtalk_workspace_app:start/2` app-env-driven start path and
+    /// `.app` module activation end to end (BT-3576).
+    ///
+    /// There is no `[release] port` manifest key (ADR 0125 §1.2 lists only
+    /// `console`/`bind`), so an operator who wants a specific console port
+    /// sets it via a `[release] sys-config` overlay file — the documented
+    /// "last one wins" merge (`assembly::generate_sys_config`'s doc
+    /// comment). This fixture uses that same mechanism to request an
+    /// OS-assigned port (`{tcp_port, 0}`), matching every other fixture
+    /// here.
+    #[allow(clippy::too_many_lines)] // one straight-line fixture-build-then-boot sequence
+    fn start_real_release() -> Self {
+        let debug_output = env::var("E2E_DEBUG").is_ok();
+        eprintln!("E2E: Building and booting a real console-enabled release...");
+
+        let project_dir = std::env::temp_dir().join(format!(
+            "bt_e2e_release_smoke_project_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(project_dir.join("src")).expect("mkdir release-smoke src");
+        std::fs::create_dir_all(project_dir.join("config")).expect("mkdir release-smoke config");
+
+        std::fs::write(
+            project_dir.join("beamtalk.toml"),
+            "# Copyright 2026 James Casey\n\
+             # SPDX-License-Identifier: Apache-2.0\n\
+             \n\
+             [package]\n\
+             name = \"release_smoke_fixture\"\n\
+             version = \"0.1.0\"\n\
+             \n\
+             [application]\n\
+             supervisor = \"ReleaseSmokeSup\"\n\
+             \n\
+             [release]\n\
+             console = true\n\
+             sys-config = \"config/sys.config\"\n\
+             \n\
+             [dependencies]\n",
+        )
+        .expect("write release-smoke beamtalk.toml");
+
+        std::fs::write(
+            project_dir.join("src/ReleaseSmokeSup.bt"),
+            "// Copyright 2026 James Casey\n\
+             // SPDX-License-Identifier: Apache-2.0\n\
+             \n\
+             Supervisor subclass: ReleaseSmokeSup\n\
+             \n\
+             \x20\x20class children => #()\n",
+        )
+        .expect("write src/ReleaseSmokeSup.bt");
+
+        std::fs::write(
+            project_dir.join("src/ReleaseSmoke.bt"),
+            "// Copyright 2026 James Casey\n\
+             // SPDX-License-Identifier: Apache-2.0\n\
+             \n\
+             /// Dispatched via `:run-entry` (ADR 0125 §1.5/§1.7) — the\n\
+             /// no-compiler-required path a console-enabled release always\n\
+             /// answers on.\n\
+             Object subclass: ReleaseSmoke\n\
+             \n\
+             \x20\x20class ping => 42\n",
+        )
+        .expect("write src/ReleaseSmoke.bt");
+
+        // No `[release] port` key exists — this overlay is the documented
+        // way to set one (see this method's doc comment). `0` is the
+        // OS-assigned-port convention every other fixture here uses.
+        std::fs::write(
+            project_dir.join("config/sys.config"),
+            "[{beamtalk_workspace, [{tcp_port, 0}]}].\n",
+        )
+        .expect("write release-smoke config/sys.config");
+
+        let output_dir = project_dir.join("dist");
+        cli_common::beamtalk()
+            .current_dir(&project_dir)
+            .args(["release", "--output"])
+            .arg(&output_dir)
+            .timeout(Duration::from_secs(180))
+            .assert()
+            .success();
+
+        let rel_dir = output_dir.join("releases").join("0.1.0");
+        let boot_path = rel_dir.join("start");
+        let sys_config_noext = rel_dir.join("sys");
+        let release_dir_for_boot_var = beamtalk_cli::path_util::to_forward_slash(
+            output_dir
+                .to_str()
+                .expect("release output dir must be UTF-8"),
+        );
+
+        let stderr_cfg = if debug_output {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
+
+        // `-sname` is required, not cosmetic: `erlang:get_cookie/0` (what
+        // the console's auth check compares the client's cookie against)
+        // returns `nocookie` on a non-distributed node regardless of
+        // `-setcookie` — distribution has to actually be alive for the
+        // cookie to take effect, exactly as `start_release`'s own fixture
+        // already does above.
+        let sname = format!("beamtalk_e2e_release_smoke_{}", std::process::id());
+
+        let mut beam_child = Command::new("erl")
+            .arg("-noshell")
+            .arg("-noinput")
+            .arg("-sname")
+            .arg(&sname)
+            .arg("-boot")
+            .arg(&boot_path)
+            .arg("-boot_var")
+            .arg("RELEASE_DIR")
+            .arg(&release_dir_for_boot_var)
+            .arg("-config")
+            .arg(&sys_config_noext)
+            .arg("-setcookie")
+            .arg(E2E_COOKIE)
+            .arg("-eval")
+            .arg(
+                "timer:sleep(200), \
+                 {ok, ActualPort} = beamtalk_repl_server:get_port(), \
+                 io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
+                 receive stop -> ok end.",
+            )
+            .env("BEAMTALK_NO_FILE_LOG", "1")
+            .stdout(Stdio::piped())
+            .stderr(stderr_cfg)
+            .spawn()
+            .expect("spawn erl to boot the release-smoke release");
+
+        let port = read_port_from_beam(&mut beam_child);
+        eprintln!("E2E: release-smoke console ready on port {port}");
+
+        Self {
+            beam_process: Some(beam_child),
+            cover_enabled: false,
+            port,
+            project_dir,
         }
     }
 
@@ -1921,6 +2077,8 @@ fn e2e_language_tests() {
     // against a `mode => release` node (ADR 0125 §1.5/§1.6, BT-3575) and
     // are run by their own dedicated test functions below, each against
     // its own release-mode fixture, not this shared workspace-mode node.
+    // `release_smoke.btscript` is excluded for the same reason — it asserts
+    // against a *real*, `beamtalk release`-assembled console (BT-3576).
     let mut test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
         .expect("Failed to read test cases directory")
         .filter_map(|entry| {
@@ -1928,6 +2086,7 @@ fn e2e_language_tests() {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "btscript")
                 && !is_release_console_case(&path)
+                && !is_release_smoke_case(&path)
             {
                 Some(path)
             } else {
@@ -1982,9 +2141,12 @@ fn is_release_console_case(path: &std::path::Path) -> bool {
         .is_some_and(|s| s.starts_with("release_console_"))
 }
 
-/// Run every `release_console_*.btscript` case file that matches `predicate`
-/// against a fresh `mode => release` node, and panic naming every failure —
-/// the shared body behind the two release-mode fixture tests below.
+/// Run every `.btscript` case file matching `predicate` against a fresh
+/// dedicated-fixture node, and panic naming every failure — the shared body
+/// behind the release-mode fixture tests below. `predicate` is the whole
+/// selection: callers combine "which dedicated-fixture family" with "which
+/// file in that family" themselves (e.g. `is_release_console_case(p) &&
+/// p.file_stem() == Some("release_console_default")`).
 fn run_release_console_cases(
     manager: &ProcessManager,
     clear_bindings: bool,
@@ -2004,10 +2166,7 @@ fn run_release_console_cases(
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "btscript")
-                && is_release_console_case(&path)
-                && predicate(&path)
-            {
+            if path.extension().is_some_and(|ext| ext == "btscript") && predicate(&path) {
                 Some(path)
             } else {
                 None
@@ -2017,7 +2176,7 @@ fn run_release_console_cases(
     test_files.sort();
     assert!(
         !test_files.is_empty(),
-        "no matching release_console_*.btscript case file found in {}",
+        "no matching dedicated-fixture .btscript case file found in {}",
         cases_dir.display()
     );
 
@@ -2060,7 +2219,8 @@ fn run_release_console_cases(
 fn e2e_release_mode_console_default_tests() {
     let manager = ProcessManager::start_release(false);
     run_release_console_cases(&manager, false, |p| {
-        p.file_stem().and_then(|s| s.to_str()) == Some("release_console_default")
+        is_release_console_case(p)
+            && p.file_stem().and_then(|s| s.to_str()) == Some("release_console_default")
     });
 }
 
@@ -2073,8 +2233,31 @@ fn e2e_release_mode_console_default_tests() {
 fn e2e_release_mode_console_include_compiler_tests() {
     let manager = ProcessManager::start_release(true);
     run_release_console_cases(&manager, true, |p| {
-        p.file_stem().and_then(|s| s.to_str()) == Some("release_console_include_compiler")
+        is_release_console_case(p)
+            && p.file_stem().and_then(|s| s.to_str()) == Some("release_console_include_compiler")
     });
+}
+
+/// `release_smoke.btscript` asserts against `ProcessManager::start_real_release`'s
+/// node instead of the shared workspace-mode one — see `is_release_smoke_case`.
+fn is_release_smoke_case(path: &std::path::Path) -> bool {
+    path.file_stem().and_then(|s| s.to_str()) == Some("release_smoke")
+}
+
+/// ADR 0125 §1.1/§1.5/§1.6 end-to-end release-console coverage (BT-3576):
+/// unlike `e2e_release_mode_console_*_tests` above (BT-3575's hand-started
+/// `beamtalk_workspace_sup:start_link/1` fixture), this attaches to a
+/// *real* `beamtalk release`-assembled artifact, booted from its own
+/// generated `.rel`/`start.boot`/`sys.config` — the same app-env-driven
+/// start path (`beamtalk_workspace_app:start/2`) and `.app` module
+/// activation a deployed release goes through — and exercises `run-entry`
+/// plus the `release_mode_no_compiler` refusal against it.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_release_smoke_test() {
+    let manager = ProcessManager::start_real_release();
+    run_release_console_cases(&manager, false, is_release_smoke_case);
 }
 
 #[cfg(test)]

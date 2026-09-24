@@ -34,6 +34,7 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 |----------|-------------|
 | [Architecture](beamtalk-architecture.md) | Compiler pipeline, runtime, and hot code loading |
 | [Testing Strategy](development/testing-strategy.md) | How we test the compiler and runtime |
+| [Deploying](development/deploying.md) | `beamtalk release`, the `bin/<name>` launcher, Docker/systemd, console + reverse proxy, upgrades (ADR 0125) |
 
 ### Vision & Planning
 
