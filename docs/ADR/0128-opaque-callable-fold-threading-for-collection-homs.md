@@ -1,7 +1,7 @@
 # ADR 0128: Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs
 
 ## Status
-Proposed (2026-09-23)
+Implemented (2026-09-24)
 
 ## Context
 
@@ -277,7 +277,8 @@ element** instead of assuming a fixed shape):
         <'true'> when 'true' ->
           let _ = apply _Callable (_Elem) in _Acc            %% Tier 1: StateAcc passes through unchanged
         <'false'> when 'true' ->
-          apply _Callable (_Elem, _Acc)                       %% Tier 2: {Result, NewStateAcc} — _Acc genuinely threaded
+          let _T = apply _Callable (_Elem, _Acc) in
+          call 'erlang':'element'(2, _T)                      %% Tier 2: NewStateAcc (element 2) becomes the next _Acc
       end in
   let _FinalState = call 'lists':'foldl'(_FoldFun, State, _Items) in
   {'reply', 'nil', _FinalState}                                %% real threading — mutation escapes correctly
@@ -286,9 +287,14 @@ element** instead of assuming a fixed shape):
 The difference from the buggy version is exactly the two defects named
 above: the accumulator (`_Acc`, seeded from `State`) is the `lists:foldl`
 loop's OWN accumulator, threaded by `lists:foldl` itself across all four
-elements (not frozen once), and the Tier 2 branch's full `{Result,
-NewStateAcc}` pair is preserved and becomes the next iteration's `_Acc`
-(not discarded via `element(1, _T)`).
+elements (not frozen once), and the Tier 2 branch's `NewStateAcc` (element
+2 of the callable's own `{Result, NewStateAcc}` reply) becomes the next
+iteration's `_Acc` (not discarded via `element(1, _T)`, as the buggy
+version did — but also not left as the raw `{Result, NewStateAcc}` pair,
+which would neither satisfy the next call's `apply _Callable(_Elem, _Acc)`
+contract — `_Callable` reads/writes its own second parameter as a raw map
+via `maps:get`/`maps:put` — nor the final reply's `NewState` slot, which
+must be a raw map too).
 
 ### Full trace through `size => self inject: 0 into: [:n :_each | n + 1]`
 

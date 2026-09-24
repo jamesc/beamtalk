@@ -3651,6 +3651,41 @@ impl CoreErlangGenerator {
             return false;
         }
 
+        // ADR 0128 / BT-3583: `do:`/`collect:`/`select:` forwarding a
+        // non-literal (opaque) callable — its tier is unknown until
+        // runtime, so conservatively require StateAcc threading;
+        // `generate_simple_list_op`'s non-literal branch now always folds
+        // with a runtime-discriminated accumulator. Scoped to exactly the
+        // three selectors `generate_simple_list_op` covers — not widened to
+        // other ControlFlow selectors (`ifTrue:`/`whileTrue:`/`on:do:`/…),
+        // which have their own literal-block-only analysis above and are
+        // out of this ADR's scope.
+        //
+        // Gated on `opaque_callable_list_op_needs_state_fold()`
+        // (`control_flow/list_ops/mod.rs`) — the SAME predicate
+        // `generate_simple_list_op` uses to decide whether it actually
+        // builds the `{Result, NewState}`-tuple fold, so this classifier
+        // and that codegen decision cannot drift apart (see the predicate's
+        // own doc comment: the class-method crash fixed on PR #4030 arose
+        // from exactly two hand-duplicated copies of this condition going
+        // out of sync). `false` for `ValueType` (no `State` map to thread)
+        // and for a class method (`class_<selector>(ClassSelf, ClassVars,
+        // Args...)` has no `State`/`StateAcc` parameter — class-side
+        // threading goes through `ClassVars`) — both still compile to a
+        // plain (non-tuple) value, so without this gate a loop forwarding
+        // an opaque callable to `do:`/`collect:`/`select:` in either
+        // context would get classified as needing a tuple unwrap the
+        // codegen never produces.
+        if matches!(sel_str.as_str(), "do:" | "collect:" | "select:")
+            && self.opaque_callable_list_op_needs_state_fold()
+        {
+            if let Some(arg) = arguments.first() {
+                if Self::extract_block_literal(arg).is_none() {
+                    return true;
+                }
+            }
+        }
+
         // Standard check: analyse argument blocks for mutations.
         // Check ALL block arguments, not just the last one.
         // For selectors like `detect:ifNone:`, the mutation-bearing block is the

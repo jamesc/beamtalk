@@ -16,8 +16,24 @@
 
 Actor subclass: SelfSendHomPool
   state: items = #(1, 2, 3, 4)
+  state: total = 0
+
+  // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a CLASS
+  // method forwarding an opaque (non-literal) callable to `collect:`. A
+  // class method compiles to `class_<selector>(ClassSelf, ClassVars,
+  // Args...)` — it has no `State`/`StateAcc` parameter at all (class-side
+  // threading goes through `ClassVars`, not `State`), so the ADR 0128 fold
+  // path (which seeds its accumulator from `current_field_read_state_var()`,
+  // always `"State"`/`"StateAccN"`) must not run here — it would reference
+  // a variable `class_collect:` never binds. Must compile and run
+  // correctly, falling back to the pre-ADR plain-value wrapper.
+  class classCollect: block => #(1, 2, 3) collect: block
 
   do: block => self.items do: block
+
+  collect: block => self.items collect: block
+
+  select: block => self.items select: block
 
   detect: block ifNone: noneBlock =>
     self do: [:each | (block value: each) ifTrue: [^each]]
@@ -29,3 +45,13 @@ Actor subclass: SelfSendHomPool
     acc
 
   size => self inject: 0 into: [:n :_each | n + 1]
+
+  // ADR 0128 / BT-3583 Constraints regression coverage (b): an opaque
+  // callable forwarded through a self-send to `do:` that mutates ONLY
+  // `self.field` (no local accumulator, no NLR) — the case the pre-fix
+  // generic wrapper already served correctly (threaded via the actor's
+  // `State` directly) and must keep working identically after the fix.
+  accumulateTotal =>
+    self.total := 0
+    self do: [:each | self.total := self.total + each]
+    self.total

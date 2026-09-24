@@ -1297,70 +1297,124 @@ fn test_list_select_pure_generates_lists_filter() {
 // ── non-literal callable in simple list ops ───────────────────
 
 #[test]
-fn test_list_do_non_literal_callable_emits_arity_check() {
-    // do: with a non-literal callable (method parameter) must emit an
-    // is_function/2 arity check so that Tier-2 (2-arg) blocks are wrapped to
-    // satisfy lists:foreach's arity-1 contract.
+fn test_list_do_non_literal_callable_emits_threaded_fold() {
+    // ADR 0128 / BT-3583: do: with a non-literal callable (method
+    // parameter), in Actor context, now folds via lists:foldl with the
+    // actor's own State map as the fold accumulator — discriminating the
+    // callable's tier PER ELEMENT (is_function/1) instead of once at wrap
+    // time — so a Tier-2 callable's captured-local/field mutations
+    // genuinely thread across every element instead of being dropped.
     let src =
         "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
     assert!(
-        code.contains("'lists':'foreach'"),
-        "Non-literal callable do: should still generate lists:foreach. Got:\n{code}"
+        code.contains("'lists':'foldl'"),
+        "Non-literal callable do: (Actor) should fold via lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foreach'"),
+        "Non-literal callable do: (Actor) should NOT use lists:foreach any more. Got:\n{code}"
     );
     assert!(
         code.contains("'erlang':'is_function'"),
-        "Non-literal callable do: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+        "Non-literal callable do: should emit an is_function/1 per-element tier check. Got:\n{code}"
     );
     assert!(
-        code.contains(", 2) of"),
-        "Non-literal callable do: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
+        code.contains(", 1) of"),
+        "Non-literal callable do: should gate on arity 1 (Tier 1) per element. Got:\n{code}"
+    );
+    // Raw tuple result: {'nil', FinalState} — unpacked by the caller's
+    // generic ControlFlowWithMutations machinery.
+    assert!(
+        code.contains("{'nil', "),
+        "Non-literal callable do: (Actor) should return a raw {{'nil', State}} tuple. Got:\n{code}"
     );
 }
 
 #[test]
-fn test_list_collect_non_literal_callable_emits_arity_check() {
-    // collect: with a non-literal callable emits the same arity-check
-    // wrapper as do:, here wrapping for lists:map (arity-1 contract).
+fn test_list_collect_non_literal_callable_emits_threaded_fold() {
+    // ADR 0128 / BT-3583: collect: with a non-literal callable, in Actor
+    // context, folds a {ResultAcc, StateAcc} pair via lists:foldl instead
+    // of the old frozen-state lists:map wrapper.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items collect: block\n";
     let code = codegen(src);
     assert!(
-        code.contains("'lists':'map'"),
-        "Non-literal callable collect: should still generate lists:map. Got:\n{code}"
+        code.contains("'lists':'foldl'"),
+        "Non-literal callable collect: (Actor) should fold via lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'map'"),
+        "Non-literal callable collect: (Actor) should NOT use lists:map any more. Got:\n{code}"
     );
     assert!(
         code.contains("'erlang':'is_function'"),
-        "Non-literal callable collect: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+        "Non-literal callable collect: should emit an is_function/1 per-element tier check. Got:\n{code}"
     );
     assert!(
-        code.contains(", 2) of"),
-        "Non-literal callable collect: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
+        code.contains("'lists':'reverse'"),
+        "Non-literal callable collect: should reverse the fold-built result list. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_collection':'from_list_like'"),
+        "Non-literal callable collect: should use from_list_like for string-aware result. Got:\n{code}"
     );
 }
 
 #[test]
-fn test_list_select_non_literal_callable_emits_arity_check() {
-    // select: with a non-literal callable also emits the arity-check wrapper.
-    // This additionally covers the "filter" => "select:" match arm in mod.rs via the
-    // non-literal code path (the non-literal else branch still uses the selector).
+fn test_list_select_non_literal_callable_emits_threaded_fold() {
+    // ADR 0128 / BT-3583: select: with a non-literal callable, in Actor
+    // context, also folds via lists:foldl — the predicate result gates
+    // whether the ELEMENT (not the block's return value) is consed onto
+    // the result accumulator.
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items select: block\n";
     let code = codegen(src);
     assert!(
-        code.contains("'lists':'filter'"),
-        "Non-literal callable select: should generate lists:filter. Got:\n{code}"
+        code.contains("'lists':'foldl'"),
+        "Non-literal callable select: (Actor) should fold via lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'filter'"),
+        "Non-literal callable select: (Actor) should NOT use lists:filter any more. Got:\n{code}"
     );
     assert!(
         code.contains("'erlang':'is_function'"),
-        "Non-literal callable select: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+        "Non-literal callable select: should emit an is_function/1 per-element tier check. Got:\n{code}"
     );
     assert!(
-        code.contains(", 2) of"),
-        "Non-literal callable select: should emit arity-2 case check for Tier-2 blocks. Got:\n{code}"
+        code.contains("<'true'> when 'true' -> ["),
+        "Non-literal callable select: should cons the element when the predicate is true. Got:\n{code}"
     );
-    // Runtime fallback selector is 'select:' (mapped from 'filter').
     assert!(
-        code.contains("'select:'"),
-        "Non-literal callable select: fallback should use 'select:' selector. Got:\n{code}"
+        code.contains("'beamtalk_collection':'from_list_like'"),
+        "Non-literal callable select: should use from_list_like for string-aware result. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_class_method_do_non_literal_callable_does_not_fold() {
+    // ADR 0128 / BT-3583 (review-flagged on PR #4030): a CLASS method
+    // forwarding a non-literal callable to `do:` must NOT route through the
+    // fold rewrite (`generate_simple_list_op_threaded_fold`) — a class
+    // method compiles to `class_<selector>(ClassSelf, ClassVars, Args...)`,
+    // which has no `State`/`StateAcc` parameter at all (class-side
+    // threading goes through `ClassVars`), so the fold's `State`-seeded
+    // accumulator would reference an unbound variable. Must keep emitting
+    // the pre-existing plain-value wrapper, exactly like the ValueType
+    // sibling case just below.
+    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foreach'"),
+        "Non-literal callable do: in a class method should use lists:foreach (no fold). Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Non-literal callable do: in a class method must NOT fold — class methods have no \
+         State/StateAcc to seed the accumulator from. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal callable do: should still emit is_function/2 arity check (BT-909). Got:\n{code}"
     );
 }
 
