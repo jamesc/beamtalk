@@ -36,8 +36,10 @@ Value subclass: SelfSendHomSackful
   // `badarg` at runtime. Must compile and run correctly.
   sumWithSideEffect: block =>
     total := 0
-    1 to: 3 do: [:i |
-      total := total + i
-      self do: block
-    ]
+    1
+      to: 3
+      do: [:i |
+        total := total + i
+        self do: block
+      ]
     total
