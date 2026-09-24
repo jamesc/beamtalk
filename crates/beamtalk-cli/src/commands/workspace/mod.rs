@@ -108,7 +108,9 @@ pub fn workspace_id_for_project(
 #[cfg(test)]
 mod tests {
     use super::epmd::wait_for_epmd_deregistration;
-    use super::lifecycle::{WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id};
+    use super::lifecycle::{
+        WorkspaceKind, WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id,
+    };
     use super::process::start_detached_node;
     use super::shutdown::{force_kill_process, wait_for_workspace_exit};
     #[cfg(target_os = "linux")]
@@ -648,9 +650,38 @@ mod tests {
         assert!(found.is_some(), "Should find the created workspace");
 
         let ws_summary = found.unwrap();
-        assert_eq!(ws_summary.project_path, project_path);
+        assert_eq!(ws_summary.project_path, Some(project_path));
+        assert_eq!(ws_summary.kind, WorkspaceKind::Dev);
         assert_eq!(ws_summary.status, WorkspaceStatus::Stopped);
         assert!(ws_summary.port.is_none());
+    }
+
+    /// The exact bug this guards against: an OTP release with `[release]
+    /// console = true` writes only a bare `port` file (no
+    /// `metadata.json` — ADR 0125 §1.4), so `list_workspaces` used to
+    /// skip it entirely and `beamtalk workspace list` reported "No
+    /// workspaces found" for a release node that was actually running.
+    #[test]
+    fn test_list_workspaces_includes_a_release_node_with_no_metadata_json() {
+        let ws = TestWorkspace::new("list_release_test");
+        fs::create_dir_all(ws.dir()).unwrap();
+        // No metadata.json — only what `beamtalk_repl_server` actually
+        // writes for a release node.
+        fs::write(ws.dir().join("port"), "0\nsome-nonce").unwrap();
+
+        let workspaces = list_workspaces().unwrap();
+        let found = workspaces.iter().find(|w| w.workspace_id == ws.id);
+        assert!(found.is_some(), "Should find the release node");
+
+        let ws_summary = found.unwrap();
+        assert_eq!(ws_summary.kind, WorkspaceKind::Release);
+        assert_eq!(ws_summary.project_path, None);
+        assert_eq!(ws_summary.created_at, None);
+        // Port 0 never actually listens, so the liveness probe reports
+        // stopped — this test only checks that the entry is *listed* at
+        // all, not the liveness probe itself (already covered by
+        // `is_node_running`'s own tests).
+        assert_eq!(ws_summary.status, WorkspaceStatus::Stopped);
     }
 
     #[test]
