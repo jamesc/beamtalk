@@ -832,42 +832,61 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         "expected `Smoke run`'s result (42) in rpc output: {rpc_stdout}"
     );
 
-    // `rpc "BeamtalkInterface releaseInfo"` — ADR 0125 §1.1/§1.8's other
-    // headline example (BT-3576): a parity-neutral reflective send, always
-    // available (no compiler needed), naming the release, its version and
-    // the toolchain OTP release. `BeamtalkInterface` — not the ADR prose's
-    // `Beamtalk` — is the class run-entry actually resolves: `Beamtalk` is
-    // a *global instance* of `BeamtalkInterface` (`stdlib/src/beamtalk_
-    // interface.bt`'s moduledoc), not itself a registered class, and
-    // run-entry dispatch only resolves registered classes
-    // (`beamtalk_repl_eval:resolve_entry/2` ->
-    // `beamtalk_runtime_api:whereis_class/1`) — confirmed empirically:
-    // `rpc "Beamtalk releaseInfo"` answers `Class 'Beamtalk' is not
-    // loaded`. Filed as a follow-up (BT-3612) rather than fixed here — this
-    // issue's scope is docs/e2e coverage, not run-entry class resolution.
-    let rpc_release_info = launcher_command(&output_dir, name)
-        .args(["rpc", "BeamtalkInterface releaseInfo"])
-        .env("RELEASE_COOKIE", &cookie)
-        .output()
-        .expect("spawn bin/<name> rpc \"BeamtalkInterface releaseInfo\"");
-    assert!(
-        rpc_release_info.status.success(),
-        "rpc releaseInfo failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&rpc_release_info.stdout),
-        String::from_utf8_lossy(&rpc_release_info.stderr)
-    );
-    let rpc_release_info_stdout = String::from_utf8_lossy(&rpc_release_info.stdout);
-    for expected in [
-        "release => <<\"cli_subprocess_fixture\">>",
-        "release_version => <<\"0.1.0\">>",
-        "otp_release =>",
-    ] {
+    // `rpc "Beamtalk releaseInfo"` — ADR 0125 §1.1/§1.8's other headline
+    // example, verbatim (BT-3576, BT-3612): a parity-neutral reflective
+    // send, always available (no compiler needed), naming the release, its
+    // version and the toolchain OTP release. `Beamtalk` is a workspace
+    // singleton *instance* of `BeamtalkInterface`, not a registered class;
+    // run-entry resolves it singleton-first
+    // (`beamtalk_repl_eval:resolve_entry/2`), so it must answer the same
+    // Dictionary as the class-side `BeamtalkInterface releaseInfo`.
+    let rpc_release_info = |receiver: &str| {
+        let entry = format!("{receiver} releaseInfo");
+        let out = launcher_command(&output_dir, name)
+            .args(["rpc", &entry])
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .unwrap_or_else(|e| panic!("spawn bin/<name> rpc {entry:?}: {e}"));
         assert!(
-            rpc_release_info_stdout.contains(expected),
-            "expected {expected:?} in `rpc \"BeamtalkInterface releaseInfo\"` output: \
-             {rpc_release_info_stdout}"
+            out.status.success(),
+            "rpc {entry:?} failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
         );
-    }
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        for expected in [
+            "release => <<\"cli_subprocess_fixture\">>",
+            "release_version => <<\"0.1.0\">>",
+            "otp_release =>",
+        ] {
+            assert!(
+                stdout.contains(expected),
+                "expected {expected:?} in `rpc {entry:?}` output: {stdout}"
+            );
+        }
+        stdout
+    };
+    let via_global = rpc_release_info("Beamtalk");
+    let via_class = rpc_release_info("BeamtalkInterface");
+    assert_eq!(
+        via_global, via_class,
+        "`rpc \"Beamtalk releaseInfo\"` and `rpc \"BeamtalkInterface releaseInfo\"` \
+         must answer the same Dictionary"
+    );
+
+    // `eval "Beamtalk releaseInfo"` — the same singleton resolution in
+    // `eval`'s separate throwaway VM (BT-3612); `eval` prints nothing on
+    // success, so the exit status is the whole contract.
+    let eval_release_info = launcher_command(&output_dir, name)
+        .args(["eval", "Beamtalk releaseInfo"])
+        .output()
+        .expect("spawn bin/<name> eval \"Beamtalk releaseInfo\"");
+    assert!(
+        eval_release_info.status.success(),
+        "eval \"Beamtalk releaseInfo\" failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&eval_release_info.stdout),
+        String::from_utf8_lossy(&eval_release_info.stderr)
+    );
 
     // `stop` — graceful `init:stop()` over distribution; the foreground
     // process must exit on its own shortly after.

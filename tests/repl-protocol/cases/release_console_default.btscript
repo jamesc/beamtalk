@@ -70,3 +70,12 @@ BT3575NoSuchClass >> foo => 1
 
 :run-entry BeamtalkInterface shapeManifest
 // => _
+
+// ADR 0125 §1.1's headline form, verbatim (BT-3612): `Beamtalk` is a
+// workspace singleton *instance*, not a registered class — run-entry resolves
+// it singleton-first, exactly like a capitalised REPL receiver.
+:run-entry Beamtalk releaseInfo
+// => #{#release => nil}
+
+:run-entry Beamtalk shapeManifest
+// => _
