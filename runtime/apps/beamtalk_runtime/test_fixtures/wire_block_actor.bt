@@ -12,7 +12,15 @@
 // handle is a node-bound HandleScoped value that beamtalk_wire:encode/1
 // rejects, so a remote caller of makeHandle must see that rejection raised,
 // not silently returned as a normal value (BT-3613).
+//
+// makeErrorShapedTuple returns a raw Tuple shaped like {error, X} — a
+// legitimate, first-class BeamTalk value (stdlib/src/tuple.bt) that must
+// NOT be confused with a genuine wire-encode failure (which also has the
+// shape {error, #beamtalk_error{}}): the generated dispatch's success-arm
+// discriminator must key off something other than the payload's own shape
+// (BT-3613 review round 2).
 
 Actor subclass: WireBlockActor
   invokeBlockWith: aBlock => aBlock value: 1
   makeHandle => Ets new: #wireBlockActorHandle type: #set
+  makeErrorShapedTuple => Tuple withAll: #(#error, 42)

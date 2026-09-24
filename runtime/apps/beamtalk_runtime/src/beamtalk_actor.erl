@@ -269,6 +269,7 @@ handle_getValue([], State) ->
     decode_wire_call/1,
     decode_wire_cast/1,
     encode_reply_for/3,
+    encode_reply_for_tagged/3,
     maybe_reclassify_compiled_dispatch_error/2
 ]).
 
@@ -2293,15 +2294,39 @@ this only substitutes the second element of the `{reply, _, NewState}`
 tuple the caller already built.
 """.
 -spec encode_reply_for(term(), atom(), term()) -> term().
-encode_reply_for({FromPid, _Tag}, Selector, ReplyPayload) when
+encode_reply_for(From, Selector, ReplyPayload) ->
+    case encode_reply_for_tagged(From, Selector, ReplyPayload) of
+        {ok, Encoded} -> Encoded;
+        {error, EncErr} -> {error, EncErr}
+    end.
+
+-doc """
+Like `encode_reply_for/3`, but always outer-tagged `{ok, _} | {error, _}` —
+`ok` for both the remote-encoded-success case AND the local no-op-passthrough
+case, `error` only for a genuine remote encode failure. `encode_reply_for/3`
+(the hand-written `handle_call/3` path's own reply, never branched on by its
+caller) can use the untagged passthrough safely; `handle_call_dispatch_case`
+(the generated compiled-actor path, BT-3613) cannot — its success arm has to
+choose the outer `{'reply', {'ok', _}, _}` vs `{'reply', {'error', _}, _}`
+shape *based on* whether encoding failed, and a plain shape-match against
+`encode_reply_for/3`'s untagged local-passthrough result is ambiguous: a
+method can legitimately return a raw `Tuple` shaped like `{error, X}` (a
+normal, first-class BeamTalk value — see `stdlib/src/tuple.bt`), which a
+local call passes through unchanged and would then be indistinguishable from
+a genuine encode failure. This function's own outer wrapper is added
+unconditionally by this function, never by user code, so matching its outer
+tag is unambiguous regardless of what `ReplyPayload` itself looks like.
+""".
+-spec encode_reply_for_tagged(term(), atom(), term()) -> {ok, term()} | {error, #beamtalk_error{}}.
+encode_reply_for_tagged({FromPid, _Tag}, Selector, ReplyPayload) when
     is_pid(FromPid), node(FromPid) =/= node()
 ->
     case beamtalk_wire:encode(ReplyPayload) of
-        {ok, Encoded} -> Encoded;
+        {ok, Encoded} -> {ok, Encoded};
         {error, EncErr} -> {error, EncErr#beamtalk_error{selector = Selector}}
     end;
-encode_reply_for(_From, _Selector, ReplyPayload) ->
-    ReplyPayload.
+encode_reply_for_tagged(_From, _Selector, ReplyPayload) ->
+    {ok, ReplyPayload}.
 
 -doc """
 Resolve a future with a value, wire-encoding it first when the future lives

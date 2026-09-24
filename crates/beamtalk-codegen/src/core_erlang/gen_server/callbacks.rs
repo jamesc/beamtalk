@@ -1538,12 +1538,23 @@ impl CoreErlangGenerator {
     /// would hand the caller `{'ok', {'error', EncErr}}` — which decodes and
     /// unwraps back to the plain tuple `{'error', EncErr}` as a
     /// *successful* method return value instead of raising, silently
-    /// breaking ADR 0126 §5.1's documented `not_serialisable` contract. The
-    /// hand-written `beamtalk_actor:handle_call/3` never has this problem
-    /// because it doesn't add an extra `{'ok', ...}` wrapper around
-    /// `encode_reply_for/3`'s result at all; mirroring that unwrapped shape
-    /// here (rather than introducing a second, codegen-only reply
-    /// convention) keeps the two paths' wire contracts identical.
+    /// breaking ADR 0126 §5.1's documented `not_serialisable` contract.
+    ///
+    /// Branching on `encode_reply_for/3`'s own (untagged) result is
+    /// unsound here, though: that function is a no-op passthrough for a
+    /// local caller, so a method that legitimately returns a raw `Tuple`
+    /// shaped like `{error, X}` (a normal, first-class `BeamTalk` value —
+    /// `stdlib/src/tuple.bt`) would be indistinguishable from a genuine
+    /// encode failure by shape alone. `encode_reply_for_tagged/3` exists
+    /// precisely for this call site: it always outer-tags its result
+    /// `{ok, _}`/`{error, _}` — `ok` for both the remote-encoded-success
+    /// case and the local passthrough case, `error` only for a genuine
+    /// remote encode failure — so matching the outer tag never depends on
+    /// what the payload itself looks like. (The hand-written
+    /// `beamtalk_actor:handle_call/3` keeps using the untagged
+    /// `encode_reply_for/3` unchanged — it never branches on the result,
+    /// it builds the reply's own outer shape itself at each call site, so
+    /// it was never at risk of this ambiguity.)
     fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
@@ -1582,11 +1593,11 @@ impl CoreErlangGenerator {
                             "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in",
                             // wire-encode the reply when the caller is remote
                             // (no-op locally — see this function's doc), then
-                            // branch on whether encoding itself failed rather
-                            // than unconditionally wrapping as {'ok', ...} —
-                            // see this function's doc for why.
+                            // branch on the outer {ok,_}/{error,_} tag
+                            // encode_reply_for_tagged/3 itself always adds —
+                            // never on the payload's own shape.
                             line(),
-                            "case call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) of",
+                            "case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of",
                             nest(
                                 INDENT,
                                 docvec![
@@ -1600,7 +1611,7 @@ impl CoreErlangGenerator {
                                         ]
                                     ),
                                     line(),
-                                    "<EncodedResult> when 'true' ->",
+                                    "<{'ok', EncodedResult}> when 'true' ->",
                                     nest(
                                         INDENT,
                                         docvec![
@@ -1621,6 +1632,12 @@ impl CoreErlangGenerator {
                     // here would otherwise double-wrap as
                     // {'error', {'error', EncErr}} instead of the flat
                     // {'error', EncErr} shape decode_call_result expects.
+                    // Unlike the success arm, this one stays on the
+                    // untagged encode_reply_for/3, not the _tagged variant
+                    // — both of its branches already converge on the same
+                    // {'reply', {'error', _}, ErrState} outer shape, so
+                    // there's no {'ok', _} vs {'error', _} choice for a
+                    // payload shape collision to corrupt.
                     line(),
                     "<{'error', Error, ErrState}> when 'true' ->",
                     nest(

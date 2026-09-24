@@ -105,6 +105,11 @@ compiled_actor_wire_test_() ->
                     "raises not_serialisable rather than returning it as a "
                     "normal value",
                     fun() -> handle_scoped_reply_raises_not_serialisable(PeerNode) end
+                },
+                {
+                    "a legitimate {error, X}-shaped Tuple return value is not "
+                    "confused with a genuine encode failure",
+                    fun() -> error_shaped_tuple_returns_normally(PeerNode) end
                 }
             ]
         end}}.
@@ -246,6 +251,27 @@ handle_scoped_reply_raises_not_serialisable(PeerNode) ->
                 error := #beamtalk_error{kind = not_serialisable}
             },
             beamtalk_actor:sync_send(Pid, makeHandle, [])
+        )
+    after
+        rpc:call(PeerNode, gen_server, stop, [Pid])
+    end.
+
+-doc """
+Regression for the collision the review round after the first fix caught:
+`handle_call_dispatch_case`'s success arm must discriminate "encoding
+failed" from "encoding succeeded" without inspecting the payload's own
+shape. Before this second fix, a method whose raw Erlang-level return value
+happened to be a bare `{error, X}` 2-tuple (a legitimate `Tuple`,
+`stdlib/src/tuple.bt`'s documented `withAll: #(#error, X)` idiom) would be
+misclassified as an encode failure and turned into a *raised exception* at
+the caller instead of a normal successful return.
+""".
+error_shaped_tuple_returns_normally(PeerNode) ->
+    Pid = spawn_remote(PeerNode, 'WireBlockActor'),
+    try
+        ?assertEqual(
+            {error, 42},
+            beamtalk_actor:sync_send(Pid, makeErrorShapedTuple, [])
         )
     after
         rpc:call(PeerNode, gen_server, stop, [Pid])
