@@ -907,12 +907,14 @@ code_change(_OldVsn, State, #{module := Module}) when is_map(State) ->
 - `ProjectPath`: absolute filesystem path for the project
 - `ActivityTimestamp`: Unix timestamp (integer seconds) of last observed activity
 - `NodeName`: Erlang atom identifying this workspace's BEAM node
+- `WorkspaceMode`: `run | workspace | release` (ADR 0125 §1.4) — the required `mode` key of `beamtalk_workspace_sup`'s config, selecting which children start (only `workspace` starts the file logger, live-development stores and idle monitor; `release` starts the REPL listener only with `console => true`)
+- `NodeCapabilities`: `#{mode, include_compiler}`, recorded by `beamtalk_workspace_sup:init/1` and classified by `beamtalk_capability` (in `beamtalk_runtime`, the shared leaf below both the REPL op layer and the `Behaviour` intrinsics). A `release` node refuses compile operations with `release_mode_no_compiler` (unless `include_compiler`) and workspace mutations with `release_mode_no_workspace` (ADR 0125 §1.5)
 
 **Repositories:**
 - `WorkspaceMetaServer`: gen_server (`beamtalk_workspace_meta`) holding state; persists to `~/.beamtalk/workspaces/{id}/metadata.json` with debounced writes
 
 **Domain Services:**
-- `IdleMonitor` (`beamtalk_idle_monitor`): Periodic timer; calls `init:stop/0` if idle time exceeds `max_idle_seconds`. Disabled for persistent/production nodes.
+- `IdleMonitor` (`beamtalk_idle_monitor`): Periodic timer; calls `init:stop/0` if idle time exceeds `max_idle_seconds`. Started only in `workspace` mode — never in `run` or `release` mode (ADR 0125 §1.4); `auto_cleanup => false` disables it.
 - `ActorSupervisor` (`beamtalk_actor_sup`): `simple_one_for_one` supervisor for all user actors in the workspace; actors are `temporary` (no restart on crash by default)
 - `SessionSupervisor` (`beamtalk_session_sup`): `simple_one_for_one` supervisor for REPL session shell processes; sessions are `temporary`
 - `WorkspaceBootstrap` (`beamtalk_workspace_bootstrap`): Startup logic — reads config, starts stdlib, initialises metadata

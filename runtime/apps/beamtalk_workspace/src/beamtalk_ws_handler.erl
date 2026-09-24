@@ -466,12 +466,21 @@ handle_protocol(Data, SessionPid, State) ->
                 <<"shutdown">> ->
                     handle_shutdown(Msg, State);
                 <<"eval">> ->
-                    %% Use async eval for streaming output
-                    handle_eval_async(Msg, SessionPid, State);
+                    %% Use async eval for streaming output. The async path
+                    %% bypasses beamtalk_repl_ops:dispatch/4, so it consults
+                    %% the capability check itself (ADR 0125 §1.5).
+                    with_capability(Op, Msg, State, fun() ->
+                        handle_eval_async(Msg, SessionPid, State)
+                    end);
                 <<"run-entry">> ->
                     %% Connected-mode `beamtalk run` — dispatch a class
-                    %% entry method with argv, streaming output like async eval.
-                    handle_run_entry_async(Msg, SessionPid, State);
+                    %% entry method with argv, streaming output like async
+                    %% eval. Compile-free, so available in every mode
+                    %% (ADR 0125 §1.5); still routed through the check so the
+                    %% classification stays the single source of truth.
+                    with_capability(Op, Msg, State, fun() ->
+                        handle_run_entry_async(Msg, SessionPid, State)
+                    end);
                 <<"stdin">> ->
                     %% Route stdin input to IO capture process
                     handle_stdin(Msg, State);
@@ -488,6 +497,19 @@ handle_protocol(Data, SessionPid, State) ->
         {error, DecodeError} ->
             ErrorJson = beamtalk_repl_json:format_error(DecodeError),
             {[{text, ErrorJson}], State}
+    end.
+
+-doc """
+Run `Handle` only if this node may perform `Op`
+(`beamtalk_capability:check/1`, ADR 0125 §1.5); otherwise reply with the
+structured refusal.
+""".
+with_capability(Op, Msg, State, Handle) ->
+    case beamtalk_capability:check(Op) of
+        ok ->
+            Handle();
+        {error, Err} ->
+            {[{text, beamtalk_repl_json:encode_error(Err, Msg)}], State}
     end.
 
 -doc "Start a new session or resume an existing one if session ID is provided.".
@@ -684,7 +706,7 @@ handle_run_entry_async(Msg, SessionPid, State = #ws_state{pending_eval = undefin
     ClassBin = maps:get(<<"class">>, Params, <<>>),
     SelectorBin = maps:get(<<"selector">>, Params, <<>>),
     RawArgs = maps:get(<<"args">>, Params, []),
-    case validate_run_entry(ClassBin, SelectorBin, RawArgs) of
+    case beamtalk_repl_eval:validate_run_entry(ClassBin, SelectorBin, RawArgs) of
         {ok, Argv} ->
             case is_process_alive(SessionPid) of
                 true ->
@@ -707,70 +729,6 @@ handle_run_entry_async(Msg, _SessionPid, State) ->
     Err1 = beamtalk_error:with_message(Err, <<"An evaluation is already in progress">>),
     Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
     {[{text, beamtalk_repl_json:encode_error(Err2, Msg)}], State}.
-
-%% Validate the `run-entry` op fields, returning the argv as a `List(String)`
-%% (a list of UTF-8 binaries) on success. `class`/`selector` must be non-empty
-%% binaries, `selector` must be a valid run-entry shape (see
-%% is_valid_run_entry_selector/1), and `args` must be a (possibly empty) list
-%% of strings.
--spec validate_run_entry(term(), term(), term()) ->
-    {ok, [binary()]} | {error, beamtalk_error:error()}.
-validate_run_entry(ClassBin, SelectorBin, RawArgs) when
-    is_binary(ClassBin), ClassBin =/= <<>>, is_binary(SelectorBin), SelectorBin =/= <<>>
-->
-    case is_valid_run_entry_selector(SelectorBin) of
-        true ->
-            case run_entry_args(RawArgs, []) of
-                {ok, Argv} ->
-                    {ok, Argv};
-                error ->
-                    Err = beamtalk_error:new(invalid_argument, 'Program'),
-                    Err1 = beamtalk_error:with_message(
-                        Err, <<"run-entry `args` must be a list of strings">>
-                    ),
-                    {error, Err1}
-            end;
-        false ->
-            Err = beamtalk_error:new(invalid_argument, 'Program'),
-            Err1 = beamtalk_error:with_message(
-                Err,
-                <<
-                    "Invalid run-entry selector: only a unary selector (e.g. `run`) "
-                    "or a single arity-1 keyword selector (e.g. `main:`) is accepted"
-                >>
-            ),
-            {error, Err1}
-    end;
-validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
-    Err = beamtalk_error:new(invalid_argument, 'Program'),
-    Err1 = beamtalk_error:with_message(
-        Err, <<"run-entry requires non-empty `class` and `selector` strings">>
-    ),
-    {error, Err1}.
-
--doc """
-True when `SelectorBin` has a valid run-entry shape — a unary
-selector (no `:`) or a single arity-1 keyword selector (exactly one `:`,
-trailing, e.g. `main:`). Mirrors the CLI's `validate_class_and_selector`
-(`crates/beamtalk-cli/src/commands/run.rs`) so a direct WebSocket client (or
-future MCP/LSP consumer) gets the same "only a unary or single arity-1
-keyword entry is accepted" rejection, rather than `do_dispatch/5` calling
-`class_send/3` with a mismatched selector/arity and surfacing a bare
-`badarg`/`undef` or a confusing DNU. Multi-keyword selectors (`move:to:`) and
-selectors with an interior colon (`at:put`) are rejected.
-""".
--spec is_valid_run_entry_selector(binary()) -> boolean().
-is_valid_run_entry_selector(SelectorBin) ->
-    case binary:matches(SelectorBin, <<":">>) of
-        [] -> true;
-        [{Pos, _Len}] -> Pos =:= byte_size(SelectorBin) - 1;
-        _ -> false
-    end.
-
--spec run_entry_args(term(), [binary()]) -> {ok, [binary()]} | error.
-run_entry_args([], Acc) -> {ok, lists:reverse(Acc)};
-run_entry_args([Arg | Rest], Acc) when is_binary(Arg) -> run_entry_args(Rest, [Arg | Acc]);
-run_entry_args(_, _Acc) -> error.
 
 -doc """
 Handle stdin op — route input to IO capture process with ref correlation.

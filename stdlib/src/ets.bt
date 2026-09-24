@@ -42,6 +42,7 @@ type EtsTableType = #set | #orderedSet | #bag | #duplicateBag
 /// shared at: "counter" put: 1
 /// ```
 typed Object subclass: Ets(K, V) native: beamtalk_ets
+  handleScope: #node
 
   // Inline-FFI exceptions (ADR 0101 / BT-2731): `at:`, `at:put:` and
   // `at:ifAbsent:` share the first keyword `at`, and `at:put:`/`at:ifAbsent:`
@@ -118,7 +119,7 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// ```beamtalk
   /// cache at: "key"        // => value or nil
   /// ```
-  at: key :: K -> V | Nil => (Erlang beamtalk_ets) lookup: self key: key
+  at: key :: K -> V | Nil => self delegate
 
   /// Insert or replace a key-value pair. Returns `nil`.
   ///

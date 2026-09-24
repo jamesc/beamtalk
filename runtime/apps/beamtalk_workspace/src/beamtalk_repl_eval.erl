@@ -20,6 +20,8 @@ module loading to beamtalk_repl_loader.
     do_eval/2, do_eval/3,
     do_eval_trace/2,
     do_dispatch/5,
+    dispatch_sync/3,
+    validate_run_entry/3,
     do_show_codegen/2,
     handle_load/2, handle_load/3,
     handle_load_source/3
@@ -349,65 +351,37 @@ raised.
     binary(), binary(), [binary()], pid() | undefined, beamtalk_repl_state:state()
 ) -> eval_result().
 do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
-    case resolve_entry(ClassNameBin, SelectorBin) of
-        {ok, ClassPid, Selector} ->
-            %% A unary entry takes no arguments; the arity-1 keyword form
-            %% (`main:`) receives the whole argv list as its single
-            %% `List(String)` argument (parity with run-mode's dispatch list).
-            DispatchArgs =
-                case is_keyword_selector(SelectorBin) of
-                    true -> [Argv];
-                    false -> []
-                end,
-            {CapturePid, _PrevGroupLeader} = CaptureRef = beamtalk_io_capture:start(Subscriber),
-            %% `beamtalk_io_capture:start/1` only redirects *this*
-            %% worker's IO, but the entry runs one hop away in its class's
-            %% gen_server, which kept the node's group leader from spawn — so its
-            %% `Console` output went to the detached node's stdout and the client
-            %% saw nothing. Publishing the capture process as the entry group
-            %% leader makes the class gen_server adopt it for the duration of the
-            %% call (`beamtalk_object_class:adopt_entry_group_leader/1`), giving
-            %% `--connect` the same "the program's output is my output" contract
-            %% run mode gets for free from the node's own stdout. Scoped to this
-            %% `run-entry` path: `do_eval` never seeds the key, so REPL `eval`
-            %% keeps routing output exactly as before.
-            PrevEntryGl = put(beamtalk_entry_group_leader, CapturePid),
-            EvalResult =
-                try beamtalk_class_dispatch:class_send(ClassPid, Selector, DispatchArgs) of
-                    RawResult ->
-                        case maybe_await_future(RawResult) of
-                            {future_rejected, FutureReason} ->
-                                FutExObj = beamtalk_exception_handler:ensure_wrapped(FutureReason),
-                                {error, FutExObj, State};
-                            Value ->
-                                {ok, Value, State}
-                        end
-                catch
-                    throw:{beamtalk_script_exit, Code} ->
-                        %% `Program exit: Code` from the dispatched entry —
-                        %% same connected-exit handling as the `do_eval` path.
-                        {script_exit, Code, State};
-                    Class:Reason:Stacktrace ->
-                        CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
-                            Class, Reason, Stacktrace
-                        ),
-                        {error, {eval_error, Class, CaughtExObj}, State}
-                after
-                    %% Unlike the eval path there is no transient eval module to
-                    %% purge — the entry runs in already-loaded class code. The
-                    %% capture process outlives this call only as a proxy to the
-                    %% original group leader, so drop the key before it can name a
-                    %% sink that is no longer streaming.
-                    case PrevEntryGl of
-                        undefined -> erase(beamtalk_entry_group_leader);
-                        _ -> put(beamtalk_entry_group_leader, PrevEntryGl)
-                    end
-                end,
-            Output = beamtalk_io_capture:stop(CaptureRef),
-            inject_output(EvalResult, Output, []);
-        {error, Err} ->
-            {error, Err, <<>>, [], State}
-    end.
+    {CapturePid, _PrevGroupLeader} = CaptureRef = beamtalk_io_capture:start(Subscriber),
+    %% `beamtalk_io_capture:start/1` only redirects *this* worker's IO, but
+    %% the entry runs one hop away in its class's gen_server, which kept the
+    %% node's group leader from spawn — so its `Console` output went to the
+    %% detached node's stdout and the client saw nothing. Publishing the
+    %% capture process as the entry group leader makes the class gen_server
+    %% adopt it for the duration of the call
+    %% (`beamtalk_object_class:adopt_entry_group_leader/1`), giving
+    %% `--connect` the same "the program's output is my output" contract run
+    %% mode gets for free from the node's own stdout. Scoped to this
+    %% `run-entry` path: `do_eval` never seeds the key, so REPL `eval` keeps
+    %% routing output exactly as before.
+    PrevEntryGl = put(beamtalk_entry_group_leader, CapturePid),
+    EvalResult =
+        try dispatch_sync(ClassNameBin, SelectorBin, Argv) of
+            {ok, Value} -> {ok, Value, State};
+            {script_exit, Code} -> {script_exit, Code, State};
+            {error, Err} -> {error, Err, State}
+        after
+            %% Unlike the eval path there is no transient eval module to
+            %% purge — the entry runs in already-loaded class code. The
+            %% capture process outlives this call only as a proxy to the
+            %% original group leader, so drop the key before it can name a
+            %% sink that is no longer streaming.
+            case PrevEntryGl of
+                undefined -> erase(beamtalk_entry_group_leader);
+                _ -> put(beamtalk_entry_group_leader, PrevEntryGl)
+            end
+        end,
+    Output = beamtalk_io_capture:stop(CaptureRef),
+    inject_output(EvalResult, Output, []).
 
 %% Resolve a `(ClassName, Selector)` entry against the live image for
 %% `do_dispatch/5`. Both names must already exist (the class is loaded; the
@@ -441,6 +415,123 @@ resolve_entry(ClassNameBin, SelectorBin) ->
 %% via `beamtalk_runtime_api` instead of duplicating it.
 -spec is_keyword_selector(binary()) -> boolean().
 is_keyword_selector(SelectorBin) -> beamtalk_runtime_api:is_keyword_selector(SelectorBin).
+
+-doc """
+Synchronous run-entry dispatch (ADR 0125 §1.7) — the resolve+dispatch+
+exception-mapping core `do_dispatch/5` itself calls, wrapped there in the
+async-streaming/IO-capture plumbing only a REPL session needs. Also called
+directly by `beamtalk_release_launcher`'s `eval`/`rpc` launcher verbs
+(BT-3573), which have no subscriber to stream to: `eval` runs in a throwaway
+VM and inherits the VM's own stdout, and `rpc`'s caller only wants the final
+result. One function, two callers — never a parallel dispatcher. Resolves
+`ClassNameBin`/`SelectorBin` via the same `resolve_entry/2` +
+`is_keyword_selector/1` this module already uses, and maps `Program exit: N`
+(`throw({beamtalk_script_exit, N})`) to `{script_exit, N}` rather than letting
+it propagate — so a caller on the *dispatching* side (the `eval` VM, the
+process `rpc:call/5` spawns on the target node, or `do_dispatch/5`'s own
+caller) always gets back data, never an exception.
+""".
+-spec dispatch_sync(binary(), binary(), [binary()]) ->
+    {ok, term()} | {script_exit, integer()} | {error, #beamtalk_error{} | term()}.
+dispatch_sync(ClassNameBin, SelectorBin, Argv) ->
+    case resolve_entry(ClassNameBin, SelectorBin) of
+        {ok, ClassPid, Selector} ->
+            DispatchArgs =
+                case is_keyword_selector(SelectorBin) of
+                    true -> [Argv];
+                    false -> []
+                end,
+            try beamtalk_class_dispatch:class_send(ClassPid, Selector, DispatchArgs) of
+                RawResult ->
+                    case maybe_await_future(RawResult) of
+                        {future_rejected, FutureReason} ->
+                            {error, beamtalk_exception_handler:ensure_wrapped(FutureReason)};
+                        Value ->
+                            {ok, Value}
+                    end
+            catch
+                throw:{beamtalk_script_exit, Code} ->
+                    {script_exit, Code};
+                Class:Reason:Stacktrace ->
+                    %% `{eval_error, Class, ExObj}` — not the bare wrapped
+                    %% object — is deliberate: `beamtalk_repl_errors`/
+                    %% `beamtalk_repl_json` pattern-match this exact shape
+                    %% for WS-facing formatting (`do_dispatch/5`'s original
+                    %% contract, preserved here since `do_dispatch/5` now
+                    %% calls this function). Every other caller
+                    %% (`beamtalk_release_launcher`'s `eval`/`rpc`) only ever
+                    %% formats it via `beamtalk_error:format_safe/2`, which
+                    %% recurses into any tuple to find the `#beamtalk_error{}`
+                    %% inside regardless of this wrapper.
+                    CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
+                        Class, Reason, Stacktrace
+                    ),
+                    {error, {eval_error, Class, CaughtExObj}}
+            end;
+        {error, Err} ->
+            {error, Err}
+    end.
+
+-doc """
+Validate the run-entry shape (`ClassBin`/`SelectorBin`/`RawArgs`) shared by
+every run-entry consumer — the WebSocket `run-entry` op
+(`beamtalk_ws_handler:handle_run_entry_async/3`) and the release launcher's
+`eval`/`rpc` verbs (BT-3573). `class`/`selector` must be non-empty binaries,
+`selector` must be a unary selector or a single arity-1 keyword selector, and
+`args` must be a (possibly empty) list of binaries. Moved here (from
+`beamtalk_ws_handler`, its sole caller until BT-3573) rather than duplicated —
+see `docs/development/architecture-principles.md` § Duplication.
+""".
+-spec validate_run_entry(term(), term(), term()) ->
+    {ok, [binary()]} | {error, #beamtalk_error{}}.
+validate_run_entry(ClassBin, SelectorBin, RawArgs) when
+    is_binary(ClassBin), ClassBin =/= <<>>, is_binary(SelectorBin), SelectorBin =/= <<>>
+->
+    case is_valid_run_entry_selector(SelectorBin) of
+        true ->
+            case run_entry_args(RawArgs, []) of
+                {ok, Argv} ->
+                    {ok, Argv};
+                error ->
+                    Err = beamtalk_error:new(invalid_argument, 'Program'),
+                    Err1 = beamtalk_error:with_message(
+                        Err, <<"run-entry `args` must be a list of strings">>
+                    ),
+                    {error, Err1}
+            end;
+        false ->
+            Err = beamtalk_error:new(invalid_argument, 'Program'),
+            Err1 = beamtalk_error:with_message(
+                Err,
+                <<
+                    "Invalid run-entry selector: only a unary selector (e.g. `run`) "
+                    "or a single arity-1 keyword selector (e.g. `main:`) is accepted"
+                >>
+            ),
+            {error, Err1}
+    end;
+validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
+    Err = beamtalk_error:new(invalid_argument, 'Program'),
+    Err1 = beamtalk_error:with_message(
+        Err, <<"run-entry requires non-empty `class` and `selector` strings">>
+    ),
+    {error, Err1}.
+
+%% True when `SelectorBin` has a valid run-entry shape — a unary selector (no
+%% `:`) or a single arity-1 keyword selector (exactly one `:`, trailing, e.g.
+%% `main:`). See `validate_run_entry/3`'s doc for callers.
+-spec is_valid_run_entry_selector(binary()) -> boolean().
+is_valid_run_entry_selector(SelectorBin) ->
+    case binary:matches(SelectorBin, <<":">>) of
+        [] -> true;
+        [{Pos, _Len}] -> Pos =:= byte_size(SelectorBin) - 1;
+        _ -> false
+    end.
+
+-spec run_entry_args(term(), [binary()]) -> {ok, [binary()]} | error.
+run_entry_args([], Acc) -> {ok, lists:reverse(Acc)};
+run_entry_args([Arg | Rest], Acc) when is_binary(Arg) -> run_entry_args(Rest, [Arg | Acc]);
+run_entry_args(_, _Acc) -> error.
 
 -spec dispatch_class_not_found_error(binary()) -> #beamtalk_error{}.
 dispatch_class_not_found_error(ClassNameBin) ->
@@ -653,6 +744,15 @@ etc.). `Path` is a project-relative `.bt` path (the same form git restored).
 """.
 -spec reload_file(string()) -> {ok, [binary()]} | {error, term()}.
 reload_file(Path) ->
+    %% Called over RPC from the LiveView client, bypassing the REPL op seam,
+    %% so it consults the capability check itself (ADR 0125 §1.5).
+    case beamtalk_capability:check(reload, 'Workspace', <<"Reloading a file">>) of
+        ok -> do_reload_file(Path);
+        {error, _} = Refusal -> Refusal
+    end.
+
+-spec do_reload_file(string()) -> {ok, [binary()]} | {error, term()}.
+do_reload_file(Path) ->
     case beamtalk_repl_loader:reload_class_file(Path) of
         {ok, ClassNames} ->
             repopulate_class_sources(Path, ClassNames),
@@ -744,6 +844,16 @@ runtime keeps no compile-time dependency on beamtalk_workspace.
 -spec eval_with_self(term(), binary() | string()) ->
     {ok, term()} | {error, #beamtalk_error{}}.
 eval_with_self(Self, Source) ->
+    %% Compiles source, so a release without a compiler refuses it
+    %% (ADR 0125 §1.5) — this entry point bypasses the REPL op seam.
+    case beamtalk_capability:check('evaluate:', 'Inspector', <<"Inspector evaluate:">>) of
+        ok -> do_eval_with_self(Self, Source);
+        {error, _} = Refusal -> Refusal
+    end.
+
+-spec do_eval_with_self(term(), binary() | string()) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+do_eval_with_self(Self, Source) ->
     SourceStr = unicode:characters_to_list(Source),
     %% Reuse a per-process module name (minted once, cached in the process
     %% dictionary) instead of a fresh atom per call, so a hot `evaluate:` loop in

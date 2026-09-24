@@ -12,7 +12,7 @@
 //! generated `main/1` bootstrap module.
 //!
 //! The bootstrap reuses ADR 0061's run-mode lifecycle: it starts the workspace
-//! (`repl = false`), registers the project classes (topo-ordered), seeds the
+//! (`mode => run`), registers the project classes (topo-ordered), seeds the
 //! `node_owning` / `program_name` app envs (ADR 0099 §§2-3), dispatches the
 //! entry method, and maps the outcome to a POSIX exit status via the shared run
 //! harness.
@@ -292,7 +292,7 @@ fn generate_boot_module(
          \x20       unicode:characters_to_binary(filename:basename(escript:script_name()))),\n\
          \x20   {{ok, _}} = beamtalk_workspace_sup:start_link(\n\
          \x20       #{{workspace_id => <<\"escript\">>, project_path => undefined,\n\
-         \x20         repl => false, start_compiler => false}}),\n\
+         \x20         mode => run, start_compiler => false}}),\n\
          \x20   {{ok, ActivationErrors}} =\n\
          \x20       beamtalk_module_activation:activate_modules([{module_list}], #{{}}),\n\
          \x20   case ActivationErrors of\n\
@@ -544,6 +544,19 @@ mod tests {
             generate_boot_module("app_escript", "Main", "run", false, &["bt@app@main".into()]);
         assert!(src.contains("dispatch(ClassPid, 'run', [])"));
         assert!(!src.contains("BinArgs"));
+    }
+
+    #[test]
+    fn test_generate_boot_module_starts_workspace_in_run_mode() {
+        // ADR 0125 §1.4: the workspace supervisor takes `mode`, not the removed
+        // `repl` boolean; an escript runs in run mode without a compiler.
+        let src =
+            generate_boot_module("app_escript", "Main", "run", false, &["bt@app@main".into()]);
+        assert!(
+            src.contains("mode => run, start_compiler => false"),
+            "{src}"
+        );
+        assert!(!src.contains("repl =>"), "{src}");
     }
 
     // -- collect_project_modules --------------------------------------------

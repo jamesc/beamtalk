@@ -54,6 +54,26 @@ pub(crate) fn current_otp_version() -> Option<&'static str> {
         .as_deref()
 }
 
+/// The build major from a compound OTP version string
+/// (`<otp_release>-<erts_version>`, e.g. `"27-15.0.1"` giving `27`) — the
+/// same string [`current_otp_version`] returns, split at its first `-` and
+/// the leading integer parsed from the `otp_release` half.
+///
+/// Used by `beamtalk release`'s provenance writer (ADR 0125 §1.8/§3.2:
+/// `required_otp` is `{min: build_major, max: build_major + 2}`) — never
+/// re-derived from `erlang:system_info(otp_release)` at runtime, which
+/// would bake a bare major with no ERTS component and drift from what this
+/// same compound string already encodes elsewhere (ADR 0075's shared
+/// type-spec cache key, ADR 0098's provenance stamp).
+///
+/// `None` if `compound` has no `-` separator or its `otp_release` half is not
+/// a plain integer — both indicate a compound string that doesn't match
+/// [`current_otp_version`]'s own `<release>-<erts>` shape.
+pub(crate) fn otp_build_major(compound: &str) -> Option<u32> {
+    let (release, _erts) = compound.split_once('-')?;
+    release.parse().ok()
+}
+
 /// On-disk provenance stamp written into a build scope after a successful build.
 ///
 /// Only `beamtalk_version` and `otp_release` are invalidation inputs; `built_at`
@@ -170,12 +190,14 @@ pub(crate) fn write_stamp(stamp_path: &Utf8Path, otp_release: Option<&str>) {
 
 /// Format a `SystemTime` as a UTC RFC 3339 timestamp (`2026-06-23T10:04:11Z`).
 /// `built_at` is informational, so second precision is plenty and no timezone
-/// crate is needed.
+/// crate is needed. `pub(crate)` (not private) so `release::provenance`'s
+/// own `built_at` field can reuse this instead of a second copy of the same
+/// no-timezone-crate algorithm (CLAUDE.md's no-duplicate-implementations rule).
 //
 // `secs / 86_400` is the post-epoch day count: it stays well within `i64`
 // (millions of years), so the `u64 → i64` cast cannot wrap.
 #[allow(clippy::cast_possible_wrap)]
-fn format_rfc3339_utc(time: SystemTime) -> String {
+pub(crate) fn format_rfc3339_utc(time: SystemTime) -> String {
     let secs = time
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -328,6 +350,19 @@ mod tests {
     #[test]
     fn rfc3339_epoch_is_unix_zero() {
         assert_eq!(format_rfc3339_utc(UNIX_EPOCH), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn otp_build_major_parses_compound_version() {
+        assert_eq!(otp_build_major("27-15.0.1"), Some(27));
+        assert_eq!(otp_build_major("28-16.0.2"), Some(28));
+    }
+
+    #[test]
+    fn otp_build_major_rejects_malformed_input() {
+        assert_eq!(otp_build_major(""), None);
+        assert_eq!(otp_build_major("no-dash-here-either"), None);
+        assert_eq!(otp_build_major("27"), None);
     }
 
     #[test]

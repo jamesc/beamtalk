@@ -54,7 +54,7 @@ use super::super::intrinsics::{
 use super::super::threaded_ir::{
     BindOp, FrameId, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::analysis::ThreadedFamilies;
 use super::family_slots;
 use beamtalk_cerl_doc::Document;
@@ -680,7 +680,7 @@ impl CoreErlangGenerator {
     /// value-type context this produced a reference to a nonexistent
     /// variable (`erlc: unbound variable 'State'`).
     fn exception_body_outer_state(&mut self) -> String {
-        if self.context == CodeGenContext::Actor {
+        if self.in_actor_instance_context() {
             self.current_state_var()
         } else {
             "~{}~".to_string()

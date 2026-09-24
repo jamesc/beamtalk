@@ -966,6 +966,9 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `Json` | `Object` | `json.bt` | JSON parse/stringify |
 | `Logger` | `Object` | `logger.bt` | OTP logger wrapper |
 | `Metaclass` | `Behaviour` | `metaclass.bt` | Metaclass mirror |
+| `Node` | `Value` | `node.bt` | BEAM node identity value: `current`, `named:`, `connected`, `connect`/`disconnect`/`ping` (ADR 0126 §2) |
+| `NodeDown` | `Announcement` | `node_down.bt` | System event: a visible node's connection was lost (ADR 0126 §8) |
+| `NodeUp` | `Announcement` | `node_up.bt` | System event: a visible node connected (ADR 0126 §8) |
 | `OS` | `Object` | `os.bt` | OS-level operations |
 | `ObjectStateChanged` | `Announcement` | `object_state_changed.bt` | System event: watched actor commits a state write (ADR 0095 §5) |
 | `Package` | `Object` | `package.bt` | Package management |

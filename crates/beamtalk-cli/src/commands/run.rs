@@ -509,7 +509,7 @@ fn build_script_eval_cmd(
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
          #{{workspace_id => <<\"{workspace_id}\">>, \
          project_path => <<\"{project_path_escaped}\">>, \
-         repl => false}}), \
+         mode => run}}), \
          ClassPid = beamtalk_class_registry:whereis_class('{class_name}'), \
          case ClassPid of \
              undefined -> \
@@ -1077,6 +1077,9 @@ mod tests {
         let cmd = build_script_eval_cmd("run_99", "/my/project", "Counter", "increment", &[], &[]);
         assert!(cmd.contains("run_99"), "workspace_id not interpolated");
         assert!(cmd.contains("/my/project"), "project_path not interpolated");
+        // ADR 0125 §1.4: run mode is `mode => run`, not the removed `repl` boolean.
+        assert!(cmd.contains("mode => run"), "workspace mode not set: {cmd}");
+        assert!(!cmd.contains("repl =>"), "removed repl key present: {cmd}");
         assert!(
             cmd.contains("'Counter'"),
             "class_name not interpolated: {cmd}"

@@ -37,6 +37,17 @@ pub(crate) fn bt_module_name_from_stem(stem: &str) -> String {
     format!("bt@{}", beamtalk_codegen::core_erlang::to_module_name(stem))
 }
 
+/// Build the package-qualified BEAM module name (`bt@<pkg>@<rel>`).
+///
+/// ADR 0026: package-mode modules use the `bt@<package>@<relative-path>` naming
+/// convention, where `rel` is the `snake_case` module path relative to the package
+/// source root (e.g. `"http@server"` for `src/http/server.bt`). This helper
+/// centralises the format string so all three build-phase callers agree on the
+/// exact shape — change one, change all.
+pub(crate) fn bt_qualified_module_name(pkg: &str, rel: &str) -> String {
+    format!("bt@{pkg}@{rel}")
+}
+
 /// What a test assertion expects: a value or an error.
 ///
 /// Shared between stdlib tests (`test_stdlib`) and doc tests (`doc_tests`).

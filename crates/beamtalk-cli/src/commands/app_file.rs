@@ -83,7 +83,7 @@ pub struct AliasMetadata {
 /// - `{vsn, ...}` from manifest
 /// - `{modules, [...]}` auto-discovered from compiled modules
 /// - `{registered, []}`
-/// - `{applications, [kernel, stdlib, ...bt_deps..., ...hex_deps..., beamtalk_runtime]}`
+/// - `{applications, [kernel, stdlib, ...bt_deps..., ...hex_deps..., beamtalk_runtime, beamtalk_workspace]}`
 /// - `{mod, {beamtalk_{appname}_app, []}}` when `app_callback_module` is `Some`
 /// - `{env, [{classes, [...]}]}` class→module mapping
 #[allow(clippy::too_many_arguments)]
@@ -191,6 +191,16 @@ fn format_modules_list(module_names: &[String]) -> String {
 /// `beamtalk_runtime` so that `application:ensure_all_started` walks
 /// the dependency tree correctly. Transitive deps (e.g., `ranch` via
 /// `cowboy`) are covered by each dependency's own `.app` file.
+///
+/// ADR 0125 §1.4: `beamtalk_workspace` is listed right after
+/// `beamtalk_runtime` so OTP starts the workspace application — and with
+/// it, `beamtalk_workspace_app:start/2`'s app-env-driven activation of
+/// every shipped `bt@*` class — before this package's own
+/// `beamtalk_<pkg>_app:start/2` runs (`outputs.rs:316-341`). Unconditional,
+/// like `beamtalk_runtime` above it: a dependency package's `.app` gets the
+/// same entry as the project's own, since both are staged as ordinary OTP
+/// applications in a release (ADR 0125 §1.2) and neither needs a `{mod, …}`
+/// entry to declare the dependency correctly.
 fn format_applications_list(bt_dep_names: &[String], hex_dep_names: &[String]) -> String {
     let mut apps = vec!["kernel".to_string(), "stdlib".to_string()];
     if !bt_dep_names.is_empty() {
@@ -204,6 +214,7 @@ fn format_applications_list(bt_dep_names: &[String], hex_dep_names: &[String]) -
         apps.extend(sorted);
     }
     apps.push("beamtalk_runtime".to_string());
+    apps.push("beamtalk_workspace".to_string());
     apps.join(", ")
 }
 
@@ -348,7 +359,10 @@ mod tests {
         assert!(result.contains("{vsn, \"0.1.0\"}"));
         assert!(result.contains("'bt@my_app@counter'"));
         assert!(result.contains("'bt@my_app@main'"));
-        assert!(result.contains("{applications, [kernel, stdlib, beamtalk_runtime]}"));
+        assert!(
+            result
+                .contains("{applications, [kernel, stdlib, beamtalk_runtime, beamtalk_workspace]}")
+        );
         assert!(result.contains("{classes, []}"));
         assert!(result.ends_with(".\n"));
         assert!(!result.contains("{mod,"));
@@ -607,21 +621,30 @@ mod tests {
     #[test]
     fn test_format_applications_list_no_hex_deps() {
         let result = format_applications_list(&[], &[]);
-        assert_eq!(result, "kernel, stdlib, beamtalk_runtime");
+        assert_eq!(
+            result,
+            "kernel, stdlib, beamtalk_runtime, beamtalk_workspace"
+        );
     }
 
     #[test]
     fn test_format_applications_list_with_hex_deps_sorted() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
         let result = format_applications_list(&[], &hex_deps);
-        assert_eq!(result, "kernel, stdlib, cowboy, gun, beamtalk_runtime");
+        assert_eq!(
+            result,
+            "kernel, stdlib, cowboy, gun, beamtalk_runtime, beamtalk_workspace"
+        );
     }
 
     #[test]
     fn test_format_applications_list_with_bt_deps_sorted() {
         let bt_deps = vec!["yaml".to_string(), "http".to_string()];
         let result = format_applications_list(&bt_deps, &[]);
-        assert_eq!(result, "kernel, stdlib, http, yaml, beamtalk_runtime");
+        assert_eq!(
+            result,
+            "kernel, stdlib, http, yaml, beamtalk_runtime, beamtalk_workspace"
+        );
     }
 
     #[test]
@@ -629,7 +652,10 @@ mod tests {
         let bt_deps = vec!["http".to_string()];
         let hex_deps = vec!["cowboy".to_string()];
         let result = format_applications_list(&bt_deps, &hex_deps);
-        assert_eq!(result, "kernel, stdlib, http, cowboy, beamtalk_runtime");
+        assert_eq!(
+            result,
+            "kernel, stdlib, http, cowboy, beamtalk_runtime, beamtalk_workspace"
+        );
     }
 
     #[test]
@@ -640,7 +666,7 @@ mod tests {
         let result = format_app_file(&manifest, &[], &[], None, &[], &[], &hex_deps, &[]);
 
         assert!(
-            result.contains("{applications, [kernel, stdlib, cowboy, gun, beamtalk_runtime]}"),
+            result.contains("{applications, [kernel, stdlib, cowboy, gun, beamtalk_runtime, beamtalk_workspace]}"),
             "Should list hex deps between stdlib and beamtalk_runtime. Got: {result}"
         );
     }
@@ -663,7 +689,9 @@ mod tests {
         );
 
         assert!(
-            result.contains("{applications, [kernel, stdlib, gun, beamtalk_runtime]}"),
+            result.contains(
+                "{applications, [kernel, stdlib, gun, beamtalk_runtime, beamtalk_workspace]}"
+            ),
             "Should include hex deps. Got: {result}"
         );
         assert!(

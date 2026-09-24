@@ -151,7 +151,7 @@ leaf_loader_setup() ->
         workspace_id => <<"leaf_change_loader_test_ws">>,
         project_path => undefined,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     clear_xref(),
     beamtalk_compiler_server:clear_classes(),

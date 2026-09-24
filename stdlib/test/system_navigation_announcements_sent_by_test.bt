@@ -17,6 +17,9 @@
 // and the List-shape contract.
 
 TestCase subclass: SystemNavigationAnnouncementsSentByTest
+  field: nav = nil
+
+  setUp => self.nav := SystemNavigation default
 
   // --- selector existence ---
   testIncludesSelectorAnnouncementsSentBy =>
@@ -58,38 +61,29 @@ TestCase subclass: SystemNavigationAnnouncementsSentByTest
   // behaviourally in BUnit. `Announcement` is self-inclusive (it is in its own
   // `superclassChain`); a non-announcement class and `nil` are rejected.
   testIsAnnouncementClassAcceptsAnnouncement =>
-    nav := SystemNavigation default
-    self assert: (nav isAnnouncementClass: Announcement)
+    self assert: (self.nav isAnnouncementClass: Announcement)
 
   testIsAnnouncementClassRejectsNonAnnouncement =>
-    nav := SystemNavigation default
-    self deny: (nav isAnnouncementClass: Integer)
+    self deny: (self.nav isAnnouncementClass: Integer)
 
   testIsAnnouncementClassRejectsNil =>
-    nav := SystemNavigation default
-    self deny: (nav isAnnouncementClass: nil)
+    self deny: (self.nav isAnnouncementClass: nil)
 
   // --- argument type guard (parity with sendersOf: / referencesTo:) ---
   //
   // Passing a Symbol must raise a typed error pointing at the right argument
-  // shape. The static type checker also flags the argument-type mismatch on the
-  // call site, so we suppress the type warning with `@expect type` — the BUnit
-  // run is about the *runtime* guard.
+  // shape. The BUnit run verifies the *runtime* guard.
   testRequiresClassArgumentNotSymbol =>
-    nav := SystemNavigation default
-    @expect type
-    self should: [nav announcementsSentBy: #NotAClass] raise: #user_error
+    self should: [self.nav announcementsSentBy: #NotAClass] raise: #user_error
 
   testRequiresClassArgumentNotString =>
-    nav := SystemNavigation default
-    @expect type
-    self should: [nav announcementsSentBy: "NotAClass"] raise: #user_error
+    self should: [self.nav announcementsSentBy: "NotAClass"] raise: #user_error
 
   // The site-level form applies the same guard.
   testSitesRequiresClassArgument =>
-    nav := SystemNavigation default
-    @expect type
-    self should: [nav announcementSitesSentBy: #NotAClass] raise: #user_error
+    self should: [
+      self.nav announcementSitesSentBy: #NotAClass
+    ] raise: #user_error
 
   // --- happy-path shape (compiler port absent) ---
   //
@@ -98,13 +92,11 @@ TestCase subclass: SystemNavigationAnnouncementsSentByTest
   // `announceSitesIn:` falls back to `[]` when the port is down). The contract
   // under test is the shape: class input -> empty List output.
   testValidArgumentReturnsListOfClasses =>
-    nav := SystemNavigation default
-    result := nav announcementsSentBy: SystemNavigation
+    result := self.nav announcementsSentBy: SystemNavigation
     self assert: (result isKindOf: List)
     self assert: result isEmpty
 
   testValidArgumentSitesReturnsList =>
-    nav := SystemNavigation default
-    result := nav announcementSitesSentBy: SystemNavigation
+    result := self.nav announcementSitesSentBy: SystemNavigation
     self assert: (result isKindOf: List)
     self assert: result isEmpty

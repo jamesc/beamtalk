@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LateSlotInheritedSubActor — test fixture for BT-3558 (ADR 0124 B10)
+//
+// Adds only its own eager field — no `late` field of its own. Every
+// `late_slot_test.bt` assertion against this class drives the `proc` slot
+// *inherited* from `LateSlotInheritedBaseActor`
+// (fixtures/late_slot_inherited_base_actor.bt) through its accessors,
+// proving the guarded read, `hasField:`, and `clearField:` all resolve the
+// slot's declared-`late` kind correctly across a class boundary, not only
+// on the class that declares it.
+
+LateSlotInheritedBaseActor subclass: LateSlotInheritedSubActor
+  state: extra :: Integer = 0
+
+  getExtra -> Integer => self.extra

@@ -122,6 +122,7 @@ Object subclass: ClassMethodBlock
   // {Array, StateAcc} tuple.
   class doubleCountingRet: items =>
     n := 0
+    @expect lint "explicit ^ of a list-op is the BT-2358 return arm under test"
     ^(items
       collect: [:x |
         n := n + 1
@@ -132,6 +133,7 @@ Object subclass: ClassMethodBlock
   // folded accumulator, threading the captured local.
   class sumCountingRet: items =>
     n := 0
+    @expect lint "explicit ^ of a list-op is the BT-2358 return arm under test"
     ^items
       inject: 0
       into: [:acc :x |
@@ -143,6 +145,7 @@ Object subclass: ClassMethodBlock
   // branch value (no 0-arg stateful-block dispatch crash, no tuple leak).
   class condRet: flag =>
     sum := 0
+    @expect lint "explicit ^ of a conditional is the BT-2358 return arm under test"
     ^(flag ifTrue: [sum := sum + 7])
 
   // BT-2350: predicate helper for the self-send + captured-local select: case.

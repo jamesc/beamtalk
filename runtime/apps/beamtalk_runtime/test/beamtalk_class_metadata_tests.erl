@@ -703,3 +703,73 @@ delete_class_method_funs_when_fun_table_absent_test() ->
     with_no_fun_table(fun() ->
         ?assertEqual(ok, beamtalk_class_metadata:delete_class_method_funs('AnyClass'))
     end).
+
+%%====================================================================
+%% flatten_ancestor_map/2 (ADR 0125 §2.2/§3.4) — the shared ancestor
+%% walk-and-merge primitive beamtalk_workspace_shape_store and
+%% beamtalk_release_shapes both call.
+%%====================================================================
+
+%% A root class (no superclass) contributes an empty ancestor map — there is
+%% nothing above it to merge.
+flatten_ancestor_map_root_class_is_empty_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Root', m, [], none, undefined),
+        Reader = fun(_) -> #{unexpected => called} end,
+        ?assertEqual(#{}, beamtalk_class_metadata:flatten_ancestor_map('Root', Reader))
+    end).
+
+%% An unregistered class also has no ancestors to walk.
+flatten_ancestor_map_unregistered_class_is_empty_test() ->
+    with_clean_table(fun() ->
+        Reader = fun(_) -> #{unexpected => called} end,
+        ?assertEqual(#{}, beamtalk_class_metadata:flatten_ancestor_map('Ghost', Reader))
+    end).
+
+%% A two-level chain: `Root <- Mid <- Leaf`. Leaf's ancestor map merges
+%% Mid's and Root's own contributions, with Mid (closer) winning a
+%% same-key conflict.
+flatten_ancestor_map_merges_closer_ancestor_wins_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Root', m, [], none, undefined),
+        ok = beamtalk_class_metadata:insert('Mid', m, [], 'Root', undefined),
+        ok = beamtalk_class_metadata:insert('Leaf', m, [], 'Mid', undefined),
+        OwnMaps = #{
+            'Root' => #{a => root_a, b => root_b},
+            'Mid' => #{b => mid_b, c => mid_c}
+        },
+        Reader = fun(Class) -> maps:get(Class, OwnMaps, #{}) end,
+        ?assertEqual(
+            #{a => root_a, b => mid_b, c => mid_c},
+            beamtalk_class_metadata:flatten_ancestor_map('Leaf', Reader)
+        )
+    end).
+
+%% Never folds in the starting class's own contribution — only its
+%% ancestors'.
+flatten_ancestor_map_excludes_starting_class_own_map_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Root', m, [], none, undefined),
+        ok = beamtalk_class_metadata:insert('Leaf', m, [], 'Root', undefined),
+        Reader = fun
+            ('Root') -> #{a => root_a};
+            ('Leaf') -> #{a => leaf_a}
+        end,
+        ?assertEqual(#{a => root_a}, beamtalk_class_metadata:flatten_ancestor_map('Leaf', Reader))
+    end).
+
+%% An ancestor whose own map cannot be read (the reader raises) contributes
+%% nothing at its level rather than failing the whole flatten.
+flatten_ancestor_map_tolerates_a_raising_reader_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Root', m, [], none, undefined),
+        ok = beamtalk_class_metadata:insert('Mid', m, [], 'Root', undefined),
+        ok = beamtalk_class_metadata:insert('Leaf', m, [], 'Mid', undefined),
+        Reader = fun
+            ('Root') -> #{a => root_a};
+            ('Mid') -> error(boom)
+        end,
+        ?assertEqual(
+            #{a => root_a}, beamtalk_class_metadata:flatten_ancestor_map('Leaf', Reader)
+        )
+    end).

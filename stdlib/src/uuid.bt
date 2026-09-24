@@ -137,13 +137,13 @@ sealed typed Value subclass: Uuid native: beamtalk_uuid
   ///   unwrap < (Uuid fromString: "ffffffff-ffff-7fff-bfff-ffffffffffff") unwrap
   /// // => true
   /// ```
-  < other :: Uuid -> Boolean => (Erlang beamtalk_uuid) lt: self with: other
+  < other :: Uuid -> Boolean => self delegate
 
   /// True if this Uuid sorts after `other` (byte-wise on the raw 16 bytes).
-  > other :: Uuid -> Boolean => (Erlang beamtalk_uuid) gt: self with: other
+  > other :: Uuid -> Boolean => self delegate
 
   /// True if this Uuid sorts before or the same as `other`.
-  <= other :: Uuid -> Boolean => (Erlang beamtalk_uuid) lte: self with: other
+  <= other :: Uuid -> Boolean => self delegate
 
   /// True if this Uuid sorts after or the same as `other`.
-  >= other :: Uuid -> Boolean => (Erlang beamtalk_uuid) gte: self with: other
+  >= other :: Uuid -> Boolean => self delegate

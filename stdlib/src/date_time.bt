@@ -266,10 +266,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
 
   /// Difference between this and another DateTime as a Duration.
   ///
-  /// Positive when this DateTime is later than `other`. Stays inline FFI
-  /// (not `self delegate`, ADR 0101 / BT-2731): an operator selector is not
-  /// a valid Erlang function name, so it dispatches through the `subtract`
-  /// shim.
+  /// Positive when this DateTime is later than `other`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -277,16 +274,16 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// b := DateTime year: 2026 month: 1 day: 1
   /// (a - b) asHours                                // => 24
   /// ```
-  - other :: DateTime -> Duration =>
-    (Erlang beamtalk_datetime) subtract: self with: other
+  - other :: DateTime -> Duration => self delegate
 
   // ===== Instance Methods — Comparison =====
   //
-  // `<`, `>`, `<=`, `>=` stay inline FFI (not `self delegate`, ADR 0101 / BT-2731):
-  // an operator selector is not a valid Erlang function name, so `self delegate`
-  // cannot emit the call. They dispatch through the named shims `lt`/`gt`/`lte`/`gte`
-  // (still wrapped-by-default), and a runtime dispatch guard (BT-2709/2710) lets
-  // this override actually run.
+  // `<`, `>`, `>=`, `<=` are all `self delegate` straight to
+  // `beamtalk_datetime`'s same-named functions. Erlang spells "less-or-equal"
+  // `=<`, not `<=`, so `'<='/2` is a small alias next to `'=<'/2` purely so
+  // `self delegate` (which derives the target name from the method's own
+  // operator selector) has a same-named function to reach.
+  // A runtime dispatch guard (BT-2709/2710) lets these overrides actually run.
   //
   // `=:=`, `=/=`, and `/=` are NOT overridable here: per ADR 0002, the compiler
   // hard-lowers all four equality/inequality operators straight to Erlang's raw
@@ -310,8 +307,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// (DateTime year: 2025 month: 1 day: 1) < (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  < other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) lt: self with: other
+  < other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime is later than `other`.
   ///
@@ -319,8 +315,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) > (DateTime year: 2025 month: 1 day: 1)  // => true
   /// ```
-  > other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) gt: self with: other
+  > other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime is earlier than or equal to `other`.
   ///
@@ -328,8 +323,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) <= (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  <= other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) lte: self with: other
+  <= other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime is later than or equal to `other`.
   ///
@@ -337,8 +331,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) >= (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  >= other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) gte: self with: other
+  >= other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime represents the same instant as `other`, regardless
   /// of offsetMinutes. A plain named method, not an operator override — `=:=`
@@ -352,8 +345,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   ///   sameInstant: (DateTime fromString: "2026-07-25T14:00:00+02:00")
   /// // => true
   /// ```
-  sameInstant: other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) eql: self with: other
+  sameInstant: other :: DateTime -> Boolean => self delegate
 
   /// True if this DateTime does not represent the same instant as `other`.
   /// The negation of `sameInstant:`.

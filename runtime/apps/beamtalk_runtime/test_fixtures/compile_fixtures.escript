@@ -116,7 +116,13 @@ main([]) ->
         %% default) and one eager-with-default field.
         "typed_late_slot_actor",
         "untyped_late_slot_actor",
-        "untyped_field_counter"
+        "untyped_field_counter",
+        %% BT-3571 (ADR 0125 §2.2/§3.4) - beamtalk_release_shapes_tests'
+        %% two-class hierarchy: a root with its own field, and a subclass
+        %% declaring shapeVersion: 2 + migrateFromV1: — asserts the
+        %% build-time extractor's flattened field map and migration table.
+        "release_shapes_root",
+        "release_shapes_leaf"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

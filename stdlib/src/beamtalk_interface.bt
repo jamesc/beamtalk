@@ -24,14 +24,31 @@ sealed typed Object subclass: BeamtalkInterface
   // receiver, so the first-keyword + self-threading `self delegate` form would
   // be wrong (it would pass a meaningless `self`). The methods stay
   // receiver-ignoring instance FFI, wrapped-by-default since BT-2722.
-  classState: current :: BeamtalkInterface | Nil = nil
+  late classState: current :: BeamtalkInterface
 
   /// Return the current singleton instance (nil before workspace bootstrap).
-  class current -> BeamtalkInterface => self.current
+  ///
+  /// `@expect type`: a class method's `self hasField:` send infers as
+  /// `Dynamic` rather than its declared `Boolean` return type — a
+  /// pre-existing type-checker gap (ADR 0124 B4's `has_clear_class_var_actor.bt`
+  /// fixture hits the same thing), not something this conversion introduces.
+  @expect type
+  class current -> BeamtalkInterface | Nil =>
+    (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
 
   /// Set the current singleton instance.
   class current: instance :: BeamtalkInterface -> BeamtalkInterface =>
     self.current := instance
+
+  /// Clear the current singleton instance (reset to nil).
+  ///
+  /// `@expect type`: a class method's `self clearField:` send infers as
+  /// `Dynamic` rather than its declared `Self` return type — the same
+  /// pre-existing type-checker gap `current`'s `self hasField:` hits above.
+  @expect type
+  class resetCurrent -> Nil =>
+    self clearField: #current
+    nil
 
   // === Class registry ===
 

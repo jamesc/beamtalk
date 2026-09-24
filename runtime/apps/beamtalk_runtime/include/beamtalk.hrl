@@ -58,7 +58,12 @@
 %%     no_superclass | class_already_exists | internal_error | dispatch_error |
 %%     callback_failed | assertion_failed | runtime_error | erlang_exit |
 %%     erlang_throw | missing_parameter | stdlib_shadowing |
-%%     stateful_block_dispatch
+%%     stateful_block_dispatch |
+%%     node_down | remote_code_mismatch | not_serialisable |
+%%     shape_version_ahead | shape_migration_failed |
+%%     wire_version_unsupported | invalid_node_name | insecure_distribution
+%%       (ADR 0126 §7.1, distribution and location-transparent actors — see
+%%       `beamtalk_exception_handler:kind_to_class/1` for their classes)
 %% - class: The class name where the error occurred (e.g., 'Integer')
 %% - selector: The method that failed (if applicable)
 %% - message: Human-readable explanation using user-facing names

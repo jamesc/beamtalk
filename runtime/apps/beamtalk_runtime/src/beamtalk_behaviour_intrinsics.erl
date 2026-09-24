@@ -808,6 +808,7 @@ Cleanup sequence:
 """.
 -spec classRemoveFromSystemByName(atom()) -> 'nil'.
 classRemoveFromSystemByName(ClassName) ->
+    ok = require_class_capability(removeFromSystem, ClassName, <<"removeFromSystem">>),
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             Error0 = beamtalk_error:new(class_not_found, ClassName),
@@ -1266,6 +1267,9 @@ object, on success.
 classRenameTo(Self, NewName) when is_atom(NewName) ->
     ClassPid = erlang:element(4, Self),
     OldName = gen_server:call(ClassPid, class_name),
+    ok = require_class_capability(
+        'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
+    ),
     ok = ensure_rename_collision_free(OldName, NewName),
     OldNameBin = atom_to_binary(OldName, utf8),
     Classification = capture_class_removal_snapshot(OldNameBin),
@@ -1916,6 +1920,7 @@ beamtalk_workspace (follows the beamtalk_actor_registry registered-name pattern)
 classReload(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    ok = require_class_capability(reload, ClassName, <<"reload">>),
     ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
     SourceFile = beamtalk_reflection:source_file_from_module(ModuleName),
     case SourceFile of
@@ -2011,6 +2016,34 @@ workspace restart unless promoted via `compile:source:'. Returns the receiver.
 classTryCompileSource(Self, Selector, Source) ->
     do_compile_source(Self, Selector, Source, ephemeral).
 
+%% ADR 0125 §1.5: refuse a method-level compile or workspace operation on a
+%% node that cannot perform it (a release without a compiler, or any release
+%% for a workspace mutation), naming the method as `Class >> selector`.
+%% The subject is built lazily (only on refusal) and formats a non-atom
+%% selector rather than crashing, so the primitive's own argument validation
+%% still reports a bad selector on nodes where the operation is allowed.
+-spec require_method_capability(beamtalk_capability:operation(), atom(), term()) -> ok.
+require_method_capability(Op, ClassName, Selector) ->
+    beamtalk_capability:require(Op, ClassName, fun() ->
+        SelectorFormat =
+            case is_atom(Selector) orelse is_binary(Selector) of
+                true -> "~ts";
+                false -> "~tp"
+            end,
+        iolist_to_binary(io_lib:format("~ts >> " ++ SelectorFormat, [ClassName, Selector]))
+    end).
+
+%% `Class <Suffix>` subject for a class-level capability refusal, built lazily.
+-spec require_class_capability(beamtalk_capability:operation(), atom(), iodata()) -> ok.
+require_class_capability(Op, ClassName, Suffix) ->
+    beamtalk_capability:require(Op, ClassName, fun() ->
+        iolist_to_binary([atom_to_binary(ClassName, utf8), <<" ">>, Suffix])
+    end).
+
+-spec compile_source_op(durable | ephemeral) -> beamtalk_capability:operation().
+compile_source_op(durable) -> 'compile:source:';
+compile_source_op(ephemeral) -> 'tryCompile:source:'.
+
 %% Shared compile-and-install path for compile:source: / tryCompile:source:.
 %% Routes to beamtalk_repl_eval:compile_method/6 via erlang:apply to keep
 %% beamtalk_runtime free of a compile-time dependency on beamtalk_workspace
@@ -2020,6 +2053,7 @@ classTryCompileSource(Self, Selector, Source) ->
 do_compile_source(Self, Selector, Source, Intent) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    ok = require_method_capability(compile_source_op(Intent), ClassName, Selector),
     ClassNameBin = atom_to_binary(ClassName, utf8),
     SourceBin = ensure_source_binary(Selector, Source, Intent, ClassName),
     {Author, AuthorKind} = current_author_context(),
@@ -2075,6 +2109,7 @@ same underlying shape).
 classPrecheckCompileSource(Self, Selector, Source) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    ok = require_method_capability('precheckCompile:source:', ClassName, Selector),
     ClassNameBin = atom_to_binary(ClassName, utf8),
     SourceBin = ensure_precheck_source_binary(Source, ClassName),
     try
@@ -2384,6 +2419,9 @@ classMigrateShapeFrom(Self, Fields, FromVersion) when
 %% for the two public functions above to handle differently.
 -spec rename_selector(#beamtalk_object{}, atom(), atom()) -> renamed | absent.
 rename_selector(Self, OldSelector, NewSelector) ->
+    ok = require_method_capability(
+        'renameSelector:to:', gen_server:call(erlang:element(4, Self), class_name), OldSelector
+    ),
     case classIncludesSelector(Self, OldSelector) of
         false ->
             absent;
@@ -3301,22 +3339,21 @@ walk_hierarchy(ClassName, Fun, Acc) ->
 -doc """
 Convert a class name atom to a class object (#beamtalk_object{}).
 
-Looks up the class process, gets its module name, and constructs
-the class object tuple. Returns nil if the class is not registered
-(safe during bootstrap window).
+Thin wrapper over `beamtalk_class_registry:resolve_class_object/1` (promoted
+there per ADR 0126 Phase 0.5 finding (e) — see that function's doc), mapping
+its `undefined` to the Beamtalk `nil` sentinel this function has always
+returned for an unregistered class (safe during bootstrap window).
 """.
 -spec atom_to_class_object(atom()) -> #beamtalk_object{} | 'nil'.
 atom_to_class_object(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
+    case beamtalk_class_registry:resolve_class_object(ClassName) of
         undefined ->
             ?LOG_DEBUG("atom_to_class_object: class ~p not registered", [ClassName], #{
                 domain => [beamtalk, runtime]
             }),
             nil;
-        ClassPid ->
-            Module = gen_server:call(ClassPid, module_name),
-            Tag = beamtalk_class_registry:class_object_tag(ClassName),
-            #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
+        ClassObj ->
+            ClassObj
     end.
 
 -doc """

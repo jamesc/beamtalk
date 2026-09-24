@@ -227,7 +227,10 @@ module 'foreign_extension' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
     let Self = call 'beamtalk_actor':'make_self'(State) in
     try call 'foreign_extension':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
+    catch <Type, Error, Stacktrace> -> case {Type, Error} of
+        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
+        <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
+    end
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
@@ -296,7 +299,7 @@ module 'foreign_extension' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_co
     try
         let _Ext0 = call 'beamtalk_extensions':'register'('String', 'bt2250Doubled', fun (_ExtArgs, Self) ->
             
-let _ConcatLeft1 = Self in let _ConcatRight2 = Self in case call 'erlang':'is_list'(_ConcatLeft1) of <'true'> when 'true' -> call 'erlang':'++'(_ConcatLeft1, _ConcatRight2) <'false'> when 'true' -> call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(_ConcatLeft1), call 'erlang':'binary_to_list'(_ConcatRight2)]) end, 'foreign_extension', #{#<98>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<50>(8,1,'integer',['unsigned'|['big']]),#<50>(8,1,'integer',['unsigned'|['big']]),#<53>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']])}#) in
+let _ConcatLeft4 = Self in let _ConcatRight5 = Self in case call 'erlang':'is_list'(_ConcatLeft4) of <'true'> when 'true' -> call 'erlang':'++'(_ConcatLeft4, _ConcatRight5) <'false'> when 'true' -> call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(_ConcatLeft4), call 'erlang':'binary_to_list'(_ConcatRight5)]) end, 'foreign_extension', #{#<98>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<50>(8,1,'integer',['unsigned'|['big']]),#<50>(8,1,'integer',['unsigned'|['big']]),#<53>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']])}#) in
         'ok'
 
     of _ProtoRegResult -> _ProtoRegResult

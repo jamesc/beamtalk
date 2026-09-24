@@ -10,6 +10,7 @@ Counter subclass: ActorNlrSuper
   incIfPositive: n =>
     n <= 0 ifTrue: [^"skipped"]
     self.flag := true
+    @expect lint "trailing ^ is the early-return-with-super-send arm under test"
     ^super increment
 
   getFlag => self.flag

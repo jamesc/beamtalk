@@ -437,6 +437,11 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
         );
     }
 
+    // BT-3563: see `test_stdlib::run_tests`'s equivalent comment — a
+    // doctest btfixture field typed with a sibling `src/` alias needs the
+    // same pre-loading.
+    let pre_loaded_aliases = crate::commands::build::collect_sibling_src_alias_infos(&test_path);
+
     // Phase 1: Compile all synthetic .btscript files
     let mut compiled_files: Vec<CompiledTestFile> = Vec::new();
     let mut all_core_files: Vec<Utf8PathBuf> = Vec::new();
@@ -449,6 +454,7 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
             &build_dir,
             opts.no_warnings,
             opts.warnings_as_errors,
+            &pre_loaded_aliases,
         )
         .wrap_err_with(|| format!("Failed to compile doctests from '{md_path}'"))?;
 

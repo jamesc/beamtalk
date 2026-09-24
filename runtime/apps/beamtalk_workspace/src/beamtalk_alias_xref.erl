@@ -132,7 +132,7 @@ anywhere.
 Fire-and-forget cast, mirroring `beamtalk_compiler_server:register_class/2`:
 silently dropped if this gen_server is not running — this module is only
 started in REPL mode (see `beamtalk_workspace_sup`'s `repl_child_specs/6`),
-so every `compile_file_core/4` call in run mode (`repl=false`) would
+so every `compile_file_core/4` call in run mode (`mode => run`) would
 otherwise crash the compile on `noproc`.
 """.
 -spec register_class(binary(), [binary()]) -> ok.

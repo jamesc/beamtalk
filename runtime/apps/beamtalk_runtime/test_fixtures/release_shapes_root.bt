@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3571 (ADR 0125 §2.2/§3.4) fixture: the superclass half of a
+// two-class hierarchy `beamtalk_release_shapes_tests` extracts shapes
+// from — its own field must show up in ReleaseShapesLeaf's *flattened*
+// shape (ancestors merged in, closer wins).
+
+Actor subclass: ReleaseShapesRoot
+  state: label :: String = "root"

@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3566: BeamtalkInterface and WorkspaceInterface each gained a
+// resetCurrent class method mirroring TranscriptStream's, for symmetry
+// after BT-3559 converted their `current` classState singleton to a
+// `late` slot with no default. Verifies resetCurrent is safe to call and
+// leaves the singleton unassigned (current == nil), the same shape as
+// TranscriptStream's own resetCurrent test (show_cr_test.bt).
+
+TestCase subclass: SingletonResetCurrentTest
+
+  testBeamtalkInterfaceResetCurrentClearsSingleton =>
+    BeamtalkInterface resetCurrent
+    self assert: BeamtalkInterface current equals: nil
+
+  testWorkspaceInterfaceResetCurrentClearsSingleton =>
+    WorkspaceInterface resetCurrent
+    self assert: WorkspaceInterface current equals: nil

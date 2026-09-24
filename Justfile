@@ -701,6 +701,14 @@ check-surface-drift:
     @echo "🔎 Checking surface parity drift..."
     @cargo run -p beamtalk-surface-drift --quiet
 
+# Print the declared OTP support window (ADR 0125 §3.1, otp-support.toml)
+# as a JSON array of majors, e.g. ["27","28"]. Consumed by ci.yml's
+# matrix.otp so the workflow never hardcodes the window itself; a drift
+# test (crates/beamtalk-cli/tests/cli/cli_otp_matrix.rs) asserts this output
+# equals the declared window.
+otp-matrix:
+    @cargo run --bin beamtalk --quiet -- otp-matrix
+
 # Evaluate search quality from structured MCP server logs (ADR 0062)
 # Usage: just search-eval /path/to/mcp-server.log
 [unix]
@@ -1363,6 +1371,14 @@ test-runtime: build-stdlib
     @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--cover=false' '--app=beamtalk_runtime,beamtalk_workspace,beamtalk_compiler' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
+
+# Run the opt-in two-node (peer-booted) beamtalk_node_tests suite. Skipped by
+# `just test-runtime`: its peer boot consistently times out on CI runners, so CI
+# runs it as a separate non-blocking step.
+[unix]
+[working-directory: 'runtime']
+test-two-node: build-stdlib
+    BEAMTALK_TWO_NODE_TESTS=1 BEAMTALK_NO_FILE_LOG=1 rebar3 eunit --cover=false --module=beamtalk_node_tests
 
 # Run performance benchmarks (separate from unit tests, ~30s)
 [working-directory: 'runtime']

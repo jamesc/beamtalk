@@ -57,6 +57,11 @@ Ets objects are represented as tagged maps:
 -export([lookup/2, insert/3, lookupIfAbsent/3, includesKey/2, removeKey/2]).
 -export([keys/1, tableSize/1, deleteTable/1]).
 
+%% `at/2` is a same-named alias for `self delegate` on `at:` to reach —
+%% kept separate from `lookup/2` (the FFI-proxy shim name above) purely so
+%% the exported name matches the Beamtalk selector.
+-export([at/2]).
+
 %% FFI shims for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
 -export([new/2, named/1, exists/1, newOrExisting/2]).
 
@@ -202,6 +207,9 @@ lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     end;
 lookup(_Self, _Key) ->
     beamtalk_error:raise_type_error('Ets', 'at:', <<"Receiver must be an Ets instance">>).
+
+-spec at(t(), Key :: term()) -> term().
+at(Self, Key) -> lookup(Self, Key).
 
 -doc """
 Insert or update a key-value pair. Returns nil.

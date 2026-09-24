@@ -39,21 +39,49 @@ from `beamtalk_shape_chain:migrate/4`, wrapped here as
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([migrate/3, migrate/4, check_stray_migrations/1, pack/1, unpack/1]).
-
--ifdef(TEST).
-%% Export field_tier/1 for the BT-3542 cross-boundary conformance test
-%% (beamtalk_shape_migration_tests) — same convention as beamtalk_stdlib.erl's
-%% `-ifdef(TEST). -export([...]). -endif.` block for internal helpers that
-%% only EUnit coverage needs, rather than widening this module's public API
-%% surface permanently for a test-only need.
--export([field_tier/1]).
--endif.
+-export([
+    migrate/3, migrate/4,
+    check_stray_migrations/1,
+    pack/1,
+    pack_wire/1,
+    unpack/1,
+    unpack_strict/1,
+    resolve_migrations/1,
+    %% ADR 0126 §5.1/§5.4: beamtalk_wire's runtime class→tier dispatch routes
+    %% through this same table (BT-3542 conformance-pinned against
+    %% sendability.rs) — no second tier table. field_tier/1 was previously
+    %% exported `-ifdef(TEST)` only (for beamtalk_shape_migration_tests'
+    %% conformance test); it is now a genuine production dependency of
+    %% beamtalk_wire, so it is a plain export like the rest of this list.
+    field_tier/1,
+    max_pack_depth/0
+]).
 
 -export_type([envelope/0]).
 
 -type envelope() ::
     {beamtalk_shape, Class :: atom(), ShapeVersion :: pos_integer(), Fields :: map()}.
+
+-doc """
+Sendability/persistence policy threaded through `pack/3`'s internal walk
+(ADR 0126 §5.4): `persist` is `pack/1`'s existing policy (`SendableRef`
+fields rejected — a pid has no meaningful on-disk shape); `wire` is
+`pack_wire/1`'s policy (`SendableRef` fields pass — pids are node-qualified
+natively and fine to ship). `HandleScoped` is rejected under both.
+""".
+-type pack_policy() :: persist | wire.
+
+-doc """
+Strictness threaded through `unpack/3`'s internal walk (ADR 0125 §3.4):
+`lenient` is `unpack/1`'s existing behaviour (migrates forward or backward,
+silently truncating fields a downgraded receiver does not declare — the
+right policy for persistence); `strict` is `unpack_strict/1`'s policy (an
+envelope newer than this node's own declared `shapeVersion` for that class
+is refused before the migration chain runs, rather than silently guessed
+at — the right policy for a wire receiver that must never truncate an
+already-upgraded peer's message).
+""".
+-type unpack_policy() :: lenient | strict.
 
 %%====================================================================
 %% migrate/3
@@ -134,7 +162,10 @@ Resolve `Class`'s compiled `Module`, its full `__beamtalk_meta/0` map, and
 its `'shape_migrations'` table (default `#{}`) in one lookup — the
 resolution sequence `migrate/4` and `check_stray_migrations/1` both need,
 extracted so a future change to it (an inherited-chain lookup, a different
-fallback) only needs updating here.
+fallback) only needs updating here. Also the resolution `beamtalk_release_shapes`
+(ADR 0125 §2.2/§3.4, BT-3571) uses for a build-time-loaded class, and the
+per-level reader its ancestor-flatten walk calls — exported (not
+`-ifdef(TEST)`-gated) for exactly that cross-module reuse.
 """.
 -spec resolve_migrations(atom()) -> {ok, module(), map(), map()} | not_found.
 resolve_migrations(Class) ->
@@ -479,8 +510,9 @@ log_dropped_fields(Class, DeclaredFields, ChainedFields) ->
 %%====================================================================
 
 -doc """
-Pack a live instance into a versioned envelope, for persistence and
-distribution (BT-3527) to consume.
+Pack a live instance into a versioned envelope, for persistence
+(BT-3527, not yet a real caller) to consume — the `persist` policy (see
+`pack_policy()`).
 
 Defined only for `Sendable`-tier classes (ADR 0103): walks the flattened
 declared field types (`classAllFieldTypesByName/1`) and the referenced
@@ -492,6 +524,31 @@ carries its own version. `Array`'s `'data'` map, `Dictionary`, and `String`
 are builtin tagged maps, not user classes — they pass through as terms,
 unversioned (their shape is the runtime's own, covered by BT-3528).
 """.
+-spec pack(Instance :: map()) -> {ok, envelope()} | {error, #beamtalk_error{}}.
+pack(Instance) when is_map(Instance) ->
+    pack(Instance, persist, 0).
+
+-doc """
+Pack a live instance for the wire (ADR 0126 §5.4) — the `wire` policy (see
+`pack_policy()`).
+
+Shares `pack/1`'s internal walk (`pack/3`, `pack_fields/7`,
+`pack_field_value/4`), threaded with the `wire` policy: a `SendableRef`
+field (an `Actor`-typed field, or — via `beamtalk_wire`'s runtime-class
+dispatch, which calls this on a `Value`-kind instance it meets during its
+term walk — a `Value` class with an `Actor`/`Pid`-typed field) **passes**
+rather than being rejected, since pids are node-qualified natively and fine
+to ship (§5.4 item 1). `HandleScoped` still rejects under `wire`, same as
+`persist` (§5.4: an `Ets`/`Port` handle is meaningless on another node too).
+
+Called both directly (a `Value` argument to a remote send) and recursively,
+by `beamtalk_wire:encode/1`'s term walk whenever it meets a `Value`-kind
+instance (ADR 0126 §5.1).
+""".
+-spec pack_wire(Instance :: map()) -> {ok, envelope()} | {error, #beamtalk_error{}}.
+pack_wire(Instance) when is_map(Instance) ->
+    pack(Instance, wire, 0).
+
 %% Recursion cap for nested Value packing (mirrors the compile-time
 %% checker's MAX_COMPOSE_DEPTH,
 %% `beamtalk-core/src/semantic_analysis/type_checker/sendability.rs`) — a
@@ -501,20 +558,25 @@ unversioned (their shape is the runtime's own, covered by BT-3528).
 %% genuine reference cycle should not arise through ordinary Beamtalk code,
 %% but pack/1 accepts any hand-built tagged map (persistence/distribution
 %% callers), so the guard costs little and cannot be skipped by construction.
+%%
+%% `beamtalk_wire:encode/1`'s own (separate) term walk reuses this exact cap
+%% via `max_pack_depth/0` (ADR 0126 §5.1: "bounded by the same depth cap as
+%% pack/1") rather than defining its own copy of the number.
 -define(MAX_PACK_DEPTH, 32).
 
--spec pack(Instance :: map()) -> {ok, envelope()} | {error, #beamtalk_error{}}.
-pack(Instance) when is_map(Instance) ->
-    pack(Instance, 0).
+-doc "The recursion depth cap shared by `pack/3`'s nested-Value walk and `beamtalk_wire`'s term walk (see the `?MAX_PACK_DEPTH` comment above).".
+-spec max_pack_depth() -> pos_integer().
+max_pack_depth() -> ?MAX_PACK_DEPTH.
 
--spec pack(map(), non_neg_integer()) -> {ok, envelope()} | {error, #beamtalk_error{}}.
-pack(Instance, Depth) when Depth >= ?MAX_PACK_DEPTH ->
+-spec pack(map(), pack_policy(), non_neg_integer()) ->
+    {ok, envelope()} | {error, #beamtalk_error{}}.
+pack(Instance, _Policy, Depth) when Depth >= ?MAX_PACK_DEPTH ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(not_serialisable, beamtalk_tagged_map:class_of(Instance, 'Object')),
             <<"nested Value packing exceeded the recursion depth limit">>
         )};
-pack(Instance, Depth) ->
+pack(Instance, Policy, Depth) ->
     case beamtalk_tagged_map:class_of(Instance) of
         undefined ->
             {error,
@@ -523,12 +585,12 @@ pack(Instance, Depth) ->
                     <<"value is not a tagged Beamtalk instance">>
                 )};
         Class ->
-            pack_instance(Class, Instance, Depth)
+            pack_instance(Class, Instance, Policy, Depth)
     end.
 
--spec pack_instance(atom(), map(), non_neg_integer()) ->
+-spec pack_instance(atom(), map(), pack_policy(), non_neg_integer()) ->
     {ok, envelope()} | {error, #beamtalk_error{}}.
-pack_instance(Class, Instance, Depth) ->
+pack_instance(Class, Instance, Policy, Depth) ->
     case beamtalk_class_metadata:lookup_module(Class) of
         {ok, Module} ->
             Meta = read_meta(Module),
@@ -537,7 +599,7 @@ pack_instance(Class, Instance, Depth) ->
             ),
             FieldTypes = beamtalk_behaviour_intrinsics:classAllFieldTypesByName(Class),
             UserFields = beamtalk_tagged_map:user_field_keys(Instance),
-            case pack_fields(Class, UserFields, Instance, FieldTypes, Depth, #{}) of
+            case pack_fields(Class, UserFields, Instance, FieldTypes, Policy, Depth, #{}) of
                 {ok, PackedFields} ->
                     {ok, {beamtalk_shape, Class, ShapeVersion, PackedFields}};
                 {error, _} = Err ->
@@ -547,21 +609,20 @@ pack_instance(Class, Instance, Depth) ->
             {error, class_not_found_error(Class)}
     end.
 
--spec pack_fields(atom(), [atom()], map(), map(), non_neg_integer(), map()) ->
+-spec pack_fields(atom(), [atom()], map(), map(), pack_policy(), non_neg_integer(), map()) ->
     {ok, map()} | {error, #beamtalk_error{}}.
-pack_fields(_Class, [], _Instance, _FieldTypes, _Depth, Acc) ->
+pack_fields(_Class, [], _Instance, _FieldTypes, _Policy, _Depth, Acc) ->
     {ok, Acc};
-pack_fields(Class, [Field | Rest], Instance, FieldTypes, Depth, Acc) ->
+pack_fields(Class, [Field | Rest], Instance, FieldTypes, Policy, Depth, Acc) ->
     Value = maps:get(Field, Instance),
-    case field_tier(maps:get(Field, FieldTypes, none)) of
-        sendable_ref ->
-            {error, not_serialisable_error(Class, Field, <<"SendableRef">>)};
-        handle_scoped ->
-            {error, not_serialisable_error(Class, Field, <<"HandleScoped">>)};
-        Tier ->
-            case pack_field_value(Tier, Value, Depth) of
+    Tier = field_tier(maps:get(Field, FieldTypes, none)),
+    case reject_tier(Tier, Policy) of
+        {true, TierLabel} ->
+            {error, not_serialisable_error(Class, Field, TierLabel)};
+        false ->
+            case pack_field_value(Tier, Value, Policy, Depth) of
                 {ok, PackedValue} ->
-                    pack_fields(Class, Rest, Instance, FieldTypes, Depth, Acc#{
+                    pack_fields(Class, Rest, Instance, FieldTypes, Policy, Depth, Acc#{
                         Field => PackedValue
                     });
                 {error, _} = Err ->
@@ -569,17 +630,37 @@ pack_fields(Class, [Field | Rest], Instance, FieldTypes, Depth, Acc) ->
             end
     end.
 
+%% ADR 0126 §5.4 item 1: `SendableRef` is rejected under `persist` (a pid has
+%% no meaningful on-disk shape) but allowed under `wire` (pids are
+%% node-qualified natively). `HandleScoped` is rejected under both.
+-spec reject_tier(sendable_ref | handle_scoped | value_nested | passthrough, pack_policy()) ->
+    {true, binary()} | false.
+reject_tier(sendable_ref, persist) -> {true, <<"SendableRef">>};
+reject_tier(sendable_ref, wire) -> false;
+reject_tier(handle_scoped, _Policy) -> {true, <<"HandleScoped">>};
+reject_tier(_Tier, _Policy) -> false.
+
 %% Recurse into a Value-kind field's actual value when it is itself a tagged
-%% instance — every other tier (passthrough) carries the raw value through
-%% unchanged, including builtin Array/Dictionary/String maps (ADR 0090).
--spec pack_field_value(value_nested | passthrough, term(), non_neg_integer()) ->
+%% instance. A `sendable_ref`-tier field (only reachable under `wire` —
+%% `reject_tier/2` rejects it under `persist`) holds an actor reference,
+%% which needs the same registered-ref node-qualification the generic wire
+%% walk applies when it meets an actor ref directly (ADR 0126 §3/§5.1);
+%% `beamtalk_pid:qualify_registered_ref/1` is the shared leaf both paths
+%% call, so this can't drift from `beamtalk_wire`'s own rewrite. Every other
+%% tier (passthrough) carries the raw value through unchanged, including
+%% builtin Array/Dictionary/String maps (ADR 0090).
+-spec pack_field_value(
+    sendable_ref | value_nested | passthrough, term(), pack_policy(), non_neg_integer()
+) ->
     {ok, term()} | {error, #beamtalk_error{}}.
-pack_field_value(value_nested, Value, Depth) when is_map(Value) ->
+pack_field_value(value_nested, Value, Policy, Depth) when is_map(Value) ->
     case beamtalk_tagged_map:is_tagged(Value) of
-        true -> pack(Value, Depth + 1);
+        true -> pack(Value, Policy, Depth + 1);
         false -> {ok, Value}
     end;
-pack_field_value(_Tier, Value, _Depth) ->
+pack_field_value(sendable_ref, #beamtalk_object{pid = Pid} = Value, _Policy, _Depth) ->
+    {ok, Value#beamtalk_object{pid = beamtalk_pid:qualify_registered_ref(Pid)}};
+pack_field_value(_Tier, Value, _Policy, _Depth) ->
     {ok, Value}.
 
 -doc """
@@ -669,7 +750,13 @@ is_builtin_passthrough(_) -> false.
 -doc """
 Unpack a versioned envelope back into a live instance map, running the
 shape migration chain from the envelope's version — so a value packed under
-an old version reads back current without the caller knowing.
+an old version reads back current without the caller knowing. The `lenient`
+policy (see `unpack_policy()`): an envelope newer than this node's own
+declared `shapeVersion` is migrated anyway, via `migrate/3`'s existing
+`ToVersion < FromVersion` downgrade branch (a logged warning, reconciled
+against this node's — older — declared field list, silently dropping any
+field that list does not know). The right policy for persistence, where an
+operator-initiated rollback genuinely cannot use the new fields.
 
 Nested envelopes (from `pack/1`'s recursive `Value` packing) are unpacked
 first, depth-first, so migration hooks see ordinary instance maps, never raw
@@ -678,23 +765,54 @@ envelope tuples. The result is tagged with `'$beamtalk_class'` and
 """.
 -spec unpack(envelope()) -> {ok, Instance :: map()} | {error, #beamtalk_error{}}.
 unpack(Envelope) ->
-    unpack(Envelope, 0).
+    unpack(Envelope, lenient, 0).
 
--spec unpack(envelope(), non_neg_integer()) -> {ok, Instance :: map()} | {error, #beamtalk_error{}}.
-unpack(_Envelope, Depth) when Depth >= ?MAX_PACK_DEPTH ->
+-doc """
+Unpack a versioned envelope for the wire (ADR 0125 §3.4, ADR 0126 §5.2) —
+the `strict` policy (see `unpack_policy()`).
+
+Shares `unpack/1`'s internal walk (`unpack/3`, `unpack_nested_fields/3`,
+`unpack_nested_value/3`), threaded with the `strict` policy: an envelope
+whose `ShapeVersion` **exceeds** this node's own declared `shapeVersion` for
+that class is refused with `#beamtalk_error{kind = shape_version_ahead}`
+**before** the migration chain runs, rather than silently truncated —
+"receivers migrate forward, never backward" for a wire, where a rolling
+deploy makes every message from an already-upgraded peer a legitimate
+newer-version envelope, not a malformed one. The check runs per envelope
+(threaded down the same nested-`Value` recursion `unpack/1` uses), per ADR
+0125 §3.4: a `Cart` at the receiver's own version carrying a `Money` field
+one version ahead is still skew, caught at the `Money` envelope, not missed
+by only checking the top level.
+
+Called by `beamtalk_wire:decode/1` at each envelope its term walk meets.
+""".
+-spec unpack_strict(envelope()) -> {ok, Instance :: map()} | {error, #beamtalk_error{}}.
+unpack_strict(Envelope) ->
+    unpack(Envelope, strict, 0).
+
+-spec unpack(envelope(), unpack_policy(), non_neg_integer()) ->
+    {ok, Instance :: map()} | {error, #beamtalk_error{}}.
+unpack(_Envelope, _Policy, Depth) when Depth >= ?MAX_PACK_DEPTH ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(not_serialisable, 'Object'),
             <<"nested Value unpacking exceeded the recursion depth limit">>
         )};
-unpack({beamtalk_shape, Class, ShapeVersion, Fields}, Depth) when
+unpack({beamtalk_shape, Class, ShapeVersion, Fields}, Policy, Depth) when
     is_atom(Class), is_integer(ShapeVersion), ShapeVersion > 0, is_map(Fields)
 ->
-    case unpack_nested_fields(Fields, Depth) of
-        {ok, UnpackedFields} ->
-            case migrate(Class, ShapeVersion, UnpackedFields) of
-                {ok, NewFields, ToVersion} ->
-                    {ok, NewFields#{'$beamtalk_class' => Class, '__shape_version__' => ToVersion}};
+    case check_unpack_policy(Policy, Class, ShapeVersion) of
+        ok ->
+            case unpack_nested_fields(Fields, Policy, Depth) of
+                {ok, UnpackedFields} ->
+                    case migrate(Class, ShapeVersion, UnpackedFields) of
+                        {ok, NewFields, ToVersion} ->
+                            {ok, NewFields#{
+                                '$beamtalk_class' => Class, '__shape_version__' => ToVersion
+                            }};
+                        {error, _} = Err ->
+                            Err
+                    end;
                 {error, _} = Err ->
                     Err
             end;
@@ -702,14 +820,36 @@ unpack({beamtalk_shape, Class, ShapeVersion, Fields}, Depth) when
             Err
     end.
 
--spec unpack_nested_fields(map(), non_neg_integer()) -> {ok, map()} | {error, #beamtalk_error{}}.
-unpack_nested_fields(Fields, Depth) ->
+%% `lenient` (unpack/1) never refuses on version alone — migrate/3's own
+%% downgrade branch already handles a ShapeVersion the receiver is behind on.
+%% `strict` (unpack_strict/1) refuses upfront when ShapeVersion is AHEAD of
+%% this node's own declared shapeVersion, before the chain runs (ADR 0125
+%% §3.4 item 3).
+-spec check_unpack_policy(unpack_policy(), atom(), pos_integer()) ->
+    ok | {error, #beamtalk_error{}}.
+check_unpack_policy(lenient, _Class, _ShapeVersion) ->
+    ok;
+check_unpack_policy(strict, Class, ShapeVersion) ->
+    case resolve_migrations(Class) of
+        {ok, _Module, Meta, _Migrations} ->
+            KnownVersion = maps:get(shape_version, Meta, 1),
+            case ShapeVersion > KnownVersion of
+                true -> {error, shape_version_ahead_error(Class, ShapeVersion, KnownVersion)};
+                false -> ok
+            end;
+        not_found ->
+            {error, class_not_found_error(Class)}
+    end.
+
+-spec unpack_nested_fields(map(), unpack_policy(), non_neg_integer()) ->
+    {ok, map()} | {error, #beamtalk_error{}}.
+unpack_nested_fields(Fields, Policy, Depth) ->
     maps:fold(
         fun
             (_K, _V, {error, _} = Err) ->
                 Err;
             (K, V, {ok, Acc}) ->
-                case unpack_nested_value(V, Depth) of
+                case unpack_nested_value(V, Policy, Depth) of
                     {ok, NV} -> {ok, Acc#{K => NV}};
                     {error, _} = Err -> Err
                 end
@@ -718,12 +858,13 @@ unpack_nested_fields(Fields, Depth) ->
         Fields
     ).
 
--spec unpack_nested_value(term(), non_neg_integer()) -> {ok, term()} | {error, #beamtalk_error{}}.
-unpack_nested_value({beamtalk_shape, Class, ShapeVersion, NestedFields}, Depth) when
+-spec unpack_nested_value(term(), unpack_policy(), non_neg_integer()) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+unpack_nested_value({beamtalk_shape, Class, ShapeVersion, NestedFields}, Policy, Depth) when
     is_atom(Class), is_integer(ShapeVersion), is_map(NestedFields)
 ->
-    unpack({beamtalk_shape, Class, ShapeVersion, NestedFields}, Depth + 1);
-unpack_nested_value(V, _Depth) ->
+    unpack({beamtalk_shape, Class, ShapeVersion, NestedFields}, Policy, Depth + 1);
+unpack_nested_value(V, _Policy, _Depth) ->
     {ok, V}.
 
 %%====================================================================
@@ -733,6 +874,29 @@ unpack_nested_value(V, _Depth) ->
 -spec class_not_found_error(atom()) -> #beamtalk_error{}.
 class_not_found_error(Class) ->
     beamtalk_error:new(class_not_found, Class, migrate).
+
+%% ADR 0125 §3.4 item 3 / ADR 0126 §5.2: an envelope ahead of this node's own
+%% declared shapeVersion for Class, refused by unpack_strict/1 before the
+%% migration chain runs.
+-spec shape_version_ahead_error(atom(), pos_integer(), pos_integer()) -> #beamtalk_error{}.
+shape_version_ahead_error(Class, SentVersion, KnownVersion) ->
+    %% unicode:characters_to_binary/1, not iolist_to_binary/1 — see
+    %% reconcile_error/2's comment (em dash outside iolist_to_binary's
+    %% 0-255 byte range).
+    Hint = unicode:characters_to_binary(
+        io_lib:format(
+            "~s envelope at shape version ~p is ahead of this node's known version ~p "
+            "— upgrade this node before the sender",
+            [Class, SentVersion, KnownVersion]
+        )
+    ),
+    beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(shape_version_ahead, Class),
+            Hint
+        ),
+        #{sent => SentVersion, known => KnownVersion, node => node()}
+    ).
 
 -spec step_error(atom(), pos_integer(), atom(), term()) -> #beamtalk_error{}.
 step_error(Class, Step, Selector, Reason) ->

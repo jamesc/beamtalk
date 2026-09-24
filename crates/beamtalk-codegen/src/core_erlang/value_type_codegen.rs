@@ -25,7 +25,7 @@ use super::util::ClassIdentity;
 use super::value_accessors::{
     AutoSlotMethods, compute_auto_slot_methods, has_opaque_native_representation,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, NlrBoundary, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, concat, join, leaf, line, nest};
 use beamtalk_core::ast::{
@@ -1620,7 +1620,7 @@ impl CoreErlangGenerator {
                 ") ->\n",
                 catch_vars.format_try_prefix(),
                 body_doc,
-                catch_vars.format_catch_suffix(),
+                catch_vars.format_catch_suffix(NlrBoundary::ValueType),
             ]
         } else {
             docvec!["fun (", params_doc, ") ->\n", body_doc,]

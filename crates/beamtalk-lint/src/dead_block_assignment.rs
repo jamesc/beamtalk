@@ -41,6 +41,10 @@
 //! - A block literal passed directly to a selector `is_state_threaded_block_arg`
 //!   recognizes (loops, conditionals, `do:`/`collect:`/`inject:into:`-style
 //!   iteration — the mutation IS threaded back to the caller)
+//! - A block literal that is the *receiver* of a selector
+//!   `is_state_threaded_block_receiver` recognizes (`[...] value`,
+//!   `[...] ensure: [...]`, `[...] on: Error do: [...]` — codegen inlines
+//!   the receiver body, so the mutation IS threaded back too)
 //! - Variables defined locally within the block (not captured from outer scope)
 
 use std::collections::HashSet;
@@ -151,13 +155,22 @@ fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
     scope.pop();
 }
 
-/// Context about the enclosing message send for a block argument.
+/// Where a block literal sits relative to the message send it belongs to.
+#[derive(Debug, Clone, Copy)]
+enum BlockPosition {
+    /// The block is the send's receiver (`[...] value`, `[...] ensure: [...]`).
+    Receiver,
+    /// The block is the argument at this index in the send's argument list.
+    Arg(usize),
+}
+
+/// Context about the enclosing message send for a block literal.
 #[derive(Debug, Clone)]
 struct BlockMessageContext {
     /// The full selector name (e.g., `inject:into:`, `do:`, `ifTrue:`)
     selector: String,
-    /// The index of this block argument in the message send's argument list
-    arg_index: usize,
+    /// Receiver, or which argument position, the block occupies.
+    position: BlockPosition,
 }
 
 /// Walk a sequence of expressions in order.
@@ -220,7 +233,19 @@ fn walk_expr(
             arguments,
             ..
         } => {
-            walk_expr(receiver, scope, safe_params, diagnostics);
+            // A block literal in receiver position gets the same
+            // selector-aware treatment as a block argument, so
+            // `[count := count + 1] value` / `[...] ensure: [...]` are
+            // recognized as inlined-and-threaded rather than escaping.
+            if let Block(block) = receiver.as_ref() {
+                let ctx = BlockMessageContext {
+                    selector: selector.name().to_string(),
+                    position: BlockPosition::Receiver,
+                };
+                enter_block(block, scope, Some(&ctx), diagnostics);
+            } else {
+                walk_expr(receiver, scope, safe_params, diagnostics);
+            }
             walk_msg_args(&selector.name(), arguments, scope, safe_params, diagnostics);
         }
 
@@ -356,7 +381,7 @@ fn walk_msg_args(
         if let Expression::Block(block) = arg {
             let ctx = BlockMessageContext {
                 selector: selector.to_string(),
-                arg_index: i,
+                position: BlockPosition::Arg(i),
             };
             enter_block(block, scope, Some(&ctx), diagnostics);
         } else {
@@ -376,13 +401,13 @@ fn enter_block(
     for param in &block.parameters {
         scope.define(param.name.as_str());
     }
-    if is_state_threaded_block_arg(msg_ctx) {
-        // This block literal sits at a (selector, argument position)
-        // that the compiler's Value-type / class-method state-threading
-        // codegen (ADR 0041; see `is_state_threaded_block_arg`'s doc comment
-        // for the exact codegen cross-reference) recognizes and threads
-        // captured-and-mutated outer locals through. A reassignment here
-        // DOES escape the block — it is not dead — so skip the check
+    if is_state_threaded_block(msg_ctx) {
+        // This block literal sits at a (selector, receiver-or-argument
+        // position) that the compiler's Value-type / class-method
+        // state-threading codegen (ADR 0041; see `is_state_threaded_block`'s
+        // doc comment for the exact codegen cross-reference) recognizes and
+        // threads captured-and-mutated outer locals through. A reassignment
+        // here DOES escape the block — it is not dead — so skip the check
         // entirely for this block's body (`None` disables it, same as
         // method/script-level code outside any block).
         walk_expr_seq(&block.body, scope, None, diagnostics);
@@ -393,29 +418,33 @@ fn enter_block(
 }
 
 /// Returns `true` if `msg_ctx` identifies a block literal at a (selector,
-/// argument position) that codegen recognizes for Value-type / class-method
-/// captured-local state-threading, meaning a reassignment to an outer local
-/// inside the block is threaded back out and visible after the call
-/// returns — contradicting this lint's general "capture by value, mutation
-/// lost" assumption.
+/// receiver-or-argument position) that codegen recognizes for Value-type /
+/// class-method captured-local state-threading, meaning a reassignment to
+/// an outer local inside the block is threaded back out and visible after
+/// the call returns — contradicting this lint's general "capture by value,
+/// mutation lost" assumption.
 ///
-/// Delegates to `beamtalk_core::state_threading_selectors::is_state_threaded_block_arg`
-/// — the single canonical "which selectors thread which block-argument
-/// positions" table (ADR 0118 §7), shared with `beamtalk-codegen`'s
-/// `get_control_flow_threaded_vars`, so the two can never silently drift
-/// (CLAUDE.md's "No duplicate implementations" rule; see that table's doc
-/// comment for the full selector list and index mapping).
+/// Delegates to `beamtalk_core::state_threading_selectors`'s
+/// `is_state_threaded_block_arg` (argument positions) and
+/// `is_state_threaded_block_receiver` (receiver position) — the single
+/// canonical "which selectors thread which block positions" tables (ADR
+/// 0118 §7), shared with `beamtalk-codegen`'s `get_control_flow_threaded_vars`,
+/// so the lint and codegen can never silently drift (CLAUDE.md's "No
+/// duplicate implementations" rule; see those tables' doc comments for the
+/// full selector lists and index mapping).
 ///
 /// Mutating ANY captured outer local inside these shapes persists after the
 /// call returns (confirmed empirically by `BUnit` runtime tests, see
-/// `stdlib/test/bt3385dead_assignment_test.bt`) — not just an
-/// `inject:into:` accumulator parameter, so the lint's exemption covers the
-/// whole block body, not only a narrower accumulator-only case.
+/// `stdlib/test/bt3385dead_assignment_test.bt` for the argument positions
+/// and `stdlib/test/dead_assignment_receiver_threading_test.bt` for the
+/// receiver positions) — not just an `inject:into:` accumulator parameter,
+/// so the lint's exemption covers the whole block body, not only a
+/// narrower accumulator-only case.
 ///
 /// Deliberately NOT included, so the lint keeps firing there: a block
 /// stored in a variable or passed to a user-defined (non-intrinsic) method
-/// and invoked indirectly via `value`/`value:` — the compiler does not
-/// silently drop such a mutation, but currently refuses
+/// and invoked indirectly via `value`/`value:`/`perform:` — the compiler does
+/// not silently drop such a mutation, but currently refuses
 /// the indirect invocation outright at runtime (a separate, more confusing
 /// failure mode outside this lint's scope) rather than threading it through;
 /// `eachWithIndex:`/`do:separatedBy:`, whose threading is context-dependent
@@ -427,14 +456,16 @@ fn enter_block(
 /// the same way as the loop/conditional family
 /// (`generate_on_do_with_mutations`/`generate_ensure_with_mutations`) — see
 /// `on_do_and_ensure_handler_no_longer_warn` below.
-fn is_state_threaded_block_arg(msg_ctx: Option<&BlockMessageContext>) -> bool {
+fn is_state_threaded_block(msg_ctx: Option<&BlockMessageContext>) -> bool {
+    use beamtalk_core::state_threading_selectors as table;
+
     let Some(ctx) = msg_ctx else {
         return false;
     };
-    beamtalk_core::state_threading_selectors::is_state_threaded_block_arg(
-        &ctx.selector,
-        ctx.arg_index,
-    )
+    match ctx.position {
+        BlockPosition::Receiver => table::is_state_threaded_block_receiver(&ctx.selector),
+        BlockPosition::Arg(index) => table::is_state_threaded_block_arg(&ctx.selector, index),
+    }
 }
 
 /// Emit a dead-assignment warning diagnostic.
@@ -945,6 +976,59 @@ sealed typed Value subclass: Foo
             assert!(
                 diags.is_empty(),
                 "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
+    }
+
+    /// A block literal in RECEIVER position of a selector codegen inlines
+    /// (`is_state_threaded_block_receiver`) threads its captured-local
+    /// mutation just like a recognized block argument does — `[count :=
+    /// count + 1] value` was the exact BT-1213 shape and has asserted
+    /// `count = 1` afterwards in `block_evaluation_test.bt` ever since, and
+    /// the `ensure:`/`on:do:` try bodies are the `do_accumulator_value.bt`
+    /// BT-3173 shapes. Runtime pins for every selector here:
+    /// `stdlib/test/dead_assignment_receiver_threading_test.bt`.
+    #[test]
+    fn threaded_receiver_block_no_warn() {
+        for src in [
+            "count := 0.\n[count := count + 1] value",
+            "total := 0.\n[:n | total := total + n] value: 7",
+            "total := 0.\n[:a :b | total := total + a + b] value: 1 value: 2",
+            "sum := 0.\n[sum := sum + 1] ensure: [nil]",
+            "sum := 0.\n[sum := sum + 1] on: Error do: [:e | nil]",
+            // Nested inside a recognized loop body, the receiver rule still applies.
+            "sum := 0.\n#(1, 2) do: [:each | [sum := sum + each] ensure: [nil]]",
+        ] {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
+            );
+        }
+    }
+
+    /// Receiver position is only exempt for the selectors codegen actually
+    /// inlines — a block literal receiving anything else (a user-defined
+    /// selector, `perform:`, `valueWithArguments:`, unary `whileTrue`) is a
+    /// closure whose mutation is lost, so the lint still fires. A keyword
+    /// `whileTrue:`/`whileFalse:` CONDITION block with a local write is the
+    /// worst case — it crashes at runtime today (BT-3607; see the shared
+    /// table's doc comment) — so it stays flagged too.
+    #[test]
+    fn unrecognized_receiver_selector_still_warns() {
+        for src in [
+            "count := 0.\n[count := count + 1] customRun: 1",
+            "count := 0.\n[count := count + 1] perform: #value withArguments: #()",
+            "count := 0.\n[:x | count := count + x] valueWithArguments: #(1)",
+            "i := 0.\n[i := i + 1. i < 3] whileTrue",
+            "i := 0.\n[i := i + 1. i < 3] whileTrue: [nil]",
+            "i := 0.\n[i := i + 1. i >= 3] whileFalse: [nil]",
+        ] {
+            let diags = lint(src);
+            assert_eq!(
+                diags.len(),
+                1,
+                "Expected 1 lint for {src:?}, got: {diags:?}"
             );
         }
     }

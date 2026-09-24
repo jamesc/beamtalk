@@ -585,10 +585,10 @@ debounce_coalesces_rapid_changes_test() ->
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
 
-%%% Run mode tests (repl=false)
+%%% Run mode tests (mode => run)
 
 run_mode_no_disk_write_test() ->
-    %% In run mode (repl=false), no entry should be written to ~/.beamtalk/workspaces/
+    %% In run mode (mode => run), no entry should be written to ~/.beamtalk/workspaces/
     WsId = <<"run_mode_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
     %% Mirror beamtalk_workspace_meta's metadata path computation exactly.
     MetaFile = metadata_path_for(WsId),
@@ -602,7 +602,7 @@ run_mode_no_disk_write_test() ->
         workspace_id => WsId,
         project_path => <<"/bt_test/run_mode">>,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
 
     %% Register a module and wait longer than the debounce window
@@ -614,6 +614,42 @@ run_mode_no_disk_write_test() ->
 
     gen_server:stop(Pid).
 
+release_mode_no_disk_write_test() ->
+    %% ADR 0125 §1.4: release mode, like run mode, writes no workspace
+    %% artifacts to disk.
+    WsId = <<"release_mode_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => undefined,
+        created_at => erlang:system_time(second),
+        mode => release
+    }),
+    ok = beamtalk_workspace_meta:register_module(lists),
+    timer:sleep(2500),
+    ?assertNot(filelib:is_file(MetaFile)),
+    gen_server:stop(Pid).
+
+removed_repl_key_fails_loudly_test() ->
+    %% The removed `repl => boolean()` key must not be silently ignored — a
+    %% stale caller would otherwise fall into workspace mode and write to disk.
+    stop_if_running(),
+    OldTrap = process_flag(trap_exit, true),
+    try
+        ?assertMatch(
+            {error, {{bad_config, {removed_key, repl, use_mode}}, _}},
+            beamtalk_workspace_meta:start_link(#{
+                workspace_id => <<"removed_repl_key">>,
+                created_at => erlang:system_time(second),
+                repl => false
+            })
+        )
+    after
+        process_flag(trap_exit, OldTrap)
+    end.
+
 run_mode_metadata_accessible_test() ->
     %% Even in run mode, get_metadata/0 must work normally
     WsId = <<"run_meta_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
@@ -624,7 +660,7 @@ run_mode_metadata_accessible_test() ->
         workspace_id => WsId,
         project_path => <<"/bt_test/run_meta">>,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
 
     {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
@@ -836,7 +872,7 @@ get_package_name_detected_from_manifest_test() ->
             workspace_id => WsId,
             project_path => list_to_binary(Tmp),
             created_at => erlang:system_time(second),
-            repl => false
+            mode => run
         }),
         ?assertEqual(<<"my_package">>, beamtalk_workspace_meta:get_package_name()),
         {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
@@ -861,7 +897,7 @@ get_package_name_undefined_when_no_package_section_test() ->
             workspace_id => WsId,
             project_path => list_to_binary(Tmp),
             created_at => erlang:system_time(second),
-            repl => false
+            mode => run
         }),
         ?assertEqual(undefined, beamtalk_workspace_meta:get_package_name()),
         gen_server:stop(Pid)
@@ -884,7 +920,7 @@ get_package_name_undefined_when_name_missing_in_section_test() ->
             workspace_id => WsId,
             project_path => list_to_binary(Tmp),
             created_at => erlang:system_time(second),
-            repl => false
+            mode => run
         }),
         ?assertEqual(undefined, beamtalk_workspace_meta:get_package_name()),
         gen_server:stop(Pid)

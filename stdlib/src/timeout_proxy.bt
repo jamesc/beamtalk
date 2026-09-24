@@ -52,6 +52,18 @@ typed Actor subclass: TimeoutProxy
   /// Set the timeout in milliseconds (or `#infinity`).
   setTimeoutMs: ms :: Timeout -> Timeout => self.timeoutMs := ms
 
+  // === Distribution ===
+
+  /// The target's node, not the proxy's (ADR 0126 §6): a proxy is always
+  /// spawned locally, so answering its own node would hide a remote target.
+  node -> Node => self.target node
+
+  /// Whether the target lives on a different node from the caller
+  /// (ADR 0126 §6). A send of `isRemote` from outside is answered in the
+  /// caller's process from the forwarded `node` above; this body covers a
+  /// send from inside the proxy itself.
+  isRemote -> Boolean => self.target isRemote
+
   // === Forwarding ===
 
   /// Forward all unknown messages to the target with the configured timeout.

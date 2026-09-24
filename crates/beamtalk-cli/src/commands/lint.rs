@@ -53,6 +53,16 @@ use tracing::warn;
 /// path — since `collect_lint_files`'s `stubs/` exclusion only applies to
 /// its *directory-walk* branch, not a direct single-file lint target.
 ///
+/// `stdlib_mode` sets `CompilerOptions::stdlib_mode`, which permits known
+/// stdlib classes to override sealed methods (e.g. `Uuid class new:`
+/// raising a pointed error instead of constructing). Without it, every such
+/// class is reported as a "Cannot override sealed method" error that
+/// `beamtalk build-stdlib` — which always sets `stdlib_mode: true` — never
+/// emits. Callers derive this via
+/// [`beamtalk_project::package::is_under_stdlib_src_dir`] against the
+/// file's own path, mirroring `is_stub_file` above; stdlib has no
+/// `beamtalk.toml`, so there is no package root to anchor the check on.
+///
 /// `file_stem` is the target file's basename without extension,
 /// passed to `check_class_file_name_agreement` so `beamtalk lint` reports
 /// the same file-name/class-name mismatch `beamtalk build`/the LSP do (via
@@ -75,6 +85,7 @@ fn collect_diagnostics(
     current_package: Option<&str>,
     is_stub_file: bool,
     file_stem: Option<&str>,
+    stdlib_mode: bool,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.`)
     // plus AST-level lint passes.
@@ -106,6 +117,7 @@ fn collect_diagnostics(
         knowledge_scope,
         has_package_dependencies,
         current_package: current_package.map(str::to_string),
+        stdlib_mode,
         ..Default::default()
     };
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
@@ -282,7 +294,22 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // auto-extracted ones. These loaders print their own diagnostics
     // (skipped signatures, version drift) directly; they are not folded into
     // `all_diags` below, which is scoped to `.bt` diagnostics.
-    let native_type_registry = package_root.as_deref().and_then(|root| {
+    //
+    // Stdlib has no `beamtalk.toml` (see `stdlib_mode`'s doc above), so
+    // `package_root` is always `None` when linting it — falling all the way
+    // through to `beamtalk build-stdlib`'s own extractor
+    // (`extract_stdlib_type_specs`, which scans `runtime/apps/beamtalk_stdlib`'s
+    // compiled `.beam` files, ADR 0075) instead of leaving the registry
+    // `None`. Without this, every `(Erlang m) f:` call in `stdlib/src`
+    // reported `Dynamic (untyped FFI)` in `beamtalk lint` even though
+    // `beamtalk build-stdlib` already infers it correctly — a lint-only
+    // false positive with no `@expect` that could satisfy both passes.
+    let is_stdlib_lint_target = package_root.is_none()
+        && source_files
+            .iter()
+            .any(|f| package::is_under_stdlib_src_dir(f.as_std_path()));
+
+    let native_type_registry = if let Some(root) = package_root.as_deref() {
         let layout = crate::commands::build_layout::BuildLayout::new(root);
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
@@ -308,7 +335,11 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             Some(merged)
         }
         .map(std::sync::Arc::new)
-    });
+    } else if is_stdlib_lint_target {
+        super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
+    } else {
+        None
+    };
 
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
@@ -355,6 +386,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         let is_stub_file = package_root.as_deref().is_some_and(|root| {
             package::is_under_stubs_dir(root.as_std_path(), file.as_std_path())
         });
+        let stdlib_mode = package::is_under_stdlib_src_dir(file.as_std_path());
 
         let lint_diags = collect_diagnostics(
             &module,
@@ -370,6 +402,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             current_package.as_deref(),
             is_stub_file,
             file.file_stem(),
+            stdlib_mode,
         );
 
         // Drop repeat sightings of a pre-loaded alias collision —
@@ -843,6 +876,7 @@ fn collect_lint_diagnostics_with_stub_flag(
         None,
         is_stub_file,
         None,
+        false,
     )
 }
 
@@ -870,6 +904,36 @@ fn collect_lint_diagnostics_with_file_stem(
         None,
         false,
         file_stem,
+        false,
+    )
+}
+
+/// As [`collect_lint_diagnostics`], but with `stdlib_mode` set explicitly —
+/// Regression test for BT-lint-stdlib-false-positives: `beamtalk lint
+/// stdlib/src/...` must not flag a stdlib class overriding a sealed method
+/// (e.g. `Uuid class new:`) the way it would for ordinary user code.
+#[cfg(test)]
+fn collect_lint_diagnostics_with_stdlib_flag(
+    source: &str,
+    stdlib_mode: bool,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    let tokens = lex_with_eof(source);
+    let (module, parse_diags) = parse(tokens);
+    collect_diagnostics(
+        &module,
+        source,
+        parse_diags,
+        vec![],
+        vec![],
+        vec![],
+        None,
+        beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+        false,
+        None,
+        false,
+        None,
+        stdlib_mode,
     )
 }
 
@@ -935,6 +999,44 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("only valid in stubs/ directory")),
             "declare native: inside stubs/ should not be reported: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn sealed_override_outside_stdlib_mode_is_reported() {
+        // `Uuid` is a real generated stdlib builtin (present in
+        // `generated_builtins.rs`), so `is_builtin_class("Uuid")` is true —
+        // but with `stdlib_mode: false` (ordinary user code, or `beamtalk
+        // lint` before this fix on any target) the sealed-override
+        // exemption never applies, so overriding `Value`'s sealed `new:`
+        // must still be reported.
+        let source = "sealed typed Value subclass: Uuid\n  class new: x :: Object -> Nil => self error: \"nope\"\n";
+        let diags = collect_lint_diagnostics_with_stdlib_flag(source, false);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Cannot override sealed method")),
+            "sealed override outside stdlib_mode should be reported: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn sealed_override_inside_stdlib_mode_is_not_reported() {
+        // Regression test for the standalone `beamtalk lint stdlib/src`
+        // false positive: a real stdlib class (`Uuid`) legitimately
+        // overriding a sealed class method (`Value class new:`, to raise a
+        // pointed "use v4/v7/fromString:" error instead of constructing)
+        // must NOT be reported once the caller correctly derives
+        // `stdlib_mode: true` for a file under `stdlib/src` — matching what
+        // `beamtalk build-stdlib` (which always sets `stdlib_mode: true`)
+        // already accepts.
+        let source = "sealed typed Value subclass: Uuid\n  class new: x :: Object -> Nil => self error: \"nope\"\n";
+        let diags = collect_lint_diagnostics_with_stdlib_flag(source, true);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("Cannot override sealed method")),
+            "sealed override inside stdlib_mode should not be reported: {diags:?}"
         );
     }
 
@@ -1101,6 +1203,7 @@ mod tests {
             None,
             false,
             None,
+            false,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -1306,6 +1409,7 @@ mod tests {
             None,
             false,
             None,
+            false,
         );
 
         let unresolved: Vec<_> = diags
@@ -1511,6 +1615,7 @@ mod tests {
             Some("consumer"),
             false,
             None,
+            false,
         );
 
         let unresolved_names: Vec<String> = diags
@@ -1699,6 +1804,7 @@ mod tests {
                 Some("consumer"),
                 false,
                 None,
+                false,
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -1723,6 +1829,7 @@ mod tests {
     /// caught a regression in either the `AliasRegistry::add_pre_loaded`
     /// identity check or `run_lint`'s cross-file dedup.
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn lint_across_many_files_reports_a_genuine_cross_package_alias_collision_exactly_once() {
         let temp = tempfile::TempDir::new().unwrap();
         let root = temp.path();
@@ -1818,6 +1925,7 @@ mod tests {
                 Some("consumer"),
                 false,
                 None,
+                false,
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -1979,6 +2087,7 @@ mod tests {
             None,
             false,
             None,
+            false,
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -2031,6 +2140,7 @@ mod tests {
             None,
             false,
             None,
+            false,
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -2098,6 +2208,7 @@ mod tests {
             None,
             false,
             None,
+            false,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(

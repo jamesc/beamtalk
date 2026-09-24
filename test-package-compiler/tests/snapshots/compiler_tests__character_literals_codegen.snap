@@ -231,7 +231,10 @@ module 'character_literals' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_c
     let Self = call 'beamtalk_actor':'make_self'(State) in
     try call 'character_literals':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
+    catch <Type, Error, Stacktrace> -> case {Type, Error} of
+        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
+        <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
+    end
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->

@@ -48,7 +48,7 @@ Erlang BIFs without dispatching (ADR 0002).
 -export(['isZero'/1, 'isNegative'/1]).
 -export(['asString'/1, 'printString'/1]).
 -export(['+'/2, '-'/2, '*'/2]).
--export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2]).
+-export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '<='/2]).
 
 %% FFI shims for (Erlang beamtalk_duration) dispatch
 -export([milliseconds/1, seconds/1, minutes/1, hours/1, days/1, fromString/1]).
@@ -260,6 +260,12 @@ Zero components are omitted; negative durations get a leading `-`.
 
 -spec '=<'(t(), t()) -> boolean().
 '=<'(Self, Other) -> compare('=<', Self, Other).
+
+%% Beamtalk spells "less-or-equal" `<=`, not `=<` — this is the same-named
+%% function `self delegate` needs to reach for the `<=` method (a quoted
+%% atom is a valid Erlang function name for any selector, operators included).
+-spec '<='(t(), t()) -> boolean().
+'<='(Self, Other) -> '=<'(Self, Other).
 
 -spec '>='(t(), t()) -> boolean().
 '>='(Self, Other) -> compare('>=', Self, Other).

@@ -21,6 +21,8 @@ must call through this module to guarantee byte-identical output.
 - Fields are rendered in **sorted** order (deterministic output).
 - Each field value is rendered via its own `printString` (Debug form).
 - A class with no fields renders as `ClassName()`.
+- A declared `late` slot (ADR 0124) that has not been assigned renders as
+  `<unassigned>` rather than being omitted — see `structural_from_state/1`.
 
 ## Bounded recursion
 
@@ -67,6 +69,13 @@ See also: ADR 0094 sections 3, 4, 6; Critical Risks #1, #4
 %% Elision marker emitted when a bound is exceeded.
 -define(ELISION, <<"...">>).
 
+%% Sentinel placed in a field list for a declared-`late` slot that has not
+%% been assigned (ADR 0124 §9/B8). Never a real field value — `render_value/5`
+%% special-cases this exact atom before it would otherwise fall through to
+%% `beamtalk_primitive:print_string/1`. Reserved-name style matches
+%% `beamtalk_tagged_map:class_key/0` and `internal_fields/0`.
+-define(LATE_UNASSIGNED, '$beamtalk_late_unassigned').
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -109,13 +118,16 @@ This is the canonical entry point used by both the compiled stdlib
 `beamtalk_reflection`). The class name and user fields are extracted from the
 tagged map, guaranteeing byte-identical output across every caller (ADR 0094,
 Critical Risk #4). Uses default bounds.
+
+A declared `late` slot (ADR 0124 §9/B8) that has not been assigned is
+rendered too, as `<unassigned>` — `fields_for_state/2` adds it alongside the
+assigned fields so it is visible rather than silently omitted, matching the
+inspector's `#notAssigned` vocabulary (B7, not implemented by this module).
 """.
 -spec structural_from_state(map()) -> binary().
 structural_from_state(State) when is_map(State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
-    UserKeys = beamtalk_tagged_map:user_field_keys(State),
-    Fields = [{K, maps:get(K, State)} || K <- UserKeys],
-    structural(ClassName, Fields).
+    structural(ClassName, fields_for_state(ClassName, State)).
 
 %%% ============================================================================
 %%% Internal rendering
@@ -196,17 +208,58 @@ render_value(Value, Depth, Width, Length, Seen) when is_map(Value) ->
                     {?ELISION, Seen};
                 false ->
                     NewSeen = Seen#{Id => true},
-                    UserKeys = beamtalk_tagged_map:user_field_keys(Value),
-                    Fields = [{K, maps:get(K, Value)} || K <- UserKeys],
+                    Fields = fields_for_state(ClassName, Value),
                     render_structural(ClassName, Fields, Depth, Width, Length, NewSeen)
             end
     end;
+render_value(?LATE_UNASSIGNED, _Depth, _Width, _Length, Seen) ->
+    %% Declared-`late`, unassigned field (ADR 0124 §9/B8) — never a real
+    %% field value, only ever injected by `unassigned_late_fields/2`.
+    {<<"<unassigned>">>, Seen};
 render_value(#beamtalk_object{} = Value, _Depth, _Width, _Length, Seen) ->
     %% Actor/object references: use printString (opaque — no field access).
     {beamtalk_primitive:print_string(Value), Seen};
 render_value(Value, _Depth, _Width, _Length, Seen) ->
     %% Primitives (integers, strings, booleans, symbols, etc.): use printString.
     {beamtalk_primitive:print_string(Value), Seen}.
+
+-doc """
+Build the `{Name, Value}` field list for a tagged map's structural render:
+its assigned user fields plus a `?LATE_UNASSIGNED`-valued entry for every
+declared `late` field the map has no key for (ADR 0124 §9/B8).
+
+Shared by `structural_from_state/1` (top-level entry point) and
+`render_value/5`'s nested-Value branch, so a `late` slot renders the same
+way whether it is the object being printed or a field nested inside one —
+one source of truth rather than two independent field-collection sites.
+""".
+-spec fields_for_state(atom(), map()) -> [{atom(), term()}].
+fields_for_state(ClassName, State) ->
+    UserKeys = beamtalk_tagged_map:user_field_keys(State),
+    Assigned = [{K, maps:get(K, State)} || K <- UserKeys],
+    Assigned ++ unassigned_late_fields(ClassName, State).
+
+-doc """
+Declared-`late` fields of `ClassName` that `State` has no key for — the
+"declared `late`, unassigned" set `fields_for_state/2` renders as
+`<unassigned>` (ADR 0124 §9/B8), told apart from "not a field at all" via
+B5b's flattened kind metadata (`classAllFieldKindsByName/1`), not mere
+absence.
+
+`classAllFieldKindsByName/1` answers `#{}` for an unregistered class (a
+plain/forged tagged map, or a class the printer test suite constructs by
+hand with no live class process) — this degrades to `[]` in that case, same
+as today's "just the present keys" behaviour.
+""".
+-spec unassigned_late_fields(atom(), map()) -> [{atom(), term()}].
+unassigned_late_fields(ClassName, State) ->
+    FieldKinds = beamtalk_behaviour_intrinsics:classAllFieldKindsByName(ClassName),
+    [
+        {Name, ?LATE_UNASSIGNED}
+     || {Name, Kind} <- maps:to_list(FieldKinds),
+        Kind =:= late,
+        not maps:is_key(Name, State)
+    ].
 
 -spec maybe_truncate(binary(), non_neg_integer()) -> binary().
 maybe_truncate(Bin, MaxLength) when byte_size(Bin) > MaxLength ->

@@ -1,0 +1,319 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for ADR 0124 Part B (`late` slots), Epic BT-3544, this issue's
+// required validation (BT-3558/B10): "unit and BUnit tests alone have
+// shipped non-functional features before" (ADR 0069's tracing epic), and
+// `late` touches parser, codegen, runtime reflection, hot reload and the
+// REPL — so this drives `late state:`/`late classState:` through a real
+// REPL session end to end: define, spawn, read-before-assign (error text),
+// printString's `<unassigned>` rendering (BT-3557/B8), assign, `fieldKinds`,
+// `clearField:`, `spawnWith:` injection, and a hot reload that flips a
+// slot's kind both ways (B9's reconcile fix).
+//
+// Everything here is exercised in isolation already — Rust unit tests
+// (`late_slot_validators.rs`, `actor_construction_definite_assignment.rs`),
+// BUnit (`late_field_read_test.bt`, `has_clear_field_test.bt`,
+// `field_kinds_test.bt`, `unguarded_late_read_test.bt`, `late_slot_test.bt`),
+// Erlang EUnit (`beamtalk_shape_diff_tests.erl`, `beamtalk_recheck_tests.erl`,
+// `beamtalk_object_printer_tests.erl`'s declared-`late`-unassigned cases) —
+// this file is the proof the same behaviour is actually reachable and
+// correct through a real REPL session, not just the isolated suites.
+//
+// Note on scope: the automatic per-reload shape-recheck outcome
+// (`'ReloadCheckCompleted'`/`'ShapeReloadFindingsCompleted'`) is published
+// as an asynchronous announcement, off the `:load` response path — this
+// simple request/response protocol-test harness has no `// =>`-assertable
+// pair for a push (the same constraint `adr_0115_recv_type_recheck_fanout.
+// btscript`'s header documents). So "observe the shape-change recheck"
+// here means observing its *effect*: the reload succeeds, `fieldKinds`
+// reflects the new kind, and the reconcile-table outcome for the (kind,
+// present?) pair is exactly what ADR 0124 §8 specifies — proof the
+// eager<->late flip was classified as a real `shape_change` (never a
+// silent `no_op`) and correctly reconciled, not just parsed.
+//
+// Note on inline class bodies (mirrors `inline_class_hot_reload.btscript`'s
+// header note): a single inline class definition supports only ONE method
+// — every other method here is added afterwards with `ClassName >> …` /
+// `ClassName class >> …`, and re-adding them after EACH full class
+// redefinition below (v1/v2/v3), since `update_class/2` replaces the whole
+// instance/class method map on every redefinition.
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session —
+// every class/binding name here is unique to this file to avoid collisions
+// with other cases.
+
+// ===========================================================================
+// DEFINE v1: `late state:` and `late classState:` together, one inline
+// method, the rest added via `>>`.
+// ===========================================================================
+
+typed Actor subclass: LateSlotsReplActor
+  shapeVersion: 1
+  late state: proc :: Integer
+  state: count :: Integer = 0
+  late classState: current :: Integer
+  getProc -> Integer => self.proc
+// => LateSlotsReplActor
+
+LateSlotsReplActor >> setProc: value :: Integer -> Integer => self.proc := value
+// => LateSlotsReplActor>>setProc:
+
+LateSlotsReplActor >> getCount -> Integer => self.count
+// => LateSlotsReplActor>>getCount
+
+LateSlotsReplActor class >> getCurrent -> Integer => self.current
+// => LateSlotsReplActor>>getCurrent
+
+LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
+// => LateSlotsReplActor>>setCurrent:
+
+// ===========================================================================
+// SPAWN + READ BEFORE ASSIGN — `hasField:` is false, the direct read raises
+// `uninitialized_state_error`, and its hint names the class, field and type.
+// ===========================================================================
+
+a := LateSlotsReplActor spawn
+// => Actor(LateSlotsReplActor, _)
+
+a hasField: #proc
+// => false
+
+[a getProc] on: Exception do: [:e | e kind]
+// => uninitialized_state_error
+
+([a getProc] on: Exception do: [:e | e message]) includesSubstring: "LateSlotsReplActor"
+// => true
+
+([a getProc] on: Exception do: [:e | e hint]) includesSubstring: "proc"
+// => true
+
+([a getProc] on: Exception do: [:e | e hint]) includesSubstring: "Integer"
+// => true
+
+([a getProc] on: Exception do: [:e | e hint]) includesSubstring: "late"
+// => true
+
+// ===========================================================================
+// printString/displayString — a declared, unassigned `late` slot renders as
+// `<unassigned>` (ADR 0124 §9/B8, `beamtalk_object_printer:structural_from_
+// state/1`). `displayString` defaults to `printString` (`Object>>displayString`)
+// and both go through the same renderer, so one check covers both selectors.
+//
+// An actor reference's own `printString` is the opaque, kind-headed
+// `Actor(ClassName, pid)` form (ADR 0094) — it never shows fields, whether or
+// not any of them are declared `late`. `structural_from_state/1` is the
+// renderer B8 changed, reached here the same way the REPL/inspector tooling
+// reaches it: a raw `sys:get_state` snapshot of the actor's own state map
+// (the FFI escape hatch, not a new public selector) fed straight to it.
+// ===========================================================================
+
+(Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
+// => LateSlotsReplActor(count: 0, proc: <unassigned>)
+
+// ===========================================================================
+// ASSIGN — the read now succeeds, and `hasField:` flips to true.
+// ===========================================================================
+
+a setProc: 42
+// => 42
+
+a getProc
+// => 42
+
+a hasField: #proc
+// => true
+
+// Assigned — `proc` is a present key now, so it renders its real value.
+(Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
+// => LateSlotsReplActor(count: 0, proc: 42)
+
+// ===========================================================================
+// fieldKinds — `#eager` / `#late`, keyed per declared slot.
+// ===========================================================================
+
+(LateSlotsReplActor fieldKinds) at: #proc
+// => late
+
+(LateSlotsReplActor fieldKinds) at: #count
+// => eager
+
+// ===========================================================================
+// clearField: — returns to unassigned; relaunchable.
+// ===========================================================================
+
+a clearField: #proc
+// => Actor(LateSlotsReplActor, _)
+
+a hasField: #proc
+// => false
+
+[a getProc] on: Exception do: [:e | e kind]
+// => uninitialized_state_error
+
+// clearField: is maps:remove/2 (beamtalk_reflection:clear_field/2) — the
+// slot renders `<unassigned>` again, exactly as before the first assignment.
+(Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
+// => LateSlotsReplActor(count: 0, proc: <unassigned>)
+
+a setProc: 7
+// => 7
+
+a getProc
+// => 7
+
+// ===========================================================================
+// `late classState:` — via class methods, and from outside (Cls hasField:/
+// Cls clearField:).
+// ===========================================================================
+
+LateSlotsReplActor hasField: #current
+// => false
+
+[LateSlotsReplActor getCurrent] on: Exception do: [:e | e kind]
+// => uninitialized_state_error
+
+LateSlotsReplActor setCurrent: 99
+// => 99
+
+LateSlotsReplActor getCurrent
+// => 99
+
+LateSlotsReplActor hasField: #current
+// => true
+
+LateSlotsReplActor clearField: #current
+// => LateSlotsReplActor
+
+LateSlotsReplActor hasField: #current
+// => false
+
+// ===========================================================================
+// spawnWith: injection — supplying a `late` slot by key counts as assigned
+// (ADR 0124 Implementation, the `spawnWith:`-injection clause).
+// ===========================================================================
+
+b := LateSlotsReplActor spawnWith: #{#proc => 5}
+// => Actor(LateSlotsReplActor, _)
+
+b hasField: #proc
+// => true
+
+b getProc
+// => 5
+
+// Clear `a`'s `proc` again (relaunchable shape) — `a` goes into the reload
+// below with `proc` absent, `b`'s with `proc` present.
+a clearField: #proc
+// => Actor(LateSlotsReplActor, _)
+
+a hasField: #proc
+// => false
+
+// ===========================================================================
+// RELOAD v2 — adds a new eager field (`extra`), forcing a genuine shape
+// change, while `proc` stays `late` and unassigned on `a`. This is exactly
+// the bug B9 (BT-3556) fixes: pre-B9, a declared-but-absent `late` field on
+// a `typed` class hit reconcile's typed-no-default failure branch and the
+// whole migration failed; post-B9 it stays absent, cleanly (ADR 0124 §8's
+// second reconcile row: "late, absent -> stays absent").
+// ===========================================================================
+
+typed Actor subclass: LateSlotsReplActor
+  shapeVersion: 2
+  late state: proc :: Integer
+  state: count :: Integer = 0
+  state: extra :: Integer = 11
+  late classState: current :: Integer
+  getProc -> Integer => self.proc
+// => LateSlotsReplActor
+
+LateSlotsReplActor >> setProc: value :: Integer -> Integer => self.proc := value
+// => LateSlotsReplActor>>setProc:
+
+LateSlotsReplActor >> getCount -> Integer => self.count
+// => LateSlotsReplActor>>getCount
+
+LateSlotsReplActor >> getExtra -> Integer => self.extra
+// => LateSlotsReplActor>>getExtra
+
+LateSlotsReplActor class >> getCurrent -> Integer => self.current
+// => LateSlotsReplActor>>getCurrent
+
+LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
+// => LateSlotsReplActor>>setCurrent:
+
+LateSlotsReplActor shapeVersion
+// => 2
+
+// `a`'s `proc` was absent going into the reload — stays absent, not
+// defaulted and not a migration failure, on a `typed` class.
+a hasField: #proc
+// => false
+
+[a getProc] on: Exception do: [:e | e kind]
+// => uninitialized_state_error
+
+// The new field gets its declared default on the surviving instance.
+a getExtra
+// => 11
+
+// `b`'s already-assigned `proc` survives the reload untouched — "present ->
+// kept" (ADR 0124 §8's first reconcile row) applies regardless of kind.
+b getProc
+// => 5
+
+// ===========================================================================
+// RELOAD v3 — flip `proc` the other way, `late` -> eager-with-default: a
+// genuine kind change (ADR 0124 §8's `shapeVersion:`-bump rule), classified
+// as a real `shape_change` by `beamtalk_shape_diff` (never a `no_op`) the
+// same way a retype is (ADR 0124 §9/B9's `kind_changed` row).
+// `a`'s `proc` is still absent going in, so reconcile's "eager, has
+// default, absent -> declared default" row now applies where "late, absent
+// -> stays absent" applied a moment ago — same absent key, different
+// declared kind, different reconcile outcome.
+// ===========================================================================
+
+typed Actor subclass: LateSlotsReplActor
+  shapeVersion: 3
+  state: proc :: Integer = 100
+  state: count :: Integer = 0
+  state: extra :: Integer = 11
+  late classState: current :: Integer
+  getProc -> Integer => self.proc
+// => LateSlotsReplActor
+
+LateSlotsReplActor >> setProc: value :: Integer -> Integer => self.proc := value
+// => LateSlotsReplActor>>setProc:
+
+LateSlotsReplActor >> getCount -> Integer => self.count
+// => LateSlotsReplActor>>getCount
+
+LateSlotsReplActor >> getExtra -> Integer => self.extra
+// => LateSlotsReplActor>>getExtra
+
+LateSlotsReplActor class >> getCurrent -> Integer => self.current
+// => LateSlotsReplActor>>getCurrent
+
+LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
+// => LateSlotsReplActor>>setCurrent:
+
+LateSlotsReplActor shapeVersion
+// => 3
+
+(LateSlotsReplActor fieldKinds) at: #proc
+// => eager
+
+// `proc` is eager-with-default now: the previously-absent key gets
+// defaulted on reload instead of staying absent.
+a getProc
+// => 100
+
+a hasField: #proc
+// => true
+
+// `b`'s previously-injected value of 5 still survives the second reload
+// too — presence always wins over the declared default, regardless of
+// kind, on both sides of the flip.
+b getProc
+// => 5

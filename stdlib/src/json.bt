@@ -85,7 +85,7 @@ sealed typed Object subclass: Json native: beamtalk_json
   /// Json generate: nil                 // => null
   /// Json generate: 42                  // => 42
   /// ```
-  class sealed generate: value :: Printable -> String => self delegate
+  class sealed generate: value :: Object -> String => self delegate
 
   /// Generate a pretty-printed JSON string with indentation (class method).
   ///
@@ -93,4 +93,4 @@ sealed typed Object subclass: Json native: beamtalk_json
   /// ```beamtalk
   /// Json prettyPrint: #{"name" => "Ada", "age" => 36}
   /// ```
-  class sealed prettyPrint: value :: Printable -> String => self delegate
+  class sealed prettyPrint: value :: Object -> String => self delegate

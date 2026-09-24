@@ -63,7 +63,7 @@ start_fixture(Prefix, Files) ->
         workspace_id => list_to_binary(Prefix ++ "_ws"),
         project_path => list_to_binary(ProjDir),
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     beamtalk_compiler_server:clear_classes(),
     State0 = beamtalk_repl_state:new(undefined, 0),

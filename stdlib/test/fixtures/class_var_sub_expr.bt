@@ -121,9 +121,11 @@ Object subclass: ClassVarSubExpr
   // fix, `generate_class_method_return` used `expression_doc(value)` which
   // did not handle the open let-chain, producing a malformed
   // `let _Ret = let _CMR = ... in ... in  in ` (double `in`).
+  @expect lint "explicit ^ with an open-scope receiver is the BT-1942 return arm under test"
   class tickReturnClass => ^(self tick) class
 
   // BT-1942: Explicit `^` return of a nil-protocol intrinsic result.
+  @expect lint "explicit ^ with an open-scope receiver is the BT-1942 return arm under test"
   class tickReturnIsNil => ^(self tick) isNil
 
   // BT-2349: class var mutated earlier, then a last-position foldl list-op that

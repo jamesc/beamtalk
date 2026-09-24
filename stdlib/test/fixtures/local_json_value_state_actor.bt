@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LocalJsonValueStateActor — regression fixture for BT-3563.
+//
+// A typed-no-default state field whose type is `local_json_value_alias.bt`'s
+// `LocalJsonValue` — a type alias declared in a *different* fixtures/*.bt
+// file, not stdlib/src. Should spawn successfully and leave `value` unset
+// (`nil`), same as `json_value_state_actor.bt`, but exercising the
+// fixture-internal alias pre-loading gap rather than the `src/`-alias one.
+
+typed Actor subclass: LocalJsonValueStateActor
+  state: value :: LocalJsonValue
+  state: count :: Integer = 0
+
+  initialize -> Integer =>
+    // Deliberately does NOT set self.value — LocalJsonValue expands to
+    // include Nil, so nil is a legitimate value here.
+    self.count := 1
+
+  getValue -> LocalJsonValue => self.value
+
+  getCount -> Integer => self.count

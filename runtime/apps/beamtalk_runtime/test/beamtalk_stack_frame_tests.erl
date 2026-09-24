@@ -243,9 +243,28 @@ module_to_class_plain_unknown_module_test() ->
     ?assertEqual(nil, beamtalk_stack_frame:module_to_class('xyzzy_q123_unique_module_def')).
 
 %% Fallback (_) case, class in atom table but not registered → nil
-%% 'Counter' resolves via snake_to_class; erlang:whereis returns undefined.
+%%
+%% BT-3585: any *real* class name is unsafe here, no matter how unrelated it
+%% looks — in a full `just test-runtime` run (~6770 EUnit tests, one VM),
+%% many beamtalk_runtime/beamtalk_workspace modules load real classes as
+%% shared, idempotent class-actor fixtures and deliberately never tear them
+%% down (see e.g. `ensure_counter_loaded/0` in beamtalk_class_dispatch_tests
+%% and beamtalk_class_chain_tests, or stdlib bootstrap loading the whole
+%% standard library — including 'StackFrame' itself, whose class actor turns
+%% out to be registered too by the time this module runs in the full suite).
+%% So instead of guessing at a class name we hope stays unregistered, use a
+%% synthetic one no fixture anywhere could plausibly define: its capitalized
+%% form is referenced as a literal atom directly below (guaranteeing it is
+%% in the atom table once this module loads, so `snake_to_class`'s
+%% `list_to_existing_atom` succeeds and the assertion actually exercises the
+%% `whereis_class` branch), while remaining a name nothing else can be
+%% registered under.
 module_to_class_plain_known_atom_not_registered_test() ->
-    ?assertEqual(nil, beamtalk_stack_frame:module_to_class('counter')).
+    ?assert(is_atom('Bt3585SentinelNeverRegisteredClass')),
+    ?assertEqual(
+        nil,
+        beamtalk_stack_frame:module_to_class('bt3585_sentinel_never_registered_class')
+    ).
 
 %% Non-atom input: guard clause returns nil without touching ModStr (line 119).
 module_to_class_non_atom_test() ->

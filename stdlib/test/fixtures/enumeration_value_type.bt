@@ -12,11 +12,13 @@ Value subclass: EnumerationValueType
 
   eachWithIndexSum: aColl =>
     sum := 0
+    @expect dead_assignment "the lost write is the pinned value-type behaviour"
     aColl eachWithIndex: [:item :i | sum := sum + (item * i)]
     sum
 
   doSeparatedBySum: aColl =>
     total := 0
+    @expect dead_assignment "the lost write is the pinned value-type behaviour"
     aColl do: [:item |
       total := total + item
     ] separatedBy: [total := total + 100]

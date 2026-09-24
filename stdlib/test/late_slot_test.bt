@@ -1,0 +1,111 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3558 (ADR 0124 B10 — the validation phase of Epic BT-3544): the
+// `late`-slot validation suite this issue's acceptance criteria names.
+//
+// Most of the ground this file's acceptance criteria lists is already
+// covered, one BUnit file per landed issue (CLAUDE.md's no-duplicate-
+// implementations rule — a second copy of an existing assertion is not
+// "more coverage"):
+//   - read/raise (absent, injected `nil`), assign then read, the
+//     `whileTrue:`-loop guard shapes: `late_field_read_test.bt` (BT-3549)
+//   - `hasField:`/`clearField:`/re-assign, on an instance, a `late
+//     classState:` (via class methods and from outside), a `Value`, and a
+//     primitive: `has_clear_field_test.bt` (BT-3551)
+//   - `fieldKinds`/`allFieldKinds`, including the inherited-vs-local split:
+//     `field_kinds_test.bt` (BT-3550)
+//   - the `terminate:`/`handleInfo:` unguarded-read warning:
+//     `unguarded_late_read_test.bt` (BT-3555)
+//   - the five parse Errors (`late field:` on a Value, no type annotation,
+//     a nilable type, a default value, `late state:` on a `native:` Actor/
+//     `Object`) are compile-time — per this ADR's own "Test placement"
+//     section (Implementation, ADR 0124), diagnostic text and severity are
+//     Rust unit tests, not BUnit: see
+//     `crates/beamtalk-core/src/semantic_analysis/validators/late_slot_validators.rs`
+//     (four of the five) and `native_validators.rs`/`class_validators.rs`
+//     (the `native:`/`Object` fifth) — a BUnit fixture can't exercise a
+//     declaration that fails to compile at all.
+//
+// What's left, and what this file adds:
+//   - an inherited `late` slot's *instance-level* read/raise/hasField:/
+//     clearField:/re-assign lifecycle, driven through a subclass that adds
+//     no `late` field of its own (the existing `fieldKinds`-inheritance
+//     fixtures never spawn an instance or read the slot's value — see
+//     fixtures/late_slot_inherited_base_actor.bt's header)
+//   - `spawnWith:` dependency-injection of a `late` slot with a real,
+//     non-`nil` value: `hasField:` is `true` and the injected value reads
+//     back immediately, with no `launch` ever called (the existing
+//     `spawnWith:` coverage in `late_field_read_test.bt` only proves the
+//     *negative* case — an injected `nil` still raises)
+//
+// Fixtures: stdlib/test/fixtures/late_slot_inherited_base_actor.bt
+//           stdlib/test/fixtures/late_slot_inherited_sub_actor.bt
+//           stdlib/test/fixtures/late_field_read_actor.bt (reused — the
+//             `LateFieldReadActor` BT-3549 fixture already declares
+//             `late state: proc :: Integer` with `getProc`/`setProc:`)
+
+TestCase subclass: LateSlotTest
+
+  // === Inherited `late` slot — instance-level lifecycle, via a subclass
+  // that declares no `late` field of its own ===
+  testInheritedLateFieldHasFieldFalseBeforeAssign =>
+    a := LateSlotInheritedSubActor spawn
+    self deny: a hasProc
+
+  testInheritedLateFieldReadBeforeAssignRaisesUninitializedStateError =>
+    a := LateSlotInheritedSubActor spawn
+    self should: [a getProc] raise: #uninitialized_state_error
+
+  testInheritedLateFieldReadBeforeAssignHintMentionsFieldAndType =>
+    a := LateSlotInheritedSubActor spawn
+    result := [a getProc] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "proc")
+    self assert: (result includesSubstring: "Integer")
+    self assert: (result includesSubstring: "late")
+
+  testInheritedLateFieldAssignThenReadAnswersTheValue =>
+    a := LateSlotInheritedSubActor spawn
+    a setProc: 9
+    self assert: a getProc equals: 9
+    self assert: a hasProc
+
+  testInheritedLateFieldClearThenReadRaisesAgain =>
+    a := LateSlotInheritedSubActor spawn
+    a setProc: 9
+    a clearProc
+    self deny: a hasProc
+    self should: [a getProc] raise: #uninitialized_state_error
+
+  testInheritedLateFieldRelaunchAfterClearSucceeds =>
+    a := LateSlotInheritedSubActor spawn
+    a setProc: 1
+    a clearProc
+    a setProc: 2
+    self assert: a getProc equals: 2
+
+  testInheritedLateFieldUnaffectedBySubclassAndBaseEagerFields =>
+    a := LateSlotInheritedSubActor spawn
+    self assert: a getCount equals: 0
+    self assert: a getExtra equals: 0
+
+  // === `spawnWith:` dependency injection of a `late` slot: a real value
+  // counts as assigned immediately, with no lifecycle call ever made ===
+  testSpawnWithInjectsLateSlotAsImmediatelyAssigned =>
+    a := LateFieldReadActor spawnWith: #{#proc => 5}
+    self assert: (a hasField: #proc)
+    self assert: a getProc equals: 5
+
+  testSpawnWithInjectedLateSlotIsReassignableAfterClear =>
+    a := LateFieldReadActor spawnWith: #{#proc => 5}
+    a clearField: #proc
+    self deny: (a hasField: #proc)
+    a setProc: 11
+    self assert: a getProc equals: 11
+
+  testSpawnWithLeavingLateSlotOutStaysUnassigned =>
+    // Control: an ordinary `spawn` (no `proc` key at all) leaves the
+    // `late` slot exactly as unassigned as before — `spawnWith:` DI is
+    // additive, not a change to the default lifecycle.
+    a := LateFieldReadActor spawn
+    self deny: (a hasField: #proc)

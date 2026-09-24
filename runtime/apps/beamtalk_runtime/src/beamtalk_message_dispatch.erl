@@ -137,10 +137,12 @@ send(Receiver, Selector, Args) ->
             beamtalk_primitive:send(Receiver, Selector, Args);
         {class, ClassPid} ->
             beamtalk_object_class:class_send(ClassPid, Selector, Args);
-        {actor, Ref} ->
+        {actor, Ref, ActorClass} ->
             %% ADR 0043: sync-by-default — use gen_server:call so the send
             %% returns the value directly, not a Future.
-            beamtalk_actor:sync_send(Ref, Selector, Args);
+            with_known_class(Ref, ActorClass, fun() ->
+                beamtalk_actor:sync_send(Ref, Selector, Args)
+            end);
         {dead, ClassName} ->
             reraise_actor_dead(ClassName, Selector)
     end.
@@ -171,8 +173,10 @@ send(Receiver, Selector, Args, Timeout) ->
             beamtalk_primitive:send(Receiver, Selector, Args);
         {class, ClassPid} ->
             beamtalk_object_class:class_send(ClassPid, Selector, Args);
-        {actor, Ref} ->
-            beamtalk_actor:sync_send(Ref, Selector, Args, Timeout);
+        {actor, Ref, ActorClass} ->
+            with_known_class(Ref, ActorClass, fun() ->
+                beamtalk_actor:sync_send(Ref, Selector, Args, Timeout)
+            end);
         {dead, ClassName} ->
             reraise_actor_dead(ClassName, Selector)
     end.
@@ -200,8 +204,10 @@ cast(Receiver, Selector, Args) ->
         {class, _ClassPid} ->
             %% Class objects cannot receive cast messages
             ok;
-        {actor, Ref} ->
-            beamtalk_actor:cast_send(Ref, Selector, Args);
+        {actor, Ref, ActorClass} ->
+            with_known_class(Ref, ActorClass, fun() ->
+                beamtalk_actor:cast_send(Ref, Selector, Args)
+            end);
         {dead, _ClassName} ->
             %% Dead actor: cast is fire-and-forget, silently ignore
             ok
@@ -266,11 +272,12 @@ send_number_coercion(Right, Selector, Args, OrigOp) ->
 
 -doc """
 Classify a receiver for dispatch, shared by send/3, send/4, cast/3.
-`{actor, Ref}` covers live actors (Ref: `pid()` or `{registered, Name}`,
-ADR 0079). `{dead, ClassName}` covers an invalid PID slot.
+`{actor, Ref, ClassName}` covers live actors (Ref: `pid()` or
+`{registered, Name}`, ADR 0079; `ClassName` is the `#beamtalk_object.class`
+field, already at hand here). `{dead, ClassName}` covers an invalid PID slot.
 """.
 -spec classify_receiver(term()) ->
-    primitive | metaclass | {class, pid()} | {actor, term()} | {dead, atom()}.
+    primitive | metaclass | {class, pid()} | {actor, term(), atom()} | {dead, atom()}.
 classify_receiver(Receiver) ->
     case is_actor(Receiver) of
         false ->
@@ -279,7 +286,7 @@ classify_receiver(Receiver) ->
             case element(2, Receiver) of
                 'Metaclass' ->
                     metaclass;
-                _ ->
+                ClassName ->
                     case beamtalk_class_registry:is_class_object(Receiver) of
                         true ->
                             {class, element(4, Receiver)};
@@ -287,12 +294,31 @@ classify_receiver(Receiver) ->
                             Ref = element(4, Receiver),
                             case is_actor_ref(Ref) of
                                 true ->
-                                    {actor, Ref};
+                                    {actor, Ref, ClassName};
                                 false ->
-                                    {dead, element(2, Receiver)}
+                                    {dead, ClassName}
                             end
                     end
             end
+    end.
+
+-doc """
+Run `Fun` (a sync/cast send to `Ref`) with `ClassName` stashed as
+`beamtalk_actor:lookup_class/1`'s fallback for `Ref` (ADR 0126 §7.3).
+`beamtalk_message_dispatch` is the call site that already holds the class
+from the `#beamtalk_object{}` record — plumbing it through here means a
+remote actor's telemetry and error breadcrumbs don't lose it to 'unknown',
+which the local-only instance registry can never resolve for a pid on
+another node. Always pairs the stash with a clear in `after`, so the hint
+never outlives this one send.
+""".
+-spec with_known_class(term(), atom(), fun(() -> Result)) -> Result.
+with_known_class(Ref, ClassName, Fun) ->
+    beamtalk_actor:stash_known_class(Ref, ClassName),
+    try
+        Fun()
+    after
+        beamtalk_actor:clear_known_class()
     end.
 
 -doc """

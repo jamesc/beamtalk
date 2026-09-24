@@ -65,7 +65,9 @@ fn wrap_value_type_body_with_nlr_catch_suffix_contains_nlr_tag_and_raw_raise() {
     let mut generator = CoreErlangGenerator::new("nlr_test");
     let token = generator.fresh_temp_var("NlrToken");
     let vars = generator.wrap_value_type_body_with_nlr_catch(&token);
-    let suffix = vars.format_catch_suffix().to_pretty_string();
+    let suffix = vars
+        .format_catch_suffix(NlrBoundary::ValueType)
+        .to_pretty_string();
     assert!(
         suffix.contains("'$bt_nlr'"),
         "suffix missing bt_nlr: {suffix}"

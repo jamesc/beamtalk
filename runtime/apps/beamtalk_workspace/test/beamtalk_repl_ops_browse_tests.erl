@@ -2272,7 +2272,7 @@ with_project_package(Pkg, Fun) ->
     end.
 
 %% Start workspace_meta with the given extra init metadata (workspace_id,
-%% created_at, repl=false are supplied), run `Fun`, then stop the server.
+%% created_at, mode => run are supplied), run `Fun`, then stop the server.
 with_started_meta(Extra, Fun) ->
     %% Defensive: a stray server from another test would shadow ours.
     case whereis(beamtalk_workspace_meta) of
@@ -2282,7 +2282,7 @@ with_started_meta(Extra, Fun) ->
     Base = #{
         workspace_id => <<"bt2640-test">>,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     },
     {ok, Pid} = beamtalk_workspace_meta:start_link(maps:merge(Base, Extra)),
     try

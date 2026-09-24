@@ -452,11 +452,19 @@ fn generate_eunit_wrapper(
 ///
 /// `pub(crate)`: reused by `test_metamorphic` for `.btscript`
 /// files that reference fixtures via `@load`.
+///
+/// `pre_loaded_aliases` (BT-3563) are type-alias declarations (ADR 0108)
+/// from a sibling `src/` directory — see
+/// `build::collect_sibling_src_alias_infos`'s doc — so a fixture field typed
+/// with a `src/`-declared alias (e.g. `stdlib/src/json.bt`'s `JsonValue`)
+/// resolves through `AliasRegistry` instead of looking like an opaque,
+/// non-nilable class name. Empty when the caller found no sibling `src/`.
 pub(crate) fn compile_fixture(
     fixture_path: &Utf8Path,
     output_dir: &Utf8Path,
     suppress_warnings: bool,
     warnings_as_errors: bool,
+    pre_loaded_aliases: &[beamtalk_core::semantic_analysis::alias_registry::AliasInfo],
 ) -> Result<String> {
     let stem = fixture_path
         .file_stem()
@@ -481,8 +489,23 @@ pub(crate) fn compile_fixture(
         has_package_dependencies: false,
     };
 
-    crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)
-        .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
+    let compile_ctx = crate::beam_compiler::CompileContext {
+        hierarchy: crate::beam_compiler::ClassHierarchyContext {
+            pre_loaded_aliases: pre_loaded_aliases.to_vec(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    crate::beam_compiler::compile_source_with_bindings(
+        fixture_path,
+        &module_name,
+        &core_file,
+        &options,
+        &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        &compile_ctx,
+        None,
+    )
+    .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
     // Compile .core → .beam
     let compiler = BeamCompiler::new(output_dir.to_owned());
@@ -549,6 +572,14 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     // `util::core_output_dir`'s doc.
     let (build_dir, _core_output_dir_guard) = util::core_output_dir()?;
 
+    // BT-3563: `test-stdlib` has no manifest/package concept at all — unlike
+    // `beamtalk test`'s `TestPipeline`, every fixture here compiles fully
+    // standalone (`ClassHierarchyContext::default()` previously). A sibling
+    // `src/` type alias (e.g. stdlib's `JsonValue`) referenced from a fixture
+    // field's declared type would otherwise look like an opaque, non-nilable
+    // class name. See `build::collect_sibling_src_alias_infos`'s doc.
+    let pre_loaded_aliases = crate::commands::build::collect_sibling_src_alias_infos(&test_path);
+
     // Phase 1: Compile all test files (Core Erlang + EUnit wrappers)
     let mut compiled_files = Vec::new();
     let mut all_core_files = Vec::new();
@@ -562,6 +593,7 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
             &build_dir,
             opts.no_warnings,
             opts.warnings_as_errors,
+            &pre_loaded_aliases,
         )?;
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);
@@ -699,11 +731,15 @@ pub(crate) struct CompilationResult {
 /// Compile a single `.btscript` test file into Core Erlang modules + `EUnit` wrapper.
 ///
 /// Does NOT execute — just produces files ready for batch compilation and execution.
+///
+/// `pre_loaded_aliases`: see [`compile_fixture`]'s doc — threaded through to
+/// every `@load` fixture this test file compiles.
 pub(crate) fn compile_single_test_file(
     test_file: &Utf8Path,
     build_dir: &Utf8Path,
     suppress_warnings: bool,
     warnings_as_errors: bool,
+    pre_loaded_aliases: &[beamtalk_core::semantic_analysis::alias_registry::AliasInfo],
 ) -> Result<CompilationResult> {
     let content = fs::read_to_string(test_file)
         .into_diagnostic()
@@ -739,6 +775,7 @@ pub(crate) fn compile_single_test_file(
             build_dir,
             suppress_warnings,
             warnings_as_errors,
+            pre_loaded_aliases,
         )?;
         fixture_modules.push(module_name);
     }

@@ -36,14 +36,14 @@ precheck_setup() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    %% `repl => false` for the same test-isolation reason
+    %% `mode => run` for the same test-isolation reason
     %% `beamtalk_recheck_tests:recheck_setup/0` uses it — see that module's
     %% comment for the disk-persistence gotcha this avoids.
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"precheck_test_ws">>,
         project_path => undefined,
         created_at => erlang:system_time(second),
-        repl => false
+        mode => run
     }),
     %% ADR 0105 Phase 1: `previous/3` (the precheck's signature-diff
     %% baseline) needs a live store — without it every diff degrades to

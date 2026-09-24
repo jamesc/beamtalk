@@ -254,13 +254,16 @@ module 'initializing_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
     let Self = call 'beamtalk_actor':'make_self'(State) in
     try call 'initializing_counter':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
+    catch <Type, Error, Stacktrace> -> case {Type, Error} of
+        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
+        <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
+    end
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'initialize'> when 'true' ->
-            let _Val1 = 100 in let State1 = call 'maps':'put'('value', _Val1, State) in let _Val2 = 'true' in let State2 = call 'maps':'put'('initialized', _Val2, State1) in {'reply', _Val2, State2}
+            let _Val4 = 100 in let State1 = call 'maps':'put'('value', _Val4, State) in let _Val5 = 'true' in let State2 = call 'maps':'put'('initialized', _Val5, State1) in {'reply', _Val5, State2}
         <'getValue'> when 'true' ->
             let _Result = call 'maps':'get'('value', State) in {'reply', _Result, State}
         <'isInitialized'> when 'true' ->

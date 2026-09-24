@@ -27,16 +27,36 @@ beamtalk_workspace_sup
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
   ├─ beamtalk_actor_sup           % Supervises user actors
-  │   -- REPL mode only (repl=true) below this line --
+  │   -- mode => workspace only below this line --
   ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105)
   ├─ beamtalk_workspace_shape_store % Shape-generation store (ADR 0105)
   ├─ beamtalk_alias_xref          % Alias-name -> dependent-class index (ADR 0108)
   ├─ beamtalk_workspace_shape_recheck_worker % Serialised shape re-check queue (ADR 0105)
   ├─ beamtalk_workspace_findings_store % Reload-induced findings store (ADR 0105)
+  │   -- mode => workspace, or mode => release with console => true --
   ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
+  │   -- mode => workspace only --
   └─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
 ```
+
+## Modes (ADR 0125 §1.4)
+
+The config's required `mode` key selects the child set:
+
+| | `run` | `workspace` | `release` |
+|---|---|---|---|
+| bootstrap, `beamtalk_actor_sup`, singletons | ✓ | ✓ | ✓ |
+| `beamtalk_compiler` app | ✓ (unless `start_compiler => false`) | ✓ | only with `include_compiler => true` |
+| workspace file logger | ✗ | ✓ | ✗ |
+| ChangeLog | memory-only | on disk | memory-only |
+| ADR 0105 stores + recheck worker, `alias_xref` | ✗ | ✓ | ✗ |
+| `beamtalk_session_sup` + `beamtalk_repl_server` | ✗ | ✓ | only with `console => true` |
+| `beamtalk_idle_monitor` | ✗ | ✓ | never |
+
+`init/1` also records the node's capabilities (`beamtalk_capability:set/1`),
+which is what makes a `release` node refuse compiler and workspace
+operations (ADR 0125 §1.5).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -44,10 +64,22 @@ beamtalk_workspace_sup
 -export([start_link/1]).
 -export([init/1]).
 
+-type mode() :: beamtalk_capability:mode().
+
 -type workspace_config() :: #{
     workspace_id => binary(),
     project_path => binary() | undefined,
-    repl => boolean(),
+    %% Required: `run` (no REPL), `workspace` (live development) or `release`
+    %% (an OTP release) — ADR 0125 §1.4.
+    mode := mode(),
+    %% `release` mode only: start the REPL listener (default `false`).
+    console => boolean(),
+    %% `release` mode only: the release bundles the compiler, so start it and
+    %% re-enable the compiler-dependent ops (default `false`; ADR 0125 §1.5).
+    include_compiler => boolean(),
+    %% `run` / `workspace` modes only: `false` skips starting the compiler app
+    %% (a packaged escript ships no compiler port). Default `true`.
+    start_compiler => boolean(),
     tcp_port => inet:port_number() | undefined,
     bind_addr => inet:ip4_address(),
     auto_cleanup => boolean(),
@@ -55,7 +87,7 @@ beamtalk_workspace_sup
     max_idle_seconds => integer()
 }.
 
--export_type([workspace_config/0]).
+-export_type([workspace_config/0, mode/0]).
 
 -doc "Start the workspace supervisor.".
 -spec start_link(workspace_config()) -> {ok, pid()} | {error, term()}.
@@ -70,25 +102,34 @@ init(Config) ->
     },
 
     %% Extract configuration
+    Mode = config_mode(Config),
     WorkspaceId = maps:get(workspace_id, Config),
     ProjectPath = maps:get(project_path, Config, undefined),
-    Repl = maps:get(repl, Config, true),
+    Console = starts_console(Mode, Config),
     TcpPort = maps:get(tcp_port, Config, undefined),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
     AutoCleanup = maps:get(auto_cleanup, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
 
-    %% Fail fast: REPL mode requires a TCP port — run mode (repl=false) does not.
-    case {Repl, TcpPort} of
+    %% Fail fast: a mode that starts the REPL listener requires a TCP port —
+    %% run mode, and a release without a console, do not.
+    case {Console, TcpPort} of
         {true, undefined} -> erlang:error({bad_config, missing_tcp_port_for_repl});
         _ -> ok
     end,
 
+    %% Record what this node may do before any child (or REPL op) runs, so a
+    %% release refuses compiler and workspace operations (ADR 0125 §1.5).
+    ok = beamtalk_capability:set(#{
+        mode => Mode, include_compiler => maps:get(include_compiler, Config, false)
+    }),
+
     %% Set up file logging before children start (they may log during init).
-    %% Skipped in run mode — no workspace artifacts should be created on disk.
-    case Repl of
-        true -> setup_file_logger(WorkspaceId);
-        false -> ok
+    %% Workspace mode only — run and release modes create no workspace
+    %% artifacts on disk.
+    case Mode of
+        workspace -> setup_file_logger(WorkspaceId);
+        _ -> ok
     end,
 
     %% Set up WebSocket log handler for live log streaming.
@@ -103,13 +144,33 @@ init(Config) ->
     %% A packaged escript (ADR 0099 §4) runs precompiled classes and ships no
     %% compiler-port binary, so it sets `start_compiler => false` to skip this —
     %% otherwise the compiler server crashes on the missing port and dumps a
-    %% spurious SASL crash report to stderr.
+    %% spurious SASL crash report to stderr. A release ships no compiler unless
+    %% it was built with `include_compiler` (ADR 0125 §1.5).
     %%
-    %% `start_compiler` is an internal boolean config (defaulting to `true`); the
-    %% two-clause match is intentionally fail-loud — an unexpected value is a
-    %% programming error, not a runtime input, so it should crash rather than be
-    %% silently coerced.
-    case maps:get(start_compiler, Config, true) of
+    %% The two-clause match is intentionally fail-loud — an unexpected value is
+    %% a programming error, not a runtime input, so it should crash rather than
+    %% be silently coerced.
+    StartsCompiler = starts_compiler(Mode, Config),
+    %% A release built with `include-compiler` opted into a live-patchable
+    %% production image (ADR 0125 §1.5) — name the three risks that decision
+    %% carries every time this node boots, not just at build time, so an
+    %% operator inspecting logs sees it even if they weren't the one who
+    %% built the release.
+    case {Mode, StartsCompiler} of
+        {release, true} ->
+            ?LOG_WARNING(
+                "Release built with [release] include-compiler = true: this production node "
+                "ships a compiler and can be sent live code. (1) A compiler is now reachable "
+                "past the ADR 0058 trust boundary, widening what an authenticated caller can "
+                "do. (2) Live patches bypass the release artifact and are lost on the next "
+                "redeploy — the running node can silently diverge from beamtalk-provenance.json. "
+                "(3) A class recompiled live loses its provenance stamp. See ADR 0125 §1.5.",
+                #{domain => [beamtalk, runtime]}
+            );
+        _ ->
+            ok
+    end,
+    case StartsCompiler of
         false ->
             ok;
         true ->
@@ -135,7 +196,7 @@ init(Config) ->
                             project_path => ProjectPath,
                             created_at => erlang:system_time(second),
                             repl_port => TcpPort,
-                            repl => Repl
+                            mode => Mode
                         }
                     ]},
                 restart => permanent,
@@ -148,14 +209,14 @@ init(Config) ->
             %% Append-only log of live in-memory method mutations; dirty-state +
             %% undo store, consumed cross-surface (REPL/MCP/LSP/browser). Owns the
             %% two-part on-disk persistence under <workspace>/changes/. Depends only
-            %% on workspace_id, so it can start right after meta. In run mode
-            %% (repl=false) the id is dropped to undefined so the log stays
+            %% on workspace_id, so it can start right after meta. In run and
+            %% release modes the id is dropped to undefined so the log stays
             %% memory-only — no workspace artifacts on disk, matching workspace_meta.
             #{
                 id => beamtalk_workspace_changelog,
                 start =>
                     {beamtalk_workspace_changelog, start_link, [
-                        #{workspace_id => changelog_workspace_id(Repl, WorkspaceId)}
+                        #{workspace_id => changelog_workspace_id(Mode, WorkspaceId)}
                     ]},
                 restart => permanent,
                 shutdown => 5000,
@@ -201,30 +262,96 @@ init(Config) ->
                     modules => [beamtalk_actor_sup]
                 }
             ] ++
-            repl_child_specs(
-                Repl, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds
-            ),
+            repl_child_specs(Mode, #{
+                console => Console,
+                tcp_port => TcpPort,
+                workspace_id => WorkspaceId,
+                bind_addr => BindAddr,
+                auto_cleanup => AutoCleanup,
+                max_idle_seconds => MaxIdleSeconds
+            }),
 
     {ok, {SupFlags, ChildSpecs}}.
+
+%%% Mode
+
+-doc """
+Read and validate the required `mode` key. There is no default and no
+`repl => boolean()` compatibility clause: a missing, stale or unknown key is
+a programming error at the call site, so it fails loudly.
+""".
+-spec config_mode(map()) -> mode().
+config_mode(#{repl := _}) ->
+    erlang:error({bad_config, {removed_key, repl, use_mode}});
+config_mode(#{mode := Mode}) when Mode =:= run; Mode =:= workspace; Mode =:= release ->
+    Mode;
+config_mode(#{mode := Mode}) ->
+    erlang:error({bad_config, {invalid_mode, Mode}});
+config_mode(_Config) ->
+    erlang:error({bad_config, missing_mode}).
+
+-doc """
+Whether this mode starts the REPL listener (`beamtalk_session_sup` +
+`beamtalk_repl_server`): always in workspace mode, never in run mode, and in
+release mode only when the config opts in with `console => true`.
+""".
+-spec starts_console(mode(), map()) -> boolean().
+starts_console(run, _Config) -> false;
+starts_console(workspace, _Config) -> true;
+starts_console(release, Config) -> maps:get(console, Config, false).
+
+-doc """
+Whether to start the `beamtalk_compiler` application. Run and workspace modes
+start it unless `start_compiler => false` (a packaged escript); a release
+ships no compiler unless built with `include_compiler => true`.
+""".
+-spec starts_compiler(mode(), map()) -> boolean().
+starts_compiler(release, Config) -> maps:get(include_compiler, Config, false);
+starts_compiler(_Mode, Config) -> maps:get(start_compiler, Config, true).
 
 %%% REPL Child Specs
 
 -doc """
-Return child specs for REPL-mode children.
-When repl=false (run mode), these are omitted: no TCP listener, no idle monitor,
-no per-connection session supervisor, no signature-generation store.
+Return the mode-dependent child specs that follow `beamtalk_actor_sup`
+(ADR 0125 §1.4):
+
+- `run` — none: no TCP listener, no idle monitor, no session supervisor, no
+  ADR 0105 stores.
+- `workspace` — the ADR 0105 / ADR 0108 live-development stores, then the
+  REPL listener, then the idle monitor.
+- `release` — the REPL listener only, and only with `console => true`. Never
+  the stores (a release has no live-edit path to feed them) and never the
+  idle monitor (it calls `init:stop/0`, which would halt a healthy
+  production node that simply had no REPL traffic).
+
+Wherever the listener is started, `beamtalk_session_sup` precedes
+`beamtalk_repl_server` (see `console_child_specs/1`).
 """.
-repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _AutoCleanup, _MaxIdleSeconds) ->
+-spec repl_child_specs(mode(), map()) -> [supervisor:child_spec()].
+repl_child_specs(run, _Opts) ->
     [];
-repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds) ->
+repl_child_specs(workspace, Opts) ->
+    live_development_child_specs() ++ console_child_specs(Opts) ++ [idle_monitor_child_spec(Opts)];
+repl_child_specs(release, #{console := true} = Opts) ->
+    console_child_specs(Opts);
+repl_child_specs(release, _Opts) ->
+    [].
+
+-doc """
+The workspace-mode-only live-development children: the ADR 0105 signature /
+shape / findings stores and recheck worker, and the ADR 0108 alias xref.
+""".
+-spec live_development_child_specs() -> [supervisor:child_spec()].
+live_development_child_specs() ->
     [
         %% Signature-generation store (ADR 0105 Phase 1).
         %% Per-selector previous-generation method signatures, captured at
         %% patch time so a diff survives the class-state metadata wipe. Only
-        %% meaningful in REPL mode — run mode (repl=false) executes a
-        %% precompiled artifact with no live-edit path (no session, no way to
-        %% reach beamtalk_repl_loader:install_method/9), so there is nothing
-        %% for it to capture there. Started before session_sup/repl_server so
+        %% meaningful in workspace mode — run and release modes execute a
+        %% precompiled artifact with no live-edit path (no way to reach
+        %% beamtalk_repl_loader:install_method/9 without a compiler and a
+        %% working tree), so there is nothing for it to capture there.
+        %% Started before session_sup/repl_server so
         %% it's ready before any REPL connection could trigger an install.
         #{
             id => beamtalk_workspace_signature_store,
@@ -239,7 +366,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
         %% Per-class previous-generation `state:`/`field:` slot sets, captured
         %% around a full class-body reload so a diff survives the module
         %% replacement (companion to the signature store above, for shape
-        %% rather than per-method signature changes). Same REPL-mode-only
+        %% rather than per-method signature changes). Same workspace-mode-only
         %% rationale as the signature store.
         #{
             id => beamtalk_workspace_shape_store,
@@ -255,7 +382,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
         %% compiler port's `referenced_aliases` response field; consulted by
         %% `beamtalk_recheck:trigger_alias_change/1` so a live alias
         %% redefinition re-checks only its recorded dependents instead of
-        %% sweeping every live class. Same REPL-mode-only rationale as its
+        %% sweeping every live class. Same workspace-mode-only rationale as its
         %% siblings above.
         #{
             id => beamtalk_alias_xref,
@@ -297,8 +424,16 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_workspace_findings_store]
-        },
+        }
+    ].
 
+-doc """
+The REPL listener: `beamtalk_session_sup` then `beamtalk_repl_server`, in
+that order (see the comment on `beamtalk_session_sup` below).
+""".
+-spec console_child_specs(map()) -> [supervisor:child_spec()].
+console_child_specs(#{tcp_port := TcpPort, workspace_id := WorkspaceId, bind_addr := BindAddr}) ->
+    [
         %% Session supervisor (one child per REPL connection).
         %%
         %% MUST start before beamtalk_repl_server: the REPL server's init/1 binds
@@ -335,35 +470,42 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_repl_server]
-        },
-
-        %% Idle monitor for auto-cleanup (only if enabled)
-        #{
-            id => beamtalk_idle_monitor,
-            start =>
-                {beamtalk_idle_monitor, start_link, [
-                    #{
-                        enabled => AutoCleanup,
-                        max_idle_seconds => MaxIdleSeconds
-                    }
-                ]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_idle_monitor]
         }
     ].
+
+-doc """
+The idle monitor (workspace mode only). Its `max_idle_seconds` expiry calls
+`init:stop/0` and halts the node, which is why no other mode starts it.
+""".
+-spec idle_monitor_child_spec(map()) -> supervisor:child_spec().
+idle_monitor_child_spec(#{auto_cleanup := AutoCleanup, max_idle_seconds := MaxIdleSeconds}) ->
+    %% Idle monitor for auto-cleanup (only if enabled)
+    #{
+        id => beamtalk_idle_monitor,
+        start =>
+            {beamtalk_idle_monitor, start_link, [
+                #{
+                    enabled => AutoCleanup,
+                    max_idle_seconds => MaxIdleSeconds
+                }
+            ]},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [beamtalk_idle_monitor]
+    }.
 
 %%% ChangeLog workspace id
 
 -doc """
 Resolve the workspace id passed to the ChangeLog gen_server.
-Run mode (repl=false) returns `undefined` so the log stays memory-only and
-writes no artifacts to disk; REPL mode passes the real id through.
+Run and release modes return `undefined` so the log stays memory-only and
+writes no artifacts to disk; workspace mode passes the real id through.
 """.
--spec changelog_workspace_id(boolean(), binary()) -> binary() | undefined.
-changelog_workspace_id(false, _WorkspaceId) -> undefined;
-changelog_workspace_id(true, WorkspaceId) -> WorkspaceId.
+-spec changelog_workspace_id(mode(), binary()) -> binary() | undefined.
+changelog_workspace_id(run, _WorkspaceId) -> undefined;
+changelog_workspace_id(workspace, WorkspaceId) -> WorkspaceId;
+changelog_workspace_id(release, _WorkspaceId) -> undefined.
 
 %%% Singleton Child Specs
 
