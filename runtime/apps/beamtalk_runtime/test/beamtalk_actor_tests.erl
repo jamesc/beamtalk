@@ -2977,6 +2977,79 @@ actor_carries_process_dict_marker_test() ->
 %%% compiled Beamtalk.
 %%% ============================================================================
 
+ffi_do_spawn_with_selector_does_not_link_class_process_test() ->
+    %% Review follow-up on BT-3596 (jamesc/beamtalk#4017): `doSpawnAs/2`/
+    %% `doSpawnWith/3` (the FFI shims behind an EXTERNAL `ClassName spawnAs:`/
+    %% `spawnWith:as:` send, reached via `class_send`'s `gen_server:call` into
+    %% the receiver class's own singleton gen_server) must unlink the newly
+    %% spawned actor from the calling process, exactly like
+    %% `safe_spawn_does_not_link_caller_test/0` does for plain `spawn` and
+    %% `beamtalk_class_instantiation_tests:test_class_self_spawn_as_success/0`
+    %% does for the deadlock-avoiding `self spawnAs:` shortcut. Unlike
+    %% `safe_spawn_named_still_links_caller_test/0` above — which calls
+    %% `'spawnAs'/3` directly and correctly asserts it STAYS linked, since
+    %% that raw function also serves as the real supervisor-child restart
+    %% MFA — this test goes through the actual `doSpawnAs/2`/`doSpawnWith/3`
+    %% call site, which must sever that link itself (mirroring the
+    %% self-send shortcut) so a `terminate:`-overriding actor spawned this
+    %% way isn't silently torn down by an unrelated exit of its own class's
+    %% gen_server process (only newly observable since BT-3596 made a
+    %% trapping actor's parent-link EXIT handling reason-agnostic).
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
+        ClassPid when is_pid(ClassPid) ->
+            Self = #beamtalk_object{
+                class = 'Counter class',
+                class_mod = counter,
+                pid = ClassPid
+            },
+            Name = bt_4017_do_spawn_as_test,
+            cleanup_name(Name),
+            {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor:doSpawnAs(Self, Name),
+            try
+                {links, CallerLinks} = process_info(self(), links),
+                {links, ClassLinks} = process_info(ClassPid, links),
+                ?assertNot(lists:member(Pid, CallerLinks)),
+                ?assertNot(lists:member(Pid, ClassLinks)),
+                {links, ActorLinks} = process_info(Pid, links),
+                ?assertNot(lists:member(self(), ActorLinks)),
+                ?assertNot(lists:member(ClassPid, ActorLinks))
+            after
+                gen_server:stop(Pid)
+            end
+    end.
+
+ffi_do_spawn_with_selector_stays_linked_in_supervisor_context_test() ->
+    %% Symmetric case: when `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` IS set (see
+    %% `safe_spawn_links_caller_when_supervisor_spawn_context_set_test/0`
+    %% above), `doSpawnAs/2` must keep the link like every other guarded
+    %% call site — the guard exists for consistency even though this
+    %% particular call site can never actually observe the key set in
+    %% practice (see the doc comment on `do_spawn_with_selector/4`).
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
+        ClassPid when is_pid(ClassPid) ->
+            Self = #beamtalk_object{
+                class = 'Counter class',
+                class_mod = counter,
+                pid = ClassPid
+            },
+            Name = bt_4017_do_spawn_as_supervisor_ctx_test,
+            cleanup_name(Name),
+            put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
+            try
+                {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor:doSpawnAs(Self, Name),
+                {links, CallerLinks} = process_info(self(), links),
+                ?assert(lists:member(Pid, CallerLinks)),
+                unlink(Pid),
+                gen_server:stop(Pid)
+            after
+                erase(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY)
+            end
+    end.
+
 ffi_register_as_non_object_returns_type_error_test() ->
     %% Covers the guard clause that rejects non-`beamtalk_object` receivers.
     Result = beamtalk_actor:registerAs(not_an_actor, some_name),

@@ -3006,6 +3006,38 @@ doSpawnWith(Self, InitArgs, Name) ->
 %% parameter controls which public-facing Beamtalk selector is threaded into
 %% returned structured errors so error messages match the method the user
 %% called.
+%%
+%% `spawnAs:`/`spawnWith:as:` are `class` methods (ADR 0079 atomic naming),
+%% so an EXTERNAL send (`Logger spawnAs: #foo`) reaches this function via the
+%% normal class dispatch `gen_server:call` into the receiver class's own
+%% singleton gen_server process (`dispatch_codegen.rs`: "a class send is a
+%% gen_server:call into the singleton class process") — this function then
+%% executes INSIDE that class process, which is therefore the one
+%% `'spawnAs'/3`'s `gen_server:start_link` links to. `class_self_spawn_as`/
+%% `do_class_self_named_spawn` (`beamtalk_class_instantiation.erl`) is a
+%% SEPARATE deadlock-avoiding shortcut for the same selector reached only via
+%% a same-class `self spawnAs:`/`self spawnWith:as:` send (`self`-dispatch
+%% inside that class's own gen_server call handler would deadlock on a
+%% second `gen_server:call` to itself) — it already unlinks, mirrored below.
+%% This path did not, leaving the class's own gen_server process
+%% permanently linked to every actor it spawns this way. BT-3596 made that
+%% asymmetry newly dangerous: once the spawned actor traps exits (because it
+%% overrides `terminate:`), an untrapped normal exit of its own class
+%% process — previously inert, since a non-trapping linked partner ignores a
+%% `normal` reason — now tears the actor down via `terminate/2` regardless
+%% of reason, via the same built-in gen_server "parent EXIT" handling this
+%% PR relies on for supervisor cascades. Sever it immediately.
+%%
+%% Guarded on `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` for consistency with the
+%% self-send unlink site and `safe_spawn/2`, though it can never actually be
+%% set here in practice: `beamtalk_supervisor:start_child_via_class_method/4`
+%% (the only place that sets it) deliberately runs a `withClassMethod:`
+%% factory via `call_class_method_direct`/`erlang:apply/3` — staying in the
+%% real supervisor process precisely so a plain `self spawn`/`self spawnAs:`
+%% inside it links to the supervisor, not the class gen_server — and never
+%% through `class_send`'s `gen_server:call`, which is the only way this
+%% function is ever reached. A future caller that did reach here from a
+%% context where the key is visible would still get the correct behavior.
 -spec do_spawn_with_selector(#beamtalk_object{}, term(), term(), atom()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 do_spawn_with_selector(Self, InitArgs, Name, Selector) ->
@@ -3013,6 +3045,10 @@ do_spawn_with_selector(Self, InitArgs, Name, Selector) ->
         {ok, ClassName, Module} ->
             case 'spawnAs'(Name, Module, InitArgs) of
                 {ok, Pid} ->
+                    case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
+                        true -> ok;
+                        _ -> unlink(Pid)
+                    end,
                     {ok, #beamtalk_object{
                         class = ClassName,
                         class_mod = Module,
