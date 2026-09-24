@@ -72,6 +72,14 @@ TestCase subclass: ActorSelfSendHomTest
     pool := SelfSendHomPool spawn
     self assert: pool accumulateTotal equals: 10
 
+  // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a class
+  // method (no `State`/`StateAcc` parameter — see
+  // `SelfSendHomPool>>classCollect:`'s doc comment) forwarding an opaque
+  // callable to `collect:`. Must not crash on an unbound `State` reference.
+  testClassMethodOpaqueCallableCollectDoesNotCrash =>
+    result := SelfSendHomPool classCollect: [:x | x * 2]
+    self assert: result equals: #(2, 4, 6)
+
   testValueClassTwinDetectIfNoneReturnsMatch =>
     sackful := SelfSendHomSackful new
     result := sackful detect: [:x | x > 2] ifNone: [0]

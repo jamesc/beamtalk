@@ -211,11 +211,24 @@ impl CoreErlangGenerator {
         // use the shared footer at all — it has its own receiver/temp-var
         // allocation. Only compute `list_var`/`recv_code` here, ahead of
         // compiling the body, for the two paths that DO share the footer
-        // (literal-block, and ValueType non-literal) — preserving the exact
-        // gensym allocation order snapshot tests pin (`list_var` before the
-        // body compiles), unchanged from before this function was split.
+        // (literal-block, and ValueType/class-method non-literal) —
+        // preserving the exact gensym allocation order snapshot tests pin
+        // (`list_var` before the body compiles), unchanged from before this
+        // function was split.
+        //
+        // Excludes `in_class_method()` (review-flagged on PR #4030): a
+        // class method compiles to `class_<selector>(ClassSelf, ClassVars,
+        // Args...)` — it has no `State`/`StateAcc` parameter at all, only
+        // `ClassVars`. `current_field_read_state_var()` (the fold's seed,
+        // below) is context-blind to `in_class_method()` and always renders
+        // `"State"`/`"StateAccN"`, a name `class_<selector>` never binds —
+        // `ThreadingPlan::generate_pack_prefix` already has to special-case
+        // this for the literal-block sibling path. ADR 0128 doesn't cover
+        // class methods; fall back to the pre-existing plain-value wrapper
+        // there too, exactly as for `ValueType`.
         let is_actor_repl_opaque = Self::extract_block_literal(body).is_none()
-            && !matches!(self.context, CodeGenContext::ValueType);
+            && !matches!(self.context, CodeGenContext::ValueType)
+            && !self.in_class_method();
         if is_actor_repl_opaque {
             // Actor/Repl: fold-based rewrite (ADR 0128 / BT-3583). The
             // callable's tier is unknown until runtime, so the fold's own
@@ -248,7 +261,10 @@ impl CoreErlangGenerator {
             }
             wrapped_doc
         } else {
-            // Non-literal (opaque) callable in `CodeGenContext::ValueType`.
+            // Non-literal (opaque) callable in `CodeGenContext::ValueType`,
+            // OR in a class method (any context) — see this function's
+            // `is_actor_repl_opaque` gate above for why class methods are
+            // excluded from the fold path too.
             //
             // ADR 0128 / BT-3583: `ValueType` has no `State` map in scope,
             // and value-type method-body classification never routes a

@@ -3661,19 +3661,27 @@ impl CoreErlangGenerator {
         // which have their own literal-block-only analysis above and are
         // out of this ADR's scope.
         //
-        // Gated on `!ValueType`: `generate_simple_list_op`'s own non-literal
-        // branch only builds the `{Result, NewState}`-tuple fold for
-        // Actor/Repl context — `ValueType` has no `State` map to thread, so
-        // it still compiles to a plain (non-tuple) value there. This
-        // classifier is reachable for `ValueType` bodies too (via
-        // `generate_letrec_body_ir`/loop bodies, `intrinsics.rs`'s
-        // `generate_block_value_inline_with_mutations`), so without this
-        // gate a `ValueType` loop forwarding an opaque callable to `do:`/
-        // `collect:`/`select:` would get classified as needing a tuple
-        // unwrap the codegen never produces — `erlang:element(2, ...)` on
-        // the resulting plain value crashes with `badarg` at runtime.
+        // Gated on `!ValueType` and `!in_class_method()`:
+        // `generate_simple_list_op`'s own non-literal branch only builds
+        // the `{Result, NewState}`-tuple fold for INSTANCE Actor/Repl
+        // context — `ValueType` has no `State` map to thread at all, and a
+        // class method (`class_<selector>(ClassSelf, ClassVars, Args...)`)
+        // has no `State`/`StateAcc` parameter either (class-side threading
+        // goes through `ClassVars`, not `State`) — so both still compile to
+        // a plain (non-tuple) value there. This classifier is reachable for
+        // `ValueType` bodies too (via `generate_letrec_body_ir`/loop
+        // bodies, `intrinsics.rs`'s `generate_block_value_inline_with_mutations`),
+        // and for class-method bodies generally, so without this gate such
+        // a loop forwarding an opaque callable to `do:`/`collect:`/
+        // `select:` would get classified as needing a tuple unwrap the
+        // codegen never produces — `erlang:element(2, ...)` on the
+        // resulting plain value crashes with `badarg` at runtime (or, for a
+        // class method, references an unbound `State` variable that
+        // `class_<selector>` never binds, in the codegen itself — see the
+        // review finding on PR #4030 for the concrete repro).
         if matches!(sel_str.as_str(), "do:" | "collect:" | "select:")
             && !matches!(self.context, CodeGenContext::ValueType)
+            && !self.in_class_method()
         {
             if let Some(arg) = arguments.first() {
                 if Self::extract_block_literal(arg).is_none() {

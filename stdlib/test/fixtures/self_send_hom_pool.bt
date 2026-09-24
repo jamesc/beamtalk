@@ -44,3 +44,15 @@ Actor subclass: SelfSendHomPool
     self.total := 0
     self do: [:each | self.total := self.total + each]
     self.total
+
+  // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a CLASS
+  // method forwarding an opaque (non-literal) callable to `collect:`. A
+  // class method compiles to `class_<selector>(ClassSelf, ClassVars,
+  // Args...)` — it has no `State`/`StateAcc` parameter at all (class-side
+  // threading goes through `ClassVars`, not `State`), so the ADR 0128 fold
+  // path (which seeds its accumulator from `current_field_read_state_var()`,
+  // always `"State"`/`"StateAccN"`) must not run here — it would reference
+  // a variable `class_collect:` never binds. Must compile and run
+  // correctly, falling back to the pre-ADR plain-value wrapper.
+  class classCollect: block =>
+    #(1, 2, 3) collect: block
