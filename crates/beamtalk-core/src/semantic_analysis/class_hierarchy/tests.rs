@@ -2332,6 +2332,8 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
             return_type: Some(DeclaredType::simple("Integer")),
             param_types: vec![],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -2379,6 +2381,8 @@ fn add_from_beam_meta_preserves_existing_entries() {
             return_type: None,
             param_types: vec![],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -2417,6 +2421,8 @@ fn add_from_beam_meta_preserves_existing_entries() {
             return_type: None,
             param_types: vec![],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

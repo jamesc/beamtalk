@@ -181,12 +181,12 @@ fn parse_class_uses_line_basic() {
     // Still a state declaration after it, proving `uses:` doesn't swallow
     // the rest of the body.
     assert_eq!(class.state.len(), 1);
-    // BT-3587's placeholder: flattening isn't implemented yet.
+    // BT-3587's placeholder error is gone now that BT-3588's
+    // `trait_expansion` pass gives `uses:` its meaning — a bare `uses:`
+    // line parses cleanly.
     assert!(
-        diagnostics.iter().any(|d| d
-            .message
-            .contains("protocol composition is not yet supported")),
-        "Expected the not-yet-supported placeholder error, got: {diagnostics:?}"
+        diagnostics.is_empty(),
+        "Expected a clean parse, got: {diagnostics:?}"
     );
 }
 

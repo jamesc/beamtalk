@@ -45,6 +45,8 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("T")),
                 param_types: vec![Some(DeclaredType::parse("GenResult(T, E)"))],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("processArray:"),
@@ -57,6 +59,8 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("T")),
                 param_types: vec![Some(DeclaredType::parse("Array(T)"))],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![],

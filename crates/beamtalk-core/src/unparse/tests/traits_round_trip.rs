@@ -83,11 +83,12 @@ fn protocol_no_blank_line_between_consecutive_provided_methods_not_inserted() {
 
 // --- `uses:` lines (ADR 0127 §2) ---
 //
-// A class with any `uses:` line always carries the BT-3587 placeholder
-// error ("protocol composition is not yet supported" — flattening is
-// BT-3588), so `format_source`/`assert_identity` — which refuse to format
-// anything with an error diagnostic — cannot be used here.
-// `assert_identity_despite_errors` unparses directly instead.
+// These sources parse cleanly on their own (no diagnostics) now that
+// BT-3587's placeholder error is gone, so `assert_identity` would work too;
+// `assert_identity_despite_errors` is kept here since these fixtures only
+// exercise the parser/unparser round trip, not full semantic analysis
+// (`uses:`-referenced protocols like `Comparable` aren't defined in the
+// same source snippet).
 
 #[test]
 fn class_uses_line_round_trip() {

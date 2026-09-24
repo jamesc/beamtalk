@@ -594,6 +594,8 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
                 return_type: Some(DeclaredType::parse("Boolean")),
                 param_types: vec![Some(DeclaredType::parse("ClassAlias"))],
                 doc: None,
+
+                origin: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -694,6 +696,8 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
                 "#temporary | #transient | #permanent",
             ))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

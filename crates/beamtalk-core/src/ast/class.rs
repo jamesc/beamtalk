@@ -211,10 +211,13 @@ pub struct ClassDefinition {
     pub superclass_type_args: Vec<TypeAnnotation>,
     /// `uses:` lines composing traits (protocols with provided methods) into
     /// this class (ADR 0127 §2). Must come before any state or method
-    /// declaration in source; parsed and round-tripped here, but not yet
-    /// flattened into the class's methods — that is
-    /// `semantic_analysis::trait_expansion` (BT-3588). Empty for a class that
-    /// uses no traits.
+    /// declaration in source. This field carries the *syntax* only — a
+    /// class with a non-empty `uses` here still has its provisions in this
+    /// AST node, not yet spliced into `methods`; `semantic_analysis::
+    /// trait_expansion` (BT-3588) reads it and returns a *new* module whose
+    /// `methods` already includes the flattened provisions, leaving this
+    /// field as the written source record. Empty for a class that uses no
+    /// traits.
     pub uses: Vec<ProtocolUse>,
     /// Source location of the entire class definition.
     pub span: Span,
@@ -492,12 +495,11 @@ pub struct ProtocolMethodSignature {
 /// declaration.
 ///
 /// This node only carries the *syntax* — composing these into the using
-/// class's own methods, and everything semantic (conflict detection,
-/// required-selector checking, the class-wins/overriding precedence rule)
-/// is `semantic_analysis::trait_expansion` (BT-3588), not a parser concern.
-/// Until that pass lands, a class with any `uses:` line gets a single
-/// "protocol composition is not yet supported" parse error (ADR 0127,
-/// BT-3587's acceptance criteria) — the class still parses and round-trips.
+/// class's own methods (collection, `excluding:`, conflict detection, the
+/// class-wins precedence rule) is `semantic_analysis::trait_expansion`
+/// (BT-3588). The `overriding:` acknowledgement check and required-selector
+/// resolution (ADR 0127 §3a, §5) need the built `ClassHierarchy` and run in
+/// BT-3589, after flattening.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolUse {
     /// The used protocol's name.

@@ -565,6 +565,7 @@ impl ClassHierarchy {
                     return_type: slot_type.clone(),
                     param_types: vec![],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
+                    origin: None,
                 });
             }
 
@@ -583,6 +584,7 @@ impl ClassHierarchy {
                     return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
+                    origin: None,
                 });
             }
         }
@@ -605,6 +607,7 @@ impl ClassHierarchy {
                     return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None; slots.len()],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
+                    origin: None,
                 });
             }
         }
@@ -952,6 +955,7 @@ impl ClassHierarchy {
                     return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
                     param_types: vec![],
                     doc: Some(getter_doc.into()),
+                    origin: None,
                 });
             }
 
@@ -973,6 +977,7 @@ impl ClassHierarchy {
                     return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None],
                     doc: Some(setter_doc.into()),
+                    origin: None,
                 });
             }
         }
@@ -1011,6 +1016,7 @@ impl ClassHierarchy {
                     return_type: Some(DeclaredType::simple(class_name.clone())),
                     param_types: vec![None; arity],
                     doc: Some(ctor_doc.into()),
+                    origin: None,
                 });
             }
         }

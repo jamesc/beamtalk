@@ -407,6 +407,8 @@ pub(super) fn method_info(
             .map(|p| p.map(DeclaredType::parse))
             .collect(),
         doc: None,
+
+        origin: None,
     }
 }
 
@@ -453,6 +455,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("T")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("error"),
@@ -465,6 +469,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("E")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("map:"),
@@ -477,6 +483,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("GenResult(R, E)")),
                 param_types: vec![Some(DeclaredType::parse("Block(T, R)"))],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("isOk"),
@@ -489,6 +497,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("Boolean")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![
@@ -503,6 +513,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::SelfType),
                 param_types: vec![Some(DeclaredType::parse("T"))],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("error:"),
@@ -515,6 +527,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::SelfType),
                 param_types: vec![Some(DeclaredType::parse("E"))],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_variables: vec![],

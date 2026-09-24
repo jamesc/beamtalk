@@ -391,6 +391,8 @@ fn setup_json_class_side_fixture(
             return_type: Some(DeclaredType::parse("String")),
             param_types: vec![Some(DeclaredType::parse(param_type))],
             doc: None,
+
+            origin: None,
         }],
         class_variables: vec![],
         type_params: vec![],
@@ -840,6 +842,8 @@ fn setup_intersection_param_fixture() -> (
                 // look like an intersection and a real `Intersection` node.
                 param_types: vec![Some(DeclaredType::parse("Printable & Serializable"))],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: "store:".into(),
@@ -852,6 +856,8 @@ fn setup_intersection_param_fixture() -> (
                 return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![Some(DeclaredType::parse("Serializable"))],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: "describe:".into(),
@@ -864,6 +870,8 @@ fn setup_intersection_param_fixture() -> (
                 return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![Some(DeclaredType::parse("Describable"))],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![],
@@ -980,6 +988,8 @@ fn test_intersection_param_conforms_to_both_no_warning() {
                 return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: "serialize".into(),
@@ -992,6 +1002,8 @@ fn test_intersection_param_conforms_to_both_no_warning() {
                 return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![],
@@ -1066,6 +1078,8 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
             return_type: Some(DeclaredType::parse("String")),
             param_types: vec![],
             doc: None,
+
+            origin: None,
         })
         .collect();
 
