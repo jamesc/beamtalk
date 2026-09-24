@@ -79,6 +79,35 @@ class_shape_entry_matches_the_extract_shapes_projection_test() ->
 %% write_shapes_json/4
 %%====================================================================
 
+%%====================================================================
+%% class_field_shape/1
+%%====================================================================
+
+class_field_shape_returns_undefined_for_an_unregistered_class_test() ->
+    ?assertEqual(undefined, beamtalk_release_shapes:class_field_shape('NoSuchClassAtAll')).
+
+class_field_shape_returns_own_fields_for_registered_root_class_test() ->
+    Dir = fixtures_dir(),
+    {ok, _} = beamtalk_release_shapes:extract_shapes([], [Dir]),
+    Shape = beamtalk_release_shapes:class_field_shape('ReleaseShapesRoot'),
+    ?assertEqual(#{<<"label">> => {<<"String">>, <<"eager">>}}, Shape).
+
+class_field_shape_returns_flattened_fields_for_registered_subclass_test() ->
+    Dir = fixtures_dir(),
+    {ok, _} = beamtalk_release_shapes:extract_shapes([], [Dir]),
+    Shape = beamtalk_release_shapes:class_field_shape('ReleaseShapesLeaf'),
+    ?assertEqual(
+        #{
+            <<"qty">> => {<<"Integer">>, <<"eager">>},
+            <<"label">> => {<<"String">>, <<"eager">>}
+        },
+        Shape
+    ).
+
+%%====================================================================
+%% write_shapes_json/4
+%%====================================================================
+
 write_shapes_json_writes_a_parseable_manifest_test() ->
     Dir = fixtures_dir(),
     TmpDir = beamtalk_file:'tempDirectory'(),
