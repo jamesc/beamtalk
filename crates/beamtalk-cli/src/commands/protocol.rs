@@ -612,7 +612,24 @@ mod tests {
             let mut client = ProtocolClient::connect("127.0.0.1", handshake_port, "cookie", None)
                 .expect("connect");
             server.join().expect("server thread");
-            // Nothing is listening any more.
+
+            // BT-3608: `handshake_port` is free again here, and under a full
+            // parallel `cargo test` run a sibling test's own
+            // `TcpListener::bind("127.0.0.1:0")` can grab that exact
+            // ephemeral port before `reconnect()` below runs — making this
+            // assertion flaky, since it then either succeeds against a
+            // stranger's server or fails with a different message than the
+            // one asserted. Point the client at a fixed sub-1024 port
+            // instead of reusing `handshake_port`: every fake server in this
+            // test suite binds via `"127.0.0.1:0"` (an OS-assigned ephemeral
+            // port — see `spawn_auth_ok_server`/`spawn_auth_error_server` in
+            // `test_support.rs` and the inline servers in this file), and OS
+            // ephemeral-port allocators never hand out ports below 1024, so
+            // no test in this binary can ever be listening on it. Binding it
+            // ourselves would additionally require root, so it stays closed
+            // for the life of the process rather than merely for as long as
+            // some listener we'd otherwise have to keep alive.
+            client.port = 1;
             let err = client
                 .reconnect()
                 .expect_err("reconnect against a closed port should fail");
