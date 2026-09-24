@@ -696,7 +696,7 @@ impl ProcessManager {
                      try beamtalk_repl_server:get_port() of \
                          {ok, ActualPort} -> ActualPort \
                      catch \
-                         exit:_ -> timer:sleep(50), GP() \
+                         exit:{noproc, _} -> timer:sleep(50), GP() \
                      end \
                  end, \
                  ActualPort = GetPort(), \
