@@ -333,18 +333,27 @@ mod tests {
     /// through `findstr`, exploitable via `RELEASE_NODE=x & calc.exe`).
     /// This test actually executes the generated `launcher.sh` with a
     /// malicious `RELEASE_NODE` and asserts it is rejected cleanly —
-    /// POSIX-only: there is no way to execute `.cmd` from this (POSIX)
-    /// suite, which is exactly why the injection bug lived in the
-    /// `.cmd`-specific code path unexercised until manual review.
+    /// `#[cfg(unix)]`, like its sibling `write_launcher_scripts_sh_is_executable`
+    /// just below: `sh` isn't reliably resolvable the same way on the
+    /// Windows CI runner `just test-rust` also runs on. There is no way to
+    /// execute `.cmd` from this (POSIX) suite either, which is exactly why
+    /// the injection bug lived in the `.cmd`-specific code path unexercised
+    /// until manual review.
+    #[cfg(unix)]
     #[test]
     fn write_launcher_scripts_sh_rejects_malicious_release_node_at_runtime() {
         let (root, _temp) = write_scripts(true);
         let sh_path = root.join("bin/orders");
+        let marker_dir = TempDir::new().unwrap();
+        let marker_path = marker_dir.path().join("beamtalk_launcher_test_pwned");
 
         let output = std::process::Command::new("sh")
             .arg(sh_path.as_std_path())
             .arg("foreground")
-            .env("RELEASE_NODE", "x; touch /tmp/beamtalk_launcher_test_pwned")
+            .env(
+                "RELEASE_NODE",
+                format!("x; touch {}", marker_path.display()),
+            )
             .env("RELEASE_COOKIE", "test-cookie")
             .output()
             .expect("failed to execute launcher.sh");
@@ -362,7 +371,7 @@ mod tests {
             "stderr: {stderr}"
         );
         assert!(
-            !std::path::Path::new("/tmp/beamtalk_launcher_test_pwned").exists(),
+            !marker_path.exists(),
             "shell metacharacters in RELEASE_NODE must never be executed"
         );
     }
