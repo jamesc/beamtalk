@@ -34,6 +34,21 @@ suite happens to register it first.
 %% module.
 -export([apply_meta_override/1]).
 
+%% Reused by beamtalk_dist_wire_tests (BT-3601, ADR 0126 Phase 3b) for its
+%% own two-node "migrate forward across the wire" test, per CLAUDE.md's
+%% no-duplicate-implementation rule: build_delegate_proxy/3 is the one place
+%% that already knows how to stub a compiled `.bt` class's exports (here,
+%% `shape_version`/`shape_migrations` meta) without tripping meck's
+%% `.bt`-module incompatibility (see this function's own doc). That test
+%% needs the stub installed on a *different* node than the one running the
+%% setup/teardown `rpc:call`s, so it drives build_delegate_proxy/3 directly
+%% with its own baked-in-literal override source rather than reusing
+%% with_shape_chain_cart_meta/3, whose pdict-based override value is only
+%% visible to the process that set it — fine for this module's own
+%% single-process tests, not for a value read by a *different* node's actor
+%% process during dispatch.
+-export([build_delegate_proxy/3]).
+
 log(LogEvent, #{config := #{parent := Parent}}) ->
     Parent ! {log_event, LogEvent},
     ok.

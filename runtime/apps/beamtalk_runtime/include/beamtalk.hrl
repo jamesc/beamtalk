@@ -136,6 +136,19 @@
 %% this macro and both call sites move together.
 -define(PROTOCOL_VERSION, <<"2.0">>).
 
+%% @doc ADR 0126 §5.1 wire-envelope format version (distinct from any class's
+%% own `shapeVersion`).
+%%
+%% Single source of truth for the leading version tag on the
+%% `'$beamtalk_wire'` request envelope (`beamtalk_actor`'s send helpers and
+%% `handle_call`/`handle_cast` prelude) and the `'$beamtalk_wire_reply'`
+%% tag `beamtalk_actor` wraps a cross-node sync reply / future
+%% resolve-or-reject value in before it crosses back over raw distribution
+%% (`beamtalk_future`'s state machine unwraps it on receipt). A receiver that
+%% does not know the version refuses with `wire_version_unsupported`
+%% (ADR 0126 §5.1) rather than guessing at a decode.
+-define(BT_WIRE_VERSION, 1).
+
 %% @doc ADR 0110 class-var shadow write-through process-dictionary key atom
 %% (ADR 0111 Phase D).
 %%

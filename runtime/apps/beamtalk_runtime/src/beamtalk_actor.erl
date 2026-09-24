@@ -301,6 +301,8 @@ handle_getValue([], State) ->
 -export([
     remote_spawn/4,
     remote_spawn_target/2,
+    remote_spawn_with/5,
+    remote_spawn_with_target/3,
     remote_named/3,
     remote_named_target/2,
     remote_all_registered/1
@@ -308,9 +310,14 @@ handle_getValue([], State) ->
 
 %% Beamtalk stdlib FFI shims for actor.bt remote spawn/lookup (ADR 0126 §3,
 %% Phase 2, BT-3599) — mirrors the doSpawnAs/2 etc. shims above.
+%% doSpawnWithOn/3 and doSpawnWithAsOn/4 back `spawnWith:on:`/
+%% `spawnWith:as:on:` (ADR 0126 §5.1, Phase 3b, BT-3601) — the Value-carrying
+%% remote-spawn selectors deferred at Phase 2 until the wire encoder landed.
 -export([
     doSpawnOn/2,
     doSpawnAsOn/3,
+    doSpawnWithOn/3,
+    doSpawnWithAsOn/4,
     doNamedOn/3,
     doAllRegisteredOn/2
 ]).
@@ -808,9 +815,34 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
         case beamtalk_pid:is_alive(ActorPid) of
             true ->
                 PropCtx = get_propagated_ctx(),
-                gen_server:cast(ActorPid, {Selector, Args, FuturePid, PropCtx}),
-                spawn_future_watcher(ActorPid, FuturePid, Selector),
-                {ok, Metadata#{outcome => ok}};
+                %% ADR 0126 §5.1: the only added cost for a local send is this
+                %% one node/1 comparison — a remote target wire-encodes Args
+                %% and tags the cast so the receiver's handle_cast prelude
+                %% recognises it.
+                case node(ActorPid) =/= node() of
+                    true ->
+                        case beamtalk_wire:encode(Args) of
+                            {ok, WireArgs} ->
+                                gen_server:cast(
+                                    ActorPid,
+                                    {'$beamtalk_wire', ?BT_WIRE_VERSION, async, Selector, WireArgs,
+                                        FuturePid, PropCtx}
+                                ),
+                                spawn_future_watcher(ActorPid, FuturePid, Selector),
+                                {ok, Metadata#{outcome => ok}};
+                            {error, EncErr} ->
+                                %% Sender-side encode failure (request direction,
+                                %% ADR 0126 §5.2) — never reaches the network.
+                                beamtalk_future:reject(
+                                    FuturePid, EncErr#beamtalk_error{selector = Selector}
+                                ),
+                                {ok, Metadata#{outcome => error}}
+                        end;
+                    false ->
+                        gen_server:cast(ActorPid, {Selector, Args, FuturePid, PropCtx}),
+                        spawn_future_watcher(ActorPid, FuturePid, Selector),
+                        {ok, Metadata#{outcome => ok}}
+                end;
             false ->
                 beamtalk_future:reject(FuturePid, actor_dead_error_record(Selector)),
                 {ok, Metadata#{outcome => error}}
@@ -854,8 +886,33 @@ cast_send(ActorPid, Selector, Args) ->
         case beamtalk_pid:is_alive(ActorPid) of
             true ->
                 PropCtx = get_propagated_ctx(),
-                gen_server:cast(ActorPid, {cast, Selector, Args, PropCtx}),
-                {ok, Metadata#{outcome => cast}};
+                case node(ActorPid) =/= node() of
+                    true ->
+                        case beamtalk_wire:encode(Args) of
+                            {ok, WireArgs} ->
+                                gen_server:cast(
+                                    ActorPid,
+                                    {'$beamtalk_wire', ?BT_WIRE_VERSION, cast, Selector, WireArgs,
+                                        PropCtx}
+                                ),
+                                {ok, Metadata#{outcome => cast}};
+                            {error, Error} ->
+                                %% Fire-and-forget: no caller to tell (mirrors
+                                %% the receiver-side cast-skew handling, ADR
+                                %% 0126 §5.2) — log and drop, matching Erlang's
+                                %% fire-and-forget semantics.
+                                ?LOG_WARNING("Cast argument not serialisable for remote send", #{
+                                    selector => Selector,
+                                    pid => ActorPid,
+                                    error => Error,
+                                    domain => [beamtalk, runtime, dist]
+                                }),
+                                {ok, Metadata#{outcome => cast}}
+                        end;
+                    false ->
+                        gen_server:cast(ActorPid, {cast, Selector, Args, PropCtx}),
+                        {ok, Metadata#{outcome => cast}}
+                end;
             false ->
                 {ok, Metadata#{outcome => cast}}
         end
@@ -1046,13 +1103,12 @@ sync_send_remote(ActorPid, Selector, Args) ->
                     %% infinity so it doesn't time out before the proxy's configured
                     %% timeout expires. For all other actors, use gen_server:call/2
                     %% which defaults to 5000ms.
-                    CallResult =
+                    CallTimeout =
                         case Class of
-                            'TimeoutProxy' ->
-                                gen_server:call(ActorPid, {Selector, Args, PropCtx}, infinity);
-                            _ ->
-                                gen_server:call(ActorPid, {Selector, Args, PropCtx})
+                            'TimeoutProxy' -> infinity;
+                            _ -> default
                         end,
+                    CallResult = wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout),
                     case CallResult of
                         {ok, Result} ->
                             {Result, Metadata#{outcome => ok}};
@@ -1122,6 +1178,64 @@ sync_send_remote(ActorPid, Selector, Args) ->
     end.
 
 -doc """
+Sync `gen_server:call` for both the local and remote (ADR 0126 §5.1) paths,
+shared by `sync_send_remote/3` and `sync_send/4`. `CallTimeout` is `default`
+(use `gen_server:call/2`'s own 5000ms default), `infinity`, or a
+non-negative integer millisecond timeout — mirroring the two call shapes the
+two callers already had before this helper existed.
+
+Remote is decided by `node(ActorPid) =/= node()` — one comparison, the only
+added cost for a local call (ADR 0126 §5.1 constraint 2). A remote call
+wire-encodes `Args` and tags the message so the receiver's `handle_call`
+prelude recognises it, then decodes the raw reply that comes back through
+the ordinary `gen_server:call` reply path — `decode_call_result/2` reraises
+on a reply-direction decode failure (§5.2) rather than returning a
+half-decoded term. An encode failure on `Args` is a request-direction
+failure (§5.2): it never reaches the network, and is raised here in the
+caller, exactly as `beamtalk_wire:encode/1`'s own doc promises.
+""".
+-spec wire_sync_call(pid(), atom(), list(), map(), default | timeout()) -> term().
+wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout) ->
+    case node(ActorPid) =/= node() of
+        true ->
+            case beamtalk_wire:encode(Args) of
+                {ok, WireArgs} ->
+                    Msg = {'$beamtalk_wire', ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx},
+                    RawResult = local_call(ActorPid, Msg, CallTimeout),
+                    decode_call_result(RawResult, Selector);
+                {error, EncErr} ->
+                    beamtalk_exception_handler:reraise(EncErr#beamtalk_error{selector = Selector})
+            end;
+        false ->
+            local_call(ActorPid, {Selector, Args, PropCtx}, CallTimeout)
+    end.
+
+-spec local_call(pid(), term(), default | timeout()) -> term().
+local_call(ActorPid, Msg, default) ->
+    gen_server:call(ActorPid, Msg);
+local_call(ActorPid, Msg, Timeout) ->
+    gen_server:call(ActorPid, Msg, Timeout).
+
+-doc """
+Decode a raw reply that came back from a remote `gen_server:call` (ADR 0126
+§5.1's "Result path" table). A decode failure here is reply-direction skew
+(§5.2): the method has already run on the callee and its state has changed,
+so this raises — `direction => reply` is merged into the error's `details`
+so it reads distinctly from the identically-kinded request-direction
+failure, which never reaches a method body at all.
+""".
+-spec decode_call_result(term(), atom()) -> term().
+decode_call_result(RawResult, Selector) ->
+    case beamtalk_wire:decode(RawResult) of
+        {ok, Decoded} ->
+            Decoded;
+        {error, #beamtalk_error{details = Details} = Err} ->
+            beamtalk_exception_handler:reraise(Err#beamtalk_error{
+                selector = Selector, details = Details#{direction => reply}
+            })
+    end.
+
+-doc """
 Sync-send with explicit timeout.
 
 Same as sync_send/3 but passes the given Timeout to gen_server:call/3.
@@ -1186,7 +1300,7 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                             PropCtx = get_sync_propagated_ctx(),
                             %% Layer 2: Check for transitive cycles.
                             check_call_stack(ActorPid, Selector),
-                            case gen_server:call(ActorPid, {Selector, Args, PropCtx}, Timeout) of
+                            case wire_sync_call(ActorPid, Selector, Args, PropCtx, Timeout) of
                                 {ok, Result} ->
                                     {Result, Metadata#{outcome => ok}};
                                 {error, {ErlType, ErrorValue, Stacktrace}} ->
@@ -1967,6 +2081,36 @@ Errors in fire-and-forget are logged but do not crash the actor.
 Errors in async-with-future are communicated via future rejection.
 """.
 -spec handle_cast(term(), map()) -> {noreply, map()}.
+%% Wire-tagged remote sends (ADR 0126 §5.1) — decode and re-dispatch through
+%% the ordinary local clauses below. A decode failure is cast-direction
+%% version skew (§5.2): there is no caller to tell, so it is logged and the
+%% telemetry event fires; an unknown wire version is handled the same way.
+handle_cast(
+    {'$beamtalk_wire', ?BT_WIRE_VERSION, async, Selector, WireArgs, FuturePid, PropCtx}, State
+) ->
+    case beamtalk_wire:decode(WireArgs) of
+        {ok, Args} ->
+            handle_cast({Selector, Args, FuturePid, PropCtx}, State);
+        {error, Error} ->
+            beamtalk_future:reject(FuturePid, Error#beamtalk_error{selector = Selector}),
+            {noreply, State}
+    end;
+handle_cast(
+    {'$beamtalk_wire', SentVersion, async, Selector, _WireArgs, FuturePid, _PropCtx}, State
+) ->
+    beamtalk_future:reject(FuturePid, wire_version_unsupported_error(Selector, SentVersion)),
+    {noreply, State};
+handle_cast({'$beamtalk_wire', ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}, State) ->
+    case beamtalk_wire:decode(WireArgs) of
+        {ok, Args} ->
+            handle_cast({cast, Selector, Args, PropCtx}, State);
+        {error, Error} ->
+            log_wire_cast_rejected(Selector, Error),
+            {noreply, State}
+    end;
+handle_cast({'$beamtalk_wire', SentVersion, cast, Selector, _WireArgs, _PropCtx}, State) ->
+    log_wire_cast_rejected(Selector, wire_version_unsupported_error(Selector, SentVersion)),
+    {noreply, State};
 %% Fire-and-forget cast with propagated context (ADR 0069 Phase 2b)
 handle_cast({cast, Selector, Args, PropCtx}, State) when
     is_atom(Selector), is_list(Args), is_map(PropCtx)
@@ -2030,17 +2174,17 @@ handle_cast({Selector, Args, FuturePid}, State) ->
             {reply, Result, NewState} ->
                 %% Resolve the future with the result
                 log_dispatch_complete(State, NewState, Selector, async, T0),
-                beamtalk_future:resolve(FuturePid, Result),
+                maybe_resolve_future(FuturePid, Result),
                 {noreply, NewState};
             {noreply, NewState} ->
                 %% Method didn't return a value, resolve with nil
                 log_dispatch_complete(State, NewState, Selector, async, T0),
-                beamtalk_future:resolve(FuturePid, nil),
+                maybe_resolve_future(FuturePid, nil),
                 {noreply, NewState};
             {error, Reason, NewState} ->
                 %% Method failed, reject the future
                 log_dispatch_complete(State, NewState, Selector, async, T0),
-                beamtalk_future:reject(FuturePid, Reason),
+                maybe_reject_future(FuturePid, Reason),
                 {noreply, NewState}
         end
     after
@@ -2057,6 +2201,20 @@ Message format: {Selector, Args} or {Selector, Args, PropCtx} (ADR 0069 Phase 2b
 Dispatches to method and returns result immediately.
 """.
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
+%% Wire-tagged remote sends (ADR 0126 §5.1) — decode and re-dispatch through
+%% the ordinary local clause below. A decode failure is request-direction
+%% version skew (§5.2): the reply is an error and this actor's state is
+%% untouched — it never reaches dispatch/4. An unknown wire version refuses
+%% the same way.
+handle_call({'$beamtalk_wire', ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx}, From, State) ->
+    case beamtalk_wire:decode(WireArgs) of
+        {ok, Args} ->
+            handle_call({Selector, Args, PropCtx}, From, State);
+        {error, Error} ->
+            {reply, {error, Error#beamtalk_error{selector = Selector}}, State}
+    end;
+handle_call({'$beamtalk_wire', SentVersion, call, Selector, _WireArgs, _PropCtx}, _From, State) ->
+    {reply, {error, wire_version_unsupported_error(Selector, SentVersion)}, State};
 %% Sync call with propagated context (ADR 0069 Phase 2b)
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     restore_propagated_ctx(PropCtx),
@@ -2079,15 +2237,15 @@ handle_call({Selector, Args}, From, State) ->
         case dispatch(Selector, Args, Self, State) of
             {reply, Result, NewState} ->
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
-                {reply, Result, NewState};
+                {reply, encode_reply_for(From, Selector, Result), NewState};
             {noreply, NewState} ->
                 %% Method didn't return a value, return nil
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
-                {reply, nil, NewState};
+                {reply, encode_reply_for(From, Selector, nil), NewState};
             {error, Reason, NewState} ->
                 %% Method failed, return error tuple
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
-                {reply, {error, Reason}, NewState}
+                {reply, encode_reply_for(From, Selector, {error, Reason}), NewState}
         end
     after
         restore_dispatch_pdict(OldState)
@@ -2099,6 +2257,96 @@ handle_call(Msg, _From, State) ->
     Error1 = beamtalk_error:with_details(Error0, #{raw_message => Msg}),
     Error = beamtalk_error:with_hint(Error1, <<"Expected {Selector, Args} tuple">>),
     {reply, {error, Error}, State}.
+
+-doc """
+Wire-encode a sync reply payload (`Result`, `nil`, or `{error, Reason}`) when
+the caller (`From`'s pid) is on another node (ADR 0126 §5.1's "Result path"
+table). Local replies are returned unchanged — the `node/1` comparison is
+the only added cost. An encode failure never crashes the callee: it replaces
+the reply with `{error, #beamtalk_error{kind = not_serialisable}}` instead;
+the method's state change (the caller's `NewState`) stands regardless, since
+this only substitutes the second element of the `{reply, _, NewState}`
+tuple the caller already built.
+""".
+-spec encode_reply_for(term(), atom(), term()) -> term().
+encode_reply_for({FromPid, _Tag}, Selector, ReplyPayload) when
+    is_pid(FromPid), node(FromPid) =/= node()
+->
+    case beamtalk_wire:encode(ReplyPayload) of
+        {ok, Encoded} -> Encoded;
+        {error, EncErr} -> {error, EncErr#beamtalk_error{selector = Selector}}
+    end;
+encode_reply_for(_From, _Selector, ReplyPayload) ->
+    ReplyPayload.
+
+-doc """
+Resolve a future with a value, wire-encoding it first when the future lives
+on another node (ADR 0126 §5.1). The encoded value is tagged
+`{'\$beamtalk_wire_reply', Version, Encoded}` so `beamtalk_future`'s state
+machine — which also serves plain, never-encoded local resolutions — can
+tell the two apart on receipt and decode only the tagged ones. An encode
+failure rejects the future instead of resolving it (callee-side encode
+failures never crash the callee, ADR 0126 §5.1).
+""".
+-spec maybe_resolve_future(pid(), term()) -> ok.
+maybe_resolve_future(FuturePid, Value) when is_pid(FuturePid), node(FuturePid) =/= node() ->
+    case beamtalk_wire:encode(Value) of
+        {ok, Encoded} ->
+            beamtalk_future:resolve(FuturePid, {'$beamtalk_wire_reply', ?BT_WIRE_VERSION, Encoded});
+        {error, EncErr} ->
+            beamtalk_future:reject(FuturePid, EncErr)
+    end,
+    ok;
+maybe_resolve_future(FuturePid, Value) ->
+    beamtalk_future:resolve(FuturePid, Value).
+
+-doc "Reject a future, wire-encoding the reason first when remote — see `maybe_resolve_future/2`.".
+-spec maybe_reject_future(pid(), term()) -> ok.
+maybe_reject_future(FuturePid, Reason) when is_pid(FuturePid), node(FuturePid) =/= node() ->
+    case beamtalk_wire:encode(Reason) of
+        {ok, Encoded} ->
+            beamtalk_future:reject(FuturePid, {'$beamtalk_wire_reply', ?BT_WIRE_VERSION, Encoded});
+        {error, EncErr} ->
+            beamtalk_future:reject(FuturePid, EncErr)
+    end,
+    ok;
+maybe_reject_future(FuturePid, Reason) ->
+    beamtalk_future:reject(FuturePid, Reason).
+
+-doc """
+Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
+`'\$beamtalk_wire'` envelope whose leading version this node does not
+recognise (ADR 0126 §5.1).
+""".
+-spec wire_version_unsupported_error(atom(), term()) -> #beamtalk_error{}.
+wire_version_unsupported_error(Selector, SentVersion) ->
+    beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(wire_version_unsupported, unknown, Selector),
+            iolist_to_binary(
+                io_lib:format(
+                    "wire envelope version ~p is not supported by this node (known version ~p)",
+                    [SentVersion, ?BT_WIRE_VERSION]
+                )
+            )
+        ),
+        #{sent => SentVersion, known => ?BT_WIRE_VERSION, node => node()}
+    ).
+
+-doc """
+Log-and-drop a wire-tagged cast rejected by version skew or an unsupported
+wire version (ADR 0126 §5.2, cast direction: "there is no one to tell").
+""".
+-spec log_wire_cast_rejected(atom(), #beamtalk_error{}) -> ok.
+log_wire_cast_rejected(Selector, Error) ->
+    ?LOG_WARNING("Wire-tagged cast rejected", #{
+        selector => Selector,
+        error => Error,
+        domain => [beamtalk, runtime, dist]
+    }),
+    maybe_execute_telemetry([beamtalk, dist, wire_rejected], #{count => 1}, #{
+        selector => Selector, error => Error
+    }).
 
 -doc """
 Handle out-of-band messages (info).
@@ -2505,7 +2753,7 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     %% (ADR 0110), extended to instance actor dispatch (BT-3582).
                     {error, Nlr, State};
                 Class:Reason:Stacktrace ->
-                    wrap_method_error(Selector, State, Class, Reason, Stacktrace)
+                    wrap_method_error(Selector, Args, State, Class, Reason, Stacktrace)
             end;
         {ok, Fun} when is_function(Fun, 2) ->
             %% Old-style method: Fun(Args, State) - for backward compatibility
@@ -2519,7 +2767,7 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     %% See the arity-4 clause above — same relay, old-style methods.
                     {error, Nlr, State};
                 Class:Reason:Stacktrace ->
-                    wrap_method_error(Selector, State, Class, Reason, Stacktrace)
+                    wrap_method_error(Selector, Args, State, Class, Reason, Stacktrace)
             end;
         {ok, _NotAFunction} ->
             %% Method value is not a function
@@ -2627,26 +2875,81 @@ make_dnu_error(Selector, ClassName, State) ->
     ),
     {error, Error, State}.
 
--doc "Wrap method dispatch exceptions as type_error with source exception details.".
--spec wrap_method_error(atom(), map(), term(), term(), list()) -> {error, term(), map()}.
-wrap_method_error(Selector, State, Class, Reason, Stacktrace) ->
-    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-    Message = format_method_error_message(ClassName, Selector, Class, Reason, Stacktrace),
-    ?LOG_ERROR("Error in method", #{
-        selector => Selector,
-        class => Class,
-        reason => Reason,
-        stacktrace => Stacktrace,
-        domain => [beamtalk, runtime]
-    }),
-    Error0 = beamtalk_error:new(method_error_kind(Class, Reason), ClassName, Selector),
-    Error1 = beamtalk_error:with_message(Error0, Message),
-    Error = beamtalk_error:with_details(Error1, #{
-        original_class => Class,
-        original_reason => Reason,
-        erlang_stacktrace => Stacktrace
-    }),
-    {error, Error, State}.
+-doc """
+Wrap method dispatch exceptions as type_error with source exception details.
+
+ADR 0126 §5.5 / BT-3579 Phase 0.5 finding (b) is checked first: a block
+invoked during dispatch whose defining module is stale or missing on this
+node raises `badfun`/`undef`, mapped to `remote_code_mismatch` instead of
+the generic classifier's `runtime_error` — see `maybe_remote_code_mismatch/3`
+for the asymmetric identification the spike found necessary.
+""".
+-spec wrap_method_error(atom(), list(), map(), term(), term(), list()) -> {error, term(), map()}.
+wrap_method_error(Selector, Args, State, Class, Reason, Stacktrace) ->
+    case maybe_remote_code_mismatch(Args, Class, Reason) of
+        {ok, Error} ->
+            ?LOG_ERROR("Remote code mismatch invoking block", #{
+                selector => Selector,
+                reason => Reason,
+                domain => [beamtalk, runtime]
+            }),
+            {error, Error, State};
+        error ->
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
+            Message = format_method_error_message(ClassName, Selector, Class, Reason, Stacktrace),
+            ?LOG_ERROR("Error in method", #{
+                selector => Selector,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                domain => [beamtalk, runtime]
+            }),
+            Error0 = beamtalk_error:new(method_error_kind(Class, Reason), ClassName, Selector),
+            Error1 = beamtalk_error:with_message(Error0, Message),
+            Error = beamtalk_error:with_details(Error1, #{
+                original_class => Class,
+                original_reason => Reason,
+                erlang_stacktrace => Stacktrace
+            }),
+            {error, Error, State}
+    end.
+
+-doc """
+ADR 0126 §5.5 / BT-3579 Phase 0.5 finding (b): the two reasons a stale block
+raises are not symmetric. `{badfun, Fun}` carries the fun value itself, so
+`erlang:fun_info/2` on the *reason* identifies the module directly. The bare
+`undef` atom carries nothing to identify with — the fallback is the first
+function-valued term in the dispatched method's own `Args`, the block
+argument the dispatch layer was about to invoke, which it still holds.
+Returns `error` (not `remote_code_mismatch`) for every other reason,
+including a bare `undef`/`badfun` from a method that never touched a block
+argument at all — the identification only makes sense when one is present.
+""".
+-spec maybe_remote_code_mismatch(list(), atom(), term()) -> {ok, #beamtalk_error{}} | error.
+maybe_remote_code_mismatch(_Args, error, {badfun, Fun}) when is_function(Fun) ->
+    {ok, remote_code_mismatch_error(Fun)};
+maybe_remote_code_mismatch(Args, error, undef) ->
+    case lists:search(fun(A) -> is_function(A) end, Args) of
+        {value, Fun} -> {ok, remote_code_mismatch_error(Fun)};
+        false -> error
+    end;
+maybe_remote_code_mismatch(_Args, _Class, _Reason) ->
+    error.
+
+-spec remote_code_mismatch_error(fun()) -> #beamtalk_error{}.
+remote_code_mismatch_error(Fun) ->
+    Module =
+        case erlang:fun_info(Fun, module) of
+            {module, M} -> M;
+            _ -> unknown
+        end,
+    beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(remote_code_mismatch, 'Block'),
+            <<"the block's defining class is not loaded at the same version on this node">>
+        ),
+        #{module => Module, node => node()}
+    ).
 
 %% Classify the kind for a raw method-dispatch failure on the runtime-only
 %% (`__methods__`) path, mirroring the compiled path: error-class
@@ -3613,6 +3916,100 @@ remote_spawn_target(ClassName, NameOrUndefined) ->
     end.
 
 -doc """
+Origin-side entry point for `spawnWith:on:`/`spawnWith:as:on:` (ADR 0126
+§5.1, Phase 3b, BT-3601) — `remote_spawn/4`'s sibling for the Value-carrying
+spawn selectors deferred at Phase 2 (BT-3599) until the wire encoder landed.
+
+`InitArgs` is wire-encoded before the `erpc` call — a remote spawn never
+ships raw, unversioned args, exactly like every other cross-node send
+(§5.1). An encode failure (e.g. `initArgs` holds a node-scoped `Ets`) is a
+request-direction failure: it never reaches the network, and is returned
+here in the caller, matching `wire_sync_call/5`'s send-side behaviour for
+ordinary sends. Otherwise shares `remote_spawn/4`'s connect-policy check and
+`erpc`/connection failure mapping verbatim.
+""".
+-spec remote_spawn_with(node(), atom(), atom() | undefined, term(), atom()) ->
+    {ok, pid()} | {error, #beamtalk_error{}}.
+remote_spawn_with(Node, ClassName, NameOrUndefined, InitArgs, Selector) ->
+    case beamtalk_node:connect_policy(Node, beamtalk_node:tls_distribution()) of
+        {error, #beamtalk_error{} = Refused} ->
+            {error, Refused#beamtalk_error{class = ClassName, selector = Selector}};
+        ok ->
+            case beamtalk_wire:encode(InitArgs) of
+                {ok, WireInitArgs} ->
+                    do_remote_spawn_with_erpc(
+                        Node, ClassName, NameOrUndefined, WireInitArgs, Selector
+                    );
+                {error, #beamtalk_error{} = EncErr} ->
+                    {error, EncErr#beamtalk_error{class = ClassName, selector = Selector}}
+            end
+    end.
+
+-spec do_remote_spawn_with_erpc(node(), atom(), atom() | undefined, term(), atom()) ->
+    {ok, pid()} | {error, #beamtalk_error{}}.
+do_remote_spawn_with_erpc(Node, ClassName, NameOrUndefined, WireInitArgs, Selector) ->
+    try
+        erpc:call(
+            Node,
+            ?MODULE,
+            remote_spawn_with_target,
+            [ClassName, NameOrUndefined, WireInitArgs],
+            ?BT_REMOTE_CALL_TIMEOUT
+        )
+    of
+        {ok, Pid} ->
+            {ok, Pid};
+        {error, #beamtalk_error{} = Err} ->
+            {error, Err#beamtalk_error{class = ClassName, selector = Selector}};
+        {error, Reason} ->
+            {error, generic_spawn_error(ClassName, Selector, Reason)}
+    catch
+        error:{erpc, noconnection} ->
+            {error, node_down_error_record(Node, Selector)};
+        error:{erpc, timeout} ->
+            {error, remote_timeout_error_record(ClassName, Selector, false)};
+        error:{erpc, ErpcReason} ->
+            {error, generic_spawn_error(ClassName, Selector, {erpc, ErpcReason})};
+        error:{exception, Reason, _Stack} ->
+            {error, generic_spawn_error(ClassName, Selector, Reason)};
+        exit:{exception, Reason} ->
+            {error, generic_spawn_error(ClassName, Selector, Reason)}
+    end.
+
+-doc """
+Runs ON the target node, in the `erpc` worker process `remote_spawn_with/5`'s
+call spawns there (ADR 0126 §5.1) — decodes `WireInitArgs` (this node's own
+class registry resolves any Value envelope or class ref it carries), then
+otherwise mirrors `remote_spawn_target/2` exactly, including the named-spawn
+unlink.
+""".
+-spec remote_spawn_with_target(atom(), atom() | undefined, term()) ->
+    {ok, pid()} | {error, term()}.
+remote_spawn_with_target(ClassName, NameOrUndefined, WireInitArgs) ->
+    case beamtalk_wire:decode(WireInitArgs) of
+        {ok, InitArgs} ->
+            case class_mod_for(ClassName) of
+                not_found ->
+                    {error, beamtalk_error:new(class_not_found, ClassName)};
+                {ok, Module} ->
+                    case NameOrUndefined of
+                        undefined ->
+                            safe_spawn(Module, InitArgs);
+                        Name when is_atom(Name) ->
+                            case 'spawnAs'(Name, Module, InitArgs) of
+                                {ok, Pid} ->
+                                    unlink(Pid),
+                                    {ok, Pid};
+                                {error, _} = Err ->
+                                    Err
+                            end
+                    end
+            end;
+        {error, #beamtalk_error{}} = Err ->
+            Err
+    end.
+
+-doc """
 Origin-side entry point for `named:on:` (ADR 0126 §3).
 
 Runs the actual lookup (`named_lookup/3`) on the target node via `erpc` —
@@ -3824,6 +4221,81 @@ do_remote_spawn(Self, NameOrUndefined, NodeArg, Selector) ->
             case node_arg_to_atom(NodeArg) of
                 {ok, Node} ->
                     case remote_spawn(Node, ClassName, NameOrUndefined, Selector) of
+                        {ok, Pid} ->
+                            {ok, #beamtalk_object{class = ClassName, class_mod = Module, pid = Pid}};
+                        {error, #beamtalk_error{} = Err} ->
+                            {error, Err#beamtalk_error{class = ClassName, selector = Selector}}
+                    end;
+                {error, #beamtalk_error{} = Err} ->
+                    {error, Err#beamtalk_error{class = ClassName, selector = Selector}}
+            end;
+        {error, #beamtalk_error{} = Err} ->
+            {error, beamtalk_error:with_selector(Err, Selector)}
+    end.
+
+-doc """
+FFI shim for `class spawnWith: initArgs :: Object on: node :: Node ->
+Result(Self, Error)` (ADR 0126 §5.1, Phase 3b, BT-3601).
+
+Same contract as `spawnOn:`, plus the initialisation arguments passed to the
+actor's `init/1` callback on `node` — `initArgs` is wire-encoded before it
+crosses the node boundary (see `remote_spawn_with/5`'s doc). **Not
+idempotent**, **no links, no local tracking** — see `spawnOn:`.
+
+Error cases: as `spawnOn:`, plus `not_serialisable` (`initArgs` holds a
+node-scoped handle).
+
+## Examples
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+c := (Counter spawnWith: #{#count => 10} on: worker) unwrap
+```
+""".
+-spec doSpawnWithOn(#beamtalk_object{}, term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnWithOn(Self, InitArgs, NodeArg) ->
+    do_remote_spawn_with(Self, InitArgs, undefined, NodeArg, 'spawnWith:on:').
+
+-doc """
+FFI shim for `class spawnWith: initArgs :: Object as: name :: Symbol on:
+node :: Node -> Result(Self, Error)` (ADR 0126 §5.1, Phase 3b, BT-3601).
+
+Same contract as `spawnAs:on:`, plus the initialisation arguments — see
+`spawnWith:on:` for the wire-encoding note.
+
+## Examples
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+(Counter spawnWith: #{#count => 10} as: #hits on: worker) unwrap
+```
+""".
+-spec doSpawnWithAsOn(#beamtalk_object{}, term(), term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnWithAsOn(Self, InitArgs, Name, NodeArg) when is_atom(Name) ->
+    do_remote_spawn_with(Self, InitArgs, Name, NodeArg, 'spawnWith:as:on:');
+doSpawnWithAsOn(Self, _InitArgs, Name, _NodeArg) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ClassName, _Module} ->
+            {error,
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(type_error, ClassName, 'spawnWith:as:on:'),
+                    iolist_to_binary(
+                        io_lib:format("spawnWith:as:on: expects a Symbol name, got ~tp", [Name])
+                    )
+                )};
+        {error, #beamtalk_error{} = Err} ->
+            {error, beamtalk_error:with_selector(Err, 'spawnWith:as:on:')}
+    end.
+
+%% Shared implementation for doSpawnWithOn/3 and doSpawnWithAsOn/4.
+-spec do_remote_spawn_with(#beamtalk_object{}, term(), atom() | undefined, term(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+do_remote_spawn_with(Self, InitArgs, NameOrUndefined, NodeArg, Selector) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ClassName, Module} ->
+            case node_arg_to_atom(NodeArg) of
+                {ok, Node} ->
+                    case remote_spawn_with(Node, ClassName, NameOrUndefined, InitArgs, Selector) of
                         {ok, Pid} ->
                             {ok, #beamtalk_object{class = ClassName, class_mod = Module, pid = Pid}};
                         {error, #beamtalk_error{} = Err} ->

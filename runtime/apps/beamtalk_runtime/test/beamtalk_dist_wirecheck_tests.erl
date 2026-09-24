@@ -51,6 +51,13 @@ Two simplifications from the full ADR machinery, deliberate for a spike:
     resolve_class_ref/1
 ]).
 
+%% Reused by beamtalk_dist_wire_tests (BT-3601, ADR 0126 Phase 3b) for its
+%% own `remote_code_mismatch` two-node tests — per CLAUDE.md's
+%% no-duplicate-implementation rule, this is the one place that already
+%% knows how to synthesize two differently-compiled versions of the same
+%% module name to stand in for cross-node deployment skew.
+-export([compile_block_module_variant/2]).
+
 %%====================================================================
 %% Shared fixture
 %%====================================================================
