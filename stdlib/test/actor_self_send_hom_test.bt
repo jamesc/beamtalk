@@ -80,3 +80,14 @@ TestCase subclass: ActorSelfSendHomTest
   testValueClassTwinSize =>
     sackful := SelfSendHomSackful new
     self assert: sackful size equals: 4
+
+  // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a
+  // `ValueType` loop already needing local-mutation threading, whose
+  // loop body ALSO forwards an opaque callable to `do:` — see
+  // `sumWithSideEffect:`'s doc comment in `self_send_hom_sackful.bt` for
+  // why this specifically exercises the `!ValueType` gate on the new
+  // `control_flow_has_mutations` check.
+  testValueTypeLoopWithNestedOpaqueCallableDoesNotCrash =>
+    sackful := SelfSendHomSackful new
+    result := sackful sumWithSideEffect: [:x | x]
+    self assert: result equals: 6

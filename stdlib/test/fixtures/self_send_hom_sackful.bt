@@ -22,3 +22,22 @@ Value subclass: SelfSendHomSackful
     acc
 
   size => self inject: 0 into: [:n :_each | n + 1]
+
+  // ADR 0128 / BT-3583 regression (review-flagged on PR #4030): a
+  // `ValueType` loop that already needs local-mutation threading
+  // (`total := total + i`), whose last loop-body statement ALSO forwards
+  // an opaque (non-literal) callable to `do:`. `control_flow_has_mutations`
+  // (gen_server/methods.rs) is reachable for `ValueType` loop bodies too
+  // (via `generate_letrec_body_ir`/`intrinsics.rs`'s
+  // `generate_block_value_inline_with_mutations`) — without gating the new
+  // ADR 0128 check on `!ValueType`, this statement would be classified as
+  // needing a `{Result, NewState}`-tuple unwrap that `generate_simple_list_op`
+  // never produces for `ValueType` (no `State` map to thread), crashing with
+  // `badarg` at runtime. Must compile and run correctly.
+  sumWithSideEffect: block =>
+    total := 0
+    1 to: 3 do: [:i |
+      total := total + i
+      self do: block
+    ]
+    total

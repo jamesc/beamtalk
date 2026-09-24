@@ -3660,7 +3660,21 @@ impl CoreErlangGenerator {
         // other ControlFlow selectors (`ifTrue:`/`whileTrue:`/`on:do:`/…),
         // which have their own literal-block-only analysis above and are
         // out of this ADR's scope.
-        if matches!(sel_str.as_str(), "do:" | "collect:" | "select:") {
+        //
+        // Gated on `!ValueType`: `generate_simple_list_op`'s own non-literal
+        // branch only builds the `{Result, NewState}`-tuple fold for
+        // Actor/Repl context — `ValueType` has no `State` map to thread, so
+        // it still compiles to a plain (non-tuple) value there. This
+        // classifier is reachable for `ValueType` bodies too (via
+        // `generate_letrec_body_ir`/loop bodies, `intrinsics.rs`'s
+        // `generate_block_value_inline_with_mutations`), so without this
+        // gate a `ValueType` loop forwarding an opaque callable to `do:`/
+        // `collect:`/`select:` would get classified as needing a tuple
+        // unwrap the codegen never produces — `erlang:element(2, ...)` on
+        // the resulting plain value crashes with `badarg` at runtime.
+        if matches!(sel_str.as_str(), "do:" | "collect:" | "select:")
+            && !matches!(self.context, CodeGenContext::ValueType)
+        {
             if let Some(arg) = arguments.first() {
                 if Self::extract_block_literal(arg).is_none() {
                     return true;
