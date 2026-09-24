@@ -603,6 +603,7 @@ CI release lanes. **Not** affected: the wire/RPC/eval layer, the Rust toolchain.
 - BT-2987 — Packaging: Linux + macOS build lane, signing/notarization
 - BT-2988 — Packaging: Windows support
 - BT-2989 — E2E validation + user docs
+- BT-3616 — Follow-up (from [ADR 0126](0126-distribution-location-transparent-actors.md) §9 item 5): `ensure_distributed/0` now starts the front as a **hidden** node (`:net_kernel.start/2` with `hidden: true`), so it no longer appears in the workspace's visible `nodes()`, fires `NodeUp`/`NodeDown`, or joins shape-skew checks / the `global` mesh
 
 **Status:** Planned
 

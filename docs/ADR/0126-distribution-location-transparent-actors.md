@@ -772,7 +772,8 @@ code execution, and the distribution boundary is single-user.
 5. **Tooling nodes are hidden.** The ADR 0097 attach front should start as a
    hidden node (`-hidden`) so it does not appear in `Node connected`, does not
    raise `NodeUp`, and does not join the `global` mesh. This is a follow-up
-   change to ADR 0097's front, filed from this ADR.
+   change to ADR 0097's front, filed from this ADR (implemented in BT-3616:
+   the front's lazy `:net_kernel.start/2` passes `hidden: true`).
 
 ### 10. Tooling and observability
 
