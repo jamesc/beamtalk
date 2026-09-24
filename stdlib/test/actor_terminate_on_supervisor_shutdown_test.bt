@@ -1,0 +1,91 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596: Actor>>terminate: must run on supervisor-initiated shutdown —
+// a rest_for_one / one_for_all cascade victim (a sibling after the one that
+// actually crashed) and a direct `aSupervisor terminate: aClass` — not just
+// on `stop`. Root cause: no actor process traps exits, so a supervisor's
+// `exit(Pid, shutdown)` kills it before `terminate/2` ever runs. The fix
+// (see crates/beamtalk-codegen/.../gen_server/callbacks.rs and
+// runtime/.../beamtalk_actor.erl) traps exits only in actors whose class (or
+// an ancestor) overrides `terminate:`.
+//
+// Fixtures: stdlib/test/fixtures/bt3596*.bt (one class per file, per the
+// compiler's file-name-matches-class-name rule)
+
+TestCase subclass: ActorTerminateOnSupervisorShutdownTest
+
+  // === Step 1 (confirm): rest_for_one cascade ===
+  //
+  // Bt3596CascadeTrigger is listed first, Bt3596CascadeVictim second. Killing
+  // the trigger makes a rest_for_one supervisor restart the trigger AND
+  // every child after it — including the victim, which never crashed
+  // itself. The victim's terminate: must run before it restarts.
+  testRestForOneCascadeVictimTerminateRuns =>
+    table := Ets new: #bt3596RestForOne type: #set
+    sup := (Bt3596RestForOneSup supervise) unwrap
+    trigger :: Bt3596CascadeTrigger := (sup which: Bt3596CascadeTrigger) unwrap
+    victim :: Bt3596CascadeVictim := (sup which: Bt3596CascadeVictim) unwrap
+    self assert: trigger isAlive
+    self assert: victim isAlive
+    trigger kill
+    // Poll until the cascade has settled: the trigger's death propagates
+    // as a rest_for_one restart of both children.
+    50 timesRepeat: [(table at: #called) isNil ifTrue: [Timer sleep: 20]]
+    self assert: (table at: #called) equals: true
+    // Restart completed — a fresh victim instance is running again.
+    restarted :: Bt3596CascadeVictim := (sup which: Bt3596CascadeVictim) unwrap
+    self assert: restarted isAlive
+    sup stop
+    table delete
+
+  // === Step 1 (confirm): one_for_all cascade ===
+  //
+  // Same shape, but a one_for_all strategy restarts every child on any
+  // sibling's crash regardless of list order.
+  testOneForAllCascadeVictimTerminateRuns =>
+    table := Ets new: #bt3596OneForAll type: #set
+    sup := (Bt3596OneForAllSup supervise) unwrap
+    trigger :: Bt3596CascadeTrigger := (sup which: Bt3596CascadeTrigger) unwrap
+    victim :: Bt3596CascadeVictim := (sup which: Bt3596CascadeVictim) unwrap
+    self assert: trigger isAlive
+    self assert: victim isAlive
+    trigger kill
+    50 timesRepeat: [(table at: #called) isNil ifTrue: [Timer sleep: 20]]
+    self assert: (table at: #called) equals: true
+    restarted :: Bt3596CascadeVictim := (sup which: Bt3596CascadeVictim) unwrap
+    self assert: restarted isAlive
+    sup stop
+    table delete
+
+  // === Step 1 (confirm): direct `aSupervisor terminate: aClass` ===
+  //
+  // The original bug report claimed this path already called terminate: —
+  // this test settles it empirically (see the PR for the result).
+  testDirectTerminateChildCallsTerminateHook =>
+    table := Ets new: #bt3596Direct type: #set
+    sup := (Bt3596DirectSup supervise) unwrap
+    before :: Bt3596DirectVictim := (sup which: Bt3596DirectVictim) unwrap
+    self assert: before isAlive
+    result := sup terminate: Bt3596DirectVictim
+    self assert: result isOk equals: true
+    50 timesRepeat: [(table at: #called) isNil ifTrue: [Timer sleep: 20]]
+    self assert: (table at: #called) equals: true
+    sup stop
+    table delete
+
+  // === Non-parent EXIT still propagates once trapping (acceptance
+  // criterion) ===
+  //
+  // Bt3596TrappingParent overrides terminate: (so it now traps exits) and
+  // manually spawns + links a plain child. When that child crashes, the
+  // parent must still die with the same reason — exactly as an untrapped
+  // actor already does — not silently swallow the crash via the default
+  // ignore-all handle_info.
+  testTrappingActorStillDiesWhenLinkedChildCrashes =>
+    parent := Bt3596TrappingParent spawn
+    parent spawnLinkedChild
+    self assert: parent isAlive
+    parent crashChild
+    50 timesRepeat: [parent isAlive ifTrue: [Timer sleep: 20]]
+    self deny: parent isAlive

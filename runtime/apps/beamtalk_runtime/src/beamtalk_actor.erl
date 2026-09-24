@@ -224,6 +224,10 @@ handle_getValue([], State) ->
     terminate/2
 ]).
 
+%% BT-3596: non-parent 'EXIT' interception for trapping actors — called
+%% from generated handle_info/2 (both Server-subclass and plain-Actor paths)
+-export([handle_linked_exit/2]).
+
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
 
@@ -1953,13 +1957,58 @@ handle_call(Msg, _From, State) ->
 
 -doc """
 Handle out-of-band messages (info).
-By default, unknown messages are ignored.
+By default, unknown messages are ignored, after first checking whether
+`Msg` is a non-parent `'EXIT'` this trapping actor needs to react to
+(BT-3596, see `handle_linked_exit/2`).
 Generated actors can override this to handle custom messages.
 """.
--spec handle_info(term(), map()) -> {noreply, map()}.
-handle_info(_Msg, State) ->
-    %% Ignore unknown info messages by default
-    {noreply, State}.
+-spec handle_info(term(), map()) -> {noreply, map()} | {stop, term(), map()}.
+handle_info(Msg, State) ->
+    case handle_linked_exit(Msg, State) of
+        pass ->
+            %% Ignore unknown info messages by default
+            {noreply, State};
+        Result ->
+            Result
+    end.
+
+-doc """
+BT-3596: Non-parent `'EXIT'` handling for an actor that traps exits.
+
+Actors only trap exits (`erlang:process_flag(trap_exit, true)`, set in
+generated `init/1`) when their class, or an ancestor, overrides
+`terminate:` — see `beamtalk_codegen`'s
+`class_or_ancestor_overrides_terminate`. Without trapping, a supervisor's
+`exit(Pid, shutdown)` (used by both `supervisor:terminate_child/2` and a
+`rest_for_one`/`one_for_all` cascade) kills the actor immediately and
+`terminate/2` never runs.
+
+Once an actor traps exits, `'EXIT'` from its OTP *parent* (the process
+that `proc_lib:start_link`-started it — i.e. the ordinary
+supervisor/spawner shutdown path) is intercepted by the `gen_server`
+loop itself before `handle_info/2` is ever called: it already invokes
+`terminate/2` and exits. So any `{'EXIT', _From, _Reason}` that reaches
+`handle_info/2` is from some *other* link — typically a child the actor
+itself spawned and linked — and must keep the crash-propagation
+semantics an untrapped actor already has: a non-`normal` reason stops
+this actor with that same reason (so its own supervisor sees it die and
+applies its restart strategy, exactly as if this actor were not
+trapping), while a `normal` exit is ignored, mirroring how a `normal`
+exit signal is never even delivered to a non-trapping linked process.
+
+Both the generated Server-subclass `handle_info/2` (dispatches
+`handleInfo:`) and the default ignore-all `handle_info/2` above call this
+first and fall through to their own behavior on `pass` — this is the one
+place BT-3596's EXIT semantics are implemented, so neither codegen nor
+this module duplicates the reason-branching logic.
+""".
+-spec handle_linked_exit(term(), map()) -> {stop, term(), map()} | {noreply, map()} | pass.
+handle_linked_exit({'EXIT', _From, normal}, State) ->
+    {noreply, State};
+handle_linked_exit({'EXIT', _From, Reason}, State) ->
+    {stop, Reason, State};
+handle_linked_exit(_Msg, _State) ->
+    pass.
 
 -doc """
 Handle hot code reload.

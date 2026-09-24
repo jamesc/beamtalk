@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: sole child of Bt3596DirectSup, terminated directly via
+// `aSupervisor terminate: aClass` (not a crash cascade).
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Actor subclass: Bt3596DirectVictim
+  state: tableName = nil
+
+  terminate: reason =>
+    self.tableName isNil
+      ifFalse: [
+        table := Ets named: self.tableName
+        table at: #called put: true; at: #reason put: reason
+      ]

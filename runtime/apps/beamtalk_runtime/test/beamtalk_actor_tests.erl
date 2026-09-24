@@ -4046,3 +4046,69 @@ bt3582_nlr_relayed_across_actor_send_arity2_test() ->
     after
         gen_server:stop(ActorPid)
     end.
+
+%%====================================================================
+%% BT-3596: Actor>>terminate: not invoked on supervisor-initiated shutdown.
+%%
+%% `handle_linked_exit/2` is the shared non-parent-'EXIT' handling used by
+%% both the generated Server-subclass `handle_info/2` (dispatches
+%% `handleInfo:`) and the default ignore-all `handle_info/2` below — see
+%% both functions' doc comments in beamtalk_actor.erl. It only ever sees a
+%% real `'EXIT'` message in an actor that traps exits (BT-3596's `init/1`
+%% `trap_exit` gating on an overridden `terminate:`), since a non-trapping
+%% actor never receives one at all — the crash kills it directly.
+%%====================================================================
+
+bt3596_handle_linked_exit_normal_reason_is_ignored_test() ->
+    State = #{value => 0},
+    ?assertEqual(
+        {noreply, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), normal}, State)
+    ).
+
+bt3596_handle_linked_exit_abnormal_reason_stops_test() ->
+    State = #{value => 0},
+    ?assertEqual(
+        {stop, boom, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), boom}, State)
+    ).
+
+bt3596_handle_linked_exit_killed_reason_stops_with_killed_test() ->
+    %% `exit(Pid, kill)` propagates to a trapping linked process as
+    %% {'EXIT', Pid, killed} (not `kill`) — this must stop the actor with
+    %% that same `killed` reason, exactly like an untrapped link would die.
+    State = #{value => 0},
+    ?assertEqual(
+        {stop, killed, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), killed}, State)
+    ).
+
+bt3596_handle_linked_exit_non_exit_message_passes_through_test() ->
+    State = #{value => 0},
+    ?assertEqual(pass, beamtalk_actor:handle_linked_exit({some, other, msg}, State)),
+    ?assertEqual(pass, beamtalk_actor:handle_linked_exit(tick, State)).
+
+bt3596_default_handle_info_stops_on_non_parent_abnormal_exit_test() ->
+    %% The default ignore-all handle_info/2 (used by every plain Actor
+    %% subclass) must not silently swallow a linked child's crash once this
+    %% actor traps exits.
+    State = #{value => 0},
+    ChildPid = spawn(fun() -> ok end),
+    ?assertEqual(
+        {stop, boom, State},
+        beamtalk_actor:handle_info({'EXIT', ChildPid, boom}, State)
+    ).
+
+bt3596_default_handle_info_ignores_normal_exit_test() ->
+    State = #{value => 0},
+    ChildPid = spawn(fun() -> ok end),
+    ?assertEqual(
+        {noreply, State},
+        beamtalk_actor:handle_info({'EXIT', ChildPid, normal}, State)
+    ).
+
+bt3596_default_handle_info_still_ignores_unknown_messages_test() ->
+    %% Unrelated to trap_exit: the pre-existing ignore-all default for any
+    %% message that isn't a linked 'EXIT' must be untouched.
+    State = #{value => 0},
+    ?assertEqual({noreply, State}, beamtalk_actor:handle_info(some_unknown_message, State)).

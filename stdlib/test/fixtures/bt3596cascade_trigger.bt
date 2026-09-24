@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: killed directly by the test to force a rest_for_one /
+// one_for_all supervisor cascade onto Bt3596CascadeVictim. Never overrides
+// terminate: — plain link semantics.
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Actor subclass: Bt3596CascadeTrigger

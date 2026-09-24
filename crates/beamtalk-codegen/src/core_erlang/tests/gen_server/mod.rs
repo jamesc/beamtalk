@@ -28,6 +28,9 @@
 //! - [`abstract_actor_stubs`] — abstract actor stub codegen
 //! - [`state_threading_self_dispatch`] — state threading for self-dispatch
 //!   sequencing
+//! - [`actor_trap_exit_on_terminate`] — BT-3596: `init/1` `trap_exit` gating
+//!   on an overridden `terminate:` (own + inherited), and `handle_info/2`'s
+//!   linked-`'EXIT'` interception
 
 use super::*;
 
@@ -83,6 +86,7 @@ fn extract_module_exports(code: &str) -> String {
 
 mod abstract_actor_stubs;
 mod actor_init_and_field_validation;
+mod actor_trap_exit_on_terminate;
 mod class_kind_and_value_accessors;
 mod class_registration;
 mod class_var_shadow_writes;

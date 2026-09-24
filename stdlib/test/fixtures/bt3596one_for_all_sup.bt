@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: same shape as Bt3596RestForOneSup, but one_for_all —
+// restarts every child on any sibling's crash regardless of list order.
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Supervisor subclass: Bt3596OneForAllSup
+
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForAll
+
+  class children -> List =>
+    triggerSpec := Bt3596CascadeTrigger supervisionSpec withRestart: #permanent
+    victimSpec := Bt3596CascadeVictim supervisionSpec withRestart: #permanent
+    victimSpec := victimSpec withArgs: #{#tableName => #bt3596OneForAll}
+    #(triggerSpec, victimSpec)
