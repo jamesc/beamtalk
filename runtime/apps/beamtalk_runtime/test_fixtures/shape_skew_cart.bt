@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3602 (ADR 0126 §5.3, Phase 4) fixture: registered as-is (shapeVersion
+// 1, implicit) on both nodes of `beamtalk_dist_shape_skew_tests`' two-node
+// pair. The connect-time-skew scenario then, on the peer only, swaps this
+// class's registered module for a `beamtalk_shape_migration_tests:
+// build_delegate_proxy/3` stub whose `'__beamtalk_meta'/0` reports
+// `shape_version => 2` — a real metadata change (`class_shape_entry/1`
+// genuinely reports the new version afterward), not a second compiled
+// `.bt` file: the compiler ties a file's name to its declared class name
+// 1:1, so `ShapeSkewCart` cannot be declared twice under two file names.
+
+Actor subclass: ShapeSkewCart
+  state: qty :: Integer = 0

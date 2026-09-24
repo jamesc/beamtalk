@@ -444,6 +444,19 @@ impl TypeChecker {
             // Identifiers look up the environment
             Expression::Identifier(ident) => {
                 let name = ident.name.as_str();
+                // ADR 0126 §6: record known-remote provenance at this USE
+                // site, mirroring `type_map`'s span-keying. Only ordinary
+                // local bindings can be known-remote — `true`/`false`/
+                // `nil`/`self` never are, so this is scoped to the `_` arm
+                // below by construction (the flow fact lives under
+                // `EnvKey::local`, which those never populate for this
+                // purpose). Persisted so a later, separate walk over the
+                // already-checked module (no live `TypeEnv`) can still
+                // answer "was this particular identifier use known-remote"
+                // — see `TypeChecker::known_remote_spans`'s doc.
+                if let Some(remote) = env.known_remote(&EnvKey::local(name)) {
+                    self.known_remote_spans.insert(ident.span, remote);
+                }
                 match name {
                     "true" | "false" => InferredType::known(WellKnownClass::Boolean.as_str()),
                     "nil" => InferredType::known(WellKnownClass::UndefinedObject.as_str()),

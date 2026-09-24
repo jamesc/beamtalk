@@ -15,10 +15,11 @@
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::receiver_knowledge;
+use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
-    DynamicReason, InferredType, TypeChecker, TypeEnv, TypeStringContext, narrowing,
+    DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, TypeStringContext, narrowing,
 };
 use crate::source_analysis::{Diagnostic, Severity, Span, is_equality_operator};
 use ecow::EcoString;
@@ -608,7 +609,15 @@ impl TypeChecker {
             // `check_argument_types` so the argument still gets *some*
             // coverage instead of none.
             if !matches!(selector, MessageSelector::Binary(_)) || !binary_operand_check_ran {
-                self.check_argument_types(
+                // ADR 0126 §6: known-remote provenance of the receiver —
+                // the only `check_argument_types` call site with the raw
+                // receiver expression on hand (every other call site sends
+                // `self`, a class reference, or a metatype, none of which
+                // is ever known-remote).
+                let receiver_known_remote = known_remote::classify(receiver, &|id| {
+                    env.known_remote(&EnvKey::local(id.name.clone()))
+                });
+                self.check_argument_types_with_known_remote(
                     &resolve_class,
                     &selector_name,
                     &arg_types,
@@ -618,6 +627,7 @@ impl TypeChecker {
                     Some(arguments),
                     Some(env),
                     type_args,
+                    receiver_known_remote.as_ref(),
                 );
             }
 

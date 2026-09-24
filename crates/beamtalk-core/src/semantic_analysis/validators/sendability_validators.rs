@@ -26,6 +26,7 @@ use crate::ast::{Block, ClassKind, Expression, Module};
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::type_checker::TypeMap;
+use crate::semantic_analysis::type_checker::known_remote::{self, KnownRemote};
 use crate::semantic_analysis::type_checker::sendability::{self, HandleScope, Tier};
 use crate::semantic_analysis::{BlockInfo, ClassHierarchy};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -44,12 +45,23 @@ use crate::state_threading_selectors::is_state_threading_keyword_selector;
 /// `alias_registry` (ADR 0108 follow-up) lets a captured
 /// alias-typed field's tier compose through the alias's expansion instead of
 /// falling back to `Tier::Unknown` for the opaque alias name.
+///
+/// ADR 0126 §6: also emits a **Hint** — independent of what the block
+/// captures — for every block argument whose SEND crosses a process
+/// boundary to a known-remote receiver (`known_remote_spans`, populated by
+/// the type checker at every identifier use site — see
+/// `TypeChecker::known_remote_spans`'s doc). A regular sync/cast send to an
+/// actor obtained from `spawnOn:`/`spawnWith:on:`/`spawnAs:on:`/
+/// `named:on:`/`scope: #global` already satisfies
+/// `send_crosses_process_boundary` (it IS a message to an actor instance),
+/// so no separate boundary re-derivation is needed here.
 pub(crate) fn check_block_capture_sendability(
     module: &Module,
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
     block_info: &HashMap<Span, BlockInfo>,
     alias_registry: Option<&AliasRegistry>,
+    known_remote_spans: &HashMap<Span, KnownRemote>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut visit = |expr: &Expression| {
@@ -67,6 +79,10 @@ pub(crate) fn check_block_capture_sendability(
         {
             return;
         }
+        // ADR 0126 §6: classified once per send — every block argument on
+        // this same send shares the same receiver known-remote fact.
+        let receiver_known_remote =
+            known_remote::classify(receiver, &|id| known_remote_spans.get(&id.span).cloned());
         for arg in arguments {
             if let Expression::Block(block) = arg {
                 check_block_captures(
@@ -77,6 +93,9 @@ pub(crate) fn check_block_capture_sendability(
                     alias_registry,
                     diagnostics,
                 );
+                if let Some(remote) = &receiver_known_remote {
+                    diagnostics.push(known_remote_block_hint(block.span, remote));
+                }
             }
         }
     };
@@ -185,6 +204,34 @@ fn check_block_captures(
             .with_category(DiagnosticCategory::Sendability),
         );
     }
+}
+
+/// ADR 0126 §6: the Hint for a block argument sent to a known-remote
+/// receiver — deliberately **Hint**, not Warning: a block sent to a remote
+/// actor fails only under version skew (`remote_code_mismatch`), and remote
+/// callbacks are a normal, legitimate pattern (unlike the `#process`/`#node`
+/// handle warnings above, which predict a certain runtime rejection).
+/// Names the target node when the spawn/lookup call's `on:` argument was a
+/// plain identifier (`node_hint`); falls back to generic wording for a
+/// `scope: #global` binding (no single node) or a non-identifier node
+/// expression.
+fn known_remote_block_hint(span: Span, remote: &KnownRemote) -> Diagnostic {
+    let location = match &remote.node_hint {
+        Some(node) => format!("on `{node}`"),
+        None => "there".to_string(),
+    };
+    Diagnostic::hint(
+        format!(
+            "block sent to a remote actor runs only if its class is loaded at the same \
+             version {location}"
+        ),
+        span,
+    )
+    .with_hint(
+        "A version mismatch raises `remote_code_mismatch` where the block runs. Remote \
+         callbacks are a normal pattern — no action needed unless nodes run different releases",
+    )
+    .with_category(DiagnosticCategory::Sendability)
 }
 
 /// ADR 0103 (Phase 2): nudge FFI-wrapping `Object` classes to declare a

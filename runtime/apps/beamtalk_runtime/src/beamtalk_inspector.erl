@@ -258,6 +258,15 @@ classify(#beamtalk_object{pid = {registered, Name, Node}}, Parent, Path, Prov) w
     end;
 classify(#beamtalk_object{pid = {registered, _Name, _Node}}, Parent, Path, Prov) ->
     value_cursor(unavailable, Parent, Path, Prov);
+%% ADR 0126 §4: a cluster-unique `scope: #global` proxy — resolved via
+%% `global:whereis_name/1` (cluster-wide, so no "this node vs. another"
+%% split like the node-qualified case above; a live pid on another node
+%% still degrades to `process_cursor/3`'s own remote-pid guard below).
+classify(#beamtalk_object{pid = {global, Name}}, Parent, Path, Prov) ->
+    case global:whereis_name(Name) of
+        Pid when is_pid(Pid) -> process_cursor(Pid, Parent, Path);
+        undefined -> value_cursor(unavailable, Parent, Path, Prov)
+    end;
 classify(Subject, Parent, Path, _Prov) when is_pid(Subject) ->
     process_cursor(Subject, Parent, Path);
 classify(Subject, Parent, Path, Prov) ->

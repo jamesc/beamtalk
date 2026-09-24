@@ -20,6 +20,8 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: spec args equals: nil
     self assert: spec shutdown equals: nil
     self assert: spec name equals: nil
+    // ADR 0126 §4, Phase 5: scope defaults to #local.
+    self assert: spec scope equals: #local
 
   testKeywordConstructor =>
     spec := SupervisionSpec
@@ -30,6 +32,7 @@ TestCase subclass: SupervisionSpecValueTest
       shutdown: nil
       classMethod: nil
       name: nil
+      scope: #local
     self assert: spec id equals: #db
     self assert: spec actorClass equals: Counter
     self assert: spec restart equals: #permanent
@@ -37,6 +40,7 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: spec shutdown equals: nil
     self assert: spec classMethod equals: nil
     self assert: spec name equals: nil
+    self assert: spec scope equals: #local
 
   testWithSetterReturnsFreshCopy =>
     spec := SupervisionSpec new
@@ -262,6 +266,51 @@ TestCase subclass: SupervisionSpecValueTest
     spec := self.spec withName: #counter
     spec2 := spec withClassMethod: #start:
     self should: [spec2 childSpec] raise: #user_error
+
+  // === scope: #global (ADR 0126 §4, Phase 5) ===
+  testWithNameScopeSetsBothFields =>
+    spec := self.spec withName: #myCounter scope: #global
+    self assert: spec name equals: #myCounter
+    self assert: spec scope equals: #global
+
+  testChildSpecWithNameScopeGlobalNoArgsUsesSpawnAsScope =>
+    spec := self.spec withName: #myCounter scope: #global
+    child := spec childSpec
+    start := child at: #start
+    // With a name, #global scope, and nil args, startFn is #spawnAs:scope:
+    // and startArgs carries just the name — same shape as the local-scope
+    // #spawnAs: case, so the runtime MFA lookup is the only thing scope
+    // changes.
+    self assert: (start at: 2) equals: #spawnAs:scope:
+    self assert: (start at: 3) equals: #(#myCounter)
+
+  testChildSpecWithNameScopeGlobalAndArgsUsesSpawnWithAsScope =>
+    args := #{#value => 10}
+    spec := (self.spec withName: #myCounter withArgs: args) withScope: #global
+    child := spec childSpec
+    start := child at: #start
+    self assert: (start at: 2) equals: #spawnWith:as:scope:
+    self assert: (start at: 3) equals: #(args, #myCounter)
+
+  testChildSpecScopeLocalMatchesUnscoped =>
+    // scope: #local is an explicit no-op alias — childSpec is byte-identical
+    // to the plain (unscoped) named case.
+    withoutScope := (self.spec withName: #myCounter) childSpec
+    withLocalScope := (self.spec withName: #myCounter scope: #local) childSpec
+    self assert: (withoutScope at: #start) equals: (withLocalScope at: #start)
+
+  testChildSpecDefaultScopeIsLocal =>
+    // Without withScope:/withName:scope:, scope stays #local and behaves
+    // exactly like the pre-BT-3603 unscoped named case.
+    spec := self.spec withName: #myCounter
+    self assert: spec scope equals: #local
+    child := spec childSpec
+    start := child at: #start
+    self assert: (start at: 2) equals: #spawnAs:
+
+  testChildSpecInvalidScopeRaisesTypeError =>
+    spec := (self.spec withName: #myCounter) withScope: #banana
+    self should: [spec childSpec] raise: #type_error
 
   // === printString formatting (BT-1989) ===
   testPrintStringWithoutName =>

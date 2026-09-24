@@ -122,7 +122,23 @@ main([]) ->
         %% declaring shapeVersion: 2 + migrateFromV1: — asserts the
         %% build-time extractor's flattened field map and migration table.
         "release_shapes_root",
-        "release_shapes_leaf"
+        "release_shapes_leaf",
+        %% BT-3613 (ADR 0126 Phase 3c) - a compiled actor whose method
+        %% invokes a passed-in block argument, so the two-node wire suite
+        %% can exercise remote_code_mismatch (ADR 0126 §5.5) against a
+        %% genuinely compiled actor's generated dispatch, not only the
+        %% hand-written __methods__ fixture beamtalk_dist_wire_tests.erl's
+        %% BT-3601 suite already covers.
+        "wire_block_actor",
+        %% BT-3602 (ADR 0126 §5.3, Phase 4) - beamtalk_dist_shape_skew_tests'
+        %% NodeShapeSkew fixtures: a class version-skewed on the peer via a
+        %% delegate-proxy stub (shape_skew_cart), one reloaded the same way
+        %% locally (shape_skew_reload_cart), a matching-version shared class,
+        %% and a class registered on only one side.
+        "shape_skew_cart",
+        "shape_skew_match_cart",
+        "shape_skew_local_only_cart",
+        "shape_skew_reload_cart"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

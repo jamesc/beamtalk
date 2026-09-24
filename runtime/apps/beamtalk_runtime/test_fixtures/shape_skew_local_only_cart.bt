@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3602 (ADR 0126 §5.3, Phase 4) fixture: registered on only *one* side
+// of `beamtalk_dist_shape_skew_tests`' two-node pair — a project class that
+// is not shared with the peer at all, which must never announce
+// `NodeShapeSkew` (there is nothing on the other side to compare against).
+
+Actor subclass: ShapeSkewLocalOnlyCart
+  state: qty :: Integer = 0
