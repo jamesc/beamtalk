@@ -166,9 +166,11 @@ read_provenance(Dir, Vsn) ->
     Path = filename:join([Dir, "releases", Vsn, "beamtalk-provenance.json"]),
     case file:read_file(Path) of
         {ok, Bin} ->
-            try json:decode(Bin) of
-                Decoded when is_map(Decoded) -> atomize_json_map(Decoded);
-                _ -> #{release => nil}
+            try
+                case json:decode(Bin) of
+                    Decoded when is_map(Decoded) -> atomize_json_map(Decoded);
+                    _ -> #{release => nil}
+                end
             catch
                 _:_ -> #{release => nil}
             end;
