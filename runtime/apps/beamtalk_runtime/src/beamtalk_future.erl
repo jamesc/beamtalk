@@ -451,23 +451,8 @@ decode_wire_reply({'$beamtalk_wire_reply', Version, Encoded}) when is_integer(Ve
             end;
         _Other ->
             {error,
-                beamtalk_error:with_details(
-                    beamtalk_error:with_hint(
-                        beamtalk_error:new(wire_version_unsupported, 'Future'),
-                        iolist_to_binary(
-                            io_lib:format(
-                                "wire envelope version ~p is not supported by this node "
-                                "(known version ~p)",
-                                [Version, ?BT_WIRE_VERSION]
-                            )
-                        )
-                    ),
-                    #{
-                        sent => Version,
-                        known => ?BT_WIRE_VERSION,
-                        node => node(),
-                        direction => reply
-                    }
+                beamtalk_wire:wire_version_unsupported_error(
+                    'Future', undefined, Version, #{direction => reply}
                 )}
     end;
 decode_wire_reply(Value) ->
