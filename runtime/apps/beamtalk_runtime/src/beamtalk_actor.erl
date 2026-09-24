@@ -230,6 +230,10 @@ handle_getValue([], State) ->
     terminate/2
 ]).
 
+%% BT-3596: non-parent 'EXIT' interception for trapping actors — called
+%% from generated handle_info/2 (both Server-subclass and plain-Actor paths)
+-export([handle_linked_exit/2]).
+
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
 
@@ -2102,13 +2106,58 @@ handle_call(Msg, _From, State) ->
 
 -doc """
 Handle out-of-band messages (info).
-By default, unknown messages are ignored.
+By default, unknown messages are ignored, after first checking whether
+`Msg` is a non-parent `'EXIT'` this trapping actor needs to react to
+(BT-3596, see `handle_linked_exit/2`).
 Generated actors can override this to handle custom messages.
 """.
--spec handle_info(term(), map()) -> {noreply, map()}.
-handle_info(_Msg, State) ->
-    %% Ignore unknown info messages by default
-    {noreply, State}.
+-spec handle_info(term(), map()) -> {noreply, map()} | {stop, term(), map()}.
+handle_info(Msg, State) ->
+    case handle_linked_exit(Msg, State) of
+        pass ->
+            %% Ignore unknown info messages by default
+            {noreply, State};
+        Result ->
+            Result
+    end.
+
+-doc """
+BT-3596: Non-parent `'EXIT'` handling for an actor that traps exits.
+
+Actors only trap exits (`erlang:process_flag(trap_exit, true)`, set in
+generated `init/1`) when their class, or an ancestor, overrides
+`terminate:` — see `beamtalk_codegen`'s
+`class_or_ancestor_overrides_terminate`. Without trapping, a supervisor's
+`exit(Pid, shutdown)` (used by both `supervisor:terminate_child/2` and a
+`rest_for_one`/`one_for_all` cascade) kills the actor immediately and
+`terminate/2` never runs.
+
+Once an actor traps exits, `'EXIT'` from its OTP *parent* (the process
+that `proc_lib:start_link`-started it — i.e. the ordinary
+supervisor/spawner shutdown path) is intercepted by the `gen_server`
+loop itself before `handle_info/2` is ever called: it already invokes
+`terminate/2` and exits. So any `{'EXIT', _From, _Reason}` that reaches
+`handle_info/2` is from some *other* link — typically a child the actor
+itself spawned and linked — and must keep the crash-propagation
+semantics an untrapped actor already has: a non-`normal` reason stops
+this actor with that same reason (so its own supervisor sees it die and
+applies its restart strategy, exactly as if this actor were not
+trapping), while a `normal` exit is ignored, mirroring how a `normal`
+exit signal is never even delivered to a non-trapping linked process.
+
+Both the generated Server-subclass `handle_info/2` (dispatches
+`handleInfo:`) and the default ignore-all `handle_info/2` above call this
+first and fall through to their own behavior on `pass` — this is the one
+place BT-3596's EXIT semantics are implemented, so neither codegen nor
+this module duplicates the reason-branching logic.
+""".
+-spec handle_linked_exit(term(), map()) -> {stop, term(), map()} | {noreply, map()} | pass.
+handle_linked_exit({'EXIT', _From, normal}, State) ->
+    {noreply, State};
+handle_linked_exit({'EXIT', _From, Reason}, State) ->
+    {stop, Reason, State};
+handle_linked_exit(_Msg, _State) ->
+    pass.
 
 -doc """
 Handle hot code reload.
@@ -3106,6 +3155,38 @@ doSpawnWith(Self, InitArgs, Name) ->
 %% parameter controls which public-facing Beamtalk selector is threaded into
 %% returned structured errors so error messages match the method the user
 %% called.
+%%
+%% `spawnAs:`/`spawnWith:as:` are `class` methods (ADR 0079 atomic naming),
+%% so an EXTERNAL send (`Logger spawnAs: #foo`) reaches this function via the
+%% normal class dispatch `gen_server:call` into the receiver class's own
+%% singleton gen_server process (`dispatch_codegen.rs`: "a class send is a
+%% gen_server:call into the singleton class process") — this function then
+%% executes INSIDE that class process, which is therefore the one
+%% `'spawnAs'/3`'s `gen_server:start_link` links to. `class_self_spawn_as`/
+%% `do_class_self_named_spawn` (`beamtalk_class_instantiation.erl`) is a
+%% SEPARATE deadlock-avoiding shortcut for the same selector reached only via
+%% a same-class `self spawnAs:`/`self spawnWith:as:` send (`self`-dispatch
+%% inside that class's own gen_server call handler would deadlock on a
+%% second `gen_server:call` to itself) — it already unlinks, mirrored below.
+%% This path did not, leaving the class's own gen_server process
+%% permanently linked to every actor it spawns this way. BT-3596 made that
+%% asymmetry newly dangerous: once the spawned actor traps exits (because it
+%% overrides `terminate:`), an untrapped normal exit of its own class
+%% process — previously inert, since a non-trapping linked partner ignores a
+%% `normal` reason — now tears the actor down via `terminate/2` regardless
+%% of reason, via the same built-in gen_server "parent EXIT" handling this
+%% PR relies on for supervisor cascades. Sever it immediately.
+%%
+%% Guarded on `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` for consistency with the
+%% self-send unlink site and `safe_spawn/2`, though it can never actually be
+%% set here in practice: `beamtalk_supervisor:start_child_via_class_method/4`
+%% (the only place that sets it) deliberately runs a `withClassMethod:`
+%% factory via `call_class_method_direct`/`erlang:apply/3` — staying in the
+%% real supervisor process precisely so a plain `self spawn`/`self spawnAs:`
+%% inside it links to the supervisor, not the class gen_server — and never
+%% through `class_send`'s `gen_server:call`, which is the only way this
+%% function is ever reached. A future caller that did reach here from a
+%% context where the key is visible would still get the correct behavior.
 -spec do_spawn_with_selector(#beamtalk_object{}, term(), term(), atom()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 do_spawn_with_selector(Self, InitArgs, Name, Selector) ->
@@ -3113,6 +3194,10 @@ do_spawn_with_selector(Self, InitArgs, Name, Selector) ->
         {ok, ClassName, Module} ->
             case 'spawnAs'(Name, Module, InitArgs) of
                 {ok, Pid} ->
+                    case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
+                        true -> ok;
+                        _ -> unlink(Pid)
+                    end,
                     {ok, #beamtalk_object{
                         class = ClassName,
                         class_mod = Module,

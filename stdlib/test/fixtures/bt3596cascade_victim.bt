@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: the cascade "victim" — never crashes itself, but a
+// rest_for_one / one_for_all restart cascade tears it down too. Overrides
+// terminate: (so BT-3596's fix makes it trap exits) and records the call +
+// reason into the shared Ets table named by `tableName`.
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Actor subclass: Bt3596CascadeVictim
+  state: tableName = nil
+
+  terminate: reason =>
+    self.tableName isNil
+      ifFalse: [
+        table := Ets named: self.tableName
+        table at: #called put: true; at: #reason put: reason
+      ]

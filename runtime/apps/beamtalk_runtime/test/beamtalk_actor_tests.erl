@@ -2977,6 +2977,79 @@ actor_carries_process_dict_marker_test() ->
 %%% compiled Beamtalk.
 %%% ============================================================================
 
+ffi_do_spawn_with_selector_does_not_link_class_process_test() ->
+    %% Review follow-up on BT-3596 (jamesc/beamtalk#4017): `doSpawnAs/2`/
+    %% `doSpawnWith/3` (the FFI shims behind an EXTERNAL `ClassName spawnAs:`/
+    %% `spawnWith:as:` send, reached via `class_send`'s `gen_server:call` into
+    %% the receiver class's own singleton gen_server) must unlink the newly
+    %% spawned actor from the calling process, exactly like
+    %% `safe_spawn_does_not_link_caller_test/0` does for plain `spawn` and
+    %% `beamtalk_class_instantiation_tests:test_class_self_spawn_as_success/0`
+    %% does for the deadlock-avoiding `self spawnAs:` shortcut. Unlike
+    %% `safe_spawn_named_still_links_caller_test/0` above — which calls
+    %% `'spawnAs'/3` directly and correctly asserts it STAYS linked, since
+    %% that raw function also serves as the real supervisor-child restart
+    %% MFA — this test goes through the actual `doSpawnAs/2`/`doSpawnWith/3`
+    %% call site, which must sever that link itself (mirroring the
+    %% self-send shortcut) so a `terminate:`-overriding actor spawned this
+    %% way isn't silently torn down by an unrelated exit of its own class's
+    %% gen_server process (only newly observable since BT-3596 made a
+    %% trapping actor's parent-link EXIT handling reason-agnostic).
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
+        ClassPid when is_pid(ClassPid) ->
+            Self = #beamtalk_object{
+                class = 'Counter class',
+                class_mod = counter,
+                pid = ClassPid
+            },
+            Name = bt_4017_do_spawn_as_test,
+            cleanup_name(Name),
+            {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor:doSpawnAs(Self, Name),
+            try
+                {links, CallerLinks} = process_info(self(), links),
+                {links, ClassLinks} = process_info(ClassPid, links),
+                ?assertNot(lists:member(Pid, CallerLinks)),
+                ?assertNot(lists:member(Pid, ClassLinks)),
+                {links, ActorLinks} = process_info(Pid, links),
+                ?assertNot(lists:member(self(), ActorLinks)),
+                ?assertNot(lists:member(ClassPid, ActorLinks))
+            after
+                gen_server:stop(Pid)
+            end
+    end.
+
+ffi_do_spawn_with_selector_stays_linked_in_supervisor_context_test() ->
+    %% Symmetric case: when `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` IS set (see
+    %% `safe_spawn_links_caller_when_supervisor_spawn_context_set_test/0`
+    %% above), `doSpawnAs/2` must keep the link like every other guarded
+    %% call site — the guard exists for consistency even though this
+    %% particular call site can never actually observe the key set in
+    %% practice (see the doc comment on `do_spawn_with_selector/4`).
+    case erlang:whereis(beamtalk_class_Counter) of
+        undefined ->
+            ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
+        ClassPid when is_pid(ClassPid) ->
+            Self = #beamtalk_object{
+                class = 'Counter class',
+                class_mod = counter,
+                pid = ClassPid
+            },
+            Name = bt_4017_do_spawn_as_supervisor_ctx_test,
+            cleanup_name(Name),
+            put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
+            try
+                {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor:doSpawnAs(Self, Name),
+                {links, CallerLinks} = process_info(self(), links),
+                ?assert(lists:member(Pid, CallerLinks)),
+                unlink(Pid),
+                gen_server:stop(Pid)
+            after
+                erase(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY)
+            end
+    end.
+
 ffi_register_as_non_object_returns_type_error_test() ->
     %% Covers the guard clause that rejects non-`beamtalk_object` receivers.
     Result = beamtalk_actor:registerAs(not_an_actor, some_name),
@@ -4046,3 +4119,69 @@ bt3582_nlr_relayed_across_actor_send_arity2_test() ->
     after
         gen_server:stop(ActorPid)
     end.
+
+%%====================================================================
+%% BT-3596: Actor>>terminate: not invoked on supervisor-initiated shutdown.
+%%
+%% `handle_linked_exit/2` is the shared non-parent-'EXIT' handling used by
+%% both the generated Server-subclass `handle_info/2` (dispatches
+%% `handleInfo:`) and the default ignore-all `handle_info/2` below — see
+%% both functions' doc comments in beamtalk_actor.erl. It only ever sees a
+%% real `'EXIT'` message in an actor that traps exits (BT-3596's `init/1`
+%% `trap_exit` gating on an overridden `terminate:`), since a non-trapping
+%% actor never receives one at all — the crash kills it directly.
+%%====================================================================
+
+bt3596_handle_linked_exit_normal_reason_is_ignored_test() ->
+    State = #{value => 0},
+    ?assertEqual(
+        {noreply, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), normal}, State)
+    ).
+
+bt3596_handle_linked_exit_abnormal_reason_stops_test() ->
+    State = #{value => 0},
+    ?assertEqual(
+        {stop, boom, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), boom}, State)
+    ).
+
+bt3596_handle_linked_exit_killed_reason_stops_with_killed_test() ->
+    %% `exit(Pid, kill)` propagates to a trapping linked process as
+    %% {'EXIT', Pid, killed} (not `kill`) — this must stop the actor with
+    %% that same `killed` reason, exactly like an untrapped link would die.
+    State = #{value => 0},
+    ?assertEqual(
+        {stop, killed, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), killed}, State)
+    ).
+
+bt3596_handle_linked_exit_non_exit_message_passes_through_test() ->
+    State = #{value => 0},
+    ?assertEqual(pass, beamtalk_actor:handle_linked_exit({some, other, msg}, State)),
+    ?assertEqual(pass, beamtalk_actor:handle_linked_exit(tick, State)).
+
+bt3596_default_handle_info_stops_on_non_parent_abnormal_exit_test() ->
+    %% The default ignore-all handle_info/2 (used by every plain Actor
+    %% subclass) must not silently swallow a linked child's crash once this
+    %% actor traps exits.
+    State = #{value => 0},
+    ChildPid = spawn(fun() -> ok end),
+    ?assertEqual(
+        {stop, boom, State},
+        beamtalk_actor:handle_info({'EXIT', ChildPid, boom}, State)
+    ).
+
+bt3596_default_handle_info_ignores_normal_exit_test() ->
+    State = #{value => 0},
+    ChildPid = spawn(fun() -> ok end),
+    ?assertEqual(
+        {noreply, State},
+        beamtalk_actor:handle_info({'EXIT', ChildPid, normal}, State)
+    ).
+
+bt3596_default_handle_info_still_ignores_unknown_messages_test() ->
+    %% Unrelated to trap_exit: the pre-existing ignore-all default for any
+    %% message that isn't a linked 'EXIT' must be untouched.
+    State = #{value => 0},
+    ?assertEqual({noreply, State}, beamtalk_actor:handle_info(some_unknown_message, State)).

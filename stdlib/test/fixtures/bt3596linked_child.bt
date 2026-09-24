@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: a plain, non-supervised child — killed directly by
+// Bt3596TrappingParent to produce a genuine linked-process crash.
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Actor subclass: Bt3596LinkedChild

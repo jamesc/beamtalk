@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: single-child supervisor for the direct
+// `aSupervisor terminate: aClass` acceptance criterion.
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Supervisor subclass: Bt3596DirectSup
+
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  class children -> List =>
+    victimSpec := Bt3596DirectVictim supervisionSpec withArgs: #{
+      #tableName => #bt3596Direct
+    }
+    #(victimSpec)

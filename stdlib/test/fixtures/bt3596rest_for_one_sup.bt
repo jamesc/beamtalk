@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: rest_for_one supervisor with Bt3596CascadeTrigger listed
+// first and Bt3596CascadeVictim second. Killing the trigger cascades a
+// restart onto the victim too, even though the victim never crashed itself.
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Supervisor subclass: Bt3596RestForOneSup
+
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #restForOne
+
+  class children -> List =>
+    triggerSpec := Bt3596CascadeTrigger supervisionSpec withRestart: #permanent
+    victimSpec := Bt3596CascadeVictim supervisionSpec withRestart: #permanent
+    victimSpec := victimSpec withArgs: #{#tableName => #bt3596RestForOne}
+    #(triggerSpec, victimSpec)

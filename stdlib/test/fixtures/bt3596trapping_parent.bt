@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3596 fixture: overrides terminate: (traps exits, per BT-3596) and
+// manually links a plain child it spawns itself (not via a supervisor).
+// Used to check that a non-parent 'EXIT' still propagates once trapping —
+// the crash must not be silently swallowed by the default ignore-all
+// handle_info.
+// See stdlib/test/actor_terminate_on_supervisor_shutdown_test.bt.
+
+Actor subclass: Bt3596TrappingParent
+  state: child = nil
+
+  spawnLinkedChild =>
+    c := Bt3596LinkedChild spawn
+    Erlang erlang link: c pid
+    self.child := c
+
+  crashChild => self.child kill
+
+  terminate: _reason => nil

@@ -428,14 +428,26 @@ Object subclass: Actor
   /// Optional lifecycle hook called when the actor is shutting down.
   ///
   /// Override in subclasses to perform cleanup such as closing resources,
-  /// flushing buffers, or notifying dependents. Called synchronously during
-  /// graceful shutdown (`stop`). The `reason` parameter is an Object — it may
-  /// be a Symbol like `#normal` for graceful stop, but OTP can also pass
-  /// compound terms like `{shutdown, term}` for non-atom shutdown reasons.
+  /// flushing buffers, or notifying dependents. Called synchronously on:
+  /// - graceful shutdown (`stop`)
+  /// - a supervisor's direct `aSupervisor terminate: aClass`
+  /// - a supervisor-initiated shutdown of this actor as part of a
+  ///   `rest_for_one` / `one_for_all` restart cascade (this actor did not
+  ///   crash itself — a sibling did — but the supervisor tears it down too)
+  ///
+  /// The `reason` parameter is an Object — it may be a Symbol like `#normal`
+  /// for graceful stop, but OTP can also pass compound terms like
+  /// `{shutdown, term}` for non-atom shutdown reasons.
   ///
   /// Not called when the actor is forcefully killed (`kill`).
   /// If `terminate:` raises an error, shutdown proceeds anyway.
   /// Actor state (`self.field`) is accessible during `terminate:`.
+  ///
+  /// BT-3596: overriding `terminate:` makes this actor's class (and any
+  /// subclass) trap exits (`process_flag(trap_exit, true)`), which is what
+  /// lets OTP deliver a supervisor's shutdown signal as a message instead of
+  /// killing the process before `terminate:` can run. A class that never
+  /// overrides `terminate:` keeps the plain link semantics it always had.
   ///
   /// ## Examples
   /// ```beamtalk
