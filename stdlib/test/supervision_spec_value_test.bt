@@ -7,6 +7,9 @@
 // Fixtures: stdlib/test/fixtures/counter.bt (Counter — Actor subclass)
 
 TestCase subclass: SupervisionSpecValueTest
+  field: spec = nil
+
+  setUp => self.spec := SupervisionSpec new withActorClass: Counter
 
   // === SupervisionSpec value type basics ===
   testDefaultSlotValues =>
@@ -44,7 +47,7 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: spec2 restart equals: #permanent
 
   testChainedWithSetters =>
-    spec := (SupervisionSpec new withActorClass: Counter) withRestart: #transient
+    spec := self.spec withRestart: #transient
     self assert: spec actorClass equals: Counter
     self assert: spec restart equals: #transient
 
@@ -72,33 +75,30 @@ TestCase subclass: SupervisionSpecValueTest
 
   // === childSpec construction ===
   testChildSpecDefaultId =>
-    spec := SupervisionSpec new withActorClass: Counter
-    child := spec childSpec
+    child := self.spec childSpec
     // Default id is the class name as a symbol
     self assert: (child at: #id) equals: #Counter
 
   testChildSpecCustomId =>
-    spec := (SupervisionSpec new withActorClass: Counter) withId: #myCounter
+    spec := self.spec withId: #myCounter
     child := spec childSpec
     self assert: (child at: #id) equals: #myCounter
 
   testChildSpecSpawnWithoutArgs =>
-    spec := SupervisionSpec new withActorClass: Counter
-    child := spec childSpec
+    child := self.spec childSpec
     start := child at: #start
     // start is #[ActorClass, #spawn, #()]
     self assert: (start at: 2) equals: #spawn
 
   testChildSpecSpawnWithArgs =>
     args := #{#value => 10}
-    spec := (SupervisionSpec new withActorClass: Counter) withArgs: args
+    spec := self.spec withArgs: args
     child := spec childSpec
     start := child at: #start
     self assert: (start at: 2) equals: #spawnWith:
 
   testChildSpecWorkerType =>
-    spec := SupervisionSpec new withActorClass: Counter
-    child := spec childSpec
+    child := self.spec childSpec
     self assert: (child at: #type) equals: #worker
     self assert: (child at: #shutdown) equals: 5000
 
@@ -109,7 +109,7 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: (child at: #shutdown) equals: #infinity
 
   testChildSpecRestartPolicy =>
-    spec := (SupervisionSpec new withActorClass: Counter) withRestart: #permanent
+    spec := self.spec withRestart: #permanent
     child := spec childSpec
     self assert: (child at: #restart) equals: #permanent
 
@@ -138,22 +138,20 @@ TestCase subclass: SupervisionSpecValueTest
 
   // === withShutdown: fluent override (BT-1456) ===
   testWithShutdownSetterReturnsFreshCopy =>
-    spec := SupervisionSpec new withActorClass: Counter
-    spec2 := spec withShutdown: 30000
+    spec2 := self.spec withShutdown: 30000
     // Original unchanged
-    self assert: spec shutdown equals: nil
+    self assert: self.spec shutdown equals: nil
     // New instance updated
     self assert: spec2 shutdown equals: 30000
 
   testChildSpecWorkerDefaultShutdown =>
     // Without withShutdown:, workers default to 5000
-    spec := SupervisionSpec new withActorClass: Counter
-    child := spec childSpec
+    child := self.spec childSpec
     self assert: (child at: #shutdown) equals: 5000
 
   testChildSpecCustomShutdown =>
     // withShutdown: overrides the default for workers
-    spec := (SupervisionSpec new withActorClass: Counter) withShutdown: 30000
+    spec := self.spec withShutdown: 30000
     child := spec childSpec
     self assert: (child at: #shutdown) equals: 30000
 
@@ -171,10 +169,9 @@ TestCase subclass: SupervisionSpecValueTest
 
   // === withName: fluent override (BT-1989, ADR 0079) ===
   testWithNameSetterReturnsFreshCopy =>
-    spec := SupervisionSpec new withActorClass: Counter
-    spec2 := spec withName: #myCounter
+    spec2 := self.spec withName: #myCounter
     // Original unchanged
-    self assert: spec name equals: nil
+    self assert: self.spec name equals: nil
     // New instance updated
     self assert: spec2 name equals: #myCounter
 
@@ -208,8 +205,7 @@ TestCase subclass: SupervisionSpecValueTest
 
   // === childSpec when name is nil — existing behavior unchanged ===
   testChildSpecWithoutNameUsesSpawn =>
-    spec := SupervisionSpec new withActorClass: Counter
-    child := spec childSpec
+    child := self.spec childSpec
     start := child at: #start
     // Without a name, startFn is #spawn (no args)
     self assert: (start at: 2) equals: #spawn
@@ -217,7 +213,7 @@ TestCase subclass: SupervisionSpecValueTest
 
   testChildSpecWithoutNameWithArgsUsesSpawnWith =>
     args := #{#value => 10}
-    spec := (SupervisionSpec new withActorClass: Counter) withArgs: args
+    spec := self.spec withArgs: args
     child := spec childSpec
     start := child at: #start
     self assert: (start at: 2) equals: #spawnWith:
@@ -225,7 +221,7 @@ TestCase subclass: SupervisionSpecValueTest
 
   // === childSpec when name is set (ADR 0079) ===
   testChildSpecWithNameNoArgsUsesSpawnAs =>
-    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter
+    spec := self.spec withName: #myCounter
     child := spec childSpec
     start := child at: #start
     // With a name and nil args, startFn is #spawnAs: and startArgs carries the name
@@ -234,7 +230,7 @@ TestCase subclass: SupervisionSpecValueTest
 
   testChildSpecWithNameAndArgsUsesSpawnWithAs =>
     args := #{#value => 10}
-    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter withArgs: args
+    spec := self.spec withName: #myCounter withArgs: args
     child := spec childSpec
     start := child at: #start
     // With a name and args, startFn is #spawnWith:as: and startArgs carries both
@@ -242,7 +238,7 @@ TestCase subclass: SupervisionSpecValueTest
     self assert: (start at: 3) equals: #(args, #myCounter)
 
   testChildSpecWithNamePreservesActorClass =>
-    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter
+    spec := self.spec withName: #myCounter
     child := spec childSpec
     start := child at: #start
     self assert: (start at: 1) equals: Counter
@@ -257,13 +253,13 @@ TestCase subclass: SupervisionSpecValueTest
 
   testChildSpecDefaultIdUnaffectedByName =>
     // id still defaults to the class name when only name is set
-    spec := (SupervisionSpec new withActorClass: Counter) withName: #myCounter
+    spec := self.spec withName: #myCounter
     child := spec childSpec
     self assert: (child at: #id) equals: #Counter
 
   testChildSpecNameAndClassMethodConflictRaisesError =>
     // name and classMethod are mutually exclusive — childSpec raises
-    spec := (SupervisionSpec new withActorClass: Counter) withName: #counter
+    spec := self.spec withName: #counter
     spec2 := spec withClassMethod: #start:
     self should: [spec2 childSpec] raise: #user_error
 
