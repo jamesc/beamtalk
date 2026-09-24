@@ -30,13 +30,12 @@ you `COPY` into a container or copy to a server. `--force-output` deletes a
 pre-existing `--output` directory even if it doesn't look like a prior
 `beamtalk release` output; use it deliberately, not as a default habit.
 
-**Note on `Beamtalk releaseInfo` above:** it is the parity-neutral
-reflective send that names the release, its version and the toolchain OTP
-release — but run-entry dispatch (what `rpc`/`eval` use) resolves
-*registered classes* only, and `Beamtalk` is a global *instance*, not
-itself a class. The invocation that actually works today is
-`bin/<name> rpc "BeamtalkInterface releaseInfo"` (its class-side method).
-This is a tracked gap (BT-3612), not a typo in this guide.
+`Beamtalk releaseInfo` is the parity-neutral reflective send that names the
+release, its version and the toolchain OTP release. `rpc`/`eval` resolve the
+workspace globals (`Beamtalk`, `Workspace`, `Transcript`) to their live
+singleton instances before falling back to registered classes, so
+`rpc "Beamtalk releaseInfo"` and `rpc "BeamtalkInterface releaseInfo"` (the
+class-side method) answer the same Dictionary.
 
 ## `[release]` manifest keys
 

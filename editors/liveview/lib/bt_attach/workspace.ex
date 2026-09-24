@@ -2148,7 +2148,7 @@ defmodule BtAttach.Workspace do
   # ── internals ─────────────────────────────────────────────────────────────
 
   # Returns `:ok`, or `{:error, :epmd_absent}` if the local epmd isn't
-  # reachable — the lazy `:net_kernel.start/1` this uses (unlike an `erl
+  # reachable — the lazy `:net_kernel.start/2` this uses (unlike an `erl
   # -sname` boot) does not auto-start epmd, so probing first turns that
   # failure into a classifiable error instead of the `raise` below (ADR 0097
   # Implementation §1c names this failure mode explicitly).
@@ -2161,7 +2161,7 @@ defmodule BtAttach.Workspace do
 
         # Two connected mounts can both pass Node.alive?/0 and race here; the
         # loser sees {:error, {:already_started, _}}, which is fine.
-        case :net_kernel.start([name, :shortnames]) do
+        case :net_kernel.start(name, dist_start_options()) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           {:error, reason} -> raise "failed to start distributed node: #{inspect(reason)}"
@@ -2171,6 +2171,24 @@ defmodule BtAttach.Workspace do
       end
     end
   end
+
+  @doc """
+  Options this front passes to `:net_kernel.start/2` when it lazily turns
+  distribution on (ADR 0097 Implementation §1a). Exposed (not `defp`) purely
+  so the start config is unit-testable without real distribution.
+
+  `hidden: true` makes the front a **hidden** node (the programmatic
+  equivalent of `erl -hidden`; BT-3616, ADR 0126 §9 item 5). A connection
+  from a hidden node is itself hidden, so on the workspace node the front
+  never appears in `erlang:nodes/0` / `Node connected`, never raises
+  `NodeUp`/`NodeDown` (`beamtalk_node_monitor`'s `net_kernel:monitor_nodes/1`
+  reports visible nodes only), is excluded from shape-skew checks, and never
+  joins the workspace's `global` mesh. Nothing in the attach path needs a
+  visible connection: every Facade op is an explicit `:rpc.call/4` to
+  `node_name/0`, and `global:`-scoped names are resolved on the workspace
+  node inside those RPCs, never on this front.
+  """
+  def dist_start_options, do: %{name_domain: :shortnames, hidden: true}
 
   defp set_cookie do
     case System.get_env("BT_WORKSPACE_COOKIE") do
@@ -2207,7 +2225,7 @@ defmodule BtAttach.Workspace do
   end
 
   # Raw TCP probe of the local epmd port — cheaper and more reliable than
-  # inferring epmd absence from :net_kernel.start/1's opaque error reasons.
+  # inferring epmd absence from :net_kernel.start/2's opaque error reasons.
   # Exposed (not `defp`) with injectable host/port so tests can point it at a
   # throwaway listener/closed port instead of the real system epmd.
   @doc false

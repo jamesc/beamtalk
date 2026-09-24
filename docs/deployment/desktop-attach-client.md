@@ -95,6 +95,18 @@ status badge in the picker — rather than a wall of connection-error noise or
 a silently-hung UI. If the workspace comes back (or the machine wakes from
 sleep, which drops the connection), the window reconnects.
 
+**The attach front is a hidden Erlang node.** Each `bt_attach` process turns
+distribution on lazily when it first connects, and it starts as a **hidden**
+node (`:net_kernel.start/2` with `hidden: true`, the programmatic form of
+`erl -hidden`; see `BtAttach.Workspace.dist_start_options/0`). On the
+workspace node that means an attached window never shows up in `Node
+connected` / `erlang:nodes()` (it's only in `erlang:nodes(hidden)`), attaching
+and detaching never fire `NodeUp`/`NodeDown`, the front is excluded from
+cluster shape-skew checks, and it never joins the workspace's `global` mesh
+(ADR 0126 §9 item 5, BT-3616). Attach itself is unaffected: every IDE
+operation is an explicit RPC to the named workspace node, which a hidden
+connection supports exactly as a visible one does.
+
 ## Security posture (local only)
 
 The desktop app is a **single-user, on-this-machine** tool, not a network

@@ -8,7 +8,7 @@ defmodule BtAttach.WorkspaceConnectTest do
 
   None of these three functions go through `BtAttach.Workspace.rpc/3` — they
   drive real distribution primitives directly (`Node.alive?/0`,
-  `Node.connect/1`, `Node.set_cookie/2`, `:net_kernel.start/1`,
+  `Node.connect/1`, `Node.set_cookie/2`, `:net_kernel.start/2`,
   `:gen_tcp.connect/4`), so `workspace_rpc_test.exs`'s `:rpc`-only meck cannot
   shape their branches. This sandbox also has no real epmd on the standard
   port and this BEAM isn't distributed (confirmed empirically — see the "no
@@ -185,7 +185,7 @@ defmodule BtAttach.WorkspaceConnectTest do
     end
   end
 
-  describe "ensure_distributed/0 (via connect/0) — epmd reachable, :net_kernel.start/1 branches" do
+  describe "ensure_distributed/0 (via connect/0) — epmd reachable, :net_kernel.start/2 branches" do
     # Node.alive?/0 is left on its real (not-alive) passthrough here — the
     # branch under test is the *other* side of `ensure_distributed/0`'s outer
     # `if`, reached only when this node isn't already distributed.
@@ -211,26 +211,56 @@ defmodule BtAttach.WorkspaceConnectTest do
       :ok
     end
 
-    # net_kernel.start/1 succeeding does not make this BEAM *really*
+    # :net_kernel.start/2 succeeding does not make this BEAM *really*
     # distributed (only the mock reported success), so the subsequent real
     # Node.connect/1 call still reports :ignored — that outcome is incidental
     # to this test (real distribution state, not scripted); what's under test
     # is that ensure_distributed/0 reached :ok and let connect/0 proceed
     # past it to the Node.connect/1 call at all.
-    test "net_kernel.start/1 succeeding lets ensure_distributed/0 proceed" do
-      :meck.expect(:net_kernel, :start, fn _args -> {:ok, self()} end)
+    test "net_kernel.start/2 succeeding lets ensure_distributed/0 proceed" do
+      :meck.expect(:net_kernel, :start, fn _name, _opts -> {:ok, self()} end)
 
       assert {:error, {:connect_failed, _node, :ignored}} = Workspace.connect()
     end
 
-    test "net_kernel.start/1 racing to :already_started is treated as success" do
-      :meck.expect(:net_kernel, :start, fn _args -> {:error, {:already_started, self()}} end)
+    # BT-3616 / ADR 0126 §9 item 5: the front must start as a *hidden* node
+    # so it never shows up in the workspace's visible `nodes()`, never fires
+    # NodeUp/NodeDown and is excluded from shape-skew checks. Pins the actual
+    # arguments ensure_distributed/0 hands to :net_kernel, not just the
+    # public dist_start_options/0 helper, so a regression back to the visible
+    # `start/1` list form fails here.
+    test "starts distribution as a hidden shortnames node" do
+      test_pid = self()
+
+      # Pin the not-yet-distributed branch explicitly (rather than relying on
+      # this VM's incidental state, which an ambient epmd plus an earlier test
+      # can flip) and stub the follow-on connect: only the start args matter.
+      :meck.expect(Node, :alive?, fn -> false end)
+      :meck.expect(Node, :connect, fn _node -> true end)
+
+      :meck.expect(:net_kernel, :start, fn name, opts ->
+        send(test_pid, {:net_kernel_start, name, opts})
+        {:ok, self()}
+      end)
+
+      assert :ok = Workspace.connect()
+
+      assert_received {:net_kernel_start, name, opts}
+      assert "bt_attach_" <> _ = Atom.to_string(name)
+      assert %{hidden: true, name_domain: :shortnames} = opts
+      assert Workspace.dist_start_options() == opts
+    end
+
+    test "net_kernel.start/2 racing to :already_started is treated as success" do
+      :meck.expect(:net_kernel, :start, fn _name, _opts ->
+        {:error, {:already_started, self()}}
+      end)
 
       assert {:error, {:connect_failed, _node, :ignored}} = Workspace.connect()
     end
 
-    test "net_kernel.start/1 failing for any other reason raises" do
-      :meck.expect(:net_kernel, :start, fn _args -> {:error, :some_reason} end)
+    test "net_kernel.start/2 failing for any other reason raises" do
+      :meck.expect(:net_kernel, :start, fn _name, _opts -> {:error, :some_reason} end)
 
       assert_raise RuntimeError, ~r/failed to start distributed node/, fn ->
         Workspace.connect()

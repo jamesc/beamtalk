@@ -2744,7 +2744,9 @@ announce_binding_changed_session_id_nil_outside_worker_test() ->
 stdlib_gate_test_() ->
     {setup, fun stdlib_gate_setup/0, fun stdlib_gate_cleanup/1, [
         {"compile_method on a stdlib class is refused", fun compile_method_stdlib_refused/0},
-        {"resolve_entry finds a loaded class + selector", fun resolve_entry_loaded_class/0}
+        {"resolve_entry finds a loaded class + selector", fun resolve_entry_loaded_class/0},
+        {"run-entry resolves the Beamtalk global singleton (BT-3612)",
+            fun dispatch_sync_beamtalk_singleton/0}
     ]}.
 
 %%====================================================================
@@ -2780,18 +2782,52 @@ do_dispatch_class_not_found_test() ->
     ?assert(binary:match(Msg, <<"NoSuchClassBT2691">>) =/= nomatch).
 
 %% resolve_entry/2 against the live image: a loaded class + an existing selector
-%% yields `{ok, ClassPid, SelectorAtom}` (the inputs `class_send/3` consumes).
+%% yields `{ok, {class, ClassPid}, SelectorAtom}` (the inputs `class_send/3`
+%% consumes).
 resolve_entry_loaded_class() ->
     ?assert(beamtalk_runtime_api:whereis_class('ErlangModule') =/= undefined),
     Result = beamtalk_repl_eval:resolve_entry(
         <<"ErlangModule">>, <<"doesNotUnderstand:args:">>
     ),
-    ?assertMatch({ok, Pid, 'doesNotUnderstand:args:'} when is_pid(Pid), Result),
+    ?assertMatch({ok, {class, Pid}, 'doesNotUnderstand:args:'} when is_pid(Pid), Result),
     %% An unknown class is still a structured class_not_found error here.
     ?assertMatch(
         {error, #beamtalk_error{kind = class_not_found}},
         beamtalk_repl_eval:resolve_entry(<<"NoSuchClassBT2691">>, <<"main:">>)
     ).
+
+%% BT-3612 / ADR 0125 §1.1's headline example, verbatim: `rpc "Beamtalk
+%% releaseInfo"`. `Beamtalk` is a workspace singleton *instance* of
+%% `BeamtalkInterface`, not a registered class, so run-entry resolution must
+%% fall back to the singleton binding and send to the live instance —
+%% answering the same Dictionary the class-side `BeamtalkInterface
+%% releaseInfo` does. This fixture runs no workspace bootstrap, so the
+%% singleton's `current` class var is wired here the same way
+%% `beamtalk_workspace_bootstrap:bootstrap_value_singleton/3` does it.
+dispatch_sync_beamtalk_singleton() ->
+    ClassPid = beamtalk_runtime_api:whereis_class('BeamtalkInterface'),
+    ?assert(is_pid(ClassPid)),
+    Prev = beamtalk_class_dispatch:class_send(ClassPid, current, []),
+    _ = beamtalk_class_dispatch:class_send(
+        ClassPid, 'current:', ['bt@stdlib@beamtalk_interface':new()]
+    ),
+    try
+        ?assertMatch(
+            {ok, {instance, _}, releaseInfo},
+            beamtalk_repl_eval:resolve_entry(<<"Beamtalk">>, <<"releaseInfo">>)
+        ),
+        ViaGlobal = beamtalk_repl_eval:dispatch_sync(<<"Beamtalk">>, <<"releaseInfo">>, []),
+        ViaClass = beamtalk_repl_eval:dispatch_sync(
+            <<"BeamtalkInterface">>, <<"releaseInfo">>, []
+        ),
+        ?assertMatch({ok, #{release := nil}}, ViaGlobal),
+        ?assertEqual(ViaClass, ViaGlobal)
+    after
+        case Prev of
+            nil -> beamtalk_class_dispatch:class_send(ClassPid, resetCurrent, []);
+            _ -> beamtalk_class_dispatch:class_send(ClassPid, 'current:', [Prev])
+        end
+    end.
 
 stdlib_gate_setup() ->
     application:ensure_all_started(beamtalk_runtime),

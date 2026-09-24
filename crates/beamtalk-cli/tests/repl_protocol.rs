@@ -2316,17 +2316,15 @@ fn node_name_from_print_string(rendered: &str) -> String {
 /// connect` / `Counter spawnOn:` / `Workspace nodes` / `ProcessNavigation
 /// on:` exercise from a real REPL session.
 ///
-/// Opt-in, like `beamtalk_node_tests.erl`'s own two-node suite
-/// (`BEAMTALK_TWO_NODE_TESTS=1`, `just test-two-node`): booting a genuine
-/// second, independently-spawned distributed-Erlang node consistently
-/// fails to connect back to the first on this repo's `ubuntu-latest` CI
-/// runners (`.github/workflows/ci.yml`'s "Test two-node suite (optional)"
-/// step documents the identical constraint for the Erlang-level suite,
-/// `continue-on-error: true`) — passes reliably locally (verified 22/22),
-/// so this is a runner-networking limitation, not a bug in this test or
-/// the feature it exercises. Gated the same way rather than left required
-/// and flaky, per this repo's own already-established precedent for this
-/// exact class of CI constraint.
+/// Opt-in (`BEAMTALK_TWO_NODE_TESTS=1`): booting a genuine second,
+/// independently-spawned distributed-Erlang node consistently fails to
+/// connect back to the first on this repo's `ubuntu-latest` CI runners
+/// (`Node connect` answers false; `.github/workflows/ci.yml`'s "Test
+/// two-node distribution e2e (optional)" step, `continue-on-error: true`)
+/// — passes reliably locally (verified 22/22). The root cause is not yet
+/// known; it is *not* the one behind `beamtalk_node_tests.erl`'s two-node
+/// suite's former CI failure, which was an `EUnit` 5-second per-test timeout
+/// (BT-3609) and runs in `just test-runtime` again.
 #[test]
 #[ignore = "slow test - run with `just test-repl-protocol`"]
 #[serial(e2e)]
@@ -2335,7 +2333,7 @@ fn e2e_distribution_tests() {
         eprintln!(
             "E2E: skipping e2e_distribution_tests — opt-in via BEAMTALK_TWO_NODE_TESTS=1 \
              (two independently-spawned distributed-Erlang nodes don't reliably connect on \
-             this repo's CI runners; see beamtalk_node_tests.erl's identical gate)"
+             this repo's CI runners)"
         );
         return;
     }

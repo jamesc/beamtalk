@@ -384,29 +384,59 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
     inject_output(EvalResult, Output, []).
 
 %% Resolve a `(ClassName, Selector)` entry against the live image for
-%% `do_dispatch/5`. Both names must already exist (the class is loaded; the
+%% `dispatch_sync/3`. Both names must already exist (the receiver is loaded; the
 %% selector names one of its methods), so we use existing-atom lookups and never
-%% grow the atom table from client-supplied strings. A missing class or selector
-%% becomes a structured error the caller surfaces verbatim.
+%% grow the atom table from client-supplied strings. A missing receiver or
+%% selector becomes a structured error the caller surfaces verbatim.
+%%
+%% The receiver name resolves through the same singleton-then-class order the
+%% REPL uses for a capitalised receiver (`beamtalk_workspace:
+%% resolve_class_reference/2`): a workspace singleton binding name (`Beamtalk`,
+%% `Workspace`, `Transcript` — the set `beamtalk_workspace_config` declares)
+%% resolves to its live *instance* via `beamtalk_workspace:
+%% resolve_singleton_instance/1`, so `run-entry Beamtalk releaseInfo` answers
+%% exactly what `eval "Beamtalk releaseInfo"` does (ADR 0125 §1.1, BT-3612);
+%% any other name must be a registered class, dispatched class-side.
+-type entry_receiver() :: {class, pid()} | {instance, term()}.
 -spec resolve_entry(binary(), binary()) ->
-    {ok, pid(), atom()} | {error, #beamtalk_error{}}.
+    {ok, entry_receiver(), atom()} | {error, #beamtalk_error{}}.
 resolve_entry(ClassNameBin, SelectorBin) ->
+    case resolve_entry_receiver(ClassNameBin) of
+        {ok, Receiver} ->
+            case beamtalk_repl_errors:safe_to_existing_atom(SelectorBin) of
+                {ok, Selector} ->
+                    {ok, Receiver, Selector};
+                {error, _} ->
+                    {error, dispatch_dnu_error(ClassNameBin, SelectorBin)}
+            end;
+        error ->
+            {error, dispatch_class_not_found_error(ClassNameBin)}
+    end.
+
+-spec resolve_entry_receiver(binary()) -> {ok, entry_receiver()} | error.
+resolve_entry_receiver(ClassNameBin) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
-        {ok, ClassName} ->
-            case beamtalk_runtime_api:whereis_class(ClassName) of
-                undefined ->
-                    {error, dispatch_class_not_found_error(ClassNameBin)};
-                ClassPid ->
-                    case beamtalk_repl_errors:safe_to_existing_atom(SelectorBin) of
-                        {ok, Selector} ->
-                            {ok, ClassPid, Selector};
-                        {error, _} ->
-                            {error, dispatch_dnu_error(ClassNameBin, SelectorBin)}
+        {ok, Name} ->
+            case beamtalk_workspace:resolve_singleton_instance(Name) of
+                {ok, Instance} ->
+                    {ok, {instance, Instance}};
+                error ->
+                    case beamtalk_runtime_api:whereis_class(Name) of
+                        undefined -> error;
+                        ClassPid -> {ok, {class, ClassPid}}
                     end
             end;
         {error, _} ->
-            {error, dispatch_class_not_found_error(ClassNameBin)}
+            error
     end.
+
+%% Send a resolved entry: class-side through the class's gen_server, or an
+%% ordinary instance send to a workspace singleton.
+-spec send_entry(entry_receiver(), atom(), list()) -> term().
+send_entry({class, ClassPid}, Selector, Args) ->
+    beamtalk_class_dispatch:class_send(ClassPid, Selector, Args);
+send_entry({instance, Instance}, Selector, Args) ->
+    beamtalk_message_dispatch:send(Instance, Selector, Args).
 
 %% True when the selector is the arity-1 keyword form (`main:`), i.e. it ends in
 %% a single trailing colon — the CLI validates the shape, so a non-empty binary
@@ -435,13 +465,13 @@ caller) always gets back data, never an exception.
     {ok, term()} | {script_exit, integer()} | {error, #beamtalk_error{} | term()}.
 dispatch_sync(ClassNameBin, SelectorBin, Argv) ->
     case resolve_entry(ClassNameBin, SelectorBin) of
-        {ok, ClassPid, Selector} ->
+        {ok, Receiver, Selector} ->
             DispatchArgs =
                 case is_keyword_selector(SelectorBin) of
                     true -> [Argv];
                     false -> []
                 end,
-            try beamtalk_class_dispatch:class_send(ClassPid, Selector, DispatchArgs) of
+            try send_entry(Receiver, Selector, DispatchArgs) of
                 RawResult ->
                     case maybe_await_future(RawResult) of
                         {future_rejected, FutureReason} ->

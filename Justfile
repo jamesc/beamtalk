@@ -1372,14 +1372,6 @@ test-runtime: build-stdlib
     @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
-# Run the opt-in two-node (peer-booted) beamtalk_node_tests suite. Skipped by
-# `just test-runtime`: its peer boot consistently times out on CI runners, so CI
-# runs it as a separate non-blocking step.
-[unix]
-[working-directory: 'runtime']
-test-two-node: build-stdlib
-    BEAMTALK_TWO_NODE_TESTS=1 BEAMTALK_NO_FILE_LOG=1 rebar3 eunit --cover=false --module=beamtalk_node_tests
-
 # Run performance benchmarks (separate from unit tests, ~30s)
 [working-directory: 'runtime']
 perf: build-stdlib
