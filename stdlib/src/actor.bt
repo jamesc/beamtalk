@@ -152,6 +152,98 @@ Object subclass: Actor
   class sealed named: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_actor) named: self as: name
 
+  // === Cluster-unique names: scope: #global (ADR 0126 §4, Phase 5) ===
+  //
+  // Node-local names (above) stay the default. These `scope:` variants are
+  // the opt-in cluster-unique form ADR 0079 reserved the vocabulary for:
+  // `scope: #global` backs the name with OTP's `global` module instead of
+  // the local process registry, so it is unique across the whole connected
+  // cluster (not just this node) and resolves the same way from any node.
+  // `scope: #local` is an explicit no-op alias — identical to the unscoped
+  // selectors above. Any other scope Symbol raises `#beamtalk_error{kind =
+  // type_error}`. `global` names go through the SAME reserved-name
+  // blocklist as local names (ADR 0079) — no second blocklist.
+
+  /// Atomically spawn a new actor and register it under `name`, in the
+  /// requested cluster scope.
+  ///
+  /// `scope: #local` behaves identically to `spawnAs:` — genuinely atomic:
+  /// a losing race never runs `initialize` at all (OTP reserves the local
+  /// name as part of the process start itself). `scope: #global` registers
+  /// with OTP's `global` module instead — the name is unique across the
+  /// whole connected cluster and resolves the same way from every node,
+  /// via `global:whereis_name/1` on each send rather than a per-node
+  /// lookup — but is NOT atomic in the same way: `global` has no
+  /// custom-resolver variant of an atomic "start-and-register", so the
+  /// actor is started (and `initialize` runs to completion) *before* the
+  /// name is registered. If that registration then loses the race, the
+  /// already-initialized actor is torn down and `name_registered` is
+  /// returned — but any side effect `initialize` already performed (I/O,
+  /// messaging another actor, etc.) already happened, even though the
+  /// caller sees the same clean failure `#local` would give without ever
+  /// running `initialize`. Idempotent `initialize` overrides are
+  /// unaffected; one with externally-visible side effects should account
+  /// for this under `scope: #global`.
+  ///
+  /// Returns `Result ok: actor` on success, or `Result error:` with one of:
+  /// - `name_registered` — another process is already registered under
+  ///   `name` in that scope
+  /// - `reserved_name` — `name` is in the OTP kernel / stdlib blocklist
+  /// - `type_error` — `name` is not a Symbol, or `scope` is neither
+  ///   `#local` nor `#global`
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// leader := (Scheduler spawnAs: #scheduler scope: #global) unwrap
+  /// // on any node in the cluster:
+  /// s := (Scheduler named: #scheduler scope: #global) unwrap
+  /// ```
+  class sealed spawnAs: name :: Symbol scope: scope :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doSpawnAsScope: self
+      withName: name
+      scope: scope
+
+  /// Atomically spawn a new actor with init args and register it under
+  /// `name`, in the requested cluster scope.
+  ///
+  /// Same contract as `spawnAs:scope:` plus the initialisation arguments
+  /// passed to the actor's `init/1` callback. `initArgs` goes through the
+  /// same wire encoder as every other cross-node argument (ADR 0126 §5.1)
+  /// — no second encode path.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := (Counter spawnWith: #{#count => 10} as: #counter scope: #global) unwrap
+  /// ```
+  class sealed spawnWith: initArgs :: Object as: name :: Symbol scope: scope :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doSpawnWithAsScope: self
+      args: initArgs
+      name: name
+      scope: scope
+
+  /// Look up an actor by name in the requested cluster scope, checked
+  /// against the receiver class.
+  ///
+  /// `scope: #local` behaves identically to `named:` (this node's local
+  /// registry). `scope: #global` checks OTP's cluster-wide `global`
+  /// registry instead — the same name resolves to the same actor from
+  /// every connected node.
+  ///
+  /// Error cases: as `named:`, plus `type_error` when `scope` is neither
+  /// `#local` nor `#global`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// s := (Scheduler named: #scheduler scope: #global) unwrap
+  /// ```
+  class sealed named: name :: Symbol scope: scope :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_actor)
+      doNamedScope: self
+      as: name
+      scope: scope
+
   /// Return every currently-registered Beamtalk actor as `Actor` proxies.
   ///
   /// Filters out raw Erlang-registered processes (kernel, logger, user FFI
