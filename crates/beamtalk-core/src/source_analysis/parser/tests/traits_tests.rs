@@ -284,6 +284,41 @@ fn parse_class_multiple_uses_lines() {
 }
 
 #[test]
+fn parse_class_uses_line_comma_separated_protocols_is_error() {
+    // ADR 0127 §2: "One trait per `uses:` line; several traits are several
+    // lines." `uses: A, B` is the natural mistake for someone used to
+    // comma-separated `implements:`-style lists in other languages.
+    let diagnostics = parse_err(
+        "Value subclass: Report
+  uses: Labelled, Describable",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("'uses:' takes one protocol per line")),
+        "Expected a one-protocol-per-line error, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_class_uses_line_comma_separated_protocols_recovers() {
+    // The bad `uses: A, B` line must not silently swallow the rest of the
+    // class body (the exact regression this issue's unknown-keyword fix
+    // targets, here for a non-keyword token).
+    let tokens = crate::source_analysis::lex_with_eof(
+        "Value subclass: Report
+  uses: Labelled, Describable
+  field: title :: String = \"\"",
+    );
+    let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+    let class = &module.classes[0];
+    assert_eq!(class.uses.len(), 1);
+    assert_eq!(class.uses[0].protocol.name, "Labelled");
+    assert_eq!(class.state.len(), 1);
+    assert_eq!(class.state[0].name.name, "title");
+}
+
+#[test]
 fn parse_class_uses_line_aliasing_is_not_yet_supported() {
     let diagnostics = parse_err(
         "Value subclass: Report

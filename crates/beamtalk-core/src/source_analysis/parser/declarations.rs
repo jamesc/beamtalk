@@ -977,6 +977,29 @@ impl Parser {
             }
         }
 
+        // A same-line trailing comma is the classic `uses: A, B` mistake —
+        // ADR 0127 §2 explicitly anticipates it ("One trait per `uses:`
+        // line; several traits are several lines"). Without this check the
+        // comma is neither a recognized clause keyword nor consumed here,
+        // so the enclosing class/protocol body would otherwise silently end
+        // at it with no diagnostic at all — exactly the failure mode this
+        // issue's `unexpected 'foo:' in class body` fix targets, just for a
+        // non-keyword token shape.
+        if is_comma(self.current_kind()) && !self.current_token().has_leading_newline() {
+            let comma_span = self.current_token().span();
+            self.diagnostics.push(
+                Diagnostic::error("'uses:' takes one protocol per line", comma_span).with_hint(
+                    "write each trait on its own 'uses:' line, e.g. 'uses: A' then 'uses: B'",
+                ),
+            );
+            // Skip the rest of the line so the class/protocol body can
+            // recover at the next line instead of ending silently.
+            while !self.is_at_end() && !self.current_token().has_leading_newline() {
+                end = self.current_token().span();
+                self.advance();
+            }
+        }
+
         ProtocolUse {
             protocol,
             package,
@@ -992,9 +1015,8 @@ impl Parser {
     ///
     /// Reuses the general list-literal parser ([`Self::parse_list_literal`])
     /// rather than duplicating its comma/paren/trailing-comma/error-recovery
-    /// handling,
-    /// then requires each element to be a bare symbol literal — the "list of
-    /// symbols" the ADR's grammar calls for, nothing else. A non-symbol
+    /// handling, then requires each element to be a bare symbol literal —
+    /// the "list of symbols" the ADR's grammar calls for, nothing else. A non-symbol
     /// element or a cons tail (`#(#a | rest)`) is reported and skipped;
     /// selector text validation (does the named protocol actually provide
     /// it?) is a semantic-analysis concern (BT-3588), not this parser's.
