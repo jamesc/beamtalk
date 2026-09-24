@@ -129,7 +129,16 @@ main([]) ->
         %% genuinely compiled actor's generated dispatch, not only the
         %% hand-written __methods__ fixture beamtalk_dist_wire_tests.erl's
         %% BT-3601 suite already covers.
-        "wire_block_actor"
+        "wire_block_actor",
+        %% BT-3602 (ADR 0126 §5.3, Phase 4) - beamtalk_dist_shape_skew_tests'
+        %% NodeShapeSkew fixtures: a class version-skewed on the peer via a
+        %% delegate-proxy stub (shape_skew_cart), one reloaded the same way
+        %% locally (shape_skew_reload_cart), a matching-version shared class,
+        %% and a class registered on only one side.
+        "shape_skew_cart",
+        "shape_skew_match_cart",
+        "shape_skew_local_only_cart",
+        "shape_skew_reload_cart"
     ],
     lists:foreach(
         fun(Basename) -> build_local_fixture(Beamtalk, FixturesDir, FixtureBuildDir, RepoRoot, Basename) end,

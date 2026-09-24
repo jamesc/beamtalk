@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3602 (ADR 0126 §5.3, Phase 4) fixture: registered as-is (shapeVersion
+// 1, implicit) on both nodes of `beamtalk_dist_shape_skew_tests`' two-node
+// pair — see shape_skew_cart.bt's comment for why this is a single file,
+// not a v1/v2 pair. The reload scenario connects while both sides match
+// (no skew), then swaps this class's registered module *locally* for a
+// shape_version-2 delegate-proxy stub and re-announces `ClassLoaded`,
+// exercising `beamtalk_node_monitor`'s reload-time re-check.
+
+Actor subclass: ShapeSkewReloadCart
+  state: qty :: Integer = 0
