@@ -257,6 +257,21 @@ handle_getValue([], State) ->
 %% temporaries from committed state before the reply is emitted.
 -export([notify_state_change/2, strip_local_temps/1]).
 
+%% ADR 0126 §5.1/§5.5 (BT-3613): the `'$beamtalk_wire'`-envelope
+%% recognition/decode helpers shared by this module's own handle_call/3 and
+%% handle_cast/2 clauses AND every compiled actor's generated
+%% handle_call/3 / handle_cast/2 (crates/beamtalk-codegen/.../gen_server/
+%% callbacks.rs) — the one place that logic lives (CLAUDE.md "No duplicate
+%% implementations"). encode_reply_for/3 and
+%% maybe_reclassify_compiled_dispatch_error/2 close the same gap on the
+%% reply/error side for generated dispatch.
+-export([
+    decode_wire_call/1,
+    decode_wire_cast/1,
+    encode_reply_for/3,
+    maybe_reclassify_compiled_dispatch_error/2
+]).
+
 %% Shared error constructor used by beamtalk_class_instantiation to avoid
 %% duplicating the same instantiation_error construction logic.
 -export([generic_spawn_error/3]).
@@ -2085,36 +2100,23 @@ Errors in fire-and-forget are logged but do not crash the actor.
 Errors in async-with-future are communicated via future rejection.
 """.
 -spec handle_cast(term(), map()) -> {noreply, map()}.
-%% Wire-tagged remote sends (ADR 0126 §5.1) — decode and re-dispatch through
-%% the ordinary local clauses below. A decode failure is cast-direction
-%% version skew (§5.2): there is no caller to tell, so it is logged and the
-%% telemetry event fires; an unknown wire version is handled the same way.
-handle_cast(
-    {'$beamtalk_wire', ?BT_WIRE_VERSION, async, Selector, WireArgs, FuturePid, PropCtx}, State
-) ->
-    case beamtalk_wire:decode(WireArgs) of
-        {ok, Args} ->
-            handle_cast({Selector, Args, FuturePid, PropCtx}, State);
-        {error, Error} ->
-            beamtalk_future:reject(FuturePid, Error#beamtalk_error{selector = Selector}),
-            {noreply, State}
+%% Wire-tagged remote sends (ADR 0126 §5.1) — decode_wire_cast/1 recognises
+%% every `'$beamtalk_wire'` cast/async shape (the one place that logic
+%% lives, shared with generated compiled-actor handle_cast/2 — see its own
+%% doc and decode_wire_cast/1's) and either hands back a plain local
+%% message to re-dispatch through the ordinary clauses below, or has
+%% already logged/rejected a decode or version failure itself (cast
+%% direction, §5.2: "there is no caller to tell").
+handle_cast({'$beamtalk_wire', _, _, _, _, _} = Msg, State) ->
+    case decode_wire_cast(Msg) of
+        {redispatch, Msg2} -> handle_cast(Msg2, State);
+        noreply -> {noreply, State}
     end;
-handle_cast(
-    {'$beamtalk_wire', SentVersion, async, Selector, _WireArgs, FuturePid, _PropCtx}, State
-) ->
-    beamtalk_future:reject(FuturePid, wire_version_unsupported_error(Selector, SentVersion)),
-    {noreply, State};
-handle_cast({'$beamtalk_wire', ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}, State) ->
-    case beamtalk_wire:decode(WireArgs) of
-        {ok, Args} ->
-            handle_cast({cast, Selector, Args, PropCtx}, State);
-        {error, Error} ->
-            log_wire_cast_rejected(Selector, Error),
-            {noreply, State}
+handle_cast({'$beamtalk_wire', _, _, _, _, _, _} = Msg, State) ->
+    case decode_wire_cast(Msg) of
+        {redispatch, Msg2} -> handle_cast(Msg2, State);
+        noreply -> {noreply, State}
     end;
-handle_cast({'$beamtalk_wire', SentVersion, cast, Selector, _WireArgs, _PropCtx}, State) ->
-    log_wire_cast_rejected(Selector, wire_version_unsupported_error(Selector, SentVersion)),
-    {noreply, State};
 %% Fire-and-forget cast with propagated context (ADR 0069 Phase 2b)
 handle_cast({cast, Selector, Args, PropCtx}, State) when
     is_atom(Selector), is_list(Args), is_map(PropCtx)
@@ -2205,20 +2207,19 @@ Message format: {Selector, Args} or {Selector, Args, PropCtx} (ADR 0069 Phase 2b
 Dispatches to method and returns result immediately.
 """.
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
-%% Wire-tagged remote sends (ADR 0126 §5.1) — decode and re-dispatch through
-%% the ordinary local clause below. A decode failure is request-direction
-%% version skew (§5.2): the reply is an error and this actor's state is
-%% untouched — it never reaches dispatch/4. An unknown wire version refuses
-%% the same way.
-handle_call({'$beamtalk_wire', ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx}, From, State) ->
-    case beamtalk_wire:decode(WireArgs) of
-        {ok, Args} ->
-            handle_call({Selector, Args, PropCtx}, From, State);
-        {error, Error} ->
-            {reply, {error, Error#beamtalk_error{selector = Selector}}, State}
+%% Wire-tagged remote sends (ADR 0126 §5.1) — decode_wire_call/1 recognises
+%% every `'$beamtalk_wire'` call shape (the one place that logic lives,
+%% shared with generated compiled-actor handle_call/3 — see its own doc and
+%% decode_wire_call/1's) and either hands back a plain local message to
+%% re-dispatch through the ordinary clause below, or a ready-made reply for
+%% a decode/version failure — request-direction skew (§5.2): the reply is
+%% an error and this actor's state is untouched, since it never reaches
+%% dispatch/4.
+handle_call({'$beamtalk_wire', _, _, _, _, _} = Msg, From, State) ->
+    case decode_wire_call(Msg) of
+        {redispatch, Msg2} -> handle_call(Msg2, From, State);
+        {reply, ReplyVal} -> {reply, ReplyVal, State}
     end;
-handle_call({'$beamtalk_wire', SentVersion, call, Selector, _WireArgs, _PropCtx}, _From, State) ->
-    {reply, {error, wire_version_unsupported_error(Selector, SentVersion)}, State};
 %% Sync call with propagated context (ADR 0069 Phase 2b)
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     restore_propagated_ctx(PropCtx),
@@ -2338,6 +2339,37 @@ wire_version_unsupported_error(Selector, SentVersion) ->
     ).
 
 -doc """
+Recognise and decode a `'\$beamtalk_wire'` call envelope (ADR 0126 §5.1) —
+the single place this decode/version-check logic lives (CLAUDE.md "No
+duplicate implementations"), called both by this module's own
+`handle_call/3` wire clause and by every compiled actor's generated
+`handle_call/3` (`crates/beamtalk-codegen/src/core_erlang/gen_server/
+callbacks.rs`, `generate_handle_call`).
+
+Returns `{redispatch, {Selector, Args, PropCtx}}` on a successful decode —
+the caller re-dispatches that plain 3-tuple through its own ordinary local
+clause, exactly the shape `handle_call/3`'s own next clause already
+matches. Returns `{reply, ReplyVal}` for a decode failure or an unsupported
+wire version (request-direction skew, §5.2): the caller replies `ReplyVal`
+immediately with its pre-call `State` untouched — `dispatch/4` never runs.
+Any other message (not a wire envelope) passes through unchanged as
+`{redispatch, Msg}`, so a caller can route *every* `handle_call/3` message
+through this function uniformly if it chooses to.
+""".
+-spec decode_wire_call(term()) -> {redispatch, term()} | {reply, term()}.
+decode_wire_call({'$beamtalk_wire', ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx}) ->
+    case beamtalk_wire:decode(WireArgs) of
+        {ok, Args} ->
+            {redispatch, {Selector, Args, PropCtx}};
+        {error, Error} ->
+            {reply, {error, Error#beamtalk_error{selector = Selector}}}
+    end;
+decode_wire_call({'$beamtalk_wire', SentVersion, call, Selector, _WireArgs, _PropCtx}) ->
+    {reply, {error, wire_version_unsupported_error(Selector, SentVersion)}};
+decode_wire_call(Msg) ->
+    {redispatch, Msg}.
+
+-doc """
 Log-and-drop a wire-tagged cast rejected by version skew or an unsupported
 wire version (ADR 0126 §5.2, cast direction: "there is no one to tell").
 """.
@@ -2351,6 +2383,58 @@ log_wire_cast_rejected(Selector, Error) ->
     maybe_execute_telemetry([beamtalk, dist, wire_rejected], #{count => 1}, #{
         selector => Selector, error => Error
     }).
+
+-doc """
+Recognise and decode a `'\$beamtalk_wire'` cast/async envelope (ADR 0126
+§5.1) — shared the same way decode_wire_call/1 is (see its doc), by this
+module's own `handle_cast/2` wire clauses and every compiled actor's
+generated `handle_cast/2`.
+
+Returns `{redispatch, Msg}` with a plain local cast/async 4-tuple on a
+successful decode, or `noreply` once a decode/version failure has already
+been logged and dropped (cast direction, §5.2) or the pending future
+rejected. Any other message (not a wire envelope) passes through unchanged
+as `{redispatch, Msg}`.
+
+The async-with-future shape (`kind = async`) is decoded here too, for a
+hand-written `__methods__` actor's own `handle_cast/2` — but no compiled
+`.bt` construct reaches it: a genuinely compiled actor's generated
+`handle_cast/2` only ever pattern-matches the 6-element `cast`-kind wire
+envelope, so a 7-element `async`-kind one sent to a compiled actor simply
+never reaches this function at all and falls through the generated
+callback's own catch-all to `{noreply, State}` — exactly like an
+un-wire-tagged async cast to a compiled actor already does today
+(`beamtalk_codegen_simulation_tests.erl`'s documented gap).
+""".
+-spec decode_wire_cast(term()) -> {redispatch, term()} | noreply.
+decode_wire_cast(
+    {'$beamtalk_wire', ?BT_WIRE_VERSION, async, Selector, WireArgs, FuturePid, PropCtx}
+) ->
+    case beamtalk_wire:decode(WireArgs) of
+        {ok, Args} ->
+            {redispatch, {Selector, Args, FuturePid, PropCtx}};
+        {error, Error} ->
+            beamtalk_future:reject(FuturePid, Error#beamtalk_error{selector = Selector}),
+            noreply
+    end;
+decode_wire_cast(
+    {'$beamtalk_wire', SentVersion, async, Selector, _WireArgs, FuturePid, _PropCtx}
+) ->
+    beamtalk_future:reject(FuturePid, wire_version_unsupported_error(Selector, SentVersion)),
+    noreply;
+decode_wire_cast({'$beamtalk_wire', ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}) ->
+    case beamtalk_wire:decode(WireArgs) of
+        {ok, Args} ->
+            {redispatch, {cast, Selector, Args, PropCtx}};
+        {error, Error} ->
+            log_wire_cast_rejected(Selector, Error),
+            noreply
+    end;
+decode_wire_cast({'$beamtalk_wire', SentVersion, cast, Selector, _WireArgs, _PropCtx}) ->
+    log_wire_cast_rejected(Selector, wire_version_unsupported_error(Selector, SentVersion)),
+    noreply;
+decode_wire_cast(Msg) ->
+    {redispatch, Msg}.
 
 -doc """
 Handle out-of-band messages (info).
@@ -2984,6 +3068,34 @@ maybe_remote_code_mismatch(Args, error, undef) ->
     end;
 maybe_remote_code_mismatch(_Args, _Class, _Reason) ->
     error.
+
+-doc """
+Reclassify a genuinely compiled actor's raw `safe_dispatch/3` dispatch
+error (`generate_safe_dispatch`'s catch, `{Type, Reason, Stacktrace}`) as
+`remote_code_mismatch` when it is exactly the badfun/undef-invoking-a-
+stale-block shape `maybe_remote_code_mismatch/3` already identifies for the
+hand-written `__methods__` dispatch path (`wrap_method_error/6`, ADR 0126
+§5.5) — reuses that one check rather than re-deriving the same badfun/undef
+identification a second time for generated dispatch (CLAUDE.md "No
+duplicate implementations"). `Args` is the dispatched method's own argument
+list, exactly as `wrap_method_error/6` receives it.
+
+Every error shape compiled dispatch's catch can otherwise produce — any
+`{Type, Reason, Stacktrace}` triple that isn't this one case, an NLR relay
+tuple, or an already-wrapped `#beamtalk_error{}` from a method that raised
+one directly — passes through completely unchanged: this only ever
+substitutes the one case compiled dispatch does not otherwise classify,
+never compiled dispatch's other (intentionally raw, reraised-as-is) error
+wrapping.
+""".
+-spec maybe_reclassify_compiled_dispatch_error(list(), term()) -> term().
+maybe_reclassify_compiled_dispatch_error(Args, {Class, Reason, _Stacktrace} = Error) ->
+    case maybe_remote_code_mismatch(Args, Class, Reason) of
+        {ok, WrappedError} -> WrappedError;
+        error -> Error
+    end;
+maybe_reclassify_compiled_dispatch_error(_Args, Error) ->
+    Error.
 
 -spec remote_code_mismatch_error(fun()) -> #beamtalk_error{}.
 remote_code_mismatch_error(Fun) ->

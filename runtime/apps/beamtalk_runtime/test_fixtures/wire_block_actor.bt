@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// WireBlockActor - a genuinely compiled Actor whose sole method invokes a
+// passed-in block argument, for testing ADR 0126 §5.5's remote_code_mismatch
+// classification against a genuinely compiled actor's generated dispatch
+// (not just the hand-written __methods__ fixture test_wire_actor.erl's own
+// 'invokeBlockWith:' already covers) — BT-3613.
+
+Actor subclass: WireBlockActor
+  invokeBlockWith: aBlock => aBlock value: 1
