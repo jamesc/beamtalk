@@ -1452,8 +1452,16 @@ resolve_remote_registered(Name, Node) ->
         Pid when is_pid(Pid) -> Pid;
         undefined -> undefined
     catch
-        error:{erpc, noconnection} -> node_down;
-        error:{erpc, timeout} -> node_down
+        %% Every erpc-level failure (an unusual reason, or the remote
+        %% erlang:whereis/1 itself somehow raising) collapses to the same
+        %% node_down sentinel this function already returns for the common
+        %% noconnection/timeout cases: this is a best-effort existence
+        %% check, not a Result-returning API, so there is no richer outcome
+        %% to report — "could not determine" and "node unreachable" are the
+        %% same actionable fact to every call site here.
+        error:{erpc, _ErpcReason} -> node_down;
+        error:{exception, _Reason, _Stack} -> node_down;
+        exit:{exception, _Reason} -> node_down
     end.
 
 -doc """
@@ -3177,6 +3185,12 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
     %% pid on another node — so the whole read-check-unregister sequence
     %% must run on `Node0` itself, via a plain two-tuple recursive call to
     %% this same function there, not here.
+    %% Unlike the sibling remote ops (remote_spawn/4, remote_named/3,
+    %% remote_all_registered/1), an unreachable node here is NOT coerced to
+    %% a quiet `ok`: `unregister`'s "only raises on real failures" contract
+    %% means idempotent success is reserved for "already unregistered",
+    %% never for "couldn't find out" — the actor may still be registered on
+    %% Node0. Raise the same node_down/timeout error the siblings surface.
     try
         erpc:call(
             Node0,
@@ -3188,8 +3202,16 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
     of
         ok -> ok
     catch
-        error:{erpc, noconnection} -> ok;
-        error:{erpc, timeout} -> ok
+        error:{erpc, noconnection} ->
+            beamtalk_error:raise(
+                (node_down_error_record(Node0, unregister))#beamtalk_error{
+                    class = Self#beamtalk_object.class
+                }
+            );
+        error:{erpc, timeout} ->
+            beamtalk_error:raise(
+                (remote_timeout_error_record(Self#beamtalk_object.class, unregister, true))
+            )
     end;
 unregister(Self) when is_record(Self, beamtalk_object) ->
     %% ADR 0079: name-resolving proxies (`pid = {registered, N}`, including
@@ -3526,7 +3548,7 @@ remote_spawn(Node, ClassName, NameOrUndefined, Selector) ->
                 error:{erpc, noconnection} ->
                     {error, node_down_error_record(Node, Selector)};
                 error:{erpc, timeout} ->
-                    {error, remote_timeout_error_record(ClassName, Selector)};
+                    {error, remote_timeout_error_record(ClassName, Selector, false)};
                 error:{erpc, ErpcReason} ->
                     {error, generic_spawn_error(ClassName, Selector, {erpc, ErpcReason})};
                 error:{exception, Reason, _Stack} ->
@@ -3614,8 +3636,12 @@ remote_named(Node, ReceiverClass, Name) ->
                 error:{erpc, noconnection} ->
                     {error, node_down_error_record(Node, Selector)};
                 error:{erpc, timeout} ->
-                    {error, remote_timeout_error_record(ReceiverClass, Selector)};
+                    {error, remote_timeout_error_record(ReceiverClass, Selector, true)};
+                error:{erpc, ErpcReason} ->
+                    {error, generic_spawn_error(ReceiverClass, Selector, {erpc, ErpcReason})};
                 error:{exception, Reason, _Stack} ->
+                    {error, generic_spawn_error(ReceiverClass, Selector, Reason)};
+                exit:{exception, Reason} ->
                     {error, generic_spawn_error(ReceiverClass, Selector, Reason)}
             end
     end.
@@ -3653,8 +3679,12 @@ remote_all_registered(Node) ->
                 error:{erpc, noconnection} ->
                     {error, node_down_error_record(Node, Selector)};
                 error:{erpc, timeout} ->
-                    {error, remote_timeout_error_record('Actor', Selector)};
+                    {error, remote_timeout_error_record('Actor', Selector, true)};
+                error:{erpc, ErpcReason} ->
+                    {error, generic_spawn_error('Actor', Selector, {erpc, ErpcReason})};
                 error:{exception, Reason, _Stack} ->
+                    {error, generic_spawn_error('Actor', Selector, Reason)};
+                exit:{exception, Reason} ->
                     {error, generic_spawn_error('Actor', Selector, Reason)}
             end
     end.
@@ -3674,9 +3704,17 @@ qualify_registered_ref(#beamtalk_object{pid = {registered, Name}} = Obj, Node) w
 qualify_registered_ref(Obj, _Node) ->
     Obj.
 
--doc "Construct a structured `timeout` error for a remote spawn/lookup/list op (ADR 0126 §3).".
--spec remote_timeout_error_record(atom(), atom()) -> #beamtalk_error{}.
-remote_timeout_error_record(ClassName, Selector) ->
+-doc """
+Construct a structured `timeout` error for a remote spawn/lookup/list/
+unregister op (ADR 0126 §3). `Idempotent` picks the hint: `spawnOn:`/
+`spawnAs:on:` are genuinely non-idempotent (a timeout may mean the far side
+already spawned), while `named:on:`/`allRegisteredOn:` (read-only lookups)
+and `unregister` (already idempotent locally) are always safe to retry —
+the generic "not guaranteed to be safe" wording would be actively
+misleading for those.
+""".
+-spec remote_timeout_error_record(atom(), atom(), boolean()) -> #beamtalk_error{}.
+remote_timeout_error_record(ClassName, Selector, false) ->
     beamtalk_error:new(
         timeout,
         ClassName,
@@ -3686,6 +3724,13 @@ remote_timeout_error_record(ClassName, Selector) ->
             "may not have applied it; a retry is not guaranteed to be safe (see the ADR "
             "0126 idempotency note)"
         >>
+    );
+remote_timeout_error_record(ClassName, Selector, true) ->
+    beamtalk_error:new(
+        timeout,
+        ClassName,
+        Selector,
+        <<"Remote operation did not complete within the timeout; safe to retry">>
     ).
 
 -doc "Resolve a `node :: Node` FFI argument to its underlying node atom.".

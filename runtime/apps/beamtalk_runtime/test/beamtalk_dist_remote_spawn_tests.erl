@@ -157,6 +157,15 @@ node_down_on_unreachable_node() ->
     ?assertMatch(
         {error, #beamtalk_error{kind = node_down}},
         beamtalk_actor:remote_all_registered(GhostNode)
+    ),
+    %% unregister on a node-qualified proxy must raise node_down rather than
+    %% silently reporting success — the name may still be registered on the
+    %% (actually unreachable) far side.
+    GhostProxy = #beamtalk_object{
+        class = 'Counter', class_mod = test_counter, pid = {registered, someName, GhostNode}
+    },
+    ?assertError(
+        #{error := #beamtalk_error{kind = node_down}}, beamtalk_actor:unregister(GhostProxy)
     ).
 
 %%====================================================================
