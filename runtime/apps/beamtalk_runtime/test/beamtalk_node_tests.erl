@@ -192,7 +192,16 @@ setup() ->
 cleanup(Started) ->
     lists:foreach(fun(Pid) -> gen_server:stop(Pid) end, Started).
 
+%% Opt-in: the peer this suite boots consistently times out in
+%% `peer:start/1` on CI runners, so it only runs when
+%% BEAMTALK_TWO_NODE_TESTS=1 (`just test-two-node`; a non-blocking CI step).
 two_node_test_() ->
+    case os:getenv("BEAMTALK_TWO_NODE_TESTS") of
+        "1" -> two_node_tests();
+        _ -> []
+    end.
+
+two_node_tests() ->
     {timeout, 120,
         {setup, fun setup/0, fun cleanup/1, fun(_) ->
             [
