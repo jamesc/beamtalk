@@ -273,6 +273,109 @@ mod tests {
         }
     }
 
+    /// The exact bug this guards against: `-sname` used to be baked into
+    /// `vm.args` at build time — `erl` keeps the *first* `-sname` it sees
+    /// and warns on a duplicate, so nothing the launcher passed afterwards
+    /// could ever override it, making it impossible to run two instances
+    /// of the same release on one host (ADR 0126 §9's "development,
+    /// testing" same-host clustering). Both launchers must compute
+    /// `-sname` themselves from `RELEASE_NODE` (falling back to the
+    /// release name), and `foreground` must actually pass it on the `erl`
+    /// command line — not just the client verbs.
+    #[test]
+    fn write_launcher_scripts_support_release_node_override() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        assert!(
+            sh.contains("RELEASE_NODE"),
+            "launcher.sh must read RELEASE_NODE: {sh}"
+        );
+        assert!(
+            sh.contains("-sname \"$(node_sname)\""),
+            "launcher.sh's foreground verb must pass -sname on the erl command line: {sh}"
+        );
+
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        assert!(
+            cmd.contains("RELEASE_NODE"),
+            "launcher.cmd must read RELEASE_NODE: {cmd}"
+        );
+        assert!(
+            cmd.contains("-sname \"%THIS_NODE%\""),
+            "launcher.cmd's foreground verb must pass -sname on the erl command line: {cmd}"
+        );
+    }
+
+    /// The exact bug this guards against: a malformed `RELEASE_NODE`
+    /// (verified live to contain e.g. `/`) reached `erl` unvalidated and
+    /// crashed the whole node with a raw kernel crash dump ("Invalid node
+    /// name!") instead of a clean, actionable error. Both launchers must
+    /// reject it up front, before ever invoking `erl`/`erl.exe`.
+    #[test]
+    fn write_launcher_scripts_validate_release_node_before_invoking_erl() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        assert!(
+            sh.contains("RELEASE_NODE") && sh.contains("not a valid instance name"),
+            "launcher.sh must validate RELEASE_NODE: {sh}"
+        );
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        assert!(
+            cmd.contains("RELEASE_NODE") && cmd.contains("not a valid instance name"),
+            "launcher.cmd must validate RELEASE_NODE: {cmd}"
+        );
+    }
+
+    /// Text-substring assertions (the test above) pass regardless of
+    /// whether the validation logic actually *works* — exactly the false
+    /// confidence that let a command-injection bug ship in `launcher.cmd`'s
+    /// first version of this check (an unquoted `%RELEASE_NODE%` piped
+    /// through `findstr`, exploitable via `RELEASE_NODE=x & calc.exe`).
+    /// This test actually executes the generated `launcher.sh` with a
+    /// malicious `RELEASE_NODE` and asserts it is rejected cleanly —
+    /// `#[cfg(unix)]`, like its sibling `write_launcher_scripts_sh_is_executable`
+    /// just below: `sh` isn't reliably resolvable the same way on the
+    /// Windows CI runner `just test-rust` also runs on. There is no way to
+    /// execute `.cmd` from this (POSIX) suite either, which is exactly why
+    /// the injection bug lived in the `.cmd`-specific code path unexercised
+    /// until manual review.
+    #[cfg(unix)]
+    #[test]
+    fn write_launcher_scripts_sh_rejects_malicious_release_node_at_runtime() {
+        let (root, _temp) = write_scripts(true);
+        let sh_path = root.join("bin/orders");
+        let marker_dir = TempDir::new().unwrap();
+        let marker_path = marker_dir.path().join("beamtalk_launcher_test_pwned");
+
+        let output = std::process::Command::new("sh")
+            .arg(sh_path.as_std_path())
+            .arg("foreground")
+            .env(
+                "RELEASE_NODE",
+                format!("x; touch {}", marker_path.display()),
+            )
+            .env("RELEASE_COOKIE", "test-cookie")
+            .output()
+            .expect("failed to execute launcher.sh");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "malicious RELEASE_NODE must be rejected with exit code 2: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("not a valid instance name"),
+            "stderr: {stderr}"
+        );
+        assert!(
+            !marker_path.exists(),
+            "shell metacharacters in RELEASE_NODE must never be executed"
+        );
+    }
+
     #[test]
     fn write_launcher_scripts_cmd_uses_crlf_line_endings() {
         let (root, _temp) = write_scripts(true);

@@ -191,16 +191,12 @@ pub fn build_release(
         project_root,
         &release_config_dir,
         &release_cfg.sys_config,
+        &release_name,
         release_cfg.console,
         &release_cfg.bind,
         release_cfg.include_compiler,
     )?;
-    assembly::generate_vm_args(
-        project_root,
-        &release_config_dir,
-        &release_cfg.vm_args,
-        &release_name,
-    )?;
+    assembly::generate_vm_args(project_root, &release_config_dir, &release_cfg.vm_args)?;
 
     if release_cfg.include_compiler {
         eprintln!("Staging compiler port binary...");

@@ -23,9 +23,9 @@ use super::node_state::is_node_running;
 use super::process::start_detached_node;
 use super::storage::{
     NodeInfo, WorkspaceMetadata, acquire_workspace_lock, cleanup_stale_node_info, generate_cookie,
-    get_node_info, get_workspace_metadata, save_workspace_cookie, save_workspace_metadata,
-    validate_workspace_name, workspace_dir, workspace_exists, workspace_id_for,
-    workspaces_base_dir,
+    get_node_info, get_workspace_metadata, read_port_file, save_workspace_cookie,
+    save_workspace_metadata, validate_workspace_name, workspace_dir, workspace_exists,
+    workspace_id_for, workspaces_base_dir,
 };
 
 /// Best-effort project-identity fingerprint for `project_path`:
@@ -302,18 +302,60 @@ pub fn get_or_start_workspace(
 /// Summary of a workspace for listing purposes.
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceSummary {
-    /// Unique workspace identifier.
+    /// Unique workspace identifier — a hash of the project path for
+    /// [`WorkspaceKind::Workspace`], or the release's own name for
+    /// [`WorkspaceKind::Release`] (ADR 0125 §1.2's `[release] name`,
+    /// `generate_sys_config`'s `workspace_id`).
     pub workspace_id: String,
-    /// Absolute path to the project directory.
-    pub project_path: PathBuf,
+    /// Absolute path to the project directory. `None` for
+    /// [`WorkspaceKind::Release`]: a release node has no
+    /// `metadata.json` (ADR 0125 §1.4 — only workspace mode writes disk
+    /// artifacts), so its original build-time project path is unknown
+    /// to this listing.
+    pub project_path: Option<PathBuf>,
+    /// Whether this is a persistent dev workspace or an OTP release's
+    /// console (ADR 0125 §1.4/§1.6).
+    pub kind: WorkspaceKind,
     /// Whether the workspace BEAM node is currently running.
     pub status: WorkspaceStatus,
     /// TCP port of the running node, if any.
     pub port: Option<u16>,
-    /// OS process ID of the running node, if any.
+    /// OS process ID of the running node, if any. Always `None` for
+    /// [`WorkspaceKind::Release`] — release nodes write no `pid` file.
     pub pid: Option<u32>,
-    /// Unix timestamp (seconds) when the workspace was created.
-    pub created_at: u64,
+    /// Unix timestamp (seconds) when the workspace was created. `None` for
+    /// [`WorkspaceKind::Release`] (no `metadata.json` to read it from).
+    pub created_at: Option<u64>,
+}
+
+/// Whether a listed workspace is a persistent dev workspace (`beamtalk
+/// repl`/`beamtalk workspace create`) or a running OTP release's console
+/// (`[release] console = true`, ADR 0125 §1.6). A release node is
+/// discovered purely from its REPL port file
+/// (`~/.beamtalk/workspaces/<name>/port`) — it writes no
+/// `metadata.json`/`node.info`, so it supports `list` but not yet the
+/// name-based `attach`/`stop`/`status` flows those files back (those still
+/// need `--port`/`--cookie`, since a release's cookie is deliberately never
+/// persisted to disk — ADR 0125 §1.6).
+/// Named `Workspace`, not `Dev`, so `#[serde(rename_all = "lowercase")]`'s
+/// `--json` output ("workspace") agrees with [`Display`](std::fmt::Display)'s
+/// human-table rendering ("workspace") — a mismatched pair here previously
+/// showed `"kind":"dev"` in JSON next to `workspace` in the table for the
+/// identical row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceKind {
+    Workspace,
+    Release,
+}
+
+impl std::fmt::Display for WorkspaceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Workspace => write!(f, "workspace"),
+            Self::Release => write!(f, "release"),
+        }
+    }
 }
 
 /// Running status of a workspace.
@@ -369,7 +411,54 @@ fn probe_node_status(workspace_id: &str) -> (WorkspaceStatus, Option<NodeInfo>) 
     }
 }
 
+/// Probe a release node's liveness from its bare port file — the only
+/// artifact it writes (see [`WorkspaceKind::Release`]). Unlike
+/// [`probe_node_status`], there is no `node.info` to go stale, so nothing
+/// here is cleaned up; a dead release simply stops reporting as running the
+/// next time its port stops accepting connections.
+fn probe_release_node_status(workspace_id: &str) -> (WorkspaceStatus, Option<u16>) {
+    let Ok(Some((port, nonce))) = read_port_file(workspace_id) else {
+        return (WorkspaceStatus::Stopped, None);
+    };
+    // `node_name`/`pid` are unused by `is_node_running` (it only checks
+    // `port`/`nonce`/`bind_addr`) and are never read back from this
+    // throwaway `NodeInfo` — a release node has no `node.info` to source
+    // real values from.
+    //
+    // `bind_addr: None` (→ `connect_host()`'s 127.0.0.1 default) is a known
+    // gap, not an oversight: the port file
+    // (`beamtalk_repl_server:write_port_file/3`) only ever contains
+    // `PORT\nNONCE`, never the configured `[release] bind` address, so a
+    // release explicitly bound to a specific non-loopback interface would
+    // be probed on the wrong host here and `list` would report it stopped
+    // while it's actually running. Not correctness-critical today —
+    // `attach`/`stop` for release nodes already require an explicit
+    // `--port`/`--host`, so only this `list` status column is affected —
+    // but a real fix would need `bind_addr` threaded into the port file the
+    // way `node.info` carries it for dev workspaces.
+    let info = NodeInfo {
+        node_name: format!("{workspace_id}@localhost"),
+        port,
+        pid: 0,
+        start_time: None,
+        nonce,
+        bind_addr: None,
+    };
+    if is_node_running(&info, Some(workspace_id)) {
+        (WorkspaceStatus::Running, Some(port))
+    } else {
+        (WorkspaceStatus::Stopped, None)
+    }
+}
+
 /// List all workspaces found in `~/.beamtalk/workspaces/`.
+///
+/// Recognizes two kinds of directory (see [`WorkspaceKind`]): a dev
+/// workspace's own `metadata.json`, or — absent that — an OTP release's
+/// bare REPL port file. A directory with neither is some other, unrelated
+/// thing (or leftover lock-file cruft `workspace_dir`/`acquire_workspace_lock`
+/// itself may create) and is silently skipped, exactly as before this
+/// function knew about releases at all.
 pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
     let workspaces_dir = workspaces_base_dir()?;
 
@@ -388,31 +477,41 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
             continue;
         }
 
-        let metadata_path = path.join("metadata.json");
-        if !metadata_path.exists() {
-            continue;
-        }
-
         let Some(workspace_id) = workspace_id_from_path(&path) else {
             continue;
         };
 
-        let Ok(metadata) = get_workspace_metadata(&workspace_id) else {
-            continue;
-        };
+        if path.join("metadata.json").exists() {
+            let Ok(metadata) = get_workspace_metadata(&workspace_id) else {
+                continue;
+            };
 
-        let (status, node) = probe_node_status(&workspace_id);
-        let port = node.as_ref().map(|i| i.port);
-        let pid = node.as_ref().map(|i| i.pid);
+            let (status, node) = probe_node_status(&workspace_id);
+            let port = node.as_ref().map(|i| i.port);
+            let pid = node.as_ref().map(|i| i.pid);
 
-        summaries.push(WorkspaceSummary {
-            workspace_id,
-            project_path: metadata.project_path,
-            status,
-            port,
-            pid,
-            created_at: metadata.created_at,
-        });
+            summaries.push(WorkspaceSummary {
+                workspace_id,
+                project_path: Some(metadata.project_path),
+                kind: WorkspaceKind::Workspace,
+                status,
+                port,
+                pid,
+                created_at: Some(metadata.created_at),
+            });
+        } else if path.join("port").is_file() {
+            let (status, port) = probe_release_node_status(&workspace_id);
+
+            summaries.push(WorkspaceSummary {
+                workspace_id,
+                project_path: None,
+                kind: WorkspaceKind::Release,
+                status,
+                port,
+                pid: None,
+                created_at: None,
+            });
+        }
     }
 
     // Sort by workspace_id for stable output

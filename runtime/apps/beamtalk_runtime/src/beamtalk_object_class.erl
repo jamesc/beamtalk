@@ -1600,7 +1600,14 @@ notify_compiler_server_register(ClassName, Meta) ->
         beamtalk_compiler_server:register_class(ClassName, Meta)
     catch
         error:undef ->
-            ?LOG_WARNING(#{
+            %% `include-compiler = false` is the release/escript default
+            %% (ADR 0125 §1.2), so this fires for every class at every boot
+            %% in the common case — expected steady state, not an
+            %% operational concern, hence ?LOG_DEBUG rather than
+            %% ?LOG_WARNING (matching the sibling `update_class` guard just
+            %% above, which treats the same "compiler server may be absent"
+            %% condition the same way).
+            ?LOG_DEBUG(#{
                 event => register_class_undef,
                 class => ClassName,
                 reason => "beamtalk_compiler_server:register_class/2 not available",

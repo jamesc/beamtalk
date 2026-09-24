@@ -236,8 +236,13 @@ pointing at `[package] version`.
 `_build/deps/`, the same graph `beamtalk build` already resolves), the
 runtime closure, and `kernel`/`stdlib`/`sasl` (`sasl` is already transitive
 — `beamtalk_workspace.app.src` declares it — and would be required
-regardless: `release_handler` lives there). `[release] apps` names *extra* OTP apps (an
-Erlang dependency reached only via FFI, say) that the closure cannot see.
+regardless: `release_handler` lives there). A rebar3 native/hex dependency
+that's *declared* in some staged app's own generated `.app` (e.g. `gun`,
+declared by `http`'s `{applications, …}`) is auto-staged from
+`_build/dev/native/default/lib/` — the closure doesn't need to be told about
+it. `[release] apps` names *extra* OTP apps that stay genuinely invisible to
+that walk: a dependency reached only via raw FFI, never named in any staged
+app's `{applications, …}` list.
 
 **The closure is an application-level set, and an application's own `.app`
 decides its dependencies — not this ADR.** Two consequences follow, and

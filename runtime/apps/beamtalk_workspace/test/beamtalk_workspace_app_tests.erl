@@ -88,6 +88,53 @@ env_workspace_config_reads_overrides_test() ->
     end.
 
 %%====================================================================
+%% release_workspace_id/0 (BT-3617 follow-up — RELEASE_NODE, ADR 0126 §9)
+%%====================================================================
+
+%% No RELEASE_NODE set: falls back to the sys.config-baked workspace_id
+%% (the release's own name, `generate_sys_config`) — today's behaviour,
+%% unchanged.
+release_workspace_id_falls_back_to_sys_config_test() ->
+    clear_env(),
+    ok = application:set_env(beamtalk_workspace, workspace_id, <<"symphony">>),
+    true = os:unsetenv("RELEASE_NODE"),
+    try
+        ?assertEqual(<<"symphony">>, beamtalk_workspace_app:release_workspace_id())
+    after
+        clear_env()
+    end.
+
+%% RELEASE_NODE set: it wins over the sys.config-baked workspace_id — this
+%% is what lets two instances of the *same* release, started with distinct
+%% RELEASE_NODE values, scope their REPL port files
+%% (~/.beamtalk/workspaces/<workspace_id>/port) independently, matching the
+%% distinct `-sname`s `launcher.sh`'s `node_sname` gives them.
+release_workspace_id_prefers_release_node_env_var_test() ->
+    clear_env(),
+    ok = application:set_env(beamtalk_workspace, workspace_id, <<"symphony">>),
+    true = os:putenv("RELEASE_NODE", "symphony1"),
+    try
+        ?assertEqual(<<"symphony1">>, beamtalk_workspace_app:release_workspace_id())
+    after
+        os:unsetenv("RELEASE_NODE"),
+        clear_env()
+    end.
+
+%% An empty RELEASE_NODE (e.g. `RELEASE_NODE= bin/symphony foreground`,
+%% rather than genuinely unset) must not produce an empty-binary
+%% workspace_id — treated the same as unset.
+release_workspace_id_treats_empty_release_node_as_unset_test() ->
+    clear_env(),
+    ok = application:set_env(beamtalk_workspace, workspace_id, <<"symphony">>),
+    true = os:putenv("RELEASE_NODE", ""),
+    try
+        ?assertEqual(<<"symphony">>, beamtalk_workspace_app:release_workspace_id())
+    after
+        os:unsetenv("RELEASE_NODE"),
+        clear_env()
+    end.
+
+%%====================================================================
 %% parse_bind_addr/1
 %%====================================================================
 

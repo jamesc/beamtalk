@@ -36,6 +36,35 @@ rem Pin epmd to loopback (ADR 0125 §1.6) for every verb that can start
 rem distribution or epmd itself — see launcher.sh's identical comment.
 set "ERL_EPMD_ADDRESS=127.0.0.1"
 
+rem Reject a malformed RELEASE_NODE before it ever reaches erl.exe — see
+rem launcher.sh's identical check for why (an invalid -sname otherwise
+rem crashes the whole node with a raw kernel crash dump). Same charset as
+rem the CLI's own dev-workspace-id validation: letters, digits, -, _ only.
+rem
+rem Deliberately NOT `echo(%RELEASE_NODE%| findstr ...`: %VAR% expands
+rem *before* cmd.exe tokenizes operators on the line, so an unquoted value
+rem containing '&'/'|'/'^'/'<'/'>' is interpreted as a shell operator at
+rem the moment this very check runs — command injection in the check meant
+rem to reject unsafe values (e.g. `RELEASE_NODE=x & calc.exe` runs
+rem calc.exe). Quoting the expansion narrows but does not close this (an
+rem embedded '"' still breaks out). Delayed expansion (`!VAR!`) is safe
+rem here instead: it substitutes *after* the line has already been parsed,
+rem so special characters in the value become inert literal text, never
+rem new operators — this is why `setlocal enabledelayedexpansion` is set
+rem at the top of this file. The character-class check itself uses only
+rem `set`/`for` substitution, never piping the raw value through a spawned
+rem command.
+if defined RELEASE_NODE (
+    set "RN_CHECK=!RELEASE_NODE!"
+    for %%C in (A B C D E F G H I J K L M N O P Q R S T U V W X Y Z a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 - _) do (
+        set "RN_CHECK=!RN_CHECK:%%C=!"
+    )
+    if defined RN_CHECK (
+        echo error: RELEASE_NODE "!RELEASE_NODE!" is not a valid instance name ^(letters, digits, '-', '_' only^) 1>&2
+        exit /b 2
+    )
+)
+
 set "VERB=%~1"
 if "%VERB%"=="" set "VERB=foreground"
 if not "%VERB%"=="" shift
@@ -121,6 +150,20 @@ set "COOKIE_ARGS="
 if defined RELEASE_COOKIE set "COOKIE_ARGS=-setcookie %RELEASE_COOKIE%"
 exit /b 0
 
+rem This node's own -sname: RELEASE_NODE if set, else the release name
+rem (matching `mix release`'s identically-named env var) — see
+rem launcher.sh's `node_sname` comment for why this must never be baked
+rem into vm.args (erl keeps the *first* -sname it sees and warns on a
+rem duplicate). This is what lets more than one instance of the same
+rem release run on one host at once (ADR 0126 section 9).
+:node_sname
+if defined RELEASE_NODE (
+    set "THIS_NODE=%RELEASE_NODE%@localhost"
+) else (
+    set "THIS_NODE=%RELEASE_NAME%@localhost"
+)
+exit /b 0
+
 rem `-boot` for every verb below except `foreground` — see launcher.sh's
 rem `minimal_boot_args` comment: with no `-boot`, erl.exe falls back to
 rem `%ROOT%\bin\start.boot`, which does not exist; `copy_erts` stages a
@@ -137,11 +180,13 @@ exit /b 0
 call :check_otp_window
 if errorlevel 1 exit /b 1
 call :cookie_args
+call :node_sname
 rem -noshell -noinput: see launcher.sh's foreground comment — no
 rem interactive shell attaches stdin, so a supervisor with no tty
 rem (a Windows service, a container) does not make the node see EOF
 rem and terminate right after boot. Console output is unaffected.
 "%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
+    -sname "%THIS_NODE%" ^
     -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args" %COOKIE_ARGS%
 exit /b %errorlevel%
 
@@ -151,9 +196,12 @@ if errorlevel 1 exit /b 1
 call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
+call :node_sname
 set "SNAME=%RELEASE_NAME%_stop_%RANDOM%"
-rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
-set "NODE=%RELEASE_NAME%@localhost"
+rem This instance's own name — see :node_sname's comment (respects
+rem RELEASE_NODE, so stop targets whichever instance was started with
+rem the same value).
+set "NODE=%THIS_NODE%"
 "%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
@@ -164,9 +212,12 @@ if errorlevel 1 exit /b 1
 call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
+call :node_sname
 set "SNAME=%RELEASE_NAME%_ping_%RANDOM%"
-rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
-set "NODE=%RELEASE_NAME%@localhost"
+rem This instance's own name — see :node_sname's comment (respects
+rem RELEASE_NODE, so ping targets whichever instance was started with
+rem the same value).
+set "NODE=%THIS_NODE%"
 "%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
 exit /b %errorlevel%
@@ -176,9 +227,12 @@ call :check_otp_window
 if errorlevel 1 exit /b 1
 call :cookie_args
 call :minimal_boot_args
+call :node_sname
 set "SNAME=%RELEASE_NAME%_rc_%RANDOM%"
-rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
-set "NODE=%RELEASE_NAME%@localhost"
+rem This instance's own name — see :node_sname's comment (respects
+rem RELEASE_NODE, so remote_console attaches to whichever instance was
+rem started with the same value).
+set "NODE=%THIS_NODE%"
 "%ERL%" -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% -remsh "%NODE%"
 exit /b %errorlevel%
 
@@ -217,9 +271,12 @@ if not defined SELECTOR goto :usage
 call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
+call :node_sname
 set "SNAME=%RELEASE_NAME%_rpc_%RANDOM%"
-rem @localhost, not %COMPUTERNAME% — see launcher.sh's identical comment.
-set "NODE=%RELEASE_NAME%@localhost"
+rem This instance's own name — see :node_sname's comment (respects
+rem RELEASE_NODE, so rpc targets whichever instance was started with
+rem the same value).
+set "NODE=%THIS_NODE%"
 "%ERL%" -noshell -hidden -sname "%SNAME%" %COOKIE_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%

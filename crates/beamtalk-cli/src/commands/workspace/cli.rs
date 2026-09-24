@@ -203,34 +203,36 @@ fn run_list(json: bool) -> Result<()> {
 
     // Table header
     println!(
-        "{:<2} {:<14} {:<30} {:<10} {:<6}",
-        "", "WORKSPACE", "PROJECT", "STATUS", "PORT"
+        "{:<2} {:<14} {:<30} {:<9} {:<10} {:<6}",
+        "", "WORKSPACE", "PROJECT", "KIND", "STATUS", "PORT"
     );
 
     for ws in &workspaces {
-        let is_current = current_project_root.as_ref().is_some_and(|root| {
-            // Compare canonicalized paths to handle symlinks/relative paths
-            let root_canon = root.canonicalize().ok();
-            let ws_canon = ws.project_path.canonicalize().ok();
-            match (root_canon, ws_canon) {
-                (Some(a), Some(b)) => a == b,
-                _ => root == &ws.project_path,
-            }
+        let is_current = ws.project_path.as_deref().is_some_and(|ws_path| {
+            current_project_root.as_ref().is_some_and(|root| {
+                // Compare canonicalized paths to handle symlinks/relative paths
+                let root_canon = root.canonicalize().ok();
+                let ws_canon = ws_path.canonicalize().ok();
+                match (root_canon, ws_canon) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => root == ws_path,
+                }
+            })
         });
         let marker = if is_current { "▸" } else { "" };
 
-        let project = ws
-            .project_path
-            .to_string_lossy()
-            .chars()
-            .take(30)
-            .collect::<String>();
+        // `-` for a release node (`ws.project_path` is `None` — see
+        // `WorkspaceKind::Release`), not the original build-time path.
+        let project = ws.project_path.as_ref().map_or_else(
+            || "-".to_string(),
+            |p| p.to_string_lossy().chars().take(30).collect::<String>(),
+        );
 
         let port_str = ws.port.map_or_else(|| "-".to_string(), |p| p.to_string());
 
         println!(
-            "{:<2} {:<14} {:<30} {:<10} {:<6}",
-            marker, ws.workspace_id, project, ws.status, port_str
+            "{:<2} {:<14} {:<30} {:<9} {:<10} {:<6}",
+            marker, ws.workspace_id, project, ws.kind, ws.status, port_str
         );
     }
 
