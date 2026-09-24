@@ -3173,7 +3173,10 @@ registerAs(Self, _Name) ->
 FFI shim for `unregister -> Symbol`.
 
 Idempotent: returns `#ok` even if the receiver was not registered or was
-already unregistered. Only raises on real failures (reserved-name, type error).
+already unregistered. Only raises on real failures (reserved-name, type
+error) — and, for a node-qualified proxy pointing at a genuinely remote
+node (ADR 0126 §3), `node_down`/`timeout` when that node cannot be reached
+to find out, since the name may still be registered there.
 """.
 -spec unregister(#beamtalk_object{}) -> ok.
 unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
@@ -3211,7 +3214,15 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
         error:{erpc, timeout} ->
             beamtalk_error:raise(
                 (remote_timeout_error_record(Self#beamtalk_object.class, unregister, true))
-            )
+            );
+        error:{erpc, ErpcReason} ->
+            beamtalk_error:raise(
+                generic_remote_error(Self#beamtalk_object.class, unregister, {erpc, ErpcReason})
+            );
+        error:{exception, Reason, _Stack} ->
+            beamtalk_error:raise(remote_unregister_error(Self#beamtalk_object.class, Reason));
+        exit:{exception, Reason} ->
+            beamtalk_error:raise(remote_unregister_error(Self#beamtalk_object.class, Reason))
     end;
 unregister(Self) when is_record(Self, beamtalk_object) ->
     %% ADR 0079: name-resolving proxies (`pid = {registered, N}`, including
@@ -3638,11 +3649,11 @@ remote_named(Node, ReceiverClass, Name) ->
                 error:{erpc, timeout} ->
                     {error, remote_timeout_error_record(ReceiverClass, Selector, true)};
                 error:{erpc, ErpcReason} ->
-                    {error, generic_spawn_error(ReceiverClass, Selector, {erpc, ErpcReason})};
+                    {error, generic_remote_error(ReceiverClass, Selector, {erpc, ErpcReason})};
                 error:{exception, Reason, _Stack} ->
-                    {error, generic_spawn_error(ReceiverClass, Selector, Reason)};
+                    {error, generic_remote_error(ReceiverClass, Selector, Reason)};
                 exit:{exception, Reason} ->
-                    {error, generic_spawn_error(ReceiverClass, Selector, Reason)}
+                    {error, generic_remote_error(ReceiverClass, Selector, Reason)}
             end
     end.
 
@@ -3681,11 +3692,11 @@ remote_all_registered(Node) ->
                 error:{erpc, timeout} ->
                     {error, remote_timeout_error_record('Actor', Selector, true)};
                 error:{erpc, ErpcReason} ->
-                    {error, generic_spawn_error('Actor', Selector, {erpc, ErpcReason})};
+                    {error, generic_remote_error('Actor', Selector, {erpc, ErpcReason})};
                 error:{exception, Reason, _Stack} ->
-                    {error, generic_spawn_error('Actor', Selector, Reason)};
+                    {error, generic_remote_error('Actor', Selector, Reason)};
                 exit:{exception, Reason} ->
-                    {error, generic_spawn_error('Actor', Selector, Reason)}
+                    {error, generic_remote_error('Actor', Selector, Reason)}
             end
     end.
 
@@ -4028,6 +4039,41 @@ generic_spawn_error(ClassName, Selector, Reason) ->
         ),
         iolist_to_binary(io_lib:format("spawn failed: ~tp", [Reason]))
     ).
+
+-doc """
+Catch-all for an unusual `erpc`/remote-side failure on a non-spawn remote op
+(`named:on:`, `allRegisteredOn:`, remote `unregister`) — `generic_spawn_error/3`'s
+`kind = instantiation_error`/"spawn failed" wording is specific to spawn and
+would misdescribe a failed lookup or unregister, so those get this neutral
+`runtime_error` instead (ADR 0126 §3).
+""".
+-spec generic_remote_error(atom(), atom(), term()) -> #beamtalk_error{}.
+generic_remote_error(ClassName, Selector, Reason) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:with_selector(
+            beamtalk_error:new(runtime_error, ClassName),
+            Selector
+        ),
+        iolist_to_binary(io_lib:format("remote operation failed: ~tp", [Reason]))
+    ).
+
+-doc """
+`erpc:call/5` re-surfaces a remote `beamtalk_error:raise/1` as
+`error:{exception, Reason, Stacktrace}` at the origin, where `Reason` is
+`raise/1`'s own wrap: `#{'$beamtalk_class' => _, error := #beamtalk_error{}}`
+(`beamtalk_exception_handler:wrap/1`). When the remote `unregister/1` call
+(via `unregister_resolved/2`) raised a genuine structured error this way —
+`name_registered` on a lost TOCTOU race, a reserved-name/type error, etc. —
+unwrap and re-raise *that* error, with this node's own view of the class
+and `unregister` selector, so the caller sees the real `kind`/`hint` instead
+of a generic wrapper. Any other exception shape falls back to
+`generic_remote_error/3`.
+""".
+-spec remote_unregister_error(atom(), term()) -> #beamtalk_error{}.
+remote_unregister_error(ClassName, #{error := #beamtalk_error{} = Err}) ->
+    Err#beamtalk_error{class = ClassName, selector = unregister};
+remote_unregister_error(ClassName, Reason) ->
+    generic_remote_error(ClassName, unregister, Reason).
 
 -spec name_registered_error(atom()) -> {error, #beamtalk_error{}}.
 name_registered_error(Name) ->
