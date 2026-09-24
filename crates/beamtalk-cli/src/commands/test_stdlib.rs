@@ -465,6 +465,9 @@ pub(crate) fn compile_fixture(
     suppress_warnings: bool,
     warnings_as_errors: bool,
     pre_loaded_aliases: &[beamtalk_core::semantic_analysis::alias_registry::AliasInfo],
+    native_type_registry: Option<
+        &std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    >,
 ) -> Result<String> {
     let stem = fixture_path
         .file_stem()
@@ -494,6 +497,7 @@ pub(crate) fn compile_fixture(
             pre_loaded_aliases: pre_loaded_aliases.to_vec(),
             ..Default::default()
         },
+        native_type_registry: native_type_registry.cloned(),
         ..Default::default()
     };
     crate::beam_compiler::compile_source_with_bindings(
@@ -580,6 +584,20 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     // class name. See `build::collect_sibling_src_alias_infos`'s doc.
     let pre_loaded_aliases = crate::commands::build::collect_sibling_src_alias_infos(&test_path);
 
+    // BT-3617: same "no manifest/package concept" gap as the alias registry
+    // above, for ADR 0075 FFI typing — without it, an `@load` fixture's
+    // `(Erlang mod) fn:` calls always type-check as `Dynamic` under
+    // `test-stdlib`, unlike `beamtalk build`/`beamtalk lint`. `test-stdlib`
+    // only ever runs against `stdlib/bootstrap-test`, so this mirrors
+    // `beamtalk lint`'s BT-3606 stdlib fallback directly rather than
+    // `beamtalk test`'s fuller per-package resolution chain.
+    let native_type_registry = test_files
+        .iter()
+        .any(|f| beamtalk_project::package::is_under_stdlib_dir(f.as_std_path()))
+        .then(super::build_stdlib::extract_stdlib_type_specs)
+        .flatten()
+        .map(std::sync::Arc::new);
+
     // Phase 1: Compile all test files (Core Erlang + EUnit wrappers)
     let mut compiled_files = Vec::new();
     let mut all_core_files = Vec::new();
@@ -594,6 +612,7 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
             opts.no_warnings,
             opts.warnings_as_errors,
             &pre_loaded_aliases,
+            native_type_registry.as_ref(),
         )?;
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);
@@ -740,6 +759,9 @@ pub(crate) fn compile_single_test_file(
     suppress_warnings: bool,
     warnings_as_errors: bool,
     pre_loaded_aliases: &[beamtalk_core::semantic_analysis::alias_registry::AliasInfo],
+    native_type_registry: Option<
+        &std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    >,
 ) -> Result<CompilationResult> {
     let content = fs::read_to_string(test_file)
         .into_diagnostic()
@@ -776,6 +798,7 @@ pub(crate) fn compile_single_test_file(
             suppress_warnings,
             warnings_as_errors,
             pre_loaded_aliases,
+            native_type_registry,
         )?;
         fixture_modules.push(module_name);
     }

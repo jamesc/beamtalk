@@ -455,6 +455,10 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
             opts.no_warnings,
             opts.warnings_as_errors,
             &pre_loaded_aliases,
+            // BT-3617 only wired FFI typing into `test-stdlib` proper; markdown
+            // doctests run over `docs/*.md`, not the stdlib tree, so there is
+            // no `extract_stdlib_type_specs()` fallback to apply here.
+            None,
         )
         .wrap_err_with(|| format!("Failed to compile doctests from '{md_path}'"))?;
 
