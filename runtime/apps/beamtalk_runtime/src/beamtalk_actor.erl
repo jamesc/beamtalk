@@ -2515,22 +2515,14 @@ maybe_reject_future(FuturePid, Reason) ->
 -doc """
 Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
 `'\$beamtalk_wire'` envelope whose leading version this node does not
-recognise (ADR 0126 §5.1).
+recognise (ADR 0126 §5.1) — request direction, via the shared
+`beamtalk_wire:wire_version_unsupported_error/4` (CLAUDE.md "No duplicate
+implementations"; `beamtalk_future:decode_wire_reply/1` builds the
+reply-direction counterpart through the same constructor).
 """.
 -spec wire_version_unsupported_error(atom(), term()) -> #beamtalk_error{}.
 wire_version_unsupported_error(Selector, SentVersion) ->
-    beamtalk_error:with_details(
-        beamtalk_error:with_hint(
-            beamtalk_error:new(wire_version_unsupported, unknown, Selector),
-            iolist_to_binary(
-                io_lib:format(
-                    "wire envelope version ~p is not supported by this node (known version ~p)",
-                    [SentVersion, ?BT_WIRE_VERSION]
-                )
-            )
-        ),
-        #{sent => SentVersion, known => ?BT_WIRE_VERSION, node => node()}
-    ).
+    beamtalk_wire:wire_version_unsupported_error(unknown, Selector, SentVersion, #{}).
 
 -doc """
 Recognise and decode a `'\$beamtalk_wire'` call envelope (ADR 0126 §5.1) —
@@ -4479,38 +4471,9 @@ fired. Retrying an anonymous `spawnOn:` risks a duplicate actor; a named
 -spec remote_spawn(node(), atom(), atom() | undefined, atom()) ->
     {ok, pid()} | {error, #beamtalk_error{}}.
 remote_spawn(Node, ClassName, NameOrUndefined, Selector) ->
-    case beamtalk_node:connect_policy(Node, beamtalk_node:tls_distribution()) of
-        {error, #beamtalk_error{} = Refused} ->
-            {error, Refused#beamtalk_error{class = ClassName, selector = Selector}};
-        ok ->
-            try
-                erpc:call(
-                    Node,
-                    ?MODULE,
-                    remote_spawn_target,
-                    [ClassName, NameOrUndefined],
-                    ?BT_REMOTE_CALL_TIMEOUT
-                )
-            of
-                {ok, Pid} ->
-                    {ok, Pid};
-                {error, #beamtalk_error{} = Err} ->
-                    {error, Err#beamtalk_error{class = ClassName, selector = Selector}};
-                {error, Reason} ->
-                    {error, generic_spawn_error(ClassName, Selector, Reason)}
-            catch
-                error:{erpc, noconnection} ->
-                    {error, node_down_error_record(Node, Selector)};
-                error:{erpc, timeout} ->
-                    {error, remote_timeout_error_record(ClassName, Selector, false)};
-                error:{erpc, ErpcReason} ->
-                    {error, generic_spawn_error(ClassName, Selector, {erpc, ErpcReason})};
-                error:{exception, Reason, _Stack} ->
-                    {error, generic_spawn_error(ClassName, Selector, Reason)};
-                exit:{exception, Reason} ->
-                    {error, generic_spawn_error(ClassName, Selector, Reason)}
-            end
-    end.
+    remote_spawn_erpc(
+        Node, ClassName, NameOrUndefined, Selector, remote_spawn_target, fun() -> {ok, []} end
+    ).
 
 -doc """
 Runs ON the target node, in the `erpc` worker process `remote_spawn/4`'s
@@ -4566,55 +4529,24 @@ ships raw, unversioned args, exactly like every other cross-node send
 request-direction failure: it never reaches the network, and is returned
 here in the caller, matching `wire_sync_call/5`'s send-side behaviour for
 ordinary sends. Otherwise shares `remote_spawn/4`'s connect-policy check and
-`erpc`/connection failure mapping verbatim.
+`erpc`/connection failure mapping verbatim, via `remote_spawn_erpc/6`.
 """.
 -spec remote_spawn_with(node(), atom(), atom() | undefined, term(), atom()) ->
     {ok, pid()} | {error, #beamtalk_error{}}.
 remote_spawn_with(Node, ClassName, NameOrUndefined, InitArgs, Selector) ->
-    case beamtalk_node:connect_policy(Node, beamtalk_node:tls_distribution()) of
-        {error, #beamtalk_error{} = Refused} ->
-            {error, Refused#beamtalk_error{class = ClassName, selector = Selector}};
-        ok ->
+    remote_spawn_erpc(
+        Node,
+        ClassName,
+        NameOrUndefined,
+        Selector,
+        remote_spawn_with_target,
+        fun() ->
             case beamtalk_wire:encode(InitArgs) of
-                {ok, WireInitArgs} ->
-                    do_remote_spawn_with_erpc(
-                        Node, ClassName, NameOrUndefined, WireInitArgs, Selector
-                    );
-                {error, #beamtalk_error{} = EncErr} ->
-                    {error, EncErr#beamtalk_error{class = ClassName, selector = Selector}}
+                {ok, WireInitArgs} -> {ok, [WireInitArgs]};
+                {error, #beamtalk_error{}} = EncErr -> EncErr
             end
-    end.
-
--spec do_remote_spawn_with_erpc(node(), atom(), atom() | undefined, term(), atom()) ->
-    {ok, pid()} | {error, #beamtalk_error{}}.
-do_remote_spawn_with_erpc(Node, ClassName, NameOrUndefined, WireInitArgs, Selector) ->
-    try
-        erpc:call(
-            Node,
-            ?MODULE,
-            remote_spawn_with_target,
-            [ClassName, NameOrUndefined, WireInitArgs],
-            ?BT_REMOTE_CALL_TIMEOUT
-        )
-    of
-        {ok, Pid} ->
-            {ok, Pid};
-        {error, #beamtalk_error{} = Err} ->
-            {error, Err#beamtalk_error{class = ClassName, selector = Selector}};
-        {error, Reason} ->
-            {error, generic_spawn_error(ClassName, Selector, Reason)}
-    catch
-        error:{erpc, noconnection} ->
-            {error, node_down_error_record(Node, Selector)};
-        error:{erpc, timeout} ->
-            {error, remote_timeout_error_record(ClassName, Selector, false)};
-        error:{erpc, ErpcReason} ->
-            {error, generic_spawn_error(ClassName, Selector, {erpc, ErpcReason})};
-        error:{exception, Reason, _Stack} ->
-            {error, generic_spawn_error(ClassName, Selector, Reason)};
-        exit:{exception, Reason} ->
-            {error, generic_spawn_error(ClassName, Selector, Reason)}
-    end.
+        end
+    ).
 
 -doc """
 Runs ON the target node, in the `erpc` worker process `remote_spawn_with/5`'s
@@ -4647,6 +4579,75 @@ remote_spawn_with_target(ClassName, NameOrUndefined, WireInitArgs) ->
             end;
         {error, #beamtalk_error{}} = Err ->
             Err
+    end.
+
+-doc """
+Shared connect-policy-check + `erpc:call/5` + catch-mapping for
+`remote_spawn/4` and `remote_spawn_with/5` (CLAUDE.md "No duplicate
+implementations") — the two differ only in which target function `erpc`
+invokes on the remote node and what, if anything, is computed (and may
+itself fail, e.g. `remote_spawn_with/5`'s wire-encode) as that target
+function's extra arguments beyond `[ClassName, NameOrUndefined]`.
+
+`BuildExtraArgs` is invoked only after `connect_policy/2` allows the
+connection — never before, matching both callers' original ordering (a
+refused connection is reported without ever running `remote_spawn_with/5`'s
+wire-encode) — and its own `{error, #beamtalk_error{}}` is `class`/`selector`
+tagged exactly like a `connect_policy/2` refusal or an `erpc` failure below.
+""".
+-spec remote_spawn_erpc(
+    node(),
+    atom(),
+    atom() | undefined,
+    atom(),
+    atom(),
+    fun(() -> {ok, [term()]} | {error, #beamtalk_error{}})
+) -> {ok, pid()} | {error, #beamtalk_error{}}.
+remote_spawn_erpc(Node, ClassName, NameOrUndefined, Selector, TargetFun, BuildExtraArgs) ->
+    case beamtalk_node:connect_policy(Node, beamtalk_node:tls_distribution()) of
+        {error, #beamtalk_error{} = Refused} ->
+            {error, Refused#beamtalk_error{class = ClassName, selector = Selector}};
+        ok ->
+            case BuildExtraArgs() of
+                {ok, ExtraArgs} ->
+                    remote_spawn_erpc_call(
+                        Node, ClassName, NameOrUndefined, Selector, TargetFun, ExtraArgs
+                    );
+                {error, #beamtalk_error{} = Err} ->
+                    {error, Err#beamtalk_error{class = ClassName, selector = Selector}}
+            end
+    end.
+
+-spec remote_spawn_erpc_call(
+    node(), atom(), atom() | undefined, atom(), atom(), [term()]
+) -> {ok, pid()} | {error, #beamtalk_error{}}.
+remote_spawn_erpc_call(Node, ClassName, NameOrUndefined, Selector, TargetFun, ExtraArgs) ->
+    try
+        erpc:call(
+            Node,
+            ?MODULE,
+            TargetFun,
+            [ClassName, NameOrUndefined | ExtraArgs],
+            ?BT_REMOTE_CALL_TIMEOUT
+        )
+    of
+        {ok, Pid} ->
+            {ok, Pid};
+        {error, #beamtalk_error{} = Err} ->
+            {error, Err#beamtalk_error{class = ClassName, selector = Selector}};
+        {error, Reason} ->
+            {error, generic_spawn_error(ClassName, Selector, Reason)}
+    catch
+        error:{erpc, noconnection} ->
+            {error, node_down_error_record(Node, Selector)};
+        error:{erpc, timeout} ->
+            {error, remote_timeout_error_record(ClassName, Selector, false)};
+        error:{erpc, ErpcReason} ->
+            {error, generic_spawn_error(ClassName, Selector, {erpc, ErpcReason})};
+        error:{exception, Reason, _Stack} ->
+            {error, generic_spawn_error(ClassName, Selector, Reason)};
+        exit:{exception, Reason} ->
+            {error, generic_spawn_error(ClassName, Selector, Reason)}
     end.
 
 -doc """

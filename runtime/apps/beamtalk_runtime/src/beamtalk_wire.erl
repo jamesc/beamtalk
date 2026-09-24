@@ -74,7 +74,7 @@ ADR 0126 §5.1 calls out explicitly (a *builtin* collection's contents, and a
 
 -include("beamtalk.hrl").
 
--export([encode/1, decode/1]).
+-export([encode/1, decode/1, wire_version_unsupported_error/4]).
 
 %%====================================================================
 %% Public API
@@ -103,6 +103,32 @@ node.
 -spec decode(term()) -> {ok, term()} | {error, #beamtalk_error{}}.
 decode(Term) ->
     decode_at(Term, [], 0).
+
+-doc """
+Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
+`'\$beamtalk_wire'`/`'\$beamtalk_wire_reply'` envelope whose leading version
+this node does not recognise (ADR 0126 §5.1) — the one place this error
+shape is built (CLAUDE.md "No duplicate implementations"), called both by
+`beamtalk_actor`'s call/cast wire-tag dispatch (request direction, `Class =
+unknown`, the message's own `Selector`) and by `beamtalk_future`'s
+`decode_wire_reply/1` (reply direction, `Class = 'Future'`, no `Selector`,
+`ExtraDetails = #{direction => reply}`).
+""".
+-spec wire_version_unsupported_error(atom(), atom() | undefined, term(), map()) ->
+    #beamtalk_error{}.
+wire_version_unsupported_error(Class, Selector, SentVersion, ExtraDetails) ->
+    beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(wire_version_unsupported, Class, Selector),
+            iolist_to_binary(
+                io_lib:format(
+                    "wire envelope version ~p is not supported by this node (known version ~p)",
+                    [SentVersion, ?BT_WIRE_VERSION]
+                )
+            )
+        ),
+        maps:merge(#{sent => SentVersion, known => ?BT_WIRE_VERSION, node => node()}, ExtraDetails)
+    ).
 
 %%====================================================================
 %% encode/1 — dispatch
