@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0125 §1.1/§1.5/§1.6 end-to-end console coverage (BT-3576): attaches
+// to a *real*, `beamtalk release`-assembled node with `[release] console =
+// true`, booted from its own generated `.rel`/`start.boot`/`sys.config` —
+// the actual `beamtalk_workspace_app:start/2` app-env-driven start path and
+// `.app` module activation a deployed release goes through
+// (`ProcessManager::start_real_release`) — unlike
+// `release_console_default.btscript` / `release_console_include_compiler.btscript`
+// (BT-3575), which assert the same wire-level behaviour against a
+// hand-started `beamtalk_workspace_sup:start_link/1` fixture that never ran
+// through a real boot script.
+//
+// The default (no `include-compiler`) release: `run-entry` — the
+// always-available, no-compiler dispatch path (ADR 0125 §1.5/§1.7), also
+// what `bin/<name> eval`/`rpc` use — reaches a real project class, and
+// `eval` (source) is refused with `release_mode_no_compiler`.
+//
+// `run_test_file_opts` skips `clear_bindings` for this file, matching
+// `release_console_default.btscript` — see its own doc for why
+// (`Session current clear` is itself an eval, always refused here).
+
+:run-entry ReleaseSmoke ping
+// => 42
+
+1 + 1
+// => ERROR: OTP release

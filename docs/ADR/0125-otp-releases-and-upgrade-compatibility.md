@@ -1,7 +1,9 @@
 # ADR 0125: OTP Releases and Upgrade Compatibility
 
 ## Status
-Accepted (2026-09-22)
+Implemented (2026-09-24) — via Epic
+[BT-3567](https://linear.app/beamtalk/issue/BT-3567) (Phases A–F,
+BT-3568…BT-3576).
 
 ## Context
 
@@ -1819,7 +1821,7 @@ transitional boolean clause** (the same discipline ADR 0123 applied to the
 ## Implementation Tracking
 
 **Epic:** [BT-3567](https://linear.app/beamtalk/issue/BT-3567)
-**Status:** Planned
+**Status:** Implemented
 **Issues:**
 
 | Phase | Issue | Title | Size | Blocked by |

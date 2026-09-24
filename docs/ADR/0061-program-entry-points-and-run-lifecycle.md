@@ -7,6 +7,12 @@ Implemented (2026-03-10)
 arity-1 keyword selector (any name, e.g. `main:` — not a hard-coded literal)
 that receives argv as a `List(String)` — see ADR 0099 §"Amendment to ADR 0061".
 
+**Amended by ADR 0125** (2026-09-24): § "Future: Release Mode" below is
+corrected — the release-mode design constraint is resolved, "TLS + auth
+required" is replaced by ADR 0058's actual stance, and the release row's
+"Bootstrap: ✗ (pre-loaded)" is corrected — see that section and ADR 0125
+§"Amendment to ADR 0061".
+
 ## Context
 
 ### The Problem
@@ -299,19 +305,26 @@ beamtalk run Main run
 
 ## Future: Release Mode
 
+**Amended by ADR 0125** (2026-09-24, BT-3576): `beamtalk release` shipped as
+ADR 0125 (Implemented), which answers this section's open questions. The
+three items below are corrected in place — struck through where this
+section's original guess turned out wrong — rather than left to mislead a
+reader who finds ADR 0061 first; the rest of this section is kept as
+written for history.
+
 `beamtalk release` (planned, separate ADR) produces a self-contained OTP release for production deployment. This introduces a third operational mode:
 
 | Mode | Bootstrap | REPL server | Workspace registry | Use case |
 |---|---|---|---|---|
 | Run mode (`repl=false`) | ✓ | ✗ | ✗ | Scripts via `beamtalk run` |
 | Full workspace | ✓ | ✓ | ✓ | Dev: `beamtalk run` (services) and `beamtalk repl` |
-| Release | ✗ (pre-loaded) | ✓ | ✗ | Production deployments |
+| Release | ~~✗ (pre-loaded)~~ **✓ — explicit activation from the `.app` module lists, like every other mode (ADR 0125 §1.4)** | ✓ (opt-in, `[release] console`) | ✗ | Production deployments |
 
-**Class loading in releases:** All `bt@*.beam` files bundled and pre-loaded at boot. `beamtalk_workspace_bootstrap` not needed — classes registered before supervisor starts. Sidesteps the class-loading problem ADR 0061 fixes for dev.
+**Class loading in releases:** ~~All `bt@*.beam` files bundled and pre-loaded at boot. `beamtalk_workspace_bootstrap` not needed — classes registered before supervisor starts.~~ **Wrong in both of the VM's boot modes — checked empirically in ADR 0125 §1.4: interactive mode skips an application's `primLoad` entries (lazy load on first reference, so an unreferenced class never registers), and embedded mode's `primLoad` runs `-on_load` — and so `register_class/0` — before any application, including the runtime whose ETS tables it needs, has started, which halts the boot. A release therefore boots in interactive mode and performs the same explicit activation run/workspace mode already do, just reading the module list from each shipped app's `{modules, …}` instead of scanning `_build/`** (`beamtalk_module_activation:activate_modules/2`, driven from `beamtalk_workspace_app:start/2`). Sidesteps the class-loading problem ADR 0061 fixes for dev.
 
-**REPL against a release:** `beamtalk repl --host prod.example.com --port 4001` connects via the same protocol as dev. The release includes a minimal REPL server (`beamtalk_repl_server` + `beamtalk_session_sup`) without the full workspace. Security defaults stricter: TLS + auth required (see ADR 0058).
+**REPL against a release:** `beamtalk repl --host prod.example.com --port 4001` connects via the same protocol as dev. The release includes a minimal REPL server (`beamtalk_repl_server` + `beamtalk_session_sup`) without the full workspace. ~~Security defaults stricter: TLS + auth required (see ADR 0058).~~ **Superseded by ADR 0058, and wrong even when this was written: Beamtalk implements no TLS of its own (mTLS was removed in PR #1401). The actual release console stance (ADR 0125 §1.6) is: off by default (`[release] console = false`); loopback-bound when enabled (`bind = "127.0.0.1"`); the cookie handshake mandatory in every case, refusing to boot with `console = true` and no cookie configured; a non-loopback `bind` logs a warning rather than refusing; and TLS, when wanted, is terminated by a reverse proxy (Caddy/nginx) or an overlay network (Tailscale/WireGuard) in front of the loopback port — never by Beamtalk itself.** This is a correction to this paragraph's security claim, not a new policy: ADR 0061 simply describes a TLS story Beamtalk no longer has.
 
-**Design constraint for the release ADR:** `beamtalk_workspace_sup` must support release mode cleanly — either via a third config variant or by extracting `beamtalk_repl_server` + `beamtalk_session_sup` into a standalone OTP application releases can include without the full workspace.
+**Design constraint for the release ADR:** ~~`beamtalk_workspace_sup` must support release mode cleanly — either via a third config variant or by extracting `beamtalk_repl_server` + `beamtalk_session_sup` into a standalone OTP application releases can include without the full workspace.~~ **Resolved by ADR 0125 §1.4: a third config variant.** `beamtalk_workspace_sup`'s `repl => boolean()` became `mode => run | workspace | release`, keeping `beamtalk_repl_server`/`beamtalk_session_sup` inside `beamtalk_workspace` rather than extracting them — the op layer they dispatch to reaches five other `beamtalk_workspace_*` stores, so an extraction would either drag every store along or fork the op vocabulary `docs/development/surface-parity.md` exists to prevent. The extraction remains a recorded follow-up (ADR 0125 § Steelman Analysis), not this ADR's or ADR 0125's work.
 
 ## Design Notes
 
@@ -322,9 +335,9 @@ beamtalk run Main run
 **BT-1318 cancelled:** The generated entry module for `[run]` is no longer needed — `[run]` is removed entirely. BT-1320 absorbs the CLI arg parsing work.
 
 ## References
-- Related ADRs: ADR 0004 (Persistent Workspace Management), ADR 0026 (Package Manifest), ADR 0059 (Supervision Tree Syntax)
+- Related ADRs: ADR 0004 (Persistent Workspace Management), ADR 0026 (Package Manifest), ADR 0059 (Supervision Tree Syntax), ADR 0099 (CLI Application Story — amends the entry selector), [ADR 0125](0125-otp-releases-and-upgrade-compatibility.md) (OTP Releases and Upgrade Compatibility, Implemented — amends § "Future: Release Mode")
 - Affected examples: `examples/otp-tree`, `examples/sicp`
 - Runtime: `beamtalk_workspace_sup.erl`, `beamtalk_workspace_bootstrap.erl`, `beamtalk_workspace_meta.erl`
 - CLI: `crates/beamtalk-cli/src/commands/run.rs`, `build.rs`, `manifest.rs`
 - Implementation issues: BT-1317 (workspace run mode), BT-1319 (OTP app callback workspace-first), BT-1320 (unified beamtalk run — absorbs BT-1318)
-- Follow-up work: `[scripts]` named shortcuts, `beamtalk stop`, `--foreground` flag, `beamtalk release`
+- Follow-up work: `[scripts]` named shortcuts, `beamtalk stop`, `--foreground` flag, `beamtalk release` (shipped as ADR 0125)
