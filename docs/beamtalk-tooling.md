@@ -29,6 +29,12 @@ beamtalk type-coverage --at-least 75          # Exit non-zero if coverage < 75% 
 beamtalk type-coverage --class MyApp          # Filter to a specific class
 beamtalk type-coverage --detail --class MyApp # Detail for one class
 
+# Releases (ADR 0125)
+beamtalk release                          # Build an OTP release (requires [application] in beamtalk.toml)
+beamtalk release --output dist/           # Override output directory
+beamtalk release --no-include-erts        # Slim image; requires a host OTP
+beamtalk release --upgrade-from prev/     # Shape-compatibility preflight against a previous release
+
 # Native Erlang
 beamtalk generate native MyActor # Generate skeleton gen_server from a native: Actor class
 ```
@@ -189,6 +195,77 @@ The Beamtalk compiler (`beamtalk-core`, written in Rust) runs as an OTP Port man
 - **Supervised lifecycle** — The compiler port is restarted automatically on crash. No orphaned socket files or manual recovery.
 - **Cross-platform** — OTP Ports work on all platforms (Linux, macOS, Windows). No Unix-specific IPC.
 - **Stateless port** — The Rust compiler binary is a pure function: source code + metadata in, Core Erlang out. All session state (class cache, known variables) lives in the Erlang gen_server and is injected per request via ETF (Erlang Term Format) over length-prefixed frames.
+
+## Releases (ADR 0125)
+
+`beamtalk release` assembles a standard OTP release — a self-contained directory (or tarball) bootable with `erl -boot`, independent of the development workspace. Requires an `[application]` section in `beamtalk.toml` (a release is a long-running service with a root supervisor).
+
+```bash
+beamtalk release                                    # build the release
+beamtalk release --output dist/                     # override output directory
+beamtalk release --no-include-erts                  # slim image; requires host OTP
+beamtalk release --upgrade-from prev-release/       # shape-compatibility preflight
+beamtalk release --force                            # force rebuild
+beamtalk release --force-output                     # wipe non-release output dir
+```
+
+### Release Configuration
+
+Configured via the `[release]` section in `beamtalk.toml`:
+
+```toml
+[release]
+name = "myapp"                    # release name (defaults to package name)
+apps = ["extra_otp_app"]          # additional OTP apps to include beyond the computed closure
+include-erts = true               # bundle ERTS (default: true)
+strip-beams = false               # drop debug_info chunks from .beam files
+include-compiler = false          # stage the compiler port binary (for runtime compilation)
+console = false                   # start with an interactive console
+bind = "127.0.0.1"               # distribution bind address
+sys-config = "config/sys.config"  # custom sys.config path
+vm-args = "config/vm.args"        # custom vm.args path
+```
+
+The release name must not contain `@` (it forms part of the `-sname` flag).
+
+### What a Release Contains
+
+| Directory | Contents |
+|-----------|----------|
+| `lib/<app>-<vsn>/ebin/` | Compiled `.beam` files for each app in the closure |
+| `erts-<vsn>/` | Bundled Erlang runtime (when `include-erts = true`) |
+| `releases/<vsn>/` | `.rel`, `start.boot`, `sys.config`, `vm.args` |
+| `releases/<vsn>/beamtalk-provenance.json` | OTP/beamtalk versions, `required_otp` range |
+| `releases/<vsn>/shapes.json` | Flattened field maps and migration tables for upgrade safety |
+| `releases/RELEASES` | OTP release metadata |
+| `bin/<name>` | POSIX launcher script |
+| `bin/<name>.cmd` | Windows launcher script |
+| `<name>-<vsn>.tar.gz` | Distributable tarball |
+
+### Launcher Commands
+
+The generated `bin/<name>` script (and `bin/<name>.cmd` on Windows) supports these commands:
+
+| Command | Description |
+|---------|-------------|
+| `foreground` (default) | Start the release in the foreground |
+| `stop` | Stop a running release |
+| `ping` | Check if the release is running |
+| `remote_console` | Attach a remote Erlang shell |
+| `eval "Class selector [args]"` | Dispatch one entry in a throwaway VM (no distribution) |
+| `rpc "Class selector [args]"` | Dispatch one entry into the running node over Erlang distribution |
+| `version` | Print the release version |
+
+The launcher enforces an OTP-major boot check — it refuses to start when the host OTP version is outside the build-major window declared in `otp-support.toml`.
+
+### Upgrade Preflight
+
+`beamtalk release --upgrade-from <prev-release-dir-or-tarball>` compares the new release's `shapes.json` and `beamtalk-provenance.json` against a previous release and prints a compatibility report:
+
+- **Error** (non-zero exit): a `shapeVersion:` bump without a corresponding `migrateFromVN:` method
+- **Warning**: field changes without a version bump, or removed classes
+
+Use this as a CI deploy gate to catch missing migration methods before production.
 
 ## REPL
 

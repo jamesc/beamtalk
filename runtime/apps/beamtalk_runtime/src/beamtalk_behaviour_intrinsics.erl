@@ -3339,22 +3339,21 @@ walk_hierarchy(ClassName, Fun, Acc) ->
 -doc """
 Convert a class name atom to a class object (#beamtalk_object{}).
 
-Looks up the class process, gets its module name, and constructs
-the class object tuple. Returns nil if the class is not registered
-(safe during bootstrap window).
+Thin wrapper over `beamtalk_class_registry:resolve_class_object/1` (promoted
+there per ADR 0126 Phase 0.5 finding (e) — see that function's doc), mapping
+its `undefined` to the Beamtalk `nil` sentinel this function has always
+returned for an unregistered class (safe during bootstrap window).
 """.
 -spec atom_to_class_object(atom()) -> #beamtalk_object{} | 'nil'.
 atom_to_class_object(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
+    case beamtalk_class_registry:resolve_class_object(ClassName) of
         undefined ->
             ?LOG_DEBUG("atom_to_class_object: class ~p not registered", [ClassName], #{
                 domain => [beamtalk, runtime]
             }),
             nil;
-        ClassPid ->
-            Module = gen_server:call(ClassPid, module_name),
-            Tag = beamtalk_class_registry:class_object_tag(ClassName),
-            #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
+        ClassObj ->
+            ClassObj
     end.
 
 -doc """
