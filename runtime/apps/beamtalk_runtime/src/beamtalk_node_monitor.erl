@@ -56,10 +56,15 @@ Two triggers, both funnelled through `check_shape_skew_on_connect/1` /
   differs.
 
 Both paths announce at most one `NodeShapeSkew` per (peer, class) pair per
-check, are best-effort (a fault-isolated `try`/`catch`, matching `announce/1`
+check, are best-effort (a fault-isolated `try`/`catch`, matching `announce/2`
 below — a skew check must never crash the monitor or block `NodeUp`/`NodeDown`),
 and only ever consider *visible* peers, matching this module's existing
-hidden-node exclusion.
+hidden-node exclusion. Each check also runs in its own spawned, fire-and-forget
+process (not inline in `handle_info`) — a slow or partitioned peer's bounded
+but still multi-second `erpc` round trip must never delay this single
+gen_server's delivery of some *other* node's `NodeUp`/`NodeDown`/reload event,
+which is exactly the scenario a rolling upgrade (ADR 0125) with several
+peers at different versions is most likely to hit.
 """.
 
 -include("beamtalk.hrl").
@@ -132,7 +137,9 @@ handle_info({nodeup, Node, _Info}, State) when Node =:= node() ->
     {noreply, State#state{own_name = Node}};
 handle_info({nodeup, Node, _Info}, State) ->
     announce('NodeUp', #{node => beamtalk_node:from_atom(Node)}),
-    check_shape_skew_on_connect(Node),
+    %% Spawned, not inline: the skew check's erpc round trip must never
+    %% delay this gen_server's delivery of another node's NodeUp/NodeDown.
+    spawn(fun() -> check_shape_skew_on_connect(Node) end),
     {noreply, State};
 handle_info({nodedown, Node, _Info}, #state{own_name = Node} = State) ->
     %% Own pending self-nodedown — clear it, not a membership change.
@@ -143,8 +150,11 @@ handle_info({nodedown, Node, Info}, State) ->
     {noreply, State};
 handle_info({'$beamtalk_class_loaded', ClassName}, State) ->
     %% Only visible, currently-connected peers participate — matching the
-    %% `NodeUp`/`NodeDown` hidden-node exclusion above.
-    check_shape_skew_on_reload(ClassName, nodes()),
+    %% `NodeUp`/`NodeDown` hidden-node exclusion above. Spawned, not inline
+    %% — see check_shape_skew_on_connect/1's spawn site above: this one is
+    %% worse if run synchronously, since it's N sequential erpc calls (one
+    %% per connected peer), not just one.
+    spawn(fun() -> check_shape_skew_on_reload(ClassName, nodes()) end),
     {noreply, State};
 handle_info(_Msg, State) ->
     {noreply, State}.
@@ -288,9 +298,11 @@ Re-query `PeerNode`'s entry for exactly `ClassName`
 (`beamtalk_release_shapes:class_shape_entry/1` — the same per-class
 primitive `shape_manifest/0` folds over, run remotely via `erpc`) and
 announce if it now differs from `LocalEntry`. `undefined` (the class is not
-registered on `PeerNode` at all — not shared) and any `erpc` failure are
-silent, matching `check_shape_skew_on_connect/1`'s "unreachable peer" and
-"non-shared class" handling.
+registered on `PeerNode` at all — not shared) is silent, matching
+`check_shape_skew_on_connect/1`'s "non-shared class" handling; an `erpc`
+failure is logged the same way that function logs its own fetch failure,
+so a peer that goes unreachable mid-reload-check doesn't look identical to
+"checked, no skew found" when debugging a missed announcement.
 """.
 -spec check_one_peer_class(node(), atom(), beamtalk_release_shapes:shape_entry()) -> ok.
 check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
@@ -308,9 +320,18 @@ check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
         RemoteEntry when is_map(RemoteEntry) ->
             announce_if_skewed(PeerNode, ClassName, LocalEntry, RemoteEntry)
     catch
-        error:{erpc, _Reason} -> ok;
-        error:{exception, _Reason, _Stack} -> ok;
-        exit:{exception, _Reason} -> ok
+        error:{erpc, Reason} ->
+            ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
+                node => PeerNode, className => ClassName, reason => Reason
+            });
+        error:{exception, Reason, _Stack} ->
+            ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
+                node => PeerNode, className => ClassName, reason => Reason
+            });
+        exit:{exception, Reason} ->
+            ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
+                node => PeerNode, className => ClassName, reason => Reason
+            })
     end,
     ok.
 
