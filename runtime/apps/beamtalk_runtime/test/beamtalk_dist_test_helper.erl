@@ -58,6 +58,9 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
 %% `peer:start/1`'s boot budget — see start_peer/2's doc.
 -define(PEER_WAIT_BOOT_MS, 60000).
 
+%% Host part of every node name this harness creates — see unique_node_name/1.
+-define(PEER_HOST, "localhost").
+
 -doc """
 Make this (test) node distributed if it isn't already. Starts epmd first
 (idempotent: `epmd -daemon` against an epmd that is already listening on
@@ -140,7 +143,7 @@ against what limit.
     {ok, peer:server_ref(), node()} | {error, term()}.
 start_peer(NamePrefix, Opts) ->
     ensure_distribution(),
-    {ok, Host} = inet:gethostname(),
+    Host = ?PEER_HOST,
     PeerName = unique_short_name(NamePrefix),
     CodePathArgs = lists:append([["-pa", Dir] || Dir <- code:get_path()]),
     CookieArgs = ["-setcookie", atom_to_list(erlang:get_cookie())],
@@ -255,20 +258,26 @@ ensure_epmd() ->
 
 -doc """
 A short node name intended to avoid collisions across repeated test runs
-on the same host: `Prefix_<unique integer>@<hostname>`. `unique_integer/1`
+on the same host: `Prefix_<unique integer>@localhost`. `unique_integer/1`
 is only unique within this BEAM instance's lifetime, so two independently
 started VMs (e.g. two parallel CI jobs on the same runner) have no
 cross-process coordination and could in principle pick overlapping names;
 a collision fails/flakes the affected test rather than corrupting state.
-Uses `inet:gethostname/0` rather than a hardcoded "localhost" so the
-harness works on whatever host CI resolves this machine's shortname to
-(never a `/tmp`-style hardcoded path — the same "don't hardcode
-environment specifics" principle CLAUDE.md states for temp paths).
+
+The host part is always `localhost` (?PEER_HOST), never
+`inet:gethostname/0` (BT-3609). ensure_epmd/0 binds epmd to 127.0.0.1
+only, and connecting to `Name@Host` asks the epmd at *Host's resolved
+address* for the port. Locally the machine's own hostname usually
+resolves to a loopback address, but on a GitHub Actions runner it
+resolves to the VM's private (non-loopback) IP, where nothing answers on
+4369 — so with `@<hostname>` names every peer boot hangs until
+`wait_boot` expires (the peer can never connect back) and every ping
+answers `pang`. `localhost` always resolves to loopback, and it is also
+the host the workspace/attach nodes use.
 """.
 -spec unique_node_name(string()) -> node().
 unique_node_name(Prefix) ->
-    {ok, Host} = inet:gethostname(),
-    list_to_atom(atom_to_list(unique_short_name(Prefix)) ++ "@" ++ Host).
+    list_to_atom(atom_to_list(unique_short_name(Prefix)) ++ "@" ++ ?PEER_HOST).
 
 -doc """
 Just the short-name part (no `@host`) of unique_node_name/1 — what

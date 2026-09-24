@@ -189,7 +189,11 @@ cleanup(ok) ->
 %% `peer:start_it/2` (reported as a *cancelled* test,
 %% `{timeout, #{stacktrace => [{peer, start_it, 2, _} | _]}}`, whose
 %% stacktrace is merely where the test process was parked when killed; the
-%% helper's own `wait_boot` never got the chance to expire).
+%% helper's own `wait_boot` never got the chance to expire). With that cap
+%% lifted, CI then exposed the second half: node names used the runner's
+%% hostname, which resolves off-loopback while the harness's epmd listens on
+%% 127.0.0.1 only, so every boot ran out the full `wait_boot` — fixed in
+%% beamtalk_dist_test_helper by naming every node `@localhost`.
 %%
 %% The budget must exceed the helper's own nested worst case so a slow but
 %% succeeding boot is never cancelled: `start_peer/2` alone may take up to
