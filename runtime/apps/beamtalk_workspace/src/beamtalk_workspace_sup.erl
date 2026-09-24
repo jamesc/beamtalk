@@ -56,7 +56,11 @@ The config's required `mode` key selects the child set:
 
 `init/1` also records the node's capabilities (`beamtalk_capability:set/1`),
 which is what makes a `release` node refuse compiler and workspace
-operations (ADR 0125 §1.5).
+operations (ADR 0125 §1.5), and, for `release` mode, logs a boot warning if
+`bind_addr` is non-loopback (`maybe_warn_non_loopback_console/3`, ADR 0125
+§1.6). The console-cookie boot refusal (also §1.6) is checked one level up,
+in `beamtalk_workspace_app:maybe_start_workspace/0`, before this
+supervisor is even asked to start — see that module's doc.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -117,6 +121,11 @@ init(Config) ->
         {true, undefined} -> erlang:error({bad_config, missing_tcp_port_for_repl});
         _ -> ok
     end,
+
+    %% A release console bound to a non-loopback address is allowed (an
+    %% operator inside a private overlay network has a legitimate reason)
+    %% but never silent (ADR 0125 §1.6).
+    maybe_warn_non_loopback_console(Mode, Console, BindAddr),
 
     %% Record what this node may do before any child (or REPL op) runs, so a
     %% release refuses compiler and workspace operations (ADR 0125 §1.5).
@@ -299,6 +308,26 @@ release mode only when the config opts in with `console => true`.
 starts_console(run, _Config) -> false;
 starts_console(workspace, _Config) -> true;
 starts_console(release, Config) -> maps:get(console, Config, false).
+
+-doc """
+Log a boot `?LOG_WARNING` naming ADR 0058 and the reverse-proxy alternative
+when a release's console is bound to a non-loopback address. Not a refusal —
+an operator inside a private overlay network (Tailscale/WireGuard) has a
+legitimate reason — but never silent (ADR 0125 §1.6). A no-op for every
+other `{Mode, Console}` combination: `run`/`workspace` are CLI-driven
+development nodes, not a release an operator deploys.
+""".
+-spec maybe_warn_non_loopback_console(mode(), boolean(), inet:ip4_address()) -> ok.
+maybe_warn_non_loopback_console(release, true, BindAddr) when BindAddr =/= {127, 0, 0, 1} ->
+    ?LOG_WARNING(
+        "Release console bound to a non-loopback address. Beamtalk implements no TLS of "
+        "its own (ADR 0058): terminate TLS with a reverse proxy (Caddy/nginx) in front of "
+        "this listener, or reach it over a private overlay network (Tailscale/WireGuard) "
+        "instead of exposing it directly.",
+        #{bind => BindAddr, domain => [beamtalk, runtime]}
+    );
+maybe_warn_non_loopback_console(_Mode, _Console, _BindAddr) ->
+    ok.
 
 -doc """
 Whether to start the `beamtalk_compiler` application. Run and workspace modes

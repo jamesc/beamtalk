@@ -16,6 +16,46 @@ suite cannot reach without a full boot per case.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
+%%====================================================================
+%% ensure_console_cookie/1 (ADR 0125 §1.6, BT-3575)
+%%====================================================================
+
+%% run/workspace modes are CLI-driven and always pass an explicit cookie
+%% already — the check is a no-op regardless of `console`.
+ensure_console_cookie_noop_for_run_mode_test() ->
+    ?assertEqual(
+        ok, beamtalk_workspace_app:ensure_console_cookie(#{mode => run, console => true})
+    ).
+
+ensure_console_cookie_noop_for_workspace_mode_test() ->
+    ?assertEqual(
+        ok, beamtalk_workspace_app:ensure_console_cookie(#{mode => workspace, console => true})
+    ).
+
+%% A release with the console off opens no listener for the cookie to guard.
+ensure_console_cookie_noop_for_release_without_console_test() ->
+    ?assertEqual(
+        ok, beamtalk_workspace_app:ensure_console_cookie(#{mode => release, console => false})
+    ).
+
+%% `mode => release, console => true` is the only combination that actually
+%% consults `init:get_argument(setcookie)` — asserted here against whatever
+%% that argument's real value is in this eunit node (never `erlang:
+%% get_cookie/0`, which is never `nocookie` once OTP's own
+%% `$HOME/.erlang.cookie` fallback has run — see the module doc for why).
+%% A `beamtalk repl`/e2e-style boot that explicitly passes `-setcookie`
+%% (`crates/beamtalk-cli/tests/repl_protocol.rs`) exercises the `ok` branch
+%% end to end; this assertion is self-consistent either way.
+ensure_console_cookie_release_console_matches_setcookie_argument_test() ->
+    Result = beamtalk_workspace_app:ensure_console_cookie(#{mode => release, console => true}),
+    case init:get_argument(setcookie) of
+        {ok, _} ->
+            ?assertEqual(ok, Result);
+        error ->
+            ?assertMatch({error, #beamtalk_error{kind = release_console_no_cookie}}, Result)
+    end.
 
 %%====================================================================
 %% env_workspace_config/1

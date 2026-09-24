@@ -1,0 +1,72 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E protocol coverage for the default release console (ADR 0125 §1.5/§1.6,
+// BT-3575): `mode => release`, `console => true`, `include-compiler = false`
+// (the default). Run against its own dedicated release-mode node
+// (`e2e_release_mode_console_default_tests`), never the shared workspace-mode
+// node `e2e_language_tests` uses.
+//
+// This file has no `@load` and issues no eval expression that expects
+// success: the default release ships no compiler, so `eval` — and so every
+// expression below the header, plain or via a `:`-meta command that itself
+// evaluates source — is refused with `release_mode_no_compiler` at the
+// protocol op gate itself (`beamtalk_capability:classify(<<"eval">>) ->
+// compiler`), before any expression is even parsed. This holds regardless of
+// *what* the source says: `1 + 1`, a class definition, `SomeClass reload`,
+// even `Workspace flush`/`SomeClass removeFromSystem` typed as source — all
+// of them are `eval` requests first. Reaching flush/removeFromSystem's own,
+// more specific `release_mode_no_workspace` refusal needs `eval` to pass
+// this outer gate, which only happens under `include-compiler` — see
+// `release_console_include_compiler.btscript`.
+//
+// What a no-compiler release console *can* still do: `run-entry` (no
+// source, no compile — ADR 0125 §1.5/§1.7), `actors`, `sessions`. This file
+// also proves `Beamtalk releaseInfo`/`shapeManifest` are reachable this way
+// — declared as `class` methods on `BeamtalkInterface` precisely so
+// `run-entry`'s class-side dispatch reaches them with no compiler at all
+// (`stdlib/src/beamtalk_interface.bt`).
+//
+// `run_test_file_opts` skips `clear_bindings` for this file — see its own
+// doc for why (`Session current clear` is itself an eval, always refused
+// here).
+
+// ===========================================================================
+// eval (and everything source-shaped) is refused — release_mode_no_compiler
+// ===========================================================================
+
+1 + 1
+// => ERROR: OTP release
+
+// A `>>` method-patch is source too — same op-level refusal, no need for
+// the class to exist (the gate runs before parsing).
+BT3575NoSuchClass >> foo => 1
+// => ERROR: OTP release
+
+// `:reload <Class>` -> `<Class> reload`, still an eval — same refusal, no
+// need for the class to actually exist (the gate runs before parsing).
+:reload BT3575NoSuchClass
+// => ERROR: OTP release
+
+// ===========================================================================
+// run-entry, actors, sessions — always available (ADR 0125 §1.5)
+// ===========================================================================
+
+:actors
+// => No actors
+
+:sessions
+// => _
+
+// `Beamtalk releaseInfo` — a non-release node would answer `#{#release =>
+// nil}`; this node *is* a release, so the shape differs (this fixture never
+// booted from a real `-boot_var RELEASE_DIR`/systools script — see
+// `beamtalk_release:info/0`'s own doc — so it degrades to
+// `#{#release => nil}` too here, precisely the "not a release" case, since
+// only the answer's *reachability* is under test in this file, not its
+// content).
+:run-entry BeamtalkInterface releaseInfo
+// => _
+
+:run-entry BeamtalkInterface shapeManifest
+// => _

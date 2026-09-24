@@ -721,14 +721,77 @@ format_msg(Msg, _Event) ->
     io_lib:format("~p", [Msg]).
 
 receive_include_compiler_warning(Timeout) ->
+    receive_log_message_containing("include-compiler", Timeout).
+
+%% Shared substring-matching wait, parameterised by the needle — one
+%% implementation for every boot-warning test in this suite (ADR 0125 §1.5's
+%% include-compiler warning and §1.6's non-loopback-bind warning below),
+%% not a second near-identical copy per warning (CLAUDE.md's
+%% no-duplicate-implementations rule).
+receive_log_message_containing(Needle, Timeout) ->
     receive
         {sup_log_event, Msg} ->
-            case string:find(unicode:characters_to_list(Msg), "include-compiler") of
-                nomatch -> receive_include_compiler_warning(Timeout);
+            case string:find(unicode:characters_to_list(Msg), Needle) of
+                nomatch -> receive_log_message_containing(Needle, Timeout);
                 _ -> true
             end
     after Timeout ->
         false
+    end.
+
+%% ADR 0125 §1.6: a release console bound to a non-loopback address must log
+%% a boot warning naming ADR 0058 and the reverse-proxy alternative — never
+%% silently. Not a refusal: `child_ids/1` (and so `init/1`) must still
+%% succeed with the REPL listener child present.
+release_mode_non_loopback_bind_logs_boot_warning_test_() ->
+    {timeout, 10, fun() ->
+        with_capabilities_restored(fun() ->
+            Parent = self(),
+            HandlerId = release_non_loopback_bind_warning_test_handler,
+            logger:set_primary_config(level, all),
+            ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
+            try
+                Config = (release_console_config())#{bind_addr => {0, 0, 0, 0}},
+                Ids = child_ids(Config),
+                ?assert(lists:member(beamtalk_repl_server, Ids)),
+                ?assert(receive_log_message_containing("non-loopback", 500))
+            after
+                _ = logger:remove_handler(HandlerId),
+                logger:set_primary_config(level, error)
+            end
+        end)
+    end}.
+
+release_mode_loopback_bind_logs_no_boot_warning_test() ->
+    with_capabilities_restored(fun() ->
+        Parent = self(),
+        HandlerId = release_loopback_bind_no_warning_test_handler,
+        logger:set_primary_config(level, all),
+        ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
+        try
+            Config = (release_console_config())#{bind_addr => {127, 0, 0, 1}},
+            _ = child_ids(Config),
+            ?assertNot(receive_log_message_containing("non-loopback", 200))
+        after
+            _ = logger:remove_handler(HandlerId),
+            logger:set_primary_config(level, error)
+        end
+    end).
+
+%% Only `mode => release, console => true` is checked — a workspace-mode
+%% node bound non-loopback (a CLI-driven development node) logs nothing.
+workspace_mode_non_loopback_bind_logs_no_boot_warning_test() ->
+    Parent = self(),
+    HandlerId = workspace_non_loopback_bind_no_warning_test_handler,
+    logger:set_primary_config(level, all),
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
+    try
+        Config = (test_config())#{bind_addr => {0, 0, 0, 0}},
+        _ = child_ids(Config),
+        ?assertNot(receive_log_message_containing("non-loopback", 200))
+    after
+        _ = logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, error)
     end.
 
 run_mode_no_tcp_port_required_test() ->

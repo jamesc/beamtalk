@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E protocol coverage for a release console built with
+// `[release] include-compiler = true` (ADR 0125 §1.5/§1.6, BT-3575). Run
+// against its own dedicated release-mode node
+// (`e2e_release_mode_console_include_compiler_tests`), never the shared
+// workspace-mode node `e2e_language_tests` uses.
+//
+// `eval` passes the protocol op gate here (`include_compiler => true`), so
+// this is the file that reaches the *workspace*-row refusals
+// (`Workspace flush` / `removeFromSystem`, `release_mode_no_workspace`) —
+// `permitted(workspace, _Caps) -> false` unconditionally, even with
+// `include-compiler` (ADR 0125 §1.5: "a release has no working tree to
+// flush to"). It also proves the literal ADR 0125 §1.1/§1.8 example,
+// `Beamtalk releaseInfo`, works through ordinary `eval` once a compiler is
+// present — on top of the always-available `run-entry` path the default
+// (no-compiler) fixture exercises instead
+// (`release_console_default.btscript`).
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// ===========================================================================
+// eval works — the compiler is present
+// ===========================================================================
+
+1 + 1
+// => 2
+
+// ===========================================================================
+// Workspace ops are still refused — release_mode_no_workspace, even here
+// ===========================================================================
+
+:flush
+// => ERROR: no working tree
+
+// `Counter` (loaded above) must resolve to a real class first — an eval
+// expression sends `removeFromSystem` to whatever `Counter` evaluates to,
+// unlike the direct-by-name Erlang entry point
+// `beamtalk_release_mode_refusal_tests:
+// remove_from_system_refused_in_both_release_variants_test_` exercises,
+// which the capability gate refuses before any class lookup even for a
+// name that resolves to nothing.
+:remove-class Counter
+// => ERROR: no working tree
+
+// ===========================================================================
+// Beamtalk releaseInfo / shapeManifest — reachable through eval too
+// ===========================================================================
+
+Beamtalk releaseInfo
+// => _
+
+Beamtalk shapeManifest
+// => _
+
+BeamtalkInterface releaseInfo
+// => _
+
+BeamtalkInterface shapeManifest
+// => _

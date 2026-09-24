@@ -13903,6 +13903,38 @@
       "explanation": "BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Beamtalk workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_native_api.bt  Covers: version, allClasses, classNamed:, globals, help:, help:selector:"
     },
     {
+      "id": "stdlib-test-beamtalk-release-interface-test",
+      "title": "BeamtalkReleaseInterfaceTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "BeamtalkReleaseInterfaceTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "beamtalk_release_interface_test",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testClassIncludesSelectorReleaseInfo",
+        "testClassIncludesSelectorShapeManifest",
+        "testIncludesSelectorReleaseInfo",
+        "testIncludesSelectorShapeManifest",
+        "testReleaseInfoOnNonReleaseNodeIsRelease",
+        "testReleaseInfoReturnsADictionary",
+        "testShapeManifestReturnsADictionary"
+      ],
+      "source": "// BUnit tests for `Beamtalk releaseInfo` / `Beamtalk shapeManifest`\n// (ADR 0125 §1.8/§3.4, BT-3575).\n//\n// `BeamtalkInterface releaseInfo`/`shapeManifest` are declared as `class`\n// methods precisely so they are reachable without the `Beamtalk` singleton\n// binding (see stdlib/src/beamtalk_interface.bt) — which is unavailable in\n// the BUnit test context (`workspace_mode: false`), the same reason\n// `beamtalk_interface_test.bt` tests `BeamtalkInterface` directly rather\n// than through `Beamtalk`, and the same reason a `BeamtalkInterface new`\n// is not attempted here either (`Object` subclasses are not instantiable\n// from Beamtalk source — only the workspace bootstrap's Erlang-side\n// `Module:new()` call creates the singleton). Both sends run against this\n// BUnit run's own live class registry, which is exactly \"a workspace node\"\n// from the registry's point of view (`beamtalk_class_registry`/\n// `beamtalk_release_shapes` do not distinguish BUnit from a full REPL\n// workspace) — the instance-side `Beamtalk releaseInfo`/`shapeManifest`\n// eval form and release-mode-specific behaviour (`#{#release => nil}` on a\n// non-release node, run-entry reachability with no compiler) are covered\n// by `tests/repl-protocol/cases/release_console_default.btscript` /\n// `release_console_include_compiler.btscript` instead, which are the only\n// places a genuine `mode => release` node and a bootstrapped `Beamtalk`\n// singleton both exist.\n\nTestCase subclass: BeamtalkReleaseInterfaceTest\n\n  testIncludesSelectorReleaseInfo =>\n    self assert: (BeamtalkInterface includesSelector: #releaseInfo)\n\n  testIncludesSelectorShapeManifest =>\n    self assert: (BeamtalkInterface includesSelector: #shapeManifest)\n\n  testClassIncludesSelectorReleaseInfo =>\n    self assert: (BeamtalkInterface class includesSelector: #releaseInfo)\n\n  testClassIncludesSelectorShapeManifest =>\n    self assert: (BeamtalkInterface class includesSelector: #shapeManifest)\n\n  // This BUnit run is not an OTP release (no `-boot_var RELEASE_DIR`), so\n  // `releaseInfo` degrades to `#{#release => nil}` — never an error, and\n  // never a crash reaching all the way to this test.\n  testReleaseInfoOnNonReleaseNodeIsRelease =>\n    info := BeamtalkInterface releaseInfo\n    self assert: (info at: #release) isNil\n\n  testReleaseInfoReturnsADictionary =>\n    self assert: (BeamtalkInterface releaseInfo isKindOf: Dictionary)\n\n  testShapeManifestReturnsADictionary =>\n    self assert: (BeamtalkInterface shapeManifest isKindOf: Dictionary)",
+      "explanation": "BUnit tests for `Beamtalk releaseInfo` / `Beamtalk shapeManifest` (ADR 0125 §1.8/§3.4, BT-3575).  `BeamtalkInterface releaseInfo`/`shapeManifest` are declared as `class` methods precisely so they are reachable without the `Beamtalk` singleton binding (see stdlib/src/beamtalk_interface.bt) — which is unavailable in the BUnit test context (`workspace_mode: false`), the same reason `beamtalk_interface_test.bt` tests `BeamtalkInterface` directly rather than through `Beamtalk`, and the same reason a `BeamtalkInterface new` is not attempted here either (`Object` subclasses are not instantiable from Beamtalk source — only the workspace bootstrap's Erlang-side `Module:new()` call creates the singleton). Both sends run against this BUnit run's own live class registry, which is exactly \"a workspace node\" from the registry's point of view (`beamtalk_class_registry`/ `beamtalk_release_shapes` do not distinguish BUnit from a full REPL workspace) — the instance-side `Beamtalk releaseInfo`/`shapeManifest` eval form and release-mode-specific behaviour (`#{#release => nil}` on a non-release node, run-entry reachability with no compiler) are covered by `tests/repl-protocol/cases/release_console_default.btscript` / `release_console_include_compiler.btscript` instead, which are the only places a genuine `mode => release` node and a bootstrapped `Beamtalk` singleton both exist."
+    },
+    {
       "id": "stdlib-test-behaviour-hierarchy-test",
       "title": "BehaviourHierarchyTest",
       "category": "stdlib-tests",
