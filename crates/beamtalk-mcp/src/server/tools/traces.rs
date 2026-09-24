@@ -1,10 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Traces/stats tool family: `list_actors`, `supervision_tree`,
+//! Traces/stats tool family: `list_actors`, `supervision_tree`, `nodes`,
 //! `enable_tracing`, `disable_tracing`, `get_traces`, `export_traces`, and
-//! `actor_stats` (ADR 0069/0092) — process-tree and per-actor call tracing
-//! introspection.
+//! `actor_stats` (ADR 0069/0092/0126) — process-tree, cluster, and per-actor
+//! call tracing introspection.
 
 use beamtalk_repl_protocol::format::{self as fmt, Diagnostic as FmtDiagnostic};
 use rmcp::{
@@ -81,6 +81,41 @@ impl BeamtalkMcp {
         // The serialised tree (`asDictionaries`) renders as a Beamtalk list of
         // node records, e.g. `#(#{#pid => "<0.200.0>", #kind => ...}, ...)`, or
         // `#()` for an empty snapshot.
+        let value = response.value_string();
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(value)]))
+    }
+
+    /// List connected cluster nodes with shape-skew counts (ADR 0126 §8/§10).
+    #[tool(
+        description = "List every visible connected BEAM node, each with its name and current shape-skew count (classes whose version differs from this node's, ADR 0126 Phase 4). Cluster-scoped — unlike list_actors, which is local-node-only by design."
+    )]
+    pub(crate) async fn nodes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("nodes");
+        tracing::debug!(tool = "nodes", "tool invoked");
+        // Surfaced through the same term-returning eval seam every surface
+        // shares (so the structured node/skew data is identical across
+        // surfaces) — the one shared implementation lives in
+        // `WorkspaceInterface>>nodes` (`stdlib/src/workspace_interface.bt`),
+        // backed by `beamtalk_node_monitor:connectedWithSkew/0`.
+        let response = self
+            .client
+            .evaluate_with_options("Workspace nodes", false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response.error_message().unwrap_or("Unknown error");
+            return Ok(error_result(fmt::format_diagnostic(
+                &FmtDiagnostic::new(msg),
+                MCP_OUTPUT_MODE,
+            )));
+        }
+
+        // Renders as a Beamtalk list of Dictionaries, e.g.
+        // `#(#{#name => #'worker@host', #skewCount => 0}, ...)`, or `#()`
+        // for a node with no connected peers.
         let value = response.value_string();
 
         timer.mark_ok();

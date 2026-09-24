@@ -23,6 +23,9 @@
 ///   an `eval`-holding role.
 /// - `ProcessNavigation from: aRoot` — a subtree rooted at a `Supervisor` handle
 ///   or a `Pid`, returning a `Result` (the root may be dead).
+/// - `ProcessNavigation on: aNode` — the `default`-scope tree of a *remote*
+///   `Node` (ADR 0126 §8), fetched via `erpc` and returning a `Result` (the
+///   node may be unreachable, down, or refused by the §9 host policy).
 ///
 /// ## Examples
 /// ```beamtalk
@@ -94,6 +97,35 @@ typed Value subclass: ProcessNavigation
   /// snapshot rooted at `aRoot`. Keeps `from:` pure Beamtalk.
   class internal snapshotFrom: aRoot :: Supervisor | Pid -> Result(List(SupervisionNode), Error) =>
     (Erlang beamtalk_process_navigation) from: aRoot
+
+  // === Remote Construction (ADR 0126 §8, Phase 7) ===
+
+  /// A `default`-scope navigation over `aNode`'s supervision tree, snapshotted
+  /// **on that node** via `erpc` — the same `supervisor:which_children` walk
+  /// `default` runs locally, never re-derived. Each returned `SupervisionNode`
+  /// carries `node => aNode` for free (the walk executes there, so `node()`
+  /// there already is `aNode`).
+  ///
+  /// Applies the same ADR 0126 §9 host policy as `Node>>connect`: an off-host
+  /// `aNode` without TLS distribution answers `Result error:` with
+  /// `kind = insecure_distribution`, without attempting the network. An
+  /// unreachable node answers `kind = node_down`; a node that does not
+  /// respond in time answers `kind = timeout`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ProcessNavigation on: peer) unwrap tree
+  /// (ProcessNavigation on: peer) ifOk: [:nav | nav tree] ifError: [:e | nil]
+  /// ```
+  class on: aNode :: Node -> Result(ProcessNavigation, Error) =>
+    (self snapshotOn: aNode) map: [:snapshot |
+      ProcessNavigation nodes: snapshot
+    ]
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped remote
+  /// snapshot on `aNode`. Keeps `on:` pure Beamtalk.
+  class internal snapshotOn: aNode :: Node -> Result(List(SupervisionNode), Error) =>
+    (Erlang beamtalk_process_navigation) on: aNode
 
   // === Accessing ===
 

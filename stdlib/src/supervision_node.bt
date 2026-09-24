@@ -43,6 +43,13 @@ typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   field: behaviourClass :: Class | Nil = nil
   /// The number of live children (supervisors only; `0` for workers).
   field: childCount :: Integer = 0
+  /// The node this snapshot node was captured on (ADR 0126 §8). Always the
+  /// local node for a `Workspace processes` / `ProcessNavigation default`
+  /// snapshot; for a remote snapshot (`ProcessNavigation on:`) this is the
+  /// target node, not the caller's — the walk runs *on* that node via
+  /// `erpc`, so every node it produces is naturally stamped with its own
+  /// identity.
+  field: node :: Node | Nil = nil
 
   /// Whether this node is a supervisor (Beamtalk or foreign).
   ///

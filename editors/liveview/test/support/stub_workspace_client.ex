@@ -1429,6 +1429,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def supervision_tree(_pid, _scope), do: {:ok, []}
 
+  # ── Cluster nodes (ADR 0126 §8/§10, BT-3605) ────────────────────────────
+
+  def nodes(_pid), do: {:ok, []}
+
   # BT-3303: a live actor's pid-stats snapshot, keyed by class (mirroring
   # `inspect_value/1` above) so a test can seed real chip values instead of the
   # catch-all `{:ok, %{}}`. Unseeded classes keep that empty default.

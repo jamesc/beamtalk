@@ -1967,7 +1967,57 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-228",
+      "title": "Node — a first-class value (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "Node current                                    // => Node(nonode@nohost)\nworker := (Node named: #'worker@localhost') unwrap\nworker name                                     // => #'worker@localhost'\nNode connected                                  // => #()  (visible connected nodes)\nworker connect                                  // => Result ok: Node(worker@localhost)\nworker isConnected                              // => true\nworker disconnect                               // => true",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-229",
+      "title": "Remote spawn and lookup (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "worker := (Node named: #'worker@localhost') unwrap\nc := (Counter spawnOn: worker) unwrap\nc node                                          // => Node(worker@localhost)\nc isRemote                                      // => true\nc increment                                     // an ordinary sync send — works identically to a local actor",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-230",
+      "title": "Cluster-unique names — scope: #global (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "leader := (Scheduler spawnAs: #scheduler scope: #global) unwrap\n// from any node in the cluster:\ns := (Scheduler named: #scheduler scope: #global) unwrap\ns tick",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-235",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1988,7 +2038,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-231",
+      "id": "docs-beamtalk-language-features-block-236",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2009,7 +2059,20 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-236",
+      "id": "docs-beamtalk-language-features-block-24",
+      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-241",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2030,7 +2093,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-237",
+      "id": "docs-beamtalk-language-features-block-242",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2048,7 +2111,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-244",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2058,20 +2121,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-24",
-      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-242",
+      "id": "docs-beamtalk-language-features-block-247",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2090,62 +2140,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-243",
+      "id": "docs-beamtalk-language-features-block-248",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-245",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "(1 to: 10) at: 1     // => 1\n(1 to: 10) at: 11    // raises index_out_of_bounds\n(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-247",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "find",
-        "first match",
-        "search"
-      ],
-      "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-248",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-249",
-      "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "map",
-        "mapping",
-        "transform",
-        "where"
-      ],
-      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) at: 5            // => 5 — bounds-checked; out-of-range raises\n                             // index_out_of_bounds (see \"Accessing an Empty\n                             // Collection\" above), never empty_collection\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2180,6 +2181,55 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-250",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "(1 to: 10) at: 1     // => 1\n(1 to: 10) at: 11    // raises index_out_of_bounds\n(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-252",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "find",
+        "first match",
+        "search"
+      ],
+      "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-253",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-254",
+      "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "map",
+        "mapping",
+        "transform",
+        "where"
+      ],
+      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) at: 5            // => 5 — bounds-checked; out-of-range raises\n                             // index_out_of_bounds (see \"Accessing an Empty\n                             // Collection\" above), never empty_collection\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-255",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2203,7 +2253,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-251",
+      "id": "docs-beamtalk-language-features-block-256",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2222,7 +2272,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-252",
+      "id": "docs-beamtalk-language-features-block-257",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2243,7 +2293,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-253",
+      "id": "docs-beamtalk-language-features-block-258",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2256,7 +2306,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-254",
+      "id": "docs-beamtalk-language-features-block-259",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2272,7 +2322,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-255",
+      "id": "docs-beamtalk-language-features-block-26",
+      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-260",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2285,7 +2350,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-256",
+      "id": "docs-beamtalk-language-features-block-261",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2304,7 +2369,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-257",
+      "id": "docs-beamtalk-language-features-block-262",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2314,7 +2379,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-258",
+      "id": "docs-beamtalk-language-features-block-263",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2335,7 +2400,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-259",
+      "id": "docs-beamtalk-language-features-block-264",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2354,22 +2419,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-26",
-      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-261",
+      "id": "docs-beamtalk-language-features-block-266",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2387,7 +2437,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-262",
+      "id": "docs-beamtalk-language-features-block-267",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2402,7 +2452,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-263",
+      "id": "docs-beamtalk-language-features-block-268",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2412,7 +2462,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-264",
+      "id": "docs-beamtalk-language-features-block-269",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2430,7 +2480,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-267",
+      "id": "docs-beamtalk-language-features-block-27",
+      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-272",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2453,7 +2518,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-268",
+      "id": "docs-beamtalk-language-features-block-273",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2463,7 +2528,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-269",
+      "id": "docs-beamtalk-language-features-block-274",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2473,22 +2538,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-27",
-      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-270",
+      "id": "docs-beamtalk-language-features-block-275",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2511,7 +2561,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-272",
+      "id": "docs-beamtalk-language-features-block-277",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2526,7 +2576,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-273",
+      "id": "docs-beamtalk-language-features-block-278",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2536,7 +2586,27 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-275",
+      "id": "docs-beamtalk-language-features-block-28",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Read field\ncurrent := self.value\n\n// Write field\nself.value := 10\n\n// Explicit assignment\nself.value := self.value + 1\nself.count := self.count - delta\nself.total := self.total * factor",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-280",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2549,7 +2619,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-276",
+      "id": "docs-beamtalk-language-features-block-281",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2572,7 +2642,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-277",
+      "id": "docs-beamtalk-language-features-block-282",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2600,7 +2670,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-278",
+      "id": "docs-beamtalk-language-features-block-283",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2628,27 +2698,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-28",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Read field\ncurrent := self.value\n\n// Write field\nself.value := 10\n\n// Explicit assignment\nself.value := self.value + 1\nself.count := self.count - delta\nself.total := self.total * factor",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-281",
+      "id": "docs-beamtalk-language-features-block-286",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2679,7 +2729,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-282",
+      "id": "docs-beamtalk-language-features-block-287",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -32035,7 +32085,7 @@
         "transform",
         "where"
       ],
-      "source": "// BT-2429: Tests for the ProcessNavigation + SupervisionTree stdlib classes\n// (ADR 0092 Phase 3).\n//\n// The collection protocol and tree shape are tested here over a hand-built\n// SupervisionTree (BUnit has no live workspace tree). The full live walk\n// (`ProcessNavigation default tree root`, node parent/children navigation, lazy\n// `status`) is covered by the REPL e2e suite (BT-2433); the runtime adjacency\n// accessors have their own EUnit coverage.\n\nTestCase subclass: ProcessNavigationTest\n\n  // A small fixed snapshot: a supervisor, an actor, and a foreign process.\n  sampleNodes =>\n    sup := SupervisionNode\n      pid: nil\n      registeredName: #sup\n      kind: #beamtalkSupervisor\n      behaviourClass: Counter\n      childCount: 1\n    actor := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: Counter\n      childCount: 0\n    foreign := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #otpProcess\n      behaviourClass: nil\n      childCount: 0\n    #(sup, actor, foreign)\n\n  sampleTree => SupervisionTree flatNodes: self sampleNodes\n\n  // === SupervisionTree: shape ===\n  testTreeSize => self assert: self sampleTree size equals: 3\n\n  testTreeNodesCount => self assert: self sampleTree nodes size equals: 3\n\n  testTreeNodesAreSupervisionNodes =>\n    self assert: (self sampleTree nodes first isKindOf: SupervisionNode)\n\n  testTreeIsEmptyFalse => self deny: self sampleTree isEmpty\n\n  testEmptyTreeIsEmpty => self assert: (SupervisionTree flatNodes: #()) isEmpty\n\n  testTreeRootNotNil => self deny: self sampleTree root isNil\n\n  testTreePrintStringShape =>\n    self assert: (self sampleTree printString startsWith: \"#SupervisionTree<\")\n\n  testEmptyTreePrintString =>\n    self assert: (SupervisionTree flatNodes: #()) printString equals: \"#SupervisionTree<empty>\"\n\n  // A node with no recorded adjacency (constructor-built) has a nil parentPid.\n  testParentPidNilWithoutAdjacency =>\n    node := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: nil\n      childCount: 0\n    self assert: node parentPid equals: nil\n\n  // === Serialisable form (surface wire shape, BT-2431) ===\n  testAsDictionariesCount =>\n    self assert: self sampleTree asDictionaries size equals: 3\n\n  testAsDictionariesCarriesKindAndClass =>\n    first := self sampleTree asDictionaries first\n    self assert: (first at: #kind) equals: #beamtalkSupervisor\n    self assert: (first at: #isSupervisor) equals: true\n    self assert: (first at: #class) equals: #Counter\n\n  // === SupervisionTree: collection protocol ===\n  testNodesOfKind =>\n    self assert: (self sampleTree nodesOfKind: #beamtalkActor) size equals: 1\n\n  testFindClass =>\n    // Both the supervisor and the actor carry behaviourClass Counter.\n    self assert: (self sampleTree findClass: Counter) size equals: 2\n\n  testSelect =>\n    self assert: (self sampleTree select: [:n | n isSupervisor]) size equals: 1\n\n  testCollect =>\n    kinds := self sampleTree collect: [:n | n kind]\n    self assert: kinds size equals: 3\n\n  testDetect =>\n    found := self sampleTree detect: [:n | n kind == #otpProcess]\n    self assert: found kind equals: #otpProcess\n\n  testDetectIfNoneFallback =>\n    found := self sampleTree detect: [:n |\n      n kind == #neverHappens\n    ] ifNone: [nil]\n    self assert: found equals: nil\n\n  testDoReturnsTree =>\n    result := self sampleTree do: [:n | n kind]\n    self assert: (result isKindOf: SupervisionTree)\n\n  // === ProcessNavigation: constructors over the live tree (FFI, no workspace) ===\n  testDefaultIsProcessNavigation =>\n    self assert: (ProcessNavigation default isKindOf: ProcessNavigation)\n\n  testDefaultTreeIsSupervisionTree =>\n    self assert: (ProcessNavigation default tree isKindOf: SupervisionTree)\n\n  testSystemTreeIsSupervisionTree =>\n    self assert: (ProcessNavigation system tree isKindOf: SupervisionTree)\n\n  testDefaultIsSubsetOfSystem =>\n    // The default scope filters infra, so its node set is a subset of system's.\n    self assert: (ProcessNavigation default tree size <= ProcessNavigation system tree size)\n\n  // === from: runtime type-error fallback (untyped FFI input) ===\n  // `ProcessNavigation from: 42` is rejected STATICALLY by the type checker\n  // (Supervisor | Pid); this exercises the defensive runtime fallback that the\n  // shim keeps for untyped/Dynamic input arriving via FFI.\n  testFromWrongTypeRuntimeFallback =>\n    result := (Erlang beamtalk_process_navigation) from: 42\n    self assert: result isError\n    self assert: result error kind equals: #type_error",
+      "source": "// BT-2429: Tests for the ProcessNavigation + SupervisionTree stdlib classes\n// (ADR 0092 Phase 3).\n//\n// The collection protocol and tree shape are tested here over a hand-built\n// SupervisionTree (BUnit has no live workspace tree). The full live walk\n// (`ProcessNavigation default tree root`, node parent/children navigation, lazy\n// `status`) is covered by the REPL e2e suite (BT-2433); the runtime adjacency\n// accessors have their own EUnit coverage.\n\nTestCase subclass: ProcessNavigationTest\n\n  // A small fixed snapshot: a supervisor, an actor, and a foreign process.\n  sampleNodes =>\n    sup := SupervisionNode\n      pid: nil\n      registeredName: #sup\n      kind: #beamtalkSupervisor\n      behaviourClass: Counter\n      childCount: 1\n      node: nil\n    actor := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: Counter\n      childCount: 0\n      node: nil\n    foreign := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #otpProcess\n      behaviourClass: nil\n      childCount: 0\n      node: nil\n    #(sup, actor, foreign)\n\n  sampleTree => SupervisionTree flatNodes: self sampleNodes\n\n  // === SupervisionTree: shape ===\n  testTreeSize => self assert: self sampleTree size equals: 3\n\n  testTreeNodesCount => self assert: self sampleTree nodes size equals: 3\n\n  testTreeNodesAreSupervisionNodes =>\n    self assert: (self sampleTree nodes first isKindOf: SupervisionNode)\n\n  testTreeIsEmptyFalse => self deny: self sampleTree isEmpty\n\n  testEmptyTreeIsEmpty => self assert: (SupervisionTree flatNodes: #()) isEmpty\n\n  testTreeRootNotNil => self deny: self sampleTree root isNil\n\n  testTreePrintStringShape =>\n    self assert: (self sampleTree printString startsWith: \"#SupervisionTree<\")\n\n  testEmptyTreePrintString =>\n    self assert: (SupervisionTree flatNodes: #()) printString equals: \"#SupervisionTree<empty>\"\n\n  // A node with no recorded adjacency (constructor-built) has a nil parentPid.\n  testParentPidNilWithoutAdjacency =>\n    node := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: nil\n      childCount: 0\n      node: nil\n    self assert: node parentPid equals: nil\n\n  // === Serialisable form (surface wire shape, BT-2431) ===\n  testAsDictionariesCount =>\n    self assert: self sampleTree asDictionaries size equals: 3\n\n  testAsDictionariesCarriesKindAndClass =>\n    first := self sampleTree asDictionaries first\n    self assert: (first at: #kind) equals: #beamtalkSupervisor\n    self assert: (first at: #isSupervisor) equals: true\n    self assert: (first at: #class) equals: #Counter\n\n  // === SupervisionTree: collection protocol ===\n  testNodesOfKind =>\n    self assert: (self sampleTree nodesOfKind: #beamtalkActor) size equals: 1\n\n  testFindClass =>\n    // Both the supervisor and the actor carry behaviourClass Counter.\n    self assert: (self sampleTree findClass: Counter) size equals: 2\n\n  testSelect =>\n    self assert: (self sampleTree select: [:n | n isSupervisor]) size equals: 1\n\n  testCollect =>\n    kinds := self sampleTree collect: [:n | n kind]\n    self assert: kinds size equals: 3\n\n  testDetect =>\n    found := self sampleTree detect: [:n | n kind == #otpProcess]\n    self assert: found kind equals: #otpProcess\n\n  testDetectIfNoneFallback =>\n    found := self sampleTree detect: [:n |\n      n kind == #neverHappens\n    ] ifNone: [nil]\n    self assert: found equals: nil\n\n  testDoReturnsTree =>\n    result := self sampleTree do: [:n | n kind]\n    self assert: (result isKindOf: SupervisionTree)\n\n  // === ProcessNavigation: constructors over the live tree (FFI, no workspace) ===\n  testDefaultIsProcessNavigation =>\n    self assert: (ProcessNavigation default isKindOf: ProcessNavigation)\n\n  testDefaultTreeIsSupervisionTree =>\n    self assert: (ProcessNavigation default tree isKindOf: SupervisionTree)\n\n  testSystemTreeIsSupervisionTree =>\n    self assert: (ProcessNavigation system tree isKindOf: SupervisionTree)\n\n  testDefaultIsSubsetOfSystem =>\n    // The default scope filters infra, so its node set is a subset of system's.\n    self assert: (ProcessNavigation default tree size <= ProcessNavigation system tree size)\n\n  // === from: runtime type-error fallback (untyped FFI input) ===\n  // `ProcessNavigation from: 42` is rejected STATICALLY by the type checker\n  // (Supervisor | Pid); this exercises the defensive runtime fallback that the\n  // shim keeps for untyped/Dynamic input arriving via FFI.\n  testFromWrongTypeRuntimeFallback =>\n    result := (Erlang beamtalk_process_navigation) from: 42\n    self assert: result isError\n    self assert: result error kind equals: #type_error",
       "explanation": "BT-2429: Tests for the ProcessNavigation + SupervisionTree stdlib classes (ADR 0092 Phase 3).  The collection protocol and tree shape are tested here over a hand-built SupervisionTree (BUnit has no live workspace tree). The full live walk (`ProcessNavigation default tree root`, node parent/children navigation, lazy `status`) is covered by the REPL e2e suite (BT-2433); the runtime adjacency accessors have their own EUnit coverage."
     },
     {
@@ -34312,7 +34362,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BT-2427: Tests for the SupervisionNode value class (ADR 0092 Phase 1).\n//\n// SupervisionNode records are minted by the runtime shim\n// (beamtalk_process_navigation) and surfaced via `Workspace processes`. The\n// end-to-end `Workspace processes` path needs a live workspace tree and is\n// covered by the REPL e2e suite (BT-2433); here we exercise the value class\n// directly via its auto-generated keyword constructor.\n\nTestCase subclass: SupervisionNodeTest\n\n  // --- Fixture helpers ---\n  dbSupervisorNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: #db\n      kind: #beamtalkSupervisor\n      behaviourClass: nil\n      childCount: 3\n\n  otpProcessNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #otpProcess\n      behaviourClass: nil\n      childCount: 0\n\n  beamtalkSupervisorNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkSupervisor\n      behaviourClass: nil\n      childCount: 0\n\n  beamtalkActorNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: nil\n      childCount: 0\n\n  beamtalkActorWithCounterNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: Counter\n      childCount: 0\n\n  restartingNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #restarting\n      behaviourClass: nil\n      childCount: 0\n\n  // === Accessors return the stored field values ===\n  testKindAccessor =>\n    self assert: self dbSupervisorNode kind equals: #beamtalkSupervisor\n\n  testRegisteredNameAccessor =>\n    self assert: self dbSupervisorNode registeredName equals: #db\n\n  testChildCountAccessor =>\n    self assert: self dbSupervisorNode childCount equals: 3\n\n  testBehaviourClassAccessor =>\n    self assert: self beamtalkActorWithCounterNode behaviourClass equals: Counter\n\n  testPidAccessorNilForRestarting =>\n    self assert: self restartingNode pid equals: nil\n\n  // === Accessor values ===\n  testKindOtpProcess =>\n    self assert: self otpProcessNode kind equals: #otpProcess\n\n  testChildCountZero => self assert: self otpProcessNode childCount equals: 0\n\n  // === isSupervisor: true for both supervisor kinds ===\n  testIsSupervisorBeamtalkSupervisor =>\n    self assert: self beamtalkSupervisorNode isSupervisor equals: true\n\n  testIsSupervisorOtpSupervisor =>\n    node := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #otpSupervisor\n      behaviourClass: nil\n      childCount: 0\n    self assert: node isSupervisor equals: true\n\n  testIsSupervisorFalseForActor =>\n    self assert: self beamtalkActorNode isSupervisor equals: false\n\n  // === isBeamtalk: true only for the #beamtalk* kinds ===\n  testIsBeamtalkActor =>\n    self assert: self beamtalkActorNode isBeamtalk equals: true\n\n  testIsBeamtalkSupervisor =>\n    self assert: self beamtalkSupervisorNode isBeamtalk equals: true\n\n  testIsBeamtalkFalseForForeign =>\n    self assert: self otpProcessNode isBeamtalk equals: false\n\n  testIsBeamtalkFalseForRestarting =>\n    self assert: self restartingNode isBeamtalk equals: false\n\n  // === printString shape ===\n  testPrintStringActorFormat =>\n    self assert: self beamtalkActorWithCounterNode printString equals: \"#SupervisionNode<#beamtalkActor Counter restarting>\"\n\n  testPrintStringSupervisorShowsChildCount =>\n    node := SupervisionNode\n      pid: nil\n      registeredName: #appSup\n      kind: #beamtalkSupervisor\n      behaviourClass: nil\n      childCount: 3\n    self assert: node printString equals: \"#SupervisionNode<#beamtalkSupervisor appSup restarting children: 3>\"\n\n  testPrintStringRestartingShowsRestarting =>\n    self assert: self restartingNode printString equals: \"#SupervisionNode<#restarting restarting>\"",
+      "source": "// BT-2427: Tests for the SupervisionNode value class (ADR 0092 Phase 1).\n//\n// SupervisionNode records are minted by the runtime shim\n// (beamtalk_process_navigation) and surfaced via `Workspace processes`. The\n// end-to-end `Workspace processes` path needs a live workspace tree and is\n// covered by the REPL e2e suite (BT-2433); here we exercise the value class\n// directly via its auto-generated keyword constructor.\n\nTestCase subclass: SupervisionNodeTest\n\n  // --- Fixture helpers ---\n  dbSupervisorNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: #db\n      kind: #beamtalkSupervisor\n      behaviourClass: nil\n      childCount: 3\n      node: nil\n\n  otpProcessNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #otpProcess\n      behaviourClass: nil\n      childCount: 0\n      node: nil\n\n  beamtalkSupervisorNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkSupervisor\n      behaviourClass: nil\n      childCount: 0\n      node: nil\n\n  beamtalkActorNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: nil\n      childCount: 0\n      node: nil\n\n  beamtalkActorWithCounterNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #beamtalkActor\n      behaviourClass: Counter\n      childCount: 0\n      node: nil\n\n  restartingNode =>\n    SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #restarting\n      behaviourClass: nil\n      childCount: 0\n      node: nil\n\n  // === Accessors return the stored field values ===\n  testKindAccessor =>\n    self assert: self dbSupervisorNode kind equals: #beamtalkSupervisor\n\n  testRegisteredNameAccessor =>\n    self assert: self dbSupervisorNode registeredName equals: #db\n\n  testChildCountAccessor =>\n    self assert: self dbSupervisorNode childCount equals: 3\n\n  testBehaviourClassAccessor =>\n    self assert: self beamtalkActorWithCounterNode behaviourClass equals: Counter\n\n  testPidAccessorNilForRestarting =>\n    self assert: self restartingNode pid equals: nil\n\n  // === Accessor values ===\n  testKindOtpProcess =>\n    self assert: self otpProcessNode kind equals: #otpProcess\n\n  testChildCountZero => self assert: self otpProcessNode childCount equals: 0\n\n  // === isSupervisor: true for both supervisor kinds ===\n  testIsSupervisorBeamtalkSupervisor =>\n    self assert: self beamtalkSupervisorNode isSupervisor equals: true\n\n  testIsSupervisorOtpSupervisor =>\n    node := SupervisionNode\n      pid: nil\n      registeredName: nil\n      kind: #otpSupervisor\n      behaviourClass: nil\n      childCount: 0\n      node: nil\n    self assert: node isSupervisor equals: true\n\n  testIsSupervisorFalseForActor =>\n    self assert: self beamtalkActorNode isSupervisor equals: false\n\n  // === isBeamtalk: true only for the #beamtalk* kinds ===\n  testIsBeamtalkActor =>\n    self assert: self beamtalkActorNode isBeamtalk equals: true\n\n  testIsBeamtalkSupervisor =>\n    self assert: self beamtalkSupervisorNode isBeamtalk equals: true\n\n  testIsBeamtalkFalseForForeign =>\n    self assert: self otpProcessNode isBeamtalk equals: false\n\n  testIsBeamtalkFalseForRestarting =>\n    self assert: self restartingNode isBeamtalk equals: false\n\n  // === printString shape ===\n  testPrintStringActorFormat =>\n    self assert: self beamtalkActorWithCounterNode printString equals: \"#SupervisionNode<#beamtalkActor Counter restarting>\"\n\n  testPrintStringSupervisorShowsChildCount =>\n    node := SupervisionNode\n      pid: nil\n      registeredName: #appSup\n      kind: #beamtalkSupervisor\n      behaviourClass: nil\n      childCount: 3\n      node: nil\n    self assert: node printString equals: \"#SupervisionNode<#beamtalkSupervisor appSup restarting children: 3>\"\n\n  testPrintStringRestartingShowsRestarting =>\n    self assert: self restartingNode printString equals: \"#SupervisionNode<#restarting restarting>\"",
       "explanation": "BT-2427: Tests for the SupervisionNode value class (ADR 0092 Phase 1).  SupervisionNode records are minted by the runtime shim (beamtalk_process_navigation) and surfaced via `Workspace processes`. The end-to-end `Workspace processes` path needs a live workspace tree and is covered by the REPL e2e suite (BT-2433); here we exercise the value class directly via its auto-generated keyword constructor."
     },
     {

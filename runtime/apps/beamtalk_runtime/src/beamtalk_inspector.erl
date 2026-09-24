@@ -99,7 +99,12 @@ compile-time dependency); actor evaluate-in-context is a deferred follow-up
     page := non_neg_integer(),
     parent := inspector() | nil,
     path := [term()],
-    provenance := provenance()
+    provenance := provenance(),
+    %% ADR 0126 §7.3/Phase 7 (BT-3605): the node a `#actor` entry's pid lives
+    %% on. Only `actor_cursor/3`/`actor_cursor_from_state/4` set it — absent
+    %% (not `nil`) on every other kind, so its presence is itself a signal
+    %% this is an actor row.
+    node => node()
 }.
 
 %% Where a cursor's subject came from, scoping value-rendering heuristics that
@@ -193,7 +198,11 @@ actor_cursor_from_state(Pid, State, Parent, Path) ->
         parent => Parent,
         path => Path,
         %% An actor's own state is native Beamtalk — never foreign-scoped.
-        provenance => beamtalk
+        provenance => beamtalk,
+        %% ADR 0126 §7.3/Phase 7 (BT-3605): the node this pid lives on —
+        %% always `node()` here (self-inspection only targets a local pid),
+        %% but carried for output-shape parity with `actor_cursor/3` below.
+        node => node(Pid)
     }.
 
 %% Build a root cursor (no parent) for a subject, classifying kind and capturing
@@ -338,7 +347,15 @@ actor_cursor(Pid, Parent, Path) ->
         parent => Parent,
         path => Path,
         %% An actor's own state is native Beamtalk — never foreign-scoped.
-        provenance => beamtalk
+        provenance => beamtalk,
+        %% ADR 0126 §7.3/Phase 7 (BT-3605): the node this actor pid lives
+        %% on. `actor_cursor/3` is only ever reached for a *local* pid
+        %% (`process_cursor/3`'s `node(Pid) =/= node()` guard above routes a
+        %% remote pid to `remote_cursor/3` instead), so this is always
+        %% `node()` in practice — carried explicitly rather than assumed, so
+        %% an `#actor` row is self-describing without cross-referencing
+        %% which cursor constructor built it.
+        node => node(Pid)
     }.
 
 %% Mint a `#foreign` cursor over a non-Beamtalk OTP pid. No state is captured at

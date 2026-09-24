@@ -23,7 +23,7 @@ defmodule BtAttach.RbacTest do
   # `processes` (default-scope supervision tree, ADR 0092) is a read op like
   # `actors`; `processes_system` is the privileged whole-node view (execute).
   @execute_admin_ops ~w(eval load_source save flush reload kill rotate_cookie processes_system)a
-  @read_ops ~w(info inspect bindings actors processes sessions complete subscribe_transcript)a
+  @read_ops ~w(info inspect bindings actors processes nodes sessions complete subscribe_transcript)a
 
   describe "role_for/2 — claim → role (fail closed)" do
     test "owner group → :owner (owner takes precedence)" do

@@ -378,12 +378,26 @@ fn read_port_from_beam(child: &mut Child) -> u16 {
 }
 
 impl ProcessManager {
-    /// Start the BEAM REPL backend with an OS-assigned ephemeral port.
+    /// Start the BEAM REPL backend with an OS-assigned ephemeral port, under
+    /// the standard `-sname beamtalk_e2e_test` fixture identity.
     ///
     /// Spawns the BEAM node with `tcp_port => 0` so the OS picks a free port,
     /// then reads the actual port from the node's stdout (`BEAMTALK_PORT:<n>`).
     /// This eliminates port conflicts between parallel test runs or other services.
     fn start() -> Self {
+        Self::start_named("beamtalk_e2e_test", E2E_SESSION_NAME)
+    }
+
+    /// Like [`Self::start`], but with an explicit `-sname` and workspace
+    /// name — the two-node distribution fixture (ADR 0126, BT-3605 Phase 7)
+    /// boots a **second**, fully independent workspace node this way
+    /// (`e2e_distribution_tests`) so `Counter` can be loaded there too (a
+    /// remote spawn resolves its class by name on the *target* node, ADR
+    /// 0126 §3) — reusing this exact startup path rather than a second,
+    /// narrower one (CLAUDE.md "No duplicate implementations"), since a
+    /// two-node distribution test needs a real second REPL-capable
+    /// workspace, not just a bare `beamtalk_runtime` node.
+    fn start_named(sname: &str, workspace_name: &str) -> Self {
         // Check if debug output is requested via environment variable
         let debug_output = env::var("E2E_DEBUG").is_ok();
 
@@ -459,18 +473,18 @@ impl ProcessManager {
         // round-trip test's own temp files (created via `File tempDirectory`)
         // stay INSIDE the project and remain flushable.
         let e2e_project_dir =
-            std::env::temp_dir().join(format!("bt_e2e_project_{}", std::process::id()));
+            std::env::temp_dir().join(format!("bt_e2e_project_{sname}_{}", std::process::id()));
         std::fs::create_dir_all(&e2e_project_dir).expect("create e2e project dir");
 
         let mut beam_child = Command::new("erl")
             .arg("-noshell")
             .arg("-sname")
-            .arg("beamtalk_e2e_test")
+            .arg(sname)
             .arg("-setcookie")
             .arg(E2E_COOKIE)
             .args(&pa_args)
             .current_dir(workspace_root())
-            .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
+            .env("BEAMTALK_WORKSPACE", workspace_name)
             .env("BEAMTALK_NO_FILE_LOG", "1")
             .env("BEAMTALK_WORKSPACE_PROJECT_PATH", &e2e_project_dir)
             .env("TMPDIR", &e2e_project_dir)
@@ -2085,6 +2099,9 @@ fn e2e_language_tests() {
     // its own release-mode fixture, not this shared workspace-mode node.
     // `release_smoke.btscript` is excluded for the same reason — it asserts
     // against a *real*, `beamtalk release`-assembled console (BT-3576).
+    // `distribution.btscript` is excluded for the same reason again — it
+    // asserts against a genuine two-node fixture (ADR 0126, BT-3605 Phase
+    // 7), run by its own dedicated test below.
     let mut test_files: Vec<PathBuf> = fs::read_dir(&cases_dir)
         .expect("Failed to read test cases directory")
         .filter_map(|entry| {
@@ -2093,6 +2110,7 @@ fn e2e_language_tests() {
             if path.extension().is_some_and(|ext| ext == "btscript")
                 && !is_release_console_case(&path)
                 && !is_release_smoke_case(&path)
+                && !is_distribution_case(&path)
             {
                 Some(path)
             } else {
@@ -2264,6 +2282,104 @@ fn is_release_smoke_case(path: &std::path::Path) -> bool {
 fn e2e_release_smoke_test() {
     let manager = ProcessManager::start_real_release();
     run_release_console_cases(&manager, false, is_release_smoke_case);
+}
+
+fn is_distribution_case(path: &std::path::Path) -> bool {
+    path.file_stem().and_then(|s| s.to_str()) == Some("distribution")
+}
+
+/// Extract the `name@host` atom text out of a `Node>>printString` result,
+/// e.g. `"Node(worker@localhost)"` → `"worker@localhost"`.
+fn node_name_from_print_string(rendered: &str) -> String {
+    rendered
+        .trim()
+        .trim_start_matches("Node(")
+        .trim_end_matches(')')
+        .to_string()
+}
+
+/// ADR 0126 (Distribution and Location-Transparent Actors) end-to-end
+/// coverage, BT-3605 Phase 7 — the epic's own required e2e test exercising
+/// the feature from the REPL rather than unit/BUnit coverage alone.
+///
+/// Boots a genuine **second**, independent workspace node
+/// (`ProcessManager::start_named`, reusing the exact same startup path
+/// `ProcessManager::start` does — CLAUDE.md "No duplicate implementations")
+/// alongside the usual e2e fixture, connects to it directly to pre-load
+/// `Counter` there (a remote spawn resolves its class *by name on the
+/// target node*, ADR 0126 §3 — `spawnOn:` would otherwise answer
+/// `class_not_found`), reads back the peer's own `Node current printString`
+/// so the exact `name@host` atom is known without guessing at hostname
+/// formatting, splices it into `distribution.btscript`'s `__PEER_NODE__`
+/// placeholder, and runs the case file against the *primary* node's REPL —
+/// exactly the two-node scenario `Node current` / `Node named:aPeer
+/// connect` / `Counter spawnOn:` / `Workspace nodes` / `ProcessNavigation
+/// on:` exercise from a real REPL session.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_distribution_tests() {
+    let primary = ProcessManager::start();
+    let peer_sname = format!("bt_e2e_dist_peer_{}", std::process::id());
+    let peer = ProcessManager::start_named(&peer_sname, "e2e-dist-peer");
+
+    // Pre-load `Counter` on the peer node directly — `spawnOn:` resolves its
+    // class by name *there*, not on the primary node the case file's REPL
+    // client is connected to. Also start `E2EAppSupervisor` there (the same
+    // fixture `supervision_tree_introspection.btscript` uses locally) so the
+    // peer's `default`-scope supervision tree is non-empty — `ProcessNavigation
+    // on:` would otherwise have nothing to show, since a bare `spawnOn:` actor
+    // is deliberately unsupervised (ADR 0126 §3) and so never appears in it.
+    let mut peer_client = ReplClient::connect(peer.port).expect("Failed to connect to peer REPL");
+    peer_client
+        .load_file("tests/repl-protocol/fixtures/counter.bt")
+        .expect("Failed to load Counter fixture onto the peer node");
+    peer_client
+        .load_file("tests/repl-protocol/fixtures/e2e_app_supervisor.bt")
+        .expect("Failed to load E2EAppSupervisor fixture onto the peer node");
+    peer_client
+        .eval("(E2EAppSupervisor supervise) unwrap")
+        .expect("Failed to start E2EAppSupervisor on the peer node");
+    let peer_node_print_string = peer_client
+        .eval_to_string("Node current printString")
+        .expect("Failed to read the peer node's own identity");
+    let peer_node_name = node_name_from_print_string(&peer_node_print_string);
+    eprintln!("E2E: distribution peer node is {peer_node_name}");
+
+    let mut primary_client =
+        ReplClient::connect(primary.port).expect("Failed to connect to primary REPL");
+
+    let cases_dir = test_cases_dir();
+    let case_path = cases_dir.join("distribution.btscript");
+    assert!(
+        case_path.exists(),
+        "distribution.btscript not found in {}",
+        cases_dir.display()
+    );
+    let template = fs::read_to_string(&case_path).expect("Failed to read distribution.btscript");
+    let rendered = template.replace("__PEER_NODE__", &peer_node_name);
+
+    // Write the substituted script under the primary node's own dedicated
+    // project dir (already created and cleaned up by `ProcessManager`) so
+    // `run_test_file` can read it back by path like any other case file —
+    // no changes needed to the shared parser/runner.
+    let rendered_path = primary.project_dir.join("distribution_rendered.btscript");
+    fs::write(&rendered_path, rendered).expect("Failed to write rendered distribution.btscript");
+
+    let (passed, failures) = run_test_file(&rendered_path, &mut primary_client);
+    let total = passed + failures.len();
+    eprintln!("\nE2E distribution results: {passed}/{total} tests passed");
+    if !failures.is_empty() {
+        eprintln!("\nFailures:");
+        for failure in &failures {
+            eprintln!("  - {failure}");
+        }
+        panic!(
+            "E2E distribution tests failed: {} of {} tests failed",
+            failures.len(),
+            total
+        );
+    }
 }
 
 #[cfg(test)]

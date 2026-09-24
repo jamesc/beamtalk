@@ -34,6 +34,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [Live Re-Checking on Reload (ADR 0105)](#live-re-checking-on-reload-adr-0105)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Announcements — Typed Events (ADR 0093)](#announcements--typed-events-adr-0093)
+- [Distribution — Location-Transparent Actors (ADR 0126)](#distribution--location-transparent-actors-adr-0126)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
   - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
@@ -5404,6 +5405,240 @@ Announcements (typed domain events you subscribe to in app logic):
 > a *connected* node works; partition tolerance, replay, and the
 > `RecordingAnnouncer`/telemetry-bridge extras live in the optional
 > `beamtalk-announcements` package (BT-2454).
+
+---
+
+## Distribution — Location-Transparent Actors (ADR 0126)
+
+Beamtalk actors are **location-transparent**: the same `.` (sync), `!`
+(cast), and `Future`-returning async sends that work between local actors
+work identically against an actor running on another BEAM node in the
+cluster. There is no special "remote actor" type — an `Actor` reference is
+an `Actor` reference, whether the process behind it lives here or across the
+network. Distribution builds directly on the supervision, announcement, and
+value-object machinery described earlier in this document; see
+[ADR 0126](ADR/0126-distribution-location-transparent-actors.md) for the full
+design, including the failure-mode analysis and security model this section
+summarizes.
+
+### `Node` — a first-class value
+
+`Node` wraps a BEAM node identity (`name@host`). It is a **value, not a
+proxy**: two `Node`s are equal iff their names are equal, and constructing
+one never touches the network.
+
+```beamtalk
+Node current                                    // => Node(nonode@nohost)
+worker := (Node named: #'worker@localhost') unwrap
+worker name                                     // => #'worker@localhost'
+Node connected                                  // => #()  (visible connected nodes)
+worker connect                                  // => Result ok: Node(worker@localhost)
+worker isConnected                              // => true
+worker disconnect                               // => true
+```
+
+`connect` (and `ping`, which auto-connects) apply a security policy (see
+Security, below): a same-host connection always succeeds; an off-host
+connection is refused with `kind = insecure_distribution` unless this node
+runs TLS distribution. `Node named:` only validates the `name@host` shape and
+never touches the network, so it always succeeds for a well-formed name —
+reachability is only proven by `connect`/`ping`.
+
+### Remote spawn and lookup
+
+Every actor spawn/lookup class-side selector gains an `on:` variant that
+targets a specific `Node`. Syntax, return types, and error kinds mirror the
+local form exactly — remote spawn always answers a `Result`, because
+reaching another node is an expected failure (ADR 0060), not a programming
+error:
+
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+c := (Counter spawnOn: worker) unwrap
+c node                                          // => Node(worker@localhost)
+c isRemote                                      // => true
+c increment                                     // an ordinary sync send — works identically to a local actor
+```
+
+| Selector | Local form | Remote form |
+|----------|-----------|-------------|
+| Anonymous spawn | `spawn` | `spawnOn: node` |
+| Named spawn (state args) | `spawnWith: args` | `spawnWith: args on: node` |
+| Named + registered spawn | `spawnAs: name` | `spawnAs: name on: node` |
+| Lookup by registered name | `named: name` | `named: name on: node` |
+| List every registered actor | `allRegistered` | `allRegisteredOn: node` |
+
+**Remote spawn is not idempotent.** A timeout after the far-side spawn
+actually succeeded leaves an unowned actor running on the target node — the
+spawning session has no way to tell "it never happened" from "it happened,
+but the reply was lost". A named spawn (`spawnAs:on:`) retried after
+`name_registered` can be recovered with `named:on:`; an anonymous `spawnOn:`
+has no such recovery — retry only when idempotency doesn't matter, or use a
+named spawn.
+
+**Remote spawn creates no link and no local tracking.** The spawned actor is
+never linked back to the spawning process (a link across a node boundary
+would turn every partition into a local crash), and the spawning workspace
+does not track it — `ActorSpawned` fires on the *target* node, not the
+caller's. The actor outlives the spawning session until something else stops
+it.
+
+### Cluster-unique names — `scope: #global`
+
+A node-local registered name (`spawnAs:`, ADR 0079) is only visible on the
+node that registered it. Requesting `scope: #global` instead registers the
+name **cluster-wide**, backed by OTP's `global` module:
+
+```beamtalk
+leader := (Scheduler spawnAs: #scheduler scope: #global) unwrap
+// from any node in the cluster:
+s := (Scheduler named: #scheduler scope: #global) unwrap
+s tick
+```
+
+`scope: #global` is opt-in — the default stays node-local — and comes with
+real operational cost, not just a lookup convenience:
+
+> **Mesh side effects.** `global` keeps a fully connected mesh between every
+> node that uses it, and OTP 25+ enables `prevent_overlapping_partitions` by
+> default: on partial connectivity, `global` actively **disconnects** nodes to
+> restore a consistent view. A program using `scope: #global` will observe
+> `NodeDown` events **caused by `global` itself**, not by an actual network
+> failure — don't assume every `NodeDown` means a real partition. `global`
+> also inherits the full-mesh registry's known scaling limits (every node
+> locks the global name table during a registration) — reach for it
+> deliberately, not as the default choice for cluster-wide lookup.
+
+When a netsplit heals and the same global name was registered on both sides,
+Beamtalk's own resolver keeps the *older* registrant (by start time) and
+stops the other with a `#globalNameConflict` reason — never OTP's default
+`exit(Pid, kill)`, so the losing actor's `terminate` still runs and its
+`ActorStopped` announcement carries the reason.
+
+### The wire — what crosses a node boundary, and what doesn't
+
+A send to a remote actor is encoded before it leaves the sender and decoded
+on arrival — transparently, with no change to the sending code. Every
+argument and result is walked and classified:
+
+| What you send | Crosses the wire as |
+|----------------|---------------------|
+| Numbers, Strings, Symbols, `Value` subclasses, `Node` | Copied, `Value` instances enveloped (version-tagged, ADR 0123/0125) |
+| Actors, `Pid` | Allowed — pids are node-qualified natively; a registered-name reference is rewritten to carry its origin node |
+| A class object (e.g. `Counter`) | Rewritten to a by-name reference, resolved against the **receiving** node's own class registry — a class object never crosses as a remote process reference |
+| Blocks (closures) | Allowed, like Erlang funs — see the caveat below |
+| `Port`, `FileHandle` (`HandleScoped(#process)`) | **Rejected** at encode time: `kind = not_serialisable` |
+| `Ets`, `AtomicCounter`, `Timer`, `Subscription` (`HandleScoped(#node)`) | **Rejected** at encode time: `kind = not_serialisable` — a handle that names a resource on *this* node is meaningless on another |
+| An unassigned `late` slot | Travels as absent; the receiver's first read raises `UninitializedStateError` |
+
+**A block whose defining class isn't loaded (at the same version) on the node
+where it runs raises `kind = remote_code_mismatch`** there — for a block
+invoked during the call that received it, that's the callee, relayed back to
+the sender like any other callee error; for a block stored and invoked
+later, it surfaces wherever it's eventually invoked.
+
+**Version skew is handled per message, not per connection.** An older
+envelope is migrated forward through the receiving class's `migrateFromVN:`
+chain; a **newer** envelope than the receiver knows is refused *before* any
+migration runs, with `kind = shape_version_ahead`. Two directions of that
+refusal have distinct consequences:
+
+- **Request direction:** the sync send's reply is the error — the receiving
+  actor's state is untouched, it never saw the message.
+- **Reply direction — the undecodable-reply caveat:** if the *caller* can't
+  decode the reply (a returned Value is newer than the caller knows), **the
+  method has already run and the callee's state has already changed** — the
+  caller raises `shape_version_ahead` (`details = #{direction => reply}`),
+  but the actor it called is not rolled back. This is a second
+  possibly-executed failure mode alongside the timeout caveat below; the ADR
+  0125 rule (upgrade the *receiving* side of a class first) avoids it for
+  requests, and for replies means upgrading a Value's *callers* first.
+
+> **The timeout-vs-`node_down` caveat.** The ordinary 5000 ms sync-send
+> timeout (ADR 0043) applies unchanged across the network. Erlang only
+> detects a silent partition after `net_ticktime` (default 60 s) — so during
+> a real partition, a sync send will normally raise `timeout` **before**
+> anything raises `node_down`. These mean different things: `timeout` says
+> "no answer arrived in time" (the call may still be running, or may already
+> have completed on the far side — a timed-out call is at-most-once-*reply*,
+> not at-most-once-*execution*, identical to a local `gen_server:call`
+> timeout); `node_down` says "the runtime has confirmed the node is gone".
+> Don't treat a `timeout` as proof the remote actor never ran.
+
+### Cluster events
+
+Node membership and shape-version skew are observed through the ordinary
+[Announcements](#announcements--typed-events-adr-0093) substrate, not a
+polling API — subscribe to the event class you care about:
+
+```beamtalk
+SystemAnnouncer current when: NodeUp do: [:e |
+  Transcript showLine: "joined: ", e node name asString
+]
+SystemAnnouncer current when: NodeDown do: [:e |
+  Transcript showLine: "lost ", e node name asString, " (", e reason asString, ")"
+]
+SystemAnnouncer current when: NodeShapeSkew do: [:e |
+  Transcript showLine: e node name asString, ": ", e className asString,
+    " local v", e localVersion printString, " remote v", e remoteVersion printString
+]
+```
+
+- **`NodeUp`** / **`NodeDown`** fire for every visible node join/leave
+  (`NodeDown` carries a `reason` Symbol). Only *visible* nodes announce —
+  hidden (tooling) nodes never produce an event. Announcements stay
+  node-local (ADR 0093): each node announces its own view of membership,
+  never a cluster-wide broadcast.
+- **`NodeShapeSkew`** is an early-warning announcement, not a per-message
+  guard: when a node connects, and again whenever a class reloads while
+  peers stay connected, this node compares its own `Beamtalk shapeManifest`
+  against each connected peer's and announces one event per class whose
+  version differs. It **never refuses the connection** — doing so would make
+  ADR 0125's rolling-upgrade procedure impossible — it only makes skew
+  visible before the first send actually fails on it (the per-message check
+  above is the real safety net). `Workspace nodes` (below) surfaces the same
+  information as a point-in-time, queryable snapshot rather than only a
+  live event stream.
+
+**Supervision-tree introspection reaches across nodes too:**
+`ProcessNavigation on: aNode` snapshots the *target* node's `default`-scope
+supervision tree via `erpc` (the same walk `ProcessNavigation default` runs
+locally, executed remotely) and returns `Result(ProcessNavigation, Error)` —
+every `SupervisionNode` in the result carries a `node` field naming which
+node it came from:
+
+```beamtalk
+(ProcessNavigation on: worker) unwrap tree nodesOfKind: #beamtalkActor
+```
+
+`Workspace nodes` lists every visible connected node together with its
+current shape-skew count (how many classes differ in version from this
+node's own), reached identically from the REPL, MCP, and LiveView surfaces
+— the cross-surface `nodes` operation (see
+[`docs/development/surface-parity.md`](development/surface-parity.md)).
+`Workspace actors` (and the local-only `ProcessNavigation default`/`system`
+scopes) remain deliberately **node-local** — they were not extended into a
+cluster-wide actor inventory.
+
+### Security model
+
+`connect` (and anything that connects as a side effect: `ping`, a remote
+spawn, `shapeManifest`) applies a host policy: a same-host connection is
+always allowed; an off-host connection is refused with `kind =
+insecure_distribution` unless this node runs TLS distribution
+(`-proto_dist inet_tls`). This guard is advisory for the *language* surface,
+not an enforcement boundary — raw `net_kernel` calls via `Erlang` FFI, and
+Erlang's own auto-connect on a send to a remote pid, bypass it. There is no
+cookie API at the language level (the cookie is a VM-level `-setcookie`
+concern, ADR 0020/0058).
+
+Only *visible* nodes participate in distribution transparency (spawn,
+lookup, cluster events); a **hidden** node (`-hidden`) never appears in
+`Node connected`, never fires `NodeUp`/`NodeDown`, and is excluded from
+shape-skew checks — hidden nodes are for tooling that observes or attaches
+to a cluster without joining it as a peer. Beamtalk's own attach front (ADR
+0097) does not yet start as a hidden node; that is a tracked follow-up, not
+part of this ADR.
 
 ---
 
