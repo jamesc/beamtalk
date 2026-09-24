@@ -81,6 +81,10 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     snapshot_from_pids/3,
     from/1,
     from/2,
+    on/1,
+    on/2,
+    %% `erpc`-reachable only — see its own doc.
+    remote_snapshot_target/1,
     status/1,
     guarded_state/1,
     guarded_state/2,
@@ -107,6 +111,21 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 %% must never wedge on a busy or stuck supervisor, so the walk uses bounded calls
 %% and treats a timeout as "no children" (best-effort, ADR 0092 §4).
 -define(WHICH_CHILDREN_TIMEOUT, 5000).
+
+%% Bounded timeout (ms) for the outer `erpc:call` a remote `on/1,2` snapshot
+%% makes (ADR 0126 §8, Phase 7). Deliberately larger than
+%% `?WHICH_CHILDREN_TIMEOUT`/`?BT_REMOTE_CALL_TIMEOUT`, not equal to either:
+%% `default_snapshot/1` on the target node can itself issue several
+%% `?WHICH_CHILDREN_TIMEOUT`-bounded guarded calls (one per supervisor found
+%% in the walk), so an outer bound sized to only *one* of those inner calls
+%% can time out a walk that is behaving correctly but simply has more than
+%% one slow-to-answer supervisor — this gives the walk genuine headroom to
+%% finish rather than raising a spurious `timeout`.
+-define(REMOTE_SNAPSHOT_TIMEOUT, 20000).
+
+%% Process-dictionary key for `cached_live_class_entries/0`'s per-walk memo —
+%% see that function's doc for why the walk needs it.
+-define(LIVE_CLASS_ENTRIES_CACHE_KEY, '$beamtalk_pn_live_class_entries_cache').
 
 %% Bounded timeout (ms) for the lazy `sys:get_status/1` fetch. A busy, wedged, or
 %% non-`sys`-compliant process must yield `nil`, never block the caller
@@ -145,6 +164,13 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     restartIntensity := #{maxRestarts := term(), window := term()} | nil,
     truncated := boolean(),
     parent_pid := pid() | nil,
+    %% The node this snapshot node was captured on (ADR 0126 §8, Phase 7):
+    %% always the node the walk actually ran on, so a snapshot taken remotely
+    %% via `on/1,2` (which runs the *same* walk on the target node via `erpc`,
+    %% never re-derived) carries that node correctly with no threading needed
+    %% — `node()` inside `leaf_node/4`/`supervisor_node/8`/
+    %% `build_restarting_node/2` is evaluated wherever the walk executes.
+    node := beamtalk_node:t(),
     %% Optional: the shared sibling set attached by `enrich/1` so a node can
     %% navigate to its parent/children. Absent on the lite nodes the shim mints.
     siblings => [node_map()]
@@ -179,7 +205,9 @@ cap (`Limit`). See `default_snapshot/0`.
 """.
 -spec default_snapshot(non_neg_integer()) -> [node_map()].
 default_snapshot(Limit) ->
-    snapshot_from_pids(default_root_pids(), default, Limit).
+    with_live_class_entries_cache(fun() ->
+        snapshot_from_pids(default_root_pids(), default, Limit)
+    end).
 
 -doc """
 Return the flat `system`-scope supervision snapshot — everything, including
@@ -200,7 +228,9 @@ cap (`Limit`). See `system_snapshot/0`.
 """.
 -spec system_snapshot(non_neg_integer()) -> [node_map()].
 system_snapshot(Limit) ->
-    snapshot_from_pids(system_root_pids(), system, Limit).
+    with_live_class_entries_cache(fun() ->
+        snapshot_from_pids(system_root_pids(), system, Limit)
+    end).
 
 -doc """
 Root a snapshot at a user-supplied `Root` — a Beamtalk `Supervisor` handle
@@ -230,7 +260,10 @@ from(Root, Limit) ->
         {ok, Pid} ->
             case erlang:is_process_alive(Pid) of
                 true ->
-                    {ok, snapshot_from_pids([Pid], system, Limit)};
+                    {ok,
+                        with_live_class_entries_cache(fun() ->
+                            snapshot_from_pids([Pid], system, Limit)
+                        end)};
                 false ->
                     {error, from_error(stale_handle, <<"the root process is not alive">>)}
             end;
@@ -241,6 +274,157 @@ from(Root, Limit) ->
                     <<"from: expects a Supervisor handle or a Pid">>
                 )}
     end.
+
+-doc """
+A `default`-scope snapshot of `Node` (ADR 0126 §8, Phase 7), taken **on**
+that node via `erpc` and never re-derived from this node's own view: the
+walk this module already runs locally for `default_snapshot/0` is the exact
+same `supervisor:which_children` walk this dispatches remotely
+(`erpc:call(Node, ?MODULE, default_snapshot, [], _)`), so a `SupervisionNode`
+built this way has `node => Node` for free — `leaf_node/4`/`supervisor_node/8`/
+`build_restarting_node/2` stamp `node()` wherever they actually run, and here
+that is the target node itself.
+
+Applies the same ADR 0126 §9 host policy `Node>>connect`/`Node>>shapeManifest`
+apply (`beamtalk_node:connect_policy/2`, never re-derived): an off-host `Node`
+without TLS distribution is refused with `kind = insecure_distribution`
+before any network attempt. The current node is special-cased to a direct
+local call, matching `beamtalk_node:shapeManifest/1`'s own reasoning (always
+allowed, and `erpc:call/5` against `node()` on a non-distributed VM is not
+guaranteed to behave like an ordinary local call).
+
+Returns `{ok, [node_map()]}`, or `{error, #beamtalk_error{}}` with
+`kind = node_down` (unreachable), `kind = timeout` (no answer within
+`?REMOTE_SNAPSHOT_TIMEOUT`), or `kind = insecure_distribution` (refused by
+policy).
+""".
+-spec on(beamtalk_node:t()) -> {ok, [node_map()]} | {error, #beamtalk_error{}}.
+on(Node) ->
+    on(Node, ?DEFAULT_CHILD_LIMIT).
+
+-doc "Like `on/1`, with an explicit per-supervisor child cap `Limit`. See `default_snapshot/1`.".
+-spec on(beamtalk_node:t(), non_neg_integer()) -> {ok, [node_map()]} | {error, #beamtalk_error{}}.
+on(#{'$beamtalk_class' := 'Node', name := Name}, Limit) ->
+    case Name =:= node() of
+        true ->
+            {ok, default_snapshot(Limit)};
+        false ->
+            case beamtalk_node:connect_policy(Name, beamtalk_node:tls_distribution()) of
+                {error, #beamtalk_error{} = Refused} ->
+                    {error, Refused#beamtalk_error{class = 'ProcessNavigation', selector = 'on:'}};
+                ok ->
+                    remote_default_snapshot(Name, Limit)
+            end
+    end.
+
+%% `erpc:call/5` fetch of `Name`'s `default_snapshot/1`, with `erpc`/connection
+%% failures mapped to `#beamtalk_error{}` — mirrors
+%% `beamtalk_node:remote_shape_manifest/1`'s own erpc-and-catch shape (same
+%% failure taxonomy: `noconnection` -> `node_down`, `timeout` -> `timeout`,
+%% anything else -> a generic `runtime_error` naming the reason).
+%%
+%% Unlike `remote_shape_manifest/1` (a plain map of primitives), a
+%% `SupervisionNode`'s `behaviourClass` field is a live class object
+%% (`#beamtalk_object{}`, the target node's own `Counter` class gen_server) —
+%% `erpc:call/5` alone would copy that raw record across as plain Erlang term
+%% data, so a `behaviourClass` compared against *this* node's own `Counter`
+%% (e.g. `tree findClass: Counter`) would never match (wrong node, wrong
+%% pid). ADR 0126 §5.1's generic class-object-to-by-name rewrite does not
+%% reach it either: that rewrite lives in `beamtalk_wire`'s *outer* term walk,
+%% and a `SupervisionNode` (a `Value`) is handed to `pack_wire/1`'s *inner*
+%% recursion once met, which — per ADR 0123 — only descends into fields
+%% *declared* as `Value` types; `behaviourClass :: Class | Nil` is
+%% `Object`-kind, not `Value`-kind, so it is untouched (the wire ADR's own
+%% documented "Known, inherited scope gap": a nested Object-kind field is not
+%% composed generically). Rather than special-case the whole `Class` tier
+%% inside the shared wire codec for the sake of one tooling op,
+%% `remote_snapshot_target/1` rewrites just this one field to a by-name
+%% reference on the target node before it crosses, and `class_ref_in/1`
+%% below resolves it back against *this* node's own class registry after —
+%% the same by-name-rewrite *idea* ADR 0126 §5.1 already establishes for
+%% every other class-object crossing, applied narrowly where the generic
+%% walk's own documented gap leaves it undone.
+-spec remote_default_snapshot(node(), non_neg_integer()) ->
+    {ok, [node_map()]} | {error, #beamtalk_error{}}.
+remote_default_snapshot(Name, Limit) ->
+    try erpc:call(Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT) of
+        Snapshot when is_list(Snapshot) ->
+            {ok, [class_ref_in(N) || N <- Snapshot]}
+    catch
+        error:{erpc, noconnection} ->
+            {error, on_node_down_error(Name)};
+        error:{erpc, timeout} ->
+            {error, on_timeout_error(Name)};
+        error:{erpc, Reason} ->
+            {error, on_error(Name, Reason)};
+        error:{exception, Reason, _Stack} ->
+            {error, on_error(Name, Reason)};
+        exit:{exception, Reason} ->
+            {error, on_error(Name, Reason)}
+    end.
+
+-doc """
+Runs **on the target node** (the `erpc` worker `remote_default_snapshot/2`
+dispatches to): take the `default`-scope snapshot there, then rewrite each
+node's `behaviourClass` to a by-name reference (`class_ref_out/1`) — see
+`remote_default_snapshot/2`'s doc for why. Exported so `erpc:call/5` can
+reach it by name; not part of the public API surface (the doc for `on/1,2`
+is the one users read).
+""".
+-spec remote_snapshot_target(non_neg_integer()) -> [node_map()].
+remote_snapshot_target(Limit) ->
+    [class_ref_out(N) || N <- default_snapshot(Limit)].
+
+%% Rewrite `Node`'s `behaviourClass` (a live class object) to a
+%% `{'$beamtalk_class_ref', ClassName}` by-name reference, or leave it as-is
+%% (`nil`, or already resolved) — the target-node half of the rewrite
+%% `remote_default_snapshot/2`'s doc explains.
+-spec class_ref_out(node_map()) -> node_map().
+class_ref_out(#{behaviourClass := BClass} = Node) when is_tuple(BClass) ->
+    Node#{behaviourClass => {'$beamtalk_class_ref', class_name_of(BClass)}};
+class_ref_out(Node) ->
+    Node.
+
+%% The inverse: resolve a `{'$beamtalk_class_ref', ClassName}` against
+%% *this* (the calling/receiving) node's own class registry, or `nil` when
+%% the class isn't loaded here — the receiving-node half of the rewrite
+%% `remote_default_snapshot/2`'s doc explains.
+-spec class_ref_in(node_map()) -> node_map().
+class_ref_in(#{behaviourClass := {'$beamtalk_class_ref', ClassName}} = Node) ->
+    case beamtalk_class_registry:resolve_class_object(ClassName) of
+        undefined -> Node#{behaviourClass => nil};
+        ClassObject -> Node#{behaviourClass => ClassObject}
+    end;
+class_ref_in(Node) ->
+    Node.
+
+-spec on_node_down_error(node()) -> #beamtalk_error{}.
+on_node_down_error(Name) ->
+    Error0 = beamtalk_error:new(
+        node_down,
+        'ProcessNavigation',
+        'on:',
+        <<"The node may come back; retry, or use monitors to detect when it does">>
+    ),
+    beamtalk_error:with_details(Error0, #{node => Name}).
+
+-spec on_timeout_error(node()) -> #beamtalk_error{}.
+on_timeout_error(Name) ->
+    Error0 = beamtalk_error:new(
+        timeout,
+        'ProcessNavigation',
+        'on:',
+        <<"Remote supervision-tree snapshot did not complete within the timeout">>
+    ),
+    beamtalk_error:with_details(Error0, #{node => Name}).
+
+-spec on_error(node(), term()) -> #beamtalk_error{}.
+on_error(Name, Reason) ->
+    Error0 = beamtalk_error:with_hint(
+        beamtalk_error:new(runtime_error, 'ProcessNavigation', 'on:'),
+        iolist_to_binary(io_lib:format("remote snapshot fetch failed: ~tp", [Reason]))
+    ),
+    beamtalk_error:with_details(Error0, #{node => Name}).
 
 -doc """
 Lazily fetch the OTP status report for a node's pid (ADR 0092 §5).
@@ -810,11 +994,15 @@ supervisor_callback_module(Pid) ->
 %% Map a compiled module atom to its Beamtalk class name via the live class
 %% registry, or `nil` for a non-Beamtalk (foreign) module. Reliable: it matches
 %% the registry's recorded `module_name`, never reconstructs the name from text.
+%%
+%% Reads `cached_live_class_entries/0` — see that function's doc for why a
+%% snapshot walk must never call `beamtalk_class_registry:live_class_entries/0`
+%% directly here.
 -spec class_name_for_module(module() | nil) -> atom() | nil.
 class_name_for_module(nil) ->
     nil;
 class_name_for_module(Module) ->
-    case lists:keyfind(Module, 2, beamtalk_class_registry:live_class_entries()) of
+    case lists:keyfind(Module, 2, cached_live_class_entries()) of
         {Name, Module, _Pid} -> Name;
         false -> nil
     end.
@@ -1066,7 +1254,8 @@ leaf_node(Pid, ParentPid, Kind, BClass) ->
         strategy => nil,
         restartIntensity => nil,
         truncated => false,
-        parent_pid => ParentPid
+        parent_pid => ParentPid,
+        node => beamtalk_node:from_atom(node())
     }.
 
 %% A supervisor node, carrying its live child count, configured strategy /
@@ -1094,7 +1283,8 @@ supervisor_node(Pid, ParentPid, Kind, BClass, ChildCount, Strategy, RestartInten
         strategy => Strategy,
         restartIntensity => RestartIntensity,
         truncated => Truncated,
-        parent_pid => ParentPid
+        parent_pid => ParentPid,
+        node => beamtalk_node:from_atom(node())
     }.
 
 %% Build the node for a child mid-restart (ADR 0092 §3): `pid => nil`, the
@@ -1116,7 +1306,8 @@ build_restarting_node(Id, ParentPid) ->
         strategy => nil,
         restartIntensity => nil,
         truncated => false,
-        parent_pid => ParentPid
+        parent_pid => ParentPid,
+        node => beamtalk_node:from_atom(node())
     }.
 
 %% Resolve a supervisor's configured `{Strategy, RestartIntensity}` from its
@@ -1184,6 +1375,66 @@ from_error(Kind, Hint) ->
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
+
+-doc """
+Run `Fun` (a snapshot walk's root-selection + tree walk) with
+`cached_live_class_entries/0`'s per-walk memo populated on first use and
+always cleared afterward (even on an exception) — the one place this cache's
+lifetime is scoped, wrapping every top-level entry point that classifies
+foreign-supervisor pids: `default_snapshot/1`, `system_snapshot/1`, `from/2`
+(and, transitively, a remote `on/1,2` snapshot, which runs `default_snapshot/1`
+on the target node via `erpc`).
+
+## Why this cache exists
+
+`class_name_for_module/1` (used by `beamtalk_supervisor_class/2`, called once
+per supervisor-*looking* pid the walk meets, both at root selection
+(`registered_beamtalk_supervisor_pids/0`) and during the recursive walk
+itself) resolves a module to its Beamtalk class name via
+`beamtalk_class_registry:live_class_entries/0`. That function is O(number of
+loaded classes) and, per class, calls `beamtalk_object_class:class_name/1` —
+a `gen_server:call` to *that class's own process* (not a pure ETS read).
+Calling it **fresh for every supervisor-looking pid** turns one snapshot into
+O(supervisor-looking-pids × loaded-classes) gen_server round trips — cheap
+enough locally to go unnoticed (a handful of pids × ~100 stdlib classes, each
+call sub-millisecond), but the same fan-out, run **inside a remote `erpc`
+worker** (`on/1,2`, ADR 0126 §8, Phase 7) against a real workspace node's
+full class set, multiplies into tens of seconds and can blow past
+`?REMOTE_SNAPSHOT_TIMEOUT` — a real user-visible bug this cache fixes, found
+by BT-3605's own two-node e2e test (no earlier two-node test exercised a
+snapshot against a *full* workspace peer with the stdlib actually loaded;
+every prior `beamtalk_dist_test_helper` peer runs bare `beamtalk_runtime`
+with zero loaded classes, which hid this cost entirely).
+
+Scoped per-walk, not process-lifetime: a long-lived REPL eval-worker process
+must never serve a *stale* class list to a later, unrelated eval after a
+class reloads — `erase/1` on the way out (via `try...after`) guarantees the
+next walk in this same process re-fetches fresh.
+""".
+-spec with_live_class_entries_cache(fun(() -> Result)) -> Result when Result :: term().
+with_live_class_entries_cache(Fun) ->
+    try
+        Fun()
+    after
+        erase(?LIVE_CLASS_ENTRIES_CACHE_KEY)
+    end.
+
+-doc """
+`beamtalk_class_registry:live_class_entries/0`, memoized for the lifetime of
+the enclosing `with_live_class_entries_cache/1` call — see that function's
+doc for why a snapshot walk must call this instead of the registry function
+directly.
+""".
+-spec cached_live_class_entries() -> [{atom(), module(), pid()}].
+cached_live_class_entries() ->
+    case get(?LIVE_CLASS_ENTRIES_CACHE_KEY) of
+        undefined ->
+            Entries = beamtalk_class_registry:live_class_entries(),
+            put(?LIVE_CLASS_ENTRIES_CACHE_KEY, Entries),
+            Entries;
+        Entries ->
+            Entries
+    end.
 
 %% Guarded `count_children`: the cheap child counts (does not copy the child
 %% list out of the supervisor). Returns `{Active, Total}` — `Active` is the live

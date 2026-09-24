@@ -69,6 +69,13 @@ defmodule BtAttach.Facade do
     # so it is gated to a privileged (`:execute`-holding, i.e. Owner) role: it
     # grants no reconnaissance a code-running caller couldn't already perform.
     processes_system: :execute,
+    # ADR 0126 §8/§10 (BT-3605): the cluster-wide `nodes` op — connected
+    # visible nodes with their shape-skew counts. Triggers no user code (pure
+    # reflection over `beamtalk_node_monitor`'s queryable tally), so it is
+    # `:read`, safe for the Observer role, scoped exactly like `processes`.
+    # Deliberately distinct from `actors`/`processes`, which stay
+    # local-node-only by design — see docs/development/surface-parity.md.
+    nodes: :read,
     sessions: :read,
     complete: :read,
     # BT-2555: live-image hover docs for the cockpit editors. Like `complete`,
@@ -287,6 +294,9 @@ defmodule BtAttach.Facade do
 
   defp invoke(:processes_system, %{session_pid: pid}, _ctx),
     do: client().supervision_tree(pid, "system")
+
+  # ADR 0126 §8/§10 (BT-3605): connected visible nodes + shape-skew counts.
+  defp invoke(:nodes, %{session_pid: pid}, _ctx), do: client().nodes(pid)
 
   # ADR 0096 (BT-2488): the four System Browser browse ops. Each returns a
   # `{:value, json_value}` live term (the wire-shaped browse rows) verbatim —

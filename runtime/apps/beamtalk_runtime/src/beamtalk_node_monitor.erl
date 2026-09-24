@@ -65,13 +65,29 @@ but still multi-second `erpc` round trip must never delay this single
 gen_server's delivery of some *other* node's `NodeUp`/`NodeDown`/reload event,
 which is exactly the scenario a rolling upgrade (ADR 0125) with several
 peers at different versions is most likely to hit.
+
+## Queryable skew snapshot (ADR 0126 §8, Phase 7 / BT-3605)
+
+`NodeShapeSkew` above is a push-only announcement — useful for "tell me when
+skew appears", useless for "how much skew is there right now" (the question
+the `nodes` cross-surface op answers). `announce_if_skewed/4` therefore also
+casts this process a `{skew_detected, _, _}` / `{skew_cleared, _, _}` message
+per class it checks, kept in `#state.skew` (a per-peer set of currently-
+skewed class names) and read back via `connectedWithSkew/0` — the tally is
+exactly "what this module's own checks have found and not yet found
+resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
 """.
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %% API
--export([start_link/0, normalize_reason/1]).
+%% `connectedWithSkew/0` is camelCase, matching `workspace_interface.bt`'s
+%% `Workspace nodes` FFI selector verbatim (the same convention
+%% `beamtalk_workspace_changelog`'s `changeLog/0` documents) — the FFI
+%% dispatches on the selector verbatim, so this entry point must be named to
+%% match, not `connected_with_skew/0`.
+-export([start_link/0, normalize_reason/1, skew_count/1, connectedWithSkew/0]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
@@ -85,7 +101,15 @@ peers at different versions is most likely to hit.
     %% This process's own `ClassLoaded` subscription ref (Phase 4), so
     %% `terminate/2` can unsubscribe it symmetrically with
     %% `monitor_nodes(false, ...)` below.
-    class_loaded_sub :: reference() | undefined
+    class_loaded_sub :: reference() | undefined,
+    %% Queryable per-peer shape-skew tally (ADR 0126 §8, Phase 7 / BT-3605):
+    %% each connected peer's set of currently-skewed class names, kept in
+    %% sync by the same fault-isolated `announce_if_skewed/4` check that
+    %% fires the `NodeShapeSkew` announcement below — the `nodes` surface op
+    %% needs a snapshot to *read*, not just the fire-and-forget event stream
+    %% `NodeShapeSkew` already is. Cleared per-peer on `nodedown` (a
+    %% disconnected peer has no meaningful skew count).
+    skew = #{} :: #{node() => sets:set(atom())}
 }).
 
 %%% ============================================================================
@@ -107,6 +131,29 @@ else collapses to `unknown`, the field's declared default.
 normalize_reason(Reason) when is_atom(Reason), Reason =/= undefined -> Reason;
 normalize_reason(_Reason) -> unknown.
 
+-doc """
+The number of classes currently skewed against `Node` (ADR 0126 §8, Phase 7)
+— `0` for a node with no detected skew, including one this VM isn't even
+connected to. Backs the `nodes` cross-surface op (BT-3605); see
+`connectedWithSkew/0` for the batch form every surface actually calls.
+""".
+-spec skew_count(node()) -> non_neg_integer().
+skew_count(Node) ->
+    gen_server:call(?MODULE, {skew_count, Node}).
+
+-doc """
+Every currently-**visible-connected** node (`erlang:nodes/0`, matching
+`Node>>connected`'s own hidden-node exclusion) paired with its shape-skew
+count — the one shared implementation the `nodes` op reaches identically
+from the REPL, MCP, and LiveView surfaces (CLAUDE.md "No duplicate
+implementations"; ADR 0126 §8/§10). Returns
+`[#{name := node(), skewCount := non_neg_integer()}]`, sorted by node name —
+the `Workspace nodes` FFI seam (`workspace_interface.bt`).
+""".
+-spec connectedWithSkew() -> [#{name := node(), skewCount := non_neg_integer()}].
+connectedWithSkew() ->
+    gen_server:call(?MODULE, connected_with_skew).
+
 %%% ============================================================================
 %%% gen_server callbacks
 %%% ============================================================================
@@ -122,11 +169,33 @@ init([]) ->
         end,
     {ok, #state{own_name = OwnName, class_loaded_sub = ClassLoadedSub}}.
 
+handle_call({skew_count, Node}, _From, #state{skew = Skew} = State) ->
+    {reply, sets:size(skew_set_for(Node, Skew)), State};
+handle_call(connected_with_skew, _From, #state{skew = Skew} = State) ->
+    Rows = [
+        #{name => N, skewCount => sets:size(skew_set_for(N, Skew))}
+     || N <- lists:sort(nodes())
+    ],
+    {reply, Rows, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+handle_cast({skew_detected, Node, ClassName}, #state{skew = Skew} = State) ->
+    Updated = sets:add_element(ClassName, skew_set_for(Node, Skew)),
+    {noreply, State#state{skew = Skew#{Node => Updated}}};
+handle_cast({skew_cleared, Node, ClassName}, #state{skew = Skew} = State) ->
+    case maps:find(Node, Skew) of
+        {ok, Existing} ->
+            {noreply, State#state{skew = Skew#{Node => sets:del_element(ClassName, Existing)}}};
+        error ->
+            {noreply, State}
+    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
+
+-spec skew_set_for(node(), #{node() => sets:set(atom())}) -> sets:set(atom()).
+skew_set_for(Node, Skew) ->
+    maps:get(Node, Skew, sets:new([{version, 2}])).
 
 handle_info({nodeup, Node, _Info}, State) when Node =:= node() ->
     %% This VM just became distributed. Remember the name: by the time the
@@ -144,10 +213,15 @@ handle_info({nodeup, Node, _Info}, State) ->
 handle_info({nodedown, Node, _Info}, #state{own_name = Node} = State) ->
     %% Own pending self-nodedown — clear it, not a membership change.
     {noreply, State#state{own_name = undefined}};
-handle_info({nodedown, Node, Info}, State) ->
+handle_info({nodedown, Node, Info}, #state{skew = Skew} = State) ->
     Reason = normalize_reason(proplists:get_value(nodedown_reason, Info, unknown)),
     announce('NodeDown', #{node => beamtalk_node:from_atom(Node), reason => Reason}),
-    {noreply, State};
+    %% A disconnected peer has no meaningful skew count — drop its entry so
+    %% `connectedWithSkew/0` (which only ever lists `nodes()`) can't leak a
+    %% stale count if the peer reconnects and is momentarily not yet
+    %% re-checked, and so the tally map doesn't grow unboundedly across
+    %% repeated connect/disconnect cycles.
+    {noreply, State#state{skew = maps:remove(Node, Skew)}};
 handle_info({'$beamtalk_class_loaded', ClassName}, State) ->
     %% Only visible, currently-connected peers participate — matching the
     %% `NodeUp`/`NodeDown` hidden-node exclusion above. Spawned, not inline
@@ -335,18 +409,28 @@ check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
     end,
     ok.
 
--doc "Announce `NodeShapeSkew` iff `LocalEntry`/`RemoteEntry`'s `version` differ.".
+-doc """
+Announce `NodeShapeSkew` iff `LocalEntry`/`RemoteEntry`'s `version` differ,
+and keep this process's queryable skew tally (`connectedWithSkew/0`) in
+sync either way — the `nodes` op's per-peer count is exactly "how many
+classes this function has found skewed for that peer and not yet found
+matching again" (ADR 0126 §8, Phase 7 / BT-3605). Runs in a spawned,
+non-gen_server process (see the moduledoc), so the tally update is a cast,
+not a direct state mutation.
+""".
 -spec announce_if_skewed(
     node(), atom(), beamtalk_release_shapes:shape_entry(), beamtalk_release_shapes:shape_entry()
 ) -> ok.
 announce_if_skewed(PeerNode, ClassName, #{version := LocalVersion}, #{version := RemoteVersion}) when
     LocalVersion =/= RemoteVersion
 ->
+    gen_server:cast(?MODULE, {skew_detected, PeerNode, ClassName}),
     announce('NodeShapeSkew', #{
         node => beamtalk_node:from_atom(PeerNode),
         className => ClassName,
         localVersion => LocalVersion,
         remoteVersion => RemoteVersion
     });
-announce_if_skewed(_PeerNode, _ClassName, _LocalEntry, _RemoteEntry) ->
+announce_if_skewed(PeerNode, ClassName, _LocalEntry, _RemoteEntry) ->
+    gen_server:cast(?MODULE, {skew_cleared, PeerNode, ClassName}),
     ok.

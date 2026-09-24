@@ -1309,7 +1309,9 @@ changes for code already using distribution via FFI:
   (slots), BT-3528 (OTP releases), BT-2530 (announcements remote-pid fix),
   BT-3536 (shape chain/migration modules), BT-3574 (release shape preflight),
   BT-3578 (Phase 0 harness), BT-3579 (Phase 0.5 spike), BT-3582 (NLR-relay
-  bug the spike found, blocks Phase 3)
+  bug the spike found, blocks Phase 3), BT-3605 (Phase 7 — tooling, docs,
+  e2e), BT-3616 (follow-up: the attach front starting as a hidden node,
+  filed from BT-3605 — see Consequences § Neutral above)
 - Related ADRs: 0020 (connection security), 0043 (sync-by-default
   messaging), 0058 (platform security), 0059 / 0092 (supervision + introspection),
   0060 (Result), 0069 (observability), 0079 (named registration), 0091

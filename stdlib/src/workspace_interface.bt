@@ -78,6 +78,27 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   processes -> SupervisionTree => ProcessNavigation default tree
 
+  /// Return every visible connected node with its name and current
+  /// shape-skew count (ADR 0126 §8/§10, Phase 7).
+  ///
+  /// The cross-surface `nodes` op: one implementation, reached identically
+  /// via `eval`/`evaluate` on the REPL, MCP, and LiveView surfaces (like
+  /// `Workspace processes` above), backed by `beamtalk_node_monitor`'s
+  /// queryable skew tally (BT-3602's `NodeShapeSkew` announcement, kept
+  /// alongside as a live snapshot rather than only fired-and-forgotten).
+  /// Hidden (tooling) nodes are excluded, matching `Node connected`. Unlike
+  /// `Workspace actors` (deliberately local-node-only), this is
+  /// cluster-scoped by design — see `docs/development/surface-parity.md`.
+  ///
+  /// Each row is a Dictionary `#{#name => nodeAtom, #skewCount => Integer}`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace nodes                          // => #()
+  /// (Workspace nodes) isEmpty                // => true
+  /// ```
+  nodes -> List(Dictionary) => (Erlang beamtalk_node_monitor) connectedWithSkew
+
   /// Look up a specific actor by pid string.
   ///
   /// ## Examples

@@ -410,6 +410,7 @@ fn tool_router_registers_every_tool_exactly_once() {
         "inspect",
         "list_actors",
         "supervision_tree",
+        "nodes",
         "list_classes",
         "reload_class",
         "docs",

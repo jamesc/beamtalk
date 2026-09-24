@@ -682,6 +682,20 @@ jobs:
       - name: Test REPL protocol (full pipeline)
         run: just test-repl-protocol
 
+      # Optional: e2e_distribution_tests boots a second, independently-spawned
+      # distributed-Erlang node and consistently fails to connect back to the
+      # first on this runner (the identical constraint beamtalk_node_tests.erl's
+      # own two-node EUnit suite already documents and works around below in
+      # `otp-matrix`) — gated behind the same BEAMTALK_TWO_NODE_TESTS=1 opt-in
+      # and run here, non-blocking, rather than left in the required
+      # `just test-repl-protocol` run above.
+      - name: Test two-node distribution e2e (optional)
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          BEAMTALK_TWO_NODE_TESTS: "1"
+        run: cargo test --test repl_protocol e2e_distribution_tests -- --ignored
+
       # On any failure, surface epmd state + the most recent workspace startup
       # logs. The recurring "REPL did not report port" flake (BT-1599 and its
       # 2026-06 recurrence) means a workspace BEAM node booted but never became

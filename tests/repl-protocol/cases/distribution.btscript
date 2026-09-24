@@ -1,0 +1,120 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for distribution and location-transparent actors (ADR 0126,
+// BT-3605 Phase 7 — the epic's final issue). Per this repo's ADR-planning
+// convention, an epic's last issue needs a real end-to-end test exercising
+// the feature from the REPL, not just unit/BUnit coverage — several past
+// epics shipped PRs that passed CI but did not actually work from the REPL
+// because no e2e test existed.
+//
+// Runs against a genuine two-node fixture: this session's own workspace node
+// (the "primary" the REPL client below is connected to) plus a second, full
+// workspace node the Rust harness boots alongside it and connects to
+// separately, to pre-load the `Counter` fixture there (ADR 0126 §3: a remote
+// spawn resolves its class *by name on the target node*) and start
+// `E2EAppSupervisor` there too (so the peer's own supervision tree is
+// non-empty for `ProcessNavigation on:` below). See `e2e_distribution_tests`
+// in `crates/beamtalk-cli/tests/repl_protocol.rs`.
+//
+// `__PEER_NODE__` is replaced with the peer's actual `name@host` atom text
+// (read back from the peer's own `Node current printString`) before this
+// file is parsed — see `e2e_distribution_tests` for the substitution.
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// ===========================================================================
+// NODE CURRENT — this session's own node identity (ADR 0126 §2, Phase 1)
+// ===========================================================================
+
+Node current isCurrent
+// => true
+
+Node current class
+// => Node
+
+// ===========================================================================
+// CONNECTING TO A PEER
+// ===========================================================================
+
+peer := (Node named: #'__PEER_NODE__') unwrap
+// => _
+
+peer isCurrent
+// => false
+
+(peer connect) isOk
+// => true
+
+peer isConnected
+// => true
+
+(Node connected includes: peer)
+// => true
+
+// ===========================================================================
+// COUNTER SPAWNON: — argument-free remote spawn (ADR 0126 §3, Phase 2)
+// ===========================================================================
+
+remoteCounter := (Counter spawnOn: peer) unwrap
+// => _
+
+remoteCounter node name =:= peer name
+// => true
+
+remoteCounter isRemote
+// => true
+
+// ===========================================================================
+// A SYNC SEND TO THE REMOTE ACTOR
+// ===========================================================================
+
+remoteCounter increment
+// => _
+
+remoteCounter getValue
+// => 1
+
+// ===========================================================================
+// NODES — the cross-surface cluster op (ADR 0126 §8/§10, Phase 7)
+// ===========================================================================
+
+(Workspace nodes collect: [:row | row at: #name]) includes: peer name
+// => true
+
+((Workspace nodes detect: [:row | (row at: #name) =:= peer name]) at: #skewCount) >= 0
+// => true
+
+// ===========================================================================
+// PROCESSNAVIGATION ON: — remote supervision-tree snapshot (ADR 0126 §8)
+// ===========================================================================
+
+remoteNav := (ProcessNavigation on: peer) unwrap
+// => _
+
+remoteNav class
+// => ProcessNavigation
+
+remoteNav tree class
+// => SupervisionTree
+
+remoteNav tree isEmpty
+// => false
+
+remoteNav tree nodes allSatisfy: [:n | n node name =:= peer name]
+// => true
+
+// The peer's own E2EAppSupervisor + supervised Counter (started by the Rust
+// harness before this script ran) show up in the remote snapshot.
+(remoteNav tree findClass: Counter) isEmpty
+// => false
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+remoteCounter stop
+// => _
+
+peer disconnect
+// => true

@@ -19,6 +19,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkSupervisor
       behaviourClass: nil
       childCount: 3
+      node: nil
 
   otpProcessNode =>
     SupervisionNode
@@ -27,6 +28,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #otpProcess
       behaviourClass: nil
       childCount: 0
+      node: nil
 
   beamtalkSupervisorNode =>
     SupervisionNode
@@ -35,6 +37,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkSupervisor
       behaviourClass: nil
       childCount: 0
+      node: nil
 
   beamtalkActorNode =>
     SupervisionNode
@@ -43,6 +46,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkActor
       behaviourClass: nil
       childCount: 0
+      node: nil
 
   beamtalkActorWithCounterNode =>
     SupervisionNode
@@ -51,6 +55,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkActor
       behaviourClass: Counter
       childCount: 0
+      node: nil
 
   restartingNode =>
     SupervisionNode
@@ -59,6 +64,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #restarting
       behaviourClass: nil
       childCount: 0
+      node: nil
 
   // === Accessors return the stored field values ===
   testKindAccessor =>
@@ -93,6 +99,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #otpSupervisor
       behaviourClass: nil
       childCount: 0
+      node: nil
     self assert: node isSupervisor equals: true
 
   testIsSupervisorFalseForActor =>
@@ -122,6 +129,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkSupervisor
       behaviourClass: nil
       childCount: 3
+      node: nil
     self assert: node printString equals: "#SupervisionNode<#beamtalkSupervisor appSup restarting children: 3>"
 
   testPrintStringRestartingShowsRestarting =>

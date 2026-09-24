@@ -20,18 +20,21 @@ TestCase subclass: ProcessNavigationTest
       kind: #beamtalkSupervisor
       behaviourClass: Counter
       childCount: 1
+      node: nil
     actor := SupervisionNode
       pid: nil
       registeredName: nil
       kind: #beamtalkActor
       behaviourClass: Counter
       childCount: 0
+      node: nil
     foreign := SupervisionNode
       pid: nil
       registeredName: nil
       kind: #otpProcess
       behaviourClass: nil
       childCount: 0
+      node: nil
     #(sup, actor, foreign)
 
   sampleTree => SupervisionTree flatNodes: self sampleNodes
@@ -64,6 +67,7 @@ TestCase subclass: ProcessNavigationTest
       kind: #beamtalkActor
       behaviourClass: nil
       childCount: 0
+      node: nil
     self assert: node parentPid equals: nil
 
   // === Serialisable form (surface wire shape, BT-2431) ===
