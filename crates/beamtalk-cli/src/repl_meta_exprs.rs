@@ -35,7 +35,9 @@ pub fn remove_method_expr_for(arg: &str) -> Option<String> {
     if class.is_empty() || selector.is_empty() {
         return None;
     }
-    Some(format!("{class} removeSelector: #{selector}"))
+    Some(beamtalk_core::tool_expr::remove_method_expr(
+        class, selector,
+    ))
 }
 
 /// Construct the `Workspace flush: <selector>` expression a `:flush
@@ -160,7 +162,9 @@ pub fn rename_class_expr_for(arg: &str) -> Option<String> {
     if new_name.is_empty() {
         return None;
     }
-    Some(format!("{old_name} renameTo: #{new_name}"))
+    Some(beamtalk_core::tool_expr::rename_class_expr(
+        old_name, new_name,
+    ))
 }
 
 /// Construct the `<Class> renameSelector: #<OldSelector> to: #<NewSelector>`
@@ -192,8 +196,10 @@ pub fn rename_method_expr_for(arg: &str) -> Option<String> {
     if old_selector.is_empty() || new_selector.is_empty() {
         return None;
     }
-    Some(format!(
-        "{class} renameSelector: #{old_selector} to: #{new_selector}"
+    Some(beamtalk_core::tool_expr::rename_method_expr(
+        class,
+        old_selector,
+        new_selector,
     ))
 }
 

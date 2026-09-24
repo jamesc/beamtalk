@@ -23,9 +23,11 @@
 //! tests below are this module's conformance suite.
 //!
 //! The REPL-CLI surface (`beamtalk-cli`'s `:remove-method`/`:flush <sel>`
-//! meta-commands) still hand-rolls its own copy of the `removeSelector:` and
-//! `flush:` shapes rather than calling into this module — that duplication
-//! is tracked separately, not fixed here.
+//! meta-commands) delegates `removeSelector:`, `renameTo:`, and
+//! `renameSelector:to:` expression construction here (via
+//! `beamtalk_cli::repl_meta_exprs`); only the arg-parsing and REPL-specific
+//! guards live in that module. `flush:` and `removeFromSystem` remain separate
+//! because their CLI forms have different shapes from the tool-surface forms.
 //!
 //! # Caller responsibility: `class`/`selector`/`kind` are not validated here
 //!
