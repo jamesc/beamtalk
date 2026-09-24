@@ -1074,7 +1074,10 @@ impl CoreErlangGenerator {
     /// ADR 0118 phase 4: `true` if `expr` (already paren-unwrapped)
     /// is an inline-threaded control-flow construct — `ifTrue:`/`ifFalse:`/
     /// `ifTrue:ifFalse:`, `and:`/`or:`, the nil-conditional family, or
-    /// `match:` — that needs mutation threading. The pure gate behind
+    /// `match:` — that needs mutation threading, or (ADR 0128 / BT-3615) a
+    /// collection HOM forwarding an opaque callable through the
+    /// `{Value, NewState}` fold (`opaque_callable_fold_needs_threading`).
+    /// The pure gate behind
     /// [`Self::inline_control_flow_producer`], reusing the exact same
     /// per-family predicates that producer dispatches on, so the two can
     /// never disagree. Called by
@@ -1088,6 +1091,14 @@ impl CoreErlangGenerator {
         let expr = expr.unwrap_parens();
         if let Expression::Match { arms, .. } = expr {
             return self.match_needs_state_threading(arms);
+        }
+        // ADR 0128 / BT-3615: a collection HOM forwarding an opaque callable
+        // (`items collect: block`, `items inject: 0 into: block`, …) in
+        // Actor instance context compiles to the same `{Value, NewState}`
+        // tuple shape, so it is a producer here too — see
+        // `opaque_callable_fold_needs_threading`'s doc comment.
+        if self.opaque_callable_fold_needs_threading(expr) {
+            return true;
         }
         let Expression::MessageSend {
             receiver,
@@ -1143,6 +1154,13 @@ impl CoreErlangGenerator {
         let expr = expr.unwrap_parens();
         if !self.inline_control_flow_needs_threading(expr) {
             return Ok(None);
+        }
+        if let Some(tuple_doc) = self.opaque_callable_fold_tuple_doc(expr)? {
+            let span = expr.span();
+            let frame = self.current_frame();
+            return Ok(Some(
+                self.control_flow_tuple_to_threaded_value(tuple_doc, frame, span),
+            ));
         }
         if let Expression::Match { value, arms, .. } = expr {
             let span = expr.span();

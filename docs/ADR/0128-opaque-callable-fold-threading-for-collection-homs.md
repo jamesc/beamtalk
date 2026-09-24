@@ -1,7 +1,8 @@
 # ADR 0128: Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs
 
 ## Status
-Implemented (2026-09-24)
+Implemented (2026-09-24). Scope extended by BT-3615 (2026-09-24) — see
+§Scope and §Amendment (BT-3615).
 
 ## Context
 
@@ -359,25 +360,81 @@ data-only addition, not a verifier behavior change.
 
 ### Scope
 
-Applies uniformly to every selector routed through
-`generate_simple_list_op`'s non-literal branch today: `do:`, `collect:`,
-`select:` (the "foreach"/"map"/"filter" cases). The same principle —
-route the non-literal-callable case through the existing
-`_with_mutations` fold machinery instead of a frozen-state wrapper around
-a void BIF — extends by the same pattern to `reject:`, `inject:into:`,
-`detect:`, `detect:ifNone:`, `count:`, `anySatisfy:`, `allSatisfy:` (each
-already has a literal-block `_with_mutations` sibling in
-`list_ops/{basic_ops,filter_ops,search_ops,transform_ops}.rs` to
-generalize from) and to the equivalent primitives on `Array`/`Set`, which
-share `generate_simple_list_op`'s `is_list`-guarded fallback to
-`beamtalk_collection:to_list` today. BT-3583's acceptance criteria (§below)
-scope the *required* fix to `do:`/`collect:`/`select:` (the three
-`generate_simple_list_op` covers) — `inject:into:`, `detect:`, etc. do not
-need this fix to make `testSizeThreadsCapturedLocalWriteThroughSelfSendHom`
-pass (per the trace above, `inject:into:`'s own body never forwards an
-opaque callable to a BIF — only `do:`'s does), but are the same latent gap
-and are flagged as tracked follow-up rather than silently left
-inconsistent.
+**Covered** (BT-3583 + BT-3615) — an opaque (non-literal) callable
+forwarded, in an **Actor instance method**, to any of `do:`, `collect:`,
+`select:`, `inject:into:`, `detect:`, `detect:ifNone:`, `count:`,
+`anySatisfy:`, `allSatisfy:`, on a `List`, `Array` or `Set` receiver (or
+any other collection `beamtalk_collection:to_list/1` converts), in any
+position: a method-body statement, an assignment RHS, a `^` value, an
+expression position (receiver, argument, binary operand, conditional
+receiver), a conditional arm, a loop body, a `whileTrue:` condition.
+`beamtalk-core`'s `state_threading_selectors::opaque_fold_callable_arg`
+is the single "which selector, which argument" table for all of it.
+
+BT-3615's investigation used `self_send_hom_pool.bt`'s repro shape — an
+Actor whose user HOM forwards its block parameter across a self-send to
+the primitive (`stdlib/test/fixtures/self_send_hom_fold_pool.bt`) — with
+a Tier 2 (captured-local-writing) block unless noted:
+
+| Operator / receiver / shape | Before BT-3615 | After |
+|---|---|---|
+| `inject:into:` (List) | **crash** — `badarity` (the arity-3 Tier 2 fun applied with 2 args by the arg-swap wrapper) | threads |
+| `detect:` (List) | **crash** — type error inside `beamtalk_list:detect/2` | threads, short-circuits |
+| `detect:ifNone:` (List) | **crash** — type error inside the runtime `detect:ifNone:` | threads, short-circuits |
+| `count:` (List) | **crash** — `function_clause` in `lists:filter/2` | threads |
+| `anySatisfy:` (List) | **crash** — `function_clause` in `lists:any/2` | threads, short-circuits |
+| `allSatisfy:` (List) | **crash** — `function_clause` in `lists:all/2` | threads, short-circuits |
+| `do:` / `collect:` (Array) | works (BT-3583 fold) | works |
+| `inject:into:` (Array, Set) | **crash** — `badarity` | threads |
+| `do:` (Set) | works | works |
+| `collect:` / `select:` (Set) | captured local threads, but the answer was a **`List`**, not a `Set` — also for a PURE opaque callable (a BT-3583 regression) and for a literal mutating block | answers a `Set` |
+| any operator, result assigned (`r := self hom: [...]`) | captured-local write **silently dropped** — caller side, independent of the operator (also for a plain `hom: b => b value: 5`) | threads |
+| expression position: `(items collect: block) size`, `(items inject: 0 into: block) + 1`, `(items anySatisfy: block) ifTrue: ...` (any callable) | `{Result, State}` tuple **leaked** as the value (`size` answered `2`; `+`/`ifTrue:ifFalse:` DNU on `Tuple`) — for `collect:` a BT-3583 regression | unwrapped, `State` threaded |
+| `flag ifTrue: [items do: block]`, `1 to: 2 do: [:_k \| ... items inject: 0 into: block ...]`, `[(items count: block) > i] whileTrue: [...]` | captured-local write **silently dropped** | threads |
+
+**Explicitly narrowed** (not covered; each is a separate gap, not a shape
+this ADR's per-element fold can reach):
+
+- **Value-type (`Value subclass:`) and class-method contexts.** Neither
+  has a `State` map, and — found while extending the shared
+  `mutation_corpus_*` matrix — neither can thread a Tier 2 block's
+  captured-local writes through ANY user-defined HOM today:
+  `hom: b => b value: 5` called as `self hom: [:x | n := n + x]` fails
+  with "Cannot call 'value:' on Block via perform:", and forwarding to
+  `do:`/`collect:`/`select:` drops the write while the other six crash
+  exactly as they did in Actor context before this fix. That is a
+  calling-convention gap at the user-HOM boundary (the caller never packs
+  or reads back captured locals), not a collection-primitive one. Pure
+  (Tier 1) opaque callables work in both contexts and are pinned by the
+  matrix's `opaque*NonLastReadWrite` cells.
+- **The REPL** (`CodeGenContext::Repl`). BT-3583 routed the REPL through
+  the fold too, but the REPL eval module only unpacks a `{Result, State}`
+  tuple when a builder flags `repl_loop_mutated`, and does not splice
+  ADR 0118 preludes, so `#(1, 2, 3) collect: blk` at the prompt displayed
+  the raw tuple. BT-3615 restricts the fold to Actor instance methods
+  (`opaque_callable_list_op_needs_state_fold` =
+  `in_actor_instance_context()`); the REPL keeps the pre-BT-3583
+  plain-value wrapper (a Tier 2 stored block's writes are dropped there,
+  as before BT-3583). Pinned by
+  `tests/repl-protocol/cases/metamorphic_threading.btscript`.
+- **A stored closure passed as the callable** (`blk := [:x | n := n + x].
+  items do: blk. n`) in any context, including Actor: the captured local
+  is never packed into `State` before the send nor read back after (no
+  self-send boundary does it), so the write is dropped — even ADR 0041's
+  documented `10 timesRepeat: myBlock` example fails today. Needs the
+  pack/extract step `generate_tier2_self_send_open` performs, keyed off
+  the stored block's captured-mutation set.
+- **`reject:`, `flatMap:`, `takeWhile:`, `dropWhile:`, `partition:`,
+  `groupBy:`, `sort:`** — not investigated; not in the table.
+- Adjacent gaps found along the way that are NOT opaque-callable shapes:
+  a literal `detect:ifNone:` whose `ifNone:` block writes a method local
+  drops the write (the opaque path matches it); a literal mutating
+  list-op in expression position (`(items collect: [:x | n := n + 1. x])
+  size`) leaks its tuple; in a class with a `classState:`, a same-class
+  class-method self-send used directly as the receiver of a threaded
+  `do:`/`ifTrue:` fails to compile (`unbound variable 'ClassVars1'`); an
+  inline `lists:foreach` `do:` answers `ok` instead of `nil`
+  (REPL-visible, so left for a separate, confirmed change).
 
 ### Explicit non-goal: fully general opaque forwarding
 
@@ -394,6 +451,61 @@ natural escalation is Option 1 (mutable reference cell) from
 §Alternatives Considered below — recorded there with its cost so a future
 ADR revision does not have to re-derive why it was deferred rather than
 built now.
+
+## Amendment (BT-3615): the remaining collection HOMs
+
+The per-element `is_function/2` fold maps onto the six remaining
+operators with one shared lowering, `generate_opaque_callable_fold`
+(`control_flow/list_ops/opaque_fold.rs`), which replaced BT-3583's
+`generate_simple_list_op_threaded_fold` (so `do:`/`collect:`/`select:`
+use it too — no per-operator copy). Each operator's codegen call site
+(`search_ops.rs`, `transform_ops.rs`, `generate_simple_list_op`) routes an
+opaque callable to it through `routes_through_opaque_callable_fold`. Its
+accumulator is always `{Slot, [FoundFlag,] StAcc}`, the last element the
+actor `State` map; `opaque_callable_apply_doc` emits the one
+tier-discriminated call (`is_function(Callable, N)`, N = 1, or 2 for
+`inject:into:`'s `(Acc, Each)`), handing `k(Result, NewStAcc)` the next
+accumulator. Four points did not map mechanically and are decided here:
+
+1. **Short-circuiting.** `detect:`/`detect:ifNone:`/`anySatisfy:`/
+   `allSatisfy:` keep short-circuit *call* semantics: once decided, the
+   fold passes the accumulator through without invoking the callable
+   again (the literal-block `_with_mutations` siblings, by contrast,
+   evaluate every element). `lists:foldl` still walks the remaining
+   elements, but no user code runs for them.
+2. **`detect:` failure / `detect:ifNone:`.** The found flag lives in slot 2
+   so the existing `bind_detect_found_or_raise_doc` raises `not_found`
+   unchanged; `detect:ifNone:`'s handler is compiled by the existing
+   `generate_if_none_branch_tuple`, seeded from the fold's final `State`.
+3. **Expression position.** BT-3583's fold returned a raw
+   `{Result, NewState}` tuple that only a *statement-level*
+   `ControlFlowWithMutations` unpack consumed; anywhere else the tuple
+   leaked. The fold is now an ADR 0118 producer:
+   `inline_control_flow_needs_threading` recognizes it
+   (`opaque_callable_fold_needs_threading`), and
+   `inline_control_flow_producer` turns its tuple into a real `Bind` of
+   the next `State` version via `control_flow_tuple_to_threaded_value` —
+   the same boundary every inline-threaded conditional uses, so this is
+   where `ThreadedIr` (and `verify()`) sees the fold's state step. The fold
+   body itself stays an opaque `Document`, as BT-3583's did (§Representation
+   above describes a `ThreadedStmt::Threaded` node; neither BT-3583 nor
+   BT-3615 built one — the state step is modeled at the fold's boundary
+   instead).
+4. **Enclosing conditionals/loops.** A literal block CONTAINING an opaque
+   HOM send (`flag ifTrue: [items do: block]`) previously looked pure to
+   block analysis, so the enclosing construct did not thread `State` and
+   the send's updated state was discarded. `beamtalk-core`'s
+   `BlockMutationAnalysis` gains `has_opaque_callable_hom_send`
+   (syntactic, from the same table via `is_opaque_callable_hom_send`),
+   folded into `has_state_effects()` like `has_field_value_call`.
+
+Two fixes outside the fold were needed for the shapes to be observable:
+`r := self hom: [:x | n := n + x]` (a `LocalAssignSelfSend` whose block
+argument is Tier 2) now goes through `generate_tier2_self_send_open`'s
+pack/extract like the bare-statement `Tier2SelfSend` arm (it previously
+neither seeded nor read back `__local__n`); and
+`beamtalk_collection:from_list_like/2` rebuilds a `Set` for a `Set`
+receiver (it answered a `List`).
 
 ## Prior Art
 
@@ -683,22 +795,38 @@ acceptance criteria):
    function); record `reject:`/`inject:into:`/`detect:`/`detect:ifNone:`/
    `count:`/`anySatisfy:`/`allSatisfy:` and `Array`/`Set` parity as
    explicit follow-up scope (not required for BT-3583, not silently
-   dropped).
+   dropped). **Done by BT-3615** for all but `reject:` — see §Scope and
+   §Amendment (BT-3615).
 
 ### Affected components
 - `crates/beamtalk-codegen/src/core_erlang/control_flow/list_ops/mod.rs`
-  (`generate_simple_list_op`)
+  (`generate_simple_list_op`), `list_ops/opaque_fold.rs` (BT-3615: the
+  shared fold), `list_ops/{search_ops,transform_ops}.rs` (BT-3615 call
+  sites), `control_flow/conditionals.rs` (BT-3615: expression-position
+  producer), `gen_server/methods.rs` (classifier; BT-3615 assign-RHS
+  Tier 2 self-send)
+- `crates/beamtalk-core/src/state_threading_selectors.rs`
+  (BT-3615: `opaque_fold_callable_arg`/`is_opaque_callable_hom_send`),
+  `semantic_analysis/block_facts.rs` (BT-3615:
+  `has_opaque_callable_hom_send`)
+- `runtime/apps/beamtalk_stdlib/src/beamtalk_collection.erl`
+  (BT-3615: `from_list_like/2` `Set` clause)
 - `crates/beamtalk-codegen/src/core_erlang/control_flow/plan.rs`
   (`ThreadingPlan`, reused rather than duplicated)
 - `crates/beamtalk-codegen/src/core_erlang/threaded_ir/ir.rs`
   (`StateAccFallbackReason` — one new variant, data-only)
 - `stdlib/test/actor_self_send_hom_test.bt`,
   `stdlib/test/fixtures/self_send_hom_pool.bt`,
-  `stdlib/test/fixtures/self_send_hom_sackful.bt`
+  `stdlib/test/fixtures/self_send_hom_sackful.bt`,
+  `stdlib/test/fixtures/self_send_hom_fold_pool.bt` (BT-3615),
+  `stdlib/test/fixtures/mutation_corpus_*.bt` +
+  `stdlib/test/value_type_mutation_matrix_test.bt` (BT-3615 `opaque*`
+  cells), `tests/repl-protocol/cases/metamorphic_threading.btscript`
 
 ## References
 - Related issues: BT-3610 (this ADR), BT-3583 (implementation, blocked on
-  this ADR), BT-3580 (NLR relay through actor self-send — landed,
+  this ADR), BT-3615 (scope extension to the remaining HOMs and
+  `Array`/`Set`), BT-3580 (NLR relay through actor self-send — landed,
   prerequisite context)
 - Related ADRs: ADR 0041 (Universal State-Threading Block Protocol —
   Tier 1/Tier 2, the Erlang Interop Boundary this ADR distinguishes from),

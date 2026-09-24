@@ -99,3 +99,73 @@ TestCase subclass: ActorSelfSendHomTest
     sackful := SelfSendHomSackful new
     result := sackful sumWithSideEffect: [:x | x]
     self assert: result equals: 6
+
+  // ── BT-3615: ADR 0128 extended to the remaining collection HOMs ──────────
+  // `fixtures/self_send_hom_fold_pool.bt` forwards an opaque block across a
+  // self-send to each operator. Before the fix every Tier 2 shape below
+  // crashed (badarity / function_clause / type error); the `r := self hom:
+  // [...]` assignment form also silently dropped the captured-local write
+  // (caller side), for `do:`/`collect:` too.
+  testInjectIntoThreadsCapturedLocalThroughSelfSendHom =>
+    self assert: SelfSendHomFoldPool spawn injectTouches equals: #(4, 10)
+    self assert: SelfSendHomFoldPool spawn injectTouchesStatement equals: 4
+
+  testDetectThreadsCapturedLocalAndShortCircuits =>
+    self assert: SelfSendHomFoldPool spawn detectTouches equals: #(3, 3)
+
+  testDetectIfNoneThreadsCapturedLocal =>
+    self assert: SelfSendHomFoldPool spawn detectIfNoneTouches equals: #(4, 0)
+
+  testCountThreadsCapturedLocal =>
+    self assert: SelfSendHomFoldPool spawn countTouches equals: #(4, 2)
+
+  testAnySatisfyThreadsCapturedLocalAndShortCircuits =>
+    self assert: SelfSendHomFoldPool spawn anySatisfyTouches equals: #(2, true)
+
+  testAllSatisfyThreadsCapturedLocalAndShortCircuits =>
+    self assert: SelfSendHomFoldPool spawn allSatisfyTouches equals: #(2, false)
+
+  testOpaqueFoldThreadsFieldAndCapturedLocalTogether =>
+    self assert: SelfSendHomFoldPool spawn injectFieldAndLocal equals: #(10, 4, 110)
+
+  testArrayOpaqueFoldsThreadCapturedLocal =>
+    pool := SelfSendHomFoldPool spawn
+    self assert: pool arrDoTouches equals: 10
+    self assert: pool arrCollectTouches equals: #(10, #[2, 4, 6, 8])
+    self assert: pool arrInjectTouches equals: #(4, 10)
+
+  testSetOpaqueFoldsThreadCapturedLocalAndKeepSpecies =>
+    pool := SelfSendHomFoldPool spawn
+    self assert: pool setDoTouches equals: 10
+    self assert: pool setCollectTouches equals: #(10, Set, 4)
+    self assert: pool setInjectTouches equals: #(4, 10)
+
+  // Pure (Tier 1) opaque callables from another process — the common case
+  // that worked before and must keep working, with the right result type.
+  testPureOpaqueCallableRemainingOperators =>
+    pool := SelfSendHomFoldPool spawn
+    self assert: (pool fwdInject: 0 into: [:a :b | a + b]) equals: 10
+    self assert: (pool fwdDetect: [:x | x > 2]) equals: 3
+    self assert: (pool fwdDetect: [:x | x > 20] ifNone: [7]) equals: 7
+    self assert: (pool fwdCount: [:x | x > 2]) equals: 2
+    self assert: (pool fwdAnySatisfy: [:x | x > 3]) equals: true
+    self assert: (pool fwdAllSatisfy: [:x | x > 3]) equals: false
+    self assert: (pool setCollect: [:x | x * 2]) class equals: Set
+    self assert: (pool setSelect: [:x | x > 2]) class equals: Set
+    self assert: (pool arrCollect: [:x | x * 2]) class equals: Array
+
+  testOpaqueDetectRaisesNotFound =>
+    pool := SelfSendHomFoldPool spawn
+    self should: [pool fwdDetect: [:x | x > 100]] raise: #not_found
+
+  testOpaqueFoldInExpressionPositionUnwrapsResult =>
+    pool := SelfSendHomFoldPool spawn
+    self assert: (pool nestedCollectSize: [:x | x]) equals: 4
+    self assert: (pool nestedInjectPlusOne: [:a :b | a + b]) equals: 11
+    self assert: (pool nestedAnyAnswer: [:x | x > 3]) equals: "yes"
+
+  testOpaqueFoldInConditionalArmAndLoopBodyThreadsState =>
+    pool := SelfSendHomFoldPool spawn
+    self assert: pool doWhenTouches equals: 10
+    self assert: pool injectTwiceTouches equals: #(8, 20)
+    self assert: pool whileConditionTouches equals: #(12, 2)

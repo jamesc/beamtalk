@@ -6,6 +6,7 @@
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
+use super::OpaqueFoldOp;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -22,7 +23,7 @@ use beamtalk_core::ast::{Block, Expression};
 ///
 /// The class named in the error comes from the receiver, so a `Set` routed
 /// through the list-op path reports `Set` rather than `List`.
-fn bind_detect_found_or_raise_doc(
+pub(super) fn bind_detect_found_or_raise_doc(
     found_result: &str,
     fold_result: &str,
     recv_var: &str,
@@ -62,6 +63,16 @@ impl CoreErlangGenerator {
 
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_bool_predicate_with_mutations(receiver, body_block, false);
+        }
+        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
+        // instance method folds with the `State` map threaded through a
+        // per-element tier check — see `opaque_fold.rs`.
+        if self.routes_through_opaque_callable_fold(body) {
+            return self.generate_opaque_callable_fold(
+                receiver,
+                body,
+                OpaqueFoldOp::Satisfy { is_all: false },
+            );
         }
 
         // No mutations: fall through to simple BIF call (lists:any/2)
@@ -111,6 +122,16 @@ impl CoreErlangGenerator {
 
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_bool_predicate_with_mutations(receiver, body_block, true);
+        }
+        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
+        // instance method folds with the `State` map threaded through a
+        // per-element tier check — see `opaque_fold.rs`.
+        if self.routes_through_opaque_callable_fold(body) {
+            return self.generate_opaque_callable_fold(
+                receiver,
+                body,
+                OpaqueFoldOp::Satisfy { is_all: true },
+            );
         }
 
         // No mutations: fall through to simple BIF call (lists:all/2)
@@ -360,6 +381,12 @@ impl CoreErlangGenerator {
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
             return self.generate_list_detect_with_mutations(receiver, body_block);
         }
+        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
+        // instance method folds with the `State` map threaded through a
+        // per-element tier check — see `opaque_fold.rs`.
+        if self.routes_through_opaque_callable_fold(body) {
+            return self.generate_opaque_callable_fold(receiver, body, OpaqueFoldOp::Detect);
+        }
 
         // No mutations: fall through to BIF call (beamtalk_list:detect/2)
         // see `check_bare_list_op_block_self_sends`'s doc comment.
@@ -408,7 +435,7 @@ impl CoreErlangGenerator {
     /// distinguish — when `if_none` is not a literal block (e.g. a variable
     /// holding one): there is no block AST to inline, so state cannot
     /// thread through an opaque callable value.
-    fn generate_if_none_branch_tuple(
+    pub(super) fn generate_if_none_branch_tuple(
         &mut self,
         if_none: &Expression,
         state_var: &str,
@@ -488,6 +515,17 @@ impl CoreErlangGenerator {
                 return self
                     .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
             }
+        }
+
+        // ADR 0128 / BT-3615: an opaque (non-literal) callable in an Actor
+        // instance method folds with the `State` map threaded through a
+        // per-element tier check — see `opaque_fold.rs`.
+        if self.routes_through_opaque_callable_fold(predicate) {
+            return self.generate_opaque_callable_fold(
+                receiver,
+                predicate,
+                OpaqueFoldOp::DetectIfNone { if_none },
+            );
         }
 
         // No mutations: fall through to runtime dispatch

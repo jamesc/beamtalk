@@ -18,18 +18,23 @@
 //! - [`transform_ops`] — `inject:into:`, `flatMap:`, `count:`, `takeWhile:`,
 //!   `dropWhile:`, `partition:`, `groupBy:`, `sort:` codegen
 //! - [`enumeration_ops`] — `eachWithIndex:`, `do:separatedBy:` desugar codegen
+//! - [`opaque_fold`] — ADR 0128 opaque-callable (non-literal block) fold
+//!   threading shared by `do:`/`collect:`/`select:`/`inject:into:`/`detect:`/
+//!   `detect:ifNone:`/`count:`/`anySatisfy:`/`allSatisfy:`
 
 mod basic_ops;
 mod enumeration_ops;
 mod filter_ops;
+mod opaque_fold;
 mod search_ops;
 mod transform_ops;
 
 #[cfg(test)]
 mod tests;
 
-use super::super::threaded_ir::StateAccFallbackReason;
-use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+pub(in crate::core_erlang) use opaque_fold::OpaqueFoldOp;
+
+use super::super::{CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -194,15 +199,16 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Whether a non-literal (opaque) callable forwarded to `do:`/`collect:`/
-    /// `select:` should route through the ADR 0128 / BT-3583 `lists:foldl`
-    /// state-fold rewrite (`generate_simple_list_op_threaded_fold`) rather
+    /// Whether a non-literal (opaque) callable forwarded to a collection HOM
+    /// (`beamtalk-core`'s `opaque_fold_callable_arg`) should route through the
+    /// ADR 0128 `lists:foldl` state-fold rewrite
+    /// (`generate_opaque_callable_fold`) rather
     /// than the pre-existing plain-value wrapper
     /// (`generate_non_literal_callable_erlang_wrapper`).
     ///
     /// The single source of truth for this decision — shared by the codegen
-    /// call site (`generate_simple_list_op`'s `is_actor_repl_opaque`, below)
-    /// and the classifier call site (`control_flow_has_mutations`,
+    /// call sites (via `routes_through_opaque_callable_fold`, used by every
+    /// covered operator's codegen) and the classifier call site (`control_flow_has_mutations`,
     /// `gen_server/methods.rs`) that decides whether a caller should expect
     /// a `{Result, NewState}` tuple back. These two decisions must never
     /// diverge — the class-method crash fixed on PR #4030 (an unbound
@@ -210,12 +216,21 @@ impl CoreErlangGenerator {
     /// class of hand-duplicated condition drifting apart; extracting one
     /// predicate makes that impossible instead of merely documented.
     ///
-    /// `false` for `CodeGenContext::ValueType` (no `State` map to thread)
-    /// and for a class method (`class_<selector>(ClassSelf, ClassVars,
-    /// Args...)` has no `State`/`StateAcc` parameter either — class-side
-    /// threading goes through `ClassVars`).
+    /// `true` only in an Actor INSTANCE method
+    /// (`in_actor_instance_context`). `false` for `CodeGenContext::ValueType`
+    /// (no `State` map to thread) and for a class method
+    /// (`class_<selector>(ClassSelf, ClassVars, Args...)` has no
+    /// `State`/`StateAcc` parameter either — class-side threading goes
+    /// through `ClassVars`). BT-3615: also `false` for
+    /// `CodeGenContext::Repl` — the REPL eval module unpacks a
+    /// `{Result, State}` tuple only when a builder flags
+    /// `repl_loop_mutated`, and does not splice ADR 0118 expression
+    /// preludes, so the fold's tuple leaked into the displayed value
+    /// (`#(1, 2, 3) collect: blk` answered `{#(2, 4, 6), #{...}}`) and an
+    /// expression-position fold referenced an unbound `State1`. The REPL
+    /// keeps the plain-value wrapper, as before BT-3583.
     pub(in crate::core_erlang) fn opaque_callable_list_op_needs_state_fold(&self) -> bool {
-        !matches!(self.context, CodeGenContext::ValueType) && !self.in_class_method()
+        self.in_actor_instance_context()
     }
 
     pub(in crate::core_erlang) fn generate_simple_list_op(
@@ -231,11 +246,11 @@ impl CoreErlangGenerator {
         // `check_bare_list_op_block_self_sends`'s doc comment.
         self.check_bare_list_op_block_self_sends(body)?;
 
-        // Actor/Repl's non-literal (opaque) callable path (below) does not
+        // The Actor-instance non-literal (opaque) callable path (below) does not
         // use the shared footer at all — it has its own receiver/temp-var
         // allocation. Only compute `list_var`/`recv_code` here, ahead of
         // compiling the body, for the two paths that DO share the footer
-        // (literal-block, and ValueType/class-method non-literal) —
+        // (literal-block, and ValueType/REPL/class-method non-literal) —
         // preserving the exact gensym allocation order snapshot tests pin
         // (`list_var` before the body compiles), unchanged from before this
         // function was split.
@@ -246,19 +261,22 @@ impl CoreErlangGenerator {
         // `gen_server/methods.rs`) uses to decide whether a caller expects
         // a `{Result, NewState}` tuple back, so the two decisions cannot
         // drift apart (review-flagged on PR #4030).
-        let is_actor_repl_opaque = Self::extract_block_literal(body).is_none()
-            && self.opaque_callable_list_op_needs_state_fold();
-        if is_actor_repl_opaque {
-            // Actor/Repl: fold-based rewrite (ADR 0128 / BT-3583). The
+        if self.routes_through_opaque_callable_fold(body) {
+            // Actor instance: fold-based rewrite (ADR 0128 / BT-3583). The
             // callable's tier is unknown until runtime, so the fold's own
-            // accumulator IS the actor/REPL `State` map itself — folding it
+            // accumulator IS the actor `State` map itself — folding it
             // through `lists:foldl` genuinely threads it across every
             // element (unlike the old frozen-`State` wrapper this
             // replaces), and the fold lambda discriminates Tier 1 vs Tier 2
             // once PER ELEMENT rather than once at wrap time. See the
             // ADR's "Concrete lowering sketch" for the full annotated
             // Before/After.
-            return self.generate_simple_list_op_threaded_fold(receiver, body, operation);
+            let op = match operation {
+                "foreach" => OpaqueFoldOp::Do,
+                "map" => OpaqueFoldOp::Collect,
+                _ => OpaqueFoldOp::Select,
+            };
+            return self.generate_opaque_callable_fold(receiver, body, op);
         }
 
         let list_var = self.fresh_temp_var("temp");
@@ -280,15 +298,15 @@ impl CoreErlangGenerator {
             }
             wrapped_doc
         } else {
-            // Non-literal (opaque) callable in `CodeGenContext::ValueType`,
-            // OR in a class method (any context) — see this function's
-            // `is_actor_repl_opaque` gate above for why class methods are
-            // excluded from the fold path too.
+            // Non-literal (opaque) callable in `CodeGenContext::ValueType`
+            // or `Repl`, OR in a class method (any context) — see
+            // `opaque_callable_list_op_needs_state_fold`'s doc comment for
+            // why each is excluded from the fold path.
             //
             // ADR 0128 / BT-3583: `ValueType` has no `State` map in scope,
             // and value-type method-body classification never routes a
             // non-literal do:/collect:/select: call through the
-            // tuple-threading machinery this ADR adds for Actor/Repl
+            // tuple-threading machinery this ADR adds for Actor
             // (`is_foldl_list_op_with_vt_local_threading`/
             // `foldl_list_op_body_block` only recognize a LITERAL block
             // argument) — so a `ValueType` method keeps emitting exactly
@@ -437,247 +455,6 @@ impl CoreErlangGenerator {
             leaf::var(body_var),
             "]) end",
         ]
-    }
-
-    /// ADR 0128 / BT-3583: `do:`/`collect:`/`select:` forwarding a
-    /// non-literal (opaque) callable in `Actor`/`Repl` context — replaces
-    /// the lossy tier-discriminating wrapper (frozen `State`, discarded
-    /// `NewStateAcc`) with a `lists:foldl`-driven loop whose accumulator
-    /// genuinely threads the actor/REPL `State` map, discriminating the
-    /// callable's tier once PER ELEMENT (`is_function(Callable, 1)`) rather
-    /// than once at wrap time. Returns a raw `{Result, NewState}` tuple
-    /// `Document`, unpacked by the caller's generic
-    /// `BodyExprKind::ControlFlowWithMutations` machinery
-    /// (`gen_server/methods.rs`) exactly as `generate_list_do_with_mutations`
-    /// and its siblings already are for a literal, mutating block — no
-    /// `is_list`/message-send fallback here: `list_recv_to_safe_list_doc`'s
-    /// own `beamtalk_collection:to_list` conversion already generically
-    /// handles a non-list receiver (including one that only responds to
-    /// `do:` itself), matching the sibling `_with_mutations` functions this
-    /// mirrors.
-    #[allow(clippy::too_many_lines)]
-    fn generate_simple_list_op_threaded_fold(
-        &mut self,
-        receiver: &Expression,
-        body: &Expression,
-        operation: &str,
-    ) -> Result<Document<'static>> {
-        let line_info = self
-            .span_to_line(body.span())
-            .map_or(String::new(), |l| format!(" at line {l}"));
-        self.emit_stateacc_fallback_diagnostic(
-            format!(
-                "Loop{line_info}: StateAcc fallback — {}",
-                StateAccFallbackReason::NonLiteralCallable
-            ),
-            body.span(),
-        );
-
-        let list_var = self.fresh_temp_var("temp");
-        let recv_code = self.expression_doc(receiver)?;
-        let safe_list_var = self.fresh_temp_var("temp");
-        let callable_var = self.fresh_temp_var("Callable");
-        let raw_code = self.expression_doc(body)?;
-        let seed_state = self.current_field_read_state_var();
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(docvec![
-            "let ",
-            leaf::var(callable_var.clone()),
-            " = ",
-            raw_code,
-            " in "
-        ]);
-        docs.push(list_recv_to_safe_list_doc(
-            recv_code,
-            list_var.clone(),
-            safe_list_var.clone(),
-        ));
-
-        if operation == "foreach" {
-            let elem_var = self.fresh_temp_var("Elem");
-            let acc_var = self.fresh_temp_var("Acc");
-            let fold_fun_var = self.fresh_temp_var("FoldFun");
-            let fold_result_var = self.fresh_temp_var("FoldResult");
-            let tier2_tuple_var = self.fresh_temp_var("T");
-
-            // The fold accumulator (`_Acc`) is the raw `State`/`StateAcc`
-            // map throughout — the SAME shape `TheBlock` (a Tier 2 self-send
-            // closure) reads/writes via `maps:get`/`maps:put` on its own
-            // second parameter, and the SAME shape the reply tuple's
-            // `NewState` slot requires. So the Tier 2 branch extracts
-            // element 2 of `apply Callable(Elem, Acc)`'s `{Result,
-            // NewStateAcc}` pair as the fold's next `_Acc` — not the pair
-            // itself (a `{Result, Map}` tuple would neither satisfy the
-            // NEXT call's `Callable(Elem, Acc)` contract, which expects a
-            // raw map, nor the final reply's `NewState`, which must be one
-            // too).
-            docs.push(docvec![
-                "let ",
-                leaf::var(fold_fun_var.clone()),
-                " = fun (",
-                leaf::var(elem_var.clone()),
-                ", ",
-                leaf::var(acc_var.clone()),
-                ") -> case call 'erlang':'is_function'(",
-                leaf::var(callable_var.clone()),
-                ", 1) of <'true'> when 'true' -> let _ = apply ",
-                leaf::var(callable_var.clone()),
-                " (",
-                leaf::var(elem_var.clone()),
-                ") in ",
-                leaf::var(acc_var.clone()),
-                " <'false'> when 'true' -> let ",
-                leaf::var(tier2_tuple_var.clone()),
-                " = apply ",
-                leaf::var(callable_var),
-                " (",
-                leaf::var(elem_var),
-                ", ",
-                leaf::var(acc_var),
-                ") in call 'erlang':'element'(2, ",
-                leaf::var(tier2_tuple_var),
-                ") end in ",
-            ]);
-            docs.push(docvec![
-                "let ",
-                leaf::var(fold_result_var.clone()),
-                " = call 'lists':'foldl'(",
-                leaf::var(fold_fun_var),
-                ", ",
-                leaf::var(seed_state),
-                ", ",
-                leaf::var(safe_list_var),
-                ") in {'nil', ",
-                leaf::var(fold_result_var),
-                "}",
-            ]);
-            return Ok(Document::Vec(docs));
-        }
-
-        // "map" (collect:) / "filter" (select:): the fold accumulator is a
-        // `{ResultAcc, StateAcc}` pair so the result list and the threaded
-        // state build up in one `lists:foldl` pass. Mirrors
-        // `generate_list_collect_with_mutations`'s/
-        // `generate_list_filter_with_mutations`'s own map-acc shape.
-        let is_filter = operation == "filter";
-        let elem_var = self.fresh_temp_var("Elem");
-        let pair_var = self.fresh_temp_var("Pair");
-        let res_acc_var = self.fresh_temp_var("ResAcc");
-        let st_acc_var = self.fresh_temp_var("StAcc");
-        let fold_fun_var = self.fresh_temp_var("FoldFun");
-        let fold_result_var = self.fresh_temp_var("FoldResult");
-        let rev_list_var = self.fresh_temp_var("RevList");
-        let final_list_var = self.fresh_temp_var("FinalList");
-        let final_state_var = self.fresh_temp_var("FinalState");
-        let tier1_result_var = self.fresh_temp_var("R");
-        let tier2_tuple_var = self.fresh_temp_var("T");
-        let tier2_result_var = self.fresh_temp_var("R");
-        let tier2_state_var = self.fresh_temp_var("NewSt");
-
-        let combine = |result_ref: Document<'static>| -> Document<'static> {
-            if is_filter {
-                docvec![
-                    "case ",
-                    result_ref,
-                    " of <'true'> when 'true' -> [",
-                    leaf::var(elem_var.clone()),
-                    " | ",
-                    leaf::var(res_acc_var.clone()),
-                    "] <'false'> when 'true' -> ",
-                    leaf::var(res_acc_var.clone()),
-                    " end",
-                ]
-            } else {
-                docvec!["[", result_ref, " | ", leaf::var(res_acc_var.clone()), "]",]
-            }
-        };
-
-        docs.push(docvec![
-            "let ",
-            leaf::var(fold_fun_var.clone()),
-            " = fun (",
-            leaf::var(elem_var.clone()),
-            ", ",
-            leaf::var(pair_var.clone()),
-            ") -> let ",
-            leaf::var(res_acc_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(pair_var.clone()),
-            ") in let ",
-            leaf::var(st_acc_var.clone()),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(pair_var.clone()),
-            ") in case call 'erlang':'is_function'(",
-            leaf::var(callable_var.clone()),
-            ", 1) of <'true'> when 'true' -> let ",
-            leaf::var(tier1_result_var.clone()),
-            " = apply ",
-            leaf::var(callable_var.clone()),
-            " (",
-            leaf::var(elem_var.clone()),
-            ") in {",
-            combine(leaf::var(tier1_result_var)),
-            ", ",
-            leaf::var(st_acc_var.clone()),
-            "} <'false'> when 'true' -> let ",
-            leaf::var(tier2_tuple_var.clone()),
-            " = apply ",
-            leaf::var(callable_var.clone()),
-            " (",
-            leaf::var(elem_var.clone()),
-            ", ",
-            leaf::var(st_acc_var),
-            ") in let ",
-            leaf::var(tier2_result_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(tier2_tuple_var.clone()),
-            ") in let ",
-            leaf::var(tier2_state_var.clone()),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(tier2_tuple_var),
-            ") in {",
-            combine(leaf::var(tier2_result_var)),
-            ", ",
-            leaf::var(tier2_state_var),
-            "} end in ",
-        ]);
-        docs.push(docvec![
-            "let ",
-            leaf::var(fold_result_var.clone()),
-            " = call 'lists':'foldl'(",
-            leaf::var(fold_fun_var),
-            ", {[], ",
-            leaf::var(seed_state),
-            "}, ",
-            leaf::var(safe_list_var),
-            ") in let ",
-            leaf::var(rev_list_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(fold_result_var.clone()),
-            ") in let ",
-            leaf::var(final_list_var.clone()),
-            " = call 'lists':'reverse'(",
-            leaf::var(rev_list_var),
-            ") in ",
-        ]);
-
-        let (str_binding, str_result) =
-            self.generate_list_like_result_binding(&list_var, &final_list_var);
-        docs.push(docvec![
-            str_binding,
-            " in let ",
-            leaf::var(final_state_var.clone()),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(fold_result_var),
-            ") in {",
-            leaf::var(str_result),
-            ", ",
-            leaf::var(final_state_var),
-            "}",
-        ]);
-
-        Ok(Document::Vec(docs))
     }
 
     /// Generates a `let` binding that reconstructs a list result

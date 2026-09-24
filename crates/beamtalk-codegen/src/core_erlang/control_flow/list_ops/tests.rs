@@ -50,10 +50,11 @@ fn test_list_inject_into_pure_generates_inline_foldl() {
 }
 
 #[test]
-fn test_list_inject_into_non_literal_generates_wrapper() {
-    // inject:into: with a non-literal block (variable) emits inline
-    // lists:foldl with an arg-swap wrapper: fun (Elem, Acc) -> apply Block (Acc, Elem).
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
+fn test_list_inject_into_non_literal_value_type_generates_wrapper() {
+    // inject:into: with a non-literal block (variable) outside Actor
+    // context (no `State` map to thread) emits inline lists:foldl with an
+    // arg-swap wrapper: fun (Elem, Acc) -> apply Block (Acc, Elem).
+    let src = "Value subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foldl'"),
@@ -1381,7 +1382,7 @@ fn test_list_select_non_literal_callable_emits_threaded_fold() {
         "Non-literal callable select: should emit an is_function/1 per-element tier check. Got:\n{code}"
     );
     assert!(
-        code.contains("<'true'> when 'true' -> ["),
+        code.contains("<'true'> when 'true' -> {["),
         "Non-literal callable select: should cons the element when the predicate is true. Got:\n{code}"
     );
     assert!(
@@ -1512,6 +1513,119 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
     assert!(
         code.contains("~{}~"),
         "ValueType non-literal do: should seed wrapper with ~{{}}~ (empty map). Got:\n{code}"
+    );
+}
+
+// ── ADR 0128 / BT-3615: opaque-callable fold for the remaining HOMs ────
+
+/// Every collection HOM covered by `beamtalk-core`'s `opaque_fold_callable_arg`
+/// table, as `(selector, Actor method body forwarding the opaque callable
+/// `block` in the table's argument position)`.
+const OPAQUE_FOLD_SHAPES: &[(&str, &str)] = &[
+    ("do:", "items do: block"),
+    ("collect:", "items collect: block"),
+    ("select:", "items select: block"),
+    ("inject:into:", "items inject: 0 into: block"),
+    ("detect:", "items detect: block"),
+    ("detect:ifNone:", "items detect: block ifNone: [0]"),
+    ("count:", "items count: block"),
+    ("anySatisfy:", "items anySatisfy: block"),
+    ("allSatisfy:", "items allSatisfy: block"),
+];
+
+#[test]
+fn test_opaque_fold_callable_arg_matches_codegen_call_sites() {
+    // The shared table (`opaque_fold_callable_arg`) is what the
+    // `control_flow_has_mutations` classifier consults; each operator's
+    // codegen call site independently passes ITS block argument to
+    // `routes_through_opaque_callable_fold`. Pin that every table entry's
+    // codegen actually folds (per-element `is_function` tier check,
+    // `lists:foldl`, `{Result, NewState}` unpacked into the reply) in Actor
+    // context — a table/codegen mismatch would either leave the plain
+    // `lists:*` BIF in place or leak an unpacked tuple.
+    for (selector, body) in OPAQUE_FOLD_SHAPES {
+        let src = format!(
+            "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
+        );
+        let code = codegen(&src);
+        assert!(
+            code.contains("'lists':'foldl'") && code.contains("'erlang':'is_function'"),
+            "{selector} with an opaque callable (Actor) should fold with a per-element \
+             tier check. Got:\n{code}"
+        );
+        for bif in [
+            "'lists':'foreach'",
+            "'lists':'map'",
+            "'lists':'filter'",
+            "'lists':'any'",
+            "'lists':'all'",
+            "'beamtalk_list':'detect'",
+        ] {
+            assert!(
+                !code.contains(bif),
+                "{selector} with an opaque callable (Actor) must not reach {bif}. Got:\n{code}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_opaque_fold_value_type_keeps_plain_value_paths() {
+    // `ValueType` has no `State` map — none of the opaque-callable shapes
+    // fold there; each keeps its pre-ADR-0128 plain-value path.
+    for (selector, body) in OPAQUE_FOLD_SHAPES {
+        let src = format!(
+            "Value subclass: V\n  state: x = 0\n\n  run: items with: block =>\n    {body}\n"
+        );
+        let code = codegen(&src);
+        assert!(
+            !code.contains("'erlang':'element'(2, _Acc"),
+            "{selector} with an opaque callable (ValueType) must not thread a State fold. \
+             Got:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn test_list_inject_into_non_literal_actor_passes_acc_then_elem() {
+    // inject:into:'s callable takes `(Acc, Each)`; the Tier 1 arm must test
+    // arity 2 and the Tier 2 arm pass the StAcc as a trailing third argument.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items inject: 0 into: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains(", 2) of <'true'> when 'true' -> let"),
+        "Opaque inject:into: should test is_function(Callable, 2) for Tier 1. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("fun (Elem, Acc) -> apply"),
+        "Opaque inject:into: (Actor) should not use the ValueType arg-swap wrapper. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_opaque_detect_raises_not_found_via_shared_helper() {
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items detect: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'beamtalk_collection':'raiseDetectNotFound'"),
+        "Opaque detect: should raise not_found when nothing matched. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_opaque_fold_in_expression_position_does_not_leak_tuple() {
+    // `(items inject: 0 into: block) + 1` — the fold's `{Result, NewState}`
+    // tuple becomes a real `State` Bind prelude (ADR 0118
+    // `inline_control_flow_producer`), and the operand is its element 1.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    (items inject: 0 into: block) + 1\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "Opaque inject:into: nested as an operand should still fold. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'element'(1, _CF"),
+        "The nested fold's value should be element 1 of its hoisted tuple. Got:\n{code}"
     );
 }
 

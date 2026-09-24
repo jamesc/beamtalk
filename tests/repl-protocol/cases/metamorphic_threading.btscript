@@ -301,3 +301,132 @@ v ifTrueIfFalseAssignRhsReadWrite: true
 
 d ifTrueIfFalseAssignRhsReadWrite: true
 // => 5
+
+// ===========================================================================
+//  BT-3615 (ADR 0128): opaque (non-literal) callable forwarded through a
+//  same-class HOM to each collection primitive — the corpus's
+//  `opaque*NonLastReadWrite` fragments, plus the REPL's own top-level
+//  eval path forwarding a stored block to each primitive.
+// ===========================================================================
+o := MutationCorpusActor spawn
+// => Actor(MutationCorpusActor, _)
+
+v opaqueDoNonLastReadWrite
+// => 2
+
+o opaqueDoNonLastReadWrite
+// => 2
+
+cm opaqueDoNonLastReadWrite
+// => 2
+
+v opaqueCollectNonLastReadWrite
+// => 12
+
+o opaqueCollectNonLastReadWrite
+// => 12
+
+cm opaqueCollectNonLastReadWrite
+// => 12
+
+v opaqueSelectNonLastReadWrite
+// => 5
+
+o opaqueSelectNonLastReadWrite
+// => 5
+
+cm opaqueSelectNonLastReadWrite
+// => 5
+
+v opaqueInjectNonLastReadWrite
+// => 12
+
+o opaqueInjectNonLastReadWrite
+// => 12
+
+cm opaqueInjectNonLastReadWrite
+// => 12
+
+v opaqueDetectNonLastReadWrite
+// => 4
+
+o opaqueDetectNonLastReadWrite
+// => 4
+
+cm opaqueDetectNonLastReadWrite
+// => 4
+
+v opaqueDetectIfNoneNonLastReadWrite
+// => 10
+
+o opaqueDetectIfNoneNonLastReadWrite
+// => 10
+
+cm opaqueDetectIfNoneNonLastReadWrite
+// => 10
+
+v opaqueCountNonLastReadWrite
+// => 4
+
+o opaqueCountNonLastReadWrite
+// => 4
+
+cm opaqueCountNonLastReadWrite
+// => 4
+
+v opaqueAnySatisfyNonLastReadWrite
+// => 1
+
+o opaqueAnySatisfyNonLastReadWrite
+// => 1
+
+cm opaqueAnySatisfyNonLastReadWrite
+// => 1
+
+v opaqueAllSatisfyNonLastReadWrite
+// => 1
+
+o opaqueAllSatisfyNonLastReadWrite
+// => 1
+
+cm opaqueAllSatisfyNonLastReadWrite
+// => 1
+
+sumBlk := [:acc :x | acc + x]
+// => _
+
+#(1, 2, 3) inject: 0 into: sumBlk
+// => 6
+
+(#(1, 2, 3) inject: 0 into: sumBlk) + 1
+// => 7
+
+bigBlk := [:x | x > 1]
+// => _
+
+#(1, 2, 3) detect: bigBlk
+// => 2
+
+#(1, 2, 3) count: bigBlk
+// => 2
+
+#(1, 2, 3) anySatisfy: bigBlk
+// => true
+
+#(1, 2, 3) allSatisfy: bigBlk
+// => false
+
+#(1, 2, 3) detect: bigBlk ifNone: [0]
+// => 2
+
+dblBlk := [:x | x * 2]
+// => _
+
+(#(1, 2, 3) asSet collect: dblBlk) class
+// => Set
+
+#(1, 2, 3) collect: dblBlk
+// => [2,4,6]
+
+(#(1, 2, 3) select: bigBlk) size
+// => 2
