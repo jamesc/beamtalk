@@ -156,6 +156,13 @@
 %% (ADR 0126 §5.1) rather than guessing at a decode.
 -define(BT_WIRE_VERSION, 1).
 
+%% @doc ADR 0126 §3 timeout (ms) for a bounded `erpc:call/5` to a peer node —
+%% remote spawn/lookup (`beamtalk_actor`), `Node>>shapeManifest`, and
+%% `beamtalk_node_monitor`'s connect-/reload-time shape-skew comparison
+%% (Phase 4) all share this single source of truth rather than each pinning
+%% its own literal (CLAUDE.md "No duplicate implementations").
+-define(BT_REMOTE_CALL_TIMEOUT, 5000).
+
 %% @doc ADR 0110 class-var shadow write-through process-dictionary key atom
 %% (ADR 0111 Phase D).
 %%

@@ -73,6 +73,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Metaclass"
             | "Node"
             | "NodeDown"
+            | "NodeShapeSkew"
             | "NodeUp"
             | "Number"
             | "OS"
@@ -2474,6 +2475,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isConnected".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether this node currently has a connection to `self`. The current\nnode is trivially connected to itself.\n\n## Examples\n```beamtalk\nNode current isConnected                      // => true\n```".into()) },
                 MethodInfo { selector: "isCurrent".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Whether `self` is the node this code is running on.\n\n## Examples\n```beamtalk\nNode current isCurrent                        // => true\n```".into()) },
                 MethodInfo { selector: "ping".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("`net_adm:ping/1` — `true` iff the node answered (and is now connected).\nThe current node always answers. Applies the same host policy as\n`connect`: an off-host node without TLS distribution answers `false`.\n\n## Examples\n```beamtalk\nNode current ping                             // => true\n```".into()) },
+                MethodInfo { selector: "shapeManifest".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("Dictionary"), DeclaredType::simple("Error")])), param_types: vec![], doc: Some("This node's shape manifest (ADR 0125 §3.4), fetched via `erpc`: the\nsame `className -> #{#version, #fields, #migrations}` projection\n`Beamtalk shapeManifest` exposes locally, never re-derived. Applies\nthe same §9 host policy as `connect`: an off-host node without TLS\ndistribution answers `kind = insecure_distribution` without an erpc\nattempt. An unreachable node answers `kind = node_down`.\n\n## Examples\n```beamtalk\nNode current shapeManifest isOk            // => true\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Human-readable representation: `Node(name@host)`.\n\n## Examples\n```beamtalk\n(Node named: #'worker@localhost') unwrap printString  // => \"Node(worker@localhost)\"\n```".into()) },
                 MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Returns the `name` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
                 MethodInfo { selector: "withName:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Node".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Node")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Returns a new `Node` with `name` set to the given value.\n\n*(compiler-generated)*".into()) },
@@ -2509,6 +2511,35 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::from([("node".into(), DeclaredType::simple("Node")), ("reason".into(), DeclaredType::simple("Symbol"))]),
             state_has_default: HashMap::from([("node".into(), false), ("reason".into(), true)]),
             state_kinds: HashMap::from([("node".into(), SlotKind::Eager), ("reason".into(), SlotKind::Eager)]),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "NodeShapeSkew".into(),
+        ClassInfo {
+            name: "NodeShapeSkew".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec!["node".into(), "className".into(), "localVersion".into(), "remoteVersion".into()],
+            state_types: HashMap::from([("node".into(), DeclaredType::simple("Node")), ("className".into(), DeclaredType::simple("Symbol")), ("localVersion".into(), DeclaredType::simple("Integer")), ("remoteVersion".into(), DeclaredType::simple("Integer"))]),
+            state_has_default: HashMap::from([("node".into(), false), ("className".into(), false), ("localVersion".into(), false), ("remoteVersion".into(), false)]),
+            state_kinds: HashMap::from([("node".into(), SlotKind::Eager), ("className".into(), SlotKind::Eager), ("localVersion".into(), SlotKind::Eager), ("remoteVersion".into(), SlotKind::Eager)]),
             initialize_assigns: BTreeSet::new(),
             has_dynamic_field_writer: false,
             methods: vec![],

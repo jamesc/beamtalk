@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// NodeShapeSkew — system event announced when a class shared with a
+/// connected peer has a different `shapeVersion` there (ADR 0126 §5.3,
+/// Phase 4).
+///
+/// Published on `SystemAnnouncer current` by the runtime's
+/// `beamtalk_node_monitor`: once when a peer connects (comparing its shape
+/// manifest, fetched via `erpc`, against this node's own), and again
+/// whenever a shared class is hot-reloaded on this node while peers are
+/// connected. This is an early-warning, non-gating signal — version skew
+/// between connected nodes is expected during a rolling upgrade (ADR
+/// 0125); a per-message wire send still enforces the strict version check
+/// (`shape_version_ahead`, ADR 0126 §5.2) independently of this event.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: NodeShapeSkew do: [:e |
+///   Transcript showLine: e className asString ++ " skewed with " ++ e node name asString
+/// ]
+/// ```
+sealed typed Announcement subclass: NodeShapeSkew
+  field: node :: Node
+  field: className :: Symbol
+  field: localVersion :: Integer
+  field: remoteVersion :: Integer

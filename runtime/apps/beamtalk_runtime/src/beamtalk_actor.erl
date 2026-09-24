@@ -202,7 +202,9 @@ handle_getValue([], State) ->
 %% makes to the target node — matches `gen_server:call/2`'s own 5000ms
 %% default so a stuck remote op fails on the same order of magnitude as a
 %% stuck local one, rather than hanging indefinitely (erpc's own default).
--define(BT_REMOTE_CALL_TIMEOUT, 5000).
+%% `?BT_REMOTE_CALL_TIMEOUT` itself now lives in beamtalk.hrl — shared with
+%% `beamtalk_node`/`beamtalk_node_monitor` (Phase 4) rather than a second
+%% literal (CLAUDE.md "No duplicate implementations").
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).

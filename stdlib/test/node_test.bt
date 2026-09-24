@@ -124,3 +124,29 @@ TestCase subclass: NodeTest
     e := NodeDown node: Node current reason: #disconnect
     self assert: e node =:= Node current
     self assert: e reason equals: #disconnect
+
+  // ===== NodeShapeSkew =====
+  testNodeShapeSkewIsAnnouncement =>
+    self
+      assert: ((NodeShapeSkew
+        node: Node current
+        className: #Counter
+        localVersion: 1
+        remoteVersion: 2) isKindOf: Announcement)
+
+  testNodeShapeSkewCarriesFields =>
+    e := NodeShapeSkew
+      node: Node current
+      className: #Counter
+      localVersion: 1
+      remoteVersion: 2
+    self assert: e node =:= Node current
+    self assert: e className equals: #Counter
+    self assert: e localVersion equals: 1
+    self assert: e remoteVersion equals: 2
+
+  // ===== Node>>shapeManifest =====
+  testShapeManifestOnCurrentIsOk =>
+    result := Node current shapeManifest
+    self assert: result isOk
+    self assert: result unwrap class equals: Dictionary

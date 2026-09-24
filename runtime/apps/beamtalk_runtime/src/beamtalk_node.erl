@@ -50,11 +50,19 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
     isConnected/1,
     isCurrent/1,
     ping/1,
-    printString/1
+    printString/1,
+    shapeManifest/1
 ]).
 
 %% Runtime helpers (Pid>>node, beamtalk_node_monitor, §9 policy)
--export([from_atom/1, ofPid/1, name/1, connect_policy/2, tls_distribution/0]).
+-export([
+    from_atom/1,
+    ofPid/1,
+    name/1,
+    connect_policy/2,
+    tls_distribution/0,
+    remote_shape_manifest/1
+]).
 
 -type t() :: #{'$beamtalk_class' := 'Node', name := node()}.
 -export_type([t/0]).
@@ -175,6 +183,40 @@ ping(#{'$beamtalk_class' := 'Node', name := Name}) ->
 printString(#{'$beamtalk_class' := 'Node', name := Name}) ->
     iolist_to_binary([<<"Node(">>, atom_to_binary(Name, utf8), <<")">>]).
 
+-doc """
+`self`'s shape manifest (ADR 0126 §5.3/Phase 4): `className -> #{version,
+fields, migrations}` for every registered project/dependency class on that
+node, fetched via `erpc:call/5` to `beamtalk_release:shape_manifest/0` — the
+exact BT-3575 projection `Beamtalk shapeManifest` exposes locally, never
+re-derived (CLAUDE.md's no-duplicate-implementations rule). The current
+node is special-cased to a direct local call — same as `connect/1` — both
+because it is always allowed (no host policy or network round trip makes
+sense against `self`) and because `erpc:call/5` against `node()` on a
+*non*-distributed VM (`nonode@nohost`) is not guaranteed to behave like an
+ordinary local call. Otherwise applies the same §9 host policy as
+`connect/1`: an off-host node without TLS distribution answers
+`insecure_distribution` without an erpc attempt.
+
+Answers `Result error:` with `kind = node_down` if the node cannot be
+reached, or `kind = timeout` if it does not answer within the bounded
+`?BT_REMOTE_CALL_TIMEOUT`.
+""".
+-spec shapeManifest(t()) -> beamtalk_result:t().
+shapeManifest(#{'$beamtalk_class' := 'Node', name := Name}) ->
+    Result =
+        case Name =:= node() of
+            true ->
+                {ok, beamtalk_release:shape_manifest()};
+            false ->
+                case connect_policy(Name, tls_distribution()) of
+                    {error, #beamtalk_error{} = Refused} ->
+                        {error, Refused#beamtalk_error{class = 'Node', selector = shapeManifest}};
+                    ok ->
+                        remote_shape_manifest(Name)
+                end
+        end,
+    beamtalk_result:from_tagged_tuple(Result).
+
 %%% ============================================================================
 %%% Runtime helpers
 %%% ============================================================================
@@ -193,6 +235,41 @@ ofPid(Pid) when is_pid(Pid) ->
 -spec name(t()) -> node().
 name(#{'$beamtalk_class' := 'Node', name := Name}) ->
     Name.
+
+-doc """
+Low-level `erpc:call/5` fetch of `Name`'s `beamtalk_release:shape_manifest/0`
+(ADR 0126 §5.3/Phase 4), with `erpc`/connection failures mapped to
+`#beamtalk_error{}`. No §9 host policy check here — shared by two callers
+with different policy needs:
+
+- The public `shapeManifest/1` above, which checks the policy itself first
+  (a user-initiated call against a possibly not-yet-connected, arbitrary
+  `Node`).
+- `beamtalk_node_monitor`'s connect-/reload-time shape-skew comparison,
+  which never applies the policy: it only ever erpc's a peer that
+  `net_kernel:monitor_nodes/2` already reported as connected, so there is no
+  new connection to gate.
+
+Both share this one erpc-and-catch implementation rather than a second copy
+(CLAUDE.md's no-duplicate-implementations rule).
+""".
+-spec remote_shape_manifest(node()) -> {ok, map()} | {error, #beamtalk_error{}}.
+remote_shape_manifest(Name) ->
+    try erpc:call(Name, beamtalk_release, shape_manifest, [], ?BT_REMOTE_CALL_TIMEOUT) of
+        Manifest when is_map(Manifest) ->
+            {ok, Manifest}
+    catch
+        error:{erpc, noconnection} ->
+            {error, remote_manifest_node_down_error(Name)};
+        error:{erpc, timeout} ->
+            {error, remote_manifest_timeout_error(Name)};
+        error:{erpc, Reason} ->
+            {error, remote_manifest_error(Name, Reason)};
+        error:{exception, Reason, _Stack} ->
+            {error, remote_manifest_error(Name, Reason)};
+        exit:{exception, Reason} ->
+            {error, remote_manifest_error(Name, Reason)}
+    end.
 
 -doc """
 The ADR 0126 §9 item 2 connect guard, as a pure-ish decision: `ok` if a
@@ -264,6 +341,37 @@ node_down_error(Name, Hint) ->
         Error0, iolist_to_binary([<<"Could not connect to node ">>, atom_to_binary(Name, utf8)])
     ),
     beamtalk_error:with_details(Error1, #{node => Name}).
+
+-doc "`remote_shape_manifest/1`'s `noconnection` mapping — `shapeManifest`'s own selector, distinct from `connect`'s `node_down_error/2` above.".
+-spec remote_manifest_node_down_error(node()) -> #beamtalk_error{}.
+remote_manifest_node_down_error(Name) ->
+    Error0 = beamtalk_error:new(
+        node_down,
+        'Node',
+        shapeManifest,
+        <<"The node may come back; retry, or use monitors to detect when it does">>
+    ),
+    beamtalk_error:with_details(Error0, #{node => Name}).
+
+-doc "`remote_shape_manifest/1`'s `erpc` timeout mapping.".
+-spec remote_manifest_timeout_error(node()) -> #beamtalk_error{}.
+remote_manifest_timeout_error(Name) ->
+    Error0 = beamtalk_error:new(
+        timeout,
+        'Node',
+        shapeManifest,
+        <<"Remote shapeManifest fetch did not complete within the timeout">>
+    ),
+    beamtalk_error:with_details(Error0, #{node => Name}).
+
+-doc "`remote_shape_manifest/1`'s catch-all for any other `erpc`/remote-side failure.".
+-spec remote_manifest_error(node(), term()) -> #beamtalk_error{}.
+remote_manifest_error(Name, Reason) ->
+    Error0 = beamtalk_error:with_hint(
+        beamtalk_error:new(runtime_error, 'Node', shapeManifest),
+        iolist_to_binary(io_lib:format("shapeManifest fetch failed: ~tp", [Reason]))
+    ),
+    beamtalk_error:with_details(Error0, #{node => Name}).
 
 -spec valid_node_name(atom()) -> boolean().
 valid_node_name(Name) ->

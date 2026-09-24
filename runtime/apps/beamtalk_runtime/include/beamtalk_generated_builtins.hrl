@@ -70,6 +70,7 @@
     'Metaclass',
     'Node',
     'NodeDown',
+    'NodeShapeSkew',
     'NodeUp',
     'Number',
     'OS',
