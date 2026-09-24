@@ -2388,23 +2388,45 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-3611: captured before generating the list-op body so a
+        // class-method self-send inside its own `Foldl*` accumulator
+        // threading (ADR 0111 Addendum 9 Question 6) can be detected —
+        // `class_var_version` only ever advances from class-method-specific
+        // code paths, so this is a no-op read for every non-class-method
+        // context. See `refresh_class_var_after_opaque_scope`'s own doc
+        // comment and `emit_vt_threaded_local_assignment`'s identical
+        // Foldl-shape refresh (the pattern this mirrors — that call site
+        // never had this gap; this one did).
+        let cv_version_before = self.class_var_version();
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::foldl_list_op_body_block(expr)
             .map(|body| self.compute_threaded_locals_for_loop(body, None))
             .unwrap_or_default();
-        Ok(self.emit_vt_loop_open_extraction(
+        let extraction_doc = self.emit_vt_loop_open_extraction(
             loop_doc,
             &threaded_locals,
             // Foldl-shaped constructs never thread `ClassVars`
             // through this tuple slot (Question 6's `{ClassVars, StateAcc}`
             // accumulator shape governs that separately) — nor is there a
-            // value-type `Self` slot either.
+            // value-type `Self` slot either. `loop_doc` above is now bound
+            // opaquely to this extraction's own fresh tuple var, so any
+            // `ClassVarsN` rebind a self-send inside the fold's own
+            // accumulator performed is confined to that `let`'s RHS and
+            // unreachable from here on — recovered via the shadow-read
+            // refresh below instead (BT-3611: previously missing here,
+            // unlike every other opaque-wrap call site — the `erlc`
+            // "unbound variable 'ClassVarsN'" compiler crash this issue
+            // reports).
             &ThreadedFamilies::default(),
             expr.span(),
             "FoldlListOpResult",
             "FoldlListOpState",
-        ))
+        );
+        if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
+            return Ok(docvec![extraction_doc, refresh]);
+        }
+        Ok(extraction_doc)
     }
 
     /// Returns the threaded local variable names for a `whileTrue:` / `whileFalse:`

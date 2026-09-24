@@ -570,18 +570,23 @@ impl ThreadingPlan {
         //
         // ADR 0111 Addendum 9, Questions 3/4/6: a class-method
         // `Foldl*` body containing a self-send needs to thread `ClassVars`
-        // through the fold's own accumulator. Excluded for `Actor` context:
-        // `is_actor_self_send` (checked before any class-method-self-send
-        // path in `lower_letrec_body`) unconditionally wins
-        // for a `self <msg>` send whenever `context == Actor`, regardless of
-        // `in_class_method()` — an Actor subclass's class-method self-send
-        // never reaches the `emit_class_var_result_unwrap`/`class_bump` path
-        // this field's threading exists to support, so claiming
-        // `threads_class_vars` there would build a fun signature/accumulator
-        // shape the body never actually populates. Scoped to the addendum's
-        // own confirmed-reachable repros (`ValueType`/`Object subclass:`
-        // class methods) — not a general fix for that separate, pre-existing
-        // Actor-class-method-self-send gap, out of this issue's scope.
+        // through the fold's own accumulator — for BOTH an `Object`/
+        // `ValueType` class method AND an `Actor` subclass's own class
+        // method: `context` alone never distinguishes them here.
+        // `is_class_method_self_send`/`in_class_method()` (used by
+        // `body_analysis.has_self_sends`'s own detection and by every
+        // downstream `class_bump`/`emit_class_var_result_unwrap` call this
+        // field's threading feeds) are already context-independent — the
+        // ONLY reason this used to also require `context != Actor` was
+        // `is_actor_self_send` (`expr_shape.rs`) unconditionally winning for
+        // any `self <msg>` send whenever `context == Actor`, regardless of
+        // `in_class_method()`, misrouting an Actor class-method self-send
+        // through the actor INSTANCE self-dispatch path instead — BT-3581
+        // (already landed) fixed `is_actor_self_send` to exclude
+        // `in_class_method()` too, so that premise no longer holds and this
+        // plan's own `context != Actor` exclusion became stale, silently
+        // dropping the class-var mutation for an Actor class method's own
+        // `do:`/`collect:`/etc. body instead of threading it (BT-3584).
         // `!allow_direct_params` restricts this to Foldl-shaped constructors
         // (`new_for_foldl_list_op` and the plain `new` compat-shim variant) —
         // `new_for_letrec` passes `allow_direct_params: true` unconditionally,
@@ -611,10 +616,9 @@ impl ThreadingPlan {
             generator.loop_body_threads_class_vars(body)
         } else {
             // Foldl* shape: `new`/`new_for_foldl_list_op`-constructed
-            // plans only.
-            !matches!(context, CodeGenContext::Actor)
-                && generator.in_class_method()
-                && body_analysis.has_self_sends
+            // plans only. BT-3584: no `context != Actor` exclusion — see
+            // the comment above.
+            generator.in_class_method() && body_analysis.has_self_sends
         };
         let initial_class_var_version = generator.class_var_version();
 
