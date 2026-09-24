@@ -191,6 +191,7 @@ pub fn build_release(
         project_root,
         &release_config_dir,
         &release_cfg.sys_config,
+        &release_name,
         release_cfg.console,
         &release_cfg.bind,
         release_cfg.include_compiler,

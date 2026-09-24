@@ -119,15 +119,28 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
 /// any top-level app key it declares is deep-appended after ours (a later
 /// duplicate key wins under `file:consult/1`'s "last one wins" reading —
 /// same convention as an OTP `sys.config` overlay).
+///
+/// `workspace_id` is set to `release_name` rather than left at
+/// `beamtalk_workspace_app:env_workspace_config/1`'s fixed `<<"release">>`
+/// fallback: the REPL port file
+/// (`beamtalk_repl_server:write_port_file/3`) lives at
+/// `~/.beamtalk/workspaces/<workspace_id>/port`, so two *different*
+/// releases (distinct `-sname`s already, via `generate_vm_args`) running
+/// on the same host at once would otherwise both write
+/// `~/.beamtalk/workspaces/release/port`, each clobbering the other's —
+/// `beamtalk workspace attach` would then discover whichever booted last,
+/// not necessarily the one asked for.
 pub fn generate_sys_config(
     project_root: &Utf8Path,
     release_config_dir: &Utf8Path,
     sys_config_rel_path: &str,
+    release_name: &str,
     console: bool,
     bind: &str,
     include_compiler: bool,
 ) -> Result<Utf8PathBuf> {
     let escaped_bind = escape_erlang_string(bind);
+    let escaped_name = escape_erlang_string(release_name);
     let mut content = format!(
         "[\n\
          \x20 {{beamtalk_workspace, [\n\
@@ -135,7 +148,9 @@ pub fn generate_sys_config(
          \x20   {{console, {console}}},\n\
          \x20   {{bind, \"{escaped_bind}\"}},\n\
          \x20   {{include_compiler, {include_compiler}}},\n\
-         \x20   {{auto_cleanup, false}}\n\
+         \x20   {{auto_cleanup, false}},\n\
+         \x20   {{tcp_port, 0}},\n\
+         \x20   {{workspace_id, <<\"{escaped_name}\">>}}\n\
          \x20 ]}}"
     );
 
@@ -1361,9 +1376,16 @@ mod tests {
     fn generate_sys_config_sets_release_mode() {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let path =
-            generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1", false)
-                .unwrap();
+        let path = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            "orders",
+            false,
+            "127.0.0.1",
+            false,
+        )
+        .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
         assert!(content.contains("{mode, release}"), "{content}");
         assert!(content.contains("{console, false}"), "{content}");
@@ -1372,12 +1394,72 @@ mod tests {
         assert!(content.trim_end().ends_with('.'), "{content}");
     }
 
+    /// The exact bug this guards against: `beamtalk_workspace_sup:init/1`
+    /// hard-crashes at boot with `{bad_config, missing_tcp_port_for_repl}`
+    /// whenever `console => true` and `tcp_port` is unset — verified by
+    /// actually booting a `console = true` release, not just by reading the
+    /// supervisor's init clause. `0` (OS-assigned ephemeral port,
+    /// discovered via the REPL server's port file) matches dev/workspace
+    /// mode's own default.
+    #[test]
+    fn generate_sys_config_sets_tcp_port_so_console_mode_can_boot() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let path = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            "orders",
+            true,
+            "127.0.0.1",
+            false,
+        )
+        .unwrap();
+        let content = fs::read_to_string(path.as_std_path()).unwrap();
+        assert!(content.contains("{tcp_port, 0}"), "{content}");
+    }
+
+    /// The exact bug this guards against: `workspace_id` defaulted to the
+    /// fixed string `"release"` for every release-mode node
+    /// (`beamtalk_workspace_app:env_workspace_config/1`), so two
+    /// *different* releases (`orders`, `symphony`) running on the same
+    /// host at once would both write their REPL port to
+    /// `~/.beamtalk/workspaces/release/port`, each clobbering the other's.
+    #[test]
+    fn generate_sys_config_sets_workspace_id_to_the_release_name() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let path = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            "symphony",
+            true,
+            "127.0.0.1",
+            false,
+        )
+        .unwrap();
+        let content = fs::read_to_string(path.as_std_path()).unwrap();
+        assert!(
+            content.contains("{workspace_id, <<\"symphony\">>}"),
+            "{content}"
+        );
+    }
+
     #[test]
     fn generate_sys_config_sets_include_compiler() {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let path = generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1", true)
-            .unwrap();
+        let path = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            "orders",
+            false,
+            "127.0.0.1",
+            true,
+        )
+        .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
         assert!(content.contains("{include_compiler, true}"), "{content}");
     }
@@ -1394,8 +1476,16 @@ mod tests {
         )
         .unwrap();
 
-        let path =
-            generate_sys_config(&root, &root, "config/sys.config", true, "0.0.0.0", false).unwrap();
+        let path = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            "orders",
+            true,
+            "0.0.0.0",
+            false,
+        )
+        .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
         assert!(content.contains("{mode, release}"), "{content}");
         assert!(content.contains("{console, true}"), "{content}");
@@ -1406,8 +1496,15 @@ mod tests {
     fn generate_sys_config_absent_user_file_is_not_an_error() {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let result =
-            generate_sys_config(&root, &root, "config/sys.config", false, "127.0.0.1", false);
+        let result = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            "orders",
+            false,
+            "127.0.0.1",
+            false,
+        );
         assert!(result.is_ok());
     }
 
@@ -1580,6 +1677,7 @@ mod tests {
             &root,
             &root,
             "config/sys.config",
+            "orders",
             false,
             malicious_bind,
             false,
@@ -1597,6 +1695,28 @@ mod tests {
         assert!(
             content.contains("127.0.0.1\\\"}, {evil, true}, {bind, \\\"0.0.0.0"),
             "bind value must be escaped as a single string literal: {content}"
+        );
+    }
+
+    #[test]
+    fn generate_sys_config_escapes_release_name_with_embedded_quote() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let malicious_name = "orders\">>}, {evil, true}, {workspace_id, <<\"orders";
+        let path = generate_sys_config(
+            &root,
+            &root,
+            "config/sys.config",
+            malicious_name,
+            false,
+            "127.0.0.1",
+            false,
+        )
+        .unwrap();
+        let content = fs::read_to_string(path.as_std_path()).unwrap();
+        assert!(
+            content.contains("orders\\\">>}, {evil, true}, {workspace_id, <<\\\"orders"),
+            "release name must be escaped as a single binary literal: {content}"
         );
     }
 }

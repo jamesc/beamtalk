@@ -8,10 +8,12 @@
 //! graph `beamtalk build` already resolves, not re-derived), the runtime
 //! closure (`beamtalk_runtime`/`beamtalk_stdlib`/`beamtalk_workspace` and
 //! their declared deps `cowboy`/`cowlib`/`ranch`/`telemetry`/
-//! `telemetry_poller`), `kernel`/`stdlib`/`sasl`/`crypto` (host-provided,
-//! never staged), and `[release] apps` extras. `beamtalk_compiler` (+ OTP's
-//! own `compiler` app) is included only when `[release] include-compiler`
-//! is set.
+//! `telemetry_poller`), `[release] apps` extras, any further rebar3
+//! native/hex dep a staged app's `.app` declares and `beamtalk build` has
+//! already resolved (e.g. `gun`, declared by `http`), and `kernel`/
+//! `stdlib`/`sasl`/`crypto` (host-provided, never staged). `beamtalk_compiler`
+//! (+ OTP's own `compiler` app) is included only when `[release]
+//! include-compiler` is set.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -55,8 +57,11 @@ pub struct AppClosure {
     /// against the *building* machine's own Erlang/OTP install, never
     /// staged into `lib/`.
     pub host_apps: Vec<String>,
-    /// Applications staged into `lib/<app>-<vsn>/ebin/`, in a fixed,
-    /// dependency-respecting order ending with the project's own app.
+    /// Applications staged into `lib/<app>-<vsn>/ebin/`. Order carries no
+    /// meaning to `systools:make_script/2` (it derives boot order itself
+    /// from each `.app`'s declared dependencies) — a native/hex dep
+    /// auto-staged to satisfy another staged app's declared dependency (see
+    /// [`compute_app_closure`]) is appended after the project's own app.
     pub staged_apps: Vec<StagedApp>,
 }
 
@@ -127,20 +132,24 @@ pub fn compute_app_closure(
 
     // `[release] apps` extras — resolved from the rebar3 hex-dep lib dir
     // `beamtalk build` already populated (`_build/dev/native/default/lib/`).
+    // Reserved for a dependency genuinely invisible to this closure (used
+    // only via raw FFI, never named in any staged app's `{applications, …}`)
+    // — a *declared* native/hex dep like `gun` doesn't need this: the
+    // fixed-point loop below finds it on its own.
     for extra in &release_cfg.apps {
-        let ebin = layout.rebar_lib_dir().join(extra).join("ebin");
-        if !ebin.is_dir() {
-            miette::bail!(
-                "[release] apps names '{extra}', but no compiled ebin was found at '{ebin}'.\n\
+        let ebin = native_dep_ebin(layout, extra).ok_or_else(|| {
+            miette::miette!(
+                "[release] apps names '{extra}', but no compiled ebin was found at '{}'.\n\
                  Add it as a [native.dependencies] entry (or a path/git dependency) so \
-                 `beamtalk build` resolves and compiles it first."
-            );
-        }
+                 `beamtalk build` resolves and compiles it first.",
+                layout.rebar_lib_dir().join(extra).join("ebin")
+            )
+        })?;
         staged.push(read_staged_app(extra, &[ebin])?);
     }
 
-    // The project's own app, last: it is the one `.rel` entry whose
-    // dependencies (via `{applications, …}`) include everything above.
+    // The project's own app: the one `.rel` entry whose dependencies (via
+    // `{applications, …}`) include everything above.
     staged.push(read_staged_app(&pkg.name, &[layout.ebin_dir()])?);
 
     let mut host_apps = vec![
@@ -153,27 +162,65 @@ pub fn compute_app_closure(
         host_apps.push("compiler".to_string());
     }
 
-    // A staged app can declare a dependency this closure never stages
-    // itself — e.g. `ranch` (staged) declares `ssl` (host-provided).
-    // `systools:make_script/2` hard-errors on any declared dependency
-    // missing from the `.rel` (`{undefined_applications, …}`), so seed the
-    // host-app set with every such name; `write_rel_and_boot_script`
-    // transitively resolves each seed's *own* deps live (e.g. `ssl` pulls
-    // in `public_key`/`asn1`), so only the first hop needs finding here.
-    let staged_names: std::collections::HashSet<&str> =
-        staged.iter().map(|a| a.name.as_str()).collect();
-    for staged_app in &staged {
-        for dep in &staged_app.declared_deps {
-            if !staged_names.contains(dep.as_str()) && !host_apps.contains(dep) {
-                host_apps.push(dep.clone());
-            }
-        }
-    }
+    resolve_declared_deps(layout, &mut staged, &mut host_apps)?;
 
     Ok(AppClosure {
         host_apps,
         staged_apps: staged,
     })
+}
+
+/// Resolve every declared dependency a `staged` app names but this closure
+/// hasn't accounted for yet, into either a further staged app or a
+/// `host_apps` entry. Two cases:
+///  - `beamtalk build` already resolved it as a rebar3 native/hex dep into
+///    `_build/dev/native/default/lib/` (e.g. `gun`, declared in `http`'s own
+///    generated `.app`) — stage it exactly like a `[release] apps` extra,
+///    rather than assuming every unstaged declared dep is host-provided OTP.
+///    A newly staged dep can itself declare further such deps (e.g. `gun` →
+///    `cowlib`), so this walks `staged` to a fixed point rather than a
+///    single pass.
+///  - Otherwise it's genuinely host-provided OTP — e.g. `ranch` (staged)
+///    declares `ssl`. `systools:make_script/2` hard-errors on any declared
+///    dependency missing from the `.rel` (`{undefined_applications, …}`), so
+///    seed `host_apps` with every such name; `write_rel_and_boot_script`
+///    transitively resolves each seed's *own* deps live (e.g. `ssl` pulls in
+///    `public_key`/`asn1`), so only the first hop needs finding here.
+fn resolve_declared_deps(
+    layout: &BuildLayout,
+    staged: &mut Vec<StagedApp>,
+    host_apps: &mut Vec<String>,
+) -> Result<()> {
+    let mut staged_names: std::collections::HashSet<String> =
+        staged.iter().map(|a| a.name.clone()).collect();
+    let mut i = 0;
+    while i < staged.len() {
+        let declared_deps = staged[i].declared_deps.clone();
+        i += 1;
+        for dep in declared_deps {
+            if staged_names.contains(&dep) || host_apps.contains(&dep) {
+                continue;
+            }
+            match native_dep_ebin(layout, &dep) {
+                Some(ebin) => {
+                    let app = read_staged_app(&dep, &[ebin])?;
+                    staged_names.insert(app.name.clone());
+                    staged.push(app);
+                }
+                None => host_apps.push(dep),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The rebar3-populated native/hex-dep lib dir for `name`
+/// (`_build/dev/native/default/lib/<name>/ebin`), if `beamtalk build` has
+/// already resolved and compiled it there — `None` if `name` isn't a native
+/// dependency at all (most likely a genuine host-provided OTP app).
+fn native_dep_ebin(layout: &BuildLayout, name: &str) -> Option<Utf8PathBuf> {
+    let ebin = layout.rebar_lib_dir().join(name).join("ebin");
+    ebin.is_dir().then_some(ebin)
 }
 
 /// The source ebin director(y/ies) for one [`RUNTIME_APP_NAMES`] entry, from
@@ -690,6 +737,72 @@ mod tests {
         let ebin = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
         let err = read_staged_app("nope", &[ebin]).unwrap_err();
         assert!(err.to_string().contains("Could not find 'nope.app'"));
+    }
+
+    /// The exact bug this fix addresses: `http` declares `gun` in its own
+    /// generated `.app` `{applications, …}` list, `beamtalk build` has
+    /// already compiled `gun` into the rebar3 native lib dir, and no
+    /// `[release] apps` entry names it — `gun` must still end up staged,
+    /// not swept into `host_apps` where a bare `erl` can never find it.
+    #[test]
+    fn resolve_declared_deps_stages_a_declared_native_dep_found_in_the_rebar_lib_dir() {
+        let dir = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        let gun_ebin = layout.rebar_lib_dir().join("gun").join("ebin");
+        fs::create_dir_all(gun_ebin.as_std_path()).unwrap();
+        fs::write(
+            gun_ebin.join("gun.app").as_std_path(),
+            r#"{application, gun, [{vsn, "2.1.0"}, {applications, [kernel, stdlib, ssl]}]}."#,
+        )
+        .unwrap();
+
+        let mut staged = vec![StagedApp {
+            name: "http".to_string(),
+            vsn: "0.1.5".to_string(),
+            source_ebins: vec![],
+            declared_deps: vec!["kernel".to_string(), "gun".to_string()],
+        }];
+        let mut host_apps = vec!["kernel".to_string(), "stdlib".to_string()];
+
+        resolve_declared_deps(&layout, &mut staged, &mut host_apps).unwrap();
+
+        assert!(
+            staged.iter().any(|a| a.name == "gun"),
+            "gun should be staged, not left for host_apps: {staged:?}"
+        );
+        assert!(
+            !host_apps.contains(&"gun".to_string()),
+            "gun must not end up in host_apps: {host_apps:?}"
+        );
+        // gun's own declared `ssl` has no rebar lib dir entry — it's a
+        // genuine host-provided OTP app, so it goes to host_apps.
+        assert!(host_apps.contains(&"ssl".to_string()));
+    }
+
+    #[test]
+    fn resolve_declared_deps_treats_undiscoverable_deps_as_host_apps() {
+        let dir = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        let mut staged = vec![StagedApp {
+            name: "ranch".to_string(),
+            vsn: "1.8.0".to_string(),
+            source_ebins: vec![],
+            declared_deps: vec!["ssl".to_string()],
+        }];
+        let mut host_apps = vec!["kernel".to_string()];
+
+        resolve_declared_deps(&layout, &mut staged, &mut host_apps).unwrap();
+
+        assert_eq!(
+            staged.len(),
+            1,
+            "no rebar lib dir for ssl — nothing to stage"
+        );
+        assert!(host_apps.contains(&"ssl".to_string()));
     }
 
     #[test]
