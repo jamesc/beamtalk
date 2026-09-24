@@ -1185,6 +1185,29 @@ spec_to_otp(BtSpec, Mode) ->
                         SpawnAsArgs2 = lists:nth(3, StartElems),
                         [InitArgsMap, NameAtom] = SpawnAsArgs2,
                         {beamtalk_actor, 'spawnAs', [NameAtom, ChildModule, InitArgsMap]};
+                    'spawnAs:scope:' ->
+                        %% ADR 0126 §4, Phase 5: `SupervisionSpec withName:
+                        %% scope: #global` — same shape as `spawnAs:` above
+                        %% (startArgs carries just the Name, `#(name)` →
+                        %% Erlang `[Name]`), but routes through
+                        %% `beamtalk_actor:'spawnAsGlobal'/2` so the child
+                        %% registers with OTP `global` instead of the local
+                        %% registry. `childSpec` only ever emits this
+                        %% startFn when `scope` is `#global` — `#local`
+                        %% still emits plain `#spawnAs:` above.
+                        SpawnAsGlobalArgs = lists:nth(3, StartElems),
+                        [GlobalName] = SpawnAsGlobalArgs,
+                        {beamtalk_actor, 'spawnAsGlobal', [GlobalName, ChildModule]};
+                    'spawnWith:as:scope:' ->
+                        %% ADR 0126 §4, Phase 5: cluster-global spawn-with-args
+                        %% sibling of `spawnWith:as:` above — same startArgs
+                        %% shape (`#(args, name)` → Erlang `[Args, Name]`),
+                        %% routed through `beamtalk_actor:'spawnAsGlobal'/3`.
+                        SpawnAsGlobalArgs2 = lists:nth(3, StartElems),
+                        [GlobalInitArgsMap, GlobalNameAtom] = SpawnAsGlobalArgs2,
+                        {beamtalk_actor, 'spawnAsGlobal', [
+                            GlobalNameAtom, ChildModule, GlobalInitArgsMap
+                        ]};
                     classMethod ->
                         %% Route through the actor's keyword class method.
                         %% StartArgs is #(selector, argsList) — compiled as an
@@ -1211,7 +1234,8 @@ spec_to_otp(BtSpec, Mode) ->
                                 io_lib:format(
                                     "unsupported child start function: ~p "
                                     "(expected spawn, spawnWith:, spawnAs:, "
-                                    "spawnWith:as:, or classMethod)",
+                                    "spawnWith:as:, spawnAs:scope:, "
+                                    "spawnWith:as:scope:, or classMethod)",
                                     [Other]
                                 )
                             )

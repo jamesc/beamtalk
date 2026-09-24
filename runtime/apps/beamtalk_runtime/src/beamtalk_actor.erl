@@ -101,17 +101,17 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 | REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
 | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
 | self spawn/spawnWith: | safe_spawn/2, unlinked (or linked if inside a `withClassMethod:` supervisor factory) | Class method | Yes |
-| self spawnAs:/spawnWith:as: | safe_spawn_named/3, unlinked after (or stays linked, same exception) | Class method | Yes |
-| withName: supervisor child | safe_spawn_named/3 → gen_server:start_link → init/1 | Supervised | Yes |
+| self spawnAs:/spawnWith:as: | safe_spawn_named/4, unlinked after (or stays linked, same exception) | Class method | Yes |
+| withName: supervisor child | safe_spawn_named/4 → gen_server:start_link → init/1 | Supervised | Yes |
 | Supervisor child (unnamed, plain spawn/spawnWith:) | start_link/1 → gen_server:start_link → init/1 | Supervised | Yes |
-| withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/3, linked | Supervised | Yes |
+| withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/4, linked | Supervised | Yes |
 | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
 
 unnamed `Module:spawn/0,1` (via `beamtalk_actor:safe_spawn/2`)
 spawns unlinked in the common case — the caller (which can be a class
 gen_server for dynamic dispatch, or a class method body for `self spawn`)
 is never linked to the actor it creates, so killing the actor cannot take
-the caller down with it. `safe_spawn_named/3` (`spawnAs:`/`spawnWith:as:`)
+the caller down with it. `safe_spawn_named/4` (`spawnAs:`/`spawnWith:as:`)
 stays linked, because it doubles as the real OTP supervisor child MFA for
 `SupervisionSpec withName:` children (ADR 0079) — that link is the
 restart mechanism, not a bug. Its own `self`-send risk (a class method's
@@ -275,6 +275,20 @@ handle_getValue([], State) ->
     reserved_name/1
 ]).
 
+%% Cluster-unique names (ADR 0126 §4, Phase 5, BT-3603). `'spawnAsGlobal'/2,3`
+%% mirrors `'spawnAs'/2,3` but registers with OTP `global` instead of the
+%% local process registry — see spawn_named_scoped/5's shared implementation.
+%% `resolve_global_conflict/3` is the partition-heal conflict resolver
+%% registered for every Beamtalk `global` name; `started_at_from_dictionary/1`
+%% is exported so it can run on a remote node via `erpc` from
+%% `actor_started_at/1`, the resolver's age comparison.
+-export([
+    'spawnAsGlobal'/2,
+    'spawnAsGlobal'/3,
+    resolve_global_conflict/3,
+    started_at_from_dictionary/1
+]).
+
 %% Beamtalk stdlib FFI shims for actor.bt named registration (ADR 0079)
 %% Selectors are re-derived by beamtalk_erlang_proxy from the first keyword;
 %% these names deliberately differ from the runtime `spawnAs/2,3` entry points
@@ -295,6 +309,15 @@ handle_getValue([], State) ->
     isRegistered/1,
     named/2,
     allRegistered/1
+]).
+
+%% Beamtalk stdlib FFI shims for actor.bt cluster-unique names (ADR 0126 §4,
+%% Phase 5, BT-3603) — mirrors the doSpawnAs/2 etc. shims above, with an
+%% added `scope :: Symbol` argument (`#local` or `#global`).
+-export([
+    doSpawnAsScope/3,
+    doSpawnWithAsScope/4,
+    doNamedScope/3
 ]).
 
 %% Remote spawn and lookup (ADR 0126 §3, Phase 2, BT-3599). `remote_spawn/4`
@@ -483,7 +506,7 @@ the factory; since every hop in between is a plain synchronous call in the
 same process (no `spawn`/`erlang:apply` to a different process, no message
 send-and-receive), the key is still visible here. When it is set, this
 delegates to `safe_spawn_linked/2` instead, staying linked exactly like
-`safe_spawn_named/3` already does for the named-child case.
+`safe_spawn_named/4` already does for the named-child case.
 
 This consolidates the await_initialize logic so generated spawn
 functions stay simple.
@@ -506,28 +529,30 @@ Spawn an actor **linked**, with
 trap_exit + initialize synchronization, for the one `safe_spawn/2` case that
 needs the link — a `withClassMethod:` supervisor child's factory calling
 plain `self spawn`/`self spawnWith:` (see `safe_spawn/2`'s doc). Shares the
-trap_exit dance with `safe_spawn_named/3` via `start_link_and_await/1`.
+trap_exit dance with `safe_spawn_named/4` via `start_link_and_await/1`.
 """.
 -spec safe_spawn_linked(module(), map()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
     start_link_and_await(fun() -> gen_server:start_link(Module, InitArgs, []) end).
 
 -doc """
-Spawn a named actor with trap_exit + initialize synchronization.
+Spawn a named actor with trap_exit + initialize synchronization, per
+`Scope` (`local`/ADR 0079, or `global`/ADR 0126 §4, Phase 5, BT-3603).
 
 Handles the full spawn sequence:
 1. Trap exits so a failed start_link or handle_continue doesn't kill caller
-2. Call gen_server:start_link({local, Name}, ...)
-3. If start_link succeeds, wait for handle_continue (initialize) to complete
+2. Start the actor, registered per `Scope` (see below)
+3. If the start succeeds, wait for handle_continue (initialize) to complete
 4. Restore trap_exit and return {ok, Pid} or {error, Reason}
 
 Unlike `safe_spawn/2` (unnamed) in its common case, this stays
-**linked** (`gen_server:start_link/4`, with the original trap_exit dance) —
-it is the shared implementation behind both `spawnAs:`/`spawnWith:as:` *and*
+**linked** — it is the shared implementation behind both
+`spawnAs:`/`spawnWith:as:`/`spawnAs:scope:`/`spawnWith:as:scope:` *and*
 the real OTP supervisor child MFA that `beamtalk_supervisor:spec_to_otp/1`
-builds for `SupervisionSpec withName:` children (ADR 0079:
-`{beamtalk_actor, spawnAs, [Name, Module]}` / `[Name, Module, InitArgs]`
-literally names this function as the start callback). That link is not a
+builds for `SupervisionSpec withName:`/`withName:scope:` children (ADR
+0079: `{beamtalk_actor, spawnAs, [Name, Module]}` / `[Name, Module,
+InitArgs]`, or, for `global`, `{beamtalk_actor, spawnAsGlobal, ...}` —
+either way this function is the start callback). That link is not a
 bug — it is exactly the OTP contract a real supervisor relies on to
 detect the child's exit and restart it; removing it would silently break
 supervised named-actor restart (see `beamtalk_supervisor_tests:supervisor_restart_re_registers_name_test/0`).
@@ -540,14 +565,45 @@ immediately after a successful spawn *unless* it detects the
 `withClassMethod:`-supervisor context via
 `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`, in which case it stays linked for the
 same reason `safe_spawn_linked/2` above does.
+
+`local` keeps the original `{local, Name}` registration — a single atomic
+`gen_server:start_link({local, Name}, ...)`.
+
+`global` cannot reuse the same atomic form — OTP's `{global, Name}` start
+always binds the *default* resolver (`global:random_exit_name/3`, the
+force-kill behaviour ADR 0126 §4 replaces), and there is no variant that
+takes a custom one. Instead this starts the gen_server **anonymously but
+still linked** (`gen_server:start_link/3` — same link as the `local`
+clause, since this also doubles as a `SupervisionSpec
+withName:scope:#global` child's start MFA, ADR 0126 §4), then explicitly
+`global:register_name/3`s the resulting pid with `resolve_global_conflict/3`
+as the resolver. A losing race (`no` — another process already holds
+`Name`) stops the just-started actor (`terminate/2` runs — this is an
+ordinary, not a conflict, teardown) and reports `{already_started,
+ExistingPid}`, the exact shape `spawn_named_scoped/4` already translates to
+`name_registered` for the `local` path, so no separate error-mapping arm is
+needed for `global`.
 """.
--spec safe_spawn_named(atom(), module(), map()) -> {ok, pid()} | {error, term()}.
-safe_spawn_named(Name, Module, InitArgs) when is_atom(Name) ->
-    start_link_and_await(fun() -> gen_server:start_link({local, Name}, Module, InitArgs, []) end).
+-spec safe_spawn_named(local | global, atom(), module(), map()) -> {ok, pid()} | {error, term()}.
+safe_spawn_named(local, Name, Module, InitArgs) ->
+    start_link_and_await(fun() -> gen_server:start_link({local, Name}, Module, InitArgs, []) end);
+safe_spawn_named(global, Name, Module, InitArgs) ->
+    case start_link_and_await(fun() -> gen_server:start_link(Module, InitArgs, []) end) of
+        {ok, Pid} ->
+            case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
+                yes ->
+                    {ok, Pid};
+                no ->
+                    gen_server:stop(Pid, normal, 5000),
+                    {error, {already_started, global:whereis_name(Name)}}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 -doc """
 Shared linked-start + trap_exit + await_initialize dance for
-`safe_spawn_named/3` and `safe_spawn_linked/2`. `StartFun` performs the
+`safe_spawn_named/4` and `safe_spawn_linked/2`. `StartFun` performs the
 actual `gen_server:start_link/3,4` call (parametrized so the two callers can
 each pass their own registration shape) and is invoked exactly once, with
 `trap_exit` already set, so a crash during `initialize` delivers an `'EXIT'`
@@ -629,7 +685,10 @@ For all other messages, checks if the actor is alive first:
 - If dead, rejects the Future with an `actor_dead` error
 """.
 -spec async_send(
-    pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list(), pid()
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
+    atom(),
+    list(),
+    pid()
 ) ->
     ok.
 %% ADR 0079: name-resolving proxy fan-out. Name-only selectors
@@ -682,6 +741,29 @@ async_send({registered, Name, Node} = Ref, Selector, Args, FuturePid) when
         node_down ->
             beamtalk_future:reject(FuturePid, node_down_error_record(Node, Selector)),
             ok
+    end;
+%% ADR 0126 §4: cluster-unique `scope: #global` proxy fan-out (`named:
+%% scope: #global`) — mirrors the `{registered, Name}` clauses above,
+%% resolving via `global:whereis_name/1` (cluster-wide, no `Node` to target)
+%% instead of a local `whereis/1`.
+async_send({global, Name}, isAlive, [], FuturePid) when is_atom(Name) ->
+    Result = is_pid(global:whereis_name(Name)),
+    beamtalk_future:resolve(FuturePid, Result),
+    ok;
+async_send({global, _Name}, isRegistered, [], FuturePid) ->
+    beamtalk_future:resolve(FuturePid, true),
+    ok;
+async_send({global, Name}, registeredName, [], FuturePid) when is_atom(Name) ->
+    beamtalk_future:resolve(FuturePid, Name),
+    ok;
+async_send({global, Name} = Ref, Selector, Args, FuturePid) when is_atom(Name) ->
+    case global:whereis_name(Name) of
+        undefined ->
+            Error = no_such_process_error(Ref, Selector),
+            beamtalk_future:reject(FuturePid, Error),
+            ok;
+        Pid when is_pid(Pid) ->
+            async_send(Pid, Selector, Args, FuturePid)
     end;
 async_send(ActorPid, isAlive, [], FuturePid) ->
     %% isAlive is handled locally - no message to the actor
@@ -863,7 +945,9 @@ Checks if the actor is alive before sending. If dead, silently returns ok
 WARNING: Race condition! beamtalk_pid:is_alive/1 is a snapshot check.
 The actor could die between the alive check and the gen_server:cast.
 """.
--spec cast_send(pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list()) -> ok.
+-spec cast_send(
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom(), list()
+) -> ok.
 %% ADR 0079: name-resolving proxy fan-out for fire-and-forget
 %% sends. If the name is not currently registered, silently drop the cast
 %% (consistent with cast_send's existing `actor dead -> ok` semantics).
@@ -880,6 +964,14 @@ cast_send({registered, Name, Node}, Selector, Args) when is_atom(Name), is_atom(
         Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args);
         undefined -> ok;
         node_down -> ok
+    end;
+%% ADR 0126 §4: cluster-unique `scope: #global` proxy — see async_send/4's
+%% matching clause. A stale/never-registered name is silently dropped, same
+%% fire-and-forget contract.
+cast_send({global, Name}, Selector, Args) when is_atom(Name) ->
+    case global:whereis_name(Name) of
+        undefined -> ok;
+        Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args)
     end;
 cast_send(ActorPid, Selector, Args) ->
     %% Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
@@ -941,7 +1033,9 @@ For all other messages, checks if the actor is alive first:
 - If dead, raises `#beamtalk_error{kind = actor_dead}`
 - If timeout, raises `#beamtalk_error{kind = timeout}`
 """.
--spec sync_send(pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list()) ->
+-spec sync_send(
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom(), list()
+) ->
     term().
 %% ADR 0079: name-resolving proxy fan-out. Name-only methods
 %% answer from the proxy itself; other methods resolve to the currently-
@@ -976,6 +1070,21 @@ sync_send({registered, Name, Node} = Ref, Selector, Args) when is_atom(Name), is
             raise_no_such_process(Ref, Selector);
         node_down ->
             raise_node_down(Node, Selector);
+        Pid when is_pid(Pid) ->
+            sync_send(Pid, Selector, Args)
+    end;
+%% ADR 0126 §4: cluster-unique `scope: #global` proxy fan-out — mirrors the
+%% `{registered, Name}` clauses above, resolving via `global:whereis_name/1`.
+sync_send({global, Name}, isAlive, []) when is_atom(Name) ->
+    is_pid(global:whereis_name(Name));
+sync_send({global, _Name}, isRegistered, []) ->
+    true;
+sync_send({global, Name}, registeredName, []) when is_atom(Name) ->
+    Name;
+sync_send({global, Name} = Ref, Selector, Args) when is_atom(Name) ->
+    case global:whereis_name(Name) of
+        undefined ->
+            raise_no_such_process(Ref, Selector);
         Pid when is_pid(Pid) ->
             sync_send(Pid, Selector, Args)
     end;
@@ -1247,7 +1356,10 @@ Timeout is a non-negative integer (milliseconds) or the atom `infinity`.
 Used by TimeoutProxy to forward messages with a custom timeout.
 """.
 -spec sync_send(
-    pid() | {registered, atom()} | {registered, atom(), node()}, atom(), list(), timeout()
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
+    atom(),
+    list(),
+    timeout()
 ) ->
     term().
 %% ADR 0079: name-resolving proxy fan-out for the explicit-
@@ -1281,6 +1393,21 @@ sync_send({registered, Name, Node} = Ref, Selector, Args, Timeout) when
             raise_no_such_process(Ref, Selector);
         node_down ->
             raise_node_down(Node, Selector);
+        Pid when is_pid(Pid) ->
+            sync_send(Pid, Selector, Args, Timeout)
+    end;
+%% ADR 0126 §4: cluster-unique `scope: #global` proxy fan-out for the
+%% explicit-timeout path — see sync_send/3's matching clause.
+sync_send({global, Name}, isAlive, [], _Timeout) when is_atom(Name) ->
+    is_pid(global:whereis_name(Name));
+sync_send({global, _Name}, isRegistered, [], _Timeout) ->
+    true;
+sync_send({global, Name}, registeredName, [], _Timeout) when is_atom(Name) ->
+    Name;
+sync_send({global, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) ->
+    case global:whereis_name(Name) of
+        undefined ->
+            raise_no_such_process(Ref, Selector);
         Pid when is_pid(Pid) ->
             sync_send(Pid, Selector, Args, Timeout)
     end;
@@ -1588,19 +1715,25 @@ name-resolving proxy when the registered name no longer points at any
 process. Distinct from `actor_dead`, which fires when a held pid points
 at a dead process — `no_such_process` says the *name* failed to resolve.
 """.
--spec raise_no_such_process({registered, atom()} | {registered, atom(), node()}, atom()) ->
-    no_return().
+-spec raise_no_such_process(
+    {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom()
+) -> no_return().
 raise_no_such_process({registered, Name}, Selector) ->
     beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector));
 raise_no_such_process({registered, Name, _Node}, Selector) ->
+    beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector));
+raise_no_such_process({global, Name}, Selector) ->
     beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector)).
 
 -doc "Construct a structured `no_such_process` error for the given proxy ref.".
--spec no_such_process_error({registered, atom()} | {registered, atom(), node()}, atom()) ->
-    #beamtalk_error{}.
+-spec no_such_process_error(
+    {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom()
+) -> #beamtalk_error{}.
 no_such_process_error({registered, Name}, Selector) ->
     no_such_process_error_record(Name, Selector);
 no_such_process_error({registered, Name, _Node}, Selector) ->
+    no_such_process_error_record(Name, Selector);
+no_such_process_error({global, Name}, Selector) ->
     no_such_process_error_record(Name, Selector).
 
 -spec no_such_process_error_record(atom(), atom()) -> #beamtalk_error{}.
@@ -2044,6 +2177,15 @@ init(State) when is_map(State) ->
                     %% `all_registered/0` can filter them out of the
                     %% flat OTP registry without needing a separate table.
                     erlang:put('$beamtalk_actor', Class),
+                    %% ADR 0126 §4: start-time marker for
+                    %% `resolve_global_conflict/3`'s "keep the older
+                    %% registrant" tie-break — read back (possibly from
+                    %% another node) via `actor_started_at/1`. Every actor
+                    %% carries this, not just `global`-scoped ones: it's
+                    %% cheap, and scope is a spawn-time choice this
+                    %% process-dictionary write happens before either path
+                    %% diverges.
+                    erlang:put('$beamtalk_actor_started_at', erlang:system_time(microsecond)),
                     StateKeys = [
                         K
                      || K <- maps:keys(State),
@@ -2446,10 +2588,18 @@ Normalise an OTP terminate reason to a stable Symbol for the `ActorStopped`
 event payload: `normal`/`shutdown` are clean stops, anything else is a
 `crashed`. Keeps the typed `reason :: Symbol` field flat (the raw reason term is
 still available in the telemetry stop event for diagnostics).
+
+`{shutdown, global_name_conflict}` is its own Symbol (ADR 0126 §4,
+Phase 5, BT-3603): `resolve_global_conflict/3` stops the losing side of a
+`global` name conflict with exactly this reason (never `exit(Pid, kill)`,
+which would skip `terminate/2` entirely and report `killed` — OTP's own
+default resolver's behaviour, which this replaces), specifically so it
+reads distinctly from an ordinary supervisor-initiated `shutdown`.
 """.
--spec normalize_stop_reason(term()) -> normal | shutdown | crashed.
+-spec normalize_stop_reason(term()) -> normal | shutdown | crashed | 'globalNameConflict'.
 normalize_stop_reason(normal) -> normal;
 normalize_stop_reason(shutdown) -> shutdown;
+normalize_stop_reason({shutdown, global_name_conflict}) -> 'globalNameConflict';
 normalize_stop_reason({shutdown, _}) -> shutdown;
 normalize_stop_reason(_Other) -> crashed.
 
@@ -3323,16 +3473,74 @@ through from `gen_server:start_link/4` as `{error, Reason}`.
 -doc """
 Spawn an actor under a registered name (arity 3).
 
-Delegates to `safe_spawn_named/3` (which wraps
-`gen_server:start_link({local, Name}, ...)` with trap_exit and
-`initialize` synchronization) after enforcing the reserved-name
-blocklist and the atom type-check. On `{already_started, _}` or
-`badarg` from the registry, returns a structured `#beamtalk_error{}`
-with kind `name_registered` so the stdlib boundary can translate
-to `Result error: ...`.
+Delegates to `spawn_named_scoped/4` with `local` scope — see that
+function's doc for the shared reserved-name/badarg handling. On
+`{already_started, _}` or `badarg` from the registry, returns a
+structured `#beamtalk_error{}` with kind `name_registered` so the stdlib
+boundary can translate to `Result error: ...`.
 """.
 -spec 'spawnAs'(term(), term(), term()) -> {ok, pid()} | {error, term()}.
 'spawnAs'(Name, Module, Args) when is_atom(Name), is_atom(Module) ->
+    spawn_named_scoped(local, Name, Module, Args);
+'spawnAs'(Name, Module, Args) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', spawnAs),
+            iolist_to_binary(
+                io_lib:format(
+                    "spawnAs/3 expects (atom, module, term), got (~tp, ~tp, ~tp)",
+                    [Name, Module, Args]
+                )
+            )
+        )}.
+
+-doc """
+Spawn an actor cluster-globally registered under a name (arity 2, ADR 0126
+§4, Phase 5, BT-3603). `'spawnAsGlobal'/3`'s default-args sibling — see
+that function's doc.
+""".
+-spec 'spawnAsGlobal'(term(), term()) -> {ok, pid()} | {error, term()}.
+'spawnAsGlobal'(Name, Module) ->
+    'spawnAsGlobal'(Name, Module, #{}).
+
+-doc """
+Spawn an actor under a cluster-globally registered name (arity 3, ADR 0126
+§4, Phase 5, BT-3603) — `'spawnAs'/3`'s `scope: #global` sibling, backed by
+OTP `global` (`safe_spawn_named(global, ...)`) instead of the local process
+registry. Same reserved-name blocklist, same `#beamtalk_error{}` shapes —
+`spawn_named_scoped/4` is the single shared implementation behind both this
+and `'spawnAs'/3` (CLAUDE.md "No duplicate implementations").
+""".
+-spec 'spawnAsGlobal'(term(), term(), term()) -> {ok, pid()} | {error, term()}.
+'spawnAsGlobal'(Name, Module, Args) when is_atom(Name), is_atom(Module) ->
+    spawn_named_scoped(global, Name, Module, Args);
+'spawnAsGlobal'(Name, Module, Args) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', 'spawnAs:scope:'),
+            iolist_to_binary(
+                io_lib:format(
+                    "spawnAsGlobal/3 expects (atom, module, term), got (~tp, ~tp, ~tp)",
+                    [Name, Module, Args]
+                )
+            )
+        )}.
+
+-doc """
+Shared reserved-name check + `safe_spawn_named/4` dispatch behind
+`'spawnAs'/3` (`Scope = local`) and `'spawnAsGlobal'/3` (`Scope = global`) —
+the two differ only in which registry they land in (ADR 0126 §4: "`global`
+names go through the SAME `reserved_name/1` check as local names"). On
+`{already_started, _}` (both scopes — `global`'s own `safe_spawn_named/4`
+clause translates a lost `global:register_name/3` race to this exact shape,
+see its doc) or `badarg` (the `local` scope's own
+`gen_server:start_link({local, Name}, ...)` failure mode) this returns the
+structured `name_registered` error so the stdlib boundary can translate to
+`Result error: ...`.
+""".
+-spec spawn_named_scoped(local | global, atom(), module(), term()) ->
+    {ok, pid()} | {error, term()}.
+spawn_named_scoped(Scope, Name, Module, Args) ->
     case reserved_name(Name) of
         true ->
             {error,
@@ -3345,7 +3553,7 @@ to `Result error: ...`.
                     )
                 )};
         false ->
-            try safe_spawn_named(Name, Module, Args) of
+            try safe_spawn_named(Scope, Name, Module, Args) of
                 {ok, Pid} ->
                     {ok, Pid};
                 {error, {already_started, _Other}} ->
@@ -3359,18 +3567,7 @@ to `Result error: ...`.
                 error:badarg ->
                     name_registered_error(Name)
             end
-    end;
-'spawnAs'(Name, Module, Args) ->
-    {error,
-        beamtalk_error:with_hint(
-            beamtalk_error:new(type_error, 'Actor', spawnAs),
-            iolist_to_binary(
-                io_lib:format(
-                    "spawnAs/3 expects (atom, module, term), got (~tp, ~tp, ~tp)",
-                    [Name, Module, Args]
-                )
-            )
-        )}.
+    end.
 
 %%% ============================================================================
 %%% Beamtalk stdlib FFI shims (ADR 0079)
@@ -3441,7 +3638,7 @@ into a `#beamtalk_object{}` carrying the receiver class.
 -spec doSpawnAs(#beamtalk_object{}, term()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 doSpawnAs(Self, Name) ->
-    do_spawn_with_selector(Self, #{}, Name, 'spawnAs:').
+    do_spawn_with_selector(local, Self, #{}, Name, 'spawnAs:').
 
 -doc """
 FFI shim for `class spawnWith: initArgs as: name :: Symbol -> Result(Self, Error)`.
@@ -3452,12 +3649,91 @@ Atomically spawns an actor registered under `Name`. Returns a tagged
 -spec doSpawnWith(#beamtalk_object{}, term(), term()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 doSpawnWith(Self, InitArgs, Name) ->
-    do_spawn_with_selector(Self, InitArgs, Name, 'spawnWith:as:').
+    do_spawn_with_selector(local, Self, InitArgs, Name, 'spawnWith:as:').
 
-%% Shared implementation for doSpawnAs/2 and doSpawnWith/3. The `Selector`
-%% parameter controls which public-facing Beamtalk selector is threaded into
-%% returned structured errors so error messages match the method the user
-%% called.
+-doc """
+FFI shim for `class spawnAs: name :: Symbol scope: scope :: Symbol ->
+Result(Self, Error)` (ADR 0126 §4, Phase 5, BT-3603).
+
+`scope: #local` behaves identically to `doSpawnAs/2`; `scope: #global`
+registers with OTP `global` instead (`'spawnAsGlobal'/3`, via
+`do_spawn_with_selector/5`). Any other scope Symbol is a structured
+`type_error` (ADR 0126 §4: "Any other scope symbol →
+`#beamtalk_error{kind = type_error}`").
+""".
+-spec doSpawnAsScope(#beamtalk_object{}, term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnAsScope(Self, Name, ScopeSym) ->
+    case resolve_scope(ScopeSym, 'spawnAs:scope:') of
+        {ok, Scope} ->
+            do_spawn_with_selector(Scope, Self, #{}, Name, 'spawnAs:scope:');
+        {error, #beamtalk_error{} = Err} ->
+            {error, attach_class_if_known(Self, Err, 'spawnAs:scope:')}
+    end.
+
+-doc """
+FFI shim for `class spawnWith: initArgs :: Object as: name :: Symbol scope:
+scope :: Symbol -> Result(Self, Error)` (ADR 0126 §4, Phase 5, BT-3603).
+
+Same contract as `doSpawnAsScope/3` plus the initialisation arguments — see
+that function's doc for the scope validation.
+""".
+-spec doSpawnWithAsScope(#beamtalk_object{}, term(), term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doSpawnWithAsScope(Self, InitArgs, Name, ScopeSym) ->
+    case resolve_scope(ScopeSym, 'spawnWith:as:scope:') of
+        {ok, Scope} ->
+            do_spawn_with_selector(Scope, Self, InitArgs, Name, 'spawnWith:as:scope:');
+        {error, #beamtalk_error{} = Err} ->
+            {error, attach_class_if_known(Self, Err, 'spawnWith:as:scope:')}
+    end.
+
+-doc """
+Resolve a `scope :: Symbol` FFI argument to `local` or `global` (ADR 0126
+§4). `#local` is the explicit no-op alias for the unscoped selectors;
+`#global` backs the name with OTP `global`. Any other Symbol (or non-Symbol)
+is a structured `type_error` — the shared validation behind every
+`...scope:` FFI shim (`doSpawnAsScope/3`, `doSpawnWithAsScope/4`,
+`doNamedScope/3`), so the accepted vocabulary and its error shape can only
+drift in one place.
+""".
+-spec resolve_scope(term(), atom()) -> {ok, local | global} | {error, #beamtalk_error{}}.
+resolve_scope(local, _Selector) ->
+    {ok, local};
+resolve_scope(global, _Selector) ->
+    {ok, global};
+resolve_scope(Other, Selector) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', Selector),
+            iolist_to_binary(
+                io_lib:format(
+                    "scope must be #local or #global, got ~tp", [Other]
+                )
+            )
+        )}.
+
+-doc """
+Attach the receiver's class name (when resolvable) to a `#beamtalk_error{}`
+raised before `class_self_to_name_and_module/1` would otherwise have done
+so — `resolve_scope/2`'s type_error fires before that lookup runs, but the
+error should still read as `Counter spawnAs:scope:`, not the generic
+`'Actor'` placeholder, when the class is available. Falls back to leaving
+the error's `'Actor'` class untouched when `Self` is not a resolvable class
+receiver — this is a best-effort attribution, not itself the type check.
+""".
+-spec attach_class_if_known(term(), #beamtalk_error{}, atom()) -> #beamtalk_error{}.
+attach_class_if_known(Self, Err, Selector) ->
+    case class_self_to_name_and_module(Self) of
+        {ok, ClassName, _Module} -> Err#beamtalk_error{class = ClassName, selector = Selector};
+        {error, _} -> Err
+    end.
+
+%% Shared implementation for doSpawnAs/2, doSpawnWith/3, doSpawnAsScope/3,
+%% and doSpawnWithAsScope/4. `Scope` selects `'spawnAs'/3` (local) or
+%% `'spawnAsGlobal'/3` (global, ADR 0126 §4). The `Selector` parameter
+%% controls which public-facing Beamtalk selector is threaded into returned
+%% structured errors so error messages match the method the user called.
 %%
 %% `spawnAs:`/`spawnWith:as:` are `class` methods (ADR 0079 atomic naming),
 %% so an EXTERNAL send (`Logger spawnAs: #foo`) reaches this function via the
@@ -3490,21 +3766,42 @@ doSpawnWith(Self, InitArgs, Name) ->
 %% through `class_send`'s `gen_server:call`, which is the only way this
 %% function is ever reached. A future caller that did reach here from a
 %% context where the key is visible would still get the correct behavior.
--spec do_spawn_with_selector(#beamtalk_object{}, term(), term(), atom()) ->
+-spec do_spawn_with_selector(local | global, #beamtalk_object{}, term(), term(), atom()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
-do_spawn_with_selector(Self, InitArgs, Name, Selector) ->
+do_spawn_with_selector(Scope, Self, InitArgs, Name, Selector) ->
     case class_self_to_name_and_module(Self) of
         {ok, ClassName, Module} ->
-            case 'spawnAs'(Name, Module, InitArgs) of
+            SpawnResult =
+                case Scope of
+                    local -> 'spawnAs'(Name, Module, InitArgs);
+                    global -> 'spawnAsGlobal'(Name, Module, InitArgs)
+                end,
+            case SpawnResult of
                 {ok, Pid} ->
                     case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
                         true -> ok;
                         _ -> unlink(Pid)
                     end,
+                    %% ADR 0126 §4: the `local` scope returns the raw pid
+                    %% (unchanged, `doSpawnAs/2`'s existing contract) — a
+                    %% local `{local, Name}` registration is bidirectional
+                    %% (`erlang:process_info(Pid, registered_name)` already
+                    %% resolves it back), so a raw pid loses nothing.
+                    %% `global` has no such reverse pid->name lookup, so the
+                    %% raw pid alone would make `registeredName`/
+                    %% `isRegistered` (and restart survival) silently stop
+                    %% working — return the name-resolving `{global, Name}`
+                    %% proxy instead, exactly what `named:scope:#global`
+                    %% would hand back for this same actor a moment later.
+                    IdentitySlot =
+                        case Scope of
+                            local -> Pid;
+                            global -> proxy_ref_for_scope(global, Name)
+                        end,
                     {ok, #beamtalk_object{
                         class = ClassName,
                         class_mod = Module,
-                        pid = Pid
+                        pid = IdentitySlot
                     }};
                 {error, #beamtalk_error{} = Err} ->
                     {error, Err#beamtalk_error{
@@ -3612,6 +3909,24 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
         exit:{exception, Reason} ->
             beamtalk_error:raise(remote_unregister_error(Self#beamtalk_object.class, Reason))
     end;
+unregister(#beamtalk_object{pid = {global, Name0}}) when is_atom(Name0) ->
+    %% ADR 0126 §4: `unregister` is the ADR 0079 *local* per-instance
+    %% unregistration primitive (`registerAs:`'s counterpart) — it has no
+    %% meaning for a cluster-unique `global` name, which is never touched by
+    %% `registerAs:`/`unregister` in the first place (only `spawnAs:scope:`/
+    %% `named:scope:` ever produce a `{global, Name}` identity slot). Raise a
+    %% clean `type_error` rather than falling through to a `case_clause`
+    %% crash in the local-scope clause below.
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', unregister),
+            <<
+                "unregister only applies to local (ADR 0079) registrations; "
+                "a cluster-global (scope: #global) actor cannot be "
+                "unregistered this way"
+            >>
+        )
+    );
 unregister(Self) when is_record(Self, beamtalk_object) ->
     %% ADR 0079: name-resolving proxies (`pid = {registered, N}`, including
     %% a node-qualified ref whose Node is *this* node) derive the pid via
@@ -3699,6 +4014,9 @@ registeredName(Self) when is_record(Self, beamtalk_object) ->
             %% ADR 0126 §3: node-qualified proxy — same, answers from the
             %% identity slot (the Symbol is node-independent).
             Name;
+        {global, Name} when is_atom(Name) ->
+            %% ADR 0126 §4: cluster-unique `scope: #global` proxy — same.
+            Name;
         Pid when is_pid(Pid) ->
             registered_name_for_pid(Pid)
     end;
@@ -3719,6 +4037,9 @@ isRegistered(Self) when is_record(Self, beamtalk_object) ->
             true;
         {registered, _Name, _Node} ->
             %% ADR 0126 §3: node-qualified proxy — same reasoning.
+            true;
+        {global, _Name} ->
+            %% ADR 0126 §4: cluster-unique `scope: #global` proxy — same.
             true;
         Pid when is_pid(Pid) ->
             registered_name_for_pid(Pid) =/= nil
@@ -3756,17 +4077,77 @@ named(_Self, Name) ->
         )}.
 
 -doc """
+FFI shim for `class named: name :: Symbol scope: scope :: Symbol ->
+Result(Self, Error)` (ADR 0126 §4, Phase 5, BT-3603).
+
+`scope: #local` behaves identically to `named/2`; `scope: #global` looks
+`Name` up via OTP `global` instead — the returned proxy's identity slot is
+`{global, Name}` (cluster-wide, resolved via `global:whereis_name/1` on
+every subsequent send — see `named_lookup/4`'s doc). Any other scope Symbol
+is a structured `type_error`, matching `doSpawnAsScope/3`'s validation
+(`resolve_scope/2`).
+""".
+-spec doNamedScope(#beamtalk_object{}, term(), term()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+doNamedScope(Self, Name, ScopeSym) when is_atom(Name) ->
+    case resolve_scope(ScopeSym, 'named:scope:') of
+        {ok, Scope} ->
+            case class_self_to_name_and_module(Self) of
+                {ok, ReceiverClass, _ReceiverModule} ->
+                    named_lookup(Scope, ReceiverClass, Name, 'named:scope:');
+                {error, #beamtalk_error{} = Err} ->
+                    {error, beamtalk_error:with_selector(Err, 'named:scope:')}
+            end;
+        {error, #beamtalk_error{} = Err} ->
+            {error, attach_class_if_known(Self, Err, 'named:scope:')}
+    end;
+doNamedScope(_Self, Name, _ScopeSym) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', 'named:scope:'),
+            iolist_to_binary(
+                io_lib:format(
+                    "named:scope: expects a Symbol name, got ~tp", [Name]
+                )
+            )
+        )}.
+
+-doc """
 Shared implementation behind `named/2` (local `named:`) and
 `remote_named_target/2` (`named:on:`, ADR 0126 §3, BT-3599) — the actual
 by-name lookup + class check, parameterised on `ReceiverClass` (rather than
 a `#beamtalk_object{}` self to resolve it from) so the remote path can pass
 the class name shipped over `erpc` directly, and on `Selector` so error
-records name whichever public selector the caller actually used.
+records name whichever public selector the caller actually used. Thin
+`local`-scope wrapper over `named_lookup/4` — kept as its own arity since
+`remote_named_target/2` (an `erpc` target, arity matters) and existing call
+sites already spell it this way.
 """.
 -spec named_lookup(atom(), atom(), atom()) ->
     {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
 named_lookup(ReceiverClass, Name, Selector) ->
-    case erlang:whereis(Name) of
+    named_lookup(local, ReceiverClass, Name, Selector).
+
+-doc """
+Scope-parametrised sibling of `named_lookup/3` (ADR 0126 §4, Phase 5,
+BT-3603): `local` resolves `Name` via `erlang:whereis/1` and returns a
+`{registered, Name}` proxy exactly as before; `global` resolves it via
+`global:whereis_name/1` (cluster-wide, no node targeting needed — the name
+means the same actor from every connected node) and returns a `{global,
+Name}` proxy instead. Both scopes share the same class-check logic
+(`pid_class_name/1` + `class_matches/2`) once a candidate pid is found —
+only how the name resolves to a pid, and how the returned proxy re-resolves
+it on every later send, differ.
+""".
+-spec named_lookup(local | global, atom(), atom(), atom()) ->
+    {ok, #beamtalk_object{}} | {error, #beamtalk_error{}}.
+named_lookup(Scope, ReceiverClass, Name, Selector) ->
+    ResolvedPid =
+        case Scope of
+            local -> erlang:whereis(Name);
+            global -> global:whereis_name(Name)
+        end,
+    case ResolvedPid of
         undefined ->
             {error,
                 beamtalk_error:with_hint(
@@ -3797,21 +4178,26 @@ named_lookup(ReceiverClass, Name, Selector) ->
                         true ->
                             case class_mod_for(ActualClass) of
                                 {ok, ActualModule} ->
-                                    %% ADR 0079: return a
+                                    %% ADR 0079/§4: return a
                                     %% name-resolving proxy whose
                                     %% identity slot is `{registered,
-                                    %% Name}`. The send-site re-
+                                    %% Name}` (local) or `{global, Name}`
+                                    %% (global). The send-site re-
                                     %% resolves the name on every
                                     %% message, so the reference
                                     %% survives restarts. `remote_named/3`
-                                    %% (ADR 0126 §3) node-qualifies this
-                                    %% to `{registered, Name, Node}` for the
-                                    %% `named:on:` caller.
+                                    %% (ADR 0126 §3) node-qualifies the
+                                    %% `local`-scope shape to `{registered,
+                                    %% Name, Node}` for the `named:on:`
+                                    %% caller; the `global`-scope shape is
+                                    %% already node-independent and is
+                                    %% never qualified (`beamtalk_pid:
+                                    %% qualify_registered_ref/1`).
                                     _ = Pid,
                                     {ok, #beamtalk_object{
                                         class = ActualClass,
                                         class_mod = ActualModule,
-                                        pid = {registered, Name}
+                                        pid = proxy_ref_for_scope(Scope, Name)
                                     }};
                                 not_found ->
                                     {error,
@@ -3971,8 +4357,8 @@ An anonymous spawn (`NameOrUndefined =:= undefined`) delegates to
 `safe_spawn/2`, which (outside a supervisor context, never the case for an
 `erpc` worker) uses `gen_server:start/3` — already unlinked, so no
 unlink-after-start dance is needed there. A named spawn delegates to the
-public `'spawnAs'/3` wrapper (reserved-name check + `safe_spawn_named/3`,
-BT-3579's Phase 0.5 correction to this ADR — `safe_spawn_named/3` itself is
+public `'spawnAs'/3` wrapper (reserved-name check + `safe_spawn_named/4`,
+BT-3579's Phase 0.5 correction to this ADR — `safe_spawn_named/4` itself is
 not `-export`ed) and **unlinks immediately** after a successful start: the
 calling `erpc` worker process exits with a non-`normal` reason once this
 function returns, and a still-linked actor would die right along with it
@@ -4519,14 +4905,22 @@ proxy_pid(#beamtalk_object{pid = {registered, Name, Node}}, Selector) when
         node_down ->
             {error, node_down_error_record(Node, Selector)}
     end;
+proxy_pid(#beamtalk_object{pid = {global, Name}}, Selector) when is_atom(Name) ->
+    %% ADR 0126 §4: cluster-unique `scope: #global` proxy.
+    case global:whereis_name(Name) of
+        undefined ->
+            {error, no_such_process_error_record(Name, Selector)};
+        Pid when is_pid(Pid) ->
+            {ok, Pid}
+    end;
 proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, ClassName, Selector),
             iolist_to_binary(
                 io_lib:format(
-                    "proxy_pid/2 expects pid() or {registered, atom()} in "
-                    "#beamtalk_object.pid, got ~tp",
+                    "proxy_pid/2 expects pid(), {registered, atom()}, or "
+                    "{global, atom()} in #beamtalk_object.pid, got ~tp",
                     [Other]
                 )
             )
@@ -4586,6 +4980,11 @@ class_mod_for(ClassName) ->
         {ok, Module} -> {ok, Module};
         not_found -> not_found
     end.
+
+-doc "The `#beamtalk_object.pid` identity-slot shape a name-resolving lookup returns for `Scope` (ADR 0126 §4).".
+-spec proxy_ref_for_scope(local | global, atom()) -> {registered, atom()} | {global, atom()}.
+proxy_ref_for_scope(local, Name) -> {registered, Name};
+proxy_ref_for_scope(global, Name) -> {global, Name}.
 
 -spec generic_spawn_error(atom(), atom(), term()) -> #beamtalk_error{}.
 generic_spawn_error(ClassName, Selector, Reason) ->
@@ -4710,3 +5109,129 @@ is_kernel_reserved(user_drv) -> true;
 is_kernel_reserved(user_drv_reader) -> true;
 is_kernel_reserved(user_drv_writer) -> true;
 is_kernel_reserved(_) -> false.
+
+%%% ============================================================================
+%%% Cluster-unique names: partition heal / conflict resolver (ADR 0126 §4,
+%%% Phase 5, BT-3603)
+%%%
+%%% `safe_spawn_named(global, ...)` registers every Beamtalk `global` name
+%%% with `resolve_global_conflict/3` as its resolve function. `global`
+%%% invokes this once per conflicting name when a netsplit heals and finds
+%%% the same name registered on both sides — OTP's own default
+%%% (`global:random_exit_name/3`) force-kills the loser (`exit(Pid, kill)`:
+%%% `terminate/2` never runs, the only observable reason is `killed`); this
+%%% instead keeps the OLDER registrant (by start time) and gracefully
+%%% *stops* the other, so its `terminate/2` runs and its `ActorStopped`
+%%% announcement carries `reason: #globalNameConflict`
+%%% (`normalize_stop_reason/1`).
+%%% ============================================================================
+
+-doc """
+`global`'s resolve function for every Beamtalk `scope: #global` name (ADR
+0126 §4). Compares each candidate's start time (`actor_started_at/1`,
+reading the `'$beamtalk_actor_started_at'` process-dictionary marker
+`init/1` sets — possibly on the *other* node, via `erpc`) and keeps the
+older one, stopping the younger with `stop_global_conflict_loser/1`.
+
+Falls back to OTP's own `global:random_exit_name/3` tie-break when a start
+time cannot be read for either side (e.g. a raw, non-Beamtalk process
+happens to hold the conflicting registration, or the actor terminated in
+the narrow window between the conflict being detected and this function
+running) — `global_name_server` calls this synchronously and expects a
+decision back, never an exception, so this must always return one. Note
+this fallback (only reachable when ages genuinely cannot be compared, per
+ADR 0126 §4 "falling back to random_exit_name's choice") inherits
+`random_exit_name/3`'s own force-kill of the pid it does not return — the
+`stop_global_conflict_loser/1` call after it is then a harmless no-op on an
+already-dead pid. The comparable-ages path above never does this: it always
+resolves via a graceful stop, never a kill.
+""".
+-spec resolve_global_conflict(term(), pid(), pid()) -> pid().
+resolve_global_conflict(Name, Pid1, Pid2) ->
+    case {actor_started_at(Pid1), actor_started_at(Pid2)} of
+        {T1, T2} when is_integer(T1), is_integer(T2) ->
+            {Winner, Loser} =
+                case T1 =< T2 of
+                    true -> {Pid1, Pid2};
+                    false -> {Pid2, Pid1}
+                end,
+            stop_global_conflict_loser(Loser),
+            Winner;
+        _ ->
+            %% `global:random_exit_name/3` always returns one of its two
+            %% candidate pids (never `none`) per its own typespec.
+            case global:random_exit_name(Name, Pid1, Pid2) of
+                Pid1 ->
+                    stop_global_conflict_loser(Pid2),
+                    Pid1;
+                Pid2 ->
+                    stop_global_conflict_loser(Pid1),
+                    Pid2
+            end
+    end.
+
+-doc """
+Stop the losing side of a resolved `global` name conflict with
+`{shutdown, global_name_conflict}` (ADR 0126 §4) — never `exit(Pid, kill)`,
+which OTP's own default resolver uses and which skips `terminate/2`
+entirely. Runs the (synchronous, blocking) `gen_server:stop/3` in a
+throwaway process rather than inline: `resolve_global_conflict/3` executes
+inside `global_name_server`'s own call, and blocking that process for the
+loser's full `terminate/2` would stall every other name operation
+cluster-wide until it returns. Best-effort: a `Loser` that is not a
+`gen_server` (or has already died) falls back to a plain `exit(Pid, kill)`,
+and any other failure is swallowed — the resolver's decision (which pid
+wins the name) is already final by the time this runs; a failure to tidily
+stop the loser must never surface back into `global`.
+""".
+-spec stop_global_conflict_loser(pid()) -> ok.
+stop_global_conflict_loser(Loser) ->
+    spawn(fun() ->
+        try
+            gen_server:stop(Loser, {shutdown, global_name_conflict}, ?BT_REMOTE_CALL_TIMEOUT)
+        catch
+            _:_ ->
+                catch exit(Loser, kill)
+        end
+    end),
+    ok.
+
+-doc """
+Read `Pid`'s `'$beamtalk_actor_started_at'` process-dictionary marker
+(`init/1`), the age `resolve_global_conflict/3` compares. `Pid` may be on
+another node — a netsplit-heal conflict is exactly the case where the two
+candidates most likely live on different (just-reconnected) nodes — so a
+remote `Pid` reads it via `erpc:call/5` to `started_at_from_dictionary/1`
+on `node(Pid)` rather than the local-only `erlang:process_info/2`. Returns
+`undefined` for a dead process, a non-Beamtalk process (no marker), or an
+unreachable node — `resolve_global_conflict/3` treats that as
+"can't compare" and falls back to OTP's own tie-break.
+""".
+-spec actor_started_at(pid()) -> integer() | undefined.
+actor_started_at(Pid) when node(Pid) =:= node() ->
+    started_at_from_dictionary(Pid);
+actor_started_at(Pid) ->
+    try erpc:call(node(Pid), ?MODULE, started_at_from_dictionary, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
+        Result -> Result
+    catch
+        error:{erpc, _ErpcReason} -> undefined;
+        error:{exception, _Reason, _Stack} -> undefined;
+        exit:{exception, _Reason} -> undefined
+    end.
+
+-doc """
+Local-only read of `Pid`'s start-time marker — the `erpc` target
+`actor_started_at/1` calls for a `Pid` on another node, and (for a local
+`Pid`) what it delegates to directly. Exported for `erpc:call/5`.
+""".
+-spec started_at_from_dictionary(pid()) -> integer() | undefined.
+started_at_from_dictionary(Pid) ->
+    case erlang:process_info(Pid, dictionary) of
+        {dictionary, Dict} when is_list(Dict) ->
+            case lists:keyfind('$beamtalk_actor_started_at', 1, Dict) of
+                {'$beamtalk_actor_started_at', T} when is_integer(T) -> T;
+                _ -> undefined
+            end;
+        _ ->
+            undefined
+    end.

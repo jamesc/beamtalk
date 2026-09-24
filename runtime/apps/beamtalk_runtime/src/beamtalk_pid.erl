@@ -49,9 +49,11 @@ A local `{registered, Name}` ref (ADR 0079) resolves via `whereis/1` on
 every send, so shipping it unqualified to another node would silently
 re-resolve it against *that* node's registry instead of the sender's. This
 stamps it with the sender's own node so it keeps resolving against its
-origin. A ref already node-qualified (relayed from elsewhere) and an
-ordinary pid (already node-qualified natively by BEAM) pass through
-unchanged.
+origin. A ref already node-qualified (relayed from elsewhere), a
+cluster-unique `{global, Name}` ref (ADR 0126 §4 — already node-independent
+by construction, `global:whereis_name/1` resolves it the same way from
+every connected node, so there is no "origin" to stamp), and an ordinary
+pid (already node-qualified natively by BEAM) all pass through unchanged.
 
 The single leaf both cross-node actor-ref paths route through (CLAUDE.md
 "No duplicate implementations"): `beamtalk_wire`'s generic term walk
@@ -60,8 +62,10 @@ The single leaf both cross-node actor-ref paths route through (CLAUDE.md
 Actor-typed field inside a `Value` instance) both call this instead of
 each carrying their own copy of the rewrite.
 """.
--spec qualify_registered_ref(pid() | {registered, atom()} | {registered, atom(), node()}) ->
-    pid() | {registered, atom(), node()}.
+-spec qualify_registered_ref(
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}
+) ->
+    pid() | {registered, atom(), node()} | {global, atom()}.
 qualify_registered_ref({registered, Name}) when is_atom(Name) ->
     {registered, Name, node()};
 qualify_registered_ref(Pid) ->

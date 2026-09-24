@@ -281,8 +281,10 @@ encode_beamtalk_object(#beamtalk_object{pid = Pid} = Obj, _Path) ->
             {ok, Obj#beamtalk_object{pid = encode_actor_pid(Pid)}}
     end.
 
--spec encode_actor_pid(pid() | {registered, atom()} | {registered, atom(), node()}) ->
-    pid() | {registered, atom(), node()}.
+-spec encode_actor_pid(
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}
+) ->
+    pid() | {registered, atom(), node()} | {global, atom()}.
 encode_actor_pid(Pid) ->
     beamtalk_pid:qualify_registered_ref(Pid).
 

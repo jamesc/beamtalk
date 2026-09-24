@@ -35,12 +35,19 @@
 %%     (ADR 0126 §3) and by rewriting a `{registered, Name}` ref that
 %%     crosses a node boundary, so it keeps resolving against its *origin*
 %%     node rather than silently re-resolving against whichever node reads
-%%     it. `{global, Name :: atom()}` is reserved for the opt-in
-%%     cluster-unique `scope: #global` names (ADR 0126 §4) — no code
-%%     constructs or matches it yet.
+%%     it, or
+%%   - a `{global, Name :: atom()}` tuple for the opt-in cluster-unique
+%%     `scope: #global` names (ADR 0126 §4) — returned by
+%%     `named:scope:#global`, backed directly by OTP `global` instead of
+%%     the local process registry. Already node-independent (`global`
+%%     names resolve the same way from every connected node), so unlike
+%%     `{registered, Name}` it is never node-qualified when it crosses a
+%%     node boundary — `beamtalk_pid:qualify_registered_ref/1` passes it
+%%     through unchanged.
 %% The send-site dispatch in `beamtalk_actor` recognises all shapes; a
-%% `registered` tuple re-resolves the name to a pid on every send (via
-%% `whereis/1`, or an `erpc` `whereis/1` on `Node` for the qualified shape)
+%% `registered`/`global` tuple re-resolves the name to a pid on every send
+%% (via `whereis/1`, an `erpc` `whereis/1` on `Node` for the qualified
+%% shape, or `global:whereis_name/1` for the `global` shape)
 %% + `gen_server:call(Pid, ...)`, so the held reference survives the actor
 %% being restarted under its registered name.
 -record(beamtalk_object, {
