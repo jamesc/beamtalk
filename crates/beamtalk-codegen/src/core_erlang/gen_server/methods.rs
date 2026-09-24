@@ -3651,6 +3651,23 @@ impl CoreErlangGenerator {
             return false;
         }
 
+        // ADR 0128 / BT-3583: `do:`/`collect:`/`select:` forwarding a
+        // non-literal (opaque) callable — its tier is unknown until
+        // runtime, so conservatively require StateAcc threading;
+        // `generate_simple_list_op`'s non-literal branch now always folds
+        // with a runtime-discriminated accumulator. Scoped to exactly the
+        // three selectors `generate_simple_list_op` covers — not widened to
+        // other ControlFlow selectors (`ifTrue:`/`whileTrue:`/`on:do:`/…),
+        // which have their own literal-block-only analysis above and are
+        // out of this ADR's scope.
+        if matches!(sel_str.as_str(), "do:" | "collect:" | "select:") {
+            if let Some(arg) = arguments.first() {
+                if Self::extract_block_literal(arg).is_none() {
+                    return true;
+                }
+            }
+        }
+
         // Standard check: analyse argument blocks for mutations.
         // Check ALL block arguments, not just the last one.
         // For selectors like `detect:ifNone:`, the mutation-bearing block is the

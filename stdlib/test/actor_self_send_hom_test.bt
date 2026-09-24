@@ -51,7 +51,26 @@ TestCase subclass: ActorSelfSendHomTest
     0
 
   testSizeThreadsCapturedLocalWriteThroughSelfSendHom =>
-    self skip: "BT-3583: captured-local Tier2 accumulator not threaded through actor self-dispatch to a user HOM"
+    pool := SelfSendHomPool spawn
+    self assert: pool size equals: 4
+
+  // ADR 0128 / BT-3583 Constraints regression (a): a pure (Tier 1) opaque
+  // callable forwarded to `collect:`/`select:` — `pool` is a different
+  // actor process (no self-send), so the block is a genuine, non-mutating
+  // arity-1 closure. Must keep compiling and behaving identically after
+  // the fold-based rewrite.
+  testPureOpaqueCallableCollectAndSelect =>
+    pool := SelfSendHomPool spawn
+    self assert: (pool collect: [:x | x * 2]) equals: #(2, 4, 6, 8)
+    self assert: (pool select: [:x | x > 2]) equals: #(3, 4)
+
+  // ADR 0128 / BT-3583 Constraints regression (b): an opaque callable
+  // forwarded through a self-send to `do:` that mutates ONLY `self.field`
+  // (no local accumulator, no NLR) — the case the pre-fix generic wrapper
+  // already served correctly. Must keep behaving identically.
+  testFieldOnlyMutationOpaqueCallableThroughSelfSendDo =>
+    pool := SelfSendHomPool spawn
+    self assert: pool accumulateTotal equals: 10
 
   testValueClassTwinDetectIfNoneReturnsMatch =>
     sackful := SelfSendHomSackful new
