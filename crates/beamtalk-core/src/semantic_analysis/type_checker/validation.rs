@@ -33,6 +33,7 @@ use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 
+use super::known_remote;
 use super::sendability;
 use super::type_resolver;
 use super::types::{AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass};
@@ -1035,12 +1036,20 @@ impl TypeChecker {
     /// copy the term across a process boundary. The wording differs; the tier
     /// rule does not.
     ///
+    /// ADR 0126 §6: also warns when a node-bound handle
+    /// (`HandleScoped(#node)`) is passed in an actor message AND the
+    /// receiver is known-remote (`receiver_known_remote.is_some()`) —
+    /// upgraded from ADR 0103's silent-in-v1 `#node` tier because ADR 0126
+    /// §5.4 makes this a deterministic `not_serialisable` runtime
+    /// rejection. A `#node` handle to a receiver that is *not*
+    /// known-remote (or an Announcement payload) stays silent, unchanged
+    /// from ADR 0103.
+    ///
     /// Runs independently of whether the receiver's handler has typed
     /// parameters — the hazard is about *what* is sent, not the declared
     /// parameter type — so it is invoked before the method lookup in
-    /// [`check_argument_types`]. `#node`-scoped and `Unknown` arguments stay
-    /// silent in v1 (no static remoteness knowledge; advisory per ADR 0100).
-    /// Class-side `spawnWith:` maps are handled by
+    /// [`check_argument_types`]. `Unknown` arguments stay silent in v1
+    /// (advisory per ADR 0100). Class-side `spawnWith:` maps are handled by
     /// [`check_spawn_with_sendability`].
     #[allow(clippy::too_many_arguments)] // boundary context: selector + receiver flags + arg spans
     pub(super) fn check_arg_sendability(
@@ -1052,6 +1061,7 @@ impl TypeChecker {
         is_class_side: bool,
         receiver_is_actor: bool,
         arg_exprs: Option<&[Expression]>,
+        receiver_known_remote: Option<&known_remote::KnownRemote>,
     ) {
         // Two boundaries share this check (ADR 0103): actor *instance* message
         // arguments (#1) and Announcement payloads (#3) — both copy the term
@@ -1061,11 +1071,22 @@ impl TypeChecker {
         if !is_announce && !is_actor_message {
             return;
         }
+        // ADR 0126 §6: the #node upgrade applies only to the actor-message
+        // boundary, on a known-remote receiver — never to an Announcement
+        // payload (there is no "receiver" in the remote sense there).
+        let node_upgrade_applies = is_actor_message && receiver_known_remote.is_some();
         for (i, arg_ty) in arg_types.iter().enumerate() {
-            let sendability::Tier::HandleScoped(sendability::HandleScope::Process) =
-                sendability::tier_of(arg_ty, hierarchy, self.alias_registry.as_ref())
-            else {
-                continue;
+            let tier = sendability::tier_of(arg_ty, hierarchy, self.alias_registry.as_ref());
+            let scope = match tier {
+                sendability::Tier::HandleScoped(sendability::HandleScope::Process) => {
+                    sendability::HandleScope::Process
+                }
+                sendability::Tier::HandleScoped(sendability::HandleScope::Node)
+                    if node_upgrade_applies =>
+                {
+                    sendability::HandleScope::Node
+                }
+                _ => continue,
             };
             let arg_expr = arg_exprs.and_then(|exprs| exprs.get(i));
             let arg_span = arg_expr.map_or(span, Expression::span);
@@ -1073,18 +1094,33 @@ impl TypeChecker {
                 .as_known()
                 .cloned()
                 .unwrap_or_else(|| EcoString::from("handle"));
-            // Prefer the variable name (`port`) for the message; fall back to
-            // the handle's type name for non-identifier arguments.
+            // Prefer the variable name (`port`/`cache`) for the message;
+            // fall back to the handle's type name for non-identifier
+            // arguments.
             let label = match arg_expr {
                 Some(Expression::Identifier(ident)) => ident.name.clone(),
                 _ => ty_name.clone(),
             };
-            let boundary = if is_announce {
-                "used as an Announcement payload"
+            let diagnostic = if matches!(scope, sendability::HandleScope::Node) {
+                Diagnostic::warning(
+                    format!(
+                        "`{label}` ({ty_name} — node-bound handle) sent to a remote actor; it \
+                         will be rejected at runtime (not_serialisable)"
+                    ),
+                    arg_span,
+                )
+                .with_hint(
+                    "A node-bound handle (an ETS table, timer, or atomic counter) does not \
+                     exist on the remote node. Consider passing data, or having the remote \
+                     actor own the handle",
+                )
+                .with_category(DiagnosticCategory::Sendability)
             } else {
-                "passed in an actor message"
-            };
-            self.diagnostics.push(
+                let boundary = if is_announce {
+                    "used as an Announcement payload"
+                } else {
+                    "passed in an actor message"
+                };
                 Diagnostic::warning(
                     format!(
                         "`{label}` ({ty_name} — process-bound handle) {boundary}; it is only \
@@ -1096,14 +1132,21 @@ impl TypeChecker {
                     "A port-like handle is bound to its owning process. Consider passing \
                      data, or an Actor that owns the handle",
                 )
-                .with_category(DiagnosticCategory::Sendability),
-            );
+                .with_category(DiagnosticCategory::Sendability)
+            };
+            self.diagnostics.push(diagnostic);
         }
     }
 
     /// Check argument types against declared parameter types for a message send.
+    ///
+    /// Thin wrapper over [`Self::check_argument_types_impl`] with no
+    /// known-remote provenance (ADR 0126 §6) — the overwhelming majority of
+    /// call sites (self-sends, class-side sends, and the existing unit
+    /// tests) have no receiver expression to classify. See
+    /// [`Self::check_argument_types_with_known_remote`] for the one call
+    /// site that does.
     #[allow(clippy::too_many_arguments)] // arg_exprs + env needed for origin tracing
-    #[allow(clippy::too_many_lines)] // includes the class-literal subtyping arm
     pub(super) fn check_argument_types(
         &mut self,
         class_name: &EcoString,
@@ -1115,6 +1158,69 @@ impl TypeChecker {
         arg_exprs: Option<&[Expression]>,
         env: Option<&super::TypeEnv>,
         receiver_type_args: &[InferredType],
+    ) {
+        self.check_argument_types_impl(
+            class_name,
+            selector,
+            arg_types,
+            span,
+            hierarchy,
+            is_class_side,
+            arg_exprs,
+            env,
+            receiver_type_args,
+            None,
+        );
+    }
+
+    /// [`Self::check_argument_types`], additionally threading the
+    /// receiver's known-remote provenance (ADR 0126 §6) through to the
+    /// shared ADR 0103 sendability check
+    /// ([`Self::check_arg_sendability`]), which upgrades a
+    /// `HandleScoped(#node)` argument to a Warning when the receiver is
+    /// known-remote (silent otherwise, unchanged from ADR 0103).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn check_argument_types_with_known_remote(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        arg_types: &[InferredType],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        is_class_side: bool,
+        arg_exprs: Option<&[Expression]>,
+        env: Option<&super::TypeEnv>,
+        receiver_type_args: &[InferredType],
+        receiver_known_remote: Option<&known_remote::KnownRemote>,
+    ) {
+        self.check_argument_types_impl(
+            class_name,
+            selector,
+            arg_types,
+            span,
+            hierarchy,
+            is_class_side,
+            arg_exprs,
+            env,
+            receiver_type_args,
+            receiver_known_remote,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)] // arg_exprs + env + known-remote needed for origin tracing
+    #[allow(clippy::too_many_lines)] // includes the class-literal subtyping arm
+    fn check_argument_types_impl(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        arg_types: &[InferredType],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        is_class_side: bool,
+        arg_exprs: Option<&[Expression]>,
+        env: Option<&super::TypeEnv>,
+        receiver_type_args: &[InferredType],
+        receiver_known_remote: Option<&known_remote::KnownRemote>,
     ) {
         // ADR 0103: sendability of actor message arguments and `spawnWith:`
         // map values. Independent of the handler's declared parameter types, so
@@ -1128,6 +1234,7 @@ impl TypeChecker {
             is_class_side,
             receiver_is_actor,
             arg_exprs,
+            receiver_known_remote,
         );
         self.check_spawn_with_sendability(selector, hierarchy, receiver_is_actor, arg_exprs);
 

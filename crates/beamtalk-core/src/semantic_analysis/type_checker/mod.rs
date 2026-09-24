@@ -56,6 +56,12 @@ thread_local! {
 mod env_key;
 mod exhaustiveness;
 mod inference;
+// ADR 0126 §6: known-remote flow-fact classification, shared between the
+// live-`TypeEnv` message-argument check (`validation.rs`) and the
+// span-indexed post-hoc block-argument check
+// (`semantic_analysis::validators::sendability_validators`) — `pub(crate)`
+// since both consumers live outside this module.
+pub(crate) mod known_remote;
 mod narrowing;
 pub mod native_type_registry;
 pub mod native_types;
@@ -499,6 +505,14 @@ pub struct TypeChecker {
     ///
     /// The value is the class name, used in the diagnostic message.
     pub(super) typed_class_context: Option<EcoString>,
+    /// ADR 0126 §6: known-remote provenance recorded at every identifier
+    /// *use* site whose current binding is known-remote — mirrors
+    /// `type_map`, keyed the same way (by expression span). The live
+    /// `TypeEnv`'s flow-sensitive `known_remote` set only exists during
+    /// inference; a validator that runs afterward without a live `TypeEnv`
+    /// (`sendability_validators.rs`'s block-argument check) consults this
+    /// persisted table instead — see `known_remote::classify`'s doc.
+    pub(super) known_remote_spans: HashMap<Span, known_remote::KnownRemote>,
 }
 
 impl TypeChecker {
@@ -516,6 +530,7 @@ impl TypeChecker {
             referenced_aliases: std::collections::HashSet::new(),
             native_type_registry: None,
             typed_class_context: None,
+            known_remote_spans: HashMap::new(),
         }
     }
 
@@ -536,6 +551,7 @@ impl TypeChecker {
             referenced_aliases: std::collections::HashSet::new(),
             native_type_registry: None,
             typed_class_context: None,
+            known_remote_spans: HashMap::new(),
         }
     }
 
@@ -603,6 +619,16 @@ impl TypeChecker {
     /// Takes ownership of the type map, leaving an empty map.
     pub fn take_type_map(&mut self) -> TypeMap {
         std::mem::take(&mut self.type_map)
+    }
+
+    /// Takes ownership of the known-remote provenance table built during
+    /// checking (ADR 0126 §6), leaving an empty map. See
+    /// `known_remote_spans`'s field doc. `pub(crate)`, not `pub`:
+    /// `KnownRemote` itself is `pub(crate)` — its only consumers
+    /// (`semantic_analysis::mod`'s orchestration, `sendability_validators.rs`)
+    /// are inside this crate.
+    pub(crate) fn take_known_remote_spans(&mut self) -> HashMap<Span, known_remote::KnownRemote> {
+        std::mem::take(&mut self.known_remote_spans)
     }
 
     /// Returns a reference to the method return types collected during checking.
@@ -750,6 +776,12 @@ struct TypeEnv {
     origins: HashMap<EnvKey, TypeOrigin>,
     /// Whether we're inside a class method body (self refers to class-side).
     in_class_method: bool,
+    /// ADR 0126 §6: known-remote provenance for each binding currently
+    /// tracked as remote. Absence means "not known-remote" (the common
+    /// case), not "unknown" — flow-sensitive, overwritten by
+    /// `infer_assignment` on every reassignment (including back to a
+    /// non-remote value, which clears the entry).
+    known_remote: HashMap<EnvKey, known_remote::KnownRemote>,
 }
 
 impl TypeEnv {
@@ -758,6 +790,7 @@ impl TypeEnv {
             bindings: HashMap::new(),
             origins: HashMap::new(),
             in_class_method: false,
+            known_remote: HashMap::new(),
         }
     }
 
@@ -788,6 +821,26 @@ impl TypeEnv {
     fn remove(&mut self, key: &EnvKey) {
         self.bindings.remove(key);
         self.origins.remove(key);
+        self.known_remote.remove(key);
+    }
+
+    /// ADR 0126 §6: mark `key` as known-remote with the given provenance,
+    /// overwriting any prior fact for the same key.
+    fn mark_known_remote(&mut self, key: EnvKey, remote: known_remote::KnownRemote) {
+        self.known_remote.insert(key, remote);
+    }
+
+    /// ADR 0126 §6: clear a known-remote fact — used when a binding is
+    /// reassigned to a value that is not known-remote, so the flow fact
+    /// does not survive the reassignment.
+    fn clear_known_remote(&mut self, key: &EnvKey) {
+        self.known_remote.remove(key);
+    }
+
+    /// ADR 0126 §6: the known-remote provenance currently tracked for
+    /// `key`, if any.
+    fn known_remote(&self, key: &EnvKey) -> Option<known_remote::KnownRemote> {
+        self.known_remote.get(key).cloned()
     }
 
     /// Set a variable's type with origin tracking.

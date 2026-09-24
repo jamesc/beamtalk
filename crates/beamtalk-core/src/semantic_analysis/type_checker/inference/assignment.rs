@@ -11,6 +11,7 @@
 
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
     AssignmentTypeMismatch, CrossObjectFieldMutation,
@@ -194,6 +195,18 @@ impl TypeChecker {
                     );
                 } else {
                     env.set_local(ident.name.clone(), ty.clone());
+                }
+                // ADR 0126 §6: known-remote flow fact. Re-derived on every
+                // assignment (including a re-binding of an already-remote
+                // name to a non-remote value, which clears it) — flow
+                // fact, not sticky metadata. `value`, not `target`: the
+                // classification is purely a function of the RHS shape.
+                let key = EnvKey::local(ident.name.clone());
+                match known_remote::classify(value, &|id| {
+                    env.known_remote(&EnvKey::local(id.name.clone()))
+                }) {
+                    Some(remote) => env.mark_known_remote(key, remote),
+                    None => env.clear_known_remote(&key),
                 }
             }
             Expression::FieldAccess {
