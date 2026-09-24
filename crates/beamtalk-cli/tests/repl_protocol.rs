@@ -2323,7 +2323,7 @@ fn node_name_from_print_string(rendered: &str) -> String {
 /// two-node distribution e2e (optional)" step, `continue-on-error: true`)
 /// — passes reliably locally (verified 22/22). The root cause is not yet
 /// known; it is *not* the one behind `beamtalk_node_tests.erl`'s two-node
-/// suite's former CI failure, which was an EUnit 5-second per-test timeout
+/// suite's former CI failure, which was an `EUnit` 5-second per-test timeout
 /// (BT-3609) and runs in `just test-runtime` again.
 #[test]
 #[ignore = "slow test - run with `just test-repl-protocol`"]
