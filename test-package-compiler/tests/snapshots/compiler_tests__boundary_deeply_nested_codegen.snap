@@ -105,6 +105,13 @@ module 'boundary_deeply_nested' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
 
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
+        <{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->
+            case call 'beamtalk_actor':'decode_wire_cast'(Msg) of
+                <{'redispatch', WireMsg2}> when 'true' ->
+                    call 'boundary_deeply_nested':'handle_cast'(WireMsg2, State)
+                <'noreply'> when 'true' ->
+                    {'noreply', State}
+            end
         <{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->
             let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in
             let _OldState = call 'erlang':'get'('$bt_actor_state') in
@@ -160,8 +167,15 @@ module 'boundary_deeply_nested' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
     end
 
 
-'handle_call'/3 = fun (Msg, _From, State) ->
+'handle_call'/3 = fun (Msg, From, State) ->
     case Msg of
+        <{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->
+            case call 'beamtalk_actor':'decode_wire_call'(Msg) of
+                <{'redispatch', WireMsg2}> when 'true' ->
+                    call 'boundary_deeply_nested':'handle_call'(WireMsg2, From, State)
+                <{'reply', WireReplyVal}> when 'true' ->
+                    {'reply', WireReplyVal, State}
+            end
         <{Selector, Args, PropCtx}> when 'true' ->
             let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in
             let _OldState = call 'erlang':'get'('$bt_actor_state') in
@@ -178,9 +192,12 @@ module 'boundary_deeply_nested' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
                 <{'reply', Result, NewState}> when 'true' ->
                     let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
                     let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
-                    {'reply', {'ok', Result}, CleanNewState}
+                    let EncodedResult = call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) in
+                    {'reply', {'ok', EncodedResult}, CleanNewState}
                 <{'error', Error, ErrState}> when 'true' ->
-                    {'reply', {'error', Error}, ErrState}
+                    let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
+                    let EncodedError = call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) in
+                    {'reply', {'error', EncodedError}, ErrState}
             end
         <{Selector, Args}> when 'true' ->
             let _OldState = call 'erlang':'get'('$bt_actor_state') in
@@ -197,9 +214,12 @@ module 'boundary_deeply_nested' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
                 <{'reply', Result, NewState}> when 'true' ->
                     let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
                     let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
-                    {'reply', {'ok', Result}, CleanNewState}
+                    let EncodedResult = call 'beamtalk_actor':'encode_reply_for'(From, Selector, Result) in
+                    {'reply', {'ok', EncodedResult}, CleanNewState}
                 <{'error', Error, ErrState}> when 'true' ->
-                    {'reply', {'error', Error}, ErrState}
+                    let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
+                    let EncodedError = call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) in
+                    {'reply', {'error', EncodedError}, ErrState}
             end
     end
 
