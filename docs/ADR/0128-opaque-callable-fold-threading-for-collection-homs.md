@@ -1,7 +1,7 @@
 # ADR 0128: Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs
 
 ## Status
-Proposed (2026-09-23)
+Accepted (2026-09-24)
 
 ## Context
 
