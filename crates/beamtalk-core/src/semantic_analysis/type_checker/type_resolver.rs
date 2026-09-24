@@ -1215,6 +1215,7 @@ mod tests {
                     extending: None,
                     method_signatures: vec![],
                     class_method_signatures: vec![],
+                    provided_methods: vec![],
                     comments: CommentAttachment::default(),
                     doc_comment: None,
                     span: span(),

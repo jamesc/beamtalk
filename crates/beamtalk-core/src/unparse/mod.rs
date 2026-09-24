@@ -42,7 +42,7 @@ use crate::ast::{
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
     MatchArm, MessageSelector, MethodDefinition, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, SlotKind, StandaloneMethodDefinition,
+    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, SlotKind, StandaloneMethodDefinition,
     StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
 use crate::source_analysis::{Severity, lex_with_eof, parse, parse_method};
@@ -620,6 +620,13 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
 
     docs.push(header);
 
+    // `uses:` lines (ADR 0127 §2) — one per line, immediately after the
+    // header and before any state/class-var/method, matching where the
+    // parser requires them.
+    for use_line in &class.uses {
+        docs.push(nest(2, docvec![line(), unparse_protocol_use(use_line)]));
+    }
+
     // State declarations — use nest(2, ...) so that leading comments and
     // doc-comment lines inside the declaration are also indented at column 2,
     // matching the `line()` inside nest() pattern used for instance methods.
@@ -849,6 +856,22 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
             2,
             unparse_protocol_signature_entry(sig, Some("class "), &mut first_signature),
         ));
+    }
+
+    // Provided (instance-side) methods — `=>` bodies (ADR 0127 §1). Reuses
+    // the same `first_signature` optional-blank-line-preservation flag as
+    // the signature lists above (rather than the class body's own
+    // always-blank-line-between-methods rule), matching the ADR's own
+    // `comparable.bt` example where consecutive short provisions
+    // (`>`, `<=`, `>=`) have no blank line between them. `unparse_method_definition`
+    // already emits the method's own leading comments/doc comment, so only
+    // the separating blank line is added here.
+    for method in &protocol.provided_methods {
+        if !first_signature && method.comments.leading_blank_line {
+            docs.push(line());
+        }
+        docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
+        first_signature = false;
     }
 
     concat(docs)
@@ -1200,6 +1223,63 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
 
     docs.push(concat(decl));
     concat(docs)
+}
+
+/// Builds a [`Document`] for a [`ProtocolUse`] — a `uses:` line in a class
+/// body (ADR 0127 §2).
+///
+/// `uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)]
+/// [overriding: #(#sel, …)]`. No `aliasing:` clause yet — it is reserved
+/// but not stored on this node (not yet supported in v1).
+fn unparse_protocol_use(use_line: &ProtocolUse) -> Document<'static> {
+    let mut decl: Vec<Document<'static>> = vec![Document::Str("uses: ")];
+
+    if let Some(pkg) = &use_line.package {
+        decl.push(leaf::ident(&pkg.name));
+        decl.push(Document::Str("@"));
+    }
+    decl.push(leaf::ident(&use_line.protocol.name));
+
+    if !use_line.type_args.is_empty() {
+        decl.push(Document::Str("("));
+        for (i, ta) in use_line.type_args.iter().enumerate() {
+            if i > 0 {
+                decl.push(Document::Str(", "));
+            }
+            decl.push(unparse_type_annotation(ta));
+        }
+        decl.push(Document::Str(")"));
+    }
+
+    if !use_line.excluding.is_empty() {
+        decl.push(Document::Str(" excluding: "));
+        decl.push(unparse_selector_symbol_list(&use_line.excluding));
+    }
+
+    if !use_line.overriding.is_empty() {
+        decl.push(Document::Str(" overriding: "));
+        decl.push(unparse_selector_symbol_list(&use_line.overriding));
+    }
+
+    concat(decl)
+}
+
+/// Builds a [`Document`] for a `#(#sel, #sel2, …)` selector-symbol list —
+/// a `uses:` line's `excluding:`/`overriding:` argument (ADR 0127 §2).
+///
+/// Delegates each entry to [`unparse_literal`] (as `Literal::Symbol`) so the
+/// same quoting rule (`#'sel with space'`) applies here as everywhere else a
+/// symbol is printed, rather than re-deriving it.
+fn unparse_selector_symbol_list(selectors: &[Identifier]) -> Document<'static> {
+    let mut parts: Vec<Document<'static>> = vec![Document::Str("#(")];
+    for (i, sel) in selectors.iter().enumerate() {
+        if i > 0 {
+            parts.push(Document::Str(", "));
+        }
+        parts.push(unparse_literal(&Literal::Symbol(sel.name.clone())));
+    }
+    parts.push(Document::Str(")"));
+    concat(parts)
 }
 
 /// Builds a [`Document`] for an [`ExpressionStatement`].

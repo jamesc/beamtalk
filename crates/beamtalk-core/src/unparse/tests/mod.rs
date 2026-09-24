@@ -18,3 +18,4 @@ mod property_tests;
 mod reindent_and_literal_display;
 mod round_trip_and_idempotency;
 mod statements_and_class_formatting;
+mod traits_round_trip;

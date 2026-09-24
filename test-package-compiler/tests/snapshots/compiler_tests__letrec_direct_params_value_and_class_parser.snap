@@ -640,6 +640,7 @@ Module {
             shape_version: None,
             type_params: [],
             superclass_type_args: [],
+            uses: [],
             span: Span {
                 start: 724,
                 end: 1020,
@@ -977,6 +978,7 @@ Module {
             shape_version: None,
             type_params: [],
             superclass_type_args: [],
+            uses: [],
             span: Span {
                 start: 1022,
                 end: 1565,

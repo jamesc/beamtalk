@@ -92,6 +92,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
+        uses: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,

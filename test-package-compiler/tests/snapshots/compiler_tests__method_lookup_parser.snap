@@ -282,6 +282,7 @@ Module {
             shape_version: None,
             type_params: [],
             superclass_type_args: [],
+            uses: [],
             span: Span {
                 start: 286,
                 end: 534,

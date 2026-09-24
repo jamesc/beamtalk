@@ -321,6 +321,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
+        uses: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
