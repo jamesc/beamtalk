@@ -320,6 +320,14 @@ handle_getValue([], State) ->
     doNamedScope/3
 ]).
 
+%% Exported for two-node EUnit reachability only (beamtalk_dist_global_scope_tests) —
+%% doNamedScope/3 needs a real class-side #beamtalk_object{} Self, which the
+%% hand-written test_counter fixture doesn't have a class-registry entry
+%% for; calling named_lookup/4 directly exercises the exact function/branch
+%% a `global` lookup's cross-node pid reaches, without that FFI-level
+%% plumbing.
+-export([named_lookup/4]).
+
 %% Remote spawn and lookup (ADR 0126 §3, Phase 2, BT-3599). `remote_spawn/4`
 %% and `remote_named/3` are the origin-node entry points (erpc caller);
 %% `remote_spawn_target/2` and `remote_named_target/2` are exported so
@@ -4160,7 +4168,12 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
                     )
                 )};
         Pid when is_pid(Pid) ->
-            case pid_class_name(Pid) of
+            %% A `global` lookup's Pid can be on any connected node — the
+            %% entire point of a cluster-unique name — so this must use
+            %% the node-aware wrapper, not `pid_class_name/1` directly
+            %% (which raises `badarg` for a remote pid). Always safe for
+            %% `local` scope too, where Pid is always local.
+            case pid_class_name_remote_safe(Pid) of
                 nil ->
                     {error,
                         beamtalk_error:with_hint(
@@ -4947,6 +4960,11 @@ registered_name_for_pid(Pid) when is_pid(Pid) ->
 %% (sentinel `undefined`), `beamtalk_inspector:actor_class/1` and
 %% `beamtalk_process_navigation:actor_class_name/1` (both sentinel `nil`).
 %% `nil` wins as the single sentinel — see `registered_name_for_pid/1` above.
+%%
+%% Local-pid only: `erlang:process_info/2` raises `badarg` for a pid on
+%% another node. `pid_class_name_remote_safe/1` below is the node-aware
+%% wrapper for a caller (like `named_lookup/4`'s `global` scope) whose pid
+%% may not be local.
 -spec pid_class_name(pid()) -> atom() | nil.
 pid_class_name(Pid) ->
     case erlang:process_info(Pid, dictionary) of
@@ -4957,6 +4975,30 @@ pid_class_name(Pid) ->
             end;
         _ ->
             nil
+    end.
+
+-doc """
+Node-aware wrapper over `pid_class_name/1` (ADR 0126 §4, BT-3603 review
+round 2): `global:whereis_name/1` (`named_lookup/4`'s `global` scope) can
+resolve to a pid on any connected node — the entire point of a
+cluster-unique name — but `pid_class_name/1`'s `erlang:process_info/2` read
+only works on a local pid, raising `badarg` otherwise. Mirrors
+`actor_started_at/1`'s `node(Pid) =:= node()` / `erpc:call/5` pattern,
+calling the already-exported `pid_class_name/1` itself as the remote
+target. An unreachable node or a dead remote process resolves to `nil` —
+the same sentinel `pid_class_name/1` already uses for "not a Beamtalk
+actor", so callers don't need a third outcome to handle.
+""".
+-spec pid_class_name_remote_safe(pid()) -> atom() | nil.
+pid_class_name_remote_safe(Pid) when node(Pid) =:= node() ->
+    pid_class_name(Pid);
+pid_class_name_remote_safe(Pid) ->
+    try erpc:call(node(Pid), ?MODULE, pid_class_name, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
+        Result -> Result
+    catch
+        error:{erpc, _ErpcReason} -> nil;
+        error:{exception, _Reason, _Stack} -> nil;
+        exit:{exception, _Reason} -> nil
     end.
 
 -spec class_matches(atom(), atom()) -> boolean().

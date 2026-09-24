@@ -59,6 +59,12 @@ global_scope_test_() ->
                     "scope: #global and scope: #local are separate registries — no "
                     "cross-scope collision or visibility",
                     fun() -> local_and_global_scopes_are_separate(PeerNode) end
+                },
+                {
+                    "named:scope:#global resolves a name registered on the PEER "
+                    "node without crashing (review round 2: pid_class_name/1's "
+                    "process_info read raised badarg for a cross-node pid)",
+                    fun() -> named_scope_global_resolves_remote_registrant(PeerNode) end
                 }
             ]
         end}}.
@@ -135,6 +141,59 @@ local_and_global_scopes_are_separate(PeerNode) ->
     after
         gen_server:stop(LocalPid),
         gen_server:stop(GlobalPid)
+    end.
+
+%%====================================================================
+%% named:scope:#global against a cross-node registrant (review round 2)
+%%====================================================================
+
+-doc """
+`global:whereis_name/1` can resolve to a pid on any connected node — the
+entire point of a cluster-unique name — but `named_lookup/4`'s `global`
+branch originally read the candidate's class via the local-only
+`pid_class_name/1` (`erlang:process_info/2`), which raises `badarg` for a
+remote pid. Registers the actor ON THE PEER node specifically (rather than
+this node, like `round_trip_from_either_node/1` does) so the lookup below
+is guaranteed to resolve a genuinely remote pid, then looks it up FROM THIS
+node — exactly the "spawn on A, `named:scope:#global` from B" scenario the
+review flagged as the documented, headline use case for a cluster-unique
+name.
+
+`'Counter'` -> `test_counter` is registered in *this* node's
+`beamtalk_class_metadata` (mirroring
+`beamtalk_dist_remote_spawn_tests:register_counter_class/1`, which does the
+same for the peer) since `named_lookup/4`'s `class_mod_for/1` check runs
+locally, on whichever node calls it — here, this node.
+
+`'spawnAsGlobal'/3` stays linked to its caller by design (ADR 0079/§4 — see
+`beamtalk_dist_global_scope_tests`'s own netsplit-heal test for the same
+note), so spawning it via a bare `rpc:call/4` would kill it the moment
+`rpc`'s throwaway evaluation process exits; the explicit `unlink/1` here
+mirrors that test's own workaround.
+""".
+named_scope_global_resolves_remote_registrant(PeerNode) ->
+    Name = unique_name("bt3603_remote_named"),
+    ok = beamtalk_class_metadata:insert('Counter', test_counter, undefined, none, false),
+    {ok, PeerPid} = rpc:call(PeerNode, erlang, apply, [
+        fun() ->
+            {ok, P} = beamtalk_actor:'spawnAsGlobal'(Name, test_counter, 5),
+            unlink(P),
+            {ok, P}
+        end,
+        []
+    ]),
+    try
+        ?assertNotEqual(node(), node(PeerPid)),
+        %% Before the fix: badarg crash inside pid_class_name/1. After: a
+        %% normal {ok, #beamtalk_object{}} carrying the {global, Name} ref.
+        {ok, Obj} = beamtalk_actor:named_lookup(global, 'Counter', Name, 'named:scope:'),
+        ?assertEqual('Counter', Obj#beamtalk_object.class),
+        ?assertEqual({global, Name}, Obj#beamtalk_object.pid),
+        %% The returned proxy actually resolves and dispatches to the
+        %% peer-resident actor.
+        ?assertEqual(5, beamtalk_actor:sync_send(Obj#beamtalk_object.pid, getValue, []))
+    after
+        rpc:call(PeerNode, gen_server, stop, [PeerPid])
     end.
 
 %%====================================================================
