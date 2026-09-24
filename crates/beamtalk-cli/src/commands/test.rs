@@ -1106,8 +1106,17 @@ fn compute_native_type_registry(
         // a dependency's native FFI calls on a fresh checkout/CI runner —
         // exactly the `build`/`test` drift this function exists to close.
         let dep_options = beamtalk_core::CompilerOptions::default();
-        let resolved_deps =
-            super::deps::ensure_deps_resolved(pkg_root, &dep_options).unwrap_or_default();
+        let resolved_deps = match super::deps::ensure_deps_resolved(pkg_root, &dep_options) {
+            Ok(deps) => deps,
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Failed to resolve dependencies for FFI type registry; \
+                     dependency native modules' FFI calls may fall back to Dynamic"
+                );
+                Vec::new()
+            }
+        };
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
         let dependency_stubs = super::build::load_dependency_stub_registries(
