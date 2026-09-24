@@ -236,14 +236,41 @@ impl CoreErlangGenerator {
             callable.span(),
         );
 
+        // Receiver, then `inject:into:`'s `initial`, then the callable:
+        // generated AND emitted in source (receiver-then-left-to-right-
+        // arguments) order, matching the literal-block fast paths
+        // (`generate_list_inject`), so argument side effects — and any
+        // state they thread — happen in the order the source reads.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(list_recv_to_safe_list_doc(
+            recv_code,
+            list_var.clone(),
+            safe_list_var.clone(),
+        ));
+
+        let inject_seed: Option<Document<'static>> = match op {
+            OpaqueFoldOp::Inject { initial } => {
+                let init_var = self.fresh_temp_var("temp");
+                let init_code = self.expression_doc(initial)?;
+                docs.push(docvec![
+                    "let ",
+                    leaf::var(init_var.clone()),
+                    " = ",
+                    init_code,
+                    " in "
+                ]);
+                Some(leaf::var(init_var))
+            }
+            _ => None,
+        };
+
         let callable_var = self.fresh_temp_var("Callable");
         let raw_code = self.expression_doc(callable)?;
         let seed_state = self.current_field_read_state_var();
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(docvec![
             "let ",
             leaf::var(callable_var.clone()),
@@ -251,11 +278,6 @@ impl CoreErlangGenerator {
             raw_code,
             " in "
         ]);
-        docs.push(list_recv_to_safe_list_doc(
-            recv_code,
-            list_var.clone(),
-            safe_list_var.clone(),
-        ));
 
         let elem_var = self.fresh_temp_var("Elem");
         let acc_var = self.fresh_temp_var("Acc");
@@ -270,18 +292,7 @@ impl CoreErlangGenerator {
         let slot = self.fresh_temp_var("Slot");
         let st_acc = self.fresh_temp_var("StAcc");
         let slot_seed: Document<'static> = match op {
-            OpaqueFoldOp::Inject { initial } => {
-                let init_var = self.fresh_temp_var("temp");
-                let init_code = self.expression_doc(initial)?;
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(init_var.clone()),
-                    " = ",
-                    init_code,
-                    " in "
-                ]);
-                leaf::var(init_var)
-            }
+            OpaqueFoldOp::Inject { .. } => inject_seed.expect("Inject always binds its seed above"),
             OpaqueFoldOp::Count => leaf::int_lit(0),
             OpaqueFoldOp::Satisfy { is_all } => leaf::atom(if is_all { "true" } else { "false" }),
             OpaqueFoldOp::Collect | OpaqueFoldOp::Select => Document::Str("[]"),

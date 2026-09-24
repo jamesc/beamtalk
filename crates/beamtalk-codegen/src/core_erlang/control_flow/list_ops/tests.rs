@@ -1603,6 +1603,26 @@ fn test_list_inject_into_non_literal_actor_passes_acc_then_elem() {
 }
 
 #[test]
+fn test_opaque_inject_evaluates_receiver_then_initial_then_callable() {
+    // Source (receiver-then-left-to-right-arguments) evaluation order, like
+    // the literal-block fast path — not callable-first.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  itemsSrc => #(1, 2)\n  seedSrc => 0\n  blockSrc => [:a :b | a + b]\n\n  run =>\n    self itemsSrc inject: self seedSrc into: self blockSrc\n";
+    let code = codegen(src);
+    let run_body = &code[code
+        .find("<'run'> when")
+        .unwrap_or_else(|| panic!("no run:\n{code}"))..];
+    let pos = |sel: &str| {
+        run_body
+            .find(&format!("'{sel}'"))
+            .unwrap_or_else(|| panic!("{sel} send not found. Got:\n{code}"))
+    };
+    assert!(
+        pos("itemsSrc") < pos("seedSrc") && pos("seedSrc") < pos("blockSrc"),
+        "Opaque inject:into: should evaluate receiver, then initial, then callable. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_opaque_detect_raises_not_found_via_shared_helper() {
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items detect: block\n";
     let code = codegen(src);
