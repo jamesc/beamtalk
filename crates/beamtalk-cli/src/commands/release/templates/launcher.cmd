@@ -36,6 +36,18 @@ rem Pin epmd to loopback (ADR 0125 §1.6) for every verb that can start
 rem distribution or epmd itself — see launcher.sh's identical comment.
 set "ERL_EPMD_ADDRESS=127.0.0.1"
 
+rem Reject a malformed RELEASE_NODE before it ever reaches erl.exe — see
+rem launcher.sh's identical check for why (an invalid -sname otherwise
+rem crashes the whole node with a raw kernel crash dump). Same charset as
+rem the CLI's own dev-workspace-id validation: letters, digits, -, _ only.
+if defined RELEASE_NODE (
+    echo(%RELEASE_NODE%| findstr /r /v "^[A-Za-z0-9_-]*$" >nul
+    if not errorlevel 1 (
+        echo error: RELEASE_NODE "%RELEASE_NODE%" is not a valid instance name ^(letters, digits, '-', '_' only^) 1>&2
+        exit /b 2
+    )
+)
+
 set "VERB=%~1"
 if "%VERB%"=="" set "VERB=foreground"
 if not "%VERB%"=="" shift

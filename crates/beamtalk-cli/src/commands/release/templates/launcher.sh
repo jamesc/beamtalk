@@ -42,6 +42,22 @@ fi
 ERL_EPMD_ADDRESS=127.0.0.1
 export ERL_EPMD_ADDRESS
 
+# Reject a malformed RELEASE_NODE before it ever reaches `erl` — an invalid
+# `-sname` (e.g. containing '/', '@', '.', or whitespace) otherwise crashes
+# the whole node with a raw kernel crash dump ("Invalid node name!",
+# verified empirically) instead of a clean, actionable error like every
+# other operator-facing failure this launcher produces. Same charset as the
+# CLI's own `validate_workspace_name` (dev workspace IDs) — letters,
+# digits, `-`, `_` only; no `@`/`.` since `node_sname` always appends
+# `@localhost` itself.
+case "${RELEASE_NODE:-}" in
+    '') ;;
+    *[!A-Za-z0-9_-]*)
+        echo "error: RELEASE_NODE '$RELEASE_NODE' is not a valid instance name (letters, digits, '-', '_' only)" >&2
+        exit 2
+        ;;
+esac
+
 # ADR 0125 §3.2 — under a host ERTS, refuse to boot outside the OTP major
 # window this artifact's BEAM files are guaranteed to load on
 # (host_major in [build_major, build_major + 2]). Not applicable when the

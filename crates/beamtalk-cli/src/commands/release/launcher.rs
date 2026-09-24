@@ -306,6 +306,26 @@ mod tests {
         );
     }
 
+    /// The exact bug this guards against: a malformed `RELEASE_NODE`
+    /// (verified live to contain e.g. `/`) reached `erl` unvalidated and
+    /// crashed the whole node with a raw kernel crash dump ("Invalid node
+    /// name!") instead of a clean, actionable error. Both launchers must
+    /// reject it up front, before ever invoking `erl`/`erl.exe`.
+    #[test]
+    fn write_launcher_scripts_validate_release_node_before_invoking_erl() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        assert!(
+            sh.contains("RELEASE_NODE") && sh.contains("not a valid instance name"),
+            "launcher.sh must validate RELEASE_NODE: {sh}"
+        );
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        assert!(
+            cmd.contains("RELEASE_NODE") && cmd.contains("not a valid instance name"),
+            "launcher.cmd must validate RELEASE_NODE: {cmd}"
+        );
+    }
+
     #[test]
     fn write_launcher_scripts_cmd_uses_crlf_line_endings() {
         let (root, _temp) = write_scripts(true);
