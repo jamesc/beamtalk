@@ -190,7 +190,13 @@ cleanup(ok) ->
 %% `{timeout, #{stacktrace => [{peer, start_it, 2, _} | _]}}`, whose
 %% stacktrace is merely where the test process was parked when killed; the
 %% helper's own `wait_boot` never got the chance to expire).
--define(TWO_NODE_TEST_TIMEOUT, 90).
+%%
+%% The budget must exceed the helper's own nested worst case so a slow but
+%% succeeding boot is never cancelled: `start_peer/2` alone may take up to
+%% 60s (`wait_boot`) + 30s (`ensure_all_started` rpc), and the body then
+%% waits up to 10s per `expect_event/2` (twice in the reconnect case) —
+%% 110s, so 150s leaves real headroom.
+-define(TWO_NODE_TEST_TIMEOUT, 150).
 
 two_node_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
