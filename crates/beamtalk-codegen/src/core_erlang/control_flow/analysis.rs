@@ -183,7 +183,9 @@ enum NestedLoopShape {
     /// `loop_body_threads_class_vars`.
     Letrec,
     /// `do:`/`collect:`/`select:`/... — the `BodyKind::Foldl*` shapes,
-    /// gated by the recursive, Actor-excluded `has_self_sends` formula.
+    /// gated by the recursive `has_self_sends` formula (BT-3584: no
+    /// longer Actor-excluded — `context` alone never distinguishes an
+    /// Actor's own class method from an `Object`/`ValueType` one here).
     Foldl,
 }
 
@@ -845,7 +847,9 @@ impl CoreErlangGenerator {
     ///   in a conditional or another block (the `Foldl*` gate, that same
     ///   field's `else` branch) — deliberately recursive here, unlike the
     ///   first trigger, because that IS how `Foldl*`'s own
-    ///   `ThreadingPlan::new_impl` decides `threads_class_vars`. A bare
+    ///   `ThreadingPlan::new_impl` decides `threads_class_vars`. Applies
+    ///   equally to an Actor's own class method (BT-3584: `context` alone
+    ///   never distinguishes it from an `Object`/`ValueType` one here). A bare
     ///   class-var field write inside a `Foldl*` body needs no matching
     ///   trigger here: `generate_field_assignment_open` never threads one
     ///   regardless of nesting (`loop_mode.threading_families` stays scoped
@@ -903,13 +907,12 @@ impl CoreErlangGenerator {
         // nested-loop variant of that exact same shape would be an
         // inconsistent, surprising new restriction this predicate has no
         // business introducing. Only `Foldl*`'s own real gate
-        // (`!Actor && in_class_method() && body_analysis.has_self_sends`)
-        // is genuinely recursive, so the fallback below applies only when
-        // `shape` is `Foldl` — matching `context` too.
-        if matches!(shape, NestedLoopShape::Foldl)
-            && !matches!(self.context, CodeGenContext::Actor)
-            && self.in_class_method()
-        {
+        // (`in_class_method() && body_analysis.has_self_sends` — BT-3584:
+        // no `context != Actor` term, matching `ThreadingPlan::new_impl`'s
+        // own Foldl branch, which dropped the same stale exclusion) is
+        // genuinely recursive, so the fallback below applies only when
+        // `shape` is `Foldl`.
+        if matches!(shape, NestedLoopShape::Foldl) && self.in_class_method() {
             let analysis = block_analysis::analyze_block(body);
             // `self_send_selectors` is a `HashSet` (default `RandomState`) —
             // pick the lexicographically-smallest selector so the
