@@ -1390,6 +1390,34 @@ fn test_list_select_non_literal_callable_emits_threaded_fold() {
     );
 }
 
+#[test]
+fn test_class_method_do_non_literal_callable_does_not_fold() {
+    // ADR 0128 / BT-3583 (review-flagged on PR #4030): a CLASS method
+    // forwarding a non-literal callable to `do:` must NOT route through the
+    // fold rewrite (`generate_simple_list_op_threaded_fold`) — a class
+    // method compiles to `class_<selector>(ClassSelf, ClassVars, Args...)`,
+    // which has no `State`/`StateAcc` parameter at all (class-side
+    // threading goes through `ClassVars`), so the fold's `State`-seeded
+    // accumulator would reference an unbound variable. Must keep emitting
+    // the pre-existing plain-value wrapper, exactly like the ValueType
+    // sibling case just below.
+    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foreach'"),
+        "Non-literal callable do: in a class method should use lists:foreach (no fold). Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Non-literal callable do: in a class method must NOT fold — class methods have no \
+         State/StateAcc to seed the accumulator from. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal callable do: should still emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+}
+
 // ── ValueType context — list-op codegen ──────────────────────
 
 #[test]

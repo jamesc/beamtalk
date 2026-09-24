@@ -194,6 +194,30 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Whether a non-literal (opaque) callable forwarded to `do:`/`collect:`/
+    /// `select:` should route through the ADR 0128 / BT-3583 `lists:foldl`
+    /// state-fold rewrite (`generate_simple_list_op_threaded_fold`) rather
+    /// than the pre-existing plain-value wrapper
+    /// (`generate_non_literal_callable_erlang_wrapper`).
+    ///
+    /// The single source of truth for this decision — shared by the codegen
+    /// call site (`generate_simple_list_op`'s `is_actor_repl_opaque`, below)
+    /// and the classifier call site (`control_flow_has_mutations`,
+    /// `gen_server/methods.rs`) that decides whether a caller should expect
+    /// a `{Result, NewState}` tuple back. These two decisions must never
+    /// diverge — the class-method crash fixed on PR #4030 (an unbound
+    /// `State` reference inside `class_<selector>`) arose from exactly this
+    /// class of hand-duplicated condition drifting apart; extracting one
+    /// predicate makes that impossible instead of merely documented.
+    ///
+    /// `false` for `CodeGenContext::ValueType` (no `State` map to thread)
+    /// and for a class method (`class_<selector>(ClassSelf, ClassVars,
+    /// Args...)` has no `State`/`StateAcc` parameter either — class-side
+    /// threading goes through `ClassVars`).
+    pub(in crate::core_erlang) fn opaque_callable_list_op_needs_state_fold(&self) -> bool {
+        !matches!(self.context, CodeGenContext::ValueType) && !self.in_class_method()
+    }
+
     pub(in crate::core_erlang) fn generate_simple_list_op(
         &mut self,
         receiver: &Expression,
@@ -216,19 +240,14 @@ impl CoreErlangGenerator {
         // (`list_var` before the body compiles), unchanged from before this
         // function was split.
         //
-        // Excludes `in_class_method()` (review-flagged on PR #4030): a
-        // class method compiles to `class_<selector>(ClassSelf, ClassVars,
-        // Args...)` — it has no `State`/`StateAcc` parameter at all, only
-        // `ClassVars`. `current_field_read_state_var()` (the fold's seed,
-        // below) is context-blind to `in_class_method()` and always renders
-        // `"State"`/`"StateAccN"`, a name `class_<selector>` never binds —
-        // `ThreadingPlan::generate_pack_prefix` already has to special-case
-        // this for the literal-block sibling path. ADR 0128 doesn't cover
-        // class methods; fall back to the pre-existing plain-value wrapper
-        // there too, exactly as for `ValueType`.
+        // See `opaque_callable_list_op_needs_state_fold`'s doc comment for
+        // why `ValueType` and `in_class_method()` are excluded — the SAME
+        // predicate the classifier (`control_flow_has_mutations`,
+        // `gen_server/methods.rs`) uses to decide whether a caller expects
+        // a `{Result, NewState}` tuple back, so the two decisions cannot
+        // drift apart (review-flagged on PR #4030).
         let is_actor_repl_opaque = Self::extract_block_literal(body).is_none()
-            && !matches!(self.context, CodeGenContext::ValueType)
-            && !self.in_class_method();
+            && self.opaque_callable_list_op_needs_state_fold();
         if is_actor_repl_opaque {
             // Actor/Repl: fold-based rewrite (ADR 0128 / BT-3583). The
             // callable's tier is unknown until runtime, so the fold's own
