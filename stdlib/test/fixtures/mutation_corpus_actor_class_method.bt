@@ -36,6 +36,11 @@ Actor subclass: MutationCorpusActorClassMethod
   // Actor subclasses require at least the instance-state shape; unused by
   // any class-method fragment below (they only thread outer LOCALS).
   state: unused = 0
+  // BT-3584: a class var, distinct from the outer locals the fragments
+  // above thread — the peer of mutation_corpus_class_method.bt's own
+  // `runs`. Every fragment that reads/writes it resets it to 0 first, same
+  // rationale as that file's own `runs` field.
+  classState: runs = 0
 
   // Byte-for-byte the same body as mutation_corpus_class_method.bt's
   // `onDoSelfSendLastReadWrite`'s sibling `ensureNestedConditionalLastReadWrite:`
@@ -68,7 +73,12 @@ Actor subclass: MutationCorpusActorClassMethod
     t
 
   // ── self-send as the mutation mechanism (`is_actor_self_send` gap) ────────
-  class bump => 1
+  // BT-3584: now mutates `runs` (was `class bump => 1`, a no-op that could
+  // never expose the Foldl-shape `ClassVars`-threading gap below, since
+  // there was no class var to lose) — every fragment above this point
+  // returns an outer LOCAL, unaffected by `bump`'s own body, so this change
+  // is safe for them.
+  class bump => self.runs := self.runs + 1
 
   // Peer of mutation_corpus_class_method.bt's `selfSendWhileTrueNonLastReadWrite`
   // (`control_flow/body.rs`'s loop-body self-send branch).
@@ -94,3 +104,41 @@ Actor subclass: MutationCorpusActorClassMethod
       self bump
     ] on: Error do: [:e | nil]
     t
+
+  // BT-3584: the `Foldl*` (`do:`/`collect:`) counterpart of
+  // `selfSendWhileTrueNonLastReadWrite` above (a Letrec-shaped construct,
+  // which already threaded `ClassVars` correctly for an Actor class method
+  // before this issue) — a same-class self-send plus a co-occurring
+  // outer-local read+write inside a NON-last `do:`/`collect:` statement,
+  // followed by a POST-FOLD read of the class var. Before the fix,
+  // `plan.rs`'s `threads_class_vars_answer` unconditionally excluded
+  // `CodeGenContext::Actor` from a Foldl* body's own `ClassVars` threading —
+  // stale since BT-3581 fixed `is_actor_self_send` to exclude
+  // `in_class_method()` too — so the mutation compiled but was silently
+  // dropped: `self.runs` read back `0` instead of `5`, with no diagnostic
+  // and no compile error.
+  class selfSendDoNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    (1 to: 5)
+      do: [:x |
+        self bump
+        seen := seen + 1
+      ]
+    self.runs
+
+  // BT-3584's `collect:` peer — see `selfSendDoNonLastReadWrite` above.
+  // Also exercises BT-3611's `unbound 'ClassVarsN'` fix
+  // (`generate_vt_foldl_list_op_open`), since lifting the Actor exclusion
+  // alone would otherwise route this fragment into that same crash the
+  // Object-rooted `mutation_corpus_class_method.bt` twin hit.
+  class selfSendCollectNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    (1 to: 5)
+      collect: [:x |
+        self bump
+        seen := seen + 1
+        x
+      ]
+    self.runs

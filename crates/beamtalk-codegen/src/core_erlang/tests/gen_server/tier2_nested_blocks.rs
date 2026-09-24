@@ -45,6 +45,36 @@ fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
 }
 
 #[test]
+fn test_nested_foldl_self_send_in_inner_do_is_compile_error_actor_class_method() {
+    // BT-3584 review follow-up: the Actor-rooted twin of
+    // `test_nested_foldl_self_send_in_inner_do_is_compile_error` above.
+    // BT-3584 dropped `ThreadingPlan::new_impl`'s Foldl-branch
+    // `context != Actor` exclusion, so an Actor's own class method now
+    // reaches `threads_class_vars_answer == true` for this shape exactly
+    // like an `Object`/`Value` class method does — this predicate
+    // (`nested_loop_lost_class_var_mutation`) must reject it identically,
+    // or the same "unbound variable" `erlc` crash BT-3611 fixed at the
+    // `generate_vt_foldl_list_op_open` call site becomes newly reachable
+    // here, uncaught by any fixture until this test.
+    let src = "Actor subclass: NestedFoldClassVarMutationActor\n  state: unused = 0\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDo: aList =>\n    outerSeen := 0\n    aList\n      do: [:x |\n        total := 0\n        aList\n          do: [:y |\n            self bump\n            total := total + 1\n          ]\n        outerSeen := outerSeen + 1\n      ]\n    self.runs";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@nestedfoldclassvarmutationactor").with_workspace_mode(true),
+    );
+    match result {
+        Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
+            assert_eq!(mutation, "'self bump'");
+        }
+        other => panic!(
+            "Expected ClassVarMutationLostAcrossNestedLoop for a self-send inside a do: \
+             nested inside another do: on an Actor's own class method. Got: {other:?}"
+        ),
+    }
+}
+
+#[test]
 fn test_nested_foldl_class_reference_send_buried_in_conditional_is_compile_error() {
     // BT-3530: the same "self-send buried inside a conditional, not a bare
     // top-level statement, inside a `Foldl*` nested inside another `Foldl*`"
@@ -127,9 +157,10 @@ fn test_nested_foldl_self_send_buried_in_conditional_is_compile_error() {
     // in a conditional, not a bare top-level statement" shape as the
     // Letrec test above, but inside a `Foldl*` (`do:`) body instead —
     // `Foldl*`'s own real `threads_class_vars` gate
-    // (`!Actor && in_class_method() && body_analysis.has_self_sends`) IS
-    // genuinely recursive (unlike Letrec's), so this shape must still be
-    // rejected when nested inside another loop.
+    // (`in_class_method() && body_analysis.has_self_sends`, BT-3584: no
+    // `context != Actor` term, applies equally to an Actor's own class
+    // method) IS genuinely recursive (unlike Letrec's), so this shape must
+    // still be rejected when nested inside another loop.
     let src = "Value subclass: NestedFoldCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDo: aList =>\n    outerSeen := 0\n    aList\n      do: [:x |\n        total := 0\n        aList\n          do: [:y |\n            (y >= 0) ifTrue: [self bump]\n            total := total + 1\n          ]\n        outerSeen := outerSeen + 1\n      ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -155,7 +186,8 @@ fn test_nested_detect_self_send_in_inner_detect_is_compile_error() {
     // `dropWhile:`/`partition:`/`groupBy:`), not just `do:`/`collect:`/
     // `select:`/`reject:`/`anySatisfy:`/`allSatisfy:`/`inject:into:` —
     // `ThreadingPlan::new_impl`'s `threads_class_vars` gate
-    // (`!Actor && in_class_method() && body_analysis.has_self_sends`)
+    // (`in_class_method() && body_analysis.has_self_sends`, BT-3584: no
+    // `context != Actor` term)
     // applies uniformly to every non-`Letrec` `BodyKind`, so a class-var
     // self-send nested inside `detect:`, itself nested inside another
     // `detect:`, is exactly as vulnerable to the silent-loss/`erlc`-crash

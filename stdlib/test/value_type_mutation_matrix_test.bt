@@ -841,6 +841,17 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testSelfSendWhileTrueNonLastReadWriteClassMethod =>
     self assert: MutationCorpusClassMethod selfSendWhileTrueNonLastReadWrite equals: 5
 
+  // BT-3611: `Foldl*` (`do:`/`collect:`) self-send plus a co-occurring
+  // outer-local read+write, followed by a POST-FOLD read of the class var —
+  // `do:` already threaded `ClassVars` correctly here; `collect:` crashed
+  // `erlc` with "unbound variable 'ClassVarsN'" before the fix (see
+  // `mutation_corpus_class_method.bt`'s own fragment comments for why).
+  testSelfSendDoNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod selfSendDoNonLastReadWrite equals: 5
+
+  testSelfSendCollectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod selfSendCollectNonLastReadWrite equals: 5
+
   testSelfSendIfTrueNonLastReadWriteTrueActor =>
     self bt3178ActorSelfSendInConditionalPending
       ifTrue: [
@@ -910,6 +921,20 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testOnDoSelfSendLastReadWriteActorClassMethod =>
     self assert: MutationCorpusActorClassMethod onDoSelfSendLastReadWrite equals: 1
+
+  // BT-3584: `Foldl*` (`do:`/`collect:`) class-var threading, previously
+  // unconditionally excluded for `CodeGenContext::Actor` in `plan.rs`'s
+  // `threads_class_vars_answer` — silently dropped the mutation (`0`
+  // instead of `5`) rather than failing to compile. `collect:` also
+  // exercises BT-3611's fix (`generate_vt_foldl_list_op_open`'s previously
+  // missing post-fold `ClassVars` refresh), since lifting the Actor
+  // exclusion alone would otherwise route this cell into that same
+  // `unbound 'ClassVarsN'` `erlc` crash.
+  testSelfSendDoNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod selfSendDoNonLastReadWrite equals: 5
+
+  testSelfSendCollectNonLastReadWriteActorClassMethod =>
+    self assert: MutationCorpusActorClassMethod selfSendCollectNonLastReadWrite equals: 5
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 4 — class-var / state-field mutation, threaded the same

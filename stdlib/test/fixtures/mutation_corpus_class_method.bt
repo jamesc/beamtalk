@@ -308,6 +308,51 @@ Object subclass: MutationCorpusClassMethod
       ]
     self.runs
 
+  // BT-3611: the `Foldl*` (`do:`) counterpart of
+  // `selfSendWhileTrueNonLastReadWrite` above (a Letrec-shaped construct) —
+  // a same-class self-send plus a co-occurring outer-local read+write inside
+  // a NON-last `do:` statement, followed by a POST-FOLD read of the class
+  // var. `do:`'s own class-method-body-top-level codegen
+  // (`generate_value_type_do_open`) never had this gap; kept here as the
+  // `do:` peer of `selfSendCollectNonLastReadWrite` below, whose `collect:`
+  // counterpart (`generate_vt_foldl_list_op_open`) did.
+  class selfSendDoNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    (1 to: 5)
+      do: [:x |
+        self bump
+        seen := seen + 1
+      ]
+    self.runs
+
+  // BT-3611: `collect:` (and the rest of the `Foldl*` list-op family —
+  // `select:`/`reject:`/`inject:into:`/`detect:`/`detect:ifNone:`/`count:`,
+  // see `metamorphic_threading_test.bt`/`value_type_mutation_matrix_test.bt`
+  // for the matrix's own ground-truth cells) with a self-send plus a
+  // co-occurring outer-local read+write inside a NON-last statement,
+  // followed by a POST-FOLD read of the class var — the shape the existing
+  // `collectNonLastReadWrite`/`collectAssignRhsReadWrite` fragments above
+  // never covered (outer-local mutation only, no self-send, no post-fold
+  // class-var read). Before the fix, `generate_vt_foldl_list_op_open`
+  // (the non-last, class-method-body-top-level `collect:` codegen) bound
+  // the whole fold expression — including the self-send's own freshly
+  // minted `ClassVarsN` rebind — as the RHS of a fresh `let`, trapping that
+  // bind inside its own closed scope; the `self.runs` read below then
+  // referenced a `ClassVarsN` Core Erlang never actually bound at that
+  // point (`erlc`: "unbound variable 'ClassVarsN'"), an outright compiler
+  // crash, not merely a wrong return value.
+  class selfSendCollectNonLastReadWrite =>
+    self.runs := 0
+    seen := 0
+    (1 to: 5)
+      collect: [:x |
+        self bump
+        seen := seen + 1
+        x
+      ]
+    self.runs
+
   // `needs_mutation_threading` requires a co-occurring outer-local read+write
   // alongside the class-var write/self-send — a bare self-send with no other
   // mutation in the block never reaches the threaded path at all (see
