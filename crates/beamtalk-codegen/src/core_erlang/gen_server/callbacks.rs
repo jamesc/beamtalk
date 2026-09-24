@@ -1327,6 +1327,22 @@ impl CoreErlangGenerator {
     /// ADR 0069 Phase 2b: Matches 4-tuple messages with `PropCtx`
     /// for both fire-and-forget casts and async sends. Falls back to 3-tuple
     /// for backward compatibility.
+    ///
+    /// ADR 0126 §5.1 (BT-3613): a leading clause recognises a
+    /// `'$beamtalk_wire'`-tagged remote fire-and-forget cast by shape
+    /// (6-tuple headed by that atom, `cast` kind) and hands it to
+    /// `beamtalk_actor:decode_wire_cast/1` — the single place the tag's
+    /// decode/version-check logic lives, shared with
+    /// `beamtalk_actor.erl`'s own `handle_cast/2` (CLAUDE.md "No duplicate
+    /// implementations"). A decoded envelope re-dispatches, by a recursive
+    /// self-call, through the `{'cast', ...}` clause below exactly as if it
+    /// had arrived locally; a decode/version failure has already been
+    /// logged and dropped by the shared helper. The 7-tuple `async`-kind
+    /// wire shape is deliberately not matched here: no compiled `.bt`
+    /// construct reaches the async-with-future protocol at all (see
+    /// `decode_wire_cast/1`'s own doc), so an async-tagged wire cast falls
+    /// through to the ordinary catch-all below exactly like an
+    /// un-wire-tagged one already does today.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_cast(&mut self) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
@@ -1340,6 +1356,39 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
+                            // Wire-tagged remote fire-and-forget cast (ADR 0126
+                            // §5.1) — decode via the shared helper, then
+                            // redispatch or drop.
+                            line(),
+                            "<{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "case call 'beamtalk_actor':'decode_wire_cast'(Msg) of",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "<{'redispatch', WireMsg2}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    "call ",
+                                                    leaf::atom(module_name.clone()),
+                                                    ":'handle_cast'(WireMsg2, State)",
+                                                ]
+                                            ),
+                                            line(),
+                                            "<'noreply'> when 'true' ->",
+                                            nest(INDENT, docvec![line(), "{'noreply', State}",]),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
                             // Fire-and-forget cast with propagated context
                             line(),
                             "<{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->",
@@ -1377,12 +1426,24 @@ impl CoreErlangGenerator {
     /// ADR 0069 Phase 2b: Matches 3-tuple `{Selector, Args, PropCtx}`
     /// to restore propagated context (`OTel` trace context) before dispatch.
     /// Falls back to 2-tuple `{Selector, Args}` for backward compatibility.
+    ///
+    /// ADR 0126 §5.1 (BT-3613): a leading clause recognises a
+    /// `'$beamtalk_wire'`-tagged remote call by shape (6-tuple headed by
+    /// that atom) and hands it to `beamtalk_actor:decode_wire_call/1` —
+    /// the single place the tag's decode/version-check logic lives
+    /// (`beamtalk_actor.erl`'s own `handle_call/3` calls the very same
+    /// function for its hand-written `__methods__` path, CLAUDE.md "No
+    /// duplicate implementations"). A decoded envelope re-dispatches, by a
+    /// recursive self-call, through the 3-tuple clause below exactly as if
+    /// it had arrived locally; a decode/version failure's ready-made reply
+    /// is returned with `State` untouched, without ever reaching
+    /// `safe_dispatch/3`.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_call(&mut self) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
         let dispatch_case = Self::handle_call_dispatch_case(&module_name);
         let doc = docvec![
-            "'handle_call'/3 = fun (Msg, _From, State) ->",
+            "'handle_call'/3 = fun (Msg, From, State) ->",
             nest(
                 INDENT,
                 docvec![
@@ -1391,6 +1452,41 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
+                            // Wire-tagged remote call (ADR 0126 §5.1) — decode via
+                            // the shared helper, then redispatch or reply directly.
+                            line(),
+                            "<{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "case call 'beamtalk_actor':'decode_wire_call'(Msg) of",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "<{'redispatch', WireMsg2}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    "call ",
+                                                    leaf::atom(module_name.clone()),
+                                                    ":'handle_call'(WireMsg2, From, State)",
+                                                ]
+                                            ),
+                                            line(),
+                                            "<{'reply', WireReplyVal}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![line(), "{'reply', WireReplyVal, State}",]
+                                            ),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
                             // 3-tuple with propagated context — restore before dispatch
                             line(),
                             "<{Selector, Args, PropCtx}> when 'true' ->",
@@ -1420,6 +1516,45 @@ impl CoreErlangGenerator {
 
     /// Generates the inner `case safe_dispatch ... end` block for `handle_call`.
     /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
+    ///
+    /// ADR 0126 §5.1/§5.5 (BT-3613): both arms route their payload through
+    /// `beamtalk_actor` helpers shared with the hand-written dispatch path
+    /// rather than re-deriving the same logic in codegen (CLAUDE.md "No
+    /// duplicate implementations") — `encode_reply_for/3` wire-encodes the
+    /// reply when `From` is on another node (a no-op for a local caller,
+    /// so this is byte-identical to before for every existing local-call
+    /// test), and the error arm's `maybe_reclassify_compiled_dispatch_error/2`
+    /// reclassifies a stale-block badfun/undef as `remote_code_mismatch`
+    /// before that same encode step, leaving every other error shape
+    /// untouched.
+    ///
+    /// The success arm branches on `encode_reply_for/3`'s own result rather
+    /// than unconditionally wrapping it as `{'ok', EncodedResult}`: a
+    /// wire-encode failure (e.g. the method returned a `HandleScoped` value
+    /// to a remote caller) makes `encode_reply_for/3` return `{'error',
+    /// EncErr}` instead of the encoded payload, per its own doc ("An encode
+    /// failure never crashes the callee: it replaces the reply with
+    /// `{error, #beamtalk_error{}}` instead"). Wrapping that in `{'ok', ...}`
+    /// would hand the caller `{'ok', {'error', EncErr}}` — which decodes and
+    /// unwraps back to the plain tuple `{'error', EncErr}` as a
+    /// *successful* method return value instead of raising, silently
+    /// breaking ADR 0126 §5.1's documented `not_serialisable` contract.
+    ///
+    /// Branching on `encode_reply_for/3`'s own (untagged) result is
+    /// unsound here, though: that function is a no-op passthrough for a
+    /// local caller, so a method that legitimately returns a raw `Tuple`
+    /// shaped like `{error, X}` (a normal, first-class `BeamTalk` value —
+    /// `stdlib/src/tuple.bt`) would be indistinguishable from a genuine
+    /// encode failure by shape alone. `encode_reply_for_tagged/3` exists
+    /// precisely for this call site: it always outer-tags its result
+    /// `{ok, _}`/`{error, _}` — `ok` for both the remote-encoded-success
+    /// case and the local passthrough case, `error` only for a genuine
+    /// remote encode failure — so matching the outer tag never depends on
+    /// what the payload itself looks like. (The hand-written
+    /// `beamtalk_actor:handle_call/3` keeps using the untagged
+    /// `encode_reply_for/3` unchanged — it never branches on the result,
+    /// it builds the reply's own outer shape itself at each call site, so
+    /// it was never at risk of this ambiguity.)
     fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
@@ -1456,16 +1591,85 @@ impl CoreErlangGenerator {
                             // beamtalk_actor path does this via log_dispatch_complete.
                             line(),
                             "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in",
+                            // wire-encode the reply when the caller is remote
+                            // (no-op locally — see this function's doc), then
+                            // branch on the outer {ok,_}/{error,_} tag
+                            // encode_reply_for_tagged/3 itself always adds —
+                            // never on the payload's own shape.
                             line(),
-                            "{'reply', {'ok', Result}, CleanNewState}",
+                            "case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'error', EncErr}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'error', EncErr}, CleanNewState}",
+                                        ]
+                                    ),
+                                    line(),
+                                    "<{'ok', EncodedResult}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'ok', EncodedResult}, CleanNewState}",
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            line(),
+                            "end",
                         ]
                     ),
-                    // Error case: pass error (now includes stacktrace) opaquely to caller
+                    // Error case: reclassify a stale-block badfun/undef, then
+                    // pass the (possibly reclassified) error opaquely to the
+                    // caller, wire-encoded when remote. Same branch-not-wrap
+                    // reasoning as the success arm above: an encode failure
+                    // here would otherwise double-wrap as
+                    // {'error', {'error', EncErr}} instead of the flat
+                    // {'error', EncErr} shape decode_call_result expects.
+                    // Unlike the success arm, this one stays on the
+                    // untagged encode_reply_for/3, not the _tagged variant
+                    // — both of its branches already converge on the same
+                    // {'reply', {'error', _}, ErrState} outer shape, so
+                    // there's no {'ok', _} vs {'error', _} choice for a
+                    // payload shape collision to corrupt.
                     line(),
                     "<{'error', Error, ErrState}> when 'true' ->",
                     nest(
                         INDENT,
-                        docvec![line(), "{'reply', {'error', Error}, ErrState}",]
+                        docvec![
+                            line(),
+                            "let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in",
+                            line(),
+                            "case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'error', EncErr}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![line(), "{'reply', {'error', EncErr}, ErrState}",]
+                                    ),
+                                    line(),
+                                    "<EncodedError> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'error', EncodedError}, ErrState}",
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            line(),
+                            "end",
+                        ]
                     ),
                 ]
             ),
