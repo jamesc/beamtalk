@@ -326,6 +326,47 @@ mod tests {
         );
     }
 
+    /// Text-substring assertions (the test above) pass regardless of
+    /// whether the validation logic actually *works* — exactly the false
+    /// confidence that let a command-injection bug ship in `launcher.cmd`'s
+    /// first version of this check (an unquoted `%RELEASE_NODE%` piped
+    /// through `findstr`, exploitable via `RELEASE_NODE=x & calc.exe`).
+    /// This test actually executes the generated `launcher.sh` with a
+    /// malicious `RELEASE_NODE` and asserts it is rejected cleanly —
+    /// POSIX-only: there is no way to execute `.cmd` from this (POSIX)
+    /// suite, which is exactly why the injection bug lived in the
+    /// `.cmd`-specific code path unexercised until manual review.
+    #[test]
+    fn write_launcher_scripts_sh_rejects_malicious_release_node_at_runtime() {
+        let (root, _temp) = write_scripts(true);
+        let sh_path = root.join("bin/orders");
+
+        let output = std::process::Command::new("sh")
+            .arg(sh_path.as_std_path())
+            .arg("foreground")
+            .env("RELEASE_NODE", "x; touch /tmp/beamtalk_launcher_test_pwned")
+            .env("RELEASE_COOKIE", "test-cookie")
+            .output()
+            .expect("failed to execute launcher.sh");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "malicious RELEASE_NODE must be rejected with exit code 2: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("not a valid instance name"),
+            "stderr: {stderr}"
+        );
+        assert!(
+            !std::path::Path::new("/tmp/beamtalk_launcher_test_pwned").exists(),
+            "shell metacharacters in RELEASE_NODE must never be executed"
+        );
+    }
+
     #[test]
     fn write_launcher_scripts_cmd_uses_crlf_line_endings() {
         let (root, _temp) = write_scripts(true);

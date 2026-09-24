@@ -651,7 +651,7 @@ mod tests {
 
         let ws_summary = found.unwrap();
         assert_eq!(ws_summary.project_path, Some(project_path));
-        assert_eq!(ws_summary.kind, WorkspaceKind::Dev);
+        assert_eq!(ws_summary.kind, WorkspaceKind::Workspace);
         assert_eq!(ws_summary.status, WorkspaceStatus::Stopped);
         assert!(ws_summary.port.is_none());
     }

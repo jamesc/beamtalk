@@ -40,10 +40,27 @@ rem Reject a malformed RELEASE_NODE before it ever reaches erl.exe — see
 rem launcher.sh's identical check for why (an invalid -sname otherwise
 rem crashes the whole node with a raw kernel crash dump). Same charset as
 rem the CLI's own dev-workspace-id validation: letters, digits, -, _ only.
+rem
+rem Deliberately NOT `echo(%RELEASE_NODE%| findstr ...`: %VAR% expands
+rem *before* cmd.exe tokenizes operators on the line, so an unquoted value
+rem containing '&'/'|'/'^'/'<'/'>' is interpreted as a shell operator at
+rem the moment this very check runs — command injection in the check meant
+rem to reject unsafe values (e.g. `RELEASE_NODE=x & calc.exe` runs
+rem calc.exe). Quoting the expansion narrows but does not close this (an
+rem embedded '"' still breaks out). Delayed expansion (`!VAR!`) is safe
+rem here instead: it substitutes *after* the line has already been parsed,
+rem so special characters in the value become inert literal text, never
+rem new operators — this is why `setlocal enabledelayedexpansion` is set
+rem at the top of this file. The character-class check itself uses only
+rem `set`/`for` substitution, never piping the raw value through a spawned
+rem command.
 if defined RELEASE_NODE (
-    echo(%RELEASE_NODE%| findstr /r /v "^[A-Za-z0-9_-]*$" >nul
-    if not errorlevel 1 (
-        echo error: RELEASE_NODE "%RELEASE_NODE%" is not a valid instance name ^(letters, digits, '-', '_' only^) 1>&2
+    set "RN_CHECK=!RELEASE_NODE!"
+    for %%C in (A B C D E F G H I J K L M N O P Q R S T U V W X Y Z a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 - _) do (
+        set "RN_CHECK=!RN_CHECK:%%C=!"
+    )
+    if defined RN_CHECK (
+        echo error: RELEASE_NODE "!RELEASE_NODE!" is not a valid instance name ^(letters, digits, '-', '_' only^) 1>&2
         exit /b 2
     )
 )

@@ -135,7 +135,7 @@ cookie_args() {
 # testing, ADR 0126 §9): start each with a distinct `RELEASE_NODE`
 # (`RELEASE_NODE=symphony1 RELEASE_COOKIE=... bin/symphony foreground`), and
 # target the same one with matching `stop`/`ping`/`rpc`/`remote_console`
-# calls. `beamtalk_workspace_app:env_workspace_config/1` reads the same
+# calls. `beamtalk_workspace_app:release_workspace_id/0` reads the same
 # `RELEASE_NODE` env var for its `workspace_id`, so the REPL port file
 # (`~/.beamtalk/workspaces/<workspace_id>/port`) stays distinct too.
 node_sname() {

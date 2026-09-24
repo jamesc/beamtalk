@@ -303,7 +303,7 @@ pub fn get_or_start_workspace(
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceSummary {
     /// Unique workspace identifier — a hash of the project path for
-    /// [`WorkspaceKind::Dev`], or the release's own name for
+    /// [`WorkspaceKind::Workspace`], or the release's own name for
     /// [`WorkspaceKind::Release`] (ADR 0125 §1.2's `[release] name`,
     /// `generate_sys_config`'s `workspace_id`).
     pub workspace_id: String,
@@ -337,17 +337,22 @@ pub struct WorkspaceSummary {
 /// name-based `attach`/`stop`/`status` flows those files back (those still
 /// need `--port`/`--cookie`, since a release's cookie is deliberately never
 /// persisted to disk — ADR 0125 §1.6).
+/// Named `Workspace`, not `Dev`, so `#[serde(rename_all = "lowercase")]`'s
+/// `--json` output ("workspace") agrees with [`Display`](std::fmt::Display)'s
+/// human-table rendering ("workspace") — a mismatched pair here previously
+/// showed `"kind":"dev"` in JSON next to `workspace` in the table for the
+/// identical row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceKind {
-    Dev,
+    Workspace,
     Release,
 }
 
 impl std::fmt::Display for WorkspaceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Dev => write!(f, "workspace"),
+            Self::Workspace => write!(f, "workspace"),
             Self::Release => write!(f, "release"),
         }
     }
@@ -419,6 +424,18 @@ fn probe_release_node_status(workspace_id: &str) -> (WorkspaceStatus, Option<u16
     // `port`/`nonce`/`bind_addr`) and are never read back from this
     // throwaway `NodeInfo` — a release node has no `node.info` to source
     // real values from.
+    //
+    // `bind_addr: None` (→ `connect_host()`'s 127.0.0.1 default) is a known
+    // gap, not an oversight: the port file
+    // (`beamtalk_repl_server:write_port_file/3`) only ever contains
+    // `PORT\nNONCE`, never the configured `[release] bind` address, so a
+    // release explicitly bound to a specific non-loopback interface would
+    // be probed on the wrong host here and `list` would report it stopped
+    // while it's actually running. Not correctness-critical today —
+    // `attach`/`stop` for release nodes already require an explicit
+    // `--port`/`--host`, so only this `list` status column is affected —
+    // but a real fix would need `bind_addr` threaded into the port file the
+    // way `node.info` carries it for dev workspaces.
     let info = NodeInfo {
         node_name: format!("{workspace_id}@localhost"),
         port,
@@ -476,7 +493,7 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
             summaries.push(WorkspaceSummary {
                 workspace_id,
                 project_path: Some(metadata.project_path),
-                kind: WorkspaceKind::Dev,
+                kind: WorkspaceKind::Workspace,
                 status,
                 port,
                 pid,
