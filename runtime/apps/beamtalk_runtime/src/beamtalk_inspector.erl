@@ -561,9 +561,10 @@ is_collection(Subject) when is_list(Subject) ->
     %% degrade to `#value` instead (ADR 0095 "never raises").
     is_proper_list(Subject);
 is_collection(Subject) when is_map(Subject) ->
-    lists:member(beamtalk_tagged_map:class_of(Subject, 'Dictionary'), [
-        'List', 'Array', 'Set', 'Dictionary', 'Bag'
-    ]);
+    %% 'List' has no map representation (a Beamtalk List is a bare Erlang
+    %% list, handled by the is_list/1 clause above) — the shared helper
+    %% below covers the four builtin *tagged-map* collections.
+    beamtalk_tagged_map:is_builtin_collection(Subject);
 is_collection(_) ->
     false.
 

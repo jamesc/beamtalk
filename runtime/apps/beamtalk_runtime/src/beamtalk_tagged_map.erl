@@ -30,7 +30,7 @@ See also: beamtalk_object For Object base class reflection using tagged maps.
 -export([class_key/0]).
 
 %% Classification
--export([class_of/1, class_of/2, is_tagged/1]).
+-export([class_of/1, class_of/2, is_tagged/1, is_builtin_collection/1]).
 
 %% Internal field management
 -export([internal_fields/0, user_field_keys/1]).
@@ -102,6 +102,32 @@ is_tagged(Map) when is_map(Map) ->
         _ -> maps:is_key('__class_mod__', Map)
     end;
 is_tagged(_) ->
+    false.
+
+-doc """
+Returns `true` for a tagged map (or an untagged map, which defaults to
+`Dictionary` — `beamtalk_primitive:class_of/1`'s own fallback) whose runtime
+class is one of the builtin collection representations (`Array`, `Set`,
+`Dictionary`, `Bag`) — a map whose structural payload (`'data'`, `'elements'`,
+or its own key/value pairs) is the runtime's own, not a genuine user-declared
+`Value`/`Object`/`Actor` instance.
+
+This is the single source of truth for "is this map's structure something a
+generic walker should descend into," shared by `beamtalk_inspector:is_collection/1`
+(display drilling) and `beamtalk_wire:encode/1`/`decode/1` (ADR 0126 §5.1's
+term walk: a builtin collection's contents are walked, an opaque `Object`
+instance is passed as a raw term) — a *representation* distinction, not a
+sendability tier (`beamtalk_shape_migration:field_tier/1`'s concern), so it
+deliberately is not folded into that table.
+
+`'List'` is not a builtin *tagged map* — a Beamtalk `List` is a bare Erlang
+list, so it never reaches this function; callers that also treat bare lists
+as collections (like `is_collection/1`) check `is_list/1` themselves.
+""".
+-spec is_builtin_collection(term()) -> boolean().
+is_builtin_collection(Subject) when is_map(Subject) ->
+    lists:member(class_of(Subject, 'Dictionary'), ['Array', 'Set', 'Dictionary', 'Bag']);
+is_builtin_collection(_) ->
     false.
 
 %%% ============================================================================
