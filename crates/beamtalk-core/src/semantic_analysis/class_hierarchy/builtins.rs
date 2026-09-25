@@ -53,6 +53,8 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
         return_type: None,
         param_types: vec![None; arity],
         doc: None,
+
+        origin: None,
     }
 }
 

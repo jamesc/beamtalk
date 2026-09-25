@@ -59,6 +59,8 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("getValue"),
@@ -72,6 +74,8 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![],

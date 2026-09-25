@@ -2025,7 +2025,8 @@ fn generate_method_list(
             "                MethodInfo {{ selector: {selector}.into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
              is_internal: {internal}, spawns_block: {spawns_block}, \
-             return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr} }},",
+             return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
+             origin: None }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,

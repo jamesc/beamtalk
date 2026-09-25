@@ -752,6 +752,8 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
             return_type: None,
             param_types: vec![Some(DeclaredType::parse("Block(R)"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

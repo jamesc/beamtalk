@@ -63,6 +63,16 @@ pub struct ProtocolInfo {
     pub methods: Vec<ProtocolMethodRequirement>,
     /// Required class method signatures.
     pub class_methods: Vec<ProtocolMethodRequirement>,
+    /// Provided (instance-side) method selectors (ADR 0127 §1, §8) —
+    /// just the selector, not a full requirement, since a provision's
+    /// body is what implements it: nothing checks a using class's
+    /// signature against these the way [`Self::methods`] does. A
+    /// protocol's *type* is required ∪ provided (§8, decided), so this
+    /// set — via [`Self::all_conformance_selectors`] — joins `methods` in
+    /// every conformance check; `Protocol requiredMethods:` keeps
+    /// answering only `methods`, unaffected. Class-side provisions are
+    /// post-v1 (§9), so there is no `class_provided_selectors` counterpart.
+    pub provided_selectors: Vec<EcoString>,
     /// Source span of the protocol definition (for diagnostics).
     pub span: Span,
 }
@@ -99,6 +109,11 @@ impl ProtocolInfo {
             extending: def.extending.as_ref().map(|id| id.name.clone()),
             methods,
             class_methods,
+            provided_selectors: def
+                .provided_methods
+                .iter()
+                .map(|m| m.selector.name())
+                .collect(),
             span: def.span,
         }
     }
@@ -114,6 +129,67 @@ impl ProtocolInfo {
         let mut selectors: Vec<&EcoString> = self.methods.iter().map(|m| &m.selector).collect();
         let mut visited = std::collections::HashSet::new();
         self.collect_parent_selectors(registry, &mut selectors, &mut visited);
+        selectors
+    }
+
+    /// Returns all provided selectors, including those inherited from
+    /// extended protocols (ADR 0127 §5, "`extending:` a protocol with
+    /// provisions" — `Q extending: P`, P's provisions are part of Q's type
+    /// too, though they flatten only into a class that `uses: P` directly,
+    /// per §1's "one protocol using another is post-v1").
+    #[must_use]
+    pub fn all_provided_selectors<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+    ) -> Vec<&'a EcoString> {
+        let mut selectors: Vec<&EcoString> = self.provided_selectors.iter().collect();
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(self.name.clone());
+        self.collect_parent_provided_selectors(registry, &mut selectors, &mut visited);
+        selectors
+    }
+
+    /// Recursively collects provided selectors from parent protocols, with
+    /// cycle detection — the provided-selector mirror of
+    /// [`Self::collect_parent_selectors`].
+    fn collect_parent_provided_selectors<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+        selectors: &mut Vec<&'a EcoString>,
+        visited: &mut std::collections::HashSet<EcoString>,
+    ) {
+        if let Some(ref parent_name) = self.extending {
+            if !visited.insert(parent_name.clone()) {
+                return; // Cycle detected — stop recursion
+            }
+            if let Some(parent) = registry.get(parent_name) {
+                for sel in &parent.provided_selectors {
+                    if !selectors.contains(&sel) {
+                        selectors.push(sel);
+                    }
+                }
+                parent.collect_parent_provided_selectors(registry, selectors, visited);
+            }
+        }
+    }
+
+    /// Returns the protocol's full *type* — required ∪ provided selectors,
+    /// both transitively through `extending:` (ADR 0127 §8, decided). This
+    /// is the set every conformance check (`conformsTo:`, `:: T`
+    /// annotations, intersections and bounds) uses; `Protocol
+    /// requiredMethods:` and [`Self::all_required_selectors`] keep
+    /// answering only the required half.
+    #[must_use]
+    pub fn all_conformance_selectors<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+    ) -> Vec<&'a EcoString> {
+        let mut selectors = self.all_required_selectors(registry);
+        for sel in self.all_provided_selectors(registry) {
+            if !selectors.contains(&sel) {
+                selectors.push(sel);
+            }
+        }
         selectors
     }
 
@@ -461,10 +537,16 @@ impl ProtocolRegistry {
             return Ok(());
         }
 
-        let required = protocol.all_required_selectors(self);
+        // ADR 0127 §8 (decided): a protocol's type is required ∪ provided,
+        // so conformance needs every provided selector too, not just the
+        // required ones — a class that `uses:` the protocol already has
+        // them after flattening, and a structural conformer that skips one
+        // is exactly the case decision 2 turns into a warning here instead
+        // of a silent `does_not_understand` at the call site.
+        let conformance_selectors = protocol.all_conformance_selectors(self);
         let mut missing = Vec::new();
 
-        for selector in required {
+        for selector in conformance_selectors {
             if !hierarchy.resolves_selector(class_name, selector) {
                 missing.push(selector.clone());
             }
@@ -540,8 +622,9 @@ impl ProtocolRegistry {
             return Ok(());
         }
 
+        // ADR 0127 §8: required ∪ provided, same as `check_conformance_to_protocol`.
         let mut missing = Vec::new();
-        for selector in protocol.all_required_selectors(self) {
+        for selector in protocol.all_conformance_selectors(self) {
             if !hierarchy.resolves_class_selector(class_name, selector)
                 && !hierarchy.resolves_selector("Metaclass", selector)
             {
@@ -752,6 +835,44 @@ mod tests {
                 .collect(),
             span(),
         )
+    }
+
+    /// Builds a trivial provided method (ADR 0127 §1) for a `ProtocolInfo`
+    /// conformance test — the body's content never matters at this level,
+    /// only that the selector lives in `provided_methods` rather than
+    /// `method_signatures`.
+    fn make_provided_method(sel: &str, arity: usize) -> MethodDefinition {
+        let selector = if arity == 0 {
+            MessageSelector::Unary(sel.into())
+        } else if sel.contains(':') {
+            let parts: Vec<&str> = sel.split(':').filter(|s| !s.is_empty()).collect();
+            MessageSelector::Keyword(
+                parts
+                    .into_iter()
+                    .map(|p| KeywordPart::new(format!("{p}:"), span()))
+                    .collect(),
+            )
+        } else {
+            MessageSelector::Binary(sel.into())
+        };
+        MethodDefinition {
+            selector,
+            parameters: (0..arity)
+                .map(|i| ParameterDefinition::new(ident(&format!("arg{i}"))))
+                .collect(),
+            body: vec![ExpressionStatement::bare(
+                crate::ast::Expression::Identifier(ident("self")),
+            )],
+            return_type: None,
+            is_sealed: false,
+            is_internal: false,
+            is_class_method: false,
+            kind: MethodKind::Primary,
+            expect: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
     }
 
     // ---- Basic Registration Tests ----
@@ -970,6 +1091,112 @@ mod tests {
     }
 
     #[test]
+    fn conformance_requires_provided_selectors_too_for_a_structural_conformer() {
+        // ADR 0127 §8 (decided): a protocol's type is required ∪ provided.
+        // A class that implements only the required `<` — not the provided
+        // `max:` — no longer structurally conforms to `Comparable`.
+        let mut comparable = make_protocol("Comparable", vec![("<", 1, Some("Boolean"))]);
+        comparable.provided_methods = vec![make_provided_method("max:", 1)];
+
+        let module = Module {
+            classes: vec![make_class("PartialComparable", "Object", vec!["<"])],
+            protocols: vec![comparable],
+            ..empty_module()
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_conformance("PartialComparable", "Comparable", &hierarchy);
+        assert!(
+            result.is_err(),
+            "a structural conformer missing a provided selector must not conform"
+        );
+        assert!(result.unwrap_err().contains(&EcoString::from("max:")));
+    }
+
+    #[test]
+    fn conformance_holds_once_uses_flattens_the_provision_in() {
+        // A class that `uses:` the trait conforms once BT-3588's flattening
+        // pass has copied the provided `max:` into its own body — proving
+        // `trait_expansion::expand_module`'s output and this module's
+        // required ∪ provided conformance rule (§8) agree with each other.
+        let source = "Protocol define: Comparable
+  < other :: Self -> Boolean
+  max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]
+
+Value subclass: Version
+  uses: Comparable
+  field: major :: Integer = 0
+
+  < other :: Version -> Boolean => self.major < other major";
+
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (mut module, diagnostics) = crate::source_analysis::parse(tokens);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+        let (expansion_diags, _origins) =
+            crate::semantic_analysis::trait_expansion::expand_module(&mut module);
+        assert!(expansion_diags.is_empty(), "{expansion_diags:?}");
+
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_conformance("Version", "Comparable", &hierarchy);
+        assert!(
+            result.is_ok(),
+            "Version uses Comparable, so max: is flattened in: {result:?}"
+        );
+    }
+
+    #[test]
+    fn extending_a_protocol_with_provisions_widens_the_childs_conformance_type() {
+        // ADR 0127 §5, §8: `Sortable extending: Comparable`, where
+        // `Comparable` has a provision — `Comparable`'s provided selectors
+        // are part of `Sortable`'s own required ∪ provided type too.
+        let mut comparable = make_protocol("Comparable", vec![("<", 1, Some("Boolean"))]);
+        comparable.provided_methods = vec![make_provided_method("max:", 1)];
+        let sortable =
+            make_extending_protocol("Sortable", "Comparable", vec![("sortKey", 0, None)]);
+
+        let module = Module {
+            protocols: vec![comparable, sortable],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy);
+        assert!(diags.is_empty());
+
+        let sortable_info = registry.get("Sortable").unwrap();
+        let conformance = sortable_info.all_conformance_selectors(&registry);
+        let names: Vec<&str> = conformance.iter().map(|s| s.as_str()).collect();
+        assert!(names.contains(&"sortKey"), "{names:?}");
+        assert!(names.contains(&"<"), "{names:?}");
+        assert!(
+            names.contains(&"max:"),
+            "Comparable's provided max: must be part of Sortable's type too: {names:?}"
+        );
+
+        // `Protocol requiredMethods:` (`all_required_selectors`) must keep
+        // answering only the *required* half — unaffected by this change.
+        let required: Vec<&str> = sortable_info
+            .all_required_selectors(&registry)
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        assert!(required.contains(&"sortKey"));
+        assert!(required.contains(&"<"));
+        assert!(
+            !required.contains(&"max:"),
+            "requiredMethods: must not include a provided selector: {required:?}"
+        );
+    }
+
+    #[test]
     fn conformance_through_inheritance() {
         // SubClass inherits from MyBase which has asString
         let module = Module {
@@ -1135,6 +1362,7 @@ mod tests {
                     return_type: None,
                     param_types: vec![],
                     doc: None,
+                    origin: None,
                 })
                 .collect(),
             class_variables: vec![],
@@ -1212,6 +1440,7 @@ mod tests {
                     return_type: None,
                     param_types: vec![],
                     doc: None,
+                    origin: None,
                 }],
                 class_methods: vec![],
                 class_variables: vec![],
@@ -1378,6 +1607,8 @@ mod tests {
                 param_types: vec![],
             }],
             span: span(),
+
+            provided_selectors: vec![],
         };
         registry.register_test_protocol(parent_info);
 
@@ -1395,6 +1626,8 @@ mod tests {
                 param_types: vec![None],
             }],
             span: span(),
+
+            provided_selectors: vec![],
         };
         registry.register_test_protocol(child_info);
 
@@ -1420,6 +1653,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             span: span(),
+
+            provided_selectors: vec![],
         };
 
         let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
@@ -1442,6 +1677,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             span: span(),
+
+            provided_selectors: vec![],
         };
 
         let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);
@@ -1568,6 +1805,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             span: span(),
+
+            provided_selectors: vec![],
         };
 
         let diags = registry.add_pre_loaded(vec![protocol], &hierarchy);

@@ -43,6 +43,7 @@ pub mod return_type_writeback;
 pub(crate) mod scope;
 pub(crate) mod string_utils;
 pub mod supervisor_kind_writeback;
+pub mod trait_expansion;
 pub mod type_checker;
 // `pub`, not `pub(crate)`: `check_effect_free_statements` is used by the
 // standalone `beamtalk-lint` crate; the rest of this module stays
@@ -531,6 +532,37 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
 
     let mut result = AnalysisResult::new();
 
+    // Phase -1: Trait flattening (ADR 0127 §3, BT-3588) — expand every
+    // `uses:` line into its class's own body *before* anything else sees
+    // the module, exactly where the ADR places it ("Expansion … runs
+    // before `ClassHierarchy` is built"). A module with no `uses:` lines
+    // anywhere is untouched by `expand_module` and costs nothing beyond the
+    // one `any()` scan, so this runs unconditionally rather than gating on
+    // a knob the caller would have to remember to set.
+    //
+    // This flattens a *clone*, local to this function — `module` stays a
+    // `&Module` the caller owns and reuses for codegen afterward
+    // (`lower_module_for_codegen`/`generate_module`), which this function
+    // has no way to mutate through a shared reference. So the flattened
+    // methods reach every consumer of `AnalysisResult` below (diagnostics,
+    // `class_hierarchy`, `protocol_registry`, `type_map`, …) but not yet the
+    // caller's own AST — see `trait_expansion`'s module doc ("Codegen does
+    // not see this module yet") for the full boundary and BT-3590, which
+    // owns wiring the flattened module through to codegen.
+    let expanded_module_storage;
+    let trait_origins;
+    let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
+        let mut owned = module.clone();
+        let (expansion_diags, origins) = trait_expansion::expand_module(&mut owned);
+        result.diagnostics.extend(expansion_diags);
+        trait_origins = origins;
+        expanded_module_storage = owned;
+        &expanded_module_storage
+    } else {
+        trait_origins = trait_expansion::OriginMap::new();
+        module
+    };
+
     // Compute pre-codegen semantic facts in the same pass as the rest of
     // analysis, on the same (pre-writeback) module AST that codegen's own
     // `compute_semantic_facts(module)` call would otherwise re-derive. A pure
@@ -545,6 +577,10 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // build_with_options is infallible; propagate any diagnostics it produced
     result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
     result.diagnostics.extend(hierarchy_diags);
+    // `MethodInfo::origin` can only be stamped once `ClassHierarchy` exists
+    // (ADR 0127 §3 — see `trait_expansion`'s module doc for why the pass
+    // above can't do this itself).
+    trait_expansion::apply_origins(&mut result.class_hierarchy, &trait_origins);
 
     // Record how complete the injected cross-file knowledge is so the
     // receiver-knowledge classifier can consult it (ADR 0100 Rule 2).

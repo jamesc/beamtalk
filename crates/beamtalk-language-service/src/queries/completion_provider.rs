@@ -2667,6 +2667,8 @@ mod tests {
                         return_type: None,
                         param_types: vec![],
                         doc: None,
+
+                        origin: None,
                     },
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
@@ -2679,6 +2681,8 @@ mod tests {
                         return_type: None,
                         param_types: vec![],
                         doc: None,
+
+                        origin: None,
                     },
                 ],
                 class_methods: vec![],
@@ -2812,6 +2816,8 @@ mod tests {
                         return_type: None,
                         param_types: vec![],
                         doc: None,
+
+                        origin: None,
                     },
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
@@ -2824,6 +2830,8 @@ mod tests {
                         return_type: None,
                         param_types: vec![],
                         doc: None,
+
+                        origin: None,
                     },
                 ],
                 class_methods: vec![],

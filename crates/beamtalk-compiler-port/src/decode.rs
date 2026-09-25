@@ -295,6 +295,11 @@ pub(crate) fn parse_method_infos_from_map(
                 return_type,
                 param_types,
                 doc: None,
+                // `__beamtalk_meta` doesn't carry trait provenance over the
+                // wire yet (ADR 0127 §10a is BT-3591); a class reloaded from
+                // live BEAM metadata loses its flattened methods' `origin`
+                // until then.
+                origin: None,
             })
         })
         .collect()
@@ -548,6 +553,11 @@ pub(crate) fn parse_protocol_info_from_meta_term(
         extending,
         methods,
         class_methods,
+        // No wire representation for provided selectors on this channel yet
+        // (ADR 0127 §10a is BT-3591) — a REPL-loaded protocol's provisions
+        // are invisible to conformance checks until then, same gap as
+        // `decode.rs`'s `parse_method_infos_from_map` for `MethodInfo::origin`.
+        provided_selectors: vec![],
         // Synthetic entry — there is no source span in the live image to
         // point diagnostics at (mirrors ClassInfo's BEAM-metadata-derived
         // entries, which carry no span either).

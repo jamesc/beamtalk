@@ -48,6 +48,8 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
             // Untyped parameter: the sendability check must fire regardless.
             param_types: vec![None],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

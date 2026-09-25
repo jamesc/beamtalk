@@ -1897,6 +1897,8 @@ mod tests {
                 return_type: None,
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -1956,6 +1958,8 @@ mod tests {
                 return_type: None,
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             }],
             class_methods: vec![],
             class_variables: vec![],

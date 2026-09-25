@@ -42,6 +42,8 @@ fn union_arg_all_compatible_no_warning() {
             return_type: Some(DeclaredType::parse("Number")),
             param_types: vec![Some(DeclaredType::parse("Number"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -103,6 +105,8 @@ fn union_arg_none_compatible_warns() {
             return_type: Some(DeclaredType::parse("Integer")),
             param_types: vec![Some(DeclaredType::parse("Integer"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -170,6 +174,8 @@ fn union_arg_mixed_compatible_hints() {
             return_type: Some(DeclaredType::parse("Number")),
             param_types: vec![Some(DeclaredType::parse("Number"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -237,6 +243,8 @@ fn union_arg_dynamic_still_skips() {
             return_type: Some(DeclaredType::parse("Integer")),
             param_types: vec![Some(DeclaredType::parse("Integer"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -334,6 +342,8 @@ fn test_hierarchy_with_class_literal_arg(
                 return_type: Some(DeclaredType::parse("Boolean")),
                 param_types: vec![Some(DeclaredType::parse(param_type))],
                 doc: None,
+
+                origin: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -787,6 +797,8 @@ fn union_protocol_mixed_conformance_hints() {
             return_type: None,
             param_types: vec![],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -1054,6 +1066,8 @@ fn union_type_param_bounds_mixed_conformance_hints() {
                 return_type: None,
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -1845,6 +1859,8 @@ fn union_arg_parameterized_member_mismatch_warns() {
             return_type: None,
             param_types: vec![Some(DeclaredType::parse("Array(Integer)"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -1924,6 +1940,8 @@ fn union_arg_parameterized_members_all_match_no_warning() {
             return_type: None,
             param_types: vec![Some(DeclaredType::parse("Array(Number)"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

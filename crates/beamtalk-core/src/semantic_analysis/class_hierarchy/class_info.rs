@@ -78,6 +78,27 @@ pub struct MethodInfo {
     /// Populated for compiler-synthesized methods and stdlib methods with `///` doc comments;
     /// `None` for user-written methods without doc comments.
     pub doc: Option<EcoString>,
+    /// The protocol this method was flattened from (ADR 0127 §3), or `None`
+    /// for a method the class wrote itself (including one that overrides a
+    /// dropped provision, §3 step 4 — "class wins").
+    ///
+    /// `defined_in` deliberately keeps meaning "the class whose module holds
+    /// the code" (the *using* class after flattening), since every existing
+    /// consumer of `defined_in` reads it as a class name (inherited
+    /// type-parameter substitution, method-local type-parameter inference,
+    /// internal-visibility package lookup, DNU-override detection, the LSP's
+    /// `find_defining_class`) — see `trait_expansion`'s module doc. `origin`
+    /// carries the trait provenance those consumers must not see, for
+    /// reflection, diagnostics and tooling instead (ADR 0127 §12:
+    /// `CompiledMethod origin`, xref `provenance := protocol`).
+    ///
+    /// Set by `semantic_analysis::trait_expansion::apply_origins` after
+    /// `ClassHierarchy::build` — the pass that flattens provisions into
+    /// `ClassDefinition.methods` runs before the hierarchy exists, so it
+    /// cannot stamp `MethodInfo` directly; it instead returns an
+    /// `(class, selector) -> protocol` map that `analyse_full` applies once
+    /// the hierarchy is built.
+    pub origin: Option<EcoString>,
 }
 
 impl MethodInfo {
@@ -320,6 +341,10 @@ impl ClassInfo {
                     .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
                     .collect(),
                 doc: m.doc_comment.clone().map(Into::into),
+                // Stamped after `ClassHierarchy::build` by
+                // `trait_expansion::apply_origins` (ADR 0127) — see
+                // `MethodInfo::origin`'s doc for why it can't be set here.
+                origin: None,
             })
             .collect();
 
@@ -341,6 +366,9 @@ impl ClassInfo {
                     .map(|p| p.type_annotation.as_ref().map(DeclaredType::from))
                     .collect(),
                 doc: m.doc_comment.clone().map(Into::into),
+                // Class-side provisions are post-v1 (ADR 0127 §9); class
+                // methods are never flattened in v1, so this is always `None`.
+                origin: None,
             })
             .collect();
 

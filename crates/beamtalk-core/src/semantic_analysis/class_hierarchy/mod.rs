@@ -214,6 +214,7 @@ impl ClassHierarchy {
                         format!("Return the required method selectors for the `{name}` protocol.")
                             .into(),
                     ),
+                    origin: None,
                 },
                 MethodInfo {
                     selector: "conformingClasses".into(),
@@ -228,6 +229,7 @@ impl ClassHierarchy {
                     doc: Some(
                         format!("Return the classes conforming to the `{name}` protocol.").into(),
                     ),
+                    origin: None,
                 },
             ];
             self.classes.insert(
@@ -635,6 +637,7 @@ impl ClassHierarchy {
                     .map(|p| p.as_deref().map(DeclaredType::parse))
                     .collect(),
                 doc: None,
+                origin: None,
             };
             if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
                 let methods = match key.side {

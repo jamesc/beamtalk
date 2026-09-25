@@ -321,6 +321,8 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             return_type: None,
             param_types: vec![None, None],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![MethodInfo {
             selector: eco_string("spawn:"),
@@ -333,6 +335,8 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             return_type: Some(DeclaredType::parse("String")),
             param_types: vec![Some(DeclaredType::parse("Block(String, String)"))],
             doc: None,
+
+            origin: None,
         }],
         class_variables: vec![],
         type_params: vec![],
@@ -369,6 +373,8 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             return_type: Some(DeclaredType::parse("Integer")),
             param_types: vec![Some(DeclaredType::parse("Block(Integer, Integer)"))],
             doc: None,
+
+            origin: None,
         }],
         class_variables: vec![],
         type_params: vec![],

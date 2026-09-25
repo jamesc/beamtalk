@@ -62,6 +62,8 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
             return_type: Some(DeclaredType::parse("List")),
             param_types: vec![Some(DeclaredType::parse("String"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -108,6 +110,8 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
             return_type: Some(DeclaredType::parse("TimeoutProxy")),
             param_types: vec![Some(DeclaredType::parse("Integer"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -291,6 +295,8 @@ fn logger_class(
             return_type: Some(DeclaredType::parse("Nil")),
             param_types: vec![Some(DeclaredType::parse("String"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

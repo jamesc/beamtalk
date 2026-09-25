@@ -10,6 +10,7 @@ use super::common::*;
 
 /// Build `GenCollection(E)` with method `first` returning `E`, `size` returning `Integer`.
 /// Build `GenArray(E)` extends `GenCollection(E)` with `superclass_type_args` mapping E to E.
+#[allow(clippy::too_many_lines)] // data-literal-heavy fixture setup, not logic
 fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo, SuperclassTypeArg};
 
@@ -43,6 +44,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("E")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("size"),
@@ -55,6 +58,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("select:"),
@@ -67,6 +72,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 return_type: Some(DeclaredType::SelfType),
                 param_types: vec![Some(DeclaredType::parse("Block(E, Boolean)"))],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![],
@@ -105,6 +112,8 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
             return_type: Some(DeclaredType::SelfType),
             param_types: vec![Some(DeclaredType::parse("E"))],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -655,6 +664,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             return_type: Some(DeclaredType::parse("T")),
             param_types: vec![],
             doc: None,
+
+            origin: None,
         }],
         class_methods: vec![MethodInfo {
             selector: eco_string("wrap:"),
@@ -667,6 +678,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             return_type: Some(DeclaredType::SelfType),
             param_types: vec![Some(DeclaredType::parse("T"))],
             doc: None,
+
+            origin: None,
         }],
         class_variables: vec![],
         type_params: vec![eco_string("T")],
@@ -709,6 +722,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 return_type: Some(DeclaredType::parse("T")),
                 param_types: vec![],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("value:"),
@@ -721,6 +736,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 return_type: None,
                 param_types: vec![Some(DeclaredType::parse("T"))],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![],
@@ -788,6 +805,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![Some(DeclaredType::parse("SealedBox(Printable)"))],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: eco_string("setActor:"),
@@ -800,6 +819,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 return_type: None,
                 param_types: vec![Some(DeclaredType::parse("ActorBox(Printable)"))],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![],
@@ -826,6 +847,8 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         }],
         class_methods: vec![],
         span: span(),
+
+        provided_selectors: vec![],
     };
     registry.register_test_protocol(printable);
 
@@ -1224,6 +1247,8 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
                 return_type: Some(DeclaredType::parse("String")),
                 param_types: vec![Some(DeclaredType::parse("String"))],
                 doc: None,
+
+                origin: None,
             },
             MethodInfo {
                 selector: "buildHeaders:".into(),
@@ -1236,6 +1261,8 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
                 return_type: Some(DeclaredType::parse("Dictionary")),
                 param_types: vec![None],
                 doc: None,
+
+                origin: None,
             },
         ],
         class_methods: vec![MethodInfo {
@@ -1249,6 +1276,8 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
             return_type: Some(DeclaredType::parse("HttpClient")),
             param_types: vec![],
             doc: None,
+
+            origin: None,
         }],
         class_variables: vec![],
         type_params: vec![],

@@ -184,6 +184,8 @@ mod tests {
             return_type: None,
             param_types: vec![None, None],
             doc: None,
+
+            origin: None,
         }
     }
 

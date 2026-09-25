@@ -479,16 +479,11 @@ impl Parser {
         class_def.handle_scope = handle_scope;
         class_def.shape_version = shape_version;
         // ADR 0127: composing a trait's provisions into a class's own body
-        // (flattening) is BT-3588's semantic-analysis pass, not implemented
-        // yet. A class that names a `uses:` line still parses and
-        // round-trips, but gets a single placeholder error here so nothing
-        // downstream silently treats it as flattened.
-        if let Some(first_use) = uses.first() {
-            self.diagnostics.push(Diagnostic::error(
-                "protocol composition is not yet supported",
-                first_use.span,
-            ));
-        }
+        // (flattening) is `semantic_analysis::trait_expansion` (BT-3588),
+        // not a parser concern — this node only carries the syntax. The
+        // parser used to attach a blanket "not yet supported" placeholder
+        // error to any `uses:` line here; that placeholder is gone now that
+        // the pass exists.
         class_def.uses = uses;
         class_def
     }

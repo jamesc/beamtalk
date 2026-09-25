@@ -917,6 +917,8 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             span: test_span(),
+
+            provided_selectors: vec![],
         });
         let mut diags = Vec::new();
 
