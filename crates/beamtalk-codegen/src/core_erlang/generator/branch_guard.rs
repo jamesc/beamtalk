@@ -51,6 +51,7 @@ pub(in crate::core_erlang) struct BranchContextGuard<'a> {
     saved_class_var_version: usize,
     saved_self_version: usize,
     saved_threading_families: ThreadedFamilies,
+    saved_active_branch_frame: u32,
 }
 
 impl Drop for BranchContextGuard<'_> {
@@ -63,6 +64,7 @@ impl Drop for BranchContextGuard<'_> {
         self.generator.loop_mode.threading_families =
             std::mem::take(&mut self.saved_threading_families);
         // class_var_mutated intentionally NOT restored — sticky.
+        self.generator.active_branch_frame = self.saved_active_branch_frame;
     }
 }
 
@@ -76,6 +78,7 @@ impl CoreErlangGenerator {
         let saved_class_var_version = self.class_var_version();
         let saved_self_version = self.self_version();
         let saved_threading_families = std::mem::take(&mut self.loop_mode.threading_families);
+        let saved_active_branch_frame = self.active_branch_frame;
         self.set_state_version(0);
         self.in_loop_body = true;
         // reset-on-entry, like `state_version` — see
@@ -83,10 +86,15 @@ impl CoreErlangGenerator {
         // never inherit an enclosing Letrec loop's families by default.
         // `mem::take` above already reset it to empty.
         // mint a fresh frame identity for this branch context —
-        // see `current_branch_frame`'s doc comment. Never reset/restored
-        // (unlike the version counters above): frame identity must stay
-        // globally unique across the whole module compile.
+        // see `current_branch_frame`'s doc comment. `branch_frame_counter`
+        // itself is never reset/restored (frame identity must stay globally
+        // unique across the whole module compile), but `active_branch_frame`
+        // — the frame `current_branch_frame()` reports as "the one I'm
+        // logically inside right now" — IS saved/restored below (BT-3623):
+        // otherwise a sibling branch that opens and closes here would leave
+        // a later sibling reading this now-closed branch's stale frame.
         self.branch_frame_counter += 1;
+        self.active_branch_frame = self.branch_frame_counter;
         // do NOT reset self_version to 0 here — unlike
         // `state`, a `Self{N}` reference is always a syntactically valid
         // Core Erlang variable (the bare `Self` parameter always exists), so
@@ -105,6 +113,7 @@ impl CoreErlangGenerator {
             saved_class_var_version,
             saved_self_version,
             saved_threading_families,
+            saved_active_branch_frame,
         }
     }
 
