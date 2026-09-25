@@ -866,6 +866,15 @@ init({ClassName, ClassInfo}) ->
     StateVarXref = maps:get(state_var_xref, ClassInfo, []),
     register_state_var_xref(ClassName, StateVarXref),
 
+    %% ADR 0127 §12: Register this class's `uses:` list (declaration order)
+    %% with the protocol registry's users index, the same Meta-then-ClassInfo
+    %% precedence and miss-safe `[]` default as `method_xref`/`state_var_xref`
+    %% above — codegen does not bake `uses` into `__beamtalk_meta`/`ClassInfo`
+    %% yet (ADR 0127 §10a is a later phase), so this call is a no-op for every
+    %% class today, ready for codegen to start populating it.
+    Uses = maps:get(uses, Meta, maps:get(uses, ClassInfo, [])),
+    beamtalk_protocol_registry:register_uses(ClassName, Uses),
+
     %% ADR 0093 §2: Announce ClassLoaded on the system bus *after* the
     %% metadata row is written (line above), so any subscriber that reads the
     %% class hierarchy during dispatch sees a consistent view (announce-after-
@@ -1152,6 +1161,7 @@ handle_call(
     {method, Selector},
     _From,
     #class_state{
+        name = ClassName,
         instance_methods = Methods,
         method_source = Source,
         method_signatures = Signatures,
@@ -1168,7 +1178,14 @@ handle_call(
                     '__source__' => maps:get(Selector, Source, <<"">>),
                     '__signature__' => maps:get(Selector, Signatures, nil),
                     '__method_info__' => MethodInfo,
-                    '__doc__' => maps:get(Selector, MethodDocs, nil)
+                    '__doc__' => maps:get(Selector, MethodDocs, nil),
+                    %% ADR 0127 §12: `CompiledMethod origin` — the protocol
+                    %% this (instance-side) method was flattened from, or nil
+                    %% for a method the class wrote itself. Sourced from
+                    %% `beamtalk_xref`'s `origin` field (ADR 0127 §12:
+                    %% `beamtalk_xref_methods` rows carry `provenance :=
+                    %% protocol, origin`), not a separate store.
+                    '__origin__' => beamtalk_xref:method_origin(ClassName, false, Selector)
                 };
             error ->
                 nil
@@ -1205,6 +1222,7 @@ handle_call(
     {class_method, Selector},
     _From,
     #class_state{
+        name = ClassName,
         superclass = Superclass,
         class_methods = ClassMethods,
         class_method_source = ClassMethodSource,
@@ -1221,7 +1239,14 @@ handle_call(
                     '__source__' => maps:get(Selector, ClassMethodSource, <<"">>),
                     '__signature__' => maps:get(Selector, ClassMethodSigs, nil),
                     '__method_info__' => MethodInfo,
-                    '__doc__' => maps:get(Selector, ClassMethodDocs, nil)
+                    '__doc__' => maps:get(Selector, ClassMethodDocs, nil),
+                    %% ADR 0127 §12: class-side counterpart of the
+                    %% instance-side `'__origin__'` above. v1 has no
+                    %% class-side provided methods (ADR 0127 §13), so this
+                    %% reads nil for every class-side method today — kept
+                    %% for shape parity with the instance-side map and ready
+                    %% for a future class-side trait phase.
+                    '__origin__' => beamtalk_xref:method_origin(ClassName, true, Selector)
                 };
             error ->
                 %% Not found locally — walk superclass chain
@@ -1356,6 +1381,11 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% included) — a plain register (not a refresh_xref-style
             %% purge-then-register) is enough here.
             register_state_var_xref(ClassName, maps:get(state_var_xref, ClassInfo, [])),
+            %% ADR 0127 §12: re-register this class's `uses:` list on hot
+            %% reload — `register_uses/2` itself clears the class's prior
+            %% reverse-index rows first, so a changed `uses:` set never
+            %% leaves stale entries in the users index.
+            beamtalk_protocol_registry:register_uses(ClassName, maps:get(uses, ClassInfo, [])),
             %% ADR 0093 §2: hot redefinition is also a ClassLoaded —
             %% announced from the handle_call reply path after the refreshed
             %% metadata is committed.

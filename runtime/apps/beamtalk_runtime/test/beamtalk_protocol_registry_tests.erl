@@ -792,3 +792,257 @@ invalidate_conforms_cache_before_init_test() ->
         _ ->
             ?assertEqual(ok, beamtalk_protocol_registry:invalidate_conforms_cache())
     end.
+
+%%% ============================================================================
+%%% provided_methods/1 and required ∪ provided conformance (ADR 0127 §8/§12)
+%%% ============================================================================
+
+provided_methods_simple_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'Comparable',
+        required_methods => [#{selector => '<', arity => 1}],
+        provided_methods => [
+            #{selector => 'max:', arity => 1},
+            #{selector => 'min:', arity => 1}
+        ],
+        type_params => [],
+        extending => undefined
+    }),
+    Methods = beamtalk_protocol_registry:provided_methods('Comparable'),
+    ?assert(lists:member('max:', Methods)),
+    ?assert(lists:member('min:', Methods)),
+    ?assertEqual(2, length(Methods)).
+
+provided_methods_defaults_to_empty_test() ->
+    setup(),
+    %% A protocol registered with no `provided_methods` key at all (every
+    %% protocol predating ADR 0127) has no provisions.
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'Printable',
+        required_methods => [#{selector => 'asString', arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    ?assertEqual([], beamtalk_protocol_registry:provided_methods('Printable')).
+
+provided_methods_unknown_protocol_test() ->
+    setup(),
+    ?assertEqual([], beamtalk_protocol_registry:provided_methods('Unknown')).
+
+provided_methods_inherits_via_extending_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BaseTrait',
+        required_methods => [],
+        provided_methods => [#{selector => 'foo', arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'DerivedTrait',
+        required_methods => [],
+        provided_methods => [#{selector => 'bar', arity => 0}],
+        type_params => [],
+        extending => 'BaseTrait'
+    }),
+    Methods = beamtalk_protocol_registry:provided_methods('DerivedTrait'),
+    ?assert(lists:member('foo', Methods)),
+    ?assert(lists:member('bar', Methods)),
+    ?assertEqual(2, length(Methods)).
+
+provided_methods_own_overrides_parent_test() ->
+    setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BaseTrait2',
+        required_methods => [],
+        provided_methods => [#{selector => 'foo', arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'DerivedTrait2',
+        required_methods => [],
+        provided_methods => [#{selector => 'foo', arity => 1}],
+        type_params => [],
+        extending => 'BaseTrait2'
+    }),
+    Methods = beamtalk_protocol_registry:provided_methods('DerivedTrait2'),
+    ?assertEqual(['foo'], Methods).
+
+-doc """
+ADR 0127 §8: a protocol's type is required ∪ provided — a class responding
+to the required selectors but missing a provided one does not conform.
+""".
+conforms_to_requires_provided_methods_test() ->
+    rt_setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3592Trait',
+        required_methods => [#{selector => ping, arity => 0}],
+        provided_methods => [#{selector => pong, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    %% Only implements the required selector, not the provided one.
+    {ok, Pid} = start_class_with_ping('BT3592OnlyRequired'),
+    ?assertNot(beamtalk_protocol_registry:conforms_to('BT3592OnlyRequired', 'BT3592Trait')),
+    stop_class_process(Pid).
+
+conforms_to_true_when_provided_methods_also_satisfied_test() ->
+    rt_setup(),
+    beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3592Trait2',
+        required_methods => [#{selector => ping, arity => 0}],
+        provided_methods => [#{selector => pong, arity => 0}],
+        type_params => [],
+        extending => undefined
+    }),
+    ClassInfo = #{
+        name => 'BT3592BothClass',
+        module => bt3592_both_mod,
+        instance_methods => #{
+            ping => #{block => fun() -> pong end, arity => 0},
+            pong => #{block => fun() -> ping end, arity => 0}
+        }
+    },
+    {ok, Pid} = beamtalk_object_class:start('BT3592BothClass', ClassInfo),
+    ?assert(beamtalk_protocol_registry:conforms_to('BT3592BothClass', 'BT3592Trait2')),
+    stop_class_process(Pid).
+
+%%% ============================================================================
+%%% Users index (ADR 0127 §12): register_uses/2, unregister_uses/1,
+%%% used_protocols/1, users_of/1
+%%% ============================================================================
+
+setup_uses() ->
+    beamtalk_protocol_registry:init(),
+    case ets:info(beamtalk_protocol_uses) of
+        undefined -> ok;
+        _ -> ets:delete_all_objects(beamtalk_protocol_uses)
+    end,
+    case ets:info(beamtalk_protocol_users) of
+        undefined -> ok;
+        _ -> ets:delete_all_objects(beamtalk_protocol_users)
+    end,
+    ok.
+
+register_uses_populates_both_directions_test() ->
+    setup_uses(),
+    ok = beamtalk_protocol_registry:register_uses('DateTime', ['Comparable', 'Describable']),
+    ?assertEqual(
+        ['Comparable', 'Describable'],
+        beamtalk_protocol_registry:used_protocols('DateTime')
+    ),
+    ?assertEqual(['DateTime'], beamtalk_protocol_registry:users_of('Comparable')),
+    ?assertEqual(['DateTime'], beamtalk_protocol_registry:users_of('Describable')).
+
+used_protocols_preserves_declaration_order_test() ->
+    setup_uses(),
+    ok = beamtalk_protocol_registry:register_uses('Money', ['Describable', 'Comparable']),
+    ?assertEqual(
+        ['Describable', 'Comparable'],
+        beamtalk_protocol_registry:used_protocols('Money')
+    ).
+
+used_protocols_unregistered_class_is_empty_test() ->
+    setup_uses(),
+    ?assertEqual([], beamtalk_protocol_registry:used_protocols('NeverRegistered')).
+
+users_of_unused_protocol_is_empty_test() ->
+    setup_uses(),
+    ?assertEqual([], beamtalk_protocol_registry:users_of('NeverUsed')).
+
+users_of_multiple_users_sorted_test() ->
+    setup_uses(),
+    ok = beamtalk_protocol_registry:register_uses('Zeta', ['Comparable']),
+    ok = beamtalk_protocol_registry:register_uses('Alpha', ['Comparable']),
+    ?assertEqual(['Alpha', 'Zeta'], beamtalk_protocol_registry:users_of('Comparable')).
+
+-doc """
+Re-registering a class (hot reload with a changed `uses:` set) must not leave
+stale reverse-index rows behind — `?USERS_TABLE` is a `bag`, so a naive
+insert-only re-register would accumulate duplicates/stale entries.
+""".
+register_uses_reregistration_replaces_not_accumulates_test() ->
+    setup_uses(),
+    ok = beamtalk_protocol_registry:register_uses('DateTime', ['Comparable']),
+    ?assertEqual(['DateTime'], beamtalk_protocol_registry:users_of('Comparable')),
+    %% Reload drops Comparable, picks up Describable instead.
+    ok = beamtalk_protocol_registry:register_uses('DateTime', ['Describable']),
+    ?assertEqual([], beamtalk_protocol_registry:users_of('Comparable')),
+    ?assertEqual(['DateTime'], beamtalk_protocol_registry:users_of('Describable')),
+    ?assertEqual(['Describable'], beamtalk_protocol_registry:used_protocols('DateTime')).
+
+unregister_uses_removes_both_directions_test() ->
+    setup_uses(),
+    ok = beamtalk_protocol_registry:register_uses('DateTime', ['Comparable']),
+    ok = beamtalk_protocol_registry:unregister_uses('DateTime'),
+    ?assertEqual([], beamtalk_protocol_registry:used_protocols('DateTime')),
+    ?assertEqual([], beamtalk_protocol_registry:users_of('Comparable')).
+
+unregister_uses_unregistered_class_is_noop_test() ->
+    setup_uses(),
+    ?assertEqual(ok, beamtalk_protocol_registry:unregister_uses('NeverRegistered')).
+
+unregister_uses_leaves_other_classes_intact_test() ->
+    setup_uses(),
+    ok = beamtalk_protocol_registry:register_uses('DateTime', ['Comparable']),
+    ok = beamtalk_protocol_registry:register_uses('Money', ['Comparable']),
+    ok = beamtalk_protocol_registry:unregister_uses('DateTime'),
+    ?assertEqual(['Money'], beamtalk_protocol_registry:users_of('Comparable')),
+    ?assertEqual(['Comparable'], beamtalk_protocol_registry:used_protocols('Money')).
+
+used_protocols_before_init_test() ->
+    case ets:info(beamtalk_protocol_uses) of
+        undefined ->
+            ?assertEqual([], beamtalk_protocol_registry:used_protocols('Foo')),
+            ?assertEqual([], beamtalk_protocol_registry:users_of('Foo')),
+            beamtalk_protocol_registry:init();
+        _ ->
+            ?assertEqual([], beamtalk_protocol_registry:used_protocols('Nonexistent1973')),
+            ?assertEqual([], beamtalk_protocol_registry:users_of('Nonexistent1974'))
+    end.
+
+-doc """
+End-to-end integration: `beamtalk_object_class:start/2` (not a direct
+`register_uses/2` call) must itself populate the users index from
+`ClassInfo`'s `uses` key. Exercises the actual `beamtalk_object_class:init/1`
+call site this issue added, not just the registry API in isolation above.
+""".
+class_start_registers_uses_from_class_info_test() ->
+    rt_setup(),
+    ClassInfo = #{
+        name => 'BT3592ClassInfoUses',
+        module => bt3592_class_info_uses_mod,
+        instance_methods => #{},
+        uses => ['BT3592UsesFixtureProto']
+    },
+    {ok, Pid} = beamtalk_object_class:start('BT3592ClassInfoUses', ClassInfo),
+    ?assertEqual(
+        ['BT3592UsesFixtureProto'],
+        beamtalk_protocol_registry:used_protocols('BT3592ClassInfoUses')
+    ),
+    ?assertEqual(
+        ['BT3592ClassInfoUses'],
+        beamtalk_protocol_registry:users_of('BT3592UsesFixtureProto')
+    ),
+    stop_class_process(Pid),
+    %% Class removal must also purge the users index — exercises
+    %% beamtalk_class_lifecycle:purge_uses_index/1's wiring end to end.
+    ok = beamtalk_class_lifecycle:class_removed(
+        'BT3592ClassInfoUses', bt3592_class_info_uses_mod
+    ),
+    ?assertEqual([], beamtalk_protocol_registry:used_protocols('BT3592ClassInfoUses')),
+    ?assertEqual([], beamtalk_protocol_registry:users_of('BT3592UsesFixtureProto')).
+
+-doc """
+A class with no `uses` key in `ClassInfo` (every class compiled before ADR
+0127 §10a codegen support, and every hand-built `ClassInfo` in this test
+file) registers an empty uses list rather than crashing or leaving a stale
+entry — the miss-safe default `beamtalk_object_class:init/1` applies.
+""".
+class_start_without_uses_key_registers_empty_test() ->
+    rt_setup(),
+    {ok, Pid} = start_class_with_ping('BT3592ClassInfoNoUses'),
+    ?assertEqual([], beamtalk_protocol_registry:used_protocols('BT3592ClassInfoNoUses')),
+    stop_class_process(Pid).

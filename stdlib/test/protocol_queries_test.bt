@@ -93,3 +93,58 @@ TestCase subclass: ProtocolQueriesTest
     // Protocol objects appear in allClasses (returned as class objects)
     all := (Erlang beamtalk_interface) allClasses
     self assert: (all includes: Displayable)
+
+  // --- ADR 0127 §12: trait reflection (BT-3592) ---
+  //
+  // No stdlib protocol has provided methods yet (traits are ADR 0127
+  // infrastructure; converting stdlib protocols to traits is future work),
+  // and no class's `uses:` list reaches the runtime yet (ADR 0127 §10a —
+  // codegen does not bake `uses` into class metadata). These tests exercise
+  // the reflection API's plumbing and its empty/absent defaults, which is
+  // everything observable without a real `uses:`-composing class.
+  testProvidedMethodsUnknownProtocolIsEmpty =>
+    methods := Protocol providedMethods: #NotARealProtocol
+    self assert: methods size equals: 0
+
+  testProvidedMethodsOfRequiredOnlyProtocolIsEmpty =>
+    // Displayable has only required methods (asString, printString) — no
+    // provisions, so it has nothing to flatten into a `uses:` line.
+    methods := Protocol providedMethods: #Displayable
+    self assert: methods size equals: 0
+
+  testUsersOfUnknownProtocolIsEmpty =>
+    users := Protocol usersOf: #NotARealProtocol
+    self assert: users size equals: 0
+
+  testUsersOfUnusedProtocolIsEmpty =>
+    // Nothing declares `uses: Displayable` (no class does yet).
+    users := Protocol usersOf: #Displayable
+    self assert: users size equals: 0
+
+  testSystemNavigationUsersOfSharesProtocolImplementation =>
+    // No duplicate implementation (CLAUDE.md): SystemNavigation delegates
+    // to Protocol usersOf: rather than re-querying the registry.
+    fromProtocol := Protocol usersOf: #Displayable
+    fromNavigation := SystemNavigation default usersOf: #Displayable
+    self assert: fromNavigation size equals: fromProtocol size
+
+  testIntegerUsedProtocolsIsEmpty =>
+    // Integer conforms to Displayable/HasSize structurally, but never
+    // declares `uses:` — usedProtocols is distinct from structural
+    // conformance (`protocols`).
+    self assert: Integer usedProtocols size equals: 0
+
+  testIntegerAllUsedProtocolsIsEmpty =>
+    self assert: Integer allUsedProtocols size equals: 0
+
+  testIntegerDoesNotUseDisplayableProtocol =>
+    // `usesProtocol:` is about `uses:` composition, not structural
+    // conformance — Integer conformsTo: #Displayable, but does not
+    // usesProtocol: #Displayable.
+    self assert: (Integer conformsTo: #Displayable)
+    self deny: (Integer usesProtocol: #Displayable)
+
+  testCompiledMethodOriginNilForOrdinaryMethod =>
+    // (Integer >> #+) was written directly in Integer's own body, not
+    // flattened from a trait — origin is nil.
+    self assert: (Integer >> #'+') origin equals: nil

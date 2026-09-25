@@ -103,6 +103,7 @@ purge_class_registries(ClassName) ->
     purge_extensions(ClassName),
     purge_compiler_cache(ClassName),
     purge_workspace_class_source(ClassName),
+    purge_uses_index(ClassName),
     ok.
 
 -doc """
@@ -137,6 +138,18 @@ module) from `beamtalk_protocol_registry`.
 -spec purge_protocol(atom()) -> ok.
 purge_protocol(Module) ->
     beamtalk_protocol_registry:unregister_protocol(Module).
+
+-doc """
+Remove `ClassName` from the ADR 0127 §12 users index (`beamtalk_protocol_
+registry`'s `?USES_TABLE`/`?USERS_TABLE`) — its own `uses:` row and every
+reverse-index row naming it. Keyed by class name (like `purge_xref/1` and
+`purge_extensions/1` above), unlike `purge_protocol/1`'s module-keyed purge of
+protocols the class itself *defined*; a class is a *user* of protocols
+(recorded by name), not their definer.
+""".
+-spec purge_uses_index(atom()) -> ok.
+purge_uses_index(ClassName) ->
+    beamtalk_protocol_registry:unregister_uses(ClassName).
 
 -doc """
 Drop `ClassName` from `beamtalk_compiler_server`'s ambient class cache via

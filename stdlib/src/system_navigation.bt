@@ -113,6 +113,23 @@ sealed typed Object subclass: SystemNavigation
     ]
     handlers sort: [:a :b | a name asString < b name asString]
 
+  // ===== Trait Users (ADR 0127 §12) =====
+
+  /// Return the classes that compose (`uses:`) a protocol.
+  ///
+  /// Shares `Protocol usersOf:`'s implementation rather than re-querying the
+  /// registry — the two are the same query reached from two entry points
+  /// (a protocol-centric one and a System Navigation one), matching this
+  /// class's other Protocol-registry-backed queries (`implementorsOf:` for
+  /// selectors, this for protocol composition). Order is unspecified.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default usersOf: #Comparable   // => [DateTime, Money, ...]
+  /// ```
+  usersOf: aProtocolName :: Symbol -> List(Behaviour) =>
+    Protocol usersOf: aProtocolName
+
   // ===== Package & Extension Ownership Queries =====
 
   /// Return the packages (ADR 0070) that contribute extension methods (ADR 0066)

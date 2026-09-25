@@ -661,6 +661,46 @@ method_info_picks_current_generation_test_() ->
     end}.
 
 %%====================================================================
+%% method_origin/3 — ADR 0127 §12 trait provenance
+%%====================================================================
+
+method_origin_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% A `class_body` row (every entry in counter_xref/0) has no
+                %% origin — `nil`, the Beamtalk null value, not `undefined`.
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+                ?assertEqual(nil, beamtalk_xref:method_origin('Counter', false, 'increment')),
+
+                %% A `protocol`-provenance row (ADR 0127 §12: a flattened
+                %% trait provision) carries its protocol name as `origin`.
+                FlattenedXref = [
+                    #{
+                        class_side => false,
+                        selector => 'between:and:',
+                        line => 3,
+                        sends => [],
+                        references => [],
+                        source_status => indexed,
+                        provenance => protocol,
+                        origin => 'Comparable'
+                    }
+                ],
+                ok = beamtalk_xref:register_class('DateTime', FlattenedXref),
+                ?assertEqual(
+                    'Comparable',
+                    beamtalk_xref:method_origin('DateTime', false, 'between:and:')
+                ),
+
+                %% Unregistered selector / class → nil, not undefined or a crash.
+                ?assertEqual(nil, beamtalk_xref:method_origin('DateTime', false, 'nonexistent')),
+                ?assertEqual(nil, beamtalk_xref:method_origin('NoSuchClass', false, 'foo'))
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Generation filtering on the read path (Phase 4)
 %%====================================================================
 

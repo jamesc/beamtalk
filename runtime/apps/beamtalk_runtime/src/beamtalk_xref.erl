@@ -27,7 +27,11 @@ filter by `current_gen` throughout, so they never observe a partially-built
 or stale generation.
 
 Storage layout (all `protected, named_table, {read_concurrency, true}`):
-- `beamtalk_xref_methods` (bag): per-method definitions
+- `beamtalk_xref_methods` (bag): per-method definitions. ADR 0127 §12 adds a
+  `protocol` `provenance` value plus an `origin` field (the protocol name)
+  for a method flattened from a trait's provision — `CompiledMethod origin`
+  and the `removeSelector:`/`renameSelector:to:` refusals on a
+  protocol-provided selector read it via `method_origin/3`.
 - `beamtalk_xref_senders` (bag): selector → call sites
 - `beamtalk_xref_references` (bag): class → reference sites
 - `xref_class_gen` (set): class → current generation
@@ -76,6 +80,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     all_sent_selectors_bt/0,
     callers_of_native_module/1,
     method_info/3,
+    method_origin/3,
     state_var_line/2
 ]).
 
@@ -114,7 +119,10 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -type class_side() :: boolean().
 -type gen() :: pos_integer().
 -type source_status() :: indexed | unindexed_runtime_fun | synthetic.
--type provenance() :: class_body | extension | class_builder | put_method.
+%% `protocol` (ADR 0127 §12): a method flattened into the class from a
+%% `uses:`d trait's provision. Its companion `origin` field (below) names the
+%% protocol; every other provenance leaves `origin` `undefined`.
+-type provenance() :: class_body | extension | class_builder | put_method | protocol.
 -type recv_kind() :: self_recv | super_recv | erlang_ffi | other.
 
 %% ADR 0115 Phase 2: a message send's receiver, projected onto
@@ -171,7 +179,12 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     references => [reference_entry()],
     source_status => source_status(),
     provenance => provenance(),
-    synthetic_origin => pos_integer() | undefined
+    synthetic_origin => pos_integer() | undefined,
+    %% ADR 0127 §12: the protocol name, present (and non-`undefined`) only
+    %% when `provenance =:= protocol`. Baked by codegen alongside
+    %% `provenance` for a flattened method (ADR 0127 §10); absent for every
+    %% other provenance.
+    origin => atom() | undefined
 }.
 
 -type method_info() :: #{
@@ -179,6 +192,10 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     line := pos_integer(),
     source_status := source_status(),
     provenance := provenance(),
+    %% ADR 0127 §12: see `method_xref_entry()`'s `origin` field above — the
+    %% same value, carried through to the stored row. `CompiledMethod
+    %% origin` (`method_origin/3`) reads this.
+    origin => atom() | undefined,
     gen := gen()
 }.
 
@@ -1255,6 +1272,38 @@ method_info(Class, ClassSide, Selector) when
     end.
 
 -doc """
+Return the protocol `Class`'s `{ClassSide, Selector}` method was flattened
+from (ADR 0127 §12), or `nil` if it has no `protocol` provenance row — either
+because the class wrote it itself, or because the selector isn't indexed at
+all. Backs `CompiledMethod origin` (`beamtalk_object_class`'s `{method, _}` /
+`{class_method, _}` handlers embed this in the `'__origin__'` map key at
+construction time) and, indirectly via `beamtalk_behaviour_intrinsics`, the
+`removeSelector:`/`renameSelector:to:` refusals on a protocol-provided
+selector (ADR 0127 §11).
+
+Thin wrapper over `method_info/3`: same generation-filtered, `badarg`-safe
+ETS read, reduced to the one field these two callers need. Returns `nil`
+(the Beamtalk null value), not `undefined`, so callers can hand the result
+straight to Beamtalk without a conversion step.
+""".
+-spec method_origin(class_name(), class_side(), selector()) -> atom() | nil.
+method_origin(Class, ClassSide, Selector) ->
+    case method_info(Class, ClassSide, Selector) of
+        undefined ->
+            nil;
+        Info ->
+            case maps:get(origin, Info, undefined) of
+                %% `undefined` covers both a legacy row (registered before
+                %% ADR 0127 added the `origin` key) and a row that carries
+                %% the key with an explicit `undefined` value (every
+                %% non-`protocol` provenance) — both mean "not
+                %% trait-provided".
+                undefined -> nil;
+                Origin -> Origin
+            end
+    end.
+
+-doc """
 Return the 1-based declaration line of `Class`'s instance variable `Name`, or
 `undefined` if unregistered — e.g. a class compiled before this
 feature landed, a runtime-built `ClassBuilder` class (no compiler to derive a
@@ -1776,12 +1825,14 @@ insert_one_method(Class, Entry, Gen) ->
     Line = maps:get(line, Entry),
     SourceStatus = maps:get(source_status, Entry, indexed),
     Provenance = maps:get(provenance, Entry, class_body),
+    Origin = maps:get(origin, Entry, undefined),
 
     MethodInfo = #{
         owner => Class,
         line => Line,
         source_status => SourceStatus,
         provenance => Provenance,
+        origin => Origin,
         gen => Gen
     },
     true = ets:insert(?METHODS_TABLE, {{Class, ClassSide, Selector}, MethodInfo}),

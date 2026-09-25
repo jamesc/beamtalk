@@ -49,6 +49,16 @@ sealed typed Value subclass: CompiledMethod
   /// ```
   argumentCount -> Integer => @primitive
 
+  /// Return the protocol this method was flattened from (ADR 0127 §12), or
+  /// nil for a method the class wrote itself.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Integer >> #+) origin        // => nil
+  /// (DateTime >> #between:and:) origin  // => #Comparable (once uses: Comparable is flattened)
+  /// ```
+  origin -> Symbol | Nil => @primitive
+
   // ===== Instance Methods — Conversions =====
 
   /// Return a developer-readable string representation.

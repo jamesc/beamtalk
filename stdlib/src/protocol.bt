@@ -55,6 +55,35 @@ sealed typed Object subclass: Protocol
   class sealed isProtocol: name :: Symbol -> Boolean =>
     @primitive "protocolIsProtocol"
 
+  /// Return the provided (trait) method selectors for a protocol (ADR 0127).
+  ///
+  /// A protocol with no provided methods (every protocol predating ADR 0127,
+  /// or a pure interface with only required signatures) returns an empty
+  /// list — its `uses:` still checks requirements structurally (ADR 0068),
+  /// there is simply nothing to flatten in. Returns an empty list if the
+  /// protocol is not registered.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Protocol providedMethods: #Comparable   // => [#between:and:, #min:, #max:]
+  /// ```
+  class sealed providedMethods: protocolName :: Symbol -> List(Symbol) =>
+    @primitive "protocolProvidedMethods"
+
+  /// Return the classes that compose (`uses:`) a protocol (ADR 0127 §12).
+  ///
+  /// Distinct from `conformingClasses:`, which answers every *structural*
+  /// conformer whether or not it declares `uses:`. Order is unspecified.
+  /// `SystemNavigation usersOf:` shares this implementation. Returns an
+  /// empty list if the protocol is not registered, or nothing uses it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Protocol usersOf: #Comparable   // => [DateTime, Money, ...]
+  /// ```
+  class sealed usersOf: protocolName :: Symbol -> List(Behaviour) =>
+    @primitive "protocolUsersOf"
+
   /// Return all registered protocol names.
   ///
   /// ## Examples
