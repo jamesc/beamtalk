@@ -800,6 +800,82 @@ fail clearly:
   ChangeLog reads, inspector `evaluate:` and `pg` shell lookups already
   catch `noproc` or return empty results.
 
+### 8. Distribution (ADR 0126): facades are node-local; remote access goes through a `Node` handle
+
+Class-side facades fit ADR 0126's model rather than working against it.
+
+- **Classes are already node-local.** A class object that crosses a node is
+  rewritten to a by-name reference and resolved on the *receiving* node's
+  class registry (0126 §5.1, confirmed by the Phase 0.5 spike). So `Counter`
+  always means "this node's `Counter`". A facade inherits exactly that
+  meaning:
+  - `Beamtalk classNamed:` asks this node's registry;
+  - `Workspace` is this node's workspace;
+  - `Transcript` is this node's transcript, or this node's Logger.
+
+  This is the Erlang model too: `code:which/1` and
+  `logger:set_primary_config/2` act on the local node, and remote access is
+  an explicit `erpc:call/4`.
+- **`Node` is the pattern to follow.** 0126's `Node` is a sealed `Value`:
+  - class-side methods for the local node (`Node current`,
+    `Node connected`);
+  - instance methods for per-node operations (`aNode ping`,
+    `aNode shapeManifest` via `erpc`).
+
+  That is rule 1 plus rule 2 from §1: the class side for "here", a value
+  handle for "there". `aNode shapeManifest` is already the remote form of
+  `Beamtalk shapeManifest`.
+- **The singletons were no more distributable.** `BeamtalkInterface` and
+  `WorkspaceInterface` instances ignored their receiver, so they acted on
+  whichever node evaluated the send, exactly as the facades do. Only the
+  `TranscriptStream` actor could have pointed across nodes, and it was only
+  ever reached through the local `current`.
+- **Phase 0b stays node-local.** A direct call is a local `Module:Fun(...)`.
+  A class object received from a peer resolves to the local class, so a
+  dynamic send to it becomes a local direct call. For stateless classes,
+  0126's "which node's class process?" question disappears.
+
+**What each facade means on a node:**
+
+| Node kind | `Beamtalk` | `Workspace` | `Transcript` |
+|---|---|---|---|
+| Workspace node (REPL) | Its registry | Its workspace | Its `TranscriptStream` |
+| `run` node / escript | Its registry | Its `run`-mode workspace (§3) | Its Logger |
+| Release node | Its registry | Release-mode refusals (ADR 0125 §1.5) | Its Logger, or its `TranscriptStream` with the console |
+| Bare runtime (e.g. `beamtalk test`) | Its registry | `no_workspace` | Its Logger |
+
+**Remote access: the extension point this ADR preserves.** Remote access to
+a facade is **not** part of this ADR (0126 v1 scope). The design keeps one
+generic path open for it, a rule-2 handle obtained from a `Node`:
+
+```beamtalk
+worker := (Node named: #'worker@localhost') unwrap
+(Beamtalk on: worker) classNamed: #Counter     // future ADR
+(Workspace on: worker) actors                  // future ADR
+```
+
+- **How the handle works.** The handle is a `Value` that carries the
+  `Node` and forwards each message as
+  `erpc:call(Node, Module, SafeFn, [nil, #{} | Args])`.
+- **Why it can be generic.** The name of `SafeFn` for each selector comes
+  from the peer's `direct_class_methods` metadata (Phase 0b). So one
+  generic handle serves every stateless facade, and each facade needs no
+  remote-specific code.
+- **Version skew.** It inherits 0126 §5.2's handling of version skew and
+  §7's failure mapping (`node_down`, `remote_code_mismatch`).
+- **Why this ADR's rules are what keep it possible.** The generic handle
+  works only because every facade is stateless and every method is
+  `class sealed`. Any facade that kept Beamtalk-side state would need its
+  own remote protocol.
+
+**Output from code running on a peer.** An actor spawned on B with
+`spawnOn:` that calls `Transcript show:` writes to B's transcript or B's
+Logger, not to a REPL attached to A. That is consistent with Logger, whose
+handlers are node-local. Cross-node output uses a Logger handler that
+forwards to another node, or an actor passed in explicitly. It is not a
+regression: today the same method body gets `class_not_found` or `nil`
+(§7).
+
 ### Misuse and error examples
 
 ```beamtalk
@@ -1154,6 +1230,10 @@ where it lands.
   with a Logger handler" works only in the second case. This is acceptable
   only because `Transcript` is not an API programs or tests should rely on
   (§4).
+- **Facades are node-local, and remote access is deferred (§8).** Until a
+  follow-up ADR adds `Beamtalk on: aNode` / `Workspace on: aNode`, remote
+  reflection and workspace operations need `Node`'s own methods
+  (`aNode shapeManifest`) or FFI `erpc`.
 - **On a distributed peer (ADR 0126), `Transcript` is local to the node
   that runs the code.** Code running on a peer node without a REPL server
   logs to *that* node's Logger, not to the REPL attached elsewhere. The
@@ -1436,6 +1516,12 @@ shipped.
   - `Beamtalk releaseInfo` resolves in compiled code on any node.
   - `no_workspace` joins `release_mode_no_compiler` /
     `release_mode_no_workspace` in `beamtalk_capability`.
+- **ADR 0126:**
+  - Consistent with it, not amended in substance. §8 records that facades
+    are node-local, as 0126 §5.1 already makes every class.
+  - It names `Node`-derived handles as the future remote path.
+  - Its examples that call the non-existent `Transcript showLine:` are fixed
+    in the Phase 5 sweep.
 
 ## References
 - Related issues:
@@ -1454,6 +1540,7 @@ shipped.
   - [0083](0083-metaclass-aware-type-inference.md) — typing of `new` (the implicit-`new` note in `SystemNavigation`)
   - [0124](0124-slots-late-assignment-definite-assignment.md) — `late classState: current`
   - [0125](0125-otp-releases-and-upgrade-compatibility.md) — modes and capability refusals
+  - [0126](0126-distribution-location-transparent-actors.md) — `Node`, node-local class references, remote spawn
 - Documentation:
   - `docs/beamtalk-language-features.md`: *Workspace and Reflection API*, *Sessions and binding layers*, *Passing Blocks Through Class Methods*
 - External:
