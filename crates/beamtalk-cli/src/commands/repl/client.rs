@@ -414,16 +414,36 @@ mod tests {
 
     #[test]
     fn connect_to_unbound_port_fails_with_connect_error() {
-        // Bind then immediately drop, guaranteeing nothing is listening on
-        // this port for the actual connect attempt below.
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("local_addr").port();
-        drop(listener);
+        // Bind then immediately drop, expecting nothing to be listening on
+        // this port for the actual connect attempt below. Under a large
+        // parallel test run another test/thread can grab the just-freed
+        // ephemeral port in the gap before we connect (BT-3628), so retry
+        // with a fresh port on an unexpected success, and accept any
+        // connect-style error rather than one exact substring — a racing
+        // listener that isn't a beamtalk REPL server fails the WebSocket or
+        // auth handshake instead of the raw TCP connect.
+        for attempt in 0..5 {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            drop(listener);
 
-        let Err(err) = ReplClient::connect("127.0.0.1", port, "cookie") else {
-            panic!("expected connect to fail against an unbound port");
-        };
-        assert!(err.to_string().contains("Failed to connect"));
+            match ReplClient::connect("127.0.0.1", port, "cookie") {
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(
+                        msg.contains("Failed to connect")
+                            || msg.contains("WebSocket handshake failed")
+                            || msg.contains("auth"),
+                        "expected a connect-style error, got: {msg}"
+                    );
+                    return;
+                }
+                Ok(_) if attempt < 4 => continue,
+                Ok(_) => panic!(
+                    "expected connect to fail against an unbound port after {attempt} retries"
+                ),
+            }
+        }
     }
 
     #[test]
