@@ -564,21 +564,15 @@ fn staged_root_path_check_eval(release_dir_abs: &Utf8Path) -> String {
 /// the release dir) and a `ranch_app:start/2` undef at boot under
 /// `--no-include-erts` (where `$ROOT` is the host OTP install).
 pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_owned()
-    } else {
-        let cwd = std::env::current_dir()
-            .into_diagnostic()
-            .wrap_err("Failed to read the current directory")?;
-        Utf8PathBuf::from_path_buf(cwd)
-            .map(|cwd| cwd.join(path))
-            .map_err(|p| {
-                miette::miette!("Current directory '{}' is not valid UTF-8", p.display())
-            })?
-    };
-    // `components()` already drops `.` segments, repeated separators and a
-    // trailing separator, and keeps `..` — exactly `filename:join/1`'s rules.
-    Ok(absolute.components().collect())
+    // BT-3624: the join-onto-cwd-and-lexically-normalize logic lives in
+    // `beamtalk_core::paths::absolutize` (a shared leaf below both this
+    // crate and `find_runtime_dir_with_layout`, which needs the same
+    // non-canonicalizing behavior) — see that module's doc comment.
+    let absolute = beamtalk_core::paths::absolutize(path.as_std_path())
+        .into_diagnostic()
+        .wrap_err("Failed to read the current directory")?;
+    Utf8PathBuf::from_path_buf(absolute)
+        .map_err(|p| miette::miette!("Current directory '{}' is not valid UTF-8", p.display()))
 }
 
 /// Probe the building machine's ERTS root directory and version via a

@@ -41,6 +41,11 @@ pub mod file_walker;
 // `beamtalk-language-service`'s `queries` module.
 pub mod method_source_walker;
 pub mod near_miss_divider;
+// This module is `pub`, not `pub(crate)`: `absolutize` is the shared leaf
+// both this crate's `ffi_type_specs::find_runtime_dir_with_layout` and
+// `beamtalk-cli`'s `release::assembly::absolutize` build on (BT-3624; see
+// this module's own doc comment).
+pub mod paths;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub mod span;

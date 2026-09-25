@@ -503,10 +503,12 @@ fn compile_with_rebar3(
         .wrap_err("Failed to canonicalize rebar base dir")?;
     cmd.env("REBAR_BASE_DIR", &abs_base_dir);
 
-    let output = cmd
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to run rebar3 compile.\nIs Erlang/OTP installed?")?;
+    let output = cmd.output().into_diagnostic().wrap_err_with(|| {
+        format!(
+            "Failed to run rebar3 compile (tried '{}').\nIs Erlang/OTP installed?",
+            rebar3.display()
+        )
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
