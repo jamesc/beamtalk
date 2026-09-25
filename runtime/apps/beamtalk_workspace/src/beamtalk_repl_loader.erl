@@ -2005,13 +2005,13 @@ protocol_reload_rejected_error(ProtocolAtoms, Failures) ->
             ProtocolNamesBin,
             <<"': ">>,
             integer_to_binary(length(Failures)),
-            <<" user(s) failed to recompile — nothing was loaded:\n">>,
+            <<" user(s) failed to recompile; nothing was loaded:\n">>,
             lists:join(<<"\n">>, FailureLines)
         ])
     ),
     beamtalk_error:with_hint(
         Err1,
-        <<"Fix every listed user's compile error and reload the protocol again — none of this edit's classes were installed.">>
+        <<"Fix every listed user's compile error and reload the protocol again; none of this edit's classes were installed.">>
     ).
 
 -spec format_fanout_failure(atom(), term()) -> binary().
@@ -2037,12 +2037,12 @@ protocol_reload_install_failed_error(Who, Reason) ->
             WhoBin,
             <<": ">>,
             ReasonMsg,
-            <<" — every module this reload already installed was rolled back to its previous code.">>
+            <<"; every module this reload already installed was rolled back to its previous code.">>
         ])
     ),
     beamtalk_error:with_hint(
         Err1,
-        <<"This is unexpected — every failing module already compiled successfully. Please retry; if it persists, file a bug.">>
+        <<"This is unexpected; every failing module already compiled successfully. Please retry; if it persists, file a bug.">>
     ).
 
 %% Recompile a class with a new method definition.
