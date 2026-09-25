@@ -1,0 +1,471 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Greeter",
+                span: Span {
+                    start: 720,
+                    end: 727,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 704,
+                        end: 709,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "greetingCount",
+                        span: Span {
+                            start: 755,
+                            end: 768,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 771,
+                                end: 772,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    slot_kind: Eager,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 748,
+                        end: 772,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "greeting",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Literal(
+                                String(
+                                    "hi",
+                                ),
+                                Span {
+                                    start: 798,
+                                    end: 802,
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "String",
+                                span: Span {
+                                    start: 788,
+                                    end: 794,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 776,
+                        end: 802,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "bump",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 814,
+                                                end: 818,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "greetingCount",
+                                        span: Span {
+                                            start: 819,
+                                            end: 832,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 814,
+                                        end: 832,
+                                    },
+                                },
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 836,
+                                                    end: 840,
+                                                },
+                                            },
+                                        ),
+                                        field: Identifier {
+                                            name: "greetingCount",
+                                            span: Span {
+                                                start: 841,
+                                                end: 854,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 836,
+                                            end: 854,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 857,
+                                                end: 858,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 836,
+                                        end: 858,
+                                    },
+                                },
+                                type_annotation: None,
+                                span: Span {
+                                    start: 814,
+                                    end: 858,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 806,
+                        end: 858,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+                leading_blank_line: true,
+                blank_line_after_comments: false,
+            },
+            doc_comment: None,
+            backing_module: None,
+            handle_scope: None,
+            shape_version: None,
+            type_params: [],
+            superclass_type_args: [],
+            uses: [
+                ProtocolUse {
+                    protocol: Identifier {
+                        name: "Greetable",
+                        span: Span {
+                            start: 736,
+                            end: 745,
+                        },
+                    },
+                    package: None,
+                    type_args: [],
+                    excluding: [],
+                    overriding: [],
+                    span: Span {
+                        start: 730,
+                        end: 745,
+                    },
+                },
+            ],
+            span: Span {
+                start: 704,
+                end: 858,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [
+        ProtocolDefinition {
+            name: Identifier {
+                name: "Greetable",
+                span: Span {
+                    start: 658,
+                    end: 667,
+                },
+            },
+            type_params: [],
+            extending: None,
+            method_signatures: [],
+            class_method_signatures: [],
+            provided_methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "greet",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 689,
+                                            end: 693,
+                                        },
+                                    },
+                                ),
+                                selector: Unary(
+                                    "greeting",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 689,
+                                    end: 702,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "String",
+                                span: Span {
+                                    start: 679,
+                                    end: 685,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 670,
+                        end: 702,
+                    },
+                },
+            ],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3590 (ADR 0127 §3/§10): an Actor class's `uses:` provision must reach",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "compiled Core Erlang output through the existing gen_server generator",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "unchanged, including a provision that self-sends another of the class's",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "own (non-provided) methods across the actor state boundary.",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "See `trait_flattened_value_user/main.bt`'s header comment for why this",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "single-file fixture (protocol + class together) is not itself a",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "legal package layout, and why its `_semantic` snapshot's \"class and a",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "protocol cannot be in the same file\" diagnostic is expected.",
+                        span: Span {
+                            start: 641,
+                            end: 649,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
+            },
+            doc_comment: None,
+            span: Span {
+                start: 641,
+                end: 702,
+            },
+        },
+    ],
+    type_aliases: [],
+    native_declarations: [],
+    expressions: [],
+    span: Span {
+        start: 641,
+        end: 858,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

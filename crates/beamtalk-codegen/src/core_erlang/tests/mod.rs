@@ -21,6 +21,9 @@
 //! - [`recv_type`] — ADR 0115 Phase 2: the xref `recv_type`
 //!   write-path fixture matrix (typed/protocol/dynamic/union/native/alias
 //!   locals, `Meta{C}`, self-send, FFI receiver)
+//! - [`trait_flattening`] — ADR 0127 §3/§10 (BT-3590): a `uses:` class's
+//!   flattened provisions reaching compiled output through both the
+//!   self-sufficient and driver-handoff codegen entry points
 
 pub use super::*;
 pub use beamtalk_core::ast::*;
@@ -176,3 +179,4 @@ mod nlr;
 mod primitives;
 mod recv_type;
 mod supervisor;
+mod trait_flattening;

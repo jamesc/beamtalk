@@ -169,6 +169,107 @@ where
     }
 }
 
+/// Recursively walks an expression tree in pre-order, calling `f` on every
+/// node with a mutable reference — the write counterpart of
+/// [`walk_expression`], for passes that rewrite nodes in place (e.g.
+/// `trait_expansion`'s body-local type-annotation substitution).
+///
+/// Kept in exact variant-for-variant lockstep with [`walk_expression`] — a
+/// new `Expression` variant must be added to both, or a pass relying on
+/// either silently stops seeing it (CLAUDE.md's no-duplicate-implementations
+/// rule: this is the one walk both the read-only and mutating passes share,
+/// not two independently-maintained traversals).
+pub fn walk_expression_mut<F>(expr: &mut Expression, f: &mut F)
+where
+    F: FnMut(&mut Expression),
+{
+    f(expr);
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            walk_expression_mut(receiver, f);
+            for arg in arguments {
+                walk_expression_mut(arg, f);
+            }
+        }
+        Expression::Block(block) => {
+            for stmt in &mut block.body {
+                walk_expression_mut(&mut stmt.expression, f);
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            walk_expression_mut(target, f);
+            walk_expression_mut(value, f);
+        }
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
+            walk_expression_mut(value, f);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            walk_expression_mut(receiver, f);
+            for msg in messages {
+                for arg in &mut msg.arguments {
+                    walk_expression_mut(arg, f);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            walk_expression_mut(expression, f);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            walk_expression_mut(receiver, f);
+        }
+        Expression::Match { value, arms, .. } => {
+            walk_expression_mut(value, f);
+            for arm in arms {
+                if let Some(guard) = &mut arm.guard {
+                    walk_expression_mut(guard, f);
+                }
+                walk_expression_mut(&mut arm.body, f);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                walk_expression_mut(&mut pair.key, f);
+                walk_expression_mut(&mut pair.value, f);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                walk_expression_mut(elem, f);
+            }
+            if let Some(t) = tail {
+                walk_expression_mut(t, f);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                walk_expression_mut(elem, f);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let StringSegment::Interpolation(e) = seg {
+                    walk_expression_mut(e, f);
+                }
+            }
+        }
+        // Leaf nodes — nothing to recurse into.
+        Expression::Literal(..)
+        | Expression::Identifier(..)
+        | Expression::ClassReference { .. }
+        | Expression::Super(..)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Error { .. }
+        | Expression::Spread { .. } => {}
+    }
+}
+
 /// Walks all expressions in every statement sequence of a module (pre-order).
 ///
 /// Equivalent to calling `walk_expression` on every expression in every
@@ -460,5 +561,55 @@ mod tests {
         let mut count = 0;
         walk_module(&module, &mut |_| count += 1);
         assert_eq!(count, 6);
+    }
+
+    // ── walk_expression_mut ─────────────────────────────────────────────
+
+    /// Counts visits via `walk_expression_mut`, mirroring `count_visits` —
+    /// asserts the mutable walker visits exactly as many nodes as the
+    /// read-only one for the same tree shape.
+    fn count_visits_mut(expr: &mut Expression) -> usize {
+        let mut count = 0;
+        walk_expression_mut(expr, &mut |_| count += 1);
+        count
+    }
+
+    #[test]
+    fn walk_mut_visit_count_matches_read_only_walker() {
+        let mut expr = first_module_expr("x := 1\n");
+        assert_eq!(count_visits_mut(&mut expr), 3);
+    }
+
+    #[test]
+    fn walk_mut_can_rewrite_a_nested_assignment_type_annotation() {
+        // `[ y :: Integer := 1 ]` — a block body containing a typed
+        // assignment. Descends into the block (mirroring `walk_expression`'s
+        // descend-into-blocks behaviour) and rewrites the nested
+        // `Assignment`'s type annotation in place.
+        let mut expr = first_module_expr("[ y :: Integer := 1 ]\n");
+        let mut rewrites = 0;
+        walk_expression_mut(&mut expr, &mut |node| {
+            if let Expression::Assignment {
+                type_annotation: Some(ty),
+                ..
+            } = node
+            {
+                *ty = crate::ast::TypeAnnotation::simple("Replaced", ty.span());
+                rewrites += 1;
+            }
+        });
+        assert_eq!(rewrites, 1, "expected exactly one Assignment rewritten");
+
+        let Expression::Block(block) = &expr else {
+            panic!("expected a Block expression");
+        };
+        let Expression::Assignment {
+            type_annotation: Some(ty),
+            ..
+        } = &block.body[0].expression
+        else {
+            panic!("expected the block's sole statement to be a typed Assignment");
+        };
+        assert!(matches!(ty, crate::ast::TypeAnnotation::Simple(id) if id.name == "Replaced"));
     }
 }

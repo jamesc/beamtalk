@@ -1,0 +1,39 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Protocol"), span: Span { start: 641, end: 649 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3590 (ADR 0127 §3/§10): an Actor class's `uses:` provision must reach"), Whitespace("\n"), LineComment("// compiled Core Erlang output through the existing gen_server generator"), Whitespace("\n"), LineComment("// unchanged, including a provision that self-sends another of the class's"), Whitespace("\n"), LineComment("// own (non-provided) methods across the actor state boundary."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// See `trait_flattened_value_user/main.bt`'s header comment for why this"), Whitespace("\n"), LineComment("// single-file fixture (protocol + class together) is not itself a"), Whitespace("\n"), LineComment("// legal package layout, and why its `_semantic` snapshot's \"class and a"), Whitespace("\n"), LineComment("// protocol cannot be in the same file\" diagnostic is expected."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("define:"), span: Span { start: 650, end: 657 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Greetable"), span: Span { start: 658, end: 667 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("greet"), span: Span { start: 670, end: 675 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 676, end: 678 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 679, end: 685 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 686, end: 688 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 689, end: 693 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("greeting"), span: Span { start: 694, end: 702 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("Actor"), span: Span { start: 704, end: 709 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 710, end: 719 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Greeter"), span: Span { start: 720, end: 727 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("uses:"), span: Span { start: 730, end: 735 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Greetable"), span: Span { start: 736, end: 745 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("state:"), span: Span { start: 748, end: 754 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("greetingCount"), span: Span { start: 755, end: 768 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 769, end: 770 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 771, end: 772 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("greeting"), span: Span { start: 776, end: 784 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 785, end: 787 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 788, end: 794 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 795, end: 797 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("hi"), span: Span { start: 798, end: 802 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("bump"), span: Span { start: 806, end: 810 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 811, end: 813 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 814, end: 818 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 818, end: 819 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("greetingCount"), span: Span { start: 819, end: 832 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 833, end: 835 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 836, end: 840 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 840, end: 841 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("greetingCount"), span: Span { start: 841, end: 854 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 855, end: 856 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 857, end: 858 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 859, end: 859 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

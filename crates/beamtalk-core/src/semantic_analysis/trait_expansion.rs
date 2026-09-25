@@ -71,11 +71,11 @@ use std::collections::{HashMap, HashSet};
 use ecow::EcoString;
 
 use crate::ast::{
-    ClassDefinition, ClassKind, Expression, Identifier, MessageSelector, MethodDefinition,
-    MethodKind, Module, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
-    ProtocolUse, TypeAnnotation, TypeParamDecl,
+    ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, MessageSelector,
+    MethodDefinition, MethodKind, Module, ParameterDefinition, ProtocolDefinition,
+    ProtocolMethodSignature, ProtocolUse, TypeAnnotation, TypeParamDecl,
 };
-use crate::ast_walker::walk_expression;
+use crate::ast_walker::{walk_expression, walk_expression_mut};
 use crate::method_source_walker::collect_self_sends;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -365,6 +365,23 @@ fn substitute_provision(
     if let Some(rt) = &method.return_type {
         collect_local_type_vars(rt, &protocol_type_param_names, &mut local_type_vars);
     }
+    // A body-local typed assignment (`y :: A := …`) can name a type
+    // variable too — collect those the same way the signature's are
+    // collected above, so a body-local `A` colliding with the *using*
+    // class's own type param gets the same hygienic rename as a
+    // signature-level one would (see `substitute_body_type_annotations`'s
+    // doc for why the body needs substitution at all).
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |expr| {
+            if let Expression::Assignment {
+                type_annotation: Some(ty),
+                ..
+            } = expr
+            {
+                collect_local_type_vars(ty, &protocol_type_param_names, &mut local_type_vars);
+            }
+        });
+    }
 
     let mut local_renames: HashMap<EcoString, EcoString> = HashMap::new();
     for name in &local_type_vars {
@@ -405,14 +422,19 @@ fn substitute_provision(
         })
         .collect();
     let return_type = method.return_type.as_ref().map(&substitute);
+    // The body's self-sends resolve against the using class once this is
+    // spliced into `class.methods` (ADR 0127 §6) — no substitution needed
+    // there. But a body-local typed assignment's `TypeAnnotation`
+    // (`y :: E := …`) is exactly as capturable by the protocol's own type
+    // params / `Self` as a signature annotation is, and BT-3588 left it
+    // unsubstituted (`substitute_provision` only ever touched
+    // `parameters`/`return_type`) — see `substitute_body_type_annotations`.
+    let body = substitute_body_type_annotations(&method.body, &substitute);
 
     MethodDefinition {
         selector: method.selector.clone(),
         parameters,
-        // The body's self-sends resolve against the using class once this
-        // is spliced into `class.methods` (ADR 0127 §6) — no substitution
-        // needed there, only in the signature.
-        body: method.body.clone(),
+        body,
         return_type,
         is_sealed: method.is_sealed,
         is_internal: method.is_internal,
@@ -426,6 +448,47 @@ fn substitute_provision(
         // protocol file) is ADR 0127 §3's "Source locations", BT-3590.
         span: method.span,
     }
+}
+
+/// Applies `substitute` (the same signature-level closure
+/// [`substitute_provision`] builds) to every body-local typed assignment's
+/// `TypeAnnotation` in a cloned copy of `body`, descending into nested
+/// blocks (`walk_expression_mut`'s same reach as `walk_expression`'s —
+/// ADR 0127 §6's self-sends live there too).
+///
+/// A PR review on BT-3588 (#4037) noted this gap: `substitute_provision`
+/// only ever substituted `parameters`/`return_type`, leaving a body-local
+/// `y :: E := …` referencing the protocol's own type parameter or `Self`
+/// unsubstituted after flattening — the type checker then sees the
+/// protocol's raw `E`/`Self` inside the *user* class's body, which it
+/// cannot resolve there (`Self` is fine, since `TypeChecker` already
+/// resolves it per-class, but a protocol type param genuinely never exists
+/// outside the protocol's own methods). This closes it as part of
+/// BT-3590's own body-level walk, one step below the "Free class/protocol
+/// names in a provision resolve in the protocol's package" name-resolution
+/// work this issue's AC also needs a body walk for.
+///
+/// `Assignment.type_annotation` is the only place a body can carry a
+/// substitutable `TypeAnnotation` — codegen itself ignores the field
+/// entirely (erased at compile time, see the field's own doc), so this is
+/// a type-checking-correctness fix only, with no codegen-visible effect.
+fn substitute_body_type_annotations(
+    body: &[ExpressionStatement],
+    substitute: &impl Fn(&TypeAnnotation) -> TypeAnnotation,
+) -> Vec<ExpressionStatement> {
+    let mut body = body.to_vec();
+    for stmt in &mut body {
+        walk_expression_mut(&mut stmt.expression, &mut |expr| {
+            if let Expression::Assignment {
+                type_annotation: Some(ty),
+                ..
+            } = expr
+            {
+                *ty = substitute(ty);
+            }
+        });
+    }
+    body
 }
 
 /// Recursively collects the method-local type-variable names appearing in
