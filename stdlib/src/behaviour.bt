@@ -371,6 +371,56 @@ abstract Object subclass: Behaviour
   /// ```
   sealed protocols -> List(Symbol) => @primitive "classProtocols"
 
+  /// Return the protocols this class directly composes via `uses:`
+  /// (ADR 0127 §12), in declaration order.
+  ///
+  /// Distinct from `protocols`, which answers *structural* conformance
+  /// (ADR 0068) — a class can structurally conform to a protocol it never
+  /// `uses:`, and a class that `uses:` a protocol with no provided methods
+  /// still appears here even though it composes nothing to flatten. Empty
+  /// for a class with no `uses:` lines.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime usedProtocols   // => [#Comparable]
+  /// ```
+  sealed usedProtocols -> List(Symbol) => @primitive "classUsedProtocols"
+
+  /// Return every protocol this class or an ancestor composes via `uses:`,
+  /// transitively (ADR 0127 §12).
+  ///
+  /// `self`'s own `usedProtocols` come first, then each ancestor's (nearest
+  /// first), with an already-seen protocol name skipped rather than
+  /// repeated. Pure Beamtalk — delegates to `usedProtocols` +
+  /// `allSuperclasses`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// AuditRecord allUsedProtocols   // => [#Describable, #Comparable]
+  /// ```
+  sealed allUsedProtocols -> List(Symbol) =>
+    self allSuperclasses
+      inject: self usedProtocols
+      into: [:acc :c |
+        c usedProtocols inject: acc into: [:acc2 :p |
+          (acc2 includes: p) ifTrue: [acc2] ifFalse: [acc2 add: p]
+        ]
+      ]
+
+  /// Test whether this class or an ancestor composes `aProtocolName` via
+  /// `uses:` (ADR 0127 §12).
+  ///
+  /// Pure Beamtalk — delegates to `allUsedProtocols`. Distinct from
+  /// `conformsTo:`, which is a structural check independent of `uses:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime usesProtocol: #Comparable   // => true
+  /// DateTime usesProtocol: #Printable    // => false
+  /// ```
+  sealed usesProtocol: aProtocolName :: Symbol -> Boolean =>
+    self allUsedProtocols includes: aProtocolName
+
   // === Source file and reload (ADR 0040 Phase 2) ===
 
   /// Return the path of the source file this class was compiled from, or nil.

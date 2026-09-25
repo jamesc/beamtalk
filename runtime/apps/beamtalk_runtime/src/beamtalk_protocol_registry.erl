@@ -35,16 +35,39 @@ the System Browser reads it to badge a protocol stdlib vs project.
 | conforms_to/2               | Check if class conforms to protocol             |
 | protocols_for_class/1       | List protocols a class conforms to              |
 | required_methods/1          | Required method selectors for a protocol        |
+| provided_methods/1          | Provided (trait) method selectors for a protocol (ADR 0127) |
 | conforming_classes/1        | Classes conforming to a protocol                |
+| users_of/1                  | Classes that `uses:` a protocol (ADR 0127 §12)  |
+| used_protocols/1            | A class's own `uses:` list, in declaration order (ADR 0127 §12) |
 | protocol_info/1             | Full protocol metadata                          |
 | is_protocol/1               | Check if a name is a registered protocol        |
 
 ## Conformance Model
 
 Runtime conformance uses structural checking — a class conforms if it
-responds to all required selectors. This mirrors the compile-time
-`ProtocolRegistry::check_conformance` but operates on live runtime data
-via `beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`.
+responds to all required selectors, **and every provided (trait) selector**
+(ADR 0127 §8: a protocol's type is required ∪ provided). This mirrors the
+compile-time `ProtocolRegistry::check_conformance` but operates on live
+runtime data via `beamtalk_behaviour_intrinsics:classCanUnderstandFromName/2`.
+
+## Users Index (ADR 0127 §12)
+
+A second ETS table (`beamtalk_protocol_uses`) records each loaded class's own
+`uses:` list, in declaration order — the source of `Behaviour usedProtocols`
+— populated by `register_uses/2` when the class registers (mirroring how
+`register_xref/2` populates `beamtalk_xref` at class-load time; see
+`beamtalk_object_class:init/1`/`apply_class_info/2`). A third table
+(`beamtalk_protocol_users`, a `bag`) is the reverse index — protocol name to
+using classes — kept in lock-step by the same call, and read by `users_of/1`
+(`Protocol usersOf:` / `SystemNavigation usersOf:`) and by ADR 0127 §11/BT-3593's
+live-reload fan-out. Both tables are purged for a removed class by
+`unregister_uses/1` (called from `beamtalk_class_lifecycle:class_removed/2`,
+mirroring `purge_xref/1`'s existing per-class cleanup). Unlike the
+`conforms_to/2` cache, there is no separate class-mutation invalidation to
+track here: a class's `uses:` list only ever changes via a whole-class
+(re)registration, which calls `register_uses/2` again with the new list —
+the same "no generation needed, only a whole-class replace" reasoning
+`register_state_vars/2` already documents for `beamtalk_xref`.
 
 See also: docs/ADR/0068-parametric-types-and-protocols.md — Stage 2
 See also: beamtalk_behaviour_intrinsics — backs the class-side primitives
@@ -117,15 +140,25 @@ concurrently (e.g. during test teardown).
     conforms_to/2,
     protocols_for_class/1,
     required_methods/1,
+    provided_methods/1,
     conforming_classes/1,
     protocol_info/1,
     is_protocol/1,
     all_protocol_names/0,
-    invalidate_conforms_cache/0
+    invalidate_conforms_cache/0,
+    register_uses/2,
+    unregister_uses/1,
+    used_protocols/1,
+    users_of/1
 ]).
 
 -define(PROTOCOL_TABLE, beamtalk_protocol_registry).
 -define(CONFORMS_CACHE_TABLE, beamtalk_protocol_conforms_cache).
+%% ADR 0127 §12: `Class -> [ProtocolName, ...]` (uses: declaration order).
+-define(USES_TABLE, beamtalk_protocol_uses).
+%% ADR 0127 §12: reverse index, `ProtocolName -> Class` (a `bag`, one row per
+%% using class).
+-define(USERS_TABLE, beamtalk_protocol_users).
 %% Generation-counter row inside ?CONFORMS_CACHE_TABLE. Not a valid
 %% `{atom(), atom()}` cache key shape, so it can never collide with a real
 %% `{ClassName, ProtocolName}` entry in the same `set` table.
@@ -152,6 +185,7 @@ module's "Conformance Cache" doc), heir-protected the same way.
 init() ->
     ensure_protocol_table(),
     ensure_conforms_cache_table(),
+    ensure_uses_tables(),
     ok.
 
 -doc "Idempotently create the protocol definitions ETS table.".
@@ -196,6 +230,43 @@ ensure_conforms_cache_table() ->
             ok
     end.
 
+-doc """
+Idempotently create the ADR 0127 §12 users-index tables: `?USES_TABLE`
+(`Class -> [ProtocolName, ...]`, a `set`) and `?USERS_TABLE` (`ProtocolName ->
+Class`, a `bag`, the reverse index). Separate tables so `unregister_uses/1`
+(a per-class purge) and `users_of/1` (a per-protocol read) each hit exactly
+the table shaped for them, mirroring `?PROTOCOL_TABLE`/`?CONFORMS_CACHE_TABLE`'s
+own separation above.
+""".
+-spec ensure_uses_tables() -> ok.
+ensure_uses_tables() ->
+    case ets:info(?USES_TABLE) of
+        undefined ->
+            ets:new(?USES_TABLE, [
+                named_table,
+                set,
+                public,
+                {read_concurrency, true}
+                | beamtalk_class_registry:heir_option()
+            ]),
+            ok;
+        _ ->
+            ok
+    end,
+    case ets:info(?USERS_TABLE) of
+        undefined ->
+            ets:new(?USERS_TABLE, [
+                named_table,
+                bag,
+                public,
+                {read_concurrency, true}
+                | beamtalk_class_registry:heir_option()
+            ]),
+            ok;
+        _ ->
+            ok
+    end.
+
 %%% ============================================================================
 %%% Registration
 %%% ============================================================================
@@ -213,6 +284,12 @@ protocols. The `Info` map must contain:
 It may also carry:
 - `module` (atom): the BEAM module the protocol was defined in (e.g.
   `bt@stdlib@printable`), used to resolve the protocol class object's origin.
+- `provided_methods` (list of maps, ADR 0127): the protocol's *provided*
+  (trait) selectors, same shape as `required_methods` (`selector` + `arity`).
+  Defaults to `[]` for a protocol with no provisions (every protocol
+  registered before ADR 0127). A protocol's type is required ∪ provided
+  (ADR 0127 §8), so both sets feed `conforms_to/2`; `provided_methods/1`
+  exposes the provided set alone for `Protocol providedMethods:`.
 
 Duplicate registrations overwrite the previous entry (idempotent for hot reload).
 """.
@@ -412,7 +489,13 @@ compute_conforms_to(ClassName, ProtocolName) ->
             %% Unknown protocol — cannot conform to something that isn't a protocol
             false;
         Info ->
-            AllMethods = all_required_methods(Info),
+            %% ADR 0127 §8: a protocol's type is required ∪ provided — a
+            %% class conforms only if it also responds to every provided
+            %% (trait) selector, not just the required ones. Provided
+            %% selectors are instance-side only in v1 (§13: "class-side
+            %% provided methods are not yet supported"), so there is no
+            %% provided-class-methods counterpart to `AllClassMethods` below.
+            AllMethods = all_required_methods(Info) ++ all_provided_methods(Info),
             AllClassMethods = all_required_class_methods(Info),
             try
                 InstanceOk = lists:all(
@@ -579,6 +662,26 @@ required_methods(ProtocolName) ->
     end.
 
 -doc """
+Return the provided (trait) method selectors for a protocol (ADR 0127).
+
+Returns a list of selector atoms — the protocol's own `provided_methods`
+plus any inherited (via `extending`) from a parent protocol, own selectors
+taking precedence over a same-named parent one, mirroring
+`required_methods/1`'s inheritance merge. Provided methods are instance-side
+only in v1, so unlike `required_methods/1` there is no `class `-prefixed
+half. Returns `[]` if the protocol is not registered, or has no provisions
+(every protocol registered before ADR 0127).
+""".
+-spec provided_methods(atom()) -> [atom()].
+provided_methods(ProtocolName) ->
+    case protocol_info(ProtocolName) of
+        undefined ->
+            [];
+        Info ->
+            [Sel || #{selector := Sel} <- all_provided_methods(Info)]
+    end.
+
+-doc """
 Return the list of classes conforming to a protocol.
 
 Checks all registered classes against the protocol. Returns a list of
@@ -639,6 +742,109 @@ all_protocol_names() ->
     end.
 
 %%% ============================================================================
+%%% Users Index (ADR 0127 §12)
+%%% ============================================================================
+
+-doc """
+Register `ClassName`'s `uses:` list — the protocol names it composes, in
+declaration order — with the users index.
+
+Called at class-load time (`beamtalk_object_class:init/1`) and on hot reload
+(`apply_class_info/2`'s `update_class` path), the same call sites that
+forward `method_xref`/`state_var_xref` to `beamtalk_xref`. `ProtocolNames`
+defaults to `[]` for a class compiled before codegen bakes `uses` into
+`__beamtalk_meta`/`ClassInfo` (ADR 0127 §10a is a later phase), so this is a
+safe no-op call for every class today — the mechanism is ready for codegen to
+start populating it.
+
+Idempotent: a re-registration (hot reload with a changed `uses:` set) first
+clears `ClassName`'s prior reverse-index rows, so `?USERS_TABLE` (a `bag`)
+never accumulates stale or duplicate entries across reloads.
+
+`badarg`-safe, like every other accessor in this module: a class can start
+(`beamtalk_object_class:init/1` calls this unconditionally) before
+`init/0` has created these tables — e.g. a test fixture that stands up a
+class registry without the protocol registry, or a supervision-tree restart
+ordering edge case — and this must degrade to a silent no-op rather than
+crash the class's own `init/1` (which `catch`-wrapped bootstrap call sites,
+such as `beamtalk_bootstrap`'s stub-class registration, would otherwise
+swallow entirely, silently losing the class).
+""".
+-spec register_uses(atom(), [atom()]) -> ok.
+register_uses(ClassName, ProtocolNames) when is_atom(ClassName), is_list(ProtocolNames) ->
+    unregister_uses(ClassName),
+    try
+        case ets:info(?USES_TABLE) of
+            undefined ->
+                ok;
+            _ ->
+                true = ets:insert(?USES_TABLE, {ClassName, ProtocolNames}),
+                lists:foreach(
+                    fun(ProtocolName) -> ets:insert(?USERS_TABLE, {ProtocolName, ClassName}) end,
+                    ProtocolNames
+                ),
+                ok
+        end
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Remove `ClassName` from the users index — both its own `uses:` row and every
+reverse-index row naming it. Idempotent; a no-op if `ClassName` was never
+registered, or if the tables have not been initialised (`badarg`-safe,
+matching every other accessor in this module).
+
+Called from `beamtalk_class_lifecycle:class_removed/2` (mirroring
+`purge_xref/1`'s existing per-class cleanup on class removal) and internally
+by `register_uses/2` before it re-inserts.
+""".
+-spec unregister_uses(atom()) -> ok.
+unregister_uses(ClassName) ->
+    try
+        true = ets:match_delete(?USERS_TABLE, {'_', ClassName}),
+        true = ets:delete(?USES_TABLE, ClassName),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Return `ClassName`'s own `uses:` list, in declaration order — the source of
+`Behaviour usedProtocols`. Returns `[]` if `ClassName` is unregistered or the
+table doesn't exist yet.
+""".
+-spec used_protocols(atom()) -> [atom()].
+used_protocols(ClassName) ->
+    case ets:info(?USES_TABLE) of
+        undefined ->
+            [];
+        _ ->
+            case ets:lookup(?USES_TABLE, ClassName) of
+                [{_, ProtocolNames}] -> ProtocolNames;
+                [] -> []
+            end
+    end.
+
+-doc """
+Return the classes that `uses:` `ProtocolName` — the source of `Protocol
+usersOf:` / `SystemNavigation usersOf:` (ADR 0127 §12: `usersOf:` answers the
+classes that `uses:` it; `conforming_classes/1` still answers every
+structural conformer). Sorted alphabetically for a stable, snapshot-friendly
+order (the ADR itself leaves the order unspecified). Returns `[]` if nothing
+uses `ProtocolName`, or the table doesn't exist yet.
+""".
+-spec users_of(atom()) -> [atom()].
+users_of(ProtocolName) ->
+    case ets:info(?USERS_TABLE) of
+        undefined ->
+            [];
+        _ ->
+            Classes = [Class || {_, Class} <- ets:lookup(?USERS_TABLE, ProtocolName)],
+            lists:usort(Classes)
+    end.
+
+%%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
 
@@ -665,6 +871,33 @@ all_required_methods(#{required_methods := Methods} = Info) ->
     Methods ++ FilteredParent;
 all_required_methods(_) ->
     [].
+
+-doc """
+Collect all provided (trait) methods including from extending protocols
+(ADR 0127). Mirrors `all_required_methods/1`'s own merge exactly: a
+protocol's own provisions take precedence over a same-named provision
+inherited from a protocol it `extending`s.
+""".
+-spec all_provided_methods(map()) -> [map()].
+all_provided_methods(Info) ->
+    Methods = maps:get(provided_methods, Info, []),
+    ParentMethods =
+        case maps:get(extending, Info, undefined) of
+            undefined ->
+                [];
+            ParentName ->
+                case protocol_info(ParentName) of
+                    undefined -> [];
+                    ParentInfo -> all_provided_methods(ParentInfo)
+                end
+        end,
+    OwnSelectors = [S || #{selector := S} <- Methods],
+    FilteredParent = [
+        M
+     || #{selector := S} = M <- ParentMethods,
+        not lists:member(S, OwnSelectors)
+    ],
+    Methods ++ FilteredParent.
 
 -doc """
 Collect all required class methods including from extending protocols.

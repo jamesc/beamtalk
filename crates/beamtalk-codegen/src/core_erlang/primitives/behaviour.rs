@@ -53,6 +53,8 @@ const TOWER_ZERO_ARG: &[&str] = &[
     "classReload",
     "classDoc",
     "classProtocols",
+    // ADR 0127 §12: this class's own `uses:` list, in declaration order.
+    "classUsedProtocols",
     // ADR 0123 §1: declared shape version (default 1 read at the intrinsic).
     "classShapeVersion",
     // --- Metaclass (`metaclassXxx`) ---
@@ -326,6 +328,15 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classAllClassVarNames'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_used_protocols() {
+        let result = doc_to_string(generate_tower_bif("classUsedProtocols", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'classUsedProtocols'(Self)".to_string())
         );
     }
 

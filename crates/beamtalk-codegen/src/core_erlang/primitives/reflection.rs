@@ -49,7 +49,7 @@ pub(crate) fn generate_compiled_method_bif(
 ) -> Option<Document<'static>> {
     let _ = params; // all CompiledMethod selectors are zero-param instance reads
     match selector {
-        "selector" | "source" | "doc" | "argumentCount" | "printString" | "asString" => {
+        "selector" | "source" | "doc" | "argumentCount" | "origin" | "printString" | "asString" => {
             Some(docvec![
                 "call 'beamtalk_compiled_method_ops':'dispatch'(",
                 leaf::atom(selector.to_owned()),

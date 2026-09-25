@@ -27,6 +27,7 @@ method argumentCount    // => 0
 | `source`         | []   | Returns the method's source code   |
 | `doc`            | []   | Returns the method's doc string    |
 | `argumentCount`  | []   | Returns the method's arity         |
+| `origin`         | []   | Protocol this method was flattened from, or nil (ADR 0127) |
 | `class`          | []   | Returns `'CompiledMethod'`         |
 | `printString`    | []   | Human-readable representation      |
 | `asString`       | []   | Same as printString                |
@@ -53,6 +54,7 @@ is_builtin('selector') -> true;
 is_builtin('source') -> true;
 is_builtin('doc') -> true;
 is_builtin('argumentCount') -> true;
+is_builtin('origin') -> true;
 is_builtin('class') -> true;
 is_builtin('printString') -> true;
 is_builtin('asString') -> true;
@@ -81,6 +83,9 @@ builtin_dispatch('doc', [], #{'__doc__' := Doc}) ->
 %% argumentCount => returns the method's arity
 builtin_dispatch('argumentCount', [], #{'__method_info__' := Info}) ->
     {ok, maps:get(arity, Info, 0)};
+%% origin => the protocol this method was flattened from, or nil (ADR 0127 §12)
+builtin_dispatch('origin', [], Value) ->
+    {ok, maps:get('__origin__', Value, nil)};
 %% class => returns 'CompiledMethod'
 builtin_dispatch('class', [], _Value) ->
     {ok, 'CompiledMethod'};
@@ -108,6 +113,6 @@ does_not_understand(Selector, _Args, _Value) ->
     Error1 = beamtalk_error:new(does_not_understand, 'CompiledMethod', Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,
-        <<"CompiledMethod supports: selector, source, doc, argumentCount, class, printString, asString, respondsTo:">>
+        <<"CompiledMethod supports: selector, source, doc, argumentCount, origin, class, printString, asString, respondsTo:">>
     ),
     beamtalk_error:raise(Error2).

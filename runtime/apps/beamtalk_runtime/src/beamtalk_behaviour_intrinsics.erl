@@ -53,6 +53,7 @@ that the Behaviour/Class libraries can rely on.
 | classReload/1               | Recompile from sourceFile + hot-swap                        |
 | classConformsTo/2           | Check if class conforms to a protocol (ADR 0068 Phase 2c) |
 | classProtocols/1            | List protocols the class conforms to (ADR 0068 Phase 2c)  |
+| classUsedProtocols/1        | This class's own `uses:` list, in declaration order (ADR 0127 §12) |
 | classRenameTo/2             | Rename the class + rewrite reference sites (ADR 0114 Phase 2) |
 | classRenameSelector/3       | Rename a selector + rewrite safe self/super sites (ADR 0114 Phase 3) |
 | classRenameSelectorIfAbsent/4 | Rename a selector, running a fallback block if absent (ADR 0114 Phase 3) |
@@ -122,6 +123,8 @@ that the Behaviour/Class libraries can rely on.
     %% ADR 0068 Phase 2c: Runtime protocol queries
     classConformsTo/2,
     classProtocols/1,
+    %% ADR 0127 §12: trait `uses:` reflection
+    classUsedProtocols/1,
     %% ADR 0114 Phase 2: class rename primitive
     classRenameTo/2,
     %% ADR 0114 Phase 3: method rename primitives
@@ -1018,12 +1021,83 @@ remove_selector(Self, Selector) ->
         false ->
             case classIncludesSelector(Self, Selector) of
                 true ->
+                    ok = refuse_if_protocol_provided(ClassName, Side, Selector, remove),
                     remove_local_method(ClassName, Selector, Side),
                     removed;
                 false ->
                     absent
             end
     end.
+
+%% ADR 0127 §11: `DateTime removeSelector: #max:` where `max:` is
+%% trait-provided is an error naming the trait and the `excluding:` escape
+%% hatch — flattening put the provision in the class's own module, but it is
+%% still conceptually the trait's, and a silent drop would desync the class
+%% from what its `uses:` line promises. `renameSelector:to:` refuses the same
+%% selector for the symmetric reason (ADR 0114/0127 §12): the site closure
+%% for a trait-provided selector spans every user, which a single-class
+%% rename cannot safely rewrite.
+%%
+%% Keyed off `beamtalk_xref:method_origin/3` (`provenance := protocol,
+%% origin`, ADR 0127 §12) rather than a separate check — the same row
+%% `CompiledMethod origin` reads. Codegen does not bake this provenance into
+%% flattened methods yet (ADR 0127 §10 is a later phase), so this refusal is
+%% dormant (never fires) until then; it is fully exercised today by tests
+%% that install a `protocol`-provenance row directly via
+%% `beamtalk_xref:register_class/2`.
+%%
+%% Does NOT cover the second §11 case — removing a class's own override that
+%% would *re-expose* a hidden provision failing §3a — which needs per-class
+%% knowledge of which provisions an override shadowed. That bookkeeping does
+%% not exist at runtime yet (tracked as a follow-up; see this issue's
+%% completion notes).
+-spec refuse_if_protocol_provided(atom(), instance | class, atom(), remove | rename) -> ok.
+refuse_if_protocol_provided(ClassName, Side, Selector, Op) ->
+    case beamtalk_xref:method_origin(ClassName, Side =:= class, Selector) of
+        nil ->
+            ok;
+        Protocol ->
+            beamtalk_error:raise(
+                protocol_provided_selector_error(ClassName, Selector, Protocol, Op)
+            )
+    end.
+
+-spec protocol_provided_selector_error(atom(), atom(), atom(), remove | rename) ->
+    #beamtalk_error{}.
+protocol_provided_selector_error(ClassName, Selector, Protocol, Op) ->
+    SelectorBin = atom_to_binary(Selector, utf8),
+    ProtocolBin = atom_to_binary(Protocol, utf8),
+    Error0 = beamtalk_error:new(protocol_provided_selector, ClassName, Selector),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"#">>,
+            SelectorBin,
+            <<" is provided by trait ">>,
+            ProtocolBin,
+            <<" on ">>,
+            atom_to_binary(ClassName, utf8)
+        ])
+    ),
+    beamtalk_error:with_hint(Error1, protocol_provided_selector_hint(SelectorBin, ProtocolBin, Op)).
+
+-spec protocol_provided_selector_hint(binary(), binary(), remove | rename) -> binary().
+protocol_provided_selector_hint(SelectorBin, ProtocolBin, remove) ->
+    iolist_to_binary([
+        <<"exclude it with uses: ">>,
+        ProtocolBin,
+        <<" excluding: #(#">>,
+        SelectorBin,
+        <<") or remove it from the trait">>
+    ]);
+protocol_provided_selector_hint(SelectorBin, ProtocolBin, rename) ->
+    iolist_to_binary([
+        <<"rename #">>,
+        SelectorBin,
+        <<" on protocol ">>,
+        ProtocolBin,
+        <<" itself; every class using it shares this one definition">>
+    ]).
 
 %% Remove an extension method and best-effort log its removal (ADR 0112 § Extension
 %% methods, § ChangeLog interaction). Captures the extension's owner +
@@ -2429,6 +2503,7 @@ rename_selector(Self, OldSelector, NewSelector) ->
             ok = ensure_rename_selector_collision_free(Self, NewSelector),
             {Side, ClassPid} = removal_target(Self),
             ClassName = gen_server:call(ClassPid, class_name),
+            ok = refuse_if_protocol_provided(ClassName, Side, OldSelector, rename),
             ClassNameBin = atom_to_binary(ClassName, utf8),
             OldSelectorBin = atom_to_binary(OldSelector, utf8),
             NewSelectorBin = atom_to_binary(NewSelector, utf8),
@@ -3090,6 +3165,22 @@ classProtocols(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     beamtalk_protocol_registry:protocols_for_class(ClassName).
+
+-doc """
+Return the protocols the receiver class directly `uses:`, in declaration
+order.
+
+ADR 0127 §12: Backs `@primitive "classUsedProtocols"` in behaviour.bt.
+Distinct from `classProtocols/1` above, which answers *structural*
+conformance (ADR 0068) — this answers only the trait composition this class
+itself declared. `allUsedProtocols` (transitive, including superclasses') is
+pure Beamtalk composed on top of this primitive plus `allSuperclasses`.
+""".
+-spec classUsedProtocols(#beamtalk_object{}) -> [atom()].
+classUsedProtocols(Self) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    beamtalk_protocol_registry:used_protocols(ClassName).
 
 %%% ============================================================================
 %%% Metaclass Primitives (ADR 0036 Phase 1)

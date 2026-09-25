@@ -1687,6 +1687,15 @@ mod tests {
     }
 
     #[test]
+    fn test_compiled_method_origin() {
+        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "origin", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_compiled_method_ops':'dispatch'('origin', [], Self)".to_string())
+        );
+    }
+
+    #[test]
     fn test_compiled_method_print_string() {
         let result = doc_to_string(generate_primitive_bif("CompiledMethod", "printString", &[]));
         assert_eq!(

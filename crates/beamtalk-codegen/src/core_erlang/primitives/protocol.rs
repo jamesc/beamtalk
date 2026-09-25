@@ -46,6 +46,24 @@ pub fn generate_protocol_bif(selector: &str, params: &[String]) -> Option<Docume
         "protocolAllProtocols" => Some(Document::Str(
             "call 'beamtalk_protocol_registry':'all_protocol_names'()",
         )),
+        // ADR 0127 §12: provided (trait) method selectors for a protocol.
+        "protocolProvidedMethods" => {
+            let arg = params.first()?;
+            Some(docvec![
+                "call 'beamtalk_protocol_registry':'provided_methods'(",
+                leaf::var(arg.clone()),
+                ")"
+            ])
+        }
+        // ADR 0127 §12: classes that `uses:` a protocol.
+        "protocolUsersOf" => {
+            let arg = params.first()?;
+            Some(docvec![
+                "call 'beamtalk_protocol_registry':'users_of'(",
+                leaf::var(arg.clone()),
+                ")"
+            ])
+        }
         _ => None,
     }
 }
@@ -99,6 +117,30 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_protocol_registry':'all_protocol_names'()".to_string())
+        );
+    }
+
+    #[test]
+    fn test_protocol_provided_methods() {
+        let result = doc_to_string(generate_protocol_bif(
+            "protocolProvidedMethods",
+            &["ProtocolName".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_protocol_registry':'provided_methods'(ProtocolName)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_protocol_users_of() {
+        let result = doc_to_string(generate_protocol_bif(
+            "protocolUsersOf",
+            &["ProtocolName".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_protocol_registry':'users_of'(ProtocolName)".to_string())
         );
     }
 

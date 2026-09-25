@@ -2986,3 +2986,147 @@ class_remove_selector_local_method_no_workspace_raises_runtime_error_test_() ->
             end)
         ]
     end}.
+
+%%% ============================================================================
+%%% ADR 0127 §11: refuse removeSelector:/renameSelector:to: on a
+%%% protocol-provided (trait) selector.
+%%%
+%%% Keyed off a `provenance := protocol` row in `beamtalk_xref` — inserted
+%%% directly here (codegen does not bake this provenance into flattened
+%%% methods yet, ADR 0127 §10) rather than via a real `uses:` compile, mirroring
+%%% how `beamtalk_xref_tests.erl` hand-rolls `method_xref` payloads "mimicking
+%%% what codegen will emit".
+%%% ============================================================================
+
+%% Ensure beamtalk_xref is running, standing up a fresh instance if this test
+%% runs outside the supervised application (mirrors beamtalk_xref_tests.erl's
+%% own setup/0).
+ensure_xref_started() ->
+    case whereis(beamtalk_xref) of
+        undefined ->
+            {ok, _} = beamtalk_xref:start_link(),
+            ok;
+        _ ->
+            ok
+    end.
+
+class_remove_selector_protocol_provided_refused_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                ensure_xref_started(),
+                ClassName = 'BT3592RmSelProtoProvided',
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {ClassObj, Pid} = register_class(
+                    ClassName, #{}, #{'maxOf:' => MethodFun}
+                ),
+                ok = beamtalk_xref:register_class(ClassName, [
+                    #{
+                        class_side => false,
+                        selector => 'maxOf:',
+                        line => 1,
+                        sends => [],
+                        references => [],
+                        source_status => indexed,
+                        provenance => protocol,
+                        origin => 'BT3592ComparableFixture'
+                    }
+                ]),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = protocol_provided_selector}
+                        },
+                        beamtalk_behaviour_intrinsics:classRemoveSelector(ClassObj, 'maxOf:')
+                    ),
+                    %% Refused before any mutation — the method is still there.
+                    ?assert(beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:'))
+                after
+                    beamtalk_xref:purge_class(ClassName),
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
+
+%% A locally-defined selector (no `protocol` provenance row) removes as usual
+%% — the refusal must not fire for an ordinary class-body method.
+class_remove_selector_non_protocol_provided_still_removable_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                ensure_xref_started(),
+                ClassName = 'BT3592RmSelOrdinary',
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {ClassObj, _Pid} = register_class(
+                    ClassName, #{}, #{'ordinaryMethod3592' => MethodFun}
+                ),
+                %% No xref row at all for this class — method_origin/3 must
+                %% answer `nil`, not crash, and the refusal must not fire.
+                try
+                    ?assertError(
+                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                        beamtalk_behaviour_intrinsics:classRemoveSelector(
+                            ClassObj, 'ordinaryMethod3592'
+                        )
+                    )
+                after
+                    ok
+                end
+            end)
+        ]
+    end}.
+
+class_rename_selector_protocol_provided_refused_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_extensions:init(),
+                ensure_xref_started(),
+                ClassName = 'BT3592RenSelProtoProvided',
+                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+                {ClassObj, Pid} = register_class(
+                    ClassName, #{}, #{'maxOf:' => MethodFun}
+                ),
+                ok = beamtalk_xref:register_class(ClassName, [
+                    #{
+                        class_side => false,
+                        selector => 'maxOf:',
+                        line => 1,
+                        sends => [],
+                        references => [],
+                        source_status => indexed,
+                        provenance => protocol,
+                        origin => 'BT3592ComparableFixture'
+                    }
+                ]),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = protocol_provided_selector}
+                        },
+                        beamtalk_behaviour_intrinsics:classRenameSelector(
+                            ClassObj, 'maxOf:', 'maxOfRenamed3592'
+                        )
+                    ),
+                    %% Refused before any mutation — the old selector is
+                    %% still there, the new one is not.
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:')
+                    ),
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(
+                            ClassObj, 'maxOfRenamed3592'
+                        )
+                    )
+                after
+                    beamtalk_xref:purge_class(ClassName),
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
+            end)
+        ]
+    end}.
