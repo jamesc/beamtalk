@@ -841,7 +841,7 @@ Class-side facades fit ADR 0126's model rather than working against it.
 |---|---|---|---|
 | Workspace node (REPL) | Its registry | Its workspace | Its `TranscriptStream` |
 | `run` node / escript | Its registry | Its `run`-mode workspace (§3) | Its Logger |
-| Release node | Its registry | Release-mode refusals (ADR 0125 §1.5) | Its Logger, or its `TranscriptStream` with the console |
+| Release node | Its registry | Its release-mode workspace, partially available per ADR 0125 §1.5: introspection such as `actors`/`sessions` works; compiler ops need `include_compiler`; `flush`/rename are refused | Its Logger, or its `TranscriptStream` with the console |
 | Bare runtime (e.g. `beamtalk test`) | Its registry | `no_workspace` | Its Logger |
 
 **Remote access: the extension point this ADR preserves.** Remote access to
