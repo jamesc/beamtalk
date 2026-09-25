@@ -595,10 +595,17 @@ follows.
 - **File-handle ownership differs by context.** `beamtalk_file:
   resolve_owner` makes a handle belong to the session shell in the REPL
   and to the calling process elsewhere.
-- **The `Beamtalk`/`Workspace` method sets need re-homing (BT-3633).**
-  - Runtime introspection (`actors`, `processes`, `nodes`, `supervisors`)
-    does not conceptually need a workspace.
-  - Logging control could live on `Logger`.
+- **Node introspection moves from `Workspace` to `Node` (BT-3633).**
+  - `actors`, `actorAt:`, `actorsOf:`, `processes`, `supervisors` and the
+    root supervisor are facts about a node, not the development workspace.
+  - They become `Node` instance methods (`Node current actors`, `worker
+    actors`), so they work in every boot context and on peers, without the
+    remote facade handle of §8. `Workspace nodes` folds into
+    `Node connected`.
+  - The actor registry moves into `beamtalk_runtime` to support this.
+  - `Workspace` keeps development-environment operations, including
+    `startSupervisor:`/`stopSupervisor:`.
+  - Whether logging control moves to `Logger` is decided there too.
 
 **Context-bound by design, and already conforming:**
 
