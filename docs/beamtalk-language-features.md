@@ -188,7 +188,7 @@ Actor subclass: Counter
 Actors support two optional lifecycle hooks:
 
 - **`initialize`** — called automatically after `spawn`, before the actor is returned to the caller. Use it to set up resources or compute derived state.
-- **`terminate: reason`** — called automatically during graceful shutdown (`stop`). Use it to clean up resources. The `reason` parameter indicates why the actor is stopping (e.g., `#normal`).
+- **`terminate: reason`** — called automatically during graceful shutdown (`stop`) and supervisor-initiated shutdown (cascade or direct `aSupervisor terminate: aClass`). Use it to clean up resources. The `reason` parameter indicates why the actor is stopping (e.g., `#normal`, `#shutdown`).
 
 ```beamtalk
 Actor subclass: ResourceActor
@@ -207,9 +207,10 @@ Actor subclass: ResourceActor
 
 | Aspect | `initialize` | `terminate:` |
 |--------|--------------|--------------|
-| Called on | `spawn` / `spawnWith:` | `stop` (graceful shutdown) |
+| Called on | `spawn` / `spawnWith:` | `stop`, supervisor shutdown (`rest_for_one`/`one_for_all` cascade, direct `terminate:`), linked exit |
 | Error effect | Spawn fails with `InstantiationError` | Shutdown proceeds anyway |
 | Called on `kill`? | N/A | No — `kill` bypasses `terminate:` |
+| Side effect | — | Overriding `terminate:` causes the actor to trap exits (`process_flag(trap_exit, true)`); actors without an override keep untrapped link semantics |
 | Actor state | Accessible via `self.field` | Accessible via `self.field` |
 
 Both hooks are optional — actors without them work normally.

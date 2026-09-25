@@ -220,8 +220,8 @@ apps = ["extra_otp_app"]          # additional OTP apps to include beyond the co
 include-erts = true               # bundle ERTS (default: true)
 strip-beams = false               # drop debug_info chunks from .beam files
 include-compiler = false          # stage the compiler port binary (for runtime compilation)
-console = false                   # start with an interactive console
-bind = "127.0.0.1"               # distribution bind address
+console = false                   # start with an interactive console (requires a cookie; see deploying.md)
+bind = "127.0.0.1"               # REPL bind address (only meaningful when console = true)
 sys-config = "config/sys.config"  # custom sys.config path
 vm-args = "config/vm.args"        # custom vm.args path
 ```
