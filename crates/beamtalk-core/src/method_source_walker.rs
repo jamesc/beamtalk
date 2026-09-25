@@ -243,7 +243,7 @@ fn push_send(
 ///
 /// Implement this trait to collect different kinds of per-send data without
 /// duplicating the recursive traversal logic. Both [`collect_sends`] and
-/// [`collect_receiver_spans_expr`] (formerly separate 90-line mirrors) now
+/// [`collect_receiver_spans`] (formerly separate 90-line mirrors) now
 /// share the single walk in [`walk_expr`].
 trait SendVisitor {
     /// Called for each `Expression::MessageSend` that is not rooted in an
