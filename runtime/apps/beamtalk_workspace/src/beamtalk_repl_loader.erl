@@ -227,9 +227,15 @@ handle_load(Path, State) ->
                     Source = binary_to_list(SourceBin),
                     StdlibMode = is_stdlib_path(Path),
                     ModuleNameOverride = compute_package_module_name(Path),
+                    %% ADR 0127 §10a / BT-3593: ambient `protocol_sources`
+                    %% context — see `with_ambient_protocol_sources/1`'s doc
+                    %% for why a same-file-only `uses:` isn't enough here.
+                    PrebuiltIndexes = with_ambient_protocol_sources(
+                        beamtalk_repl_compiler:build_class_indexes()
+                    ),
                     case
                         beamtalk_repl_compiler:compile_file(
-                            Source, Path, StdlibMode, ModuleNameOverride
+                            Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
                         )
                     of
                         %% Protocol definition from file compilation.
@@ -237,6 +243,7 @@ handle_load(Path, State) ->
                         %% {ok, protocol_definition, Info, Warnings} binding to
                         %% {ok, Binary, ClassNames, ModuleName}.
                         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
+                            track_protocol_source(ProtocolInfo, Source),
                             load_protocol_module(ProtocolInfo, Path, State);
                         {ok, Binary, ClassNames, ModuleName} ->
                             load_compiled_module(
@@ -268,13 +275,15 @@ handle_load(Path, State, PrebuiltIndexes) ->
                     Source = binary_to_list(SourceBin),
                     StdlibMode = is_stdlib_path(Path),
                     ModuleNameOverride = compute_package_module_name(Path),
+                    FullIndexes = with_ambient_protocol_sources(PrebuiltIndexes),
                     case
                         beamtalk_repl_compiler:compile_file(
-                            Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
+                            Source, Path, StdlibMode, ModuleNameOverride, FullIndexes
                         )
                     of
                         %% Protocol definition — must match before generic 4-tuple.
                         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
+                            track_protocol_source(ProtocolInfo, Source),
                             load_protocol_module(ProtocolInfo, Path, State);
                         {ok, Binary, ClassNames, ModuleName} ->
                             load_compiled_module(
@@ -291,15 +300,53 @@ handle_load(Path, State, PrebuiltIndexes) ->
     {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load_source(SourceBin, Label, State) ->
     Source = binary_to_list(SourceBin),
-    case beamtalk_repl_compiler:compile_file(Source, Label, false, undefined) of
+    PrebuiltIndexes = with_ambient_protocol_sources(
+        beamtalk_repl_compiler:build_class_indexes()
+    ),
+    case beamtalk_repl_compiler:compile_file(Source, Label, false, undefined, PrebuiltIndexes) of
         %% Protocol definition — must match before generic 4-tuple.
         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
+            track_protocol_source(ProtocolInfo, Source),
             load_protocol_module(ProtocolInfo, undefined, State);
         {ok, Binary, ClassNames, ModuleName} ->
             load_compiled_module(Binary, ClassNames, ModuleName, Source, undefined, State);
         {error, Reason} ->
             {error, Reason, State}
     end.
+
+-doc """
+Merge the ambient `protocol_sources` context (ADR 0127 §10a / BT-3593) into
+`Indexes` — every protocol source `beamtalk_workspace_meta` has tracked so
+far this session (`all_protocol_sources/0`), keeping any entry `Indexes`
+already carries (a caller's own value always wins over the ambient default,
+same convention `class_hierarchy`/`protocol_registry` follow elsewhere in
+this file).
+
+Without this, a class in one file `uses:`ing a protocol defined in a
+DIFFERENT file only resolves within the compile-time-known
+`class_superclass_index`/`class_module_index` indexes above — never the
+protocol's own full AST, which `trait_expansion::expand_module` needs to
+flatten provided methods. `protocol_registry` (injected unconditionally by
+`beamtalk_compiler_server` itself, see its own doc) is signature-only and
+cannot substitute for this.
+""".
+-spec with_ambient_protocol_sources(map()) -> map().
+with_ambient_protocol_sources(Indexes) ->
+    maps:merge(#{protocol_sources => beamtalk_workspace_meta:all_protocol_sources()}, Indexes).
+
+%% Record this file's protocol source(s) (ADR 0127 §10a / BT-3593) so a
+%% LATER cross-file `uses:` — an ordinary `:load` of a class in a different
+%% file, or a protocol-reload fan-out's own recompile of ITS users — can
+%% carry this protocol's full AST via `with_ambient_protocol_sources/1`.
+%% Best-effort bookkeeping: called just before the actual `code:load_binary/3`
+%% this protocol's own install still has to run, mirroring this module's
+%% other pre-install bookkeeping calls (e.g. `prime_shape_capture/1`).
+-spec track_protocol_source(map(), string()) -> ok.
+track_protocol_source(#{protocols := ProtocolNameBins}, Source) ->
+    lists:foreach(
+        fun(NameBin) -> beamtalk_workspace_meta:set_protocol_source(NameBin, Source) end,
+        ProtocolNameBins
+    ).
 
 -doc """
 Load a compiled class module, activate it, and update REPL state.
@@ -1427,9 +1474,15 @@ reload_class_file_impl(Path, ExpectedClassName) ->
     string(), string(), binary() | undefined, atom() | undefined
 ) -> {ok, [map()]} | {error, term()}.
 reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
+    %% ADR 0127 §11 / BT-3593: a protocol file's reload can never install
+    %% just the protocol module the way a class file's reload installs just
+    %% that class — every loaded user's flattened body is baked from the
+    %% protocol's OLD provisions until it, too, recompiles. See
+    %% `reload_protocol_fanout/3`'s own doc for the two-stage atomicity this
+    %% routes through instead of `install_reload_result/2` directly.
     case compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) of
-        {ok, _Tag, _} = ProtocolResult ->
-            install_reload_result(ProtocolResult, Path);
+        {ok, protocol_definition, _ProtocolInfo} = ProtocolResult ->
+            reload_protocol_fanout(ProtocolResult, Path, Source);
         {ok, _Tag, _, _, _} = CompiledResult ->
             install_reload_result(CompiledResult, Path);
         {error, _} = Err ->
@@ -1457,18 +1510,70 @@ source is installable", so a compile failure here is reported, never raised.
     | {error, term()}.
 compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     StdlibMode = is_stdlib_path(Path),
-    case beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride) of
-        %% Protocol definition — must match before generic 4-tuple.
-        {ok, protocol_definition, ProtocolInfo, _Warnings} ->
-            {ok, protocol_definition, ProtocolInfo};
-        {ok, Binary, ClassNames, ModuleName} ->
-            case verify_class_present(ExpectedClassName, ClassNames, Path) of
-                ok -> {ok, compiled, Binary, ClassNames, ModuleName};
-                {error, _} = Err -> Err
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
+    handle_compile_reload_result(
+        beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride),
+        Path,
+        ExpectedClassName
+    ).
+
+-doc """
+`compile_reload_source/4`, additionally accepting a `PrebuiltIndexes` map
+forwarded to `beamtalk_repl_compiler:compile_file/5` (a real map, always —
+unlike `compile_file/4`'s own internal `use_runtime_indexes` shortcut,
+which is `compile_file/5`'s to interpret, not this function's to pass
+through; doing so here previously widened this arity's declared domain
+past what `compile_file/5`'s own spec promises, which is exactly the kind
+of cross-function spec mismatch Dialyzer's whole-module success-typing
+propagates into unrelated "will never be called" findings elsewhere in
+this file — found via `just dialyzer` on this very change).
+
+BT-3593's protocol-reload fan-out is this arity's one production caller: it
+merges `beamtalk_repl_compiler:build_class_indexes/0` (the same superclass/
+module indexes an ordinary reload gets) with a `protocol_sources` entry
+carrying the just-edited protocol's raw source, so each fanned-out user's
+own recompile flattens against the NEW provisions (ADR 0127 §10a) rather
+than resolving `uses:` against nothing.
+""".
+-spec compile_reload_source(string(), string(), binary() | undefined, atom() | undefined, map()) ->
+    {ok, protocol_definition, map()}
+    | {ok, compiled, binary(), [map()], atom()}
+    | {error, term()}.
+compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, PrebuiltIndexes) when
+    is_map(PrebuiltIndexes)
+->
+    StdlibMode = is_stdlib_path(Path),
+    handle_compile_reload_result(
+        beamtalk_repl_compiler:compile_file(
+            Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
+        ),
+        Path,
+        ExpectedClassName
+    ).
+
+%% Shared compile-result dispatch both `compile_reload_source` arities above
+%% reduce to — see `compile_reload_source/4`'s own doc for the shapes this
+%% translates between.
+-spec handle_compile_reload_result(
+    {ok, protocol_definition, map(), [binary()]}
+    | {ok, binary(), [map()], atom()}
+    | {error, term()},
+    string(),
+    atom() | undefined
+) ->
+    {ok, protocol_definition, map()}
+    | {ok, compiled, binary(), [map()], atom()}
+    | {error, term()}.
+handle_compile_reload_result(
+    {ok, protocol_definition, ProtocolInfo, _Warnings}, _Path, _ExpectedClassName
+) ->
+    {ok, protocol_definition, ProtocolInfo};
+handle_compile_reload_result({ok, Binary, ClassNames, ModuleName}, Path, ExpectedClassName) ->
+    case verify_class_present(ExpectedClassName, ClassNames, Path) of
+        ok -> {ok, compiled, Binary, ClassNames, ModuleName};
+        {error, _} = Err -> Err
+    end;
+handle_compile_reload_result({error, Reason}, _Path, _ExpectedClassName) ->
+    {error, Reason}.
 
 -doc """
 Install half of `reload_compile_and_load/4` — see `compile_reload_source/4`'s
@@ -1508,6 +1613,481 @@ install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) ->
         {error, Reason} ->
             {error, {load_error, Reason}}
     end.
+
+%%% ----------------------------------------------------------------------------
+%%% ADR 0127 §11 / BT-3593: atomic protocol reload fan-out
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Reload a protocol file and atomically fan the edit out to every loaded,
+source-backed, non-stdlib user (ADR 0127 §11, "Live patching is a message
+send"; BT-3593's reload-mechanics half).
+
+`ProtocolResult` is `compile_reload_source/4`'s already-successful
+`{ok, protocol_definition, ProtocolInfo}` for the just-recompiled protocol
+file at `Path`; `Source` is that file's raw text. Called from
+`reload_compile_and_load/4` in place of `install_reload_result/2` — a
+protocol reload can never stop at installing just the protocol module the
+way a class reload installs just that class, because every loaded user's
+`uses:`-flattened body is baked from the protocol's OLD provisions until it,
+too, recompiles.
+
+Refuses outright, before compiling a single user, when `Path` is a stdlib
+file — stdlib protocols are read-only in the workspace, mirroring
+`beamtalk_repl_eval:stdlib_method_read_only_error/2`'s class-level refusal
+for the same reason.
+
+Otherwise runs two stages, per the ADR's "all-or-nothing" requirement:
+
+1. **Compile.** Every class `beamtalk_protocol_registry:users_of/1` names for
+   one of this file's protocols, that ALSO has a `beamtalk_workspace_meta`
+   tracked source, is recompiled from that tracked source — `protocol_sources`
+   (this protocol's just-compiled `Source`, keyed by name) merged into
+   `beamtalk_repl_compiler:build_class_indexes/0`'s ordinary superclass/module
+   indexes, so `uses:` flattening sees the NEW provisions (ADR 0127 §10a) —
+   but NOTHING is installed yet, mirroring `rewrite_sites/2`'s own
+   compile-then-install split. A user with no tracked source (no backing
+   file, or a class the workspace never loaded from one) is not a failure:
+   it is recorded under `skipped` and warned about via `?LOG_WARNING`, per
+   the ADR's "users without workspace source keep their old code" allowance.
+   If ANY user's recompile fails, the whole reload is rejected —
+   `{error, #beamtalk_error{}}` naming every failing user with its own
+   diagnostic — and nothing from this call installs, not even the protocol
+   itself.
+2. **Install.** Only once every user has compiled does anything load: the
+   protocol module first, then each user in turn, both via the same
+   `install_reload_result/2` chokepoint an ordinary single-class reload
+   uses — so ADR 0105's shape re-check, `beamtalk_alias_xref` refresh, and
+   actor hot-reload all run exactly as they would for a ordinary reload (see
+   `activate_module/4`'s own doc). Failing here is expected to be rare
+   (every module reaching this stage already compiled successfully — the
+   same reasoning `rewrite_sites/2`'s doc gives for its own install pass),
+   but is still handled: if install fails partway through, every module
+   THIS call already installed in stage 2 — protocol included — is rolled
+   back to its previous binary (captured via `code:get_object_code/1`
+   immediately before that module's own install) before the error is
+   returned, so a partial-install failure can never leave some users on the
+   new provisions and others on the old ones. A module with no previous
+   binary (its first-ever load) has nothing to roll back to; it is left on
+   the code this call just installed, since there is no "before" state.
+
+Returns `{ok, AllClassNames}` — the protocol's own pseudo-class entries
+followed by every successfully-installed user's, in the same
+`[#{name := string(), superclass := string()}]` shape `reload_class_file/1`
+already promises its callers (`:reload`, `Counter reload`, `Workspace
+flush`) — so this is a drop-in superset of the single-protocol reload it
+replaces, not a breaking return-shape change.
+""".
+-spec reload_protocol_fanout({ok, protocol_definition, map()}, string(), string()) ->
+    {ok, [map()]} | {error, #beamtalk_error{}}.
+reload_protocol_fanout({ok, protocol_definition, ProtocolInfo} = ProtocolResult, Path, Source) ->
+    case is_stdlib_path(Path) of
+        true ->
+            {error, stdlib_protocol_reload_read_only_error(ProtocolInfo)};
+        false ->
+            ProtocolAtoms = protocol_atoms_from_info(ProtocolInfo),
+            {TargetAtoms, SkippedNameBins} = discover_fanout_targets(ProtocolAtoms),
+            %% This reload's own protocol(s) map to their fresh (not-yet-
+            %% installed) `Source` — merged OVER the ambient, possibly-stale
+            %% `all_protocol_sources/0` snapshot (still tracking the OLD
+            %% source for this same name until stage 2 installs the new
+            %% one) so a fan-out user using more than one protocol still
+            %% resolves every OTHER one it needs, not just the one being
+            %% reloaded — see `with_ambient_protocol_sources/1`'s doc.
+            ProtocolSources = maps:merge(
+                beamtalk_workspace_meta:all_protocol_sources(),
+                build_protocol_sources_map(ProtocolAtoms, Source)
+            ),
+            warn_skipped_fanout_users(ProtocolAtoms, SkippedNameBins),
+            case compile_fanout_users(TargetAtoms, ProtocolSources) of
+                {ok, CompiledUsers} ->
+                    install_protocol_fanout(ProtocolResult, Path, Source, CompiledUsers);
+                {error, Failures} ->
+                    {error, protocol_reload_rejected_error(ProtocolAtoms, Failures)}
+            end
+    end.
+
+%% This file's own protocol names, as existing atoms — `compile_reload_source/4`
+%% only reaches this point after the compiler itself accepted these as valid
+%% protocol names, and a RELOAD (as opposed to a first-ever load) means each
+%% one was already registered by an earlier load, so the atom already exists.
+-spec protocol_atoms_from_info(map()) -> [atom()].
+protocol_atoms_from_info(#{protocols := ProtocolNameBins}) ->
+    lists:filtermap(
+        fun(NameBin) -> safe_atom_result(beamtalk_repl_server:safe_to_existing_atom(NameBin)) end,
+        ProtocolNameBins
+    ).
+
+%% Every loaded user of any of `ProtocolAtoms`, partitioned into
+%% `{TargetAtoms, SkippedNameBins}` — a target has a `beamtalk_workspace_meta`
+%% tracked source to recompile from; a skip does not (no backing file, or a
+%% class the workspace never tracked source for at all). `lists:usort/1`
+%% both de-duplicates a class using more than one of this file's protocols
+%% and gives a deterministic (alphabetical) install order.
+-spec discover_fanout_targets([atom()]) -> {[atom()], [binary()]}.
+discover_fanout_targets(ProtocolAtoms) ->
+    UserAtoms = lists:usort(
+        lists:flatmap(fun beamtalk_protocol_registry:users_of/1, ProtocolAtoms)
+    ),
+    {TargetsRev, SkippedRev} = lists:foldl(
+        fun(ClassAtom, {TargetsAcc, SkippedAcc}) ->
+            ClassNameBin = normalize_class_source_key(ClassAtom),
+            case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
+                undefined -> {TargetsAcc, [ClassNameBin | SkippedAcc]};
+                _Source -> {[ClassAtom | TargetsAcc], SkippedAcc}
+            end
+        end,
+        {[], []},
+        UserAtoms
+    ),
+    {lists:reverse(TargetsRev), lists:reverse(SkippedRev)}.
+
+%% `protocol_sources` context (ADR 0127 §10a) for every fanned-out user's own
+%% recompile: this file's protocol name(s) mapped to its own just-compiled
+%% `Source` text, so `uses:` flattening sees the NEW provisions rather than
+%% nothing. Every protocol this one file defines maps to the SAME source
+%% text (a file may define more than one protocol) — `compile.rs`'s decode
+%% side re-parses each entry and only keeps the definition matching its own
+%% key, so an entry irrelevant to a given user's `uses:` line is simply
+%% never matched, not a correctness risk.
+-spec build_protocol_sources_map([atom()], string()) -> #{binary() => binary()}.
+build_protocol_sources_map(ProtocolAtoms, Source) ->
+    SourceBin = unicode:characters_to_binary(Source),
+    maps:from_list([
+        {atom_to_binary(ProtocolAtom, utf8), SourceBin}
+     || ProtocolAtom <- ProtocolAtoms
+    ]).
+
+%% Best-effort warning for every fan-out user this reload will leave on its
+%% old code because it has no workspace-tracked source (ADR 0127 §11's "users
+%% without workspace source keep their old code" allowance). Never fails the
+%% reload — a class with no source to recompile from was ALREADY going to
+%% keep running its old (still perfectly valid) code either way.
+-spec warn_skipped_fanout_users([atom()], [binary()]) -> ok.
+warn_skipped_fanout_users(_ProtocolAtoms, []) ->
+    ok;
+warn_skipped_fanout_users(ProtocolAtoms, SkippedNameBins) ->
+    ?LOG_WARNING(
+        "Protocol reload: ~p user(s) of ~p have no workspace-tracked source and keep their old code",
+        [length(SkippedNameBins), ProtocolAtoms],
+        #{
+            domain => [beamtalk, runtime],
+            skipped_users => SkippedNameBins,
+            protocols => ProtocolAtoms
+        }
+    ).
+
+%% Stage 1: compile (never install) every fan-out target from its own
+%% tracked source, with `protocol_sources` context. All-or-nothing — a
+%% single user's compile failure rejects the whole batch, mirroring
+%% `validate_rewrite_groups/1`'s identical shape for the multi-site rewrite
+%% protocol.
+-spec compile_fanout_users([atom()], #{binary() => binary()}) ->
+    {ok, [{atom(), string(), term()}]} | {error, [{atom(), term()}]}.
+compile_fanout_users(TargetAtoms, ProtocolSources) ->
+    Results = [
+        {ClassAtom, compile_fanout_user(ClassAtom, ProtocolSources)}
+     || ClassAtom <- TargetAtoms
+    ],
+    case [{ClassAtom, Reason} || {ClassAtom, {_Path, {error, Reason}}} <- Results] of
+        [] -> {ok, [{ClassAtom, Path, Compiled} || {ClassAtom, {Path, Compiled}} <- Results]};
+        Failures -> {error, Failures}
+    end.
+
+%% Recompile one fan-out target from its OWN tracked source (never the just-
+%% edited protocol's) — the class's own body did not change; only what its
+%% `uses:` line flattens in did.
+-spec compile_fanout_user(atom(), #{binary() => binary()}) ->
+    {string(), {ok, compiled, binary(), [map()], atom()} | {error, term()}}.
+compile_fanout_user(ClassAtom, ProtocolSources) ->
+    ClassNameBin = normalize_class_source_key(ClassAtom),
+    %% Present by construction: `discover_fanout_targets/1` only lists a
+    %% class here after confirming `get_class_source/1` returns a value.
+    Source = beamtalk_workspace_meta:get_class_source(ClassNameBin),
+    SourceFileBin = class_source_file(ClassNameBin),
+    Path =
+        case SourceFileBin of
+            nil -> "";
+            _ -> binary_to_list(SourceFileBin)
+        end,
+    ModuleNameOverride = compute_package_module_name(Path),
+    PrebuiltIndexes = maps:merge(
+        beamtalk_repl_compiler:build_class_indexes(),
+        #{protocol_sources => ProtocolSources}
+    ),
+    Compiled = compile_reload_source(
+        Source, Path, ModuleNameOverride, ClassAtom, PrebuiltIndexes
+    ),
+    {Path, Compiled}.
+
+%% Stage 2: install the protocol, then every already-compiled fan-out user,
+%% in order — rolling every module this call installed back to its previous
+%% code if any install fails partway through. See `reload_protocol_fanout/3`'s
+%% own doc for the full contract.
+%%
+%% "Previous binary" here means recompiled-and-reinstalled from the
+%% previously-tracked SOURCE, not a cached raw BEAM binary —
+%% `code:get_object_code/1` (the obvious candidate) only finds a module via
+%% the code-path SEARCH mechanism, which a Beamtalk class's dynamically
+%% `code:load_binary/3`-installed module was never placed on; it reliably
+%% returns `error` for every class this REPL ever loads. Recompiling from
+%% `beamtalk_workspace_meta`'s already-tracked previous source (the same
+%% source of truth `class_source_unchanged/1` already trusts elsewhere in
+%% this module) is the mechanism that actually works here, and produces the
+%% exact same observable code the module had before this reload — since
+%% nothing about a user's own `.bt` text changes in a protocol reload, only
+%% what its `uses:` line flattens in, "recompile the user against the OLD
+%% protocol source" and "restore the user's previous binary" are the same
+%% operation.
+-spec install_protocol_fanout(
+    {ok, protocol_definition, map()}, string(), string(), [{atom(), string(), term()}]
+) -> {ok, [map()]} | {error, #beamtalk_error{}}.
+install_protocol_fanout(
+    {ok, protocol_definition, ProtocolInfo} = ProtocolResult, Path, Source, CompiledUsers
+) ->
+    #{protocols := ProtocolNameBins} = ProtocolInfo,
+    %% Snapshot BEFORE install — `track_protocol_source/2` below overwrites
+    %% these the moment the new protocol module goes live.
+    OldProtocolSources = maps:from_list([
+        {NameBin, beamtalk_workspace_meta:get_protocol_source(NameBin)}
+     || NameBin <- ProtocolNameBins
+    ]),
+    %% `?MODULE:` (not a bare local call) so this install can be intercepted
+    %% by `meck` the same way `install_reload_result/2`'s own doc explains
+    %% for `rewrite_sites/2` — see `beamtalk_repl_loader_tests.erl`'s
+    %% `t_protocol_reload_rollback_merges_ambient_protocol_sources`.
+    case ?MODULE:install_reload_result(ProtocolResult, Path) of
+        {error, Reason} ->
+            {error, protocol_reload_install_failed_error(protocol, Reason)};
+        {ok, ProtocolClassNames} ->
+            %% Now that the NEW protocol module is actually live, this
+            %% reload's own edit becomes the tracked source for any LATER
+            %% cross-file `uses:` — see `track_protocol_source/2`'s doc.
+            track_protocol_source(ProtocolInfo, Source),
+            ProtocolInstalled = {protocol, Path, ProtocolClassNames},
+            case install_fanout_users(CompiledUsers, [ProtocolInstalled]) of
+                {ok, InstalledRev} ->
+                    AllClassNames = lists:flatmap(
+                        fun({_Who, _Path2, ClassNames}) -> ClassNames end,
+                        lists:reverse(InstalledRev)
+                    ),
+                    {ok, AllClassNames};
+                {error, FailedWho, Reason, InstalledRev} ->
+                    rollback_fanout_installs(InstalledRev, OldProtocolSources),
+                    {error, protocol_reload_install_failed_error(FailedWho, Reason)}
+            end
+    end.
+
+-spec install_fanout_users([{atom(), string(), term()}], [tuple()]) ->
+    {ok, [tuple()]} | {error, atom(), term(), [tuple()]}.
+install_fanout_users([], InstalledRev) ->
+    {ok, InstalledRev};
+install_fanout_users(
+    [{ClassAtom, Path, {ok, compiled, Binary, ClassNames, ModuleName}} | Rest], InstalledRev
+) ->
+    %% `?MODULE:` — see `install_protocol_fanout/4`'s own call for why.
+    case ?MODULE:install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) of
+        {ok, InstalledClassNames} ->
+            Installed = {ClassAtom, Path, InstalledClassNames},
+            install_fanout_users(Rest, [Installed | InstalledRev]);
+        {error, Reason} ->
+            {error, ClassAtom, Reason, InstalledRev}
+    end.
+
+%% Roll back every module in `InstalledRev` (oldest-installed last, since
+%% each was prepended as it installed), most-recently-installed first — an
+%% arbitrary but deterministic choice, since these installs are independent
+%% modules with no ordering dependency on one another once each is captured.
+-spec rollback_fanout_installs([tuple()], #{binary() => string() | undefined}) -> ok.
+rollback_fanout_installs(InstalledRev, OldProtocolSources) ->
+    lists:foreach(
+        fun(Installed) -> rollback_one_install(Installed, OldProtocolSources) end,
+        InstalledRev
+    ).
+
+%% Roll the just-installed protocol module back to whichever of its
+%% (possibly several) protocol names had a previously-tracked source. A name
+%% with `undefined` (this reload was its first-ever load) has no "before"
+%% state to restore — left on the code this call just installed, same
+%% accepted-limitation shape this module's other rollback paths already
+%% document for a first-ever install.
+-spec rollback_one_install(tuple(), #{binary() => string() | undefined}) -> ok.
+rollback_one_install({protocol, Path, _ClassNames}, OldProtocolSources) ->
+    lists:foreach(
+        fun
+            ({_NameBin, undefined}) ->
+                ok;
+            ({_NameBin, OldSource}) ->
+                ModuleNameOverride = compute_package_module_name(Path),
+                case compile_reload_source(OldSource, Path, ModuleNameOverride, undefined) of
+                    {ok, protocol_definition, OldProtocolInfo} ->
+                        case
+                            install_reload_result({ok, protocol_definition, OldProtocolInfo}, Path)
+                        of
+                            {ok, _} -> track_protocol_source(OldProtocolInfo, OldSource);
+                            {error, Reason} -> log_rollback_failure(protocol, Reason)
+                        end;
+                    {error, Reason} ->
+                        log_rollback_failure(protocol, Reason)
+                end
+        end,
+        maps:to_list(OldProtocolSources)
+    );
+rollback_one_install({ClassAtom, Path, _ClassNames}, OldProtocolSources) ->
+    ClassNameBin = normalize_class_source_key(ClassAtom),
+    case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
+        undefined ->
+            %% Source vanished from tracking mid-batch (a concurrent
+            %% `removeFromSystem`) — nothing sound to recompile from; leave
+            %% the just-installed module as-is, same "no before state"
+            %% shape as an `undefined` protocol source above.
+            ok;
+        UserSource ->
+            ModuleNameOverride = compute_package_module_name(Path),
+            %% Merge over the ambient snapshot the same way the forward-compile
+            %% path (`reload_protocol_fanout/3`) does — `OldProtocolSources`
+            %% only carries the name(s) *this reloaded file* defines, so a
+            %% user `uses:`ing a second, unrelated protocol would otherwise
+            %% fail this rollback recompile with an "unknown protocol"
+            %% diagnostic, leaving it stuck on its new (post-reload) code
+            %% while its siblings correctly roll back — exactly the
+            %% half-applied state the two-stage design exists to prevent.
+            PrebuiltIndexes = maps:merge(
+                beamtalk_repl_compiler:build_class_indexes(),
+                #{
+                    protocol_sources => maps:merge(
+                        beamtalk_workspace_meta:all_protocol_sources(),
+                        filter_defined(OldProtocolSources)
+                    )
+                }
+            ),
+            case
+                compile_reload_source(
+                    UserSource, Path, ModuleNameOverride, ClassAtom, PrebuiltIndexes
+                )
+            of
+                {ok, compiled, Binary, ClassNames2, ModuleName2} ->
+                    case
+                        install_reload_result(
+                            {ok, compiled, Binary, ClassNames2, ModuleName2}, Path
+                        )
+                    of
+                        {ok, _} -> ok;
+                        {error, Reason} -> log_rollback_failure(ClassAtom, Reason)
+                    end;
+                {error, Reason} ->
+                    log_rollback_failure(ClassAtom, Reason)
+            end
+    end.
+
+%% Drop `undefined` entries (a protocol never tracked before this reload)
+%% before handing a source map to a compile's `protocol_sources` option,
+%% which expects only real source text per entry.
+-spec filter_defined(#{binary() => string() | undefined}) -> #{binary() => binary()}.
+filter_defined(Sources) ->
+    maps:from_list([
+        {NameBin, unicode:characters_to_binary(Source)}
+     || {NameBin, Source} <- maps:to_list(Sources), Source =/= undefined
+    ]).
+
+%% Best-effort logging for a rollback step that itself failed — see
+%% `rollback_signature_generation/4`'s identical "a rollback failure must
+%% never surface as the user-visible error" contract elsewhere in this
+%% module. `Who` is left on whatever code this reload most recently
+%% installed for it; a further-degraded image from here is the same accepted
+%% residual this module's other rollback paths already carry.
+-spec log_rollback_failure(protocol | atom(), term()) -> ok.
+log_rollback_failure(Who, Reason) ->
+    ?LOG_ERROR(
+        "Failed to roll back ~p to its previous source after a partial protocol-reload install failure",
+        [Who],
+        #{domain => [beamtalk, runtime], who => Who, reason => Reason}
+    ),
+    ok.
+
+%% Structured refusal for reloading a stdlib protocol file — mirrors
+%% `beamtalk_repl_eval:stdlib_method_read_only_error/2`'s class-level
+%% message/hint shape for the same reason (built-in protocols ship with the
+%% standard library; edit them in the source tree and rebuild).
+-spec stdlib_protocol_reload_read_only_error(map()) -> #beamtalk_error{}.
+stdlib_protocol_reload_read_only_error(#{protocols := ProtocolNameBins}) ->
+    NamesBin = iolist_to_binary(lists:join(<<", ">>, ProtocolNameBins)),
+    %% `Class` here is nominal only (`beamtalk_error:new/2` requires an
+    %% atom) — a protocol reload has no single class this error is "about"
+    %% the way a method patch is about the class it targets, so the atom
+    %% chosen carries no further meaning beyond satisfying the API.
+    Err0 = beamtalk_error:new(runtime_error, 'Protocol'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([
+            <<"Cannot reload stdlib protocol '">>,
+            NamesBin,
+            <<"': built-in protocols are read-only in the workspace">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Err1,
+        <<"Built-in (stdlib) protocols ship with the standard library; edit them in the Beamtalk source tree and rebuild, not from the workspace.">>
+    ).
+
+%% Structured rejection for a stage-1 compile failure in the fan-out: names
+%% every failing user with its own diagnostic, so a rejected reload's error
+%% message satisfies the ADR's "report every failing user with its
+%% diagnostic and fix" requirement directly, without the caller needing to
+%% unpack a raw `Failures` list itself.
+-spec protocol_reload_rejected_error([atom()], [{atom(), term()}]) -> #beamtalk_error{}.
+protocol_reload_rejected_error(ProtocolAtoms, Failures) ->
+    ProtocolNamesBin = iolist_to_binary(
+        lists:join(<<", ">>, [atom_to_binary(P, utf8) || P <- ProtocolAtoms])
+    ),
+    FailureLines = [format_fanout_failure(ClassAtom, Reason) || {ClassAtom, Reason} <- Failures],
+    Err0 = beamtalk_error:new(runtime_error, 'Protocol'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([
+            <<"Protocol reload rejected for '">>,
+            ProtocolNamesBin,
+            <<"': ">>,
+            integer_to_binary(length(Failures)),
+            <<" user(s) failed to recompile; nothing was loaded:\n">>,
+            lists:join(<<"\n">>, FailureLines)
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Err1,
+        <<"Fix every listed user's compile error and reload the protocol again; none of this edit's classes were installed.">>
+    ).
+
+-spec format_fanout_failure(atom(), term()) -> binary().
+format_fanout_failure(ClassAtom, Reason) ->
+    #beamtalk_error{message = Msg} = beamtalk_repl_errors:ensure_structured_error(Reason),
+    iolist_to_binary([<<"  - ">>, atom_to_binary(ClassAtom, utf8), <<": ">>, Msg]).
+
+%% Structured failure for a (rare) stage-2 install failure — `Who` is either
+%% `protocol` or the failing user's class name atom.
+-spec protocol_reload_install_failed_error(protocol | atom(), term()) -> #beamtalk_error{}.
+protocol_reload_install_failed_error(Who, Reason) ->
+    WhoBin =
+        case Who of
+            protocol -> <<"the protocol module">>;
+            ClassAtom -> atom_to_binary(ClassAtom, utf8)
+        end,
+    #beamtalk_error{message = ReasonMsg} = beamtalk_repl_errors:ensure_structured_error(Reason),
+    Err0 = beamtalk_error:new(runtime_error, 'Protocol'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([
+            <<"Protocol reload failed while installing ">>,
+            WhoBin,
+            <<": ">>,
+            ReasonMsg,
+            <<"; every module this reload already installed was rolled back to its previous code.">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Err1,
+        <<"This is unexpected; every failing module already compiled successfully. Please retry; if it persists, file a bug.">>
+    ).
 
 %% Recompile a class with a new method definition.
 %%

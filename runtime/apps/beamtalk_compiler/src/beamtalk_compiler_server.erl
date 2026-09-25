@@ -212,7 +212,14 @@ compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
 
 -doc """
 Compile a file/class definition.
-Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean()}
+Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean(),
+protocol_sources => #{binary() => binary()}} — the last is an explicit,
+opt-in map of protocol name to raw `.bt` source (ADR 0127 §10a / BT-3593),
+used by `beamtalk_repl_loader`'s protocol-reload fan-out to carry a
+just-edited protocol's full source into each of its users' own recompiles,
+so `uses:` flattening sees the new provisions rather than nothing (a
+cross-file protocol otherwise only resolves via the ambient, signature-only
+`protocol_registry` cache below, which cannot flatten method bodies).
 Returns `{ok, #{core_erlang, module_name, classes, warnings}}',
 `{ok, protocol_definition, #{core_erlang, module_name, protocols, warnings}}',
 or `{error, Diagnostics}'.
@@ -1497,10 +1504,29 @@ do_compile(Port, Source, Options) ->
     %% ambient session alias cache — see handle_call({compile, ...})'s doc
     %% for why this is unconditional (not opt-in like diagnostics/3's).
     Aliases = maps:get(known_type_aliases, Options, []),
-    RequestFinal =
+    Request7 =
         case Aliases of
             [] -> Request6;
             _ -> Request6#{known_type_aliases => Aliases}
+        end,
+    %% ADR 0127 §10a / BT-3593: an explicit, per-call, full-source carrier
+    %% for `uses:` flattening — unlike `Protocols` above (the ambient,
+    %% signature-only cache every compile gets unconditionally), this is
+    %% opt-in: only `beamtalk_repl_loader`'s two-stage protocol-reload
+    %% fan-out passes it (`beamtalk_repl_compiler:compile_file/5`'s
+    %% `PrebuiltIndexes` map merges straight into `Options` — see that
+    %% function's doc), carrying the just-edited protocol's raw source for
+    %% each of its users' own recompiles. Absent for every other caller, so
+    %% this is `maps:get(..., #{})`-defaulted like every other optional
+    %% index above, never unconditionally injected — a stale-but-nonempty
+    %% ambient copy would risk silently flattening against OLD provisions
+    %% instead of failing loudly the way `pre_loaded_protocol_defs` currently
+    %% does when it is simply absent.
+    ProtocolSources = maps:get(protocol_sources, Options, #{}),
+    RequestFinal =
+        case map_size(ProtocolSources) of
+            0 -> Request7;
+            _ -> Request7#{protocol_sources => ProtocolSources}
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->

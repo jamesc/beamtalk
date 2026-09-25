@@ -194,6 +194,14 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
             &[],
             pre_class_hierarchy.clone(),
             pre_loaded_protocols,
+            // Single-method patching does not yet carry a cross-file
+            // protocol's full AST in (ADR 0127 §10a, BT-3593 left this to a
+            // follow-up: `P >> sel` live-patching, not the whole-file reload
+            // fan-out this issue covers) — a class whose OWN `uses:` names a
+            // protocol defined in another file keeps resolving that `uses:`
+            // against its already-flattened, previously-installed body only,
+            // same as before this parameter existed.
+            Vec::new(),
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );

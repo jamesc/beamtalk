@@ -393,7 +393,49 @@ the LSP has no eval affordance and is unaffected).
 - **`Actor subclass: Counter` / `Object subclass: Foo` echoes the bare class
   name** (`=> Counter`) — the existing, longest-standing convention. `Counter
   reload` / `:reload Counter` echo the same bare name on a successful
-  hot-swap (`=> Counter`).
+  hot-swap (`=> Counter`). **ADR 0127 §11 / BT-3593:** `Greeter reload` /
+  `:reload Greeter` on a *protocol* now echoes the same bare name too, but
+  the reload is no longer single-module: editing a protocol file and
+  reloading it atomically recompiles and reinstalls every loaded,
+  source-backed, non-stdlib class that `uses:` it (`beamtalk_repl_loader:
+  reload_protocol_fanout/3`, driven by the `beamtalk_protocol_registry`
+  users index, BT-3592), two-stage (compile everyone first; install only if
+  every compile succeeds) so a rejected edit installs nothing at all and
+  names every failing user with its own diagnostic. A user with no
+  workspace-tracked source keeps its old code and is only warned about
+  (server-side `?LOG_WARNING`, not yet a REPL-visible warning — see the
+  note below). A stage-2 install failure (expected to be rare — every
+  module reaching that stage already compiled) rolls every module this
+  reload already installed back to its previous tracked source. Stdlib
+  protocols are read-only, mirroring `Comparable >> max: …`'s existing
+  stdlib-method refusal. Reachable identically from every surface that
+  already reaches `beamtalk_repl_loader:reload_class_file/1,2` — `Counter
+  reload`/`:reload`'s existing chokepoint (`classReload/1`, fixed by this
+  same change to resolve a protocol's own defining module via
+  `beamtalk_protocol_registry:protocol_info/1` instead of the shared
+  `beamtalk_protocol_object` dispatch module every protocol's class object
+  shares, which never had a real source file to reload from) — so no
+  surface-specific wiring was needed for the fan-out itself. **Known gap
+  the coordinator may want a follow-up for:** the REPL/MCP/LSP `P >> sel`
+  live-patching half (adding/replacing a single provision in-memory,
+  `removeSelector:` on a protocol, and their ChangeLog/flush integration)
+  and Browse `save-section` routing for a flattened method are deferred —
+  see this PR's description for the split rationale (ADR 0127 §11 /
+  BT-3593's own "if this proves too large, split along the seam" note).
+  Covered by `runtime/apps/beamtalk_workspace/test/beamtalk_repl_loader_tests.erl`
+  (`t_protocol_reload_fanout_reaches_user`,
+  `t_protocol_reload_rejected_names_failing_user`,
+  `t_protocol_reload_skips_user_without_tracked_source`,
+  `t_protocol_reload_refuses_stdlib`) rather than a `.btscript` e2e case —
+  see that PR's notes on the aggregate e2e suite's shared-session/global-
+  class-namespace behaviour (BT-3591 is a **separate**, already-landed
+  build-graph phase; the wire mechanism this row depends on — `compile`'s
+  `protocol_sources` field carrying a cross-file protocol's full source for
+  `uses:` flattening, since the ambient `protocol_registry` cache is
+  signature-only — was added by this same BT-3593 change, in
+  `beamtalk-compiler-port`'s `handle_compile` and
+  `beamtalk_compiler_server:do_compile/3`, and is exercised by
+  `crates/beamtalk-compiler-port/src/tests/protocol_sources_wire.rs`).
 - **`type Direction = ...` echoes the bare declared alias name**
   (`=> Direction`), mirroring the class-declaration convention above rather
   than a protocol-declaration-style confirmation message. This is the

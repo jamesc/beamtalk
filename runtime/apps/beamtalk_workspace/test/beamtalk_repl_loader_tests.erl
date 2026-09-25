@@ -1224,6 +1224,22 @@ loader_integration_test_() ->
             {"new_class/2 author_kind only", fun() -> t_new_class_author_kind_only(Proj) end},
             {"handle_load_source/3 protocol", fun() -> t_handle_load_source_protocol() end},
             {"reload_class_file/1 protocol", fun() -> t_reload_class_file_protocol(Proj) end},
+            %% ADR 0127 §11 / BT-3593: atomic protocol reload fan-out.
+            {"protocol reload fans out to a loaded user", fun() ->
+                t_protocol_reload_fanout_reaches_user(Proj)
+            end},
+            {"protocol reload rejects and installs nothing when a user fails", fun() ->
+                t_protocol_reload_rejected_names_failing_user(Proj)
+            end},
+            {"protocol reload skips a user with no tracked source", fun() ->
+                t_protocol_reload_skips_user_without_tracked_source(Proj)
+            end},
+            {"protocol reload refuses a stdlib protocol file", fun() ->
+                t_protocol_reload_refuses_stdlib(Proj)
+            end},
+            {"protocol reload rollback merges ambient protocol sources", fun() ->
+                t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj)
+            end},
             {"reload_method_definition existing method span", fun() ->
                 t_reload_method_definition_existing(Proj)
             end},
@@ -1542,6 +1558,245 @@ t_reload_class_file_protocol(Proj) ->
     ),
     Result = beamtalk_repl_loader:reload_class_file(Path),
     ?assertMatch({ok, [#{name := "ReloadProto"}]}, Result).
+
+%% ADR 0127 §11 / BT-3593: editing a protocol file and reloading it
+%% recompiles+reinstalls every loaded, source-backed user too — not just the
+%% protocol module itself. Proven here by checking the USER's own compiled
+%% module binary actually changed (not merely that the reload "succeeded"),
+%% since a stale-but-successful reload would otherwise look identical.
+t_protocol_reload_fanout_reaches_user(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    ProtoName = "Bt3593Greeter" ++ N,
+    UserName = "Bt3593GreeterUser" ++ N,
+    ProtoPath = write_bt(
+        Proj,
+        ProtoName ++ ".bt",
+        list_to_binary("Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hello\"\n")
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _ProtoClasses, State1} = beamtalk_repl_loader:handle_load(ProtoPath, State0),
+    UserPath = write_bt(
+        Proj,
+        UserName ++ ".bt",
+        list_to_binary("Value subclass: " ++ UserName ++ "\n  uses: " ++ ProtoName ++ "\n")
+    ),
+    {ok, _UserClasses, _State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
+
+    UserNameAtom = list_to_atom(UserName),
+    SrcBefore = stored_method_source(UserNameAtom, greet),
+    ?assert(binary:match(SrcBefore, <<"hello">>) =/= nomatch),
+
+    %% Edit the protocol: `greet` now returns "hi" instead of "hello".
+    ok = file:write_file(
+        ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hi\"\n"
+    ),
+
+    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    ?assertMatch({ok, _}, Result),
+    {ok, ReloadedClasses} = Result,
+    ReloadedNames = [Name || #{name := Name} <- ReloadedClasses],
+    ?assert(lists:member(ProtoName, ReloadedNames)),
+    ?assert(lists:member(UserName, ReloadedNames)),
+
+    %% The user's own flattened `greet` genuinely changed — proof the
+    %% fan-out actually recompiled it against the NEW protocol source, not
+    %% merely reinstalled the same old code.
+    SrcAfter = stored_method_source(UserNameAtom, greet),
+    ?assert(binary:match(SrcAfter, <<"hi">>) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(SrcAfter, <<"hello">>)).
+
+%% All-or-nothing: a protocol edit that a loaded user cannot satisfy (here,
+%% a newly-added required method the user never implemented) is rejected
+%% wholesale — neither the protocol nor the user is reinstalled — and the
+%% error names the failing user.
+t_protocol_reload_rejected_names_failing_user(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    ProtoName = "Bt3593Rej" ++ N,
+    UserName = "Bt3593RejUser" ++ N,
+    ProtoPath = write_bt(
+        Proj,
+        ProtoName ++ ".bt",
+        list_to_binary("Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hello\"\n")
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(ProtoPath, State0),
+    UserPath = write_bt(
+        Proj,
+        UserName ++ ".bt",
+        list_to_binary("Value subclass: " ++ UserName ++ "\n  uses: " ++ ProtoName ++ "\n")
+    ),
+    {ok, _, _State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
+
+    UserNameAtom = list_to_atom(UserName),
+    SrcBefore = stored_method_source(UserNameAtom, greet),
+
+    %% Add a NEW required method (no body) the user does not implement — a
+    %% static conformance error on the user's own recompile (ADR 0127 §3
+    %% step 5), not merely a does-not-understand warning at call sites.
+    ok = file:write_file(
+        ProtoPath,
+        "Protocol define: " ++ ProtoName ++
+            "\n  shout -> String\n\n  greet -> String => \"hello\"\n"
+    ),
+
+    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    ?assertMatch({error, _}, Result),
+    {error, Err} = Result,
+    ?assert(is_record(Err, beamtalk_error)),
+    Msg = Err#beamtalk_error.message,
+    ?assertNotEqual(nomatch, binary:match(Msg, list_to_binary(UserName))),
+
+    %% All-or-nothing: the user's flattened `greet` is untouched by the
+    %% rejected reload — the protocol edit never installed anywhere.
+    SrcAfter = stored_method_source(UserNameAtom, greet),
+    ?assertEqual(SrcBefore, SrcAfter).
+
+%% A fan-out user with no workspace-tracked source (never `:load`ed, so
+%% `beamtalk_workspace_meta` never recorded a source for it — simulated here
+%% by removing its tracked source after loading it) keeps its old code: the
+%% reload still succeeds for the protocol and every OTHER, source-backed
+%% user, and the untracked user is simply absent from the result.
+t_protocol_reload_skips_user_without_tracked_source(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    ProtoName = "Bt3593Skip" ++ N,
+    UserName = "Bt3593SkipUser" ++ N,
+    ProtoPath = write_bt(
+        Proj,
+        ProtoName ++ ".bt",
+        list_to_binary("Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hello\"\n")
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(ProtoPath, State0),
+    UserPath = write_bt(
+        Proj,
+        UserName ++ ".bt",
+        list_to_binary("Value subclass: " ++ UserName ++ "\n  uses: " ++ ProtoName ++ "\n")
+    ),
+    {ok, _, _State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
+    %% Simulate "no workspace source" without a second, harder-to-construct
+    %% loading path: drop the just-recorded tracked source directly.
+    ok = beamtalk_workspace_meta:remove_class_source(list_to_binary(UserName)),
+
+    ok = file:write_file(
+        ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hi\"\n"
+    ),
+    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    ?assertMatch({ok, _}, Result),
+    {ok, ReloadedClasses} = Result,
+    ReloadedNames = [Name || #{name := Name} <- ReloadedClasses],
+    ?assert(lists:member(ProtoName, ReloadedNames)),
+    ?assertNot(lists:member(UserName, ReloadedNames)).
+
+%% Stdlib protocols are read-only in the workspace: reloading a protocol
+%% file under a `stdlib/src/' path is refused outright, before compiling a
+%% single user.
+t_protocol_reload_refuses_stdlib(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    ProtoName = "Bt3593Stdlib" ++ N,
+    StdlibDir = filename:join([Proj, "stdlib", "src"]),
+    ok = filelib:ensure_dir(filename:join(StdlibDir, "anchor")),
+    ProtoPath = filename:join(StdlibDir, ProtoName ++ ".bt"),
+    ok = file:write_file(
+        ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hello\"\n"
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, _State1} = beamtalk_repl_loader:handle_load(ProtoPath, State0),
+
+    ok = file:write_file(
+        ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hi\"\n"
+    ),
+    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    ?assertMatch({error, _}, Result),
+    {error, Err} = Result,
+    ?assert(is_record(Err, beamtalk_error)),
+    Msg = Err#beamtalk_error.message,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"read-only">>)).
+
+%% Claude BeamTalk Review finding on BT-3593's PR: `rollback_one_install/2`'s
+%% class branch must merge `beamtalk_workspace_meta:all_protocol_sources/0`
+%% (the ambient snapshot) into its rollback `protocol_sources` map, not just
+%% the reloaded file's own `OldProtocolSources` — otherwise a fan-out user
+%% that `uses:` MORE THAN ONE protocol fails its OWN rollback recompile with
+%% an "unknown protocol" diagnostic (the other protocol's source is simply
+%% missing from the map), leaving it stuck on its NEW post-reload code while
+%% every other rolled-back sibling correctly reverts to old code — exactly
+%% the half-applied state the two-stage all-or-nothing design exists to
+%% prevent.
+%%
+%% Reproduced by injecting a stage-2 install failure (via `meck`, mirroring
+%% `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
+%% — see that module's own doc for why `meck` is used at all) on a SECOND,
+%% unrelated fan-out user, so a multi-protocol user installed just before it
+%% is the one whose rollback must succeed. Install order is deterministic
+%% regardless of `beamtalk_protocol_registry:users_of/1`'s own (unspecified)
+%% `ets` `bag` ordering: `discover_fanout_targets/1` runs `lists:usort/1`
+%% over the combined user-atom list before compiling/installing, so classes
+%% always install in alphabetical order by name — `MultiName` sorts before
+%% `SimpleName` (both share the `"Bt3593Rb"` prefix, differing only at
+%% `"Multi"` vs. `"Simple"`).
+t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    P1Name = "Bt3593RbP1" ++ N,
+    P2Name = "Bt3593RbP2" ++ N,
+    MultiName = "Bt3593RbMulti" ++ N,
+    SimpleName = "Bt3593RbSimple" ++ N,
+    SimpleFile = SimpleName ++ ".bt",
+    P1Path = write_bt(
+        Proj,
+        P1Name ++ ".bt",
+        list_to_binary("Protocol define: " ++ P1Name ++ "\n  foo -> String => \"old\"\n")
+    ),
+    P2Path = write_bt(
+        Proj,
+        P2Name ++ ".bt",
+        list_to_binary("Protocol define: " ++ P2Name ++ "\n  bar -> String => \"bar\"\n")
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(P1Path, State0),
+    {ok, _, State2} = beamtalk_repl_loader:handle_load(P2Path, State1),
+    MultiPath = write_bt(
+        Proj,
+        MultiName ++ ".bt",
+        list_to_binary(
+            "Value subclass: " ++ MultiName ++ "\n  uses: " ++ P1Name ++ "\n  uses: " ++
+                P2Name ++ "\n"
+        )
+    ),
+    {ok, _, State3} = beamtalk_repl_loader:handle_load(MultiPath, State2),
+    SimplePath = write_bt(
+        Proj,
+        SimpleFile,
+        list_to_binary("Value subclass: " ++ SimpleName ++ "\n  uses: " ++ P1Name ++ "\n")
+    ),
+    {ok, _, _State4} = beamtalk_repl_loader:handle_load(SimplePath, State3),
+
+    MultiAtom = list_to_atom(MultiName),
+    FooBefore = stored_method_source(MultiAtom, foo),
+    ?assert(binary:match(FooBefore, <<"old">>) =/= nomatch),
+
+    meck:new(beamtalk_repl_loader, [passthrough]),
+    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+        case filename:basename(LoadPath) of
+            SimpleFile -> {error, {injected_fault, install_anomaly}};
+            _ -> meck:passthrough([Compiled, LoadPath])
+        end
+    end),
+    try
+        ok = file:write_file(
+            P1Path, "Protocol define: " ++ P1Name ++ "\n  foo -> String => \"new\"\n"
+        ),
+        Result = beamtalk_repl_loader:reload_class_file(P1Path),
+        ?assertMatch({error, _}, Result),
+
+        %% The rollback recompile must succeed even though Multi `uses:` TWO
+        %% protocols — before the fix, this failed with "unknown protocol
+        %% P2Name" (P2's source missing from the rollback's protocol_sources
+        %% map), leaving Multi stuck on its NEW `foo`.
+        FooAfter = stored_method_source(MultiAtom, foo),
+        ?assertEqual(FooBefore, FooAfter)
+    after
+        meck:unload(beamtalk_repl_loader)
+    end.
 
 t_new_class_multiple_classes(_Proj) ->
     %% A source declaring two classes is rejected by declared_class_name/1,

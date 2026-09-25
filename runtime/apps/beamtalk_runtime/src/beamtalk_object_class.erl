@@ -1381,11 +1381,35 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% included) — a plain register (not a refresh_xref-style
             %% purge-then-register) is enough here.
             register_state_var_xref(ClassName, maps:get(state_var_xref, ClassInfo, [])),
-            %% ADR 0127 §12: re-register this class's `uses:` list on hot
-            %% reload — `register_uses/2` itself clears the class's prior
-            %% reverse-index rows first, so a changed `uses:` set never
-            %% leaves stale entries in the users index.
-            beamtalk_protocol_registry:register_uses(ClassName, maps:get(uses, ClassInfo, [])),
+            %% ADR 0127 §12 / BT-3593: re-register this class's `uses:`
+            %% list on hot reload — `register_uses/2` itself clears the
+            %% class's prior reverse-index rows first, so a changed `uses:`
+            %% set never leaves stale entries in the users index. Reads the
+            %% freshly-read `Meta` above first (the only place codegen bakes
+            %% `uses` — see `init/1`'s identical `Meta`-then-`ClassInfo`
+            %% precedence for every other codegen-baked field): `ClassInfo`
+            %% here is the raw `update_class` call argument, which never
+            %% carries `uses` itself, so reading it alone (as this line
+            %% previously did) silently WIPED the users index on every
+            %% `register_class/0` call after the very first — `on_load`'s own
+            %% synchronous `register_class/0` (see `activate_module/4`'s doc)
+            %% installs the correct set via `init/1`'s `Meta` read, then
+            %% `activate_module/4`'s own explicit, "redundant, harmless"
+            %% second `register_class/0` call reached this handler instead of
+            %% `init/1` (the class already existed) and cleared it right back
+            %% out — found via BT-3593's own fan-out test coverage actually
+            %% exercising `users_of/1` end-to-end for the first time.
+            UsesForRegistration =
+                case erlang:function_exported(NewModule, '__beamtalk_meta', 0) of
+                    true ->
+                        case NewModule:'__beamtalk_meta'() of
+                            #{uses := Uses} -> Uses;
+                            _ -> maps:get(uses, ClassInfo, [])
+                        end;
+                    false ->
+                        maps:get(uses, ClassInfo, [])
+                end,
+            beamtalk_protocol_registry:register_uses(ClassName, UsesForRegistration),
             %% ADR 0093 §2: hot redefinition is also a ClassLoaded —
             %% announced from the handle_call reply path after the refreshed
             %% metadata is committed.
