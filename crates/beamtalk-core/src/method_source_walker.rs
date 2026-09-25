@@ -235,31 +235,42 @@ fn push_send(
     });
 }
 
-fn collect_cascade_sends(
-    receiver: &Expression,
-    messages: &[crate::ast::CascadeMessage],
-    source: &str,
-    hits: &mut Vec<SendHit>,
-) {
-    let kind = cascade_receiver_kind(receiver);
-    let module = if kind == ReceiverKind::ErlangFfi {
-        cascade_shared_ffi_module(receiver)
-    } else {
-        None
-    };
-    let error_rooted = receiver_rooted_in_error(receiver);
-    collect_sends(receiver, source, hits);
-    for msg in messages {
-        if !error_rooted {
-            push_send(&msg.selector, msg.span, kind, module.clone(), source, hits);
-        }
-        for arg in &msg.arguments {
-            collect_sends(arg, source, hits);
-        }
-    }
+// ---------------------------------------------------------------------------
+// Unified send walker (visitor pattern)
+// ---------------------------------------------------------------------------
+
+/// Visitor called at each send site during the unified AST walk.
+///
+/// Implement this trait to collect different kinds of per-send data without
+/// duplicating the recursive traversal logic. Both [`collect_sends`] and
+/// [`collect_receiver_spans`] (formerly separate 90-line mirrors) now
+/// share the single walk in [`walk_expr`].
+trait SendVisitor {
+    /// Called for each `Expression::MessageSend` that is not rooted in an
+    /// error node. `send_span` is the span of the whole send expression;
+    /// `receiver` is the receiver sub-expression.
+    fn visit_send(
+        &mut self,
+        selector: &MessageSelector,
+        send_span: Span,
+        receiver: &Expression,
+        source: &str,
+    );
+
+    /// Called for each cascade message (after the shared receiver has been
+    /// walked). `msg_span` is the span carried on [`crate::ast::CascadeMessage`];
+    /// `cascade_receiver` is the unwrapped cascade receiver expression (the
+    /// `receiver` field of the enclosing `Expression::Cascade`).
+    fn visit_cascade_message(
+        &mut self,
+        selector: &MessageSelector,
+        msg_span: Span,
+        cascade_receiver: &Expression,
+        source: &str,
+    );
 }
 
-fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
+fn walk_expr<V: SendVisitor>(expr: &Expression, source: &str, visitor: &mut V) {
     match expr {
         Expression::MessageSend {
             receiver,
@@ -269,74 +280,68 @@ fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
             ..
         } => {
             if !receiver_rooted_in_error(receiver) {
-                let kind = receiver_kind(receiver, selector);
-                let module = if kind == ReceiverKind::ErlangFfi {
-                    ffi_target_module(receiver, selector)
-                } else {
-                    None
-                };
-                push_send(selector, *span, kind, module, source, hits);
+                visitor.visit_send(selector, *span, receiver, source);
             }
-            collect_sends(receiver, source, hits);
+            walk_expr(receiver, source, visitor);
             for arg in arguments {
-                collect_sends(arg, source, hits);
+                walk_expr(arg, source, visitor);
             }
         }
         Expression::Cascade {
             receiver, messages, ..
-        } => collect_cascade_sends(receiver, messages, source, hits),
+        } => walk_cascade(receiver, messages, source, visitor),
         Expression::Assignment { target, value, .. } => {
-            collect_sends(target, source, hits);
-            collect_sends(value, source, hits);
+            walk_expr(target, source, visitor);
+            walk_expr(value, source, visitor);
         }
         Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_sends(value, source, hits);
+            walk_expr(value, source, visitor);
         }
         Expression::Block(block) => {
             for stmt in &block.body {
-                collect_sends(&stmt.expression, source, hits);
+                walk_expr(&stmt.expression, source, visitor);
             }
         }
         Expression::Parenthesized { expression, .. } => {
-            collect_sends(expression, source, hits);
+            walk_expr(expression, source, visitor);
         }
         Expression::FieldAccess { receiver, .. } => {
-            collect_sends(receiver, source, hits);
+            walk_expr(receiver, source, visitor);
         }
         Expression::Match { value, arms, .. } => {
-            collect_sends(value, source, hits);
+            walk_expr(value, source, visitor);
             for arm in arms {
-                collect_pattern_sends(&arm.pattern, source, hits);
+                walk_pattern(&arm.pattern, source, visitor);
                 if let Some(guard) = &arm.guard {
-                    collect_sends(guard, source, hits);
+                    walk_expr(guard, source, visitor);
                 }
-                collect_sends(&arm.body, source, hits);
+                walk_expr(&arm.body, source, visitor);
             }
         }
         Expression::StringInterpolation { segments, .. } => {
             for segment in segments {
                 if let StringSegment::Interpolation(inner) = segment {
-                    collect_sends(inner, source, hits);
+                    walk_expr(inner, source, visitor);
                 }
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {
             for element in elements {
-                collect_sends(element, source, hits);
+                walk_expr(element, source, visitor);
             }
             if let Some(tail_expr) = tail {
-                collect_sends(tail_expr, source, hits);
+                walk_expr(tail_expr, source, visitor);
             }
         }
         Expression::ArrayLiteral { elements, .. } => {
             for element in elements {
-                collect_sends(element, source, hits);
+                walk_expr(element, source, visitor);
             }
         }
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                collect_sends(&pair.key, source, hits);
-                collect_sends(&pair.value, source, hits);
+                walk_expr(&pair.key, source, visitor);
+                walk_expr(&pair.value, source, visitor);
             }
         }
         Expression::Literal(..)
@@ -350,45 +355,63 @@ fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
     }
 }
 
-fn collect_pattern_sends(pattern: &Pattern, source: &str, hits: &mut Vec<SendHit>) {
+fn walk_cascade<V: SendVisitor>(
+    cascade_receiver: &Expression,
+    messages: &[CascadeMessage],
+    source: &str,
+    visitor: &mut V,
+) {
+    let error_rooted = receiver_rooted_in_error(cascade_receiver);
+    walk_expr(cascade_receiver, source, visitor);
+    for msg in messages {
+        if !error_rooted {
+            visitor.visit_cascade_message(&msg.selector, msg.span, cascade_receiver, source);
+        }
+        for arg in &msg.arguments {
+            walk_expr(arg, source, visitor);
+        }
+    }
+}
+
+fn walk_pattern<V: SendVisitor>(pattern: &Pattern, source: &str, visitor: &mut V) {
     match pattern {
         Pattern::Binary { segments, .. } => {
             for segment in segments {
-                collect_pattern_sends(&segment.value, source, hits);
+                walk_pattern(&segment.value, source, visitor);
                 if let Some(size) = &segment.size {
-                    collect_sends(size, source, hits);
+                    walk_expr(size, source, visitor);
                 }
             }
         }
         Pattern::Tuple { elements, .. } => {
             for element in elements {
-                collect_pattern_sends(element, source, hits);
+                walk_pattern(element, source, visitor);
             }
         }
         Pattern::Array { elements, rest, .. } => {
             for element in elements {
-                collect_pattern_sends(element, source, hits);
+                walk_pattern(element, source, visitor);
             }
             if let Some(rest_pattern) = rest {
-                collect_pattern_sends(rest_pattern, source, hits);
+                walk_pattern(rest_pattern, source, visitor);
             }
         }
         Pattern::List { elements, tail, .. } => {
             for element in elements {
-                collect_pattern_sends(element, source, hits);
+                walk_pattern(element, source, visitor);
             }
             if let Some(tail_pattern) = tail {
-                collect_pattern_sends(tail_pattern, source, hits);
+                walk_pattern(tail_pattern, source, visitor);
             }
         }
         Pattern::Map { pairs, .. } => {
             for pair in pairs {
-                collect_pattern_sends(&pair.value, source, hits);
+                walk_pattern(&pair.value, source, visitor);
             }
         }
         Pattern::Constructor { keywords, .. } => {
             for (_selector, inner) in keywords {
-                collect_pattern_sends(inner, source, hits);
+                walk_pattern(inner, source, visitor);
             }
         }
         Pattern::Wildcard(..)
@@ -397,6 +420,52 @@ fn collect_pattern_sends(pattern: &Pattern, source: &str, hits: &mut Vec<SendHit
         | Pattern::Nil(..)
         | Pattern::Type { .. } => {}
     }
+}
+
+// ---------------------------------------------------------------------------
+// Concrete visitor: SendHit collection
+// ---------------------------------------------------------------------------
+
+struct SendHitVisitor<'a> {
+    hits: &'a mut Vec<SendHit>,
+}
+
+impl SendVisitor for SendHitVisitor<'_> {
+    fn visit_send(
+        &mut self,
+        selector: &MessageSelector,
+        send_span: Span,
+        receiver: &Expression,
+        source: &str,
+    ) {
+        let kind = receiver_kind(receiver, selector);
+        let module = if kind == ReceiverKind::ErlangFfi {
+            ffi_target_module(receiver, selector)
+        } else {
+            None
+        };
+        push_send(selector, send_span, kind, module, source, self.hits);
+    }
+
+    fn visit_cascade_message(
+        &mut self,
+        selector: &MessageSelector,
+        msg_span: Span,
+        cascade_receiver: &Expression,
+        source: &str,
+    ) {
+        let kind = cascade_receiver_kind(cascade_receiver);
+        let module = if kind == ReceiverKind::ErlangFfi {
+            cascade_shared_ffi_module(cascade_receiver)
+        } else {
+            None
+        };
+        push_send(selector, msg_span, kind, module, source, self.hits);
+    }
+}
+
+fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
+    walk_expr(expr, source, &mut SendHitVisitor { hits });
 }
 
 fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u32 {
@@ -874,12 +943,11 @@ pub struct ReceiverSpanHit {
 /// identified as the real blocker, since `find_all_sends_in_source`'s
 /// `SendHit`s carry no span into a re-unparsed copy's source.
 ///
-/// **This walk must stay structurally identical to [`collect_sends`]** (same
-/// hit count, same order, same cascade-expansion rule) or the ordinal join
-/// silently misaligns. `source_analysis::method_span_corpus_tests` asserts
-/// this holds — hit-count and selector-sequence identity — over the full
-/// stdlib+examples corpus, per this project's no-"keep-in-sync"-comment-
-/// without-a-test rule.
+/// Structural identity with [`find_all_sends_in_source`]'s walk is enforced
+/// by the shared [`walk_expr`] implementation — both surfaces use the same
+/// traversal, differing only in what the [`SendVisitor`] pushes at each
+/// send site. `source_analysis::method_span_corpus_tests` asserts hit-count
+/// and selector-sequence identity over the full stdlib+examples corpus.
 ///
 /// Unlike `find_all_sends_in_source`, this needs no synthetic-class
 /// wrapping, re-lex/re-parse, or coordinate translation: the input
@@ -889,131 +957,54 @@ pub struct ReceiverSpanHit {
 #[must_use]
 pub fn collect_receiver_spans(method: &MethodDefinition) -> Vec<ReceiverSpanHit> {
     let mut hits = Vec::new();
+    let mut visitor = ReceiverSpanVisitor { hits: &mut hits };
     for stmt in &method.body {
-        collect_receiver_spans_expr(&stmt.expression, &mut hits);
+        walk_expr(&stmt.expression, "", &mut visitor);
     }
     hits
 }
 
-/// Mirrors [`collect_sends`] arm-for-arm, pushing a [`ReceiverSpanHit`]
-/// instead of a [`SendHit`] at each site `collect_sends` would call
-/// `push_send`.
-fn collect_receiver_spans_expr(expr: &Expression, hits: &mut Vec<ReceiverSpanHit>) {
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } => {
-            if !receiver_rooted_in_error(receiver) {
-                hits.push(ReceiverSpanHit {
-                    selector: selector.name().to_string(),
-                    span: receiver.span(),
-                });
-            }
-            collect_receiver_spans_expr(receiver, hits);
-            for arg in arguments {
-                collect_receiver_spans_expr(arg, hits);
-            }
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => collect_cascade_receiver_spans(receiver, messages, hits),
-        Expression::Assignment { target, value, .. } => {
-            collect_receiver_spans_expr(target, hits);
-            collect_receiver_spans_expr(value, hits);
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_receiver_spans_expr(value, hits);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_receiver_spans_expr(&stmt.expression, hits);
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_receiver_spans_expr(expression, hits);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_receiver_spans_expr(receiver, hits);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_receiver_spans_expr(value, hits);
-            for arm in arms {
-                collect_pattern_receiver_spans(&arm.pattern, hits);
-                if let Some(guard) = &arm.guard {
-                    collect_receiver_spans_expr(guard, hits);
-                }
-                collect_receiver_spans_expr(&arm.body, hits);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let StringSegment::Interpolation(inner) = segment {
-                    collect_receiver_spans_expr(inner, hits);
-                }
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_receiver_spans_expr(element, hits);
-            }
-            if let Some(tail_expr) = tail {
-                collect_receiver_spans_expr(tail_expr, hits);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } => {
-            for element in elements {
-                collect_receiver_spans_expr(element, hits);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_receiver_spans_expr(&pair.key, hits);
-                collect_receiver_spans_expr(&pair.value, hits);
-            }
-        }
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
+// ---------------------------------------------------------------------------
+// Concrete visitor: ReceiverSpanHit collection
+// ---------------------------------------------------------------------------
+
+struct ReceiverSpanVisitor<'a> {
+    hits: &'a mut Vec<ReceiverSpanHit>,
+}
+
+impl SendVisitor for ReceiverSpanVisitor<'_> {
+    fn visit_send(
+        &mut self,
+        selector: &MessageSelector,
+        _send_span: Span,
+        receiver: &Expression,
+        _source: &str,
+    ) {
+        self.hits.push(ReceiverSpanHit {
+            selector: selector.name().to_string(),
+            span: receiver.span(),
+        });
+    }
+
+    fn visit_cascade_message(
+        &mut self,
+        selector: &MessageSelector,
+        _msg_span: Span,
+        cascade_receiver: &Expression,
+        _source: &str,
+    ) {
+        self.hits.push(ReceiverSpanHit {
+            selector: selector.name().to_string(),
+            span: cascade_receiver_span(cascade_receiver),
+        });
     }
 }
 
-/// Mirrors [`collect_cascade_sends`]: one hit per cascade message (the
-/// shared receiver's span, computed once), plus a recursive descent into the
-/// receiver subtree and each message's arguments.
-fn collect_cascade_receiver_spans(
-    receiver: &Expression,
-    messages: &[CascadeMessage],
-    hits: &mut Vec<ReceiverSpanHit>,
-) {
-    let shared_span = cascade_receiver_span(receiver);
-    let error_rooted = receiver_rooted_in_error(receiver);
-    collect_receiver_spans_expr(receiver, hits);
-    for msg in messages {
-        if !error_rooted {
-            hits.push(ReceiverSpanHit {
-                selector: msg.selector.name().to_string(),
-                span: shared_span,
-            });
-        }
-        for arg in &msg.arguments {
-            collect_receiver_spans_expr(arg, hits);
-        }
-    }
-}
-
-/// Mirrors [`cascade_receiver_kind`]'s receiver-unwrapping rule: a cascade's
-/// `receiver` field holds the *first* cascaded message's full send tree (the
-/// parser folds `a foo: 1; bar: 2` into `Cascade { receiver: (a foo: 1),
-/// messages: [bar: 2] }`), so the span every cascade message shares is the
-/// *inner* receiver of that send (`a`), not the send tree itself.
+/// A cascade's `receiver` field holds the *first* cascaded message's full send
+/// tree (the parser folds `a foo: 1; bar: 2` into
+/// `Cascade { receiver: (a foo: 1), messages: [bar: 2] }`), so the span every
+/// cascade message shares is the *inner* receiver of that send (`a`), not the
+/// send tree itself.
 fn cascade_receiver_span(receiver: &Expression) -> Span {
     if let Expression::MessageSend {
         receiver: inner, ..
@@ -1022,56 +1013,6 @@ fn cascade_receiver_span(receiver: &Expression) -> Span {
         inner.span()
     } else {
         receiver.span()
-    }
-}
-
-/// Mirrors [`collect_pattern_sends`] arm-for-arm.
-fn collect_pattern_receiver_spans(pattern: &Pattern, hits: &mut Vec<ReceiverSpanHit>) {
-    match pattern {
-        Pattern::Binary { segments, .. } => {
-            for segment in segments {
-                collect_pattern_receiver_spans(&segment.value, hits);
-                if let Some(size) = &segment.size {
-                    collect_receiver_spans_expr(size, hits);
-                }
-            }
-        }
-        Pattern::Tuple { elements, .. } => {
-            for element in elements {
-                collect_pattern_receiver_spans(element, hits);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for element in elements {
-                collect_pattern_receiver_spans(element, hits);
-            }
-            if let Some(rest_pattern) = rest {
-                collect_pattern_receiver_spans(rest_pattern, hits);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for element in elements {
-                collect_pattern_receiver_spans(element, hits);
-            }
-            if let Some(tail_pattern) = tail {
-                collect_pattern_receiver_spans(tail_pattern, hits);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_receiver_spans(&pair.value, hits);
-            }
-        }
-        Pattern::Constructor { keywords, .. } => {
-            for (_selector, inner) in keywords {
-                collect_pattern_receiver_spans(inner, hits);
-            }
-        }
-        Pattern::Wildcard(..)
-        | Pattern::Literal(..)
-        | Pattern::Variable(..)
-        | Pattern::Nil(..)
-        | Pattern::Type { .. } => {}
     }
 }
 
