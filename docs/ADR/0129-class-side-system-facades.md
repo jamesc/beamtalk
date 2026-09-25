@@ -206,9 +206,12 @@ ADR 0081 has already set the precedent for fixing this. It gave `Session`
    class is **sealed and has no class variables**
    (`compute_direct_call_eligible`, `driver.rs`).
 2. **Dependencies flow downward only.** `beamtalk_stdlib` depends on
-   `beamtalk_runtime`, not on `beamtalk_workspace`. Under `beamtalk test`
-   the workspace application isn't started, and its modules may not be on
-   the code path at all.
+   `beamtalk_runtime`, not on `beamtalk_workspace`. Under `beamtalk test`,
+   the workspace application's modules are on the code path but the
+   application is not started. None of its processes run, including the
+   compiler server, loader, ChangeLog and session supervisor. So the
+   question "is a workspace running?" cannot be answered by testing
+   whether its code is loaded.
 3. **Refusals already have one home.** `beamtalk_capability`, a runtime
    leaf module (ADR 0125 §1.4–1.5), is *the* answer to "is this operation
    available on this node?". Every refusal is a `#beamtalk_error{}`.
@@ -388,7 +391,7 @@ None of these needs a workspace. The class registry and logger belong to
 resolveWorkflowClassNames: names :: List(Symbol) -> List(Class) =>
   names collect: [:aName |
     (Beamtalk classNamed: aName) ifNil: [
-      self error: "unknown workflow class " , aName printString]]
+      self error: "unknown workflow class " ++ aName printString]]
 ```
 
 The same line now works in the REPL, in `beamtalk test` and in a release:
@@ -454,8 +457,18 @@ table. For example `require_workspace(Selector)`, which answers `ok` or the
   bare-runtime unit tests rely on. The new function instead answers "has a
   workspace supervisor recorded capabilities on this node?".
 - **The facade calls it before touching any module in
-  `beamtalk_workspace`.** Under `beamtalk test` that application is not
-  started, and its code may not be on the path (Constraint 2).
+  `beamtalk_workspace`.** Under `beamtalk test`, that application's *code
+  is on the load path* (`workspace_ebin`, `repl_startup.rs`, used by
+  `test.rs`), but *its processes are not running*. So a call made without
+  the guard does not fail with `undef`: it reaches a loader or compiler
+  server that isn't running, and surfaces as a misleading `noproc`.
+- **The existing workspace guards switch to it too.** Today
+  `beamtalk_behaviour_intrinsics` protects `classReload`,
+  `compile:source:`/`tryCompile:source:`, `precheck`,
+  `remove_local_method` and the `renameTo:`/`renameSelector:to:` site
+  rewriters by catching `error:undef`. For the reason above, those guards
+  never fire under test. They move to `require_workspace`, so they also
+  raise `no_workspace` instead of a `compile_failed {noproc…}`.
 - **Release-mode refusals don't change.** They are still raised by
   `beamtalk_capability:check/*` after `require_workspace` passes. So a
   `Workspace load:` on a release node still says
@@ -567,6 +580,12 @@ and `Workspace bindings at:put:` refuse to shadow a stdlib class with a
 `name_conflict` error. The existing `check_workspace_shadows` warning and the
 `known_vars` exemption have nothing left to cover, and are deleted.
 
+A plain REPL assignment such as `Transcript := 3` is not a `bind:as:`. It
+behaves exactly as `Integer := 3` does today: it creates a session local
+that shadows the class for the rest of that session, per the resolution
+order above. This ADR does not change how REPL assignment treats class
+names.
+
 ### 6. Old names are removed outright, with no shims
 
 With one user, there is no deprecation period:
@@ -581,14 +600,65 @@ With one user, there is no deprecation period:
 The rename lands in the same change as the in-repo sweep and the
 beamtalk-exdura update (see [§ Migration Path](#migration-path)).
 
+### 7. Audit: other mechanisms that assume a single image
+
+Applying the guiding principle "everywhere" means checking the rest of the
+system, not only these three names. The codebase was audited for anything
+that exists only in some boot contexts, or that changes the meaning of
+compiled code with the context. Each finding is dispositioned below.
+
+**In scope for this ADR.** These share this ADR's mechanism, so they are
+fixed alongside it:
+
+| Finding | Today | After this ADR |
+|---|---|---|
+| **REPL-loaded class bodies turn *any* missing class into `nil`.** `generate_workspace_class_send` (`dispatch_codegen.rs`) runs for every class-side send in code compiled with `workspace_mode`. The REPL loader and the compiler server both default to that mode. | `Foo bar` is `nil` when the file is loaded in the REPL, then a DNU far from the cause. When built, the same code raises `class_not_found`. | Phase 4 deletes this path. A REPL-loaded class body now raises `class_not_found`, as batch-compiled code does. This is the only *meaning* difference the audit found between REPL-compiled and batch-compiled code. |
+| **`beamtalk_capability` answers "workspace" when nothing was recorded.** | Under `beamtalk test`, every capability guard passes. | `require_workspace/1` distinguishes "never recorded" from "recorded" (§3). |
+| **`beamtalk_behaviour_intrinsics` guards workspace calls by catching `error:undef`.** The affected calls are `classReload`, `compile:source:`, `precheck`, `remove_local_method` and the rename rewriters. | These guards never fire under test, because the code is loaded. The user sees `compile_failed {noproc…}`. | They route through `require_workspace/1` and raise `no_workspace` (§3). |
+
+**Follow-up issues.** These are image-dependent in the same sense, but have
+different mechanisms and owners:
+
+- **`Program exit:` depends on the `node_owning` application environment.**
+  - Only `beamtalk run`, escripts and the release `eval` path set it
+    (`beamtalk_program.erl`, `beamtalk_system.erl`).
+  - In a normally booted release (`bin/x foreground`), `Program exit: N`
+    throws `{beamtalk_script_exit, N}`. That crashes the calling process
+    with `nocatch`, and the release keeps running.
+  - Under `beamtalk test` it surfaces as a test error.
+  - It needs its own decision on what `Program exit:` means in a release.
+- **File-handle ownership differs by context.** `beamtalk_file:resolve_owner`
+  makes handles belong to the session shell in the REPL, and to the calling
+  process elsewhere. The behaviour is documented, but it is still a
+  per-context difference. It should be revisited when the session and
+  actor ownership model next changes.
+
+**Accepted as context-bound by design.** These already conform to rule 3 or
+fail clearly:
+
+- **Session and supervisor lookups** conform to rule 3. `Session current`
+  (process-dictionary session context), `Supervisor current` and
+  `DynamicSupervisor current` return a documented `| Nil`, because
+  "no current session" or "not started" is a legitimate answer.
+- **Announcements work everywhere.** `SystemAnnouncer current` and
+  `AnnouncementNavigation default` run on the runtime supervisor, so they
+  work in every context. Workspace-only announcements (`BindingChanged`,
+  `FlushCompleted`, …) describe workspace activity, so emitting them only
+  there is correct.
+- **`ProcessNavigation default`/`system` degrade instead of failing.**
+  Without a workspace they return a smaller tree.
+- **Workspace-side lookups and casts fail soft.** The metadata lookups,
+  ChangeLog reads, inspector `evaluate:` and `pg` shell lookups already
+  catch `noproc` or return empty results.
+
 ### Misuse and error examples
 
 ```beamtalk
-Beamtalk new                  // Error: Beamtalk is a sealed class-side facade and cannot be instantiated
+Beamtalk new                  // compile error: Object-kind class `Beamtalk` cannot be instantiated with `new`
 BeamtalkInterface current     // Error: class_not_found: BeamtalkInterface. Hint: renamed to Beamtalk (ADR 0129)
 Workspace changes             // under beamtalk test → #beamtalk_error{kind: no_workspace, selector: 'changes', …}
-Transcript := 3               // REPL: name_conflict — Transcript is a stdlib class and cannot be shadowed
-Beamtalk classNamd: #Foo      // DNU on the Beamtalk class, with "did you mean classNamed:?"
+Workspace bind: 3 as: #Transcript  // name_conflict — Transcript is a stdlib class and cannot be shadowed
+Beamtalk classNamd: #Foo      // compile-time unknown-selector warning on the Beamtalk metaclass; DNU at runtime
 ```
 
 ## Prior Art
@@ -601,6 +671,7 @@ Beamtalk classNamd: #Foo      // DNU on the Beamtalk class, with "did you mean c
 | **Erlang** | Module functions: `code:which/1`, `logger:notice/1`, `io:format/1`. There is no singleton object, and they work in every node type. | This is exactly what a sealed, stateless class-side facade compiles to. |
 | **Elixir** | `Code`, `Logger`, `IO` and `System` are modules that work everywhere. The IEx-only helpers (`h/1`, `recompile/0`) are *imported only into the shell*. `Mix.Project` raises clearly when Mix isn't running. | The `IEx.Helpers` split is the injected-bindings pattern, and Elixir keeps it deliberately out of compiled code. `Mix.Project` raising when Mix isn't running is the `Workspace`→`no_workspace` pattern. |
 | **Gleam** | `io.println` and `logger` via Erlang. No ambient objects at all. | Confirms that a BEAM language can do without globals. |
+| **Python / IPython** | `sys`, `logging`, `importlib` are ordinary modules that work in every context. IPython injects `get_ipython()`, `display()` and `%magics` only into the interactive shell, and code copied into a `.py` file that uses them fails with `NameError`. | This is the same "works in the REPL, breaks in the script" trap, which Python users know well. It argues for keeping the REPL namespace strictly for the user's own bindings. |
 | **Livebook / Kino** | `Kino` functions are ordinary module calls. Outside a Livebook runtime they degrade or no-op instead of vanishing. | The "facade that knows what context it is in" is the same design as `Transcript` routing to `Logger`. |
 | **Pony** | `env.out` is a capability passed to `Main`. | Like Newspeak: explicit, but it needs threading everywhere. ADR 0058 already rejected capability restriction. |
 
@@ -869,9 +940,17 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
   `current` must change in one sweep, and so must exdura.
 - **Behaviour changes in `run` mode.** `Transcript` output that used to
   vanish into a buffer now appears in the log.
+  - Verified: `beamtalk run` keeps OTP's default stdout handler at the
+    default `notice` level. Only `workspace` mode installs the file logger
+    (`beamtalk_workspace_sup.erl:140`).
+- **Transcript output appears in test output.** Under `beamtalk test`,
+  `Transcript show:` and `Object>>show:`/`showCr:` now log at `notice` to
+  the test run's stdout, where they used to go nowhere. The Phase 5 sweep
+  removes the Transcript use in tests and examples. Anything that remains
+  can be filtered on the `[beamtalk, user, transcript]` domain.
 - **`Workspace globals` → `Workspace bindings` is a high-churn rename.**
-  The selector appears in 23 files, about 76 doc mentions and 22 REPL e2e
-  cases.
+  The selector appears in 22 files: about 65 lines in docs and 22 in the
+  REPL e2e cases.
 
 ### Neutral
 - `TranscriptStream` remains, as an implementation class for the REPL's
@@ -880,7 +959,7 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
   explicitly as the output APIs, with `Transcript` described as a REPL and
   beginner convenience. `Transcript` may be deprecated later; that is not
   decided here.
-- ADR 0048 (class-side method syntax, deferred) gains about 60 more
+- ADR 0048 (class-side method syntax, deferred) gains about 125 more
   `class sealed` methods to migrate if that syntax ever changes.
 - `ProcessNavigation default` and `AnnouncementNavigation default` are
   unchanged. They are rule-2 scope factories over stateful values, and they
@@ -920,7 +999,12 @@ branch is green after each phase except where noted.
 - Rename `globals` to `bindings`, and the Erlang
   `beamtalk_session_primitives:globalsView` primitive to match. Update the
   `Session` doc comments.
-- Add a BUnit test for the `no_workspace` refusal.
+- Replace the `error:undef` workspace guards in
+  `beamtalk_behaviour_intrinsics` with `require_workspace/1`. The guards
+  cover `classReload`, `do_compile_source`, `precheck`,
+  `remove_local_method` and `rewrite_sites`/`validate_sites`.
+- Add a BUnit test for the `no_workspace` refusal from `Workspace` and
+  from `Behaviour` (for example, `compile:source:` under `beamtalk test`).
 - Update the REPL-protocol e2e cases.
 
 **Phase 3: `Transcript` facade** (stdlib + runtime, M)
@@ -931,6 +1015,12 @@ branch is green after each phase except where noted.
 - Repoint `Object>>show:`/`showCr:` at `Transcript`.
 - In `beamtalk_workspace_sup`, start the `'Transcript'` process only
   alongside the REPL server, and update the ADR 0125 mode table.
+- Tests:
+  - BUnit: `Transcript show:` under `beamtalk test` returns `nil` without
+    error, and `Transcript recent` raises `no_workspace`.
+  - Runtime EUnit: a Logger handler attached to the
+    `[beamtalk, user, transcript]` domain receives the event.
+  - REPL e2e: `Transcript show:` still reaches the transcript pane.
 
 **Phase 4: remove injection** (compiler + runtime, L)
 - **Runtime workspace app:**
@@ -956,7 +1046,10 @@ branch is green after each phase except where noted.
 - **Codegen:**
   - In `dispatch_codegen.rs`, delete `generate_binding_aware_class_send`
     and `generate_workspace_class_send`, and route through
-    `generate_class_method_call`.
+    `generate_class_method_call`. REPL-loaded class bodies then raise
+    `class_not_found` for a missing class instead of evaluating to `nil`
+    (§7). Add a codegen test that loads the same missing-class send in
+    both modes and asserts the same error.
   - In `core_erlang/mod.rs`, delete the workspace-mode `ClassReference`
     branch.
   - Remove `workspace_mode` wherever its only remaining effect was
@@ -971,8 +1064,8 @@ branch is green after each phase except where noted.
 
 **Phase 4b: `SystemNavigation` class-side + BT-3632** (S–M, independent of Phases 1–4)
 - Make every `SystemNavigation` query `class sealed`, and delete `default`.
-- Repoint about 218 `SystemNavigation default` references, most of them in
-  docs.
+- Repoint about 216 `SystemNavigation default` references, most of them in
+  `stdlib/test`.
 - In `class_validators.rs`, make the Object-kind `new` check independent of
   the receiver: `self new` / `super new` in a class method of an
   Object-kind class is rejected. Fix the hint text.
@@ -1000,7 +1093,7 @@ branch is green after each phase except where noted.
     line 1065) of a nonexistent `BeamtalkSystemDictionary` /
     `stdlib/src/SystemDictionary.bt`;
   - `docs/development/testing-strategy.md`.
-- Replace the 20 uses of the non-existent `Transcript showLine:` with
+- Replace the 34 uses of the non-existent `Transcript showLine:` with
   `showCr:`.
 - Change the `beamtalk new` `Main.bt` template to `Console printLine:`,
   and update its test.
