@@ -438,10 +438,10 @@ mod tests {
                     );
                     return;
                 }
-                Ok(_) if attempt < 4 => continue,
-                Ok(_) => panic!(
+                Ok(_) if attempt == 4 => panic!(
                     "expected connect to fail against an unbound port after {attempt} retries"
                 ),
+                Ok(_) => {}
             }
         }
     }
