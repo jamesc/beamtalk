@@ -249,6 +249,7 @@ fn with_analysis_trusts_driver_prepared_module() {
         &mut module,
         &analysis.class_hierarchy,
         &analysis.method_return_types,
+        &analysis.external_protocols,
     );
 
     let code = crate::core_erlang::generate_module(
@@ -326,6 +327,7 @@ fn with_analysis_refreshes_stale_return_type_when_hand_off_invalidated() {
         &mut module,
         &analysis.class_hierarchy,
         &analysis.method_return_types,
+        &analysis.external_protocols,
     );
     assert!(
         matches!(

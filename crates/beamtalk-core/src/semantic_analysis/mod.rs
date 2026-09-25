@@ -188,6 +188,19 @@ pub struct AnalysisResult {
     /// `docs/internal/adr-0115-phase1-spike-findings.md` §1a/§1d for why
     /// this field is plumbed through here rather than recomputed downstream.
     pub type_map: TypeMap,
+
+    /// Every provision-bearing protocol carried in from outside this module
+    /// (ADR 0127 §10a, BT-3591) — same-package other files plus dependency
+    /// packages — that this analysis's Phase -1 flattening resolved a
+    /// cross-file/cross-package `uses:` line against. A driver handing this
+    /// `AnalysisResult` to [`lowering::lower_module_for_codegen`] must pass
+    /// this same map back to it, so that function's own re-flattening of the
+    /// driver's real module reproduces byte-for-byte the same flattened
+    /// methods this analysis already produced (see that function's module
+    /// doc, "Closing the flattening/codegen boundary") — a driver that
+    /// passes an empty map here instead would silently fail to flatten any
+    /// cross-file/cross-package `uses:` line the original analysis resolved.
+    pub external_protocols: HashMap<EcoString, ProtocolDefinition>,
 }
 
 impl AnalysisResult {
@@ -204,6 +217,7 @@ impl AnalysisResult {
             method_return_types: HashMap::new(),
             referenced_aliases: Vec::new(),
             type_map: TypeMap::new(),
+            external_protocols: HashMap::new(),
         }
     }
 }
@@ -753,6 +767,10 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &result.protocol_registry,
             &external_protocols,
         ));
+    // Carried for `lowering::lower_module_for_codegen` — see this field's
+    // own doc. No further use of the local `external_protocols` binding
+    // above this point, so moving (not cloning) it in is free.
+    result.external_protocols = external_protocols;
 
     // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8)
     // Must happen after both the class hierarchy and protocol registry are

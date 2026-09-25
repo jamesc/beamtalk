@@ -639,7 +639,7 @@ Actor subclass: WorkerPool
   elements -> List(Worker) => self.workers",
     );
 
-    let (diagnostics, _origins) = expand_module(&mut module);
+    let (diagnostics, _origins) = expand_module(&mut module, &HashMap::new());
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     let pool = find_class(&module, "WorkerPool");
@@ -675,7 +675,7 @@ Value subclass: Pair(A, B)
   elements -> List(A) => List with: self.first",
     );
 
-    let (diagnostics, _origins) = expand_module(&mut module);
+    let (diagnostics, _origins) = expand_module(&mut module, &HashMap::new());
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
     let pair = find_class(&module, "Pair");

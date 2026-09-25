@@ -224,8 +224,12 @@ fn execute_build_passes(
     // build-graph cache key depend on that protocol's content too — see
     // `detect_changes`'s doc. `protocol_hashes` covers every provision-bearing
     // protocol known to this build (same-package cross-file + dependency);
-    // `file_protocol_uses` reads straight off Pass 1's already-parsed
-    // `cached_asts`, so this costs no extra parse.
+    // `file_protocol_uses` comes from Pass 1's `ClassIndexResult` (which
+    // itself persists it in the incremental cache — see
+    // `IncrementalPass1Result.file_protocol_uses`), so it covers every
+    // source file regardless of whether Pass 1 re-scanned it this build,
+    // not just the ones in `index.cached_asts` (a cache-fresh file has no
+    // `cached_asts` entry at all).
     let protocol_hashes: HashMap<ecow::EcoString, String> = index
         .all_protocol_defs
         .iter()
@@ -236,19 +240,7 @@ fn execute_build_passes(
             )
         })
         .collect();
-    let file_protocol_uses: HashMap<Utf8PathBuf, Vec<ecow::EcoString>> = index
-        .cached_asts
-        .iter()
-        .map(|(file, cached)| {
-            let used: Vec<ecow::EcoString> = cached
-                .module
-                .classes
-                .iter()
-                .flat_map(|c| c.uses.iter().map(|u| u.protocol.name.clone()))
-                .collect();
-            (file.clone(), used)
-        })
-        .collect();
+    let file_protocol_uses = index.file_protocol_uses.clone();
 
     // Per-file change detection — only recompile files whose source
     // is newer than the corresponding .beam output. Pass 1's already-computed

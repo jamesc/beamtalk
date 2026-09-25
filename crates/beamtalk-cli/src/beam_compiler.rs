@@ -1020,6 +1020,7 @@ pub(crate) fn compile_source_with_bindings(
         &mut module,
         &analysis_result.class_hierarchy,
         &analysis_result.method_return_types,
+        &analysis_result.external_protocols,
     );
     write_core_erlang_with_bindings(
         &module,

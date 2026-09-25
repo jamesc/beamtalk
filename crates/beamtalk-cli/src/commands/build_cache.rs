@@ -28,6 +28,7 @@ use beamtalk_core::compilation::extension_index::{
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use camino::{Utf8Path, Utf8PathBuf};
+use ecow::EcoString;
 use miette::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,7 +48,13 @@ const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 /// per-file extension definitions.
 /// v3: `CacheEntry.mtime` replaced by `CacheEntry.content_hash` — staleness
 /// is now keyed on file content, not filesystem mtime.
-const CACHE_VERSION: u32 = 3;
+/// v4: entries gained `protocol_uses` (ADR 0127 §10a; BT-3591) — a file's
+/// `uses:` protocol names, persisted so they survive a fresh-file cache hit
+/// instead of only being known for files re-scanned this build. Bumped
+/// (rather than relying on `#[serde(default)]`) so every project gets one
+/// clean rebuild that populates it, instead of silently treating every
+/// already-cached file as using no protocols until it next goes stale.
+const CACHE_VERSION: u32 = 4;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///
@@ -92,6 +99,15 @@ pub(crate) struct CacheEntry {
     /// keyed by `(class, side, selector)`.
     #[serde(default)]
     extensions: Vec<(ExtensionKey, Vec<ExtensionLocation>)>,
+
+    /// Names of every protocol this file's classes declare via `uses:`
+    /// (ADR 0127 §10a; BT-3591) — persisted so a cache-fresh file (skipped
+    /// by Pass 1's re-scan) still reports its protocol uses to
+    /// `detect_changes`'s cache-key derivation. See this field's consumer,
+    /// `IncrementalPass1Result.file_protocol_uses`, for why deriving this
+    /// only from freshly re-scanned files silently breaks protocol-driven
+    /// incremental rebuilds after the first transitional build.
+    protocol_uses: Vec<EcoString>,
 }
 
 /// Result of loading the cache and merging with fresh data.
@@ -114,6 +130,16 @@ pub(crate) struct IncrementalPass1Result {
     /// Pass 2's `detect_changes` can reuse them instead of re-hashing every
     /// file's content a second time. See [`super::util::content_hashes_of`].
     pub source_hashes: HashMap<String, String>,
+    /// Every class's `uses:` protocol names, keyed by the declaring file
+    /// (ADR 0127 §10a; BT-3591) — covers *every* file in `source_files`,
+    /// not just the ones re-scanned this build: a cache-fresh file's uses
+    /// come from its persisted `CacheEntry.protocol_uses`, a re-scanned
+    /// file's from its freshly-parsed `cached_asts` entry. Feeds
+    /// `detect_changes`'s cache-key derivation (`build.rs`), so an
+    /// unchanged file whose used protocol's *content* changed is still
+    /// correctly detected as needing recompilation on every build, not
+    /// just the first one after the file itself was last re-scanned.
+    pub file_protocol_uses: HashMap<Utf8PathBuf, Vec<EcoString>>,
 }
 
 /// Result of loading the cache — distinguishes "no cache" from "manifest invalidated".
@@ -413,6 +439,28 @@ pub(crate) fn save_diagnostics_cache(
     );
 }
 
+/// Derive each cached file's `uses:` protocol names from its freshly-parsed
+/// AST (ADR 0127 §10a; BT-3591). Shared by both the force-rebuild path
+/// (every file passes through here) and the incremental path's stale-file
+/// re-scan — a fresh (cache-hit) file's uses instead come straight from its
+/// persisted `CacheEntry.protocol_uses`, never re-derived.
+fn protocol_uses_from_cached_asts(
+    cached_asts: &HashMap<Utf8PathBuf, super::build::CachedAst>,
+) -> HashMap<Utf8PathBuf, Vec<EcoString>> {
+    cached_asts
+        .iter()
+        .map(|(file, cached)| {
+            let uses = cached
+                .module
+                .classes
+                .iter()
+                .flat_map(|c| c.uses.iter().map(|u| u.protocol.name.clone()))
+                .collect();
+            (file.clone(), uses)
+        })
+        .collect()
+}
+
 /// Perform an incremental Pass 1 scan.
 ///
 /// Loads the existing cache (if any), determines which files are stale,
@@ -449,6 +497,8 @@ pub(crate) fn incremental_build_class_module_index(
             cached_asts,
         ) = super::build::build_class_module_index(source_files, source_root, pkg_name)?;
 
+        let file_protocol_uses = protocol_uses_from_cached_asts(&cached_asts);
+
         // Build cache entries for saving later
         let file_entries = build_cache_entries(
             source_files,
@@ -459,6 +509,7 @@ pub(crate) fn incremental_build_class_module_index(
                 class_superclass_index: &class_superclass_index,
                 all_class_infos: &all_class_infos,
                 extension_index: &extension_index,
+                file_protocol_uses: &file_protocol_uses,
             },
             &source_hashes,
         );
@@ -472,6 +523,7 @@ pub(crate) fn incremental_build_class_module_index(
             cached_asts,
             manifest_invalidated: false,
             source_hashes,
+            file_protocol_uses,
         });
     }
 
@@ -510,6 +562,12 @@ pub(crate) fn incremental_build_class_module_index(
     let mut class_superclass_index = HashMap::new();
     let mut all_class_infos = Vec::new();
     let mut extension_index = ExtensionIndex::new();
+    // ADR 0127 §10a (BT-3591): a fresh file's `uses:` protocol names come
+    // straight from its persisted cache entry — the whole point of
+    // persisting `protocol_uses` in the first place is that a file skipped
+    // by this build's re-scan must still report them, not just files this
+    // build actually touched. See `IncrementalPass1Result.file_protocol_uses`.
+    let mut file_protocol_uses: HashMap<Utf8PathBuf, Vec<EcoString>> = HashMap::new();
 
     if let Some(ref c) = cache {
         for file in &fresh_files {
@@ -522,6 +580,7 @@ pub(crate) fn incremental_build_class_module_index(
                 }
                 all_class_infos.extend(entry.class_infos.clone());
                 extension_index.add_entries(entry.extensions.iter().cloned());
+                file_protocol_uses.insert(file.clone(), entry.protocol_uses.clone());
             }
         }
     }
@@ -550,6 +609,10 @@ pub(crate) fn incremental_build_class_module_index(
     class_superclass_index.extend(stale_superclass_index);
     all_class_infos.extend(stale_class_infos);
     extension_index.merge(&stale_extensions);
+    // Re-scanned files' uses come from the AST just re-parsed for them,
+    // overwriting any (necessarily absent, since a stale file was never in
+    // `fresh_files`) stale entry above.
+    file_protocol_uses.extend(protocol_uses_from_cached_asts(&cached_asts));
 
     // Build updated cache entries and save
     let file_entries = build_cache_entries(
@@ -561,6 +624,7 @@ pub(crate) fn incremental_build_class_module_index(
             class_superclass_index: &class_superclass_index,
             all_class_infos: &all_class_infos,
             extension_index: &extension_index,
+            file_protocol_uses: &file_protocol_uses,
         },
         &source_hashes,
     );
@@ -574,6 +638,7 @@ pub(crate) fn incremental_build_class_module_index(
         cached_asts,
         manifest_invalidated,
         source_hashes,
+        file_protocol_uses,
     })
 }
 
@@ -631,6 +696,7 @@ struct Pass1Indexes<'a> {
     class_superclass_index: &'a HashMap<String, String>,
     all_class_infos: &'a [ClassInfo],
     extension_index: &'a ExtensionIndex,
+    file_protocol_uses: &'a HashMap<Utf8PathBuf, Vec<EcoString>>,
 }
 
 /// Build cache entries from the current Pass 1 results.
@@ -651,6 +717,7 @@ fn build_cache_entries(
         class_superclass_index,
         all_class_infos,
         extension_index,
+        file_protocol_uses,
     } = *indexes;
 
     // Build a reverse index: module_name → Vec<(class_name, module_name)>
@@ -707,6 +774,7 @@ fn build_cache_entries(
                 class_superclass_index: file_superclass_index,
                 class_infos: file_class_infos,
                 extensions: extension_index.entries_for_file(file.as_std_path()),
+                protocol_uses: file_protocol_uses.get(file).cloned().unwrap_or_default(),
             },
         );
     }
@@ -778,6 +846,7 @@ mod tests {
                 class_module_index: cmi,
                 class_superclass_index: csi,
                 class_infos: Vec::new(),
+                protocol_uses: Vec::new(),
             },
         );
 
@@ -876,6 +945,7 @@ mod tests {
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_uses: Vec::new(),
             },
         );
         entries.insert(
@@ -886,6 +956,7 @@ mod tests {
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_uses: Vec::new(),
             },
         );
 
@@ -925,6 +996,7 @@ mod tests {
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_uses: Vec::new(),
             },
         );
         let cache = Pass1Cache {
@@ -980,6 +1052,7 @@ mod tests {
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_uses: Vec::new(),
             },
         );
         let cache = Pass1Cache {
@@ -1026,6 +1099,7 @@ mod tests {
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_uses: Vec::new(),
             },
         );
         let cache = Pass1Cache {
@@ -1060,6 +1134,7 @@ mod tests {
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_uses: Vec::new(),
             },
         );
         let cache2 = Pass1Cache {

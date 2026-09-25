@@ -168,6 +168,7 @@ fn handed_off_analysis_pipeline_emits_a_flattened_provision() {
         &mut module,
         &analysis.class_hierarchy,
         &analysis.method_return_types,
+        &analysis.external_protocols,
     );
     // The driver's own module must already carry the flattened method
     // before codegen ever runs — this is the AST-level half of the fix.

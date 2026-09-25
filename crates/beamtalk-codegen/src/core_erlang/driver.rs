@@ -130,8 +130,15 @@ pub fn generate_module_with_warnings(
             let flattened_module_storage;
             let flattened_module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
                 let mut owned = module.clone();
-                let _ =
-                    beamtalk_core::semantic_analysis::trait_expansion::expand_module(&mut owned);
+                // No driver-supplied cross-file/cross-package protocols to
+                // flatten against here (no `AnalysisResult` was handed off —
+                // see this branch's own doc above) — same limitation this
+                // path already had for `uses:` in general; tracked in
+                // BT-3626 alongside this path's other fidelity gaps.
+                let _ = beamtalk_core::semantic_analysis::trait_expansion::expand_module(
+                    &mut owned,
+                    &std::collections::HashMap::new(),
+                );
                 flattened_module_storage = owned;
                 &flattened_module_storage
             } else {
@@ -233,10 +240,15 @@ pub fn generate_module_with_warnings(
                 options.native_type_registry.as_deref(),
             );
         generator.type_map = type_map;
+        // No cross-file/cross-package `external_protocols` map survives into
+        // this branch (self-sufficient codegen, or a stale hand-off being
+        // re-inferred from scratch) — same tracked limitation as this file's
+        // other self-sufficient `expand_module` call above (BT-3626).
         beamtalk_core::semantic_analysis::lower_module_for_codegen(
             &mut module_owned,
             &hierarchy,
             &method_return_types,
+            &std::collections::HashMap::new(),
         );
         // Record which methods *this* (re-)inference wrote a
         // return type into, for `extract_method_source` to strip before

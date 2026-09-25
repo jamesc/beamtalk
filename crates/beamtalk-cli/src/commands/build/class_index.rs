@@ -66,6 +66,12 @@ pub(crate) struct ClassIndexResult {
     /// runs. Reused by `detect_changes` (Pass 2) so it doesn't re-hash a file
     /// whose content Pass 1 already hashed this same build.
     pub(crate) source_hashes: HashMap<String, String>,
+    /// Every class's `uses:` protocol names, keyed by the declaring file
+    /// (ADR 0127 §10a; BT-3591) — covers every source file Pass 1 knows
+    /// about, not just the ones re-scanned this build (see
+    /// `IncrementalPass1Result.file_protocol_uses`). Empty for
+    /// manifest-less builds, same as `cached_asts`.
+    pub(crate) file_protocol_uses: HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
 }
 
 /// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
@@ -100,6 +106,7 @@ pub(crate) fn build_class_index(
         cached_asts,
         force_pass2,
         source_hashes,
+        file_protocol_uses,
     ) = if let Some(pkg) = pkg_manifest {
         let result = crate::commands::build_cache::incremental_build_class_module_index(
             &env.source_files,
@@ -119,6 +126,7 @@ pub(crate) fn build_class_index(
             result.cached_asts,
             result.manifest_invalidated,
             result.source_hashes,
+            result.file_protocol_uses,
         )
     } else {
         (
@@ -128,6 +136,7 @@ pub(crate) fn build_class_index(
             beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             HashMap::new(),
             false,
+            HashMap::new(),
             HashMap::new(),
         )
     };
@@ -232,6 +241,7 @@ pub(crate) fn build_class_index(
         cached_asts,
         force_pass2,
         source_hashes,
+        file_protocol_uses,
     })
 }
 

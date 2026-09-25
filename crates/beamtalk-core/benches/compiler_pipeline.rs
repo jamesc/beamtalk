@@ -127,6 +127,7 @@ fn compile_module_full(module_name: &str, source: &str) -> String {
         &mut module,
         &analysis.class_hierarchy,
         &analysis.method_return_types,
+        &analysis.external_protocols,
     );
     let opts = CodegenOptions::new(module_name)
         .with_source(source)

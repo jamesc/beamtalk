@@ -278,6 +278,76 @@ fn test_detect_changes_protocol_hash_change_forces_rebuild_of_user() {
     assert_eq!(third.unchanged_files, vec![source_file]);
 }
 
+/// ADR 0127 §10a / BT-3591 Blocker fix: a file's `uses:` protocol names
+/// must survive a Pass 1 cache hit, not just be known for files this build
+/// actually re-scanned. Before this fix, `file_protocol_uses` was derived
+/// only from `cached_asts` (Pass 1's freshly-parsed ASTs), which is empty
+/// for a cache-fresh file — silently breaking protocol-driven incremental
+/// rebuilds after the first build (the exact scenario this test drives:
+/// build once, then rebuild with an *unrelated* file changed so the
+/// `uses:` file itself is skipped as fresh).
+#[test]
+fn test_incremental_pass1_persists_protocol_uses_for_a_cache_fresh_file() {
+    let temp = TempDir::new().unwrap();
+    let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_dir = project.join("src");
+    let build_dir = project.join("build");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::create_dir_all(&build_dir).unwrap();
+
+    let greeter_file = src_dir.join("greeter.bt");
+    write_test_file(
+        &greeter_file,
+        "Object subclass: Greeter\n  uses: Greetable\n",
+    );
+    let other_file = src_dir.join("other.bt");
+    write_test_file(&other_file, "Object subclass: Other\n  m => 1\n");
+
+    let source_files = vec![greeter_file.clone(), other_file.clone()];
+
+    // First build: cache miss — both files scanned; greeter.bt's `uses:`
+    // is recorded from its fresh parse.
+    let first = super::super::super::build_cache::incremental_build_class_module_index(
+        &source_files,
+        Some(&src_dir),
+        "pkg",
+        &build_dir,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        first.file_protocol_uses.get(&greeter_file),
+        Some(&vec![ecow::EcoString::from("Greetable")]),
+        "first build must record greeter.bt's uses: from its fresh parse"
+    );
+
+    // Second build: only other.bt changed — greeter.bt is a cache hit
+    // (fresh, not re-scanned this build). Its recorded protocol uses must
+    // still be present, sourced from the persisted cache entry rather than
+    // a re-parse.
+    write_test_file(&other_file, "Object subclass: Other\n  m => 2\n");
+    let second = super::super::super::build_cache::incremental_build_class_module_index(
+        &source_files,
+        Some(&src_dir),
+        "pkg",
+        &build_dir,
+        None,
+        false,
+    )
+    .unwrap();
+    assert!(
+        !second.cached_asts.contains_key(&greeter_file),
+        "greeter.bt must be a cache hit (not re-scanned) for this test to be meaningful"
+    );
+    assert_eq!(
+        second.file_protocol_uses.get(&greeter_file),
+        Some(&vec![ecow::EcoString::from("Greetable")]),
+        "a cache-fresh file's uses: must survive from the persisted Pass 1 \
+         cache entry, not just files re-scanned this build"
+    );
+}
+
 #[test]
 fn test_detect_changes_source_modified() {
     let temp = TempDir::new().unwrap();
