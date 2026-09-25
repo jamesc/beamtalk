@@ -397,6 +397,19 @@ impl ProcessManager {
     /// narrower one (CLAUDE.md "No duplicate implementations"), since a
     /// two-node distribution test needs a real second REPL-capable
     /// workspace, not just a bare `beamtalk_runtime` node.
+    ///
+    /// `sname` is just the short-name part — the node is always registered
+    /// as `sname@localhost` (BT-3618), never `sname@<hostname>`: on a
+    /// GitHub Actions runner the machine hostname resolves to the VM's
+    /// private, non-loopback IP, where nothing answers epmd (`just`
+    /// pins `ERL_EPMD_ADDRESS=127.0.0.1` for every recipe, so an epmd this
+    /// node starts is loopback-bound only). `Node named: #'sname@<hostname>'
+    /// connect` from another node then can't reach it and answers `false` —
+    /// the same root cause `beamtalk_dist_test_helper.erl`'s
+    /// `unique_node_name/1` documents and fixes for the `EUnit` two-node
+    /// harness (BT-3609), and the same convention production workspace
+    /// nodes already use (`build_detached_node_command`'s
+    /// `beamtalk_workspace_{id}@localhost`).
     fn start_named(sname: &str, workspace_name: &str) -> Self {
         // Check if debug output is requested via environment variable
         let debug_output = env::var("E2E_DEBUG").is_ok();
@@ -479,7 +492,7 @@ impl ProcessManager {
         let mut beam_child = Command::new("erl")
             .arg("-noshell")
             .arg("-sname")
-            .arg(sname)
+            .arg(format!("{sname}@localhost"))
             .arg("-setcookie")
             .arg(E2E_COOKIE)
             .args(&pa_args)
@@ -2316,27 +2329,23 @@ fn node_name_from_print_string(rendered: &str) -> String {
 /// connect` / `Counter spawnOn:` / `Workspace nodes` / `ProcessNavigation
 /// on:` exercise from a real REPL session.
 ///
-/// Opt-in (`BEAMTALK_TWO_NODE_TESTS=1`): booting a genuine second,
-/// independently-spawned distributed-Erlang node consistently fails to
-/// connect back to the first on this repo's `ubuntu-latest` CI runners
-/// (`Node connect` answers false; `.github/workflows/ci.yml`'s "Test
-/// two-node distribution e2e (optional)" step, `continue-on-error: true`)
-/// — passes reliably locally (verified 22/22). The root cause is not yet
-/// known; it is *not* the one behind `beamtalk_node_tests.erl`'s two-node
-/// suite's former CI failure, which was an `EUnit` 5-second per-test timeout
-/// (BT-3609) and runs in `just test-runtime` again.
+/// Boots two independently-spawned distributed-Erlang nodes, both named
+/// `sname@localhost` (`ProcessManager::start_named`, BT-3618) rather than
+/// `sname@<hostname>`: on a GitHub Actions runner the machine hostname
+/// resolves to the VM's private, non-loopback IP, where nothing answers
+/// epmd (`just` pins `ERL_EPMD_ADDRESS=127.0.0.1` for every recipe, so an
+/// epmd either node starts is loopback-bound only), so `Node connect`
+/// answered `false` in CI before this fix — the same root cause
+/// `beamtalk_dist_test_helper.erl`'s `unique_node_name/1` already
+/// documents and fixes for the `EUnit` two-node harness (BT-3609). This test
+/// used to be gated behind a `BEAMTALK_TWO_NODE_TESTS=1` opt-in and run as
+/// an optional, `continue-on-error` CI step for exactly that reason; both
+/// are gone now that the root cause is fixed, and it runs as a normal
+/// blocking part of `just test-repl-protocol`.
 #[test]
 #[ignore = "slow test - run with `just test-repl-protocol`"]
 #[serial(e2e)]
 fn e2e_distribution_tests() {
-    if std::env::var("BEAMTALK_TWO_NODE_TESTS").as_deref() != Ok("1") {
-        eprintln!(
-            "E2E: skipping e2e_distribution_tests — opt-in via BEAMTALK_TWO_NODE_TESTS=1 \
-             (two independently-spawned distributed-Erlang nodes don't reliably connect on \
-             this repo's CI runners)"
-        );
-        return;
-    }
     let primary = ProcessManager::start();
     let peer_sname = format!("bt_e2e_dist_peer_{}", std::process::id());
     let peer = ProcessManager::start_named(&peer_sname, "e2e-dist-peer");
