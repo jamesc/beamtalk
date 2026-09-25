@@ -470,3 +470,302 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::core_erlang::CoreErlangGenerator;
+    use beamtalk_core::ast::{ClassDefinition, ClassKind, CommentAttachment, Identifier, Module};
+    use beamtalk_core::source_analysis::Span;
+
+    fn generator() -> CoreErlangGenerator {
+        CoreErlangGenerator::new("counter")
+    }
+
+    fn empty_module() -> Module {
+        Module {
+            classes: vec![],
+            method_definitions: vec![],
+            protocols: vec![],
+            type_aliases: vec![],
+            native_declarations: vec![],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            file_leading_comments: vec![],
+            file_trailing_comments: vec![],
+        }
+    }
+
+    fn module_with_superclass(sc: &str) -> Module {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", Span::new(0, 0)),
+            superclass: Some(Identifier::new(sc, Span::new(0, 0))),
+            superclass_package: None,
+            class_kind: ClassKind::Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            superclass_type_args: vec![],
+            uses: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            backing_module: None,
+            handle_scope: None,
+            shape_version: None,
+            span: Span::new(0, 0),
+        };
+        Module {
+            classes: vec![class],
+            method_definitions: vec![],
+            protocols: vec![],
+            type_aliases: vec![],
+            native_declarations: vec![],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            file_leading_comments: vec![],
+            file_trailing_comments: vec![],
+        }
+    }
+
+    #[test]
+    fn instance_registration_doc_contains_register_call() {
+        let doc = CoreErlangGenerator::instance_registration_doc("counter");
+        let out = doc.to_pretty_string();
+        assert!(
+            out.contains("beamtalk_object_instances"),
+            "expected registry module: {out}"
+        );
+        assert!(out.contains("register"), "expected 'register': {out}");
+        assert!(out.contains("Pid"), "expected Pid variable: {out}");
+    }
+
+    #[test]
+    fn instance_registration_doc_contains_try_catch() {
+        let doc = CoreErlangGenerator::instance_registration_doc("counter");
+        let out = doc.to_pretty_string();
+        assert!(out.contains("try"), "expected try keyword: {out}");
+        assert!(out.contains("catch"), "expected catch clause: {out}");
+    }
+
+    #[test]
+    fn generate_spawn_function_declares_spawn_0() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        assert!(
+            out.contains("'spawn'/0 = fun ()"),
+            "expected spawn/0 decl: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_spawn_function_uses_safe_spawn() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        assert!(
+            out.contains("beamtalk_actor"),
+            "expected beamtalk_actor call: {out}"
+        );
+        assert!(out.contains("safe_spawn"), "expected safe_spawn: {out}");
+    }
+
+    #[test]
+    fn generate_spawn_function_ok_arm_returns_beamtalk_object() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        assert!(
+            out.contains("beamtalk_object"),
+            "expected beamtalk_object record: {out}"
+        );
+        assert!(out.contains("'Counter'"), "expected class atom: {out}");
+        assert!(out.contains("'counter'"), "expected module atom: {out}");
+        assert!(out.contains("Pid"), "expected Pid: {out}");
+    }
+
+    #[test]
+    fn generate_spawn_function_error_arm_raises_instantiation_error() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        assert!(
+            out.contains("instantiation_error"),
+            "expected instantiation_error: {out}"
+        );
+        assert!(out.contains("raise"), "expected raise call: {out}");
+    }
+
+    #[test]
+    fn generate_spawn_function_includes_instance_registration() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        assert!(
+            out.contains("beamtalk_object_instances"),
+            "expected instance registration: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_spawn_with_args_validates_is_map() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_with_args_function(&m)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'spawn'/1 = fun (InitArgs)"),
+            "expected spawn/1 decl: {out}"
+        );
+        assert!(out.contains("is_map"), "expected is_map check: {out}");
+    }
+
+    #[test]
+    fn generate_spawn_with_args_false_branch_raises_type_error() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_with_args_function(&m)
+            .unwrap()
+            .to_pretty_string();
+        assert!(out.contains("type_error"), "expected type_error: {out}");
+        assert!(out.contains("spawnWith:"), "expected selector: {out}");
+    }
+
+    #[test]
+    fn generate_spawn_with_args_ok_arm_registers_and_returns_object() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_with_args_function(&m)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("beamtalk_object"),
+            "expected beamtalk_object: {out}"
+        );
+        assert!(
+            out.contains("beamtalk_object_instances"),
+            "expected registration: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_actor_new_error_method_raises_instantiation_error() {
+        let g = generator();
+        let out = g
+            .generate_actor_new_error_method()
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'new'/0 = fun ()"),
+            "expected new/0 decl: {out}"
+        );
+        assert!(
+            out.contains("instantiation_error"),
+            "expected instantiation_error: {out}"
+        );
+        assert!(out.contains("raise"), "expected raise: {out}");
+    }
+
+    #[test]
+    fn generate_actor_new_with_args_error_method_raises_instantiation_error() {
+        let g = generator();
+        let out = g
+            .generate_actor_new_with_args_error_method()
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'new'/1 = fun (_InitArgs)"),
+            "expected new/1 decl: {out}"
+        );
+        assert!(
+            out.contains("instantiation_error"),
+            "expected instantiation_error: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_abstract_spawn_error_method_raises_instantiation_error() {
+        let mut g = generator();
+        let out = g
+            .generate_abstract_spawn_error_method()
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'spawn'/0 = fun ()"),
+            "expected spawn/0 decl: {out}"
+        );
+        assert!(
+            out.contains("instantiation_error"),
+            "expected instantiation_error: {out}"
+        );
+        assert!(out.contains("with_hint"), "expected hint call: {out}");
+    }
+
+    #[test]
+    fn generate_abstract_spawn_with_args_error_method_raises_instantiation_error() {
+        let mut g = generator();
+        let out = g
+            .generate_abstract_spawn_with_args_error_method()
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'spawn'/1 = fun (_InitArgs)"),
+            "expected spawn/1 decl: {out}"
+        );
+        assert!(
+            out.contains("instantiation_error"),
+            "expected instantiation_error: {out}"
+        );
+    }
+
+    #[test]
+    fn instantiation_error_expr_builds_error_chain() {
+        let out =
+            CoreErlangGenerator::instantiation_error_expr("MyClass", "new", "Use spawn instead")
+                .to_pretty_string();
+        assert!(
+            out.contains("instantiation_error"),
+            "expected error kind: {out}"
+        );
+        assert!(out.contains("'MyClass'"), "expected class atom: {out}");
+        assert!(out.contains("'new'"), "expected selector atom: {out}");
+        assert!(out.contains("with_hint"), "expected hint call: {out}");
+        assert!(out.contains("raise"), "expected raise call: {out}");
+    }
+
+    #[test]
+    fn generate_superclass_function_no_classes_returns_nil() {
+        let g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_superclass_function(&m)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'superclass'/0 = fun ()"),
+            "expected superclass/0: {out}"
+        );
+        assert!(out.contains("'nil'"), "expected nil atom: {out}");
+    }
+
+    #[test]
+    fn generate_superclass_function_returns_superclass_atom() {
+        let g = generator();
+        let m = module_with_superclass("Actor");
+        let out = g
+            .generate_superclass_function(&m)
+            .unwrap()
+            .to_pretty_string();
+        assert!(out.contains("'Actor'"), "expected Actor atom: {out}");
+    }
+}
