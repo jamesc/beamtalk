@@ -589,10 +589,10 @@ follows.
 **Separate follow-ups:**
 
 - **`Program exit:` depends on the `node_owning` application
-  environment.** In a normally booted release it throws
+  environment (BT-3634).** In a normally booted release it throws
   `{beamtalk_script_exit, N}`, which crashes the calling process while the
   node keeps running. What it means in a release needs its own decision.
-- **File-handle ownership differs by context.** `beamtalk_file:
+- **File-handle ownership differs by context (BT-3635).** `beamtalk_file:
   resolve_owner` makes a handle belong to the session shell in the REPL
   and to the calling process elsewhere.
 - **Node introspection moves from `Workspace` to `Node` (BT-3633).**
@@ -919,6 +919,10 @@ The work is one epic; main stays green after each phase.
   - A method that messages its own class runs without `dispatch_error`.
   - A class with class state still uses its gen_server.
   - Reload refreshes the cache.
+- **Caller-mirror dependency.** `File open:mode:`'s `resolve_owner/0` is the
+  only class-side code that reads the caller mirrored into the class process
+  (`dispatch_caller_pid/0`). Its ownership rule must be settled first, or in
+  the same change (BT-3635).
 - **Docs.** Qualify *Passing Blocks Through Class Methods* and the
   `CLAUDE.md` rule, and note in ADR 0013 that its §4 direct dispatch is
   implemented.
@@ -1092,8 +1096,9 @@ REPL users type what they typed before. beamtalk-exdura switches
 
 ## References
 - Related issues: BT-3631 (this ADR); BT-3622 (`classNamed:` dynamic symbols);
-  BT-3632 (Object-kind `new` rule, settled in §6); BT-3633 (re-home the
-  `Beamtalk`/`Workspace` method sets)
+  BT-3632 (Object-kind `new` rule, settled in §6); BT-3633 (node
+  introspection moves to `Node`); BT-3634 (`Program exit:` outside run
+  mode); BT-3635 (`File` handle ownership)
 - Related ADRs:
   - [0010](0010-global-objects-and-singleton-dispatch.md) — global objects and singleton dispatch
   - [0013](0013-class-variables-class-methods-instantiation.md) — class methods and dispatch
