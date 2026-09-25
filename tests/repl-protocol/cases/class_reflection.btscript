@@ -49,3 +49,19 @@ intClass := Beamtalk classNamed: #Integer
 
 intClass name
 // => Integer
+
+// ===========================================================================
+// DYNAMIC (VARIABLE) SYMBOL ARGUMENT (BT-3622)
+// ===========================================================================
+
+// A variable holding a symbol works with classNamed: via the Beamtalk binding
+counterSymbol := #Counter
+// => Counter
+
+Beamtalk classNamed: counterSymbol
+// => Counter
+
+// The same variable argument works via the explicit BeamtalkInterface current form
+// (the compiled-app-safe path — Beamtalk itself is a workspace-only injected global)
+BeamtalkInterface current classNamed: counterSymbol
+// => Counter

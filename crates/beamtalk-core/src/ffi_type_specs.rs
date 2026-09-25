@@ -158,7 +158,13 @@ pub fn find_runtime_dir() -> Result<PathBuf> {
 pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
     // Check explicit env var first
     if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
-        let path = PathBuf::from(dir);
+        // BT-3624: absolutize a relative override too — a caller that pairs
+        // this with `Command::current_dir` (e.g. `rebar3_path()`) would
+        // otherwise resolve a `/`-containing program path against the wrong
+        // directory once it chdirs.
+        let path = crate::paths::absolutize(&PathBuf::from(dir))
+            .into_diagnostic()
+            .wrap_err("Failed to resolve BEAMTALK_RUNTIME_DIR")?;
         if path.join("rebar.config").exists() {
             return Ok((path, RuntimeLayout::Dev));
         }
@@ -184,7 +190,20 @@ pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
         }),
     ];
 
+    // BT-3624: absolutize every candidate before returning it. Candidate 2
+    // is relative by construction ("running from repo root"); returning it
+    // unresolved broke `rebar3_path()`/`compile_with_rebar3()` in
+    // `beamtalk-cli`, which spawn the bundled rebar3 with
+    // `Command::current_dir(<project>/_build/dev/native)` — on Unix, a
+    // program path containing `/` resolves *after* the chdir, so
+    // `runtime/tools/rebar3` was looked up under the wrong directory.
+    // Candidates 1 and 3 are already absolute in practice, but absolutizing
+    // them too is a harmless no-op (beyond lexical normalization) and keeps
+    // every candidate on the same, easy-to-reason-about footing.
     for candidate in dev_candidates.into_iter().flatten() {
+        let Ok(candidate) = crate::paths::absolutize(&candidate) else {
+            continue;
+        };
         if candidate.join("rebar.config").exists() {
             return Ok((candidate, RuntimeLayout::Dev));
         }
@@ -1528,6 +1547,68 @@ mod tests {
             paths.stdlib_erlang_ebin,
             PathBuf::from("/rt/_build/default/lib/beamtalk_stdlib/ebin")
         );
+    }
+
+    /// BT-3624 regression: dev candidate 2 ("running from repo root") is
+    /// built as the *relative* `PathBuf::from("runtime")`. Returning it
+    /// unresolved broke `rebar3_path()`/`compile_with_rebar3()` in
+    /// `beamtalk-cli`, which spawn the bundled rebar3 with
+    /// `Command::current_dir(<project>/_build/dev/native)` — on Unix, a
+    /// program path containing `/` resolves *after* the chdir, so
+    /// `runtime/tools/rebar3` was looked up under the wrong directory. Every
+    /// candidate `find_runtime_dir_with_layout` returns must be absolute.
+    ///
+    /// Hermetic: chdirs into a temp dir containing `runtime/rebar.config`
+    /// (dev candidate 2's shape) and clears `CARGO_MANIFEST_DIR` /
+    /// `BEAMTALK_RUNTIME_DIR` so candidates 1 and the env-var override (both
+    /// already absolute in a `cargo test` process) can't shadow the
+    /// candidate under test. Uses `#[serial(cwd)]` — same convention as
+    /// `beamtalk-cli`'s `test_find_package_root_relative_path_does_not_return_empty`
+    /// — to avoid racing the process-global CWD against other tests.
+    #[test]
+    #[serial_test::serial(cwd)]
+    fn find_runtime_dir_with_layout_absolutizes_the_cwd_candidate() {
+        struct CwdGuard(PathBuf);
+        impl Drop for CwdGuard {
+            fn drop(&mut self) {
+                std::env::set_current_dir(&self.0).unwrap();
+            }
+        }
+
+        let saved_manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok();
+        // SAFETY: serialized against other `cwd`-group tests by `#[serial]`;
+        // no other test in this binary reads/writes this env var.
+        unsafe { std::env::remove_var("CARGO_MANIFEST_DIR") };
+        // SAFETY: serialized against other `cwd`-group tests by `#[serial]`;
+        // no other test in this binary reads/writes this env var.
+        unsafe { std::env::remove_var("BEAMTALK_RUNTIME_DIR") };
+
+        let temp = TempDir::new().unwrap();
+        let runtime_dir = temp.path().join("runtime");
+        fs::create_dir_all(&runtime_dir).unwrap();
+        fs::write(runtime_dir.join("rebar.config"), "{deps, []}.").unwrap();
+
+        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(temp.path()).unwrap();
+        // Read back via the OS rather than reusing `temp.path()` verbatim —
+        // the two can differ when the platform's temp directory is itself a
+        // symlink (e.g. macOS's `/tmp` -> `/private/tmp`).
+        let expected = std::env::current_dir().unwrap().join("runtime");
+
+        let result = find_runtime_dir_with_layout();
+
+        if let Some(dir) = saved_manifest_dir {
+            // SAFETY: restoring what was cleared above, before the guard drops.
+            unsafe { std::env::set_var("CARGO_MANIFEST_DIR", dir) };
+        }
+
+        let (found, layout) = result.expect("runtime dir with rebar.config should be found");
+        assert!(
+            found.is_absolute(),
+            "find_runtime_dir_with_layout returned a relative path: {found:?}"
+        );
+        assert_eq!(found, expected);
+        assert_eq!(layout, RuntimeLayout::Dev);
     }
 
     // -----------------------------------------------------------------------

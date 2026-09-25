@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3590 (ADR 0127 §3/§10): an Actor class's `uses:` provision must reach
+// compiled Core Erlang output through the existing gen_server generator
+// unchanged, including a provision that self-sends another of the class's
+// own (non-provided) methods across the actor state boundary.
+//
+// See `trait_flattened_value_user/main.bt`'s header comment for why this
+// single-file fixture (protocol + class together) is not itself a
+// legal package layout, and why its `_semantic` snapshot's "class and a
+// protocol cannot be in the same file" diagnostic is expected.
+
+Protocol define: Greetable
+  greet -> String => self greeting
+
+Actor subclass: Greeter
+  uses: Greetable
+  state: greetingCount = 0
+
+  greeting -> String => "hi"
+
+  bump => self.greetingCount := self.greetingCount + 1

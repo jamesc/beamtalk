@@ -593,6 +593,114 @@ Value subclass: Pair(A, B)
     );
 }
 
+// ── body-local type-annotation substitution (BT-3588 PR #4037 deferral,
+//    closed by BT-3590) ─────────────────────────────────────────────────
+
+/// Finds the `TypeAnnotation` of the first `x :: T := …` assignment
+/// anywhere in `method`'s body (recursing into nested blocks), or `None`.
+/// Returns an owned clone — the closure's borrow of `expr` doesn't outlive
+/// `walk_expression`'s call, so a borrowed return can't be proven sound.
+fn first_body_assignment_type(method: &MethodDefinition) -> Option<TypeAnnotation> {
+    let mut found: Option<TypeAnnotation> = None;
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |expr| {
+            if found.is_none() {
+                if let Expression::Assignment {
+                    type_annotation: Some(ty),
+                    ..
+                } = expr
+                {
+                    found = Some(ty.clone());
+                }
+            }
+        });
+    }
+    found
+}
+
+#[test]
+fn body_local_typed_assignment_substitutes_the_protocols_type_param() {
+    // BT-3588 only substituted `parameters`/`return_type` — a body-local
+    // `firstElem :: E := …` referencing the protocol's own type param `E`
+    // was left as `E` after flattening, which the type checker cannot
+    // resolve inside the *using* class's body (`E` only exists inside
+    // `Enumerable`'s own methods).
+    let mut module = parse_source(
+        "Protocol define: Enumerable(E)
+  elements -> List(E)
+
+  first -> E =>
+    firstElem :: E := self elements first
+    firstElem
+
+Actor subclass: WorkerPool
+  uses: Enumerable(Worker)
+
+  elements -> List(Worker) => self.workers",
+    );
+
+    let (diagnostics, _origins) = expand_module(&mut module);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let pool = find_class(&module, "WorkerPool");
+    let first = find_method(pool, "first").expect("first was flattened in");
+    let ty = first_body_assignment_type(first)
+        .expect("expected a typed assignment in the flattened body");
+    assert_eq!(
+        ty.type_name(),
+        "Worker",
+        "body-local `E` must substitute to the uses: type arg, same as a signature `E` would"
+    );
+}
+
+#[test]
+fn body_local_typed_assignment_gets_the_same_hygienic_rename_as_a_signature_one() {
+    // Mirrors `method_local_type_var_colliding_with_the_class_type_param_is_alpha_renamed`,
+    // but for a body-local annotation instead of a parameter — a
+    // method-local `A` inside the body must not collapse into the using
+    // class's own `A` type param either.
+    let mut module = parse_source(
+        "Protocol define: Enumerable(E)
+  elements -> List(E)
+
+  firstAs: converter :: Block(E, A) -> A =>
+    result :: A := converter value: self elements first
+    result
+
+Value subclass: Pair(A, B)
+  uses: Enumerable(A)
+  field: first :: A
+  field: second :: B
+
+  elements -> List(A) => List with: self.first",
+    );
+
+    let (diagnostics, _origins) = expand_module(&mut module);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let pair = find_class(&module, "Pair");
+    let method = find_method(pair, "firstAs:").expect("firstAs: was flattened in");
+
+    // The signature's method-local `A` (return type) was renamed away from
+    // `A`/`B` — this is `method_local_type_var_colliding_with_the_class_type_param_is_alpha_renamed`'s
+    // own assertion, re-derived here to get the fresh letter this fixture chose.
+    let fresh = method
+        .return_type
+        .as_ref()
+        .map(TypeAnnotation::type_name)
+        .expect("method-local return type must have been renamed, not dropped");
+    assert_ne!(fresh, "A");
+    assert_ne!(fresh, "B");
+
+    let body_ty = first_body_assignment_type(method)
+        .expect("expected a typed assignment in the flattened body");
+    assert_eq!(
+        body_ty.type_name(),
+        fresh,
+        "body-local `A` must get the same hygienic rename as the signature's method-local `A`"
+    );
+}
+
 // ── `extending:` a protocol with provisions (ADR 0127 §5, §8) ──────────
 
 #[test]

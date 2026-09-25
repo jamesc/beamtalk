@@ -25,6 +25,14 @@ fn test_rebar3_path_returns_bundled_when_exists() {
         path.ends_with("tools/rebar3"),
         "Expected bundled rebar3 path ending in 'tools/rebar3', got: {path:?}"
     );
+    // BT-3624: a relative bundled path (e.g. `runtime/tools/rebar3`) breaks
+    // `compile_with_rebar3()`, which spawns it via `Command::current_dir` —
+    // on Unix a `/`-containing program path resolves *after* the chdir, so a
+    // relative path here would be looked up under the wrong directory.
+    assert!(
+        path.is_absolute(),
+        "rebar3_path() must return an absolute path, got: {path:?}"
+    );
 }
 
 // ---- ADR 0072 Phase 1: native Erlang compilation in build ----

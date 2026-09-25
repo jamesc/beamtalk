@@ -1041,3 +1041,64 @@ fn bt3562_plain_bare_field_read_in_nested_while_loop_compiles() {
     );
     assert_compiles_through_erlc("bt3562_plain_bare_field_read_nested", &code);
 }
+
+// ── BT-3623: two sibling mutation-threaded conditionals in one loop body ──
+//
+// `current_branch_frame()`/`current_frame()` read `branch_frame_counter`
+// directly — a monotonic counter that mints a fresh `FrameId` per
+// `enter_branch_context` call but is never decremented on exit. Inside a
+// `whileTrue:` body, a SECOND `ifTrue:`/`ifFalse:`/`and:`/`or:` (or any
+// other mutation-threaded conditional) captures its own enclosing frame via
+// `current_frame()` too — but by then the FIRST sibling conditional's own
+// `with_branch_context` has already opened and closed, leaving
+// `branch_frame_counter` pointing at that now-closed sibling's frame
+// instead of the loop's own still-active frame. The second conditional's
+// `{Value, State}`-tuple extraction `Bind` gets tagged with that stale,
+// already-popped `FrameId`, so `ThreadedIr::verify()` can't find its
+// producer where it looks: `NonLinearVersion`/`UnboundVersion`. Fixed by
+// tracking the innermost active branch frame as its own saved/restored
+// generator field (`active_branch_frame`), separate from the
+// never-restored minting counter.
+//
+// No non-local return (`^`) is needed to trigger this — the real-world
+// exdura repro just happened to have one in its first `ifTrue:` block,
+// which is why it read as an NLR-specific bug at first.
+
+#[test]
+fn bt3623_two_sibling_if_true_with_mutations_in_while_loop_compiles() {
+    let src = "Actor subclass: Bt3623Repro\n  state: a = 0\n  state: b = 0\n  state: c = 0\n  state: d = 0\n  state: running = true\n\n  run =>\n    [self.running] whileTrue: [\n      self.a := self.a + 1.\n      self.b := self.b + 1.\n      (self.a > 3) ifTrue: [\n        self.b := self.b + 100.\n        self.c := self.c + 1\n      ].\n      (self.a > 5) ifTrue: [\n        self.d := self.d + 1.\n        self.b := self.b + 1000\n      ]\n    ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3623_two_sibling_if_true").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| {
+        panic!(
+            "two sibling mutation-threaded ifTrue: blocks inside a whileTrue: body \
+             must compile without tripping the ThreadedIr verifier. Got: {e:?}"
+        )
+    });
+    assert_compiles_through_erlc("bt3623_two_sibling_if_true", &code);
+}
+
+#[test]
+fn bt3623_nlr_in_first_sibling_if_true_in_while_loop_compiles() {
+    // The exact shape from the Linear issue: the first sibling `ifTrue:`
+    // block ALSO contains a non-local return (`^`), matching exdura's
+    // `waitForSignal:`-style loop.
+    let src = "Actor subclass: Bt3623NlrRepro\n  state: a = 0\n  state: b = 0\n  state: c = 0\n  state: d = 0\n  state: running = true\n\n  run =>\n    [self.running] whileTrue: [\n      self.a := self.a + 1.\n      self.b := self.b + 1.\n      (self.a > 3) ifTrue: [\n        self.b := self.b + 100.\n        self.c := self.c + 1.\n        ^self.c\n      ].\n      (self.a > 5) ifTrue: [\n        self.d := self.d + 1.\n        self.b := self.b + 1000\n      ]\n    ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt3623_nlr_in_first_sibling").with_workspace_mode(true),
+    );
+    let code = result.unwrap_or_else(|e| {
+        panic!(
+            "a non-local return inside the first of two sibling mutation-threaded \
+             ifTrue: blocks in a whileTrue: body must compile. Got: {e:?}"
+        )
+    });
+    assert_compiles_through_erlc("bt3623_nlr_in_first_sibling", &code);
+}

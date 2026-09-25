@@ -129,14 +129,24 @@ impl CoreErlangGenerator {
     }
 
     /// ADR 0111 Addendum 5, §Branch-context version discipline,
-    /// "`FrameId` allocation is the one missing production mechanism": mints
-    /// and returns the [`threaded_ir::FrameId`] for the CURRENT (already
+    /// "`FrameId` allocation is the one missing production mechanism":
+    /// returns the [`threaded_ir::FrameId`] for the CURRENT (already
     /// entered) branch context — the frame every real `Bind`/`Threaded` node
     /// a branch-arm lowering constructs must use. Distinct from
     /// [`threaded_ir::FrameId::ROOT`] always: `enter_branch_context` mints
     /// starting at `1`.
+    ///
+    /// Reads `active_branch_frame` — saved/restored per branch context by
+    /// `enter_branch_context`/`BranchContextGuard` — rather than
+    /// `branch_frame_counter` directly. `branch_frame_counter` only ever
+    /// grows and is never restored (frame identities must stay globally
+    /// unique across a whole module compile), so reading it back as "the
+    /// frame I'm logically inside right now" is wrong as soon as a sibling
+    /// branch context has opened and closed since this one was entered — a
+    /// second `ifTrue:` in the same loop body reading the first, already-
+    /// closed `ifTrue:`'s frame instead of the loop's own (BT-3623).
     pub(in crate::core_erlang) fn current_branch_frame(&self) -> threaded_ir::FrameId {
-        threaded_ir::FrameId::new(self.branch_frame_counter)
+        threaded_ir::FrameId::new(self.active_branch_frame)
     }
 
     /// ADR 0118 phase 2a: the [`threaded_ir::FrameId`] a

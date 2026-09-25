@@ -197,7 +197,16 @@ call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
 call :node_sname
-set "SNAME=%RELEASE_NAME%_stop_%RANDOM%"
+rem `%RANDOM%` three times over, same reasoning as `:check_otp_window`'s
+rem `OTP_PROBE` comment above: a single 15-bit draw collides often enough
+rem under parallel test/CI invocations that two `stop`/`ping`/`rpc`
+rem client nodes have registered the same `-sname` with the shared,
+rem loopback-bound epmd, which erl.exe then refuses outright ("the name
+rem ... seems to be in use by another Erlang node"). Unix's `launcher.sh`
+rem avoids this by keying its `client_sname` off `$$` (the shell's own
+rem PID); cmd.exe has no equivalent builtin, so three independent
+rem `%RANDOM%` draws stand in for it here.
+set "SNAME=%RELEASE_NAME%_stop_%RANDOM%%RANDOM%%RANDOM%"
 rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so stop targets whichever instance was started with
 rem the same value).
@@ -213,7 +222,9 @@ call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
 call :node_sname
-set "SNAME=%RELEASE_NAME%_ping_%RANDOM%"
+rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
+rem this ephemeral client node's `-sname` collision-resistant.
+set "SNAME=%RELEASE_NAME%_ping_%RANDOM%%RANDOM%%RANDOM%"
 rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so ping targets whichever instance was started with
 rem the same value).
@@ -228,7 +239,9 @@ if errorlevel 1 exit /b 1
 call :cookie_args
 call :minimal_boot_args
 call :node_sname
-set "SNAME=%RELEASE_NAME%_rc_%RANDOM%"
+rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
+rem this ephemeral client node's `-sname` collision-resistant.
+set "SNAME=%RELEASE_NAME%_rc_%RANDOM%%RANDOM%%RANDOM%"
 rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so remote_console attaches to whichever instance was
 rem started with the same value).
@@ -272,7 +285,9 @@ call :lib_pa_args
 call :cookie_args
 call :minimal_boot_args
 call :node_sname
-set "SNAME=%RELEASE_NAME%_rpc_%RANDOM%"
+rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
+rem this ephemeral client node's `-sname` collision-resistant.
+set "SNAME=%RELEASE_NAME%_rpc_%RANDOM%%RANDOM%%RANDOM%"
 rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so rpc targets whichever instance was started with
 rem the same value).
