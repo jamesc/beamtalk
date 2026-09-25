@@ -1528,6 +1528,7 @@ shipped.
   - BT-3631 (this ADR)
   - BT-3622 (`classNamed:` dynamic symbols, commit `0d2cb5231`)
   - BT-3632 (Object-kind `new` rule; settled here as option 2, §1a)
+  - BT-3633 (follow-up: re-home the `Beamtalk` / `Workspace` method sets, e.g. runtime introspection out of `Workspace`)
 - Related ADRs:
   - [0010](0010-global-objects-and-singleton-dispatch.md) — global objects and singleton dispatch
   - [0013](0013-class-variables-class-methods-instantiation.md) — class methods (its §4 "future optimization", direct dynamic dispatch, is implemented by Phase 0b)
