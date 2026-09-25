@@ -69,25 +69,14 @@ impl MethodValidatorRegistry {
     fn register_builtins(&mut self) {
         // Allow variable (identifier) arguments for dynamic dispatch use cases
         // (BT-1168, BT-3622).
-        let reflection = Box::new(ReflectionMethodValidator {
-            allow_identifier: true,
-        });
-        self.validators.insert("respondsTo:", reflection);
-
-        let reflection = Box::new(ReflectionMethodValidator {
-            allow_identifier: true,
-        });
-        self.validators.insert("fieldAt:", reflection);
-
-        let reflection = Box::new(ReflectionMethodValidator {
-            allow_identifier: true,
-        });
-        self.validators.insert("fieldAt:put:", reflection);
-
-        let reflection = Box::new(ReflectionMethodValidator {
-            allow_identifier: true,
-        });
-        self.validators.insert("classNamed:", reflection);
+        self.validators
+            .insert("respondsTo:", Box::new(ReflectionMethodValidator));
+        self.validators
+            .insert("fieldAt:", Box::new(ReflectionMethodValidator));
+        self.validators
+            .insert("fieldAt:put:", Box::new(ReflectionMethodValidator));
+        self.validators
+            .insert("classNamed:", Box::new(ReflectionMethodValidator));
 
         // Block arity validators (1-parameter block)
         for selector in &[
@@ -153,16 +142,15 @@ impl MethodValidatorRegistry {
     }
 }
 
-/// Validates that reflection methods receive symbol literal arguments.
+/// Validates that reflection methods receive symbol arguments.
 ///
-/// Methods like `respondsTo:`, `fieldAt:`, and `classNamed:` expect
-/// symbol arguments (e.g., `#increment`). When `allow_identifier` is `true`,
-/// variable (identifier) arguments are also accepted for dynamic dispatch —
+/// Methods like `respondsTo:`, `fieldAt:`, `fieldAt:put:`, and `classNamed:`
+/// expect symbol arguments (e.g., `#increment`). A symbol literal or a bare
+/// identifier (variable) holding a symbol at runtime are both accepted —
 /// the runtime handles symbol values correctly. Reserved pseudo-literals
-/// (`true`, `false`, `nil`, `self`) are always rejected.
-struct ReflectionMethodValidator {
-    allow_identifier: bool,
-}
+/// (`true`, `false`, `nil`, `self`) are never symbol variables and are
+/// always rejected.
+struct ReflectionMethodValidator;
 
 impl MethodValidator for ReflectionMethodValidator {
     fn validate(
@@ -183,16 +171,15 @@ impl MethodValidator for ReflectionMethodValidator {
             // Symbol literal is correct usage
             Expression::Literal(Literal::Symbol(_), _) => vec![],
 
-            // Bare identifier — allowed when the validator permits dynamic use,
+            // Bare identifier (variable) — allowed for dynamic dispatch,
             // except for reserved pseudo-literals that are never symbol variables.
             Expression::Identifier(id)
-                if self.allow_identifier
-                    && !matches!(id.name.as_str(), "true" | "false" | "nil" | "self") =>
+                if !matches!(id.name.as_str(), "true" | "false" | "nil" | "self") =>
             {
                 vec![]
             }
 
-            // Bare identifier - most common mistake (strict mode only)
+            // Reserved pseudo-literal identifier, or another mistaken use
             Expression::Identifier(id) => {
                 let message = format!(
                     "{selector_name} expects a symbol literal, not an identifier\n\
@@ -694,9 +681,7 @@ mod tests {
 
     #[test]
     fn test_symbol_literal_is_valid() {
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let args = vec![Expression::Literal(
             Literal::Symbol("increment".into()),
             test_span(),
@@ -709,9 +694,7 @@ mod tests {
     #[test]
     fn test_identifier_allowed_for_responds_to() {
         // respondsTo: allows identifier args (dynamic dispatch use case)
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let args = vec![Expression::Identifier(Identifier::new(
             "sel",
             Span::new(15, 18),
@@ -721,31 +704,9 @@ mod tests {
     }
 
     #[test]
-    fn test_identifier_rejected_in_strict_mode() {
-        // allow_identifier: false rejects identifier args (no selector is
-        // currently registered strict, but the validator still supports it)
-        let validator = ReflectionMethodValidator {
-            allow_identifier: false,
-        };
-        let args = vec![Expression::Identifier(Identifier::new(
-            "increment",
-            Span::new(15, 24),
-        ))];
-
-        let diagnostics = validator.validate(&class_named_selector(), &args, None, test_span());
-        assert_eq!(diagnostics.len(), 1);
-        assert!(diagnostics[0].message.contains("expects a symbol literal"));
-        assert_eq!(diagnostics[0].span, Span::new(15, 24));
-        let hint = diagnostics[0].hint.as_ref().unwrap();
-        assert!(hint.contains("#increment"));
-    }
-
-    #[test]
     fn test_identifier_allowed_for_class_named() {
         // BT-3622: classNamed: allows identifier args (dynamic dispatch use case)
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let args = vec![Expression::Identifier(Identifier::new(
             "aVariable",
             Span::new(15, 24),
@@ -757,10 +718,7 @@ mod tests {
 
     #[test]
     fn test_class_reference_produces_error() {
-        // ClassReference args are always rejected, regardless of allow_identifier
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let args = vec![Expression::ClassReference {
             name: Identifier::new("Counter", Span::new(12, 19)),
             span: Span::new(12, 19),
@@ -780,9 +738,7 @@ mod tests {
 
     #[test]
     fn test_integer_literal_produces_error() {
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
 
         let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
@@ -792,9 +748,7 @@ mod tests {
 
     #[test]
     fn test_empty_arguments_no_error() {
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let diagnostics = validator.validate(&responds_to_selector(), &[], None, test_span());
         assert!(diagnostics.is_empty());
     }
@@ -825,19 +779,14 @@ mod tests {
 
     #[test]
     fn test_hint_contains_fix_suggestion() {
-        // Strict mode: identifier should produce a hint
-        let validator = ReflectionMethodValidator {
-            allow_identifier: false,
-        };
-        let args = vec![Expression::Identifier(Identifier::new(
-            "increment",
-            test_span(),
-        ))];
+        // Reserved pseudo-literal identifier should still produce a hint
+        let validator = ReflectionMethodValidator;
+        let args = vec![Expression::Identifier(Identifier::new("nil", test_span()))];
 
         let diagnostics = validator.validate(&class_named_selector(), &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         let hint = diagnostics[0].hint.as_ref().unwrap();
-        assert!(hint.contains("#increment"));
+        assert!(hint.contains("#nil"));
     }
 
     #[test]
@@ -874,9 +823,7 @@ mod tests {
 
     #[test]
     fn test_inst_var_at_put_symbol_is_valid() {
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let selector = MessageSelector::Keyword(vec![
             KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
@@ -892,9 +839,7 @@ mod tests {
     #[test]
     fn test_inst_var_at_put_identifier_allowed() {
         // fieldAt:put: now allows identifier (variable) arguments
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let selector = MessageSelector::Keyword(vec![
             KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
@@ -910,9 +855,7 @@ mod tests {
     #[test]
     fn test_field_at_identifier_allowed() {
         // fieldAt: now allows identifier (variable) arguments
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         let selector = MessageSelector::Keyword(vec![KeywordPart::new("fieldAt:", test_span())]);
         let args = vec![Expression::Identifier(Identifier::new(
             "name",
@@ -923,11 +866,9 @@ mod tests {
     }
 
     #[test]
-    fn test_reserved_pseudo_literals_rejected_even_in_permissive_mode() {
+    fn test_reserved_pseudo_literals_rejected() {
         // true, false, nil, self are never symbol variables — still reject them
-        let validator = ReflectionMethodValidator {
-            allow_identifier: true,
-        };
+        let validator = ReflectionMethodValidator;
         for name in &["true", "false", "nil", "self"] {
             let args = vec![Expression::Identifier(Identifier::new(*name, test_span()))];
             let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());

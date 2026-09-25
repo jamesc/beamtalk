@@ -56,6 +56,8 @@ intClass name
 
 // A variable holding a symbol works with classNamed: via the Beamtalk binding
 counterSymbol := #Counter
+// => Counter
+
 Beamtalk classNamed: counterSymbol
 // => Counter
 
