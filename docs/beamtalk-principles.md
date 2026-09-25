@@ -86,7 +86,7 @@ others.
   behaviour, BEAM wins, and the Smalltalk *name* is kept where possible.
 
 See [ADR 0129](ADR/0129-class-side-system-facades.md) for how this applies
-to `Beamtalk`, `Workspace`, `Transcript` and `SystemNavigation`.
+to `Beamtalk`, `Workspace`, `Transcript` and the stdlib's singleton patterns.
 
 ---
 

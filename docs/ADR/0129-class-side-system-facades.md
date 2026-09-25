@@ -9,6 +9,8 @@ Workspace-globals binding layer), ADR 0081 (the "no class-side mirror"
 rationale) and ADR 0125 (how `Beamtalk releaseInfo` resolves on a release
 node). See [§ Amended ADRs](#amended-adrs).
 
+Also settles BT-3632 (Object-kind `new` rule) — see §1a.
+
 ## Context
 
 ### Problem statement
@@ -176,7 +178,7 @@ Beamtalk has two things called "globals", and neither plays that role:
 - **`Beamtalk globals`** is a read-only `Dictionary` snapshot of the class
   registry (`handle_globals/0` in `beamtalk_interface.erl`). Nothing resolves
   names through it. It duplicates `classNamed:`/`allClasses` and
-  `SystemNavigation allClasses`, which offers much richer queries
+  `SystemNavigation default allClasses`, which offers much richer queries
   (`actorClasses`, `usersOf:`, `extendersOf:`, …). Outside its own tests and
   docs it has no callers.
 - **`Workspace globals`** is a live `BindingsView` (ADR 0081) over the
@@ -197,14 +199,18 @@ ADR 0081 has already set the precedent for fixing this. It gave `Session`
 
 ### Constraints
 
-1. **Class-side sends to a stateful class cost a process hop.** A
-   class-side method on a class that holds class variables runs in that
-   class's gen_server (see *Passing Blocks Through Class Methods* in the
+1. **Class-side sends cost a process hop unless the direct-call path
+   applies.** A class-side method normally runs in its class's gen_server (see *Passing Blocks Through Class Methods* in the
    language guide). That means process-local side effects are lost, and a
    re-entrant send to the same class raises `dispatch_error`. The codegen
    compiles a class-side send to a **direct function call** only when the
    class is **sealed and has no class variables**
-   (`compute_direct_call_eligible`, `driver.rs`).
+   (`compute_direct_call_eligible`, `driver.rs`), and the method itself is
+   `class sealed`.
+   **This optimisation is applied only to modules today.** It is computed in
+   `generate_module_with_warnings` (`driver.rs`). The REPL expression
+   generator (`crates/beamtalk-repl/src/codegen.rs`) never computes it.
+
 2. **Dependencies flow downward only.** `beamtalk_stdlib` depends on
    `beamtalk_runtime`, not on `beamtalk_workspace`. Under `beamtalk test`,
    the workspace application's modules are on the code path but the
@@ -268,7 +274,7 @@ Today the stdlib reaches a system service in three different ways:
 | Pattern | Classes | Behaviour |
 |---|---|---|
 | `class current` reads a class variable set at bootstrap; typed `\| Nil` | `BeamtalkInterface`, `WorkspaceInterface`, `TranscriptStream` | `nil` outside a workspace. This is the bug. |
-| `class default => self new` | `SystemNavigation` | Stateless and works everywhere. It is also the only stdlib code that instantiates an Object-kind class (BT-3632). |
+| `class default => self new` on an `Object subclass:` | `SystemNavigation` | Stateless today, but scoped constructors are planned (BT-2201). It is the only stdlib code that instantiates an Object-kind class (BT-3632). |
 | `class default` / `of:` / `on:`, building a scoped value or handle | `ProcessNavigation`, `AnnouncementNavigation` | Instances carry a snapshot or an announcer. `default` chooses one scope among several. |
 | `class current` asks the runtime at call time | `SystemAnnouncer`, `Session`, `Supervisor` | Returns the live entity, or `nil` when there legitimately is none. |
 
@@ -278,12 +284,13 @@ one of these three shapes:
 1. **Class-side facade.** A service that is stateless and has a single
    scope is a `sealed` class with class-side methods only. It has no
    `classState:` and is never instantiated.
-   - Examples: `Beamtalk`, `Workspace`, `Transcript`, `SystemNavigation`,
-     `System`, `File`, `Console`, `Logger`.
+   - Examples: `Beamtalk`, `Workspace`, `Transcript`, `System`, `File`,
+     `Console`, `Logger`.
 2. **`default` and named factories.** Used only when *instances carry state
    or scope*, so that `default` picks one scope among several.
    - Examples: `ProcessNavigation default` / `system` / `from:` / `on:`,
-     and `AnnouncementNavigation default` / `of:`.
+     `AnnouncementNavigation default` / `of:`, and `SystemNavigation
+     default` (plus the planned `over:` / `forClasses:`).
 3. **`current`.** Used only for a genuinely live runtime entity, **found by
    asking the runtime at call time**. It returns `| Nil` only when there
    legitimately is no such entity, for example `Session current` outside
@@ -297,61 +304,103 @@ the value-singleton retry loop (`rebootstrap_value`, 200 ms × 5) exists. And
 it forces `@expect type` workarounds on `class current` / `resetCurrent`,
 because `hasField:`/`clearField:` infer as `Dynamic`.
 
-### 1a. `SystemNavigation` moves class-side; BT-3632 is settled
+### 1a. `SystemNavigation` is rule 2 and becomes a `Value`; BT-3632 is settled
 
-- **`SystemNavigation` is rule 1.** It is stateless, and a node has exactly
-  one class registry, so `default` has nothing to choose between. In
-  Pharo, `default` picks the default *environment*. Beamtalk has no
-  environments to pick from. So `default` is image plumbing, not
-  vocabulary.
-- **The selectors carry over unchanged.** `SystemNavigation implementorsOf:
-  #foo`, `SystemNavigation sendersOf: #bar`, `SystemNavigation
-  actorClasses`, and so on. `default` is removed.
-- **A DNU on `default` points to the new form.** The DNU hint for
-  `SystemNavigation default` names the class-side form, the same way the
-  DNU hints for the removed `*Interface` names do (§6).
-- **If package-scoped navigation ever arrives** (ADR 0070 namespaces), it
-  becomes a rule-2 value class carrying a scope. It would have its own
-  `default` and `forPackage:` factories, as `ProcessNavigation` does.
+`SystemNavigation` stays **instance-side, with `default`**. It is not a rule-1
+facade, for two reasons its own header records
+(`stdlib/src/system_navigation.bt`):
+
+- **Scopes are planned.** BT-2201 plans scoped constructors,
+  `SystemNavigation over: aPackage` and `SystemNavigation forClasses: aList`,
+  which reuse the same query protocol. `default` is therefore a real
+  rule-2 scope factory: "the whole registry", as opposed to a package or
+  a class list. That matches Pharo, where `default` picks an environment.
+- **Class-side iteration would self-deadlock.** "Routing the iteration
+  through a class gen_server would self-deadlock when the walk reaches
+  `SystemNavigation` itself." Instance methods run as plain Erlang in the
+  caller's process.
+
+Today, though, it gets its instance by `self new` on a `sealed Object
+subclass:`. That is the only stdlib code that instantiates an Object-kind
+class, and it is the inconsistency BT-3632 reports. The fix is to make
+`SystemNavigation` what rule 2 says it is: a **`sealed typed Value
+subclass:`**.
+
+- **For now it has one field**, its scope, which is `#all` for `default`.
+  BT-2201's constructors fill that field in later.
+- **`default` becomes an ordinary `Value` construction.** It stays
+  `SystemNavigation default`, and every call site is unchanged.
 
 This settles **BT-3632** as its option 2:
 
 - **Object-kind classes are never instantiable.** With `SystemNavigation`
-  class-side, no stdlib code instantiates an Object-kind class.
+  a `Value`, no stdlib code instantiates an Object-kind class.
 - **The validator stops depending on how the receiver is spelled.**
-  `check_actor_new_usage` / `object_kind_new_error` in
-  `class_validators.rs` also rejects `self new` / `super new` inside a
-  class method of an Object-kind class, not just `Foo new`.
+  `check_actor_new_usage` / `object_kind_new_error` in `class_validators.rs`
+  also rejects `self new` / `super new` inside a class method of an
+  Object-kind class, not just `Foo new`.
 - **The hint stays accurate.** It keeps "Object subclasses are not
   instantiable", and adds: "for a stateless service, use class-side
-  methods; for data, use `Value subclass:`".
-- **Rule-2 classes are unaffected.** `AnnouncementNavigation` creates its
-  handles through FFI (`navigationFor:`), not `new`, and `ProcessNavigation`
-  is a `Value`.
+  methods; for a scoped query or data, use `Value subclass:`".
+- **The other rule-2 classes already conform.** `AnnouncementNavigation`
+  creates its handles through FFI (`navigationFor:`), not `new`, and
+  `ProcessNavigation` is already a `Value`.
 
 ### 1b. Rules every facade follows
 
 - **Sealed, stateless, class-side only.** A facade is declared
-  `sealed typed Object subclass: …`, with no `classState:` and no
-  instance-side API. That makes every static send to it eligible for the
-  direct-call path (Constraint 1). `Beamtalk classNamed: x` therefore
-  compiles to a plain function call in the caller's process: there is no
-  class gen_server hop and no re-entrancy hazard.
+  `sealed typed Object subclass: …`, with no `classState:`, no
+  instance-side API and every method `class sealed`. Those are the gates
+  for the direct-call path (`compute_direct_call_eligible`, Constraint 1).
+  In batch-compiled code, `Beamtalk classNamed: x` already compiles to a
+  plain function call in the caller's process: there is no class
+  gen_server hop, no 60 s / 5 min `class_send` timeout, and no
+  re-entrancy hazard.
+- **REPL expressions must use the direct-call path too. This is a
+  prerequisite.** Today `crates/beamtalk-repl/src/codegen.rs` builds a
+  bare `CoreErlangGenerator` and never computes `direct_call_eligible`.
+  Once the binding-aware send is removed, REPL sends to a facade would
+  otherwise go through the facade's class gen_server. That would cause
+  three problems:
+  - **Serialisation.** Every REPL session, MCP tool and the
+    `beamtalk workspace transcript` poller would queue on one class
+    process.
+  - **Timeouts.** A long `Workspace load:`/`sync`/`test` would hit the
+    `class_send` timeout.
+  - **Re-entrancy.** A test run by `Workspace test` that sends to
+    `Workspace` would raise `dispatch_error`.
+
+  Phase 0 computes `direct_call_eligible` for REPL expression codegen from
+  the class hierarchy. Phase 4 must not remove the binding-aware path until
+  that has shipped.
+- **Dynamic sends still take the class process.** Examples are
+  `x := Workspace. x test` or `perform:`. They work, but they are
+  subject to the hazards above, as with any class. This is the documented
+  behaviour of class-side methods (*Passing Blocks Through Class
+  Methods*), not something this ADR introduces.
 - **No `new` and no `current`.** The class *is* the object. It is still
   first-class: `Beamtalk class`, `Workspace respondsTo: #load:`, and
-  `x := Beamtalk. x version` all work, and the last goes through ordinary
-  dynamic class dispatch.
+  `x := Beamtalk. x version` all work.
 - **State lives in Erlang, not in class variables.** That means the
   runtime class registry, the logger configuration, the workspace
   supervisor tree and the registered `'Transcript'` process.
 - **Typed signatures.** The type checker sees real metaclass methods.
   `Beamtalk classNamed:` is `Class | Nil`, as the method itself declares.
   There is no longer a `| Nil` from `current` to guard against.
-- **Backing modules use the same pattern as `System`/`File`/`Console`.**
-  Where the backing Erlang lives in a `beamtalk_stdlib`/`beamtalk_runtime`
-  module, the facade is `native:` and uses `self delegate`. The
-  "receiver-ignoring instance FFI" comment in `beamtalk_interface.bt`
-  disappears along with the thing it apologises for.
+- **Backing FFI: `native:` for the primary module, inline for the rest.**
+  - `Workspace` and `Transcript` are `native:` over their primary backing
+    module and use `self delegate`.
+  - `Beamtalk` is backed by three modules: `beamtalk_interface`,
+    `beamtalk_logging_config` and `beamtalk_release`. It is `native:
+    beamtalk_interface` for the reflection selectors. The logging and
+    release selectors keep inline `(Erlang …)` FFI, as `Logger`-adjacent
+    code does today.
+  - `beamtalk_interface.erl` also backs `SystemNavigation`
+    (`findSendersIn/2`, `allSendsIn/1`, …). Renaming its exports for the
+    delegate convention is therefore limited to the functions `Beamtalk`
+    uses.
+  - The "receiver-ignoring instance FFI" comment in `beamtalk_interface.bt`
+    goes away along with the thing it apologises for.
 
 ### 2. `Beamtalk`: system reflection, everywhere
 
@@ -375,7 +424,7 @@ None of these needs a workspace. The class registry and logger belong to
 - **What replaces it:**
   - `Beamtalk classNamed:` for lookup by name;
   - `Beamtalk allClasses` for enumeration;
-  - `SystemNavigation` for anything richer.
+  - `SystemNavigation default` for anything richer.
 - **Why remove it:**
   - The name leads Smalltalkers to read it as the global scope, which it
     is not.
@@ -408,6 +457,7 @@ Beamtalk version                   // => "0.x.y"
 becomes a `class sealed` method with the same selector and type:
 
 - `load:`, `newClass:at:`, `moveClass:to:`;
+- `isAvailable` (new; never raises, §3);
 - `classes`, `testClasses`, `bindings` (renamed from `globals`, see §5);
 - `currentSession`, `sessions`;
 - `actors`, `actorAt:`, `actorsOf:`, `processes`, `nodes`;
@@ -439,12 +489,21 @@ raises a DNU on `nil`:
 }
 ```
 
-A BUnit test can assert on it like any other structured error:
+**`Workspace isAvailable -> Boolean`** is the one `Workspace` selector that
+never raises. It lets code and tests branch on the context explicitly, and it
+makes the context-bound nature of `Workspace` discoverable. A test class can be
+run by `beamtalk test` (no workspace) *and* by `Workspace test`, REPL `:test`
+or MCP `run_tests` (inside a workspace). A test for the refusal must therefore
+state its context rather than assume it:
 
 ```beamtalk
-testWorkspaceUnavailableUnderBUnit =>
+testWorkspaceRefusesWithoutWorkspace =>
+  Workspace isAvailable ifTrue: [^self skip: "runs only outside a workspace"]
   self should: [Workspace classes] raise: #no_workspace
 ```
+
+The refusal logic itself is unit-tested in EUnit against explicit capability
+records, with no dependency on how the test node was booted.
 
 **One check for availability.** The check is a new function in
 `beamtalk_capability`, the runtime leaf that already owns the ADR 0125 §1.5
@@ -473,6 +532,35 @@ table. For example `require_workspace(Selector)`, which answers `ok` or the
   `beamtalk_capability:check/*` after `require_workspace` passes. So a
   `Workspace load:` on a release node still says
   `release_mode_no_compiler`, never `no_workspace`.
+- **Compiler availability is recorded in every mode, not only `release`.**
+  - Today, `permitted/2` lets every non-release mode through
+    (`Mode =/= release -> true`).
+  - A packaged escript runs in `run` mode with `start_compiler => false`.
+    There, `Workspace load:` passes both checks and then crashes on the
+    missing compiler server.
+  - `beamtalk_workspace_sup` will therefore record `include_compiler` in
+    `run` mode too, set from `start_compiler`, and `permitted(compiler, …)`
+    will consult it in every mode.
+  - The refusal names the mode: `run_mode_no_compiler`, alongside
+    `release_mode_no_compiler`.
+- **Capabilities are cleared when the workspace stops.** They live in a
+  `persistent_term`, and `clear/0` has no non-test callers today. So
+  "recorded" could outlive the supervisor. `beamtalk_workspace_sup`
+  clears them on shutdown.
+- **`run` mode is a workspace, so `Workspace` answers there.** Every
+  selector behaves exactly as ADR 0125 §1.5 already specifies for that
+  mode.
+  - Selectors that are meaningful without a REPL answer normally:
+    `actors`, `classes`, `supervisors`, `processes`, `nodes`, `load:`
+    when a compiler is present, and so on.
+  - Session-oriented selectors answer truthfully and empty: `sessions`
+    returns `#()`, `currentSession` returns `nil`, and `bindings` is empty.
+  - This ADR adds no per-selector `run`-mode rules beyond the compiler
+    check.
+- **One guard site.** The guard is not repeated in each of about 40 `.bt`
+  methods. It runs once, at the class-side delegate entry of the backing
+  module (`beamtalk_workspace_interface_primitives`), before any capability
+  check.
 
 ### 4. `Transcript`: the REPL's shared log, and a day-0 convenience
 
@@ -505,15 +593,42 @@ is there anyone to subscribe, whether the REPL, the WebSocket push or
 registered `'Transcript'` `TranscriptStream` process **only** when it starts
 the REPL server. It no longer starts it in `run` mode, where the process
 buffered output that nobody could read. The facade routes on
-`whereis('Transcript')`. That is one check, and it is correct by
-construction.
+`whereis('Transcript')`. That is one cheap check, but not a perfect one:
+- **A user actor can hijack the name.** One registered as `#Transcript`
+  would receive the output. The facade therefore checks that the
+  registered process is the workspace's `TranscriptStream`, not merely
+  that the name exists.
+- **Output falls back to Logger during a supervisor restart.** For that
+  brief window the stream is not registered. This is acceptable for a
+  convenience API.
 
-Choosing Logger's `notice` level is deliberate. It is OTP's default primary
-level, so `Transcript show:` output is visible by default under `beamtalk run`
-and in releases. Anyone who wants to capture, silence or redirect it uses the
-same `Logger` handler and filter configuration as any other log output. The
-`[beamtalk, user, transcript]` domain lets them filter it specifically, with
-no Transcript-specific machinery.
+**The Logger route is shaped for the day-0 use case.**
+
+- **Level.** Choosing `notice` is deliberate: it is OTP's default primary
+  level, so the output is visible by default under `beamtalk run`, in
+  tests and in releases.
+- **Plain format.** OTP's default handler would print a
+  `=NOTICE REPORT==== <timestamp> ===` header per call, which is hostile to a
+  newcomer's `Transcript showCr: "hi"`. So the runtime installs a small
+  dedicated handler, `beamtalk_transcript_log`:
+  - it is a `logger_std_h` writing to `standard_io`, with template
+    `[msg, "\n"]`;
+  - it accepts only the `[beamtalk, user, transcript]` domain;
+  - the default handler gets a domain filter that stops those events;
+  - the result is plain text, one line per event.
+- **Capture and redirection stay pure Logger.** Anyone who wants to
+  capture, silence or redirect the output reconfigures or removes that
+  handler, using the same Logger configuration as any other output. No
+  Transcript-specific machinery is added.
+- **No lost output at exit.** `logger_std_h` writes asynchronously, and
+  `beamtalk_script_harness` halts the node as soon as `main` returns. The
+  harness and the `Program exit:` / `System halt:` paths flush the
+  transcript handler before `erlang:halt/1`, so the last lines are not
+  lost.
+- **Ordering relative to `Console`.** It is not guaranteed: `Console`
+  writes synchronously, and the handler writes asynchronously. Programs
+  that care about ordering use one output API, which should be `Console`
+  or `Logger`, per the guidance above.
 
 ```beamtalk
 // REPL (interactive workspace)
@@ -523,7 +638,7 @@ Transcript recent                             // => #("Hello", "World")
 
 ```beamtalk
 // compiled code under `beamtalk run`: no REPL server
-Transcript showCr: "starting"    // logged at notice: "starting"
+Transcript showCr: "starting"    // prints "starting" (a notice event on [beamtalk, user, transcript])
 Transcript recent                // raises #beamtalk_error{kind: no_workspace}
 ```
 
@@ -885,12 +1000,47 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
   names but aren't" as a learnability trap.
 - It leaves two names per concept with no user for the long one.
 
+### G. `Beamtalk` facade only; `Workspace` stays REPL-scoped
+Ship Phase 1 alone. That is enough to fix BT-3622 and exdura. `Workspace` then
+remains a REPL-only name, like Elixir's `IEx.Helpers`, which the Prior Art
+section cites approvingly. Using it in compiled code becomes a compile-time
+error, "Workspace is REPL-only", instead of a runtime `no_workspace`.
+
+- 🏭 **Operator**: "It's the smallest change that fixes the actual bug. It
+  doesn't take `Workspace` away as a user class name. And it avoids every
+  question about what `Workspace` means in `run` mode or on an escript
+  without a compiler."
+- 🎨 **Language designer**: "A compile-time error is strictly better than a
+  runtime one, and `IEx.Helpers` shows the split works in practice."
+
+Rejected, but this is the strongest alternative:
+
+- **It keeps an injected name.** The compiler would still need to know
+  which names are REPL-only, so the `known_vars` machinery survives. REPL
+  code and compiled code would still resolve `Workspace` differently. That
+  is the principle this ADR sets out to establish (§ Guiding principle).
+- **Its compile-time error is wrong for legitimate uses.** `Workspace` *is*
+  meaningful in compiled code running in `run` mode, in a release console,
+  or in a `beamtalk run` build script (ADR 0040's `BuildScript` example).
+  "REPL-only" rejects code that would work.
+- **The name reservation is the real cost, and it is accepted** (see
+  Negative consequences).
+
+Phase 1 is deliberately independent. If the rest of this ADR stalls, G is
+where it lands.
+
 ### Transcript sub-alternatives
 - **Start the transcript process in every mode, including `beamtalk test`.**
   This makes output a buffer nobody reads, and needs a new supervisor
   placement in the runtime. Rejected.
 - **Fall back to stdout.** This duplicates `Console`, prints into test
   output, and can't be silenced by configuration. Rejected.
+- **H: keep `Transcript` a REPL-only binding, and back `Object>>show:` with
+  `Console`.** This keeps the newcomer experience in the REPL, with
+  synchronous and ordered output elsewhere. Rejected: it keeps an injected
+  name (see G), and `Object>>show:` would write stdout directly with no way
+  to silence it in tests. The dedicated plain-format Logger handler (§4)
+  gives the same visible, unadorned output while remaining configurable.
 - **Raise `no_workspace` from `show:`.** This is correct but hostile to the
   day-0 use `Transcript` exists for. Rejected for `show:`/`cr`/`showCr:`,
   and kept for the workspace-only `recent`/`clear`.
@@ -932,8 +1082,10 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
 - **Dynamic sends to `Workspace` still hop into its class process.** A
   send through a variable, such as `ws := Workspace. ws test`, uses the
   class gen_server, as it does for any class. A block passed into such a
-  send that messages `Workspace` again raises `dispatch_error`. Static
-  sends, which are what anyone writes, avoid this.
+  send that messages `Workspace` again raises `dispatch_error`, and a long
+  `test`/`load:` is subject to the `class_send` timeout. Static sends avoid
+  this, but only once Phase 0 gives REPL expressions the direct-call path.
+  Before that, REPL sends go through the class process too.
 - **The Logger fallback is not line-exact.** `show: "a"; show: "b"; cr`
   logs two events, "a" and "b", rather than one line "ab".
 - **It is a breaking rename.** Every in-repo use of the old class names and
@@ -948,6 +1100,25 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
   the test run's stdout, where they used to go nowhere. The Phase 5 sweep
   removes the Transcript use in tests and examples. Anything that remains
   can be filtered on the `[beamtalk, user, transcript]` domain.
+- **User code can no longer use three class names.** `Beamtalk`,
+  `Workspace` and `Transcript` become protected stdlib class names:
+  - loading a user class with one of those names fails
+    (`check_stdlib_name_shadowing`);
+  - under ADR 0070 §3, a dependency that exports one is a compile error.
+
+  `Workspace` in particular is a common domain noun. Nothing in this repo
+  defines such a class, but beamtalk-exdura must be checked before Phase 1
+  ships.
+- **Transcript capture depends on context.** Inside a workspace the output
+  goes to the `TranscriptStream`; outside it goes to Logger. So "capture it
+  with a Logger handler" works only in the second case. This is acceptable
+  only because `Transcript` is not an API programs or tests should rely on
+  (§4).
+- **On a distributed peer (ADR 0126), `Transcript` is local to the node
+  that runs the code.** Code running on a peer node without a REPL server
+  logs to *that* node's Logger, not to the REPL attached elsewhere. The
+  ADR 0126 examples that call `Transcript showLine:` are fixed in the
+  Phase 5 sweep.
 - **`Workspace globals` → `Workspace bindings` is a high-churn rename.**
   The selector appears in 22 files: about 65 lines in docs and 22 in the
   REPL e2e cases.
@@ -955,6 +1126,9 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
 ### Neutral
 - `TranscriptStream` remains, as an implementation class for the REPL's
   stream.
+- In a mixed-version cluster (ADR 0125/0126), the removed classes
+  (`BeamtalkInterface`, `WorkspaceInterface`) and the new ones appear as
+  ordinary shape-manifest skew until every node is upgraded.
 - `Logger` and `Console` are unchanged. The docs now point to them
   explicitly as the output APIs, with `Transcript` described as a REPL and
   beginner convenience. `Transcript` may be deprecated later; that is not
@@ -970,9 +1144,28 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
 
 ## Implementation
 
-The rename and the injection removal must land together, because the old
-names disappear. The phases below are therefore stages within one epic. The
-branch is green after each phase except where noted.
+The phases are stages within one epic, and main stays green after each one.
+
+**Each facade phase (1–3) removes its own name from the singleton config in
+the same change.** It deletes the `Beamtalk`, `Workspace` or `Transcript`
+entry from `value_singletons/0` or `singletons/0`, and from the hard-coded
+lists (`handle_session_bindings`, `is_protected_name`, `known_vars`). The
+REPL resolver checks singletons *before* the class registry, so a leftover
+entry would shadow the new class with a stale instance.
+
+Phase 4 then deletes the machinery, which by then is empty.
+
+Phase 1 depends only on Phase 0, so it can ship alone. That makes it the
+landing point if the rest stalls (Alternative G). Phases 4b and 5 are
+independent of the facade phases.
+
+**Phase 0: direct calls from REPL expressions** (codegen, S; prerequisite and wire-check)
+- Compute `direct_call_eligible` in `crates/beamtalk-repl/src/codegen.rs`
+  from the class hierarchy, as `driver.rs` does for modules.
+- Add a codegen test: a REPL expression `System osPlatform`, a sealed
+  class-side send to an existing facade, emits a direct call.
+- This proves the core assumption of §1b before any facade exists, and it
+  gates Phase 4.
 
 **Phase 1: `Beamtalk` facade** (stdlib, S–M)
 - Rename `stdlib/src/beamtalk_interface.bt` to `beamtalk.bt`. The class
@@ -999,6 +1192,11 @@ branch is green after each phase except where noted.
 - Rename `globals` to `bindings`, and the Erlang
   `beamtalk_session_primitives:globalsView` primitive to match. Update the
   `Session` doc comments.
+- Add `Workspace isAvailable`.
+- Put the single guard at the backing module's delegate entry (§3).
+- Record `include_compiler` in `run` mode, make `permitted(compiler, …)`
+  mode-independent, add `run_mode_no_compiler`, and clear the capabilities
+  on `beamtalk_workspace_sup` shutdown.
 - Replace the `error:undef` workspace guards in
   `beamtalk_behaviour_intrinsics` with `require_workspace/1`. The guards
   cover `classReload`, `do_compile_source`, `precheck`,
@@ -1013,6 +1211,10 @@ branch is green after each phase except where noted.
   in the `[beamtalk, user, transcript]` domain.
 - Strip `current`, `current:` and `resetCurrent` from `TranscriptStream`.
 - Repoint `Object>>show:`/`showCr:` at `Transcript`.
+- Install the `beamtalk_transcript_log` handler (plain `[msg, "\n"]`,
+  domain-filtered), and add the stop-filter on the default handler.
+- Flush it in `beamtalk_script_harness` and in `Program exit:` /
+  `System halt:` before `erlang:halt/1`.
 - In `beamtalk_workspace_sup`, start the `'Transcript'` process only
   alongside the REPL server, and update the ADR 0125 mode table.
 - Tests:
@@ -1062,10 +1264,10 @@ branch is green after each phase except where noted.
   `beamtalk_repl_compiler_tests`, `beamtalk_workspace_sup_tests`, the
   primitives load tests and the structural-validator tests.
 
-**Phase 4b: `SystemNavigation` class-side + BT-3632** (S–M, independent of Phases 1–4)
-- Make every `SystemNavigation` query `class sealed`, and delete `default`.
-- Repoint about 216 `SystemNavigation default` references, most of them in
-  `stdlib/test`.
+**Phase 4b: `SystemNavigation` becomes a `Value` + BT-3632** (S, independent of Phases 0–4)
+- Change `SystemNavigation` to `sealed typed Value subclass:` with a scope
+  field (`#all`). `default` constructs the value. The query methods and
+  every call site are unchanged.
 - In `class_validators.rs`, make the Object-kind `new` check independent of
   the receiver: `self new` / `super new` in a class method of an
   Object-kind class is rejected. Fix the hint text.
@@ -1125,9 +1327,8 @@ There are no shims. Everything moves in one change:
 | `(Erlang beamtalk_interface) findClass: n` (exdura) | `Beamtalk classNamed: n` |
 | Test setUp swapping `TranscriptStream current:` | Assert on return values, or configure a Logger handler on domain `[beamtalk, user, transcript]` |
 | `Transcript showLine: x` (docs only; never existed) | `Transcript showCr: x` |
-| `Beamtalk globals` | `Beamtalk classNamed:` / `Beamtalk allClasses` / `SystemNavigation …` |
+| `Beamtalk globals` | `Beamtalk classNamed:` / `Beamtalk allClasses` / `SystemNavigation default …` |
 | `Workspace globals` | `Workspace bindings` |
-| `SystemNavigation default implementorsOf: #x` | `SystemNavigation implementorsOf: #x` |
 | `self new` in a class method of an `Object subclass:` | A class-side API (rule 1), or `Value subclass:` for data |
 
 REPL users type exactly what they typed before.
