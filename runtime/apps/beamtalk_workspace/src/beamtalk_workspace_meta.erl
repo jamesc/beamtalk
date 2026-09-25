@@ -26,6 +26,14 @@ and can be queried by other components (e.g., idle monitor).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
 -export([set_class_source/2, get_class_source/1, all_class_sources/0, remove_class_source/1]).
+%% ADR 0127 §10a / BT-3593: protocol source tracking, mirroring the class
+%% source API above — see set_protocol_source/2's own doc for why this
+%% exists (cross-file `uses:` flattening for both an ordinary `:load` and
+%% the protocol-reload fan-out). Deliberately NOT persisted to
+%% `metadata.json` like `class_sources` is — see that function's doc.
+-export([
+    set_protocol_source/2, get_protocol_source/1, all_protocol_sources/0, remove_protocol_source/1
+]).
 %% File mtime tracking for incremental load-project.
 -export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
 -export([get_package_name/0]).
@@ -73,6 +81,10 @@ and can be queried by other components (e.g., idle monitor).
     supervised_actors :: [pid()],
     loaded_modules :: #{atom() => string() | undefined},
     class_sources :: #{binary() => string()},
+    %% ADR 0127 §10a / BT-3593: protocol source tracking — see
+    %% set_protocol_source/2's doc. Deliberately not persisted (see that
+    %% same doc), unlike class_sources.
+    protocol_sources :: #{binary() => string()},
     %% Map from absolute file path (string) to mtime (erlang:universaltime()).
     %% Used by incremental load-project to detect changed files.
     file_mtimes :: #{string() => calendar:datetime()},
@@ -304,6 +316,79 @@ all_class_sources() ->
     end.
 
 -doc """
+Store source text for a protocol (ADR 0127 §10a / BT-3593), keyed by
+protocol name — the same shape `set_class_source/2` uses for classes.
+
+Recorded on every successful load or reload of a protocol file
+(`beamtalk_repl_loader:load_protocol_module/3`,
+`load_protocol_module_stateless/2`) so `all_protocol_sources/0` can hand a
+full, ambient `protocol_sources` map (ADR 0127 §10a's `external_protocols`
+wire carrier) to `beamtalk_compiler:compile/2` for both an ordinary `:load`
+of a class in a DIFFERENT file from the protocol it `uses:`, and each fan-out
+user's own recompile during a protocol reload — neither can otherwise see a
+cross-file protocol's full AST (the ambient `protocol_registry` cache is
+signature-only: selector + arity, no method bodies, useless for flattening).
+
+Unlike `class_sources`, this is NOT persisted into `metadata.json` — a
+protocol source is needed only within the CURRENT session's own compiler
+calls (rebuilt from the live, already-registered protocol every time a
+class using it gets compiled), never read back after a workspace restart the
+way a class's tracked source is (for `Workspace recheckImage`, `>>` method
+patching, etc.). Adding persistence here is a reasonable follow-up if a
+cross-session need for it emerges, not a gap this feature depends on today.
+""".
+-spec set_protocol_source(binary(), string()) -> ok.
+set_protocol_source(ProtocolName, Source) when is_binary(ProtocolName) ->
+    try
+        gen_server:call(?MODULE, {set_protocol_source, ProtocolName, Source})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
+-doc "Get stored source text for a protocol. Returns undefined if not found or server not started.".
+-spec get_protocol_source(binary()) -> string() | undefined.
+get_protocol_source(ProtocolName) when is_binary(ProtocolName) ->
+    try
+        gen_server:call(?MODULE, {get_protocol_source, ProtocolName})
+    catch
+        exit:{noproc, _} ->
+            undefined
+    end.
+
+-doc """
+Remove stored source text for a protocol — mirrors `remove_class_source/1`'s
+fire-and-forget, degrade-silently contract. Called when a protocol's
+defining class is removed from the system.
+""".
+-spec remove_protocol_source(binary()) -> ok.
+remove_protocol_source(ProtocolName) when is_binary(ProtocolName) ->
+    try
+        gen_server:cast(?MODULE, {remove_protocol_source, ProtocolName})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
+-doc """
+Every currently-recorded `{ProtocolName, Source}` pair — the ambient
+`protocol_sources` map both an ordinary cross-file `:load` and the
+protocol-reload fan-out merge into their own compile options (see
+`set_protocol_source/2`'s doc). Returns an empty map (not an error) if the
+server is not started, mirroring `all_class_sources/0`'s contract.
+""".
+-spec all_protocol_sources() -> #{binary() => string()}.
+all_protocol_sources() ->
+    try
+        gen_server:call(?MODULE, all_protocol_sources)
+    catch
+        exit:{noproc, _} ->
+            #{};
+        exit:{timeout, _} ->
+            #{}
+    end.
+
+-doc """
 Store the mtime for a loaded .bt file.
 Called after each successful file load during load-project.
 """.
@@ -492,6 +577,7 @@ init(InitialMetadata) ->
         supervised_actors = [],
         loaded_modules = #{},
         class_sources = #{},
+        protocol_sources = #{},
         file_mtimes = #{},
         settings = #{},
         metadata_path = MetadataPath,
@@ -534,6 +620,16 @@ handle_call({set_class_source, ClassName, Source}, _From, State) ->
     Sources = State#state.class_sources,
     State2 = State#state{class_sources = Sources#{ClassName => Source}},
     {reply, ok, schedule_persist(State2)};
+handle_call({get_protocol_source, ProtocolName}, _From, State) ->
+    Result = maps:get(ProtocolName, State#state.protocol_sources, undefined),
+    {reply, Result, State};
+handle_call(all_protocol_sources, _From, State) ->
+    {reply, State#state.protocol_sources, State};
+handle_call({set_protocol_source, ProtocolName, Source}, _From, State) ->
+    %% Not persisted (see set_protocol_source/2's doc) — no schedule_persist/1.
+    Sources = State#state.protocol_sources,
+    State2 = State#state{protocol_sources = Sources#{ProtocolName => Source}},
+    {reply, ok, State2};
 handle_call(get_file_mtimes, _From, State) ->
     {reply, {ok, State#state.file_mtimes}, State};
 handle_call({get_setting, Key, Default}, _From, State) ->
@@ -586,6 +682,11 @@ handle_cast({remove_class_source, ClassName}, State) ->
     Sources = State#state.class_sources,
     State2 = State#state{class_sources = maps:remove(ClassName, Sources)},
     {noreply, schedule_persist(State2)};
+handle_cast({remove_protocol_source, ProtocolName}, State) ->
+    %% Not persisted — no schedule_persist/1, see set_protocol_source/2's doc.
+    Sources = State#state.protocol_sources,
+    State2 = State#state{protocol_sources = maps:remove(ProtocolName, Sources)},
+    {noreply, State2};
 handle_cast({set_file_mtime, FilePath, Mtime}, State) ->
     Mtimes = State#state.file_mtimes,
     State2 = State#state{file_mtimes = Mtimes#{FilePath => Mtime}},

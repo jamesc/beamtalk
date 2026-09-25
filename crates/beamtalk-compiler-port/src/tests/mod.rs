@@ -30,6 +30,9 @@
 //!   ...` REPL declarations
 //! - [`type_string_wire_fidelity`] — Type-annotation string
 //!   fidelity across the compiler-port wire protocol
+//! - [`protocol_sources_wire`] — `protocol_sources` (ADR 0127 §10a /
+//!   BT-3593): a cross-file protocol's full source flattening a `uses:`
+//!   line through the wire
 
 use super::*;
 // The compiler port's crate-root `main.rs` no longer imports the full ETF
@@ -140,6 +143,7 @@ mod completion_and_native_types;
 mod diagnostics_class_hierarchy;
 mod dispatch_and_hierarchy_meta;
 mod module_naming_and_misc;
+mod protocol_sources_wire;
 mod source_queries;
 mod span_resolution;
 mod type_alias_declarations;

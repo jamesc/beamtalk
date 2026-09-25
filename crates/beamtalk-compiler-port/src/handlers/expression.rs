@@ -80,6 +80,12 @@ pub(crate) fn parse_and_check_expression(
             &known_var_refs,
             pre_class_hierarchy,
             pre_loaded_protocols,
+            // No wire representation for a full cross-file protocol AST on
+            // this entry point (ADR 0127 §10a, BT-3593) — a bare expression
+            // or an inline class/protocol definition typed at the REPL
+            // cannot itself carry a `uses:` referencing a protocol outside
+            // its own module, so there is nothing to thread here yet.
+            Vec::new(),
             pre_loaded_aliases,
             diagnostics_overrides(),
         );

@@ -48,6 +48,18 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // existing collision check (alias name vs. `hierarchy`/
     // `protocol_registry`) never gets a chance to run.
     let pre_loaded_aliases = extract_known_type_aliases(request);
+    // ADR 0127 §10a / BT-3593: the live-reload fan-out recompiles a
+    // protocol's users from their own files, one `compile` request per file
+    // — each such request carries the just-edited protocol's full source
+    // under `protocol_sources` (name -> raw `.bt` text) so `uses:` flattening
+    // sees the NEW provisions rather than whatever this port process last
+    // saw (or nothing, for a protocol it never compiled at all). See
+    // `parse_protocol_defs`'s own doc for why this is a full-source channel
+    // rather than a signature-only one like `protocol_registry` above.
+    let pre_loaded_protocol_defs = match extract_optional_string_map(request, "protocol_sources") {
+        Ok(sources) => parse_protocol_defs(&sources),
+        Err(resp) => return resp,
+    };
 
     // Parse the source
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
@@ -70,6 +82,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
             &[],
             pre_class_hierarchy.clone(),
             pre_loaded_protocols,
+            pre_loaded_protocol_defs,
             pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
@@ -245,4 +258,36 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
+}
+
+/// Parse `protocol_sources` (`{name => raw .bt source}`, see `handle_compile`'s
+/// doc) into full `ProtocolDefinition` ASTs for `pre_loaded_protocol_defs`.
+///
+/// Each entry is lexed and parsed standalone, exactly like the file compile
+/// this handler itself runs above — a source that fails to parse, or whose
+/// module doesn't actually define a protocol named `name` (a caller bug: the
+/// Erlang side always names the entry after the protocol whose source it
+/// carries), silently contributes nothing, mirroring
+/// `parse_protocol_registry_from_term`'s "degrade gracefully on a malformed
+/// entry" convention rather than failing the whole request over one
+/// unrelated user's stale value. A protocol whose provisions this omits
+/// simply isn't visible for flattening on THIS compile — the caller
+/// (`beamtalk_repl_loader`'s two-stage reload) treats a resulting "unknown
+/// protocol"/missing-provision diagnostic on the user file as a compile
+/// failure for that user, same as any other, so this never silently
+/// installs a half-flattened class.
+fn parse_protocol_defs(
+    sources: &std::collections::HashMap<String, String>,
+) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
+    sources
+        .iter()
+        .filter_map(|(name, source)| {
+            let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+            let (module, _parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+            module
+                .protocols
+                .into_iter()
+                .find(|p| p.name.name.as_str() == name)
+        })
+        .collect()
 }

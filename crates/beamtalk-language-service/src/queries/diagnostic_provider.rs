@@ -470,6 +470,12 @@ pub fn compute_diagnostics_and_referenced_aliases(
         known_vars,
         pre_loaded_classes,
         pre_loaded_protocols,
+        // Diagnostics-only callers (e.g. `diagnostics/3`) never run codegen
+        // for this module, so there is no flattened output that a missing
+        // cross-file protocol AST could silently corrupt — same "no wire
+        // representation on this entry point yet" carve-out as
+        // `expression.rs`/`compile_method.rs`'s call sites.
+        Vec::new(),
         pre_loaded_aliases,
         diagnostics_overrides,
     );
@@ -488,6 +494,19 @@ pub fn compute_diagnostics_and_referenced_aliases(
 /// hierarchy, semantic facts, and inferred method return types from scratch.
 /// Callers that only need diagnostics/`referenced_aliases` should keep using
 /// [`compute_diagnostics_and_referenced_aliases`].
+///
+/// `pre_loaded_protocol_defs` (ADR 0127 §10a, BT-3593) carries the full AST
+/// of every provision-bearing protocol the caller has resolved from outside
+/// this module — unlike `pre_loaded_protocols` (signature-only: selector +
+/// arity, no method bodies, used for conformance/Dnu diagnostics), this is
+/// what `trait_expansion::expand_module`'s `external_protocols` needs to
+/// flatten a cross-file/cross-package `uses:` line. Pass `vec![]` for a
+/// caller with no such protocol to carry (e.g. a bare expression or a
+/// single-method patch, where `uses:` cannot appear standalone) — a `uses:`
+/// then only resolves against protocols defined in the SAME module, exactly
+/// as before this parameter existed.
+#[allow(clippy::too_many_arguments)]
+// pre_loaded_classes/protocols/protocol_defs/aliases are each independently load-bearing context, not one bag
 #[must_use]
 pub fn compute_diagnostics_and_analysis(
     module: &beamtalk_core::ast::Module,
@@ -495,6 +514,7 @@ pub fn compute_diagnostics_and_analysis(
     known_vars: &[&str],
     pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
@@ -502,6 +522,7 @@ pub fn compute_diagnostics_and_analysis(
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes)
         .with_pre_loaded_protocols(pre_loaded_protocols)
+        .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
         .with_pre_loaded_aliases(pre_loaded_aliases);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     // Diagnostics are consumed by `run_diagnostic_pipeline` below;

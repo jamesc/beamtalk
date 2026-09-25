@@ -269,6 +269,22 @@ impl CoreErlangGenerator {
                 .collect::<Vec<_>>(),
         );
 
+        // ADR 0127 §10a / BT-3593: emit this class's `uses:` protocol names
+        // (declaration order) so `beamtalk_object_class:init/1` can populate
+        // `beamtalk_protocol_registry`'s users index (`register_uses/2`) —
+        // that call site previously read this key from `Meta`/`ClassInfo`
+        // as a documented no-op ("codegen does not bake `uses` into
+        // `__beamtalk_meta`/`ClassInfo` yet"); this is the wiring it was
+        // left waiting for. A class with no `uses:` lines emits `[]`,
+        // matching `register_uses/2`'s own "no entries" contract.
+        let uses_doc = Self::meta_atom_list(
+            &class
+                .uses
+                .iter()
+                .map(|u| u.protocol.name.to_string())
+                .collect::<Vec<_>>(),
+        );
+
         // ADR 0070 Phase 4: Emit package name as compile-time constant
         let package_doc: Document<'static> = match package_name {
             Some(pkg) => leaf::atom(pkg.to_string()),
@@ -342,6 +358,8 @@ impl CoreErlangGenerator {
             visibility_doc,
             ",\n      'type_params' => ",
             type_params_doc,
+            ",\n      'uses' => ",
+            uses_doc,
             ",\n      'field_types' => ",
             field_types_doc,
             ",\n      'field_has_default' => ",

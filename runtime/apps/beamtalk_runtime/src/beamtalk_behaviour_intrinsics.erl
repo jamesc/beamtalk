@@ -1990,12 +1990,40 @@ Delegates compilation to beamtalk_repl_eval:reload_class_file/1 via
 erlang:apply/3 to avoid a compile-time dep from beamtalk_runtime to
 beamtalk_workspace (follows the beamtalk_actor_registry registered-name pattern).
 """.
+%% ADR 0127 §11 / BT-3593: a protocol's class object is dispatched by the
+%% single shared `beamtalk_protocol_object` module for EVERY protocol
+%% (`beamtalk_protocol_registry:create_protocol_class/2`) — reflecting on
+%% that shared dispatch module's own (internal runtime) source would never
+%% find the protocol's `.bt` file, so `Greeter reload` always raised
+%% `no_source_file` before this, for every protocol regardless of whether it
+%% genuinely had a workspace source file. Resolve a protocol's OWN defining
+%% module instead — already recorded on its registry entry at registration
+%% time for exactly this purpose (see
+%% `beamtalk-codegen`'s `generate_protocol_registrations`'s `module` field
+%% doc, "so the runtime — and the System Browser — can resolve a protocol
+%% class object's origin/source"). Falls back to the ordinary
+%% `module_name_safe/1` path for a non-protocol class, or a protocol
+%% registered before that field existed.
+-spec protocol_or_class_module(atom(), pid()) -> atom() | undefined.
+protocol_or_class_module(ClassName, ClassPid) ->
+    case beamtalk_protocol_registry:is_protocol(ClassName) of
+        true ->
+            case beamtalk_protocol_registry:protocol_info(ClassName) of
+                #{module := ModuleName} when is_atom(ModuleName) ->
+                    ModuleName;
+                _ ->
+                    beamtalk_object_class:module_name_safe(ClassPid)
+            end;
+        false ->
+            beamtalk_object_class:module_name_safe(ClassPid)
+    end.
+
 -spec classReload(#beamtalk_object{}) -> #beamtalk_object{}.
 classReload(Self) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     ok = require_class_capability(reload, ClassName, <<"reload">>),
-    ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
+    ModuleName = protocol_or_class_module(ClassName, ClassPid),
     SourceFile = beamtalk_reflection:source_file_from_module(ModuleName),
     case SourceFile of
         nil ->
@@ -2038,6 +2066,15 @@ classReload(Self) ->
                     beamtalk_error:raise(
                         beamtalk_error:with_message(Error0, Msg)
                     );
+                %% ADR 0127 §11 / BT-3593: the protocol-reload fan-out
+                %% already raises an already-structured `#beamtalk_error{}`
+                %% (stdlib refusal, or "rejected — names every failing
+                %% user") — re-raise it as-is rather than re-wrapping it
+                %% inside a generic "Reload failed: ~p" message, which would
+                %% bury that carefully-composed text behind a raw `~p` dump
+                %% of the record.
+                {error, #beamtalk_error{} = StructuredError} ->
+                    beamtalk_error:raise(StructuredError);
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(reload_failed, ClassName),
                     Msg = iolist_to_binary(
