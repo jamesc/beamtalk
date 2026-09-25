@@ -520,16 +520,35 @@ fn build_assembly_eval(
 /// via a macOS-only CI failure (`ranch_app:start/2` undef at boot) that a
 /// prior version's `Utf8Path::canonicalize_utf8()` on the staged-ebin side
 /// alone, with no matching canonicalization on this side, produced.
+///
+/// The result is also lexically normalized the way Erlang's own
+/// `filename:join/1` normalizes the application directories `systools`
+/// reads back (BT-3619): `.` segments, repeated separators and a trailing
+/// separator are dropped, `..` segments are kept verbatim (Erlang keeps
+/// them too, and resolving them lexically would be wrong across a
+/// symlink). Without this, the default `beamtalk release` output dir —
+/// `./_build/release/<name>-<vsn>` joined onto the current directory —
+/// yields a `RELEASE_DIR` of `/proj/./_build/…` that never string-prefixes
+/// systools' `/proj/_build/…`, so every staged app falls back to
+/// `$ROOT/lib/…`. That is invisible under a bundled ERTS (where `$ROOT` *is*
+/// the release dir) and a `ranch_app:start/2` undef at boot under
+/// `--no-include-erts` (where `$ROOT` is the host OTP install).
 pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
-    if path.is_absolute() {
-        return Ok(path.to_owned());
-    }
-    let cwd = std::env::current_dir()
-        .into_diagnostic()
-        .wrap_err("Failed to read the current directory")?;
-    Utf8PathBuf::from_path_buf(cwd)
-        .map(|cwd| cwd.join(path))
-        .map_err(|p| miette::miette!("Current directory '{}' is not valid UTF-8", p.display()))
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        let cwd = std::env::current_dir()
+            .into_diagnostic()
+            .wrap_err("Failed to read the current directory")?;
+        Utf8PathBuf::from_path_buf(cwd)
+            .map(|cwd| cwd.join(path))
+            .map_err(|p| {
+                miette::miette!("Current directory '{}' is not valid UTF-8", p.display())
+            })?
+    };
+    // `components()` already drops `.` segments, repeated separators and a
+    // trailing separator, and keeps `..` — exactly `filename:join/1`'s rules.
+    Ok(absolute.components().collect())
 }
 
 /// Probe the building machine's ERTS root directory and version via a
@@ -1215,6 +1234,39 @@ mod tests {
             source_ebins: vec![ebin.to_owned()],
             declared_deps: Vec::new(),
         }
+    }
+
+    /// BT-3619: the default output dir (`./_build/release/<name>-<vsn>`)
+    /// must not keep its `.` segment once absolutized — systools compares
+    /// `RELEASE_DIR` against `filename:join/1`-normalized app dirs, which
+    /// never contain one. Compared via `as_str`: `Utf8Path`'s own `==`
+    /// normalizes `.` away and would hide exactly this bug.
+    #[test]
+    fn absolutize_drops_cur_dir_segments_from_a_relative_path() {
+        let cwd = Utf8PathBuf::from_path_buf(std::env::current_dir().unwrap()).unwrap();
+        let abs = absolutize(Utf8Path::new("./_build/release/app-0.1.0")).unwrap();
+        let expected = cwd.join("_build").join("release").join("app-0.1.0");
+        assert_eq!(abs.as_str(), expected.as_str());
+    }
+
+    #[test]
+    fn absolutize_normalizes_an_absolute_path_like_erlang_filename_join() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        let messy = Utf8PathBuf::from(format!("{root}/./a//b/./"));
+        let expected = root.join("a").join("b");
+        assert_eq!(absolutize(&messy).unwrap().as_str(), expected.as_str());
+    }
+
+    #[test]
+    fn absolutize_keeps_parent_dir_segments() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        let with_parent = root.join("a").join("..").join("b");
+        assert_eq!(
+            absolutize(&with_parent).unwrap().as_str(),
+            with_parent.as_str()
+        );
     }
 
     #[test]
