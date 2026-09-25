@@ -241,6 +241,48 @@ fn test_responds_to_with_identifier_no_error() {
 }
 
 #[test]
+fn test_class_named_with_identifier_no_error() {
+    // BT-3622: Beamtalk classNamed: aVariable — identifier arg is allowed
+    let expr = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Beamtalk", test_span()),
+            span: test_span(),
+            package: None,
+        }),
+        selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+            "classNamed:",
+            test_span(),
+        )]),
+        arguments: vec![Expression::Identifier(Identifier::new(
+            "aVariable",
+            Span::new(22, 31),
+        ))],
+        is_cast: false,
+        span: test_span(),
+    };
+
+    let module = Module::new(vec![bare(expr)], test_span());
+    let known_vars = ["aVariable"];
+    let result = analyse_full(
+        &module,
+        AnalysisContext::default().with_known_vars(&known_vars),
+    );
+
+    let symbol_errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("expects a symbol literal"))
+        .collect();
+
+    assert_eq!(
+        symbol_errors.len(),
+        0,
+        "identifier arg to classNamed: should not produce symbol literal error, got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn test_class_named_with_class_reference_emits_error() {
     // Beamtalk classNamed: Counter — should error
     let expr = Expression::MessageSend {
