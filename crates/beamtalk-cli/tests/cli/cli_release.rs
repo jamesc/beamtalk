@@ -647,6 +647,122 @@ fn build_release_fixture(project: &std::path::Path, output_dir: &std::path::Path
         .success();
 }
 
+/// Spawns `bin/<name> foreground` and polls `ping` until the node is live,
+/// panicking with captured stdout/stderr on an early exit or a timeout — the
+/// boot-and-wait sequence every launcher lifecycle test needs (BT-3573's
+/// default-ERTS lifecycle test and BT-3619's `--no-include-erts` counterpart
+/// both spawn the same node and wait for the same signal; only the release
+/// build that produced `output_dir` differs between them).
+fn spawn_foreground_and_wait_for_ping(
+    output_dir: &std::path::Path,
+    name: &str,
+    cookie: &str,
+) -> ForegroundGuard {
+    let child = launcher_command(output_dir, name)
+        .arg("foreground")
+        .env("RELEASE_COOKIE", cookie)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn bin/<name> foreground");
+    // Guarantees `wait()` runs on every exit path (including an early
+    // `panic!`/`assert!` below) — an unreaped child a test process spawned
+    // is exactly the zombie-process hazard `clippy::zombie_processes` warns
+    // about, and callers have several early-return branches before their
+    // explicit `stop`-then-`wait()` sequence reaps it in the ordinary case.
+    let mut foreground = ForegroundGuard(child);
+
+    // Poll `ping` until the node is live (or the child exited early, which
+    // is itself a failure worth surfacing directly rather than timing out).
+    // 60s, not a shorter window: cheap insurance against a slow CI boot
+    // under contention.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut pinged = false;
+    let mut last_ping_output: Option<std::process::Output> = None;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(status)) = foreground.0.try_wait() {
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            if let Some(mut out) = foreground.0.stdout.take() {
+                let _ = std::io::Read::read_to_string(&mut out, &mut stdout);
+            }
+            if let Some(mut err) = foreground.0.stderr.take() {
+                let _ = std::io::Read::read_to_string(&mut err, &mut stderr);
+            }
+            panic!(
+                "bin/<name> foreground exited early: {status:?}\nstdout={stdout}\nstderr={stderr}"
+            );
+        }
+        let ping = launcher_command(output_dir, name)
+            .arg("ping")
+            .env("RELEASE_COOKIE", cookie)
+            .output()
+            .expect("spawn bin/<name> ping");
+        if ping.status.success() {
+            pinged = true;
+            break;
+        }
+        last_ping_output = Some(ping);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    if !pinged {
+        // Kill the still-running foreground node first so its pipes close
+        // and whatever it already wrote (a distribution/boot error, if any)
+        // can be read back in full, instead of guessing blind at a second
+        // CI-only failure mode.
+        let _ = foreground.0.kill();
+        let _ = foreground.0.wait();
+        let mut fg_stdout = String::new();
+        let mut fg_stderr = String::new();
+        if let Some(mut out) = foreground.0.stdout.take() {
+            let _ = std::io::Read::read_to_string(&mut out, &mut fg_stdout);
+        }
+        if let Some(mut err) = foreground.0.stderr.take() {
+            let _ = std::io::Read::read_to_string(&mut err, &mut fg_stderr);
+        }
+        panic!(
+            "node never came up in time for `ping` to succeed; \
+             cookie={cookie:?}; last ping attempt: {last_ping_output:?}; \
+             foreground stdout so far={fg_stdout:?}; \
+             foreground stderr so far={fg_stderr:?}"
+        );
+    }
+    foreground
+}
+
+/// Sends `bin/<name> stop` and waits for the foreground process to exit —
+/// the shared graceful-shutdown sequence every launcher lifecycle test ends
+/// with.
+fn stop_and_wait_for_exit(
+    foreground: &mut ForegroundGuard,
+    output_dir: &std::path::Path,
+    name: &str,
+    cookie: &str,
+) {
+    let stop = launcher_command(output_dir, name)
+        .arg("stop")
+        .env("RELEASE_COOKIE", cookie)
+        .output()
+        .expect("spawn bin/<name> stop");
+    assert!(
+        stop.status.success(),
+        "stop failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
+
+    let stop_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut stopped = false;
+    while std::time::Instant::now() < stop_deadline {
+        if let Ok(Some(_status)) = foreground.0.try_wait() {
+            stopped = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    assert!(stopped, "bin/<name> foreground did not exit after `stop`");
+}
+
 #[test]
 fn release_writes_launcher_scripts_test() {
     let project = cli_common::fixture_project();
@@ -729,77 +845,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // observed CI-only "node never came up" failures. An explicit cookie
     // removes the shared file from the picture entirely.
     let cookie = format!("bt3573_test_cookie_{}", std::process::id());
-    let child = launcher_command(&output_dir, name)
-        .arg("foreground")
-        .env("RELEASE_COOKIE", &cookie)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn bin/<name> foreground");
-    // Guarantees `wait()` runs on every exit path (including an early
-    // `panic!`/`assert!` below) — an unreaped child a test process spawned
-    // is exactly the zombie-process hazard `clippy::zombie_processes` warns
-    // about, and this test has several early-return branches before the
-    // explicit `stop`-then-`wait()` sequence at the bottom reaps it in the
-    // ordinary case.
-    let mut foreground = ForegroundGuard(child);
-
-    // Poll `ping` until the node is live (or the child exited early, which
-    // is itself a failure worth surfacing directly rather than timing out).
-    // 60s, not the pre-fix 30s: cheap insurance in case a slow CI boot
-    // under contention was ever a real, independent factor alongside the
-    // cookie desync this fix addresses.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    let mut pinged = false;
-    let mut last_ping_output: Option<std::process::Output> = None;
-    while std::time::Instant::now() < deadline {
-        if let Ok(Some(status)) = foreground.0.try_wait() {
-            let mut stdout = String::new();
-            let mut stderr = String::new();
-            if let Some(mut out) = foreground.0.stdout.take() {
-                let _ = std::io::Read::read_to_string(&mut out, &mut stdout);
-            }
-            if let Some(mut err) = foreground.0.stderr.take() {
-                let _ = std::io::Read::read_to_string(&mut err, &mut stderr);
-            }
-            panic!(
-                "bin/<name> foreground exited early: {status:?}\nstdout={stdout}\nstderr={stderr}"
-            );
-        }
-        let ping = launcher_command(&output_dir, name)
-            .arg("ping")
-            .env("RELEASE_COOKIE", &cookie)
-            .output()
-            .expect("spawn bin/<name> ping");
-        if ping.status.success() {
-            pinged = true;
-            break;
-        }
-        last_ping_output = Some(ping);
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
-    if !pinged {
-        // Kill the still-running foreground node first so its pipes close
-        // and whatever it already wrote (a distribution/boot error, if
-        // any) can be read back in full, instead of guessing blind at a
-        // second CI-only failure mode.
-        let _ = foreground.0.kill();
-        let _ = foreground.0.wait();
-        let mut fg_stdout = String::new();
-        let mut fg_stderr = String::new();
-        if let Some(mut out) = foreground.0.stdout.take() {
-            let _ = std::io::Read::read_to_string(&mut out, &mut fg_stdout);
-        }
-        if let Some(mut err) = foreground.0.stderr.take() {
-            let _ = std::io::Read::read_to_string(&mut err, &mut fg_stderr);
-        }
-        panic!(
-            "node never came up in time for `ping` to succeed; \
-             cookie={cookie:?}; last ping attempt: {last_ping_output:?}; \
-             foreground stdout so far={fg_stdout:?}; \
-             foreground stderr so far={fg_stderr:?}"
-        );
-    }
+    let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &cookie);
 
     // `eval` — a separate VM, dispatch `Smoke run`, halt with the outcome.
     let eval = launcher_command(&output_dir, name)
@@ -890,28 +936,38 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
 
     // `stop` — graceful `init:stop()` over distribution; the foreground
     // process must exit on its own shortly after.
-    let stop = launcher_command(&output_dir, name)
-        .arg("stop")
-        .env("RELEASE_COOKIE", &cookie)
-        .output()
-        .expect("spawn bin/<name> stop");
-    assert!(
-        stop.status.success(),
-        "stop failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&stop.stdout),
-        String::from_utf8_lossy(&stop.stderr)
-    );
+    stop_and_wait_for_exit(&mut foreground, &output_dir, name, &cookie);
+}
 
-    let stop_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    let mut stopped = false;
-    while std::time::Instant::now() < stop_deadline {
-        if let Ok(Some(_status)) = foreground.0.try_wait() {
-            stopped = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
-    assert!(stopped, "bin/<name> foreground did not exit after `stop`");
+/// BT-3619: `bin/<name> foreground` under `--no-include-erts` (host ERTS) —
+/// the exact combination the bug report reproduces on (macOS aarch64,
+/// mise-managed OTP 28.5), but no existing test exercised end to end.
+/// `release_no_include_erts_skips_erts_and_still_boots_test` boots the same
+/// release by hand-invoking `erl -boot_var RELEASE_DIR <dir>` with the
+/// *build-time* path, bypassing the launcher's own runtime `RELEASE_DIR`
+/// computation entirely (`launcher.sh`'s `ROOT`, resolved via `pwd -P` from
+/// the script's own on-disk location); the lifecycle test just above only
+/// exercises the launcher against the default, bundled-ERTS build. This is
+/// the missing combination — the actual user-facing path the report's
+/// `bin/<name> foreground` repro steps describe.
+#[test]
+fn release_launcher_foreground_boots_under_no_include_erts_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    make_releasable(project.path());
+    add_smoke_class(project.path());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--no-include-erts", "--output"])
+        .arg(&output_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success();
+
+    let name = "cli_subprocess_fixture";
+    let cookie = format!("bt3619_test_cookie_{}", std::process::id());
+    let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &cookie);
+    stop_and_wait_for_exit(&mut foreground, &output_dir, name, &cookie);
 }
 
 /// The `eval` verb's separate throwaway VM never starts the project's own
