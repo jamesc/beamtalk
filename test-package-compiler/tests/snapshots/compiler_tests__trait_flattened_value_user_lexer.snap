@@ -1,0 +1,23 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Protocol"), span: Span { start: 1003, end: 1011 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3590 (ADR 0127 §3/§10): a Value class's `uses:` provision must reach"), Whitespace("\n"), LineComment("// compiled Core Erlang output through the existing value-type generator"), Whitespace("\n"), LineComment("// unchanged."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// A real `.bt` file may declare either one class or one protocol, never"), Whitespace("\n"), LineComment("// both (ADR 0127 §Constraints, \"One top-level definition per file\"), so"), Whitespace("\n"), LineComment("// this single-file fixture — combining both purely to exercise codegen —"), Whitespace("\n"), LineComment("// is not itself an example of legal package layout. `trait_expansion`"), Whitespace("\n"), LineComment("// (BT-3588) only flattens a `uses:` against a protocol declared in the"), Whitespace("\n"), LineComment("// *same* module; carrying a protocol's AST across files is BT-3591's job."), Whitespace("\n"), LineComment("// This case's `_semantic` snapshot therefore records the expected"), Whitespace("\n"), LineComment("// \"class and a protocol cannot be in the same file\" diagnostic alongside"), Whitespace("\n"), LineComment("// the correctly-flattened codegen output below — the diagnostic is a"), Whitespace("\n"), LineComment("// known, unrelated limitation this fixture accepts in order to pin the"), Whitespace("\n"), LineComment("// codegen wiring, not a regression."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("define:"), span: Span { start: 1012, end: 1019 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Describable"), span: Span { start: 1020, end: 1031 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("describe"), span: Span { start: 1034, end: 1042 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1043, end: 1045 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 1046, end: 1052 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1053, end: 1055 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("a describable thing"), span: Span { start: 1056, end: 1077 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("Value"), span: Span { start: 1079, end: 1084 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 1085, end: 1094 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Report"), span: Span { start: 1095, end: 1101 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("uses:"), span: Span { start: 1104, end: 1109 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Describable"), span: Span { start: 1110, end: 1121 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("title"), span: Span { start: 1125, end: 1130 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1131, end: 1133 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 1134, end: 1140 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1141, end: 1143 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Report"), span: Span { start: 1144, end: 1152 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 1153, end: 1153 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

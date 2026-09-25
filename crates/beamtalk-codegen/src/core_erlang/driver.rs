@@ -106,13 +106,47 @@ pub fn generate_module_with_warnings(
                 Some(analysis.method_return_types),
             )
         } else {
+            // ADR 0127 §3 (BT-3590): flatten `uses:` before computing
+            // semantic facts or building the hierarchy here. Unlike the
+            // `Some(analysis)` branch above (whose `hierarchy` *and*
+            // `semantic_facts` both already reflect `analyse_full`'s own
+            // flattened clone — `compute_semantic_facts` runs there only
+            // after that clone's flattening reassigns `module`, per
+            // `analyse_full`'s Phase -1), self-sufficient codegen has no
+            // other driver flattening this module for it. Both
+            // `compute_semantic_facts` and `ClassHierarchy::build` walk
+            // `module.classes` directly — never `module.protocols` — so a
+            // flattened provision is invisible to *both* unless this
+            // module is flattened *before* either call: `SemanticFacts`
+            // (state-effect/block-NLR/dispatch-kind classification) would
+            // otherwise have no entry for the provision's own body,
+            // silently degrading codegen for any flattened provision with
+            // a block, loop, or self-send needing state-threading — not
+            // just make `hierarchy` blind to it, which is the narrower
+            // failure a hierarchy-only fix would have left in place.
+            // Diagnostics are discarded — same rationale as
+            // `lower_module_for_codegen`'s own `expand_module` call (see
+            // that function's module doc).
+            let flattened_module_storage;
+            let flattened_module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
+                let mut owned = module.clone();
+                let _ =
+                    beamtalk_core::semantic_analysis::trait_expansion::expand_module(&mut owned);
+                flattened_module_storage = owned;
+                &flattened_module_storage
+            } else {
+                module
+            };
+
             // Compute semantic facts before codegen begins.
             generator.semantic_facts =
-                beamtalk_core::semantic_analysis::compute_semantic_facts(module);
+                beamtalk_core::semantic_analysis::compute_semantic_facts(flattened_module);
 
             // Build hierarchy once for the entire generation (ADR 0006)
             let (hierarchy_result, _) =
-                beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(module);
+                beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(
+                    flattened_module,
+                );
             let hierarchy = hierarchy_result
                 .map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
             (hierarchy, false, None)

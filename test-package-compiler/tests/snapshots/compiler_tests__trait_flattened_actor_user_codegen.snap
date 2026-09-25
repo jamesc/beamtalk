@@ -1,0 +1,447 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: core_erlang
+---
+module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_continue'/2, 'handle_cast'/2, 'handle_call'/3, 'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'has_method'/1, 'class_name'/0, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'superclass'/0, '__beamtalk_meta'/0, 'has_method_local'/1, 'class_supervisionSpec'/2, 'register_class'/0]
+  attributes ['behaviour' = ['gen_server'], 'on_load' = [{'register_class', 0}],
+     'beamtalk_class' = [{'Greeter', 'Actor'}]]
+
+'start_link'/1 = fun (InitArgs) ->
+    call 'gen_server':'start_link'('trait_flattened_actor_user', InitArgs, [])
+
+
+'start_link'/2 = fun (ServerName, InitArgs) ->
+    call 'gen_server':'start_link'(ServerName, 'trait_flattened_actor_user', InitArgs, [])
+
+
+'spawn'/0 = fun () ->
+    case call 'beamtalk_actor':'safe_spawn'('trait_flattened_actor_user', ~{}~) of
+        <{'ok', Pid}> when 'true' ->
+            let _InstReg = try call 'beamtalk_object_instances':'register'('Greeter', Pid)
+                of _RegOk -> _RegOk
+                catch <_RegT, _RegE, _RegS> -> 'ok'
+            in
+            {'beamtalk_object', 'Greeter', 'trait_flattened_actor_user', Pid}
+        <{'error', Reason}> when 'true' ->
+            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'Greeter') in
+            let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
+            let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in
+            call 'beamtalk_error':'raise'(SpawnErr2)
+    end
+
+
+'spawn'/1 = fun (InitArgs) ->
+    case call 'erlang':'is_map'(InitArgs) of
+        <'false'> when 'true' ->
+            let TypeErr0 = call 'beamtalk_error':'new'('type_error', 'Greeter') in
+            let TypeErr1 = call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:') in
+            let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, #{#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#) in
+            call 'beamtalk_error':'raise'(TypeErr2)
+        <'true'> when 'true' ->
+            case call 'beamtalk_actor':'safe_spawn'('trait_flattened_actor_user', InitArgs) of
+                <{'ok', Pid}> when 'true' ->
+                    let _InstReg = try call 'beamtalk_object_instances':'register'('Greeter', Pid)
+                        of _RegOk -> _RegOk
+                        catch <_RegT, _RegE, _RegS> -> 'ok'
+                    in
+                    {'beamtalk_object', 'Greeter', 'trait_flattened_actor_user', Pid}
+                <{'error', Reason}> when 'true' ->
+                    let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'Greeter') in
+                    let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in
+                    let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in
+                    call 'beamtalk_error':'raise'(SpawnErr2)
+            end
+    end
+
+
+'new'/0 = fun () ->
+    let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
+    let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
+    call 'beamtalk_error':'raise'(Error2)
+
+'new'/1 = fun (_InitArgs) ->
+    let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
+    let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
+    call 'beamtalk_error':'raise'(Error2)
+
+'superclass'/0 = fun () -> 'Actor'
+
+
+'class_name'/0 = fun () -> 'Greeter'
+
+
+'init'/1 = fun (InitArgs) ->
+    let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> 'skipped'
+        <'false'> when 'true' ->
+            call 'erlang':'put'('$beamtalk_actor', 'Greeter')
+    end in
+    let DefaultState = ~{
+        '__class_mod__' => 'trait_flattened_actor_user'
+        , '__shape_version__' => 1
+        , 'greetingCount' => 0
+    }~
+    in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' ->
+            let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in
+            {'ok', CleanState}
+        <'false'> when 'true' ->
+            let _TelPid = call 'erlang':'self'() in
+            let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'Greeter'}~) in
+            {'ok', FinalState}
+    end
+
+
+'handle_continue'/2 = fun (Continue, State) ->
+    case Continue of
+        <'initialize'> when 'true' ->
+            let InitNewState = State in
+            let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in
+            {'noreply', InitCleanState}
+        <_> when 'true' -> {'noreply', State}
+    end
+
+
+'handle_cast'/2 = fun (Msg, State) ->
+    case Msg of
+        <{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->
+            case call 'beamtalk_actor':'decode_wire_cast'(Msg) of
+                <{'redispatch', WireMsg2}> when 'true' ->
+                    call 'trait_flattened_actor_user':'handle_cast'(WireMsg2, State)
+                <'noreply'> when 'true' ->
+                    {'noreply', State}
+            end
+        <{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->
+            let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in
+            let _OldState = call 'erlang':'get'('$bt_actor_state') in
+            let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+            let _CastDispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(CastSelector, CastArgs, State) in
+            let _RestoreOk = case _OldState of
+                <'undefined'> when 'true' ->
+                    call 'erlang':'erase'('$bt_actor_state')
+                <_Prev> when 'true' ->
+                    call 'erlang':'put'('$bt_actor_state', _Prev)
+            end in
+            let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+            case _CastDispatchResult of
+                <{'reply', _CastResult, CastNewState}> when 'true' ->
+                    let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
+                    {'noreply', CleanCastNewState}
+                <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
+                    let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
+                    let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                    in {'noreply', State}
+                <{'error', CastError, _CastState2}> when 'true' ->
+                    let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in
+                    let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                    in {'noreply', State}
+            end
+        <{'cast', CastSelector, CastArgs}> when 'true' ->
+            let _OldState = call 'erlang':'get'('$bt_actor_state') in
+            let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+            let _CastDispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(CastSelector, CastArgs, State) in
+            let _RestoreOk = case _OldState of
+                <'undefined'> when 'true' ->
+                    call 'erlang':'erase'('$bt_actor_state')
+                <_Prev> when 'true' ->
+                    call 'erlang':'put'('$bt_actor_state', _Prev)
+            end in
+            let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+            case _CastDispatchResult of
+                <{'reply', _CastResult, CastNewState}> when 'true' ->
+                    let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
+                    {'noreply', CleanCastNewState}
+                <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
+                    let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
+                    let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                    in {'noreply', State}
+                <{'error', CastError, _CastState2}> when 'true' ->
+                    let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in
+                    let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                    in {'noreply', State}
+            end
+        <_> when 'true' -> {'noreply', State}
+    end
+
+
+'handle_call'/3 = fun (Msg, From, State) ->
+    case Msg of
+        <{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->
+            case call 'beamtalk_actor':'decode_wire_call'(Msg) of
+                <{'redispatch', WireMsg2}> when 'true' ->
+                    call 'trait_flattened_actor_user':'handle_call'(WireMsg2, From, State)
+                <{'reply', WireReplyVal}> when 'true' ->
+                    {'reply', WireReplyVal, State}
+            end
+        <{Selector, Args, PropCtx}> when 'true' ->
+            let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in
+            let _OldState = call 'erlang':'get'('$bt_actor_state') in
+            let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+            let _DispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(Selector, Args, State) in
+            let _RestoreOk = case _OldState of
+                <'undefined'> when 'true' ->
+                    call 'erlang':'erase'('$bt_actor_state')
+                <_Prev> when 'true' ->
+                    call 'erlang':'put'('$bt_actor_state', _Prev)
+            end in
+            let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+            case _DispatchResult of
+                <{'reply', Result, NewState}> when 'true' ->
+                    let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
+                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
+                    case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, CleanNewState}
+                        <{'ok', EncodedResult}> when 'true' ->
+                            {'reply', {'ok', EncodedResult}, CleanNewState}
+                    end
+                <{'error', Error, ErrState}> when 'true' ->
+                    let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
+                    case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, ErrState}
+                        <EncodedError> when 'true' ->
+                            {'reply', {'error', EncodedError}, ErrState}
+                    end
+            end
+        <{Selector, Args}> when 'true' ->
+            let _OldState = call 'erlang':'get'('$bt_actor_state') in
+            let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+            let _DispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(Selector, Args, State) in
+            let _RestoreOk = case _OldState of
+                <'undefined'> when 'true' ->
+                    call 'erlang':'erase'('$bt_actor_state')
+                <_Prev> when 'true' ->
+                    call 'erlang':'put'('$bt_actor_state', _Prev)
+            end in
+            let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+            case _DispatchResult of
+                <{'reply', Result, NewState}> when 'true' ->
+                    let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
+                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
+                    case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, CleanNewState}
+                        <{'ok', EncodedResult}> when 'true' ->
+                            {'reply', {'ok', EncodedResult}, CleanNewState}
+                    end
+                <{'error', Error, ErrState}> when 'true' ->
+                    let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
+                    case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
+                        <{'error', EncErr}> when 'true' ->
+                            {'reply', {'error', EncErr}, ErrState}
+                        <EncodedError> when 'true' ->
+                            {'reply', {'error', EncodedError}, ErrState}
+                    end
+            end
+    end
+
+
+'handle_info'/2 = fun (Msg, State) ->
+    call 'beamtalk_actor':'handle_info'(Msg, State)
+
+
+'code_change'/3 = fun (OldVsn, State, Extra) ->
+    call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)
+
+
+'terminate'/2 = fun (Reason, State) ->
+    let _TelPid = call 'erlang':'self'() in
+    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'Greeter', 'reason' => Reason}~) in
+    %% Call terminate: method if defined — exceptions must not prevent shutdown
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    let _TermDisp = try call 'trait_flattened_actor_user':'dispatch'('terminate:', [Reason], Self, State)
+        of _TermOk -> 'ok'
+        catch <_TermT, _TermE, _TermS> -> 'ok'
+    in 'ok'
+
+
+'safe_dispatch'/3 = fun (Selector, Args, State) ->
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    try call 'trait_flattened_actor_user':'dispatch'(Selector, Args, Self, State)
+    of Result -> Result
+    catch <Type, Error, Stacktrace> -> case {Type, Error} of
+        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
+        <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
+    end
+
+
+'dispatch'/4 = fun (Selector, Args, Self, State) ->
+    case Selector of
+        <'greeting'> when 'true' ->
+            let _Result = #{#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']])}# in {'reply', _Result, State}
+        <'bump'> when 'true' ->
+            let _Val4 = call 'erlang':'+'(call 'maps':'get'('greetingCount', State), 1) in let State1 = call 'maps':'put'('greetingCount', _Val4, State) in {'reply', _Val4, State1}
+        <'greet'> when 'true' ->
+            let _SD5 = case call 'trait_flattened_actor_user':'safe_dispatch'('greeting', [], State) of <{'reply', _SDResult6, _SDState7}> when 'true' -> {_SDResult6, _SDState7} <{'error', {'$bt_nlr', _SDErrorNlrTok8, _SDErrorNlrVal9, _SDErrorNlrSt10}, _}> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _SDErrorNlrTok8, _SDErrorNlrVal9, _SDErrorNlrSt10}) <{'error', {_SDErrorType11, _SDErrorReason12, _SDErrorStack13}, _}> when 'true' -> let _SDErrorClass15 = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in call 'beamtalk_exception_handler':'reraise'(_SDErrorType11, _SDErrorReason12, _SDErrorStack13, ~{'selector' => 'greeting', 'class' => _SDErrorClass15}~) <{'error', _SDErrorPlain14, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDErrorPlain14) <_SDErrorNoMatch16> when 'true' -> call 'erlang':'error'({'case_clause', _SDErrorNoMatch16}) end in let State1 = call 'erlang':'element'(2, _SD5) in {'reply', call 'erlang':'element'(1, _SD5), State1}
+        <OtherSelector> when 'true' ->
+            %% BT-229/ADR 0005: Check extension registry before hierarchy walk
+            let ExtLookup = try call 'beamtalk_extensions':'lookup'('Greeter', OtherSelector)
+                of ExtLookupResult -> ExtLookupResult
+                catch <_EType, _EReason, _EStack> -> 'not_found'
+            in
+            case ExtLookup of
+                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                    %% BT-1512/BT-2250: Invoke via the runtime helper, which
+                    %% accepts both the 3-arity actor shape
+                    %% (fun(Args, Self, State) -> {Result, NewState}) and the
+                    %% 2-arity value shape (fun(Args, Self) -> Result), so a
+                    %% foreign extension whose codegen-time arity could not be
+                    %% resolved still dispatches correctly. Returns {reply, _, _}.
+                    %% BT-3199: Selector/ClassName are threaded through so a
+                    %% crashing extension body is caught and converted to a
+                    %% structured error naming what was sent, instead of
+                    %% re-raising a bare Erlang exception.
+                    call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'Greeter', Args, Self, State)
+                <'not_found'> when 'true' ->
+                    %% ADR 0006: Try hierarchy walk before DNU
+                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'Greeter') of
+                        <{'reply', InheritedResult, InheritedState}> when 'true' ->
+                            {'reply', InheritedResult, InheritedState}
+                        <{'error', DispatchError}> when 'true' ->
+                            %% BT-2842: only mask genuine "not found" as DNU; a real
+                            %% error raised by an inherited method must propagate.
+                            case call 'beamtalk_error':'is_does_not_understand'(DispatchError) of
+                                <'true'> when 'true' ->
+                                    %% Not in hierarchy - try doesNotUnderstand:args: (BT-29)
+                                    let DnuSelector = 'doesNotUnderstand:args:' in
+                                    let Methods = call 'trait_flattened_actor_user':'method_table'() in
+                                    case call 'maps':'is_key'(DnuSelector, Methods) of
+                                        <'true'> when 'true' ->
+                                            call 'trait_flattened_actor_user':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
+                                        <'false'> when 'true' ->
+                                            %% No DNU handler - return #beamtalk_error{} record
+                                            let ClassName = 'Greeter' in
+                                            let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
+                                            let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
+                                            let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
+                                            let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
+                                            {'error', Error, State}
+                                    end
+                                <'false'> when 'true' ->
+                                    call 'beamtalk_error':'raise'(DispatchError)
+                            end
+                    end
+            end
+    end
+
+
+'method_table'/0 = fun () ->
+    ~{'greeting' => 0, 'bump' => 0, 'greet' => 0}~
+
+
+'has_method'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['greeting', 'bump', 'greet']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('Greeter', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['greeting', 'bump', 'greet']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('Greeter', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
+            end
+    end
+
+
+'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
+    let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    case CMR of
+      <{'class_var_result', Policy, NewClassVars}> when 'true' ->
+        let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
+        let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
+        let Spec2 = call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy) in
+        {'class_var_result', Spec2, NewClassVars}
+      <Policy> when 'true' ->
+        let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
+        let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
+        call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy)
+    end
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'Greeter',
+      'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
+      'fields' => ['greetingCount'],
+      'class_fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'field_types' => ~{'greetingCount' => 'none'}~,
+      'field_has_default' => ~{'greetingCount' => 'true'}~,
+      'field_kinds' => ~{'greetingCount' => 'eager'}~,
+      'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
+      'method_info' => ~{'greeting' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+    }~
+
+'register_class'/0 = fun () ->
+    try
+        let _BuilderState0 = ~{
+            'className' => 'Greeter',
+            'superclassRef' => 'Actor',
+            'moduleName' => 'trait_flattened_actor_user',
+            'methodSource' => ~{'greeting' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<34>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<34>(8,1,'integer',['unsigned'|['big']])}#, 'bump' => #{#<98>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<67>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<67>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<49>(8,1,'integer',['unsigned'|['big']])}#, 'greet' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classMethodSource' => ~{}~,
+            'methodSignatures' => ~{'greeting' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#, 'bump' => #{#<98>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']])}#, 'greet' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classMethodSignatures' => ~{}~,
+            'methodXref' => [~{'class_side' => 'false', 'selector' => 'greeting', 'line' => 1, 'sends' => [], 'references' => [~{'class' => 'String', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'bump', 'line' => 1, 'sends' => [~{'selector' => '+', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'greet', 'line' => 1, 'sends' => [~{'selector' => 'greeting', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'dynamic'}~], 'references' => [~{'class' => 'String', 'line' => 1}~], 'source_status' => 'indexed'}~],
+            'stateVarXref' => [],
+            'classState' => ~{}~,
+            'classDoc' => 'none',
+            'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
+            'meta' => ~{'class' => 'Greeter',
+      'superclass' => 'Actor',
+      'package' => 'none',
+      'kind' => 'actor',
+      'fields' => ['greetingCount'],
+      'class_fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'field_types' => ~{'greetingCount' => 'none'}~,
+      'field_has_default' => ~{'greetingCount' => 'true'}~,
+      'field_kinds' => ~{'greetingCount' => 'eager'}~,
+      'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
+      'method_info' => ~{'greeting' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+    }~,
+            'isConstructible' => 'false'
+        }~
+        in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', _Err0}> when 'true' -> {'error', _Err0}
+        end
+
+        in _Reg0
+
+    of _ClassRegResult ->
+let <_ProtoReg_Greetable> = call 'beamtalk_protocol_registry':'register_protocol'(~{'name' => 'Greetable', 'module' => 'trait_flattened_actor_user', 'required_methods' => [], 'required_class_methods' => [], 'type_params' => [], 'extending' => 'undefined', 'doc' => 'none'}~) in
+        _ClassRegResult
+    catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
+
+end
