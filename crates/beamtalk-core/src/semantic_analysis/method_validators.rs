@@ -18,8 +18,8 @@
 //!
 //! The `ReflectionMethodValidator` checks that reflection methods like
 //! `respondsTo:`, `fieldAt:`, `fieldAt:put:`, and `classNamed:` receive
-//! symbol arguments. `classNamed:` requires a symbol literal; the others
-//! also accept identifier (variable) arguments for dynamic dispatch.
+//! symbol arguments. All four also accept identifier (variable) arguments
+//! for dynamic dispatch.
 
 use crate::ast::{Expression, Literal, MessageSelector};
 #[cfg(test)]
@@ -67,8 +67,8 @@ impl MethodValidatorRegistry {
     }
 
     fn register_builtins(&mut self) {
-        // Allow variable (identifier) arguments for dynamic dispatch use cases.
-        // classNamed: retains strict literal-only enforcement.
+        // Allow variable (identifier) arguments for dynamic dispatch use cases
+        // (BT-1168, BT-3622).
         let reflection = Box::new(ReflectionMethodValidator {
             allow_identifier: true,
         });
@@ -85,7 +85,7 @@ impl MethodValidatorRegistry {
         self.validators.insert("fieldAt:put:", reflection);
 
         let reflection = Box::new(ReflectionMethodValidator {
-            allow_identifier: false,
+            allow_identifier: true,
         });
         self.validators.insert("classNamed:", reflection);
 
@@ -158,9 +158,8 @@ impl MethodValidatorRegistry {
 /// Methods like `respondsTo:`, `fieldAt:`, and `classNamed:` expect
 /// symbol arguments (e.g., `#increment`). When `allow_identifier` is `true`,
 /// variable (identifier) arguments are also accepted for dynamic dispatch —
-/// the runtime handles symbol values correctly. Only `classNamed:` retains
-/// strict literal-only enforcement (`allow_identifier: false`). Reserved
-/// pseudo-literals (`true`, `false`, `nil`, `self`) are always rejected.
+/// the runtime handles symbol values correctly. Reserved pseudo-literals
+/// (`true`, `false`, `nil`, `self`) are always rejected.
 struct ReflectionMethodValidator {
     allow_identifier: bool,
 }
@@ -722,8 +721,9 @@ mod tests {
     }
 
     #[test]
-    fn test_identifier_produces_error_for_class_named() {
-        // classNamed: is strict: identifiers are rejected
+    fn test_identifier_rejected_in_strict_mode() {
+        // allow_identifier: false rejects identifier args (no selector is
+        // currently registered strict, but the validator still supports it)
         let validator = ReflectionMethodValidator {
             allow_identifier: false,
         };
@@ -741,9 +741,25 @@ mod tests {
     }
 
     #[test]
-    fn test_class_reference_produces_error() {
+    fn test_identifier_allowed_for_class_named() {
+        // BT-3622: classNamed: allows identifier args (dynamic dispatch use case)
         let validator = ReflectionMethodValidator {
-            allow_identifier: false,
+            allow_identifier: true,
+        };
+        let args = vec![Expression::Identifier(Identifier::new(
+            "aVariable",
+            Span::new(15, 24),
+        ))];
+
+        let diagnostics = validator.validate(&class_named_selector(), &args, None, test_span());
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_class_reference_produces_error() {
+        // ClassReference args are always rejected, regardless of allow_identifier
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
         };
         let args = vec![Expression::ClassReference {
             name: Identifier::new("Counter", Span::new(12, 19)),
@@ -809,7 +825,7 @@ mod tests {
 
     #[test]
     fn test_hint_contains_fix_suggestion() {
-        // Strict mode (classNamed:): identifier should produce a hint
+        // Strict mode: identifier should produce a hint
         let validator = ReflectionMethodValidator {
             allow_identifier: false,
         };
