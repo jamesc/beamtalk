@@ -668,8 +668,11 @@ every other class. So `Beamtalk`, `Workspace` and `Transcript` resolve the
 same way as `Integer`. This is the rule ADR 0081 already applied to
 `Session`.
 
-**`Workspace globals` becomes `Workspace bindings`.** It now holds only the
-user's `bind:as:` entries. The name "globals" would keep implying Smalltalk's
+**`Workspace globals` becomes `Workspace bindings`.** This rename is part of
+the point of the ADR, not cosmetic. The ADR removes the image-era
+metaprogramming abstractions: injected singletons, a pretend global scope,
+and `Beamtalk globals`. The name "globals" is one of those abstractions.
+The view now holds only the user's `bind:as:` entries. The name "globals" would keep implying Smalltalk's
 semantics, "visible to all code", and that implication is the bug this ADR
 fixes. The entries are visible only to REPL evals.
 
@@ -936,6 +939,16 @@ class registry. Every boot context, including `beamtalk test`, populates the
 - 🎨 **Language designer**: "It removes a whole resolution tier.
   Identifier resolution becomes locals → bindings → classes, everywhere."
 
+### G. `Beamtalk` facade only; `Workspace` stays REPL-scoped
+- 🏭 **Operator**: "It's the smallest change that fixes the actual bug. It
+  doesn't take `Workspace` away as a user class name. And it avoids every
+  question about what `Workspace` means in `run` mode or on an escript
+  without a compiler."
+- 🎨 **Language designer**: "A compile-time error is strictly better than a
+  runtime one, and `IEx.Helpers` shows the split works in practice."
+- **Why it still loses:** it keeps an injected, REPL-only name, which is
+  the thing this ADR removes (see Alternative G below).
+
 ### Tension points
 - **Purists prefer A/E, pragmatists and tooling prefer D.** Smalltalk
   purists value instance substitutability. The only real use of it in the
@@ -1006,14 +1019,7 @@ remains a REPL-only name, like Elixir's `IEx.Helpers`, which the Prior Art
 section cites approvingly. Using it in compiled code becomes a compile-time
 error, "Workspace is REPL-only", instead of a runtime `no_workspace`.
 
-- 🏭 **Operator**: "It's the smallest change that fixes the actual bug. It
-  doesn't take `Workspace` away as a user class name. And it avoids every
-  question about what `Workspace` means in `run` mode or on an escript
-  without a compiler."
-- 🎨 **Language designer**: "A compile-time error is strictly better than a
-  runtime one, and `IEx.Helpers` shows the split works in practice."
-
-Rejected, but this is the strongest alternative:
+Rejected, though it is the strongest alternative (see its steelman):
 
 - **It keeps an injected name.** The compiler would still need to know
   which names are REPL-only, so the `known_vars` machinery survives. REPL
@@ -1107,8 +1113,8 @@ where it lands.
   - under ADR 0070 §3, a dependency that exports one is a compile error.
 
   `Workspace` in particular is a common domain noun. Nothing in this repo
-  defines such a class, but beamtalk-exdura must be checked before Phase 1
-  ships.
+  defines such a class, and beamtalk-exdura doesn't either. A collision in
+  user code is fixed by renaming the user's class.
 - **Transcript capture depends on context.** Inside a workspace the output
   goes to the `TranscriptStream`; outside it goes to Logger. So "capture it
   with a Logger handler" works only in the second case. This is acceptable
