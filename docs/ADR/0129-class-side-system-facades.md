@@ -889,7 +889,7 @@ The work is one epic; main stays green after each phase.
   - Phases 0a and 0b come first.
   - Phase 1 can ship on its own after them.
   - Phase 6 depends on 0b.
-  - Phase 7 follows the facade phases.
+  - Phase 5 follows the facade phases.
 
 **Phase 0a: direct calls from REPL expressions** (codegen, S)
 - Compute `direct_call_eligible` in `crates/beamtalk-repl/src/codegen.rs`
