@@ -78,11 +78,25 @@ pub enum SpawnAttempt {
 /// `try_spawn` or [`find_free_port`].
 pub fn allocate_port_with_retry(
     max_attempts: u32,
+    try_spawn: impl FnMut(u16) -> Result<SpawnAttempt>,
+) -> Result<u16> {
+    allocate_port_with_retry_using(max_attempts, find_free_port, try_spawn)
+}
+
+/// [`allocate_port_with_retry`], parameterized on the candidate-port source
+/// so tests can inject a deterministic fake instead of exercising real OS
+/// ephemeral-port allocation — see BT-3628: consecutive real
+/// [`find_free_port`] calls can return the same just-freed port back to back
+/// under contention, which made the retry-count/distinct-candidate
+/// assertions flaky.
+fn allocate_port_with_retry_using(
+    max_attempts: u32,
+    mut find_port: impl FnMut() -> Result<u16>,
     mut try_spawn: impl FnMut(u16) -> Result<SpawnAttempt>,
 ) -> Result<u16> {
     let mut last_exit_status = None;
     for _ in 0..max_attempts.max(1) {
-        let candidate = find_free_port()?;
+        let candidate = find_port()?;
         match try_spawn(candidate)? {
             SpawnAttempt::Bound => return Ok(candidate),
             SpawnAttempt::PortTaken(reason) => last_exit_status = reason,
@@ -139,17 +153,32 @@ mod tests {
 
     #[test]
     fn allocate_port_with_retry_retries_on_port_taken() {
+        // Uses a fake, strictly-incrementing port source instead of the real
+        // `find_free_port` — real OS ephemeral-port allocation can hand back
+        // the same just-freed port on consecutive calls under contention
+        // (observed on windows-2022 CI), which made `seen_candidates.len()`
+        // flaky. This test only cares that the retry loop asks for a fresh
+        // candidate each time, not that the candidate came from a real bind.
         let mut calls = 0;
         let mut seen_candidates = HashSet::new();
-        let port = allocate_port_with_retry(DEFAULT_MAX_ATTEMPTS, |candidate| {
-            calls += 1;
-            seen_candidates.insert(candidate);
-            if calls < 3 {
-                Ok(SpawnAttempt::PortTaken(None))
-            } else {
-                Ok(SpawnAttempt::Bound)
-            }
-        })
+        let mut next_fake_port = 40_000u16;
+        let port = allocate_port_with_retry_using(
+            DEFAULT_MAX_ATTEMPTS,
+            || {
+                let port = next_fake_port;
+                next_fake_port += 1;
+                Ok(port)
+            },
+            |candidate| {
+                calls += 1;
+                seen_candidates.insert(candidate);
+                if calls < 3 {
+                    Ok(SpawnAttempt::PortTaken(None))
+                } else {
+                    Ok(SpawnAttempt::Bound)
+                }
+            },
+        )
         .expect("should succeed on the third attempt");
         assert!(port >= 1024);
         assert_eq!(calls, 3, "should retry exactly twice before succeeding");
