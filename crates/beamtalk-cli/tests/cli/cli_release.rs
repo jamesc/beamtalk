@@ -653,13 +653,23 @@ fn build_release_fixture(project: &std::path::Path, output_dir: &std::path::Path
 /// default-ERTS lifecycle test and BT-3619's `--no-include-erts` counterpart
 /// both spawn the same node and wait for the same signal; only the release
 /// build that produced `output_dir` differs between them).
+///
+/// `node` becomes this instance's `RELEASE_NODE` (`launcher.sh`'s
+/// `node_sname()` falls back to the release name otherwise) — every caller
+/// that spawns a fixture release under this name must pass a distinct
+/// `node`, since `fixture_project()` hardcodes the same package name for
+/// every test and Rust's default parallel test execution can run two such
+/// foregrounds at once; without distinct `-sname`s they'd race to register
+/// the same name with the host's shared epmd and one would never come up.
 fn spawn_foreground_and_wait_for_ping(
     output_dir: &std::path::Path,
     name: &str,
+    node: &str,
     cookie: &str,
 ) -> ForegroundGuard {
     let child = launcher_command(output_dir, name)
         .arg("foreground")
+        .env("RELEASE_NODE", node)
         .env("RELEASE_COOKIE", cookie)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -695,6 +705,7 @@ fn spawn_foreground_and_wait_for_ping(
         }
         let ping = launcher_command(output_dir, name)
             .arg("ping")
+            .env("RELEASE_NODE", node)
             .env("RELEASE_COOKIE", cookie)
             .output()
             .expect("spawn bin/<name> ping");
@@ -732,15 +743,18 @@ fn spawn_foreground_and_wait_for_ping(
 
 /// Sends `bin/<name> stop` and waits for the foreground process to exit —
 /// the shared graceful-shutdown sequence every launcher lifecycle test ends
-/// with.
+/// with. `node` must be the same `RELEASE_NODE` the foreground instance was
+/// started with (see `spawn_foreground_and_wait_for_ping`'s doc comment).
 fn stop_and_wait_for_exit(
     foreground: &mut ForegroundGuard,
     output_dir: &std::path::Path,
     name: &str,
+    node: &str,
     cookie: &str,
 ) {
     let stop = launcher_command(output_dir, name)
         .arg("stop")
+        .env("RELEASE_NODE", node)
         .env("RELEASE_COOKIE", cookie)
         .output()
         .expect("spawn bin/<name> stop");
@@ -845,7 +859,13 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // observed CI-only "node never came up" failures. An explicit cookie
     // removes the shared file from the picture entirely.
     let cookie = format!("bt3573_test_cookie_{}", std::process::id());
-    let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &cookie);
+    // A distinct `RELEASE_NODE` — see `spawn_foreground_and_wait_for_ping`'s
+    // doc comment: without one this collides with the BT-3619
+    // `--no-include-erts` counterpart test below, which spawns the same
+    // fixture project name and would otherwise race it for the same
+    // `-sname` under parallel test execution.
+    let node = format!("bt3573_node_{}", std::process::id());
+    let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &node, &cookie);
 
     // `eval` — a separate VM, dispatch `Smoke run`, halt with the outcome.
     let eval = launcher_command(&output_dir, name)
@@ -863,6 +883,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // the result (`Smoke run` => `21 + 21` => `42`).
     let rpc = launcher_command(&output_dir, name)
         .args(["rpc", "Smoke run"])
+        .env("RELEASE_NODE", &node)
         .env("RELEASE_COOKIE", &cookie)
         .output()
         .expect("spawn bin/<name> rpc");
@@ -890,6 +911,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         let entry = format!("{receiver} releaseInfo");
         let out = launcher_command(&output_dir, name)
             .args(["rpc", &entry])
+            .env("RELEASE_NODE", &node)
             .env("RELEASE_COOKIE", &cookie)
             .output()
             .unwrap_or_else(|e| panic!("spawn bin/<name> rpc {entry:?}: {e}"));
@@ -936,7 +958,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
 
     // `stop` — graceful `init:stop()` over distribution; the foreground
     // process must exit on its own shortly after.
-    stop_and_wait_for_exit(&mut foreground, &output_dir, name, &cookie);
+    stop_and_wait_for_exit(&mut foreground, &output_dir, name, &node, &cookie);
 }
 
 /// BT-3619: `bin/<name> foreground` under `--no-include-erts` (host ERTS) —
@@ -966,8 +988,14 @@ fn release_launcher_foreground_boots_under_no_include_erts_test() {
 
     let name = "cli_subprocess_fixture";
     let cookie = format!("bt3619_test_cookie_{}", std::process::id());
-    let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &cookie);
-    stop_and_wait_for_exit(&mut foreground, &output_dir, name, &cookie);
+    // A distinct `RELEASE_NODE` — see `spawn_foreground_and_wait_for_ping`'s
+    // doc comment: without one this collides with the default-ERTS
+    // lifecycle test above, which spawns the same fixture project name and
+    // would otherwise race it for the same `-sname` under parallel test
+    // execution.
+    let node = format!("bt3619_node_{}", std::process::id());
+    let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &node, &cookie);
+    stop_and_wait_for_exit(&mut foreground, &output_dir, name, &node, &cookie);
 }
 
 /// The `eval` verb's separate throwaway VM never starts the project's own
