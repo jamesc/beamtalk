@@ -1727,11 +1727,13 @@ t_protocol_reload_refuses_stdlib(Proj) ->
 %% `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
 %% — see that module's own doc for why `meck` is used at all) on a SECOND,
 %% unrelated fan-out user, so a multi-protocol user installed just before it
-%% is the one whose rollback must succeed. Relies on
-%% `beamtalk_protocol_registry:users_of/1` returning classes in the order
-%% they registered (`?USERS_TABLE`'s `bag` reverse index preserves
-%% `ets:insert/2` order for a single key in this implementation) — Multi is
-%% loaded (and so registers its `uses:`) before Simple.
+%% is the one whose rollback must succeed. Install order is deterministic
+%% regardless of `beamtalk_protocol_registry:users_of/1`'s own (unspecified)
+%% `ets` `bag` ordering: `discover_fanout_targets/1` runs `lists:usort/1`
+%% over the combined user-atom list before compiling/installing, so classes
+%% always install in alphabetical order by name — `MultiName` sorts before
+%% `SimpleName` (both share the `"Bt3593Rb"` prefix, differing only at
+%% `"Multi"` vs. `"Simple"`).
 t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
     N = integer_to_list(erlang:unique_integer([positive])),
     P1Name = "Bt3593RbP1" ++ N,
