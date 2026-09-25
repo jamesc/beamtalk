@@ -118,11 +118,12 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     let alias_sources = collect_stdlib_alias_sources(&source_files)?;
     // Live same-run protocol pre-pass, mirroring the alias pre-pass
     // immediately above — see `collect_stdlib_protocol_infos`'s doc for why.
-    let protocol_infos = collect_stdlib_protocol_infos(&source_files);
+    let (protocol_infos, protocol_defs) = collect_stdlib_protocol_infos(&source_files);
     let compile_ctx = CompileContext {
         native_type_registry: native_type_registry.map(std::sync::Arc::new),
         hierarchy: ClassHierarchyContext {
             pre_loaded_protocols: protocol_infos,
+            pre_loaded_protocol_defs: protocol_defs,
             pre_loaded_aliases: stdlib_pre_loaded_aliases(&alias_sources),
             ..ClassHierarchyContext::default()
         },
@@ -1015,10 +1016,26 @@ fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<Alia
 /// that file simply contributes no protocols to the merged set, and the same
 /// parse error is already reported through the normal per-file diagnostics
 /// path when that file is compiled on its own.
+///
+/// Also returns the full AST of every *provision-bearing* protocol found
+/// (ADR 0127 §10a; BT-3591) — the trait-flattening counterpart to the
+/// `ProtocolInfo` metadata above, handed to every stdlib file's
+/// `ClassHierarchyContext::pre_loaded_protocol_defs` so a stdlib class's
+/// `uses:` line naming a trait declared in a *different* stdlib file
+/// flattens (mirrors this function's own `ProtocolInfo` pre-pass reasoning,
+/// one level deeper: the same cross-file gap `ProtocolInfo` closes for
+/// conformance/`extending:` resolution exists for provisions, since
+/// `trait_expansion::expand_module`'s own-module-only fallback would
+/// otherwise report every cross-file stdlib trait as "unknown protocol").
+#[allow(clippy::type_complexity)] // 2-tuple mirrors this module's other multi-output extractors
 fn collect_stdlib_protocol_infos(
     source_files: &[Utf8PathBuf],
-) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+) -> (
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::ast::ProtocolDefinition>,
+) {
     let mut all = Vec::new();
+    let mut all_defs = Vec::new();
     for file in source_files {
         let Ok(source) = fs::read_to_string(file) else {
             continue;
@@ -1030,8 +1047,14 @@ fn collect_stdlib_protocol_infos(
                 &module,
             ),
         );
+        all_defs.extend(
+            module
+                .protocols
+                .into_iter()
+                .filter(|p| !p.provided_methods.is_empty()),
+        );
     }
-    all
+    (all, all_defs)
 }
 
 /// The `CompilerOptions` every stdlib compile in [`build_stdlib`] runs with.
@@ -2360,7 +2383,8 @@ mod tests {
         // actually calls it — over *all* source files in one pass, before
         // any compile happens (a live scan, not a seed from any prior
         // "generated" snapshot).
-        let protocol_infos = collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
+        let (protocol_infos, _protocol_defs) =
+            collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
         assert_eq!(
             protocol_infos.len(),
             1,
@@ -2434,6 +2458,98 @@ mod tests {
                 .has_protocol("ProtocolFixtureA"),
             "expected the negative control (no pre_loaded_protocols) to reproduce \
              the pre-BT-3034 gap: the cross-file protocol should NOT be registered"
+        );
+    }
+
+    /// ADR 0127 §10a / BT-3591: a stdlib class's `uses:` line naming a
+    /// *trait* (a provision-bearing protocol) declared in a different
+    /// stdlib file must flatten — `collect_stdlib_protocol_infos`'s
+    /// `ProtocolInfo` pre-pass alone (the test above) only carries
+    /// name/signature metadata, not the provided method bodies
+    /// `trait_expansion::expand_module` needs to splice in.
+    #[test]
+    fn test_cross_file_trait_flattening_seeds_pre_loaded_protocol_defs() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+
+        // File A: declares a trait (a provision-bearing protocol), mirroring
+        // a hypothetical stdlib `comparable.bt`.
+        let file_a = lib_dir.join("TraitFixtureA.bt");
+        fs::write(
+            &file_a,
+            "Protocol define: TraitFixtureA\n  \
+             < other :: Self -> Boolean\n\n  \
+             max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n",
+        )
+        .unwrap();
+
+        // File B: `uses:` it, the exact cross-file shape ordinary
+        // `beamtalk build`/the LSP already flatten via
+        // `pre_loaded_protocol_defs` — stdlib needed the same wiring.
+        let file_b = lib_dir.join("TraitFixtureB.bt");
+        fs::write(
+            &file_b,
+            "Value subclass: TraitFixtureB\n  \
+             uses: TraitFixtureA\n  \
+             field: n :: Integer = 0\n\n  \
+             < other :: TraitFixtureB -> Boolean => self.n < other n\n",
+        )
+        .unwrap();
+
+        let (_protocol_infos, protocol_defs) =
+            collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
+        assert_eq!(
+            protocol_defs.len(),
+            1,
+            "expected exactly one provision-bearing protocol, from file A"
+        );
+
+        let options = stdlib_compiler_options(false);
+        let bindings =
+            beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new();
+        let core_file = lib_dir.join("b.core");
+
+        // Fixed (with pre_loaded_protocol_defs): compiles cleanly, `max:`
+        // flattens in.
+        let diags = compile_source_with_bindings(
+            &file_b,
+            "bt@stdlib@trait_fixture_b",
+            &core_file,
+            &options,
+            &bindings,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    pre_loaded_protocol_defs: protocol_defs.clone(),
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("cross-file trait usage should compile without errors");
+        assert!(
+            !diags.iter().any(|d| d.message.contains("unknown protocol")),
+            "expected the cross-file trait to resolve, got: {diags:?}"
+        );
+
+        // Negative control: WITHOUT pre_loaded_protocol_defs, `uses:
+        // TraitFixtureA` cannot resolve — an "unknown protocol" error, which
+        // `compile_source_with_bindings` surfaces as an `Err` (unlike a
+        // warning/hint, an error-severity diagnostic fails the compile) —
+        // proving the assertion above exercises the fix rather than a
+        // tautology.
+        let result_unfixed = compile_source_with_bindings(
+            &file_b,
+            "bt@stdlib@trait_fixture_b",
+            &core_file,
+            &options,
+            &bindings,
+            &CompileContext::default(),
+            None,
+        );
+        assert!(
+            result_unfixed.is_err(),
+            "expected the negative control (no pre_loaded_protocol_defs) to fail \
+             to compile — `uses: TraitFixtureA` cannot resolve without it"
         );
     }
 
@@ -3891,9 +4007,45 @@ mod tests {
         let real = dir.join("printable.bt");
         fs::write(&real, "Protocol define: Printable\n  asString -> String\n").unwrap();
 
-        let infos = collect_stdlib_protocol_infos(&[missing, real]);
+        let (infos, defs) = collect_stdlib_protocol_infos(&[missing, real]);
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].name.as_str(), "Printable");
+        // `Printable` here declares no provided methods, so it contributes
+        // nothing to the trait-flattening AST list — see this function's
+        // own doc for why only provision-bearing protocols are collected.
+        assert!(defs.is_empty());
+    }
+
+    /// The trait-flattening counterpart of the test above
+    /// (ADR 0127 §10a; BT-3591): a *provision-bearing* protocol's full AST
+    /// is collected, while a requirement-only protocol in the same source
+    /// set still isn't.
+    #[test]
+    fn test_collect_stdlib_protocol_infos_collects_provision_bearing_protocol_defs() {
+        let (_temp, dir) = temp_utf8_dir();
+        let requirement_only = dir.join("printable.bt");
+        fs::write(
+            &requirement_only,
+            "Protocol define: Printable\n  asString -> String\n",
+        )
+        .unwrap();
+        let with_provision = dir.join("comparable.bt");
+        fs::write(
+            &with_provision,
+            "Protocol define: Comparable\n  \
+             < other :: Self -> Boolean\n\n  \
+             max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n",
+        )
+        .unwrap();
+
+        let (infos, defs) = collect_stdlib_protocol_infos(&[requirement_only, with_provision]);
+        assert_eq!(infos.len(), 2, "both protocols are tracked as ProtocolInfo");
+        assert_eq!(
+            defs.len(),
+            1,
+            "only the provision-bearing protocol contributes a full AST: {defs:?}"
+        );
+        assert_eq!(defs[0].name.name.as_str(), "Comparable");
     }
 
     // --- alias_source_texts_sorted_by_name ---

@@ -68,13 +68,14 @@ use tracing::warn;
 /// the same file-name/class-name mismatch `beamtalk build`/the LSP do (via
 /// `ProjectDiagnosticContext::source_file_stem`) — `None` for callers with
 /// no real file backing the module skips the check.
-#[allow(clippy::too_many_arguments)] // pre_loaded_protocols/pre_loaded_aliases are separate params; each is load-bearing context
+#[allow(clippy::too_many_arguments)] // pre_loaded_protocols/pre_loaded_protocol_defs/pre_loaded_aliases are separate params; each is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
     source: &str,
     parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
     cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     native_type_registry: Option<
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
@@ -124,6 +125,7 @@ fn collect_diagnostics(
         .with_options(&options)
         .with_pre_loaded_classes(cross_file_classes)
         .with_pre_loaded_protocols(pre_loaded_protocols)
+        .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
         .with_pre_loaded_aliases(pre_loaded_aliases)
         .with_native_type_registry(native_type_registry)
         .with_cross_file_extensions(cross_file_extensions)
@@ -251,6 +253,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         mut all_class_infos,
         extension_index,
         mut all_protocol_infos,
+        mut all_protocol_defs,
         mut all_alias_infos,
         parsed_files,
     ) = parse_and_extract_class_infos(
@@ -269,6 +272,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             project_root,
             &mut all_class_infos,
             &mut all_protocol_infos,
+            &mut all_protocol_defs,
             &mut all_alias_infos,
         )
     } else {
@@ -394,6 +398,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             parse_diags,
             cross_file_classes,
             all_protocol_infos.clone(),
+            all_protocol_defs.clone(),
             all_alias_infos.clone(),
             native_type_registry.clone(),
             knowledge_scope,
@@ -653,6 +658,7 @@ fn parse_and_extract_class_infos(
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     beamtalk_core::compilation::extension_index::ExtensionIndex,
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::ast::ProtocolDefinition>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     Vec<ParsedLintFile>,
 )> {
@@ -675,6 +681,7 @@ fn parse_and_extract_class_infos(
     // protocols and aliases here (as `build` does), `:: Alias` and
     // `extending:` diagnostics could disagree between `build` and `lint`.
     let mut all_protocol_infos = Vec::new();
+    let mut all_protocol_defs = Vec::new();
     let mut all_alias_infos = Vec::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
 
@@ -725,6 +732,17 @@ fn parse_and_extract_class_infos(
                 &module,
             ),
         );
+        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // BT-3591) — the trait-flattening counterpart to `all_protocol_infos`
+        // immediately above; see `collect_diagnostics`'s
+        // `pre_loaded_protocol_defs` parameter.
+        all_protocol_defs.extend(
+            module
+                .protocols
+                .iter()
+                .filter(|p| !p.provided_methods.is_empty())
+                .cloned(),
+        );
         let mut alias_infos =
             beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
                 &module,
@@ -745,6 +763,7 @@ fn parse_and_extract_class_infos(
         all_class_infos,
         extension_index,
         all_protocol_infos,
+        all_protocol_defs,
         all_alias_infos,
         parsed_files,
     ))
@@ -786,6 +805,7 @@ fn merge_dependency_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     all_protocol_infos: &mut Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
     all_alias_infos: &mut Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 ) -> Vec<super::deps::path::ResolvedDependency> {
     let options = beamtalk_core::CompilerOptions::default();
@@ -794,6 +814,7 @@ fn merge_dependency_infos(
             for dep in &resolved_deps {
                 all_class_infos.extend(dep.class_infos.clone());
                 all_protocol_infos.extend(dep.protocol_infos.clone());
+                all_protocol_defs.extend(dep.protocol_defs.clone());
                 all_alias_infos.extend(dep.alias_infos.clone());
             }
             resolved_deps
@@ -869,6 +890,7 @@ fn collect_lint_diagnostics_with_stub_flag(
         vec![],
         vec![],
         vec![],
+        vec![],
         None,
         beamtalk_core::semantic_analysis::KnowledgeScope::default(),
         &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
@@ -894,6 +916,7 @@ fn collect_lint_diagnostics_with_file_stem(
         &module,
         source,
         parse_diags,
+        vec![],
         vec![],
         vec![],
         vec![],
@@ -923,6 +946,7 @@ fn collect_lint_diagnostics_with_stdlib_flag(
         &module,
         source,
         parse_diags,
+        vec![],
         vec![],
         vec![],
         vec![],
@@ -1196,6 +1220,7 @@ mod tests {
             cross_file_classes,
             vec![],
             vec![],
+            vec![],
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
@@ -1402,6 +1427,7 @@ mod tests {
             cross_file_classes,
             vec![],
             vec![],
+            vec![],
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
@@ -1509,6 +1535,7 @@ mod tests {
             mut all_class_infos,
             extension_index,
             mut all_protocol_infos,
+            mut all_protocol_defs,
             mut all_alias_infos,
             parsed_files,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
@@ -1517,6 +1544,7 @@ mod tests {
             &consumer_root,
             &mut all_class_infos,
             &mut all_protocol_infos,
+            &mut all_protocol_defs,
             &mut all_alias_infos,
         );
 
@@ -1607,6 +1635,7 @@ mod tests {
             parse_diags,
             vec![], // no same-package cross-file classes
             all_protocol_infos,
+            all_protocol_defs,
             all_alias_infos,
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
@@ -1764,6 +1793,7 @@ mod tests {
             mut all_class_infos,
             extension_index,
             mut all_protocol_infos,
+            mut all_protocol_defs,
             mut all_alias_infos,
             parsed_files,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
@@ -1772,6 +1802,7 @@ mod tests {
             &consumer_root,
             &mut all_class_infos,
             &mut all_protocol_infos,
+            &mut all_protocol_defs,
             &mut all_alias_infos,
         );
         assert_eq!(
@@ -1796,6 +1827,7 @@ mod tests {
                 parse_diags,
                 cross_file_classes,
                 all_protocol_infos.clone(),
+                all_protocol_defs.clone(),
                 all_alias_infos.clone(),
                 None,
                 beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
@@ -1884,6 +1916,7 @@ mod tests {
             mut all_class_infos,
             extension_index,
             mut all_protocol_infos,
+            mut all_protocol_defs,
             mut all_alias_infos,
             parsed_files,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
@@ -1892,6 +1925,7 @@ mod tests {
             &consumer_root,
             &mut all_class_infos,
             &mut all_protocol_infos,
+            &mut all_protocol_defs,
             &mut all_alias_infos,
         );
         assert_eq!(
@@ -1917,6 +1951,7 @@ mod tests {
                 parse_diags,
                 cross_file_classes,
                 all_protocol_infos.clone(),
+                all_protocol_defs.clone(),
                 all_alias_infos.clone(),
                 None,
                 beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
@@ -2080,6 +2115,7 @@ mod tests {
             vec![],
             vec![],
             vec![],
+            vec![],
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
@@ -2130,6 +2166,7 @@ mod tests {
             &module,
             source,
             parse_diags,
+            vec![],
             vec![],
             vec![],
             vec![],
@@ -2198,6 +2235,7 @@ mod tests {
             &module,
             source,
             parse_diags,
+            vec![],
             vec![],
             vec![],
             vec![],

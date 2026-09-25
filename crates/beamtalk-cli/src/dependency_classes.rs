@@ -28,6 +28,19 @@
 //! dependency, because [`beamtalk_project::package`] only walks the
 //! package's own `src/`/`test/` directories.
 //!
+//! **Protocol ASTs (ADR 0127 §10a; BT-3591):** alongside each dependency's
+//! `ClassInfo`s, [`resolve_dependency_protocol_defs`] yields the full AST of
+//! every *provision-bearing* protocol declared in that dependency's source —
+//! the trait-flattening counterpart to the class-metadata resolution above.
+//! `trait_expansion::expand_module` needs a used protocol's actual provided
+//! methods, not just its name/signature, to flatten a cross-package `uses:`
+//! against it; this is the only source that data can come from on this
+//! offline path (a checkout with no `.bt` source has none to give — see that
+//! function's own doc for the "neither source nor
+//! `'__beamtalk_protocol_source'/0`" case, which is not yet implementable
+//! here since nothing on this Rust-side path reads a compiled `.beam`
+//! module's exports).
+//!
 //! **Transitive dependencies:** [`resolve_dependency_class_infos`]
 //! walks the full transitive dependency graph — not just the project's own
 //! direct `[dependencies]` table — by recursively reading each discovered
@@ -58,6 +71,7 @@
 use crate::build_layout::BuildLayout;
 use crate::manifest;
 use crate::path_util::dep_root_for_source;
+use beamtalk_core::ast::ProtocolDefinition;
 use beamtalk_core::compilation::DependencyMap;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
@@ -71,7 +85,7 @@ use tracing::warn;
 /// Resolve dependency class metadata for `project_root` without performing
 /// any network I/O.
 ///
-/// Returns `(has_package_dependencies, class_infos)`:
+/// Returns `(has_package_dependencies, class_infos, protocol_defs)`:
 /// - `has_package_dependencies` mirrors `beamtalk lint`'s `run_lint`-computed
 ///   flag: read from the manifest's
 ///   `[dependencies]` table regardless of whether any individual dependency
@@ -79,14 +93,25 @@ use tracing::warn;
 ///   fetched yet doesn't flip diagnostic behaviour between runs.
 /// - `class_infos` contains every class defined in a dependency whose
 ///   checkout is present on disk.
+/// - `protocol_defs` contains the full AST of every *provision-bearing*
+///   protocol defined in a dependency whose checkout is present on disk
+///   (ADR 0127 §10a; BT-3591) — the trait-flattening counterpart to
+///   `class_infos`, so a cross-package `uses:` can flatten against it
+///   instead of reporting "no source available" (see
+///   `trait_expansion::expand_module`'s doc). A dependency whose checkout
+///   isn't present on disk contributes nothing here either — same
+///   best-effort skip as `class_infos`.
 ///
-/// Returns `(false, Vec::new())` if `project_root` has no `beamtalk.toml`.
+/// Returns `(false, Vec::new(), Vec::new())` if `project_root` has no
+/// `beamtalk.toml`.
 #[must_use]
-pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<ClassInfo>) {
+pub fn resolve_dependency_class_infos(
+    project_root: &Utf8Path,
+) -> (bool, Vec<ClassInfo>, Vec<ProtocolDefinition>) {
     let manifest_path = project_root.join("beamtalk.toml");
     match manifest_path.try_exists() {
         Ok(true) => {}
-        Ok(false) => return (false, Vec::new()),
+        Ok(false) => return (false, Vec::new(), Vec::new()),
         Err(e) => {
             warn!(
                 error = %e,
@@ -94,7 +119,7 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
                 "Failed to check for beamtalk.toml for offline dependency class resolution; \
                  assuming no manifest"
             );
-            return (false, Vec::new());
+            return (false, Vec::new(), Vec::new());
         }
     }
 
@@ -106,13 +131,14 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
                 "Failed to parse beamtalk.toml for offline dependency class resolution; \
                  conservatively assuming dependencies are declared"
             );
-            return (true, Vec::new());
+            return (true, Vec::new(), Vec::new());
         }
     };
 
     let has_package_dependencies = !parsed.dependencies.is_empty();
     let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
+    let mut protocol_defs = Vec::new();
 
     // BFS over the transitive dependency graph, matching
     // `discover_all_dep_roots`'s reachability: a queue of
@@ -152,7 +178,7 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
                 continue;
             }
 
-            collect_dep_class_infos(&dep_root, &name, &mut class_infos);
+            collect_dep_class_infos(&dep_root, &name, &mut class_infos, &mut protocol_defs);
 
             // Queue this dependency's own dependencies for discovery,
             // reading whatever checkout is already on disk — still no
@@ -166,7 +192,7 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
         }
     }
 
-    (has_package_dependencies, class_infos)
+    (has_package_dependencies, class_infos, protocol_defs)
 }
 
 /// Cheap staleness signal for a dependency's source tree: the
@@ -196,9 +222,10 @@ impl DepFingerprint {
     }
 }
 
-/// A dependency's cached class infos, tagged with the [`DepFingerprint`]
-/// they were resolved under.
-type CachedDepClassInfos = (DepFingerprint, Vec<ClassInfo>);
+/// A dependency's cached class infos and provision-bearing protocol ASTs
+/// (ADR 0127 §10a; BT-3591), tagged with the [`DepFingerprint`] they were
+/// resolved under.
+type CachedDepClassInfos = (DepFingerprint, Vec<ClassInfo>, Vec<ProtocolDefinition>);
 
 /// Process-lifetime cache of [`collect_dep_class_infos`] results, keyed by
 /// dependency checkout path. See the module docs for why this
@@ -216,9 +243,15 @@ static PARSE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUs
 
 /// Parse every `.bt` file under a dependency's `src/` directory (falling
 /// back to its root if there is no `src/`) and append its class metadata to
-/// `class_infos`, reusing a cached result when the dependency's
-/// [`DepFingerprint`] hasn't changed since the last call.
-fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mut Vec<ClassInfo>) {
+/// `class_infos` and its provision-bearing protocols' full ASTs (ADR 0127
+/// §10a; BT-3591) to `protocol_defs`, reusing a cached result when the
+/// dependency's [`DepFingerprint`] hasn't changed since the last call.
+fn collect_dep_class_infos(
+    dep_root: &Utf8Path,
+    dep_name: &str,
+    class_infos: &mut Vec<ClassInfo>,
+    protocol_defs: &mut Vec<ProtocolDefinition>,
+) {
     let src_dir = dep_root.join("src");
     let search_dir = if src_dir.is_dir() {
         src_dir.as_path()
@@ -240,10 +273,13 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get(search_dir)
-        .filter(|(cached_fingerprint, _)| *cached_fingerprint == fingerprint)
-        .map(|(_, cached_infos)| cached_infos.clone());
-    if let Some(cached_infos) = cached {
+        .filter(|(cached_fingerprint, _, _)| *cached_fingerprint == fingerprint)
+        .map(|(_, cached_infos, cached_protocol_defs)| {
+            (cached_infos.clone(), cached_protocol_defs.clone())
+        });
+    if let Some((cached_infos, cached_protocol_defs)) = cached {
         class_infos.extend(cached_infos);
+        protocol_defs.extend(cached_protocol_defs);
         return;
     }
 
@@ -251,6 +287,7 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
     PARSE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     let mut resolved = Vec::new();
+    let mut resolved_protocol_defs = Vec::new();
     let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
@@ -266,17 +303,26 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
         let (module, _parse_diags) = parse(tokens);
         resolved
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
+        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // BT-3591) — see this function's own doc.
+        resolved_protocol_defs.extend(
+            module
+                .protocols
+                .into_iter()
+                .filter(|p| !p.provided_methods.is_empty()),
+        );
     }
 
     class_infos.extend(resolved.iter().cloned());
+    protocol_defs.extend(resolved_protocol_defs.iter().cloned());
     // Only cache a result derived from every file being read successfully —
     // caching a partial result under this fingerprint would make a transient read failure
     // (e.g. a lock from a concurrent `beamtalk build`) sticky until the fingerprint changes.
     if all_read {
-        cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(search_dir.to_path_buf(), (fingerprint, resolved));
+        cache.lock().unwrap_or_else(PoisonError::into_inner).insert(
+            search_dir.to_path_buf(),
+            (fingerprint, resolved, resolved_protocol_defs),
+        );
     }
 }
 
@@ -303,7 +349,7 @@ mod tests {
     fn no_manifest_returns_empty() {
         let tmp = TempDir::new().unwrap();
         let root = Utf8Path::from_path(tmp.path()).unwrap();
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(!has_deps);
         assert!(infos.is_empty());
     }
@@ -317,7 +363,7 @@ mod tests {
             tmp.path().join("beamtalk.toml").as_path(),
             "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n",
         );
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(!has_deps);
         assert!(infos.is_empty());
     }
@@ -340,12 +386,54 @@ mod tests {
             "Object subclass: HTTPServer\n",
         );
 
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(
             infos.iter().any(|c| c.name == "HTTPServer"),
             "expected HTTPServer in resolved class infos, got {infos:?}"
         );
+    }
+
+    /// ADR 0127 §10a / BT-3591: a dependency's *provision-bearing* protocol
+    /// (a trait) is yielded as a full AST alongside its `ClassInfo`s, so a
+    /// cross-package `uses: http@Retryable` can flatten against it — the
+    /// trait-flattening counterpart to the class-resolution test above. A
+    /// requirement-only protocol in the same dependency is still tracked
+    /// (via the offline path's existing `ProtocolInfo` extraction,
+    /// unaffected here) but contributes no AST.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn git_dependency_checkout_present_resolves_provision_bearing_protocol_defs() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path()
+                .join("_build/deps/http/src/retryable.bt")
+                .as_path(),
+            "Protocol define: Retryable\n  \
+             attempt -> Boolean\n\n  \
+             retryTwice -> Boolean => self attempt or: [self attempt]\n",
+        );
+        write(
+            tmp.path()
+                .join("_build/deps/http/src/printable.bt")
+                .as_path(),
+            "Protocol define: Printable\n  asString -> String\n",
+        );
+
+        let (has_deps, _infos, protocol_defs) = resolve_dependency_class_infos(root);
+        assert!(has_deps);
+        assert_eq!(
+            protocol_defs.len(),
+            1,
+            "expected only the provision-bearing protocol, got {protocol_defs:?}"
+        );
+        assert_eq!(protocol_defs[0].name.name.as_str(), "Retryable");
     }
 
     /// A registry dependency lands in the same `_build/deps/<name>/`
@@ -368,7 +456,7 @@ mod tests {
             "Object subclass: YAMLParser\n",
         );
 
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(
             infos.iter().any(|c| c.name == "YAMLParser"),
@@ -388,7 +476,7 @@ mod tests {
         );
 
         // No `_build/deps/http/` checkout — best-effort skip, not an error.
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(infos.is_empty());
     }
@@ -414,7 +502,7 @@ mod tests {
             "Object subclass: Utils\n",
         );
 
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(
             infos.iter().any(|c| c.name == "Utils"),
@@ -445,13 +533,13 @@ mod tests {
         // spurious failure here harder to diagnose than "expected 0, got N".
         PARSE_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
 
-        let (_, infos1) = resolve_dependency_class_infos(root);
+        let (_, infos1, _) = resolve_dependency_class_infos(root);
         let calls_after_first = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
         assert!(
             calls_after_first > 0,
             "first call should have parsed the dependency file, got 0 parse calls"
         );
-        let (_, infos2) = resolve_dependency_class_infos(root);
+        let (_, infos2, _) = resolve_dependency_class_infos(root);
         let calls_after_second = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
 
         assert_eq!(
@@ -478,7 +566,7 @@ mod tests {
         // `cache_hit_avoids_reparsing_unchanged_dependency` above.
         PARSE_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
 
-        let (_, infos1) = resolve_dependency_class_infos(root);
+        let (_, infos1, _) = resolve_dependency_class_infos(root);
         assert!(infos1.iter().any(|c| c.name == "HTTPServer"));
         let calls_after_first = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
         assert!(
@@ -500,7 +588,7 @@ mod tests {
             .set_modified(bumped)
             .unwrap();
 
-        let (_, infos2) = resolve_dependency_class_infos(root);
+        let (_, infos2, _) = resolve_dependency_class_infos(root);
         let calls_after_second = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
 
         assert!(
@@ -532,7 +620,7 @@ mod tests {
             "Object subclass: A\n",
         );
 
-        let (_, infos1) = resolve_dependency_class_infos(root);
+        let (_, infos1, _) = resolve_dependency_class_infos(root);
         assert!(infos1.iter().any(|c| c.name == "A"));
         assert!(!infos1.iter().any(|c| c.name == "B"));
 
@@ -544,7 +632,7 @@ mod tests {
             "Object subclass: B\n",
         );
 
-        let (_, infos2) = resolve_dependency_class_infos(root);
+        let (_, infos2, _) = resolve_dependency_class_infos(root);
         assert!(
             infos2.iter().any(|c| c.name == "B"),
             "expected newly added file's class to be picked up, got {infos2:?}"
@@ -582,7 +670,7 @@ mod tests {
             "Object subclass: BClass\n",
         );
 
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(
             infos.iter().any(|c| c.name == "AClass"),
@@ -621,7 +709,7 @@ mod tests {
             "Object subclass: BClass\n",
         );
 
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(
             infos.iter().any(|c| c.name == "BClass"),
@@ -652,7 +740,7 @@ mod tests {
         );
         // No `_build/deps/b/` checkout.
 
-        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(infos.iter().any(|c| c.name == "AClass"));
         assert!(!infos.iter().any(|c| c.name == "BClass"));
@@ -690,7 +778,7 @@ mod tests {
             "Object subclass: SharedClass\n",
         );
 
-        let (_, infos) = resolve_dependency_class_infos(root);
+        let (_, infos, _) = resolve_dependency_class_infos(root);
         let shared_count = infos.iter().filter(|c| c.name == "SharedClass").count();
         assert_eq!(
             shared_count, 1,

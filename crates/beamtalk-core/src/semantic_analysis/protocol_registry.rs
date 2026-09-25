@@ -1137,7 +1137,7 @@ Value subclass: Version
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
         let (expansion_diags, _origins) =
-            crate::semantic_analysis::trait_expansion::expand_module(&mut module);
+            crate::semantic_analysis::trait_expansion::expand_module(&mut module, &HashMap::new());
         assert!(expansion_diags.is_empty(), "{expansion_diags:?}");
 
         let (hierarchy, _) = ClassHierarchy::build(&module);

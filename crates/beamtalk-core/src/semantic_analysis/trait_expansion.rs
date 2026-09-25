@@ -45,15 +45,29 @@
 //!
 //! # Inputs and boundaries
 //!
-//! [`expand_module`] takes only `&mut Module` — a deliberately narrow,
-//! explicit-input design (no hidden global registry lookup) that mirrors
+//! [`expand_module`] takes `&mut Module` plus an `external_protocols` map —
+//! a deliberately narrow, explicit-input design (no hidden global registry
+//! lookup) that mirrors
 //! [`crate::semantic_analysis::class_kind_writeback::apply_class_kind_writeback`].
-//! A used protocol is resolved from `module.protocols` alone: only
-//! same-module traits flatten today. Carrying a trait's AST across files
-//! (ADR 0127 §10a, "Carrying trait ASTs to users") is BT-3591's build-graph
-//! work; until then, a cross-file or cross-package `uses:` reports
-//! [`Diagnostic::error`] "unknown protocol" the same way a genuinely
-//! misspelled name would, rather than silently doing nothing.
+//! A used protocol is resolved from `module.protocols` first (current-file
+//! wins on a name clash), falling back to `external_protocols` — every
+//! provision-bearing protocol's full AST carried in from elsewhere: another
+//! file in the same package, or a dependency package (ADR 0127 §10a,
+//! "Carrying trait ASTs to users"; BT-3591's build-graph work). Each compile
+//! path builds this map from whatever source it already has access to (see
+//! that section for the full per-entry-point breakdown) and hands it in
+//! here — `trait_expansion` itself does no file I/O and knows nothing about
+//! packages or dependency checkouts. A `uses:` whose protocol resolves in
+//! neither map reports [`Diagnostic::error`]: "unknown protocol" for a bare
+//! name (a same-file/same-project typo, exactly as before), or a distinct
+//! "no source available" error for a package-qualified name — since the
+//! *only* way a cross-package protocol's `ProtocolDefinition` reaches
+//! `external_protocols` is by successfully parsing that dependency's `.bt`
+//! source, failing to find it there means precisely that no source (nor yet
+//! a `'__beamtalk_protocol_source'/0` reader — not implemented on this,
+//! Rust-side, path; see ADR 0127 §10a "Binary-only dependencies") was
+//! available, so the diagnostic can report that directly rather than
+//! guessing.
 //!
 //! # `MethodInfo::origin`
 //!
@@ -91,6 +105,16 @@ pub type OriginMap = HashMap<(EcoString, EcoString), EcoString>;
 /// Expand every `uses:` line in `module`'s classes in place (ADR 0127 §3
 /// steps 1–4, 6).
 ///
+/// `external_protocols` carries every provision-bearing protocol's full AST
+/// from outside this module — another file in the same package, or a
+/// dependency package (ADR 0127 §10a; BT-3591) — keyed by bare protocol
+/// name. Pass an empty map for a caller with no cross-file/cross-package
+/// carrying to offer (a `uses:` then only resolves same-module, exactly as
+/// before). A name present in both `module.protocols` and
+/// `external_protocols` resolves to the current module's own definition —
+/// current-file wins, matching every other pre-hierarchy pass's "current
+/// module wins" convention.
+///
 /// Returns the diagnostics this pass produced (unknown protocols, provision
 /// conflicts, the body-less-protocol hint) and the [`OriginMap`] the caller
 /// applies to `MethodInfo::origin` after building `ClassHierarchy` from the
@@ -99,7 +123,11 @@ pub type OriginMap = HashMap<(EcoString, EcoString), EcoString>;
 /// A class with no `uses:` lines is untouched and contributes nothing to
 /// either return value — this function is a no-op for every module that
 /// doesn't use ADR 0127 traits, so callers can run it unconditionally.
-pub fn expand_module(module: &mut Module) -> (Vec<Diagnostic>, OriginMap) {
+#[allow(clippy::implicit_hasher)] // concrete HashMap (every caller builds one the same way) is simpler for callers
+pub fn expand_module(
+    module: &mut Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+) -> (Vec<Diagnostic>, OriginMap) {
     let mut diagnostics = Vec::new();
     let mut origins = OriginMap::new();
 
@@ -111,8 +139,14 @@ pub fn expand_module(module: &mut Module) -> (Vec<Diagnostic>, OriginMap) {
     // protocol's provisions never change while flattening its users, and
     // borrowing `module.protocols` for the whole loop while also mutating
     // `module.classes` would need this same split regardless.
-    let protocols: HashMap<&EcoString, &ProtocolDefinition> =
-        module.protocols.iter().map(|p| (&p.name.name, p)).collect();
+    //
+    // `external_protocols` is inserted first so the current module's own
+    // `module.protocols` entries — inserted second into the same `HashMap`
+    // — overwrite any same-named external entry (current-file wins, per
+    // this function's own doc).
+    let mut protocols: HashMap<&EcoString, &ProtocolDefinition> =
+        external_protocols.iter().collect();
+    protocols.extend(module.protocols.iter().map(|p| (&p.name.name, p)));
 
     for class in &mut module.classes {
         if class.uses.is_empty() {
@@ -196,27 +230,16 @@ fn expand_class(
     let mut conflicted: HashSet<EcoString> = HashSet::new();
 
     for use_ in &class.uses {
-        // A package-qualified `uses:` (`uses: json@Parser`) or a name not
-        // defined in this module is not resolvable yet — cross-file trait
-        // ASTs are BT-3591 (module doc). Matching by bare name only when
-        // `package` is `None` avoids accidentally flattening an unrelated
-        // same-named local protocol for a qualified reference.
-        let protocol = if use_.package.is_none() {
-            protocols.get(&use_.protocol.name).copied()
-        } else {
-            None
-        };
+        // `protocols` already merges the current module's own protocols with
+        // every externally-carried one (same-package other file, or a
+        // dependency's protocol AST — BT-3591, module doc), so a bare-name
+        // lookup resolves either kind identically regardless of whether
+        // `use_` itself is package-qualified (`uses: json@Parser`) — the
+        // qualifier only matters for the *diagnostic* below when resolution
+        // fails.
+        let protocol = protocols.get(&use_.protocol.name).copied();
         let Some(protocol) = protocol else {
-            diagnostics.push(
-                Diagnostic::error(
-                    format!("unknown protocol `{}`", use_.protocol.name),
-                    use_.protocol.span,
-                )
-                .with_hint(
-                    "cross-file and cross-package traits aren't supported yet — \
-                     define the protocol in this file, or check the spelling",
-                ),
-            );
+            diagnostics.push(missing_protocol_diagnostic(use_));
             continue;
         };
 
@@ -290,6 +313,44 @@ fn expand_class(
     for (selector, provision) in flattened {
         origins.insert((class.name.name.clone(), selector), provision.protocol_name);
         class.methods.push(provision.method);
+    }
+}
+
+/// Builds the diagnostic for a `uses:` line whose protocol resolved in
+/// neither the current module nor `external_protocols` (ADR 0127 §10a;
+/// BT-3591).
+///
+/// A package-qualified reference (`uses: json@Parser`) gets a distinct "no
+/// source available" error rather than the bare-name "unknown protocol" one:
+/// the only way a cross-package protocol's AST reaches `external_protocols`
+/// is a caller successfully parsing that dependency's `.bt` source (see
+/// [`expand_module`]'s doc), so failing to find it here means precisely that
+/// — not a typo — and the diagnostic can name that directly instead of
+/// guessing between the two.
+fn missing_protocol_diagnostic(use_: &ProtocolUse) -> Diagnostic {
+    if let Some(package) = &use_.package {
+        Diagnostic::error(
+            format!(
+                "no source available for protocol `{}` used via `{}@{}`",
+                use_.protocol.name, package.name, use_.protocol.name
+            ),
+            use_.protocol.span,
+        )
+        .with_hint(
+            "a trait's provisions must be flattened from its source — the dependency must \
+             ship this protocol's `.bt` source (or, for a compiled-only module, export \
+             `'__beamtalk_protocol_source'/0`) so `uses:` can flatten it here",
+        )
+    } else {
+        Diagnostic::error(
+            format!("unknown protocol `{}`", use_.protocol.name),
+            use_.protocol.span,
+        )
+        .with_hint(
+            "no protocol by this name was found in this file, elsewhere in this package, or \
+             among its resolved dependencies — check the spelling, or add a package qualifier \
+             (`uses: pkg@Name`) if it's defined in a dependency",
+        )
     }
 }
 
@@ -691,10 +752,18 @@ const OVERRIDE_ALLOWLIST_ROOTS: &[&str] = &["Object", "Value"];
 /// (Phase 0.5) — both class-side checks (`resolves_selector`, the
 /// superclass-chain walk) and protocol-side checks (`all_conformance_selectors`,
 /// which needs the registry for `extending:` transitivity) depend on it.
+///
+/// `external_protocols` must be the same map [`expand_module`] flattened
+/// `module` against (BT-3591) — a class-side check for a `uses:` line that
+/// resolved cross-file/cross-package during expansion needs the same
+/// protocol definition to check requirements, `excluding:`/`overriding:`
+/// names, and dropped-provision override compatibility against.
+#[allow(clippy::implicit_hasher)] // concrete HashMap (every caller builds one the same way) is simpler for callers
 pub fn check_after_hierarchy(
     module: &Module,
     hierarchy: &ClassHierarchy,
     protocol_registry: &ProtocolRegistry,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -703,8 +772,9 @@ pub fn check_after_hierarchy(
     }
 
     if module.classes.iter().any(|c| !c.uses.is_empty()) {
-        let protocols: HashMap<&EcoString, &ProtocolDefinition> =
-            module.protocols.iter().map(|p| (&p.name.name, p)).collect();
+        let mut protocols: HashMap<&EcoString, &ProtocolDefinition> =
+            external_protocols.iter().collect();
+        protocols.extend(module.protocols.iter().map(|p| (&p.name.name, p)));
         for class in &module.classes {
             if class.uses.is_empty() {
                 continue;
@@ -926,14 +996,11 @@ fn check_class_trait_usage(
             .is_closed_complete();
 
     for use_ in &class.uses {
-        // Mirrors `expand_class`'s own protocol resolution — a
-        // package-qualified or unknown-name `uses:` was already diagnosed
-        // by `expand_module` (Phase -1); nothing further to check here.
-        let protocol = if use_.package.is_none() {
-            protocols.get(&use_.protocol.name).copied()
-        } else {
-            None
-        };
+        // Mirrors `expand_class`'s own protocol resolution (`protocols`
+        // here is the same current-module-plus-external merge) — an
+        // unresolvable `uses:` was already diagnosed by `expand_module`
+        // (Phase -1); nothing further to check here.
+        let protocol = protocols.get(&use_.protocol.name).copied();
         let Some(protocol) = protocol else {
             continue;
         };

@@ -220,6 +220,36 @@ fn execute_build_passes(
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 
+    // ADR 0127 §10a (BT-3591): a class's `uses:` line makes its file's
+    // build-graph cache key depend on that protocol's content too — see
+    // `detect_changes`'s doc. `protocol_hashes` covers every provision-bearing
+    // protocol known to this build (same-package cross-file + dependency);
+    // `file_protocol_uses` reads straight off Pass 1's already-parsed
+    // `cached_asts`, so this costs no extra parse.
+    let protocol_hashes: HashMap<ecow::EcoString, String> = index
+        .all_protocol_defs
+        .iter()
+        .map(|p| {
+            (
+                p.name.name.clone(),
+                crate::commands::util::protocol_content_hash(p),
+            )
+        })
+        .collect();
+    let file_protocol_uses: HashMap<Utf8PathBuf, Vec<ecow::EcoString>> = index
+        .cached_asts
+        .iter()
+        .map(|(file, cached)| {
+            let used: Vec<ecow::EcoString> = cached
+                .module
+                .classes
+                .iter()
+                .flat_map(|c| c.uses.iter().map(|u| u.protocol.name.clone()))
+                .collect();
+            (file.clone(), used)
+        })
+        .collect();
+
     // Per-file change detection — only recompile files whose source
     // is newer than the corresponding .beam output. Pass 1's already-computed
     // content hashes (`index.source_hashes`) let this skip re-hashing
@@ -230,6 +260,8 @@ fn execute_build_passes(
         &file_module_pairs,
         force,
         &index.source_hashes,
+        &file_protocol_uses,
+        &protocol_hashes,
     );
 
     // Warn about orphaned .beam files (source deleted but .beam remains)
@@ -276,6 +308,7 @@ fn execute_build_passes(
             class_superclass_index: index.class_superclass_index.clone(),
             pre_loaded_classes: index.all_class_infos.clone(),
             pre_loaded_protocols: index.all_protocol_infos.clone(),
+            pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
             extension_index: index.extension_index.clone(),
         },

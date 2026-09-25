@@ -179,6 +179,7 @@ fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
         &module,
         source,
         &[],
+        vec![],
         initial_diags,
         false,
         None,
@@ -216,6 +217,7 @@ fn run_module_analysis_reports_mismatched_file_name() {
         &module,
         source,
         &[],
+        vec![],
         parse_diags,
         false,
         None,
@@ -241,6 +243,7 @@ fn run_module_analysis_does_not_report_matching_file_name() {
         &module,
         source,
         &[],
+        vec![],
         parse_diags,
         false,
         None,
@@ -253,6 +256,56 @@ fn run_module_analysis_does_not_report_matching_file_name() {
             .iter()
             .any(|d| d.message.contains("does not match declared class")),
         "matching file name should not be reported: {diags:?}"
+    );
+}
+
+/// ADR 0127 §10a / BT-3591: `run_module_analysis`'s `pre_loaded_protocol_defs`
+/// argument must actually reach
+/// `AnalysisContext::with_pre_loaded_protocol_defs`, so a dependency-sourced
+/// trait (a provision-bearing protocol) can flatten into a `uses:` class
+/// during MCP `lint`/`diagnostic_summary` instead of reporting "unknown
+/// protocol". `trait_expansion`'s "unknown protocol"/"no source available"
+/// diagnostics carry no `DiagnosticCategory` (unlike
+/// `check_native_declaration_location`'s, see the test below), so — like
+/// `run_module_analysis_is_stub_file_suppresses_native_declaration_location_error`
+/// above — this asserts on `analyse_full`'s pre-filter diagnostics directly
+/// rather than `run_module_analysis`'s own `category.is_some()`-filtered
+/// return, which would otherwise silently drop them either way.
+#[test]
+fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
+    let protocol_source = "Protocol define: Comparable\n  \
+        < other :: Self -> Boolean\n\n  \
+        max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n";
+    let (protocol_module, protocol_parse_diags) = parse(lex_with_eof(protocol_source));
+    assert!(protocol_parse_diags.is_empty());
+    let protocol_defs = protocol_module.protocols;
+    assert_eq!(protocol_defs.len(), 1);
+
+    let source = "Value subclass: Version\n  \
+        uses: Comparable\n  \
+        field: major :: Integer = 0\n\n  \
+        < other :: Version -> Boolean => self.major < other major\n";
+    let tokens = lex_with_eof(source);
+    let (module, _parse_diags) = parse(tokens);
+
+    let has_unknown_protocol = |defs: Vec<beamtalk_core::ast::ProtocolDefinition>| {
+        let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
+            .with_pre_loaded_protocol_defs(defs);
+        let result = beamtalk_core::semantic_analysis::analyse_full(&module, analysis_ctx);
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown protocol"))
+    };
+
+    assert!(
+        !has_unknown_protocol(protocol_defs),
+        "expected the dependency-sourced trait to resolve with pre_loaded_protocol_defs seeded"
+    );
+    assert!(
+        has_unknown_protocol(Vec::new()),
+        "expected the negative control (no pre_loaded_protocol_defs) to report \
+         `uses: Comparable` as unresolvable"
     );
 }
 
@@ -321,6 +374,7 @@ fn run_module_analysis_reports_native_declaration_location_error() {
         &module,
         source,
         &[],
+        Vec::new(),
         Vec::new(),
         false,
         None,
