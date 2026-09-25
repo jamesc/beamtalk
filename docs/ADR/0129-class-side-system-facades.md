@@ -176,7 +176,7 @@ Beamtalk has two things called "globals", and neither plays that role:
 - **`Beamtalk globals`** is a read-only `Dictionary` snapshot of the class
   registry (`handle_globals/0` in `beamtalk_interface.erl`). Nothing resolves
   names through it. It duplicates `classNamed:`/`allClasses` and
-  `SystemNavigation default allClasses`, which offers much richer queries
+  `SystemNavigation allClasses`, which offers much richer queries
   (`actorClasses`, `usersOf:`, `extendersOf:`, …). Outside its own tests and
   docs it has no callers.
 - **`Workspace globals`** is a live `BindingsView` (ADR 0081) over the
@@ -218,6 +218,34 @@ ADR 0081 has already set the precedent for fixing this. It gave `Session`
 
 ## Decision
 
+### Guiding principle: Smalltalk's vocabulary, not the image's mechanics
+
+Beamtalk is "Smalltalk-**like**, not Smalltalk-**compatible**"
+(`docs/beamtalk-principles.md`). This ADR makes that concrete for system
+objects, and records it as a general principle:
+
+- **Keep what users type and read.** That means message syntax, cascades,
+  blocks and the reflection selectors (`implementorsOf:`, `sendersOf:`,
+  `allClasses`, `respondsTo:`, `printString`). It also means the familiar
+  names: `Transcript show:`, `Beamtalk classNamed:`. A Pharo developer's
+  habits should pay off here.
+- **Drop the mechanisms that depend on a single live image.** Examples are
+  a `SystemDictionary` of globals, singletons created at startup and reached
+  through globals or class variables, and `Smalltalk at:put:` changing what
+  compiled code means. In Pharo these work because every line is compiled
+  and run inside one image. On BEAM the same module runs in the REPL, a
+  compiled app, `beamtalk test` and a release, so each of these mechanisms
+  becomes a "works here, not there" bug.
+- **Tiebreaker:** does a Pharo user's habit produce a *working* program,
+  and would an Erlang developer find the generated code unsurprising? When
+  the two conflict, BEAM wins, and the Smalltalk *name* is kept where
+  possible.
+
+The same principle is added to `docs/beamtalk-principles.md`, so future
+designs are checked against it.
+
+### Summary
+
 **The compiler and runtime inject no names.** `Beamtalk`, `Workspace` and
 `Transcript` become ordinary, sealed, stateless stdlib classes with
 **class-side** APIs. An identifier resolves the same way in every context:
@@ -230,7 +258,75 @@ REPL expression, method body, `beamtalk build`, `beamtalk test`,
 | `Workspace` | `Workspace` (renamed from `WorkspaceInterface`) | Sessions, bindings, ChangeLog, `load:`, flush, supervisors, tests | Raises `#beamtalk_error{kind: no_workspace}` |
 | `Transcript` | `Transcript` (new) | The REPL's `TranscriptStream` process | Routes `show:`/`cr` through `Logger` |
 
-### 1. Rules every facade follows
+### 1. How stdlib reaches "the system thing"
+
+Today the stdlib reaches a system service in three different ways:
+
+| Pattern | Classes | Behaviour |
+|---|---|---|
+| `class current` reads a class variable set at bootstrap; typed `\| Nil` | `BeamtalkInterface`, `WorkspaceInterface`, `TranscriptStream` | `nil` outside a workspace. This is the bug. |
+| `class default => self new` | `SystemNavigation` | Stateless and works everywhere. It is also the only stdlib code that instantiates an Object-kind class (BT-3632). |
+| `class default` / `of:` / `on:`, building a scoped value or handle | `ProcessNavigation`, `AnnouncementNavigation` | Instances carry a snapshot or an announcer. `default` chooses one scope among several. |
+| `class current` asks the runtime at call time | `SystemAnnouncer`, `Session`, `Supervisor` | Returns the live entity, or `nil` when there legitimately is none. |
+
+**The rule.** Every stdlib class that exposes a system service uses exactly
+one of these three shapes:
+
+1. **Class-side facade.** A service that is stateless and has a single
+   scope is a `sealed` class with class-side methods only. It has no
+   `classState:` and is never instantiated.
+   - Examples: `Beamtalk`, `Workspace`, `Transcript`, `SystemNavigation`,
+     `System`, `File`, `Console`, `Logger`.
+2. **`default` and named factories.** Used only when *instances carry state
+   or scope*, so that `default` picks one scope among several.
+   - Examples: `ProcessNavigation default` / `system` / `from:` / `on:`,
+     and `AnnouncementNavigation default` / `of:`.
+3. **`current`.** Used only for a genuinely live runtime entity, **found by
+   asking the runtime at call time**. It returns `| Nil` only when there
+   legitimately is no such entity, for example `Session current` outside
+   a REPL session.
+   - Examples: `SystemAnnouncer`, `Session`, `Supervisor`.
+
+**Forbidden:** a singleton held in a class variable that bootstrap code sets.
+That is the image mechanism this ADR removes. It fails in every boot context
+that doesn't run the bootstrap. It also races class loading, which is why
+the value-singleton retry loop (`rebootstrap_value`, 200 ms × 5) exists. And
+it forces `@expect type` workarounds on `class current` / `resetCurrent`,
+because `hasField:`/`clearField:` infer as `Dynamic`.
+
+### 1a. `SystemNavigation` moves class-side; BT-3632 is settled
+
+- **`SystemNavigation` is rule 1.** It is stateless, and a node has exactly
+  one class registry, so `default` has nothing to choose between. In
+  Pharo, `default` picks the default *environment*. Beamtalk has no
+  environments to pick from. So `default` is image plumbing, not
+  vocabulary.
+- **The selectors carry over unchanged.** `SystemNavigation implementorsOf:
+  #foo`, `SystemNavigation sendersOf: #bar`, `SystemNavigation
+  actorClasses`, and so on. `default` is removed.
+- **A DNU on `default` points to the new form.** The DNU hint for
+  `SystemNavigation default` names the class-side form, the same way the
+  DNU hints for the removed `*Interface` names do (§6).
+- **If package-scoped navigation ever arrives** (ADR 0070 namespaces), it
+  becomes a rule-2 value class carrying a scope. It would have its own
+  `default` and `forPackage:` factories, as `ProcessNavigation` does.
+
+This settles **BT-3632** as its option 2:
+
+- **Object-kind classes are never instantiable.** With `SystemNavigation`
+  class-side, no stdlib code instantiates an Object-kind class.
+- **The validator stops depending on how the receiver is spelled.**
+  `check_actor_new_usage` / `object_kind_new_error` in
+  `class_validators.rs` also rejects `self new` / `super new` inside a
+  class method of an Object-kind class, not just `Foo new`.
+- **The hint stays accurate.** It keeps "Object subclasses are not
+  instantiable", and adds: "for a stateless service, use class-side
+  methods; for data, use `Value subclass:`".
+- **Rule-2 classes are unaffected.** `AnnouncementNavigation` creates its
+  handles through FFI (`navigationFor:`), not `new`, and `ProcessNavigation`
+  is a `Value`.
+
+### 1b. Rules every facade follows
 
 - **Sealed, stateless, class-side only.** A facade is declared
   `sealed typed Object subclass: …`, with no `classState:` and no
@@ -276,7 +372,7 @@ None of these needs a workspace. The class registry and logger belong to
 - **What replaces it:**
   - `Beamtalk classNamed:` for lookup by name;
   - `Beamtalk allClasses` for enumeration;
-  - `SystemNavigation default` for anything richer.
+  - `SystemNavigation` for anything richer.
 - **Why remove it:**
   - The name leads Smalltalkers to read it as the global scope, which it
     is not.
@@ -786,9 +882,9 @@ a class-alias mechanism so `Beamtalk` names the same class. Rejected:
   decided here.
 - ADR 0048 (class-side method syntax, deferred) gains about 60 more
   `class sealed` methods to migrate if that syntax ever changes.
-- `SystemNavigation default` keeps its instance-facade shape. It is
-  never injected, and it works in every context, so it has none of the bug.
-  Whether to make it class-side for consistency is left to a follow-up.
+- `ProcessNavigation default` and `AnnouncementNavigation default` are
+  unchanged. They are rule-2 scope factories over stateful values, and they
+  already conform.
 - The class names `Beamtalk` and `Workspace` compile to modules
   `bt@stdlib@beamtalk` and `bt@stdlib@workspace`. These don't collide with
   the Erlang `beamtalk_*` application modules.
@@ -873,6 +969,17 @@ branch is green after each phase except where noted.
   `beamtalk_repl_compiler_tests`, `beamtalk_workspace_sup_tests`, the
   primitives load tests and the structural-validator tests.
 
+**Phase 4b: `SystemNavigation` class-side + BT-3632** (S–M, independent of Phases 1–4)
+- Make every `SystemNavigation` query `class sealed`, and delete `default`.
+- Repoint about 218 `SystemNavigation default` references, most of them in
+  docs.
+- In `class_validators.rs`, make the Object-kind `new` check independent of
+  the receiver: `self new` / `super new` in a class method of an
+  Object-kind class is rejected. Fix the hint text.
+- Add validator tests for both `Foo new` and `self new`.
+- Update the `SystemNavigation` comment that cites ADR 0083's implicit
+  `new`.
+
 **Phase 5: sweep docs, examples and templates** (M)
 - **`docs/beamtalk-language-features.md`:**
   - Rewrite *Workspace and Reflection API* around the class-side facades,
@@ -889,7 +996,9 @@ branch is green after each phase except where noted.
   - `docs/learning/22-workspace-globals.md`, which is renamed for
     `Workspace bindings`;
   - `docs/stdlib-implementation-status.md`;
-  - `docs/beamtalk-ddd-model.md`;
+  - `docs/beamtalk-ddd-model.md`, including the stale description (around
+    line 1065) of a nonexistent `BeamtalkSystemDictionary` /
+    `stdlib/src/SystemDictionary.bt`;
   - `docs/development/testing-strategy.md`.
 - Replace the 20 uses of the non-existent `Transcript showLine:` with
   `showCr:`.
@@ -923,8 +1032,10 @@ There are no shims. Everything moves in one change:
 | `(Erlang beamtalk_interface) findClass: n` (exdura) | `Beamtalk classNamed: n` |
 | Test setUp swapping `TranscriptStream current:` | Assert on return values, or configure a Logger handler on domain `[beamtalk, user, transcript]` |
 | `Transcript showLine: x` (docs only; never existed) | `Transcript showCr: x` |
-| `Beamtalk globals` | `Beamtalk classNamed:` / `Beamtalk allClasses` / `SystemNavigation default …` |
+| `Beamtalk globals` | `Beamtalk classNamed:` / `Beamtalk allClasses` / `SystemNavigation …` |
 | `Workspace globals` | `Workspace bindings` |
+| `SystemNavigation default implementorsOf: #x` | `SystemNavigation implementorsOf: #x` |
+| `self new` in a class method of an `Object subclass:` | A class-side API (rule 1), or `Value subclass:` for data |
 
 REPL users type exactly what they typed before.
 
@@ -968,8 +1079,10 @@ shipped.
     `release_mode_no_workspace` in `beamtalk_capability`.
 
 ## References
-- Related issues: BT-3631 (this ADR), BT-3622 (`classNamed:` dynamic symbols,
-  commit `0d2cb5231`)
+- Related issues:
+  - BT-3631 (this ADR)
+  - BT-3622 (`classNamed:` dynamic symbols, commit `0d2cb5231`)
+  - BT-3632 (Object-kind `new` rule; settled here as option 2, §1a)
 - Related ADRs:
   - [0010](0010-global-objects-and-singleton-dispatch.md) — global objects and singleton dispatch
   - [0013](0013-class-variables-class-methods-instantiation.md) — class methods
@@ -979,6 +1092,7 @@ shipped.
   - [0064](0064-runtime-logging-control-and-observability-api.md) — Logger
   - [0070](0070-package-namespaces-and-dependencies.md) — no per-file imports
   - [0081](0081-first-class-session-object.md) — Session and binding layers
+  - [0083](0083-metaclass-aware-type-inference.md) — typing of `new` (the implicit-`new` note in `SystemNavigation`)
   - [0124](0124-slots-late-assignment-definite-assignment.md) — `late classState: current`
   - [0125](0125-otp-releases-and-upgrade-compatibility.md) — modes and capability refusals
 - Documentation:

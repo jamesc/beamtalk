@@ -61,6 +61,33 @@ State persists in **running processes**, not a monolithic snapshot file.
 
 **Implication:** The workspace is the live system. Reconnecting picks up where you left off — actors, state, loaded modules all persist.
 
+### Smalltalk's vocabulary, not the image's mechanics
+
+The same compiled module runs in several boot contexts: the REPL
+workspace, `beamtalk run`, `beamtalk test` and an OTP release. Each context
+starts a different set of applications. Anything that exists only because
+"the image" set it up is therefore present in some contexts and missing in
+others.
+
+- **Keep what users type and read.** Message syntax, cascades, blocks,
+  reflection selectors (`implementorsOf:`, `respondsTo:`, …) and familiar
+  names (`Transcript show:`, `Beamtalk classNamed:`).
+- **Drop the mechanisms that depend on a single live image:**
+  - a global `SystemDictionary`;
+  - names the REPL injects that compiled code can't see;
+  - singletons that a bootstrap step stores in class variables;
+  - anything that changes what compiled code means depending on where it
+    runs.
+- **An identifier must mean the same thing in every context.** A service
+  that is genuinely context-bound, such as `Workspace` outside a workspace,
+  raises a clear structured error. It never evaluates to `nil`, and it
+  never goes silent.
+- **Tiebreaker:** when a Pharo habit conflicts with idiomatic BEAM
+  behaviour, BEAM wins, and the Smalltalk *name* is kept where possible.
+
+See [ADR 0129](ADR/0129-class-side-system-facades.md) for how this applies
+to `Beamtalk`, `Workspace`, `Transcript` and `SystemNavigation`.
+
 ---
 
 ## 5. Code Lives in Files
