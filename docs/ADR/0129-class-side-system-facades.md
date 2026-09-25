@@ -178,7 +178,7 @@ Beamtalk has two things called "globals", and neither plays that role:
 - **`Beamtalk globals`** is a read-only `Dictionary` snapshot of the class
   registry (`handle_globals/0` in `beamtalk_interface.erl`). Nothing resolves
   names through it. It duplicates `classNamed:`/`allClasses` and
-  `SystemNavigation default allClasses`, which offers much richer queries
+  `SystemNavigation allClasses`, which offers much richer queries
   (`actorClasses`, `usersOf:`, `extendersOf:`, …). Outside its own tests and
   docs it has no callers.
 - **`Workspace globals`** is a live `BindingsView` (ADR 0081) over the
@@ -274,7 +274,7 @@ Today the stdlib reaches a system service in three different ways:
 | Pattern | Classes | Behaviour |
 |---|---|---|
 | `class current` reads a class variable set at bootstrap; typed `\| Nil` | `BeamtalkInterface`, `WorkspaceInterface`, `TranscriptStream` | `nil` outside a workspace. This is the bug. |
-| `class default => self new` on an `Object subclass:` | `SystemNavigation` | Stateless today, but scoped constructors are planned (BT-2201). It is the only stdlib code that instantiates an Object-kind class (BT-3632). |
+| `class default => self new` on an `Object subclass:` | `SystemNavigation` | A stateless, single-scope service disguised as an instance. It is the only stdlib code that instantiates an Object-kind class (BT-3632). |
 | `class default` / `of:` / `on:`, building a scoped value or handle | `ProcessNavigation`, `AnnouncementNavigation` | Instances carry a snapshot or an announcer. `default` chooses one scope among several. |
 | `class current` asks the runtime at call time | `SystemAnnouncer`, `Session`, `Supervisor` | Returns the live entity, or `nil` when there legitimately is none. |
 
@@ -284,13 +284,12 @@ one of these three shapes:
 1. **Class-side facade.** A service that is stateless and has a single
    scope is a `sealed` class with class-side methods only. It has no
    `classState:` and is never instantiated.
-   - Examples: `Beamtalk`, `Workspace`, `Transcript`, `System`, `File`,
-     `Console`, `Logger`.
+   - Examples: `Beamtalk`, `Workspace`, `Transcript`, `SystemNavigation`,
+     `System`, `File`, `Console`, `Logger`.
 2. **`default` and named factories.** Used only when *instances carry state
    or scope*, so that `default` picks one scope among several.
    - Examples: `ProcessNavigation default` / `system` / `from:` / `on:`,
-     `AnnouncementNavigation default` / `of:`, and `SystemNavigation
-     default` (plus the planned `over:` / `forClasses:`).
+     and `AnnouncementNavigation default` / `of:`.
 3. **`current`.** Used only for a genuinely live runtime entity, **found by
    asking the runtime at call time**. It returns `| Nil` only when there
    legitimately is no such entity, for example `Session current` outside
@@ -304,44 +303,49 @@ the value-singleton retry loop (`rebootstrap_value`, 200 ms × 5) exists. And
 it forces `@expect type` workarounds on `class current` / `resetCurrent`,
 because `hasField:`/`clearField:` infer as `Dynamic`.
 
-### 1a. `SystemNavigation` is rule 2 and becomes a `Value`; BT-3632 is settled
+### 1a. `SystemNavigation` becomes a class-side facade; BT-3632 is settled
 
-`SystemNavigation` stays **instance-side, with `default`**. It is not a rule-1
-facade, for two reasons its own header records
-(`stdlib/src/system_navigation.bt`):
+`SystemNavigation` is a stateless, single-scope service. A node has one class
+registry, and `default` has nothing to choose between. So it follows rule 1.
+Every query becomes `class sealed`, and `default` is removed:
 
-- **Scopes are planned.** BT-2201 plans scoped constructors,
-  `SystemNavigation over: aPackage` and `SystemNavigation forClasses: aList`,
-  which reuse the same query protocol. `default` is therefore a real
-  rule-2 scope factory: "the whole registry", as opposed to a package or
-  a class list. That matches Pharo, where `default` picks an environment.
-- **Class-side iteration would self-deadlock.** "Routing the iteration
-  through a class gen_server would self-deadlock when the walk reaches
-  `SystemNavigation` itself." Instance methods run as plain Erlang in the
-  caller's process.
+```beamtalk
+SystemNavigation sendersOf: #printString
+SystemNavigation implementorsOf: #asString
+SystemNavigation actorClasses
+```
 
-Today, though, it gets its instance by `self new` on a `sealed Object
-subclass:`. That is the only stdlib code that instantiates an Object-kind
-class, and it is the inconsistency BT-3632 reports. The fix is to make
-`SystemNavigation` what rule 2 says it is: a **`sealed typed Value
-subclass:`**.
-
-- **For now it has one field**, its scope, which is `#all` for `default`.
-  BT-2201's constructors fill that field in later.
-- **`default` becomes an ordinary `Value` construction.** It stays
-  `SystemNavigation default`, and every call site is unchanged.
+- **Neither Pharo's spelling nor call-site compatibility is a goal.** The
+  Pharo idiom `SystemNavigation default` exists because Pharo navigation is
+  scoped to an environment. Beamtalk has nothing to scope it to, so
+  `default` is image plumbing. About 216 call sites change, mostly in
+  `stdlib/test`, as a mechanical edit with no shim (§6).
+- **The file's header gives two reasons for staying instance-side. Neither
+  holds any more:**
+  - **"Future constructors (BT-2201), e.g. `over: aPackage`."** Stale.
+    BT-2201 has shipped, with package scoping as query *arguments*
+    (`classesInPackage:`, `subclassesIn:`), not as scoped instances.
+  - **"Class-side iteration would self-deadlock when the walk reaches
+    `SystemNavigation` itself."** True only on the class-gen_server path.
+    `SystemNavigation` qualifies for direct calls: it is sealed, has no
+    class state, and its methods are `class sealed`. So after Phases 0a and
+    0b, static *and* dynamic sends run in the caller, and the walk never
+    re-enters a class process. Phase 4b therefore depends on Phase 0b.
+- **Narrower scopes, if ever needed, are a separate class.** It would be a
+  rule-2 `Value` carrying the scope, with its own factories.
+  `SystemNavigation` itself stays the unscoped facade.
 
 This settles **BT-3632** as its option 2:
 
 - **Object-kind classes are never instantiable.** With `SystemNavigation`
-  a `Value`, no stdlib code instantiates an Object-kind class.
+  class-side, no stdlib code instantiates an Object-kind class.
 - **The validator stops depending on how the receiver is spelled.**
   `check_actor_new_usage` / `object_kind_new_error` in `class_validators.rs`
   also rejects `self new` / `super new` inside a class method of an
   Object-kind class, not just `Foo new`.
 - **The hint stays accurate.** It keeps "Object subclasses are not
   instantiable", and adds: "for a stateless service, use class-side
-  methods; for a scoped query or data, use `Value subclass:`".
+  methods; for data or a scoped query object, use `Value subclass:`".
 - **The other rule-2 classes already conform.** `AnnouncementNavigation`
   creates its handles through FFI (`navigationFor:`), not `new`, and
   `ProcessNavigation` is already a `Value`.
@@ -356,28 +360,55 @@ This settles **BT-3632** as its option 2:
   plain function call in the caller's process: there is no class
   gen_server hop, no 60 s / 5 min `class_send` timeout, and no
   re-entrancy hazard.
-- **REPL expressions must use the direct-call path too. This is a
-  prerequisite.** Today `crates/beamtalk-repl/src/codegen.rs` builds a
-  bare `CoreErlangGenerator` and never computes `direct_call_eligible`.
-  Once the binding-aware send is removed, REPL sends to a facade would
-  otherwise go through the facade's class gen_server. That would cause
-  three problems:
-  - **Serialisation.** Every REPL session, MCP tool and the
-    `beamtalk workspace transcript` poller would queue on one class
-    process.
-  - **Timeouts.** A long `Workspace load:`/`sync`/`test` would hit the
-    `class_send` timeout.
-  - **Re-entrancy.** A test run by `Workspace test` that sends to
-    `Workspace` would raise `dispatch_error`.
+- **A facade must behave the same however it is reached. This is a
+  prerequisite.** Today only *statically* compiled sends in modules take
+  the direct-call path. Two cases still go through the facade's class
+  gen_server:
+  - **REPL expressions.** `crates/beamtalk-repl/src/codegen.rs` builds a
+    bare `CoreErlangGenerator` and never computes `direct_call_eligible`.
+  - **Dynamic sends, in every context.** Examples are a class held in a
+    variable (`nav := Workspace. nav test`), a class looked up by name
+    (`(Beamtalk classNamed: #Workspace) test`), `perform:`, a class passed
+    as an argument to a tool, and `class_send` from Erlang.
+    `beamtalk_class_dispatch:class_send/3` always does a `gen_server:call`.
 
-  Phase 0 computes `direct_call_eligible` for REPL expression codegen from
-  the class hierarchy. Phase 4 must not remove the binding-aware path until
-  that has shipped.
-- **Dynamic sends still take the class process.** Examples are
-  `x := Workspace. x test` or `perform:`. They work, but they are
-  subject to the hazards above, as with any class. This is the documented
-  behaviour of class-side methods (*Passing Blocks Through Class
-  Methods*), not something this ADR introduces.
+  Through the class process, a facade inherits four hazards that are
+  specific to class-side methods:
+  - **Re-entrancy.** A method that messages its own class raises
+    `dispatch_error`. Examples: a `Workspace test` whose tests call
+    `Workspace`, and `Beamtalk help: Beamtalk`.
+  - **Serialisation.** Every REPL session, MCP tool and the
+    `beamtalk workspace transcript` poller queues on one process.
+  - **Timeouts.** `class_send` allows 60 s, or 5 min for tests, so a long
+    `load:`/`test` can time out.
+  - **Lost process-local context.** `Workspace currentSession` reads the
+    caller's process dictionary, so it would return `nil`.
+
+  That would turn "works in the REPL, breaks in test" into "works when
+  spelled statically, breaks when the class is passed as a value", which is
+  the same kind of context-dependence this ADR forbids. So:
+  - **Phase 0a** computes `direct_call_eligible` for REPL expressions.
+  - **Phase 0b** makes dynamic class sends take the same path. Codegen
+    records each module's direct-callable class selectors in
+    `__beamtalk_meta/0`, as `direct_class_methods => #{Selector =>
+    SafeFunctionName}`. That set is computed by the same
+    `compute_direct_call_eligible` that decides static calls, so the rule
+    is generated from one source, not written once in Rust and again in
+    Erlang.
+  - `class_send/3` consults that set, via a cache filled at class
+    registration and invalidated on reload. For a listed selector it calls
+    `Module:SafeFn(nil, #{}, Args…)` directly, with the same calling
+    convention as the static direct call. Otherwise it falls back to the
+    gen_server as today.
+  - This is the "future optimization" ADR 0013 already describes (§4,
+    "use `apply(Module, Selector, Args)` … the gen_server path is only
+    needed when the method accesses class variable state").
+
+  Phase 4 must not remove the binding-aware path until both have shipped.
+  The effect reaches beyond the facades. For *every* sealed, stateless class
+  (`System`, `File`, `Logger`, `Console` and eligible user classes), static
+  and dynamic sends behave identically and run in the caller. Classes with
+  class state keep the gen_server, which their correctness depends on.
 - **No `new` and no `current`.** The class *is* the object. It is still
   first-class: `Beamtalk class`, `Workspace respondsTo: #load:`, and
   `x := Beamtalk. x version` all work.
@@ -424,7 +455,7 @@ None of these needs a workspace. The class registry and logger belong to
 - **What replaces it:**
   - `Beamtalk classNamed:` for lookup by name;
   - `Beamtalk allClasses` for enumeration;
-  - `SystemNavigation default` for anything richer.
+  - `SystemNavigation` for anything richer.
 - **Why remove it:**
   - The name leads Smalltalkers to read it as the global scope, which it
     is not.
@@ -671,10 +702,10 @@ same way as `Integer`. This is the rule ADR 0081 already applied to
 **`Workspace globals` becomes `Workspace bindings`.** This rename is part of
 the point of the ADR, not cosmetic. The ADR removes the image-era
 metaprogramming abstractions: injected singletons, a pretend global scope,
-and `Beamtalk globals`. The name "globals" is one of those abstractions.
-The view now holds only the user's `bind:as:` entries. The name "globals" would keep implying Smalltalk's
-semantics, "visible to all code", and that implication is the bug this ADR
-fixes. The entries are visible only to REPL evals.
+and `Beamtalk globals`. The name "globals" is one of those abstractions: it implies Smalltalk's
+"visible to all code", and that implication is the bug this ADR fixes. The
+view now holds only the user's `bind:as:` entries, which only REPL evals can
+see.
 
 `bindings` fits what the view actually is:
 - it returns a `BindingsView`, the class name ADR 0081 already chose;
@@ -1085,13 +1116,15 @@ where it lands.
   `Transcript` or `Beamtalk` instance, for example a mock. Tests that
   captured Transcript output must assert on return values or use Logger
   handler configuration instead.
-- **Dynamic sends to `Workspace` still hop into its class process.** A
-  send through a variable, such as `ws := Workspace. ws test`, uses the
-  class gen_server, as it does for any class. A block passed into such a
-  send that messages `Workspace` again raises `dispatch_error`, and a long
-  `test`/`load:` is subject to the `class_send` timeout. Static sends avoid
-  this, but only once Phase 0 gives REPL expressions the direct-call path.
-  Before that, REPL sends go through the class process too.
+- **Dispatch for sealed, stateless classes changes system-wide (Phase 0b).**
+  After Phase 0b, a dynamic class-side send to any such class runs in the
+  caller instead of the class process. Code that (unwisely) relied on that
+  serialisation, or on the class process's identity, for a *stateless*
+  class method would see different behaviour. None is known in the repo.
+  The language guide's *Passing Blocks Through Class Methods* section must
+  say that the hop applies only to classes with class state, or methods
+  that are not `class sealed`. `CLAUDE.md`'s "Blocks into class methods"
+  rule needs the same qualification.
 - **The Logger fallback is not line-exact.** `show: "a"; show: "b"; cr`
   logs two events, "a" and "b", rather than one line "ab".
 - **It is a breaking rename.** Every in-repo use of the old class names and
@@ -1113,7 +1146,8 @@ where it lands.
   - under ADR 0070 §3, a dependency that exports one is a compile error.
 
   `Workspace` in particular is a common domain noun. Nothing in this repo
-  defines such a class, and beamtalk-exdura doesn't either. A collision in
+  defines such a class, and beamtalk-exdura doesn't either (confirmed by its
+  owner, 2026-09-25). A collision in
   user code is fixed by renaming the user's class.
 - **Transcript capture depends on context.** Inside a workspace the output
   goes to the `TranscriptStream`; outside it goes to Logger. So "capture it
@@ -1161,17 +1195,38 @@ entry would shadow the new class with a stale instance.
 
 Phase 4 then deletes the machinery, which by then is empty.
 
-Phase 1 depends only on Phase 0, so it can ship alone. That makes it the
+Phase 1 depends only on Phases 0a–0b, so it can ship alone. That makes it the
 landing point if the rest stalls (Alternative G). Phases 4b and 5 are
-independent of the facade phases.
+independent of the facade phases, but 4b depends on 0b.
 
-**Phase 0: direct calls from REPL expressions** (codegen, S; prerequisite and wire-check)
+**Phase 0a: direct calls from REPL expressions** (codegen, S; prerequisite and wire-check)
 - Compute `direct_call_eligible` in `crates/beamtalk-repl/src/codegen.rs`
   from the class hierarchy, as `driver.rs` does for modules.
-- Add a codegen test: a REPL expression `System osPlatform`, a sealed
+- Add a codegen test: a REPL expression such as `System osPlatform`, a sealed
   class-side send to an existing facade, emits a direct call.
 - This proves the core assumption of §1b before any facade exists, and it
   gates Phase 4.
+
+**Phase 0b: direct dispatch for dynamic class sends** (codegen + runtime, M; prerequisite)
+- **Codegen:** `class_meta.rs` emits `direct_class_methods => #{Selector
+  => SafeFn}` in `__beamtalk_meta/0`. It is computed by
+  `compute_direct_call_eligible`, with no second implementation of the
+  rule.
+- **Runtime:** `beamtalk_class_dispatch:class_send/3` reads the per-class
+  set, cached when the class registers and refreshed on hot reload. For a
+  listed selector it applies `Module:SafeFn(nil, #{}, Args)`; otherwise it
+  keeps the `gen_server:call` path.
+- **Tests:** a conformance test compiles a sealed stateless class and
+  asserts that the static and dynamic sends produce the same result in the
+  caller's process. Dynamic sends covered: a variable, `perform:`, and
+  `classNamed:`.
+  - A self-walking method invoked dynamically no longer raises
+    `dispatch_error`.
+  - A class *with* class state still dispatches through its gen_server.
+- **Docs:** qualify *Passing Blocks Through Class Methods* and
+  `CLAUDE.md`'s "Blocks into class methods" rule.
+- ADR 0013's "future optimization" note is marked as implemented by this
+  ADR.
 
 **Phase 1: `Beamtalk` facade** (stdlib, S–M)
 - Rename `stdlib/src/beamtalk_interface.bt` to `beamtalk.bt`. The class
@@ -1270,16 +1325,19 @@ independent of the facade phases.
   `beamtalk_repl_compiler_tests`, `beamtalk_workspace_sup_tests`, the
   primitives load tests and the structural-validator tests.
 
-**Phase 4b: `SystemNavigation` becomes a `Value` + BT-3632** (S, independent of Phases 0–4)
-- Change `SystemNavigation` to `sealed typed Value subclass:` with a scope
-  field (`#all`). `default` constructs the value. The query methods and
-  every call site are unchanged.
+**Phase 4b: `SystemNavigation` class-side + BT-3632** (S–M; depends on Phase 0b)
+- Make every `SystemNavigation` query `class sealed`, and delete `default`.
+- Repoint about 216 `SystemNavigation default` references, most of them in
+  `stdlib/test`.
 - In `class_validators.rs`, make the Object-kind `new` check independent of
   the receiver: `self new` / `super new` in a class method of an
   Object-kind class is rejected. Fix the hint text.
 - Add validator tests for both `Foo new` and `self new`.
-- Update the `SystemNavigation` comment that cites ADR 0083's implicit
-  `new`.
+- Add a test that a dynamic send (`nav := SystemNavigation. nav
+  actorClasses`) returns the same result as the static send.
+- Update the `SystemNavigation` header. Remove the implicit-`new` note
+  that cites ADR 0083, the stale "future constructors (BT-2201)"
+  paragraph, and the self-deadlock rationale, which Phase 0b makes moot.
 
 **Phase 5: sweep docs, examples and templates** (M)
 - **`docs/beamtalk-language-features.md`:**
@@ -1333,7 +1391,8 @@ There are no shims. Everything moves in one change:
 | `(Erlang beamtalk_interface) findClass: n` (exdura) | `Beamtalk classNamed: n` |
 | Test setUp swapping `TranscriptStream current:` | Assert on return values, or configure a Logger handler on domain `[beamtalk, user, transcript]` |
 | `Transcript showLine: x` (docs only; never existed) | `Transcript showCr: x` |
-| `Beamtalk globals` | `Beamtalk classNamed:` / `Beamtalk allClasses` / `SystemNavigation default …` |
+| `Beamtalk globals` | `Beamtalk classNamed:` / `Beamtalk allClasses` / `SystemNavigation …` |
+| `SystemNavigation default sendersOf: #x` | `SystemNavigation sendersOf: #x` |
 | `Workspace globals` | `Workspace bindings` |
 | `self new` in a class method of an `Object subclass:` | A class-side API (rule 1), or `Value subclass:` for data |
 
@@ -1385,7 +1444,7 @@ shipped.
   - BT-3632 (Object-kind `new` rule; settled here as option 2, §1a)
 - Related ADRs:
   - [0010](0010-global-objects-and-singleton-dispatch.md) — global objects and singleton dispatch
-  - [0013](0013-class-variables-class-methods-instantiation.md) — class methods
+  - [0013](0013-class-variables-class-methods-instantiation.md) — class methods (its §4 "future optimization", direct dynamic dispatch, is implemented by Phase 0b)
   - [0019](0019-singleton-class-variables.md) — singleton class variables
   - [0040](0040-workspace-native-repl-commands.md) — BeamtalkInterface/WorkspaceInterface facades
   - [0058](0058-platform-security-model.md) — ambient authority
