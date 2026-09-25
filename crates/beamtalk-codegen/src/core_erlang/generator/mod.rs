@@ -123,6 +123,18 @@ pub struct CoreErlangGenerator {
     /// mints frame `1`. Never reset — frame identity must stay unique across
     /// an entire module compile, not just within one method.
     pub(in crate::core_erlang) branch_frame_counter: u32,
+    /// The [`threaded_ir::FrameId`] of the innermost currently-active branch
+    /// context — distinct from `branch_frame_counter`, which only mints
+    /// fresh, never-reused frame identities and must NOT be read back as
+    /// "the frame I am logically inside right now". A sibling branch that
+    /// opens and closes (e.g. a second `ifTrue:` in the same loop body)
+    /// bumps `branch_frame_counter` without restoring it, so reading it
+    /// directly after such a sibling closes yields that now-closed
+    /// sibling's frame instead of the enclosing scope's own frame (BT-3623).
+    /// `enter_branch_context` saves/sets/restores this field the same way it
+    /// does `state_version`/`class_var_version`/`self_version`; `0` means
+    /// [`threaded_ir::FrameId::ROOT`] (no branch context currently active).
+    pub(in crate::core_erlang) active_branch_frame: u32,
     /// The generator's loop-body context — the nine fields (hybrid/direct-params
     /// mode flags, `ClassVars`-threading side channels, pre-extracted field
     /// variable maps) that only have meaning while compiling a loop body,
@@ -340,6 +352,7 @@ impl CoreErlangGenerator {
             state_threading: VersionCounter::new(),
             in_loop_body: false,
             branch_frame_counter: 0,
+            active_branch_frame: 0,
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
