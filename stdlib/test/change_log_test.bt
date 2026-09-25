@@ -310,7 +310,7 @@ TestCase subclass: ChangeLogTest
 
   testCleanEntryIsClean => self assert: self cleanEntry isClean
 
-  testEntryDiffNilByDefault => self assert: self activeEntry diff isNil
+  testEntryDiffNilByDefault => self assert: self activeEntry diff equals: nil
 
   testEntryDiffAccessor =>
     self assert: self diffEntry diff equals: "- self.v + 1\n+ self.v + 2\n"
@@ -324,7 +324,7 @@ TestCase subclass: ChangeLogTest
   testNewClassEntryIsNewClass => self assert: self newClassEntry isNewClass
 
   testNewClassEntrySelectorIsNil =>
-    self assert: self newClassEntry selector isNil
+    self assert: self newClassEntry selector equals: nil
 
   testMethodEntryIsNotNewClass => self deny: self activeEntry isNewClass
 
@@ -333,7 +333,7 @@ TestCase subclass: ChangeLogTest
     self assert: self renameClassEntry isRenameClass
 
   testRenameClassEntrySelectorIsNil =>
-    self assert: self renameClassEntry selector isNil
+    self assert: self renameClassEntry selector equals: nil
 
   testMethodEntryIsNotRenameClass => self deny: self activeEntry isRenameClass
 
