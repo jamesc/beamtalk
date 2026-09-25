@@ -120,6 +120,26 @@ pub struct ProjectIndex {
     /// every declared protocol is exported project-wide with no
     /// collision/visibility bookkeeping needed here.
     file_protocols: HashMap<Utf8PathBuf, Vec<ProtocolInfo>>,
+    /// Per-file full ASTs of *provision-bearing* protocols declared in that
+    /// file — the trait-flattening counterpart to `file_protocols` (ADR 0127
+    /// §10a; BT-3591). `ProtocolInfo` above carries name/signature metadata
+    /// only, enough for `extending:`/conformance resolution; flattening a
+    /// cross-file `uses:` needs the provided methods' actual bodies, which
+    /// only live here. Feeds [`Self::cross_file_protocol_defs_for`].
+    file_protocol_defs: HashMap<Utf8PathBuf, Vec<beamtalk_core::ast::ProtocolDefinition>>,
+    /// Per-file set of bare protocol names that file's classes `uses:`
+    /// (BT-3591) — the input side of the protocol → users edge below.
+    /// Package-qualified `uses: pkg@Name` is tracked by its bare `Name`,
+    /// mirroring `trait_expansion`'s own resolution (protocols share one
+    /// flat project-wide namespace, like classes).
+    file_protocol_uses: HashMap<Utf8PathBuf, HashSet<EcoString>>,
+    /// Reverse index of `file_protocol_uses`: for each protocol name, every
+    /// currently-indexed file whose classes `uses:` it. This is the
+    /// "protocol → users" edge `ProjectIndex` gains for BT-3591 — a protocol
+    /// file's editor/LSP handler consults [`Self::users_of_protocol`] to
+    /// find which other open files need their diagnostics recomputed after
+    /// the protocol's provisions change.
+    protocol_users: HashMap<EcoString, HashSet<Utf8PathBuf>>,
     /// Per-workspace-root real package name, keyed by root directory.
     ///
     /// Populated by [`Self::set_root_packages`] — `beamtalk-lsp` reads each
@@ -147,6 +167,9 @@ impl ProjectIndex {
             merged_aliases: AliasRegistry::new(),
             file_aliases: HashMap::new(),
             file_protocols: HashMap::new(),
+            file_protocol_defs: HashMap::new(),
+            file_protocol_uses: HashMap::new(),
+            protocol_users: HashMap::new(),
             root_packages: Vec::new(),
         }
     }
@@ -230,6 +253,19 @@ impl ProjectIndex {
             if !protocol_infos.is_empty() {
                 index.file_protocols.insert(path.clone(), protocol_infos);
             }
+            // Provision-bearing stdlib protocols' full ASTs (BT-3591) —
+            // mirrors the `ProtocolInfo` tracking immediately above; see
+            // `file_protocol_defs`'s doc.
+            let protocol_defs: Vec<_> = module
+                .protocols
+                .iter()
+                .filter(|p| !p.provided_methods.is_empty())
+                .cloned()
+                .collect();
+            if !protocol_defs.is_empty() {
+                index.file_protocol_defs.insert(path.clone(), protocol_defs);
+            }
+            index.update_file_protocol_uses(path.clone(), &module);
         }
         index.rebuild_alias_registry();
         (Ok(index), all_diagnostics)
@@ -363,6 +399,78 @@ impl ProjectIndex {
         }
     }
 
+    /// Add or update a file's *provision-bearing* protocol ASTs (ADR 0127
+    /// §10a; BT-3591) — the trait-flattening counterpart to
+    /// [`Self::update_file_protocols`]. Call alongside it whenever a file is
+    /// (re)indexed. An empty `protocol_defs` clears the file's prior entry.
+    pub fn update_file_protocol_defs(
+        &mut self,
+        file: Utf8PathBuf,
+        protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    ) {
+        if protocol_defs.is_empty() {
+            self.file_protocol_defs.remove(&file);
+        } else {
+            self.file_protocol_defs.insert(file, protocol_defs);
+        }
+    }
+
+    /// Records which bare protocol names `module`'s classes `uses:` (BT-3591)
+    /// — the input side of the protocol → users edge — and rebuilds the
+    /// reverse [`Self::protocol_users`] index. Call whenever `file` is
+    /// (re)indexed, alongside [`Self::update_file`]/[`Self::update_file_protocols`].
+    pub fn update_file_protocol_uses(
+        &mut self,
+        file: Utf8PathBuf,
+        module: &beamtalk_core::ast::Module,
+    ) {
+        let used: HashSet<EcoString> = module
+            .classes
+            .iter()
+            .flat_map(|c| c.uses.iter().map(|u| u.protocol.name.clone()))
+            .collect();
+
+        // Drop this file from every protocol's user set before re-adding it
+        // under its current `uses:` set — a protocol this file no longer
+        // uses must not linger as a stale edge.
+        if let Some(previously_used) = self.file_protocol_uses.get(&file) {
+            for name in previously_used {
+                if let Some(users) = self.protocol_users.get_mut(name) {
+                    users.remove(&file);
+                    if users.is_empty() {
+                        self.protocol_users.remove(name);
+                    }
+                }
+            }
+        }
+
+        if used.is_empty() {
+            self.file_protocol_uses.remove(&file);
+        } else {
+            for name in &used {
+                self.protocol_users
+                    .entry(name.clone())
+                    .or_default()
+                    .insert(file.clone());
+            }
+            self.file_protocol_uses.insert(file, used);
+        }
+    }
+
+    /// Returns every currently-indexed file whose classes `uses:` the
+    /// protocol named `protocol_name` (BT-3591's protocol → users edge) —
+    /// the set a protocol file's editor/LSP handler re-analyses after that
+    /// protocol's provisions change. Bare name only, matching how
+    /// [`Self::update_file_protocol_uses`] records a package-qualified
+    /// `uses: pkg@Name` under its bare `Name`.
+    #[must_use]
+    pub fn users_of_protocol(&self, protocol_name: &str) -> Vec<Utf8PathBuf> {
+        self.protocol_users
+            .get(protocol_name)
+            .map(|users| users.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// Rebuilds [`Self::merged_aliases`] from scratch across every indexed
     /// file's tracked [`AliasInfo`] entries, in deterministic (sorted-path)
     /// iteration order — mirrors [`Self::remerge_classes`]'s determinism
@@ -469,6 +577,21 @@ impl ProjectIndex {
         // removal above — no rebuild needed (no merged registry; see
         // `file_protocols`'s doc).
         self.file_protocols.remove(file);
+        self.file_protocol_defs.remove(file);
+        // Drop this file's `uses:` edges too — mirrors the protocol removal
+        // immediately above; `update_file_protocol_uses(file, &empty
+        // module)` would do the same work but a removed file has no module
+        // left to pass, so the reverse-index cleanup is inlined here.
+        if let Some(previously_used) = self.file_protocol_uses.remove(file) {
+            for name in &previously_used {
+                if let Some(users) = self.protocol_users.get_mut(name) {
+                    users.remove(file);
+                    if users.is_empty() {
+                        self.protocol_users.remove(name);
+                    }
+                }
+            }
+        }
     }
 
     /// Re-merge class definitions from remaining files for the given class names.
@@ -722,6 +845,24 @@ impl ProjectIndex {
             .iter()
             .filter(|(path, _)| *path != file)
             .flat_map(|(_, infos)| infos.iter().cloned())
+            .collect()
+    }
+
+    /// Returns cross-file *provision-bearing* protocol ASTs for diagnostic
+    /// computation (ADR 0127 §10a; BT-3591) — the trait-flattening
+    /// counterpart to [`Self::cross_file_protocol_infos_for`]. Feeds
+    /// `ProjectDiagnosticContext::pre_loaded_protocol_defs` so a
+    /// cross-file/cross-package `uses:` flattens in the LSP the same way
+    /// `beamtalk build` already does.
+    #[must_use]
+    pub fn cross_file_protocol_defs_for(
+        &self,
+        file: &Utf8PathBuf,
+    ) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
+        self.file_protocol_defs
+            .iter()
+            .filter(|(path, _)| *path != file)
+            .flat_map(|(_, defs)| defs.iter().cloned())
             .collect()
     }
 

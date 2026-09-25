@@ -79,10 +79,44 @@ pub(super) fn mtime_of(path: &Utf8Path) -> Option<SystemTime> {
 /// second copy of the hex-encoding loop, is introduced.
 pub(super) fn content_hash_of(path: &Utf8Path) -> Option<String> {
     let bytes = fs::read(path).ok()?;
+    Some(sha256_hex(&bytes))
+}
+
+/// SHA-256 hash of arbitrary bytes, as a lowercase hex string — the shared
+/// leaf [`content_hash_of`] and [`protocol_content_hash`] both hash through,
+/// so there is exactly one digest-to-hex-string routine in this crate.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    hasher.update(bytes);
     let digest = hasher.finalize();
-    Some(hex_encode(&digest))
+    hex_encode(&digest)
+}
+
+/// Content hash of a protocol's *own* AST, independent of which file it came
+/// from (ADR 0127 §10a; BT-3591) — used to build a class's build-graph edge
+/// to each protocol its `uses:` lines name (`detect_changes`'s combined
+/// cache key) and, eventually, the `uses => [{Name, Hash}]` `__beamtalk_meta`
+/// entry (BT-3590/BT-3625's codegen work; not produced by this crate).
+///
+/// Re-unparses `protocol` into canonical source text via
+/// [`beamtalk_core::unparse::unparse_module`] (wrapped in a throwaway,
+/// otherwise-empty `Module`) rather than hashing the *defining file's* raw
+/// content: a protocol's hash must depend only on that protocol's own
+/// definition, not on unrelated content sharing its file (a doc comment
+/// edit elsewhere in the file, a second protocol in the same file changing)
+/// — hashing the whole file would force every one of its users to rebuild
+/// on any edit to that file, not just an edit to the protocol they actually
+/// use. Canonical unparse output (rather than the original source slice)
+/// also means two byte-identical protocols defined with different
+/// formatting/whitespace hash the same, matching this hash's only real job:
+/// detecting a *semantic* change to what `uses:` would flatten in.
+#[must_use]
+pub(crate) fn protocol_content_hash(protocol: &beamtalk_core::ast::ProtocolDefinition) -> String {
+    let wrapper = beamtalk_core::ast::Module {
+        protocols: vec![protocol.clone()],
+        ..beamtalk_core::ast::Module::new(Vec::new(), protocol.span)
+    };
+    sha256_hex(beamtalk_core::unparse::unparse_module(&wrapper).as_bytes())
 }
 
 /// [`content_hash_of`] for every file in `paths`, keyed by path string.
@@ -288,6 +322,75 @@ mod tests {
         let dir_path = Utf8Path::from_path(dir.path()).unwrap();
         let missing = dir_path.join("does-not-exist.bt");
         assert!(content_hash_of(&missing).is_none());
+    }
+
+    /// ADR 0127 §10a / BT-3591: parses `source` and returns its single
+    /// protocol definition, for exercising [`protocol_content_hash`] without
+    /// a file on disk.
+    fn parse_one_protocol(source: &str) -> beamtalk_core::ast::ProtocolDefinition {
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+        let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(module.protocols.len(), 1);
+        module.protocols.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn test_protocol_content_hash_stable_for_same_definition() {
+        let protocol = parse_one_protocol(
+            "Protocol define: Comparable\n  \
+             < other :: Self -> Boolean\n\n  \
+             max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n",
+        );
+        let hash1 = protocol_content_hash(&protocol);
+        let hash2 = protocol_content_hash(&protocol);
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64, "SHA-256 hex digest is 64 chars");
+    }
+
+    #[test]
+    fn test_protocol_content_hash_changes_with_provision_body() {
+        let a = parse_one_protocol(
+            "Protocol define: Comparable\n  \
+             < other :: Self -> Boolean\n\n  \
+             max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n",
+        );
+        let b = parse_one_protocol(
+            "Protocol define: Comparable\n  \
+             < other :: Self -> Boolean\n\n  \
+             max: other :: Self -> Self => (self < other) ifTrue: [self] ifFalse: [other]\n",
+        );
+        assert_ne!(
+            protocol_content_hash(&a),
+            protocol_content_hash(&b),
+            "a changed provision body must change the hash"
+        );
+    }
+
+    #[test]
+    fn test_protocol_content_hash_independent_of_defining_file() {
+        // Two byte-identical protocol definitions, one parsed alone and one
+        // parsed alongside an unrelated class in the same file, must hash
+        // identically — the hash is a property of the protocol's own AST,
+        // not of whatever else happens to share its file.
+        let source = "Protocol define: Printable\n  asString -> String\n";
+        let tokens_a = beamtalk_core::source_analysis::lex_with_eof(source);
+        let (module_a, diags_a) = beamtalk_core::source_analysis::parse(tokens_a);
+        assert!(diags_a.is_empty());
+        let a = module_a.protocols.into_iter().next().unwrap();
+
+        let combined = format!("Object subclass: Unrelated\n  m => 1\n\n{source}");
+        let tokens_b = beamtalk_core::source_analysis::lex_with_eof(&combined);
+        let (module_b, diags_b) = beamtalk_core::source_analysis::parse(tokens_b);
+        assert!(diags_b.is_empty());
+        let b = module_b.protocols.into_iter().next().unwrap();
+
+        assert_eq!(
+            protocol_content_hash(&a),
+            protocol_content_hash(&b),
+            "the same protocol definition must hash the same regardless of \
+             unrelated content in its file"
+        );
     }
 
     #[test]

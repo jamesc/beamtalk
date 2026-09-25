@@ -158,6 +158,7 @@ pub(crate) fn handle_inline_class_definition(
             &mut module,
             &analysis.class_hierarchy,
             &analysis.method_return_types,
+            &analysis.external_protocols,
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }

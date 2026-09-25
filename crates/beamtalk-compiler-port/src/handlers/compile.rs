@@ -231,6 +231,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
             &mut module,
             &analysis.class_hierarchy,
             &analysis.method_return_types,
+            &analysis.external_protocols,
         );
         codegen_options = codegen_options.with_analysis(analysis);
     }

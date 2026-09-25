@@ -14,7 +14,7 @@
 //!
 //! The analysis produces diagnostics and metadata used by the code generator.
 
-use crate::ast::Module;
+use crate::ast::{Module, ProtocolDefinition};
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -188,6 +188,19 @@ pub struct AnalysisResult {
     /// `docs/internal/adr-0115-phase1-spike-findings.md` §1a/§1d for why
     /// this field is plumbed through here rather than recomputed downstream.
     pub type_map: TypeMap,
+
+    /// Every provision-bearing protocol carried in from outside this module
+    /// (ADR 0127 §10a, BT-3591) — same-package other files plus dependency
+    /// packages — that this analysis's Phase -1 flattening resolved a
+    /// cross-file/cross-package `uses:` line against. A driver handing this
+    /// `AnalysisResult` to [`lowering::lower_module_for_codegen`] must pass
+    /// this same map back to it, so that function's own re-flattening of the
+    /// driver's real module reproduces byte-for-byte the same flattened
+    /// methods this analysis already produced (see that function's module
+    /// doc, "Closing the flattening/codegen boundary") — a driver that
+    /// passes an empty map here instead would silently fail to flatten any
+    /// cross-file/cross-package `uses:` line the original analysis resolved.
+    pub external_protocols: HashMap<EcoString, ProtocolDefinition>,
 }
 
 impl AnalysisResult {
@@ -204,6 +217,7 @@ impl AnalysisResult {
             method_return_types: HashMap::new(),
             referenced_aliases: Vec::new(),
             type_map: TypeMap::new(),
+            external_protocols: HashMap::new(),
         }
     }
 }
@@ -313,6 +327,17 @@ pub struct AnalysisContext<'a> {
     /// Protocol definitions extracted from other source files, e.g. `BUnit`
     /// fixtures.
     pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    /// Full ASTs of provision-bearing protocols from outside this module —
+    /// another file in the same package, or a dependency package (ADR 0127
+    /// §10a; BT-3591). Unlike `pre_loaded_protocols` (name/signature metadata
+    /// only, for conformance/`extending:` resolution), this carries the
+    /// protocol's actual provided-method bodies, which `trait_expansion`'s
+    /// [`trait_expansion::expand_module`] needs to flatten a cross-file or
+    /// cross-package `uses:` — see that function's own doc. Empty for a
+    /// caller with no cross-file/cross-package carrying to offer, in which
+    /// case a `uses:` outside the current module reports "unknown protocol"
+    /// (same-module resolution only), exactly as before this field existed.
+    pub pre_loaded_protocol_defs: Vec<ProtocolDefinition>,
     /// Type alias definitions extracted from other source files or packages
     /// (ADR 0108 Phase 5), *or* type aliases declared in earlier turns of
     /// the same REPL session (ADR 0108 Phase 8) — both uses funnel through
@@ -394,6 +419,17 @@ impl<'a> AnalysisContext<'a> {
         pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
     ) -> Self {
         self.pre_loaded_protocols = pre_loaded_protocols;
+        self
+    }
+
+    /// Full ASTs of provision-bearing protocols from outside this module —
+    /// see the `pre_loaded_protocol_defs` field's own doc.
+    #[must_use]
+    pub fn with_pre_loaded_protocol_defs(
+        mut self,
+        pre_loaded_protocol_defs: Vec<ProtocolDefinition>,
+    ) -> Self {
+        self.pre_loaded_protocol_defs = pre_loaded_protocol_defs;
         self
     }
 
@@ -520,6 +556,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         skip_module_expression_lint,
         pre_loaded_classes,
         pre_loaded_protocols,
+        pre_loaded_protocol_defs,
         pre_loaded_aliases,
         known_packages,
         current_package,
@@ -549,11 +586,23 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // caller's own AST — see `trait_expansion`'s module doc ("Codegen does
     // not see this module yet") for the full boundary and BT-3590, which
     // owns wiring the flattened module through to codegen.
+    // `external_protocols` (ADR 0127 §10a; BT-3591) merges every
+    // provision-bearing protocol carried in from outside this module — used
+    // both by `expand_module` right below and by `check_after_hierarchy`
+    // later (Phase 0.55), which needs the same protocol definitions to check
+    // a cross-file/cross-package `uses:` line's requirements and
+    // `excluding:`/`overriding:` names.
+    let external_protocols: HashMap<EcoString, ProtocolDefinition> = pre_loaded_protocol_defs
+        .into_iter()
+        .map(|p| (p.name.name.clone(), p))
+        .collect();
+
     let expanded_module_storage;
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
         let mut owned = module.clone();
-        let (expansion_diags, origins) = trait_expansion::expand_module(&mut owned);
+        let (expansion_diags, origins) =
+            trait_expansion::expand_module(&mut owned, &external_protocols);
         result.diagnostics.extend(expansion_diags);
         trait_origins = origins;
         expanded_module_storage = owned;
@@ -716,7 +765,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             module,
             &result.class_hierarchy,
             &result.protocol_registry,
+            &external_protocols,
         ));
+    // Carried for `lowering::lower_module_for_codegen` — see this field's
+    // own doc. No further use of the local `external_protocols` binding
+    // above this point, so moving (not cloning) it in is free.
+    result.external_protocols = external_protocols;
 
     // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8)
     // Must happen after both the class hierarchy and protocol registry are

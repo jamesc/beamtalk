@@ -89,6 +89,7 @@ pub(crate) fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
     source: &str,
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
     has_package_dependencies: bool,
     native_type_registry: Option<
@@ -114,6 +115,10 @@ pub(crate) fn run_module_analysis(
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_options(&options)
         .with_pre_loaded_classes(cross_file_classes)
+        // Dependency-sourced provision-bearing protocol ASTs (ADR 0127
+        // §10a; BT-3591) — see `merge_dependency_class_infos`'s doc for why
+        // same-package cross-file protocols aren't included here.
+        .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
         .with_native_type_registry(native_type_registry)
         .with_is_stub_file(is_stub_file);
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
@@ -259,8 +264,12 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
     // Merge dependency class metadata so cross-file references to
     // classes defined only in a repository/path dependency (declared in
-    // beamtalk.toml) resolve the same way `beamtalk build` does.
-    let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
+    // beamtalk.toml) resolve the same way `beamtalk build` does. Also
+    // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
+    // §10a; BT-3591) so a cross-package `uses:` flattens too.
+    let mut all_protocol_defs = Vec::new();
+    let has_package_dependencies =
+        merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
@@ -291,6 +300,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             module,
             source,
             &all_class_infos,
+            all_protocol_defs.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
@@ -467,11 +477,23 @@ fn resolve_current_package(path: &str) -> Option<String> {
 /// into one with network side effects. Dependencies that have never been
 /// fetched by a prior `beamtalk build` are silently skipped.
 ///
+/// Also collects `protocol_defs`: the full AST of every provision-bearing
+/// protocol defined in a dependency (ADR 0127 §10a; BT-3591), so a
+/// cross-package `uses:` can flatten in MCP `lint`/`diagnostic_summary` the
+/// same way `beamtalk build` already does — see
+/// `resolve_dependency_class_infos`'s doc. Same-package
+/// cross-file protocol resolution (a protocol declared in a sibling source
+/// file) is a pre-existing, separate gap in this pipeline — Pass 1 above
+/// extracts only `ClassInfo` from project source files, never protocol
+/// metadata of any kind, unlike CLI `beamtalk lint`'s
+/// `parse_and_extract_class_infos` — not widened here.
+///
 /// Returns whether the project's manifest declares any dependencies, for use
 /// as `CompilerOptions::has_package_dependencies`.
 fn merge_dependency_class_infos(
     path: &str,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
 ) -> bool {
     let Some(project_root) =
         beamtalk_project::package::find_package_root(std::path::Path::new(path))
@@ -482,9 +504,10 @@ fn merge_dependency_class_infos(
         return false;
     };
 
-    let (has_package_dependencies, dep_class_infos) =
+    let (has_package_dependencies, dep_class_infos, dep_protocol_defs) =
         beamtalk_cli::dependency_classes::resolve_dependency_class_infos(&project_root);
     all_class_infos.extend(dep_class_infos);
+    all_protocol_defs.extend(dep_protocol_defs);
     has_package_dependencies
 }
 
@@ -584,8 +607,12 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
 
     // Merge dependency class metadata so cross-file references to
     // classes defined only in a repository/path dependency (declared in
-    // beamtalk.toml) resolve the same way `beamtalk build` does.
-    let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
+    // beamtalk.toml) resolve the same way `beamtalk build` does. Also
+    // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
+    // §10a; BT-3591) so a cross-package `uses:` flattens too.
+    let mut all_protocol_defs = Vec::new();
+    let has_package_dependencies =
+        merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
@@ -616,6 +643,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             &module,
             &source,
             &all_class_infos,
+            all_protocol_defs.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),

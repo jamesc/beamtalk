@@ -52,6 +52,13 @@ pub struct ProjectDiagnosticContext<'a> {
     /// Pre-loaded protocol definitions from other source files.
     pub pre_loaded_protocols:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Full ASTs of provision-bearing protocols from other source files or
+    /// dependency packages (ADR 0127 §10a; BT-3591) — carries the actual
+    /// provided-method bodies `trait_expansion::expand_module` needs to
+    /// flatten a cross-file/cross-package `uses:`, unlike `pre_loaded_protocols`
+    /// above (name/signature metadata only). Empty for a caller with no
+    /// cross-file/cross-package carrying to offer.
+    pub pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     /// Pre-loaded type alias definitions from other source files in the same
     /// package (ADR 0108). Mirrors `pre_loaded_protocols` — seeded
     /// into the `AliasRegistry` before the current module's own aliases are
@@ -159,6 +166,7 @@ pub fn compute_project_diagnostics_with_analysis(
         .with_options(&ctx.options)
         .with_pre_loaded_classes(ctx.cross_file_classes.clone())
         .with_pre_loaded_protocols(ctx.pre_loaded_protocols.clone())
+        .with_pre_loaded_protocol_defs(ctx.pre_loaded_protocol_defs.clone())
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
         .with_native_type_registry(ctx.native_type_registry.clone())
         .with_cross_file_extensions(&ctx.cross_file_extensions)

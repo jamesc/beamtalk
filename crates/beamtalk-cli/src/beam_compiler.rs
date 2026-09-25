@@ -654,6 +654,14 @@ pub struct ClassHierarchyContext {
     /// recognise protocol names defined outside the current module.
     pub pre_loaded_protocols:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Full ASTs of provision-bearing protocols from other source files in
+    /// the compilation unit, or from a resolved dependency (ADR 0127 §10a;
+    /// BT-3591) — the trait-flattening counterpart to `pre_loaded_protocols`
+    /// above. `pre_loaded_protocols` carries name/signature metadata only,
+    /// enough for `extending:`/conformance resolution; flattening a
+    /// cross-file or cross-package `uses:` needs the provided methods'
+    /// actual bodies, which only live here.
+    pub pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     /// Type alias declarations (`type Name = ...`) from other source files in
     /// the same package (ADR 0108). Seeded into the `AliasRegistry`
     /// during semantic analysis so a cross-file alias reference resolves
@@ -872,6 +880,7 @@ pub(crate) fn compile_source_with_bindings(
             options: options.clone(),
             cross_file_classes: cross_file_classes.clone(),
             pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
+            pre_loaded_protocol_defs: ctx.hierarchy.pre_loaded_protocol_defs.clone(),
             // Cross-file/package type aliases from Pass 1 — see
             // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
             // filters out any name the current module redeclares itself, so no
@@ -1011,6 +1020,7 @@ pub(crate) fn compile_source_with_bindings(
         &mut module,
         &analysis_result.class_hierarchy,
         &analysis_result.method_return_types,
+        &analysis_result.external_protocols,
     );
     write_core_erlang_with_bindings(
         &module,

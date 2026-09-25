@@ -9,12 +9,13 @@
 //! correspond to a current source file or package name.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use ecow::EcoString;
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
-use crate::commands::util::content_hash_of;
+use crate::commands::util::{content_hash_of, sha256_hex};
 
 /// Result of per-file change detection.
 ///
@@ -74,15 +75,37 @@ pub(crate) struct ChangeDetectionResult {
 /// a permanent stale skip, but it means a same-build edit isn't caught as
 /// immediately as the old mtime-based check (which re-read mtime fresh at
 /// this call site).
+///
+/// `file_protocol_uses`/`protocol_hashes` are ADR 0127 §10a's (BT-3591)
+/// build-graph edge: a class's `uses:` line makes its file's cache key
+/// depend on that protocol's content too, not just the file's own. For each
+/// source file, [`combined_content_hash`] folds the hashes of every
+/// provision-bearing protocol its classes `uses:` (bare name;
+/// `file_protocol_uses` — built by the caller from the same parsed `Module`s
+/// Pass 1 already has — resolves a package-qualified `uses: pkg@Name` under
+/// its bare `Name`, mirroring `trait_expansion`'s own resolution) into that
+/// file's stored/compared hash, so editing a protocol changes its users'
+/// cache keys and rebuilds them, even when their own source is untouched.
+/// Both are empty for a caller with no protocol data to offer (manifest-less
+/// builds, `--stdlib-mode`'s own separate pre-pass, tests), in which case
+/// every file's combined hash reduces to its own content hash — unchanged
+/// behaviour.
 pub(crate) fn detect_changes(
     source_files: &[Utf8PathBuf],
     build_dir: &Utf8Path,
     file_module_pairs: &[(Utf8PathBuf, String, Utf8PathBuf)],
     force: bool,
     known_hashes: &HashMap<String, String>,
+    file_protocol_uses: &HashMap<Utf8PathBuf, Vec<EcoString>>,
+    protocol_hashes: &HashMap<EcoString, String>,
 ) -> ChangeDetectionResult {
     // Content hash of each source file as of the last successful
-    // `.beam` build, keyed by path string.
+    // `.beam` build, keyed by path string. Also carries each file's
+    // own-content-only hash under a synthetic `<path>\0own` key (never a
+    // real path — `\0` cannot appear in one), stashed in the very same
+    // sidecar so a protocol-driven cache-key change can be told apart from
+    // an own-content change on the *next* build without a second cache file
+    // (see the rebuild-reason `warn!` below).
     let previous_hashes = crate::commands::build_cache::load_beam_hash_cache(build_dir);
 
     // Hash every source file up front — both to decide staleness below and
@@ -90,14 +113,36 @@ pub(crate) fn detect_changes(
     // Reuse Pass 1's hash when we already have one (see `known_hashes`'s doc)
     // rather than reading and hashing the file's content again.
     let mut source_hashes: HashMap<String, String> = HashMap::new();
+    let empty_uses: Vec<EcoString> = Vec::new();
     for (source_file, _module_name, _core_file) in file_module_pairs {
-        if let Some(hash) = known_hashes
+        let Some(own_hash) = known_hashes
             .get(source_file.as_str())
             .cloned()
             .or_else(|| content_hash_of(source_file))
+        else {
+            continue;
+        };
+        let used_protocols = file_protocol_uses.get(source_file).unwrap_or(&empty_uses);
+        let combined_hash = combined_content_hash(&own_hash, used_protocols, protocol_hashes);
+
+        // A protocol-driven rebuild (own content unchanged, but the
+        // combined key differs because a used protocol's hash changed) is
+        // exactly what ADR 0127 §10a asks `beamtalk build` to warn about —
+        // surfaced here, at the point the distinction is cheaply knowable,
+        // rather than left indistinguishable from an ordinary content edit.
+        if combined_hash != own_hash
+            && previous_hashes.get(&own_hash_key(source_file)) == Some(&own_hash)
         {
-            source_hashes.insert(source_file.as_str().to_string(), hash);
+            warn!(
+                file = %source_file,
+                protocols = ?used_protocols,
+                "rebuilding '{source_file}': unchanged itself, but a protocol it uses \
+                 (one of {used_protocols:?}) changed since it was last built"
+            );
         }
+
+        source_hashes.insert(source_file.as_str().to_string(), combined_hash);
+        source_hashes.insert(own_hash_key(source_file), own_hash);
     }
 
     if force {
@@ -170,6 +215,46 @@ pub(crate) fn detect_changes(
         orphaned_beam_files,
         source_hashes,
     }
+}
+
+/// The synthetic sidecar key stashing `source_file`'s own-content-only hash
+/// (as opposed to its combined-with-protocols hash, stored under the file's
+/// own path) — see `detect_changes`'s doc for why this shares the existing
+/// beam-hash sidecar rather than needing a second cache file. `\0` can never
+/// appear in a real path, so this can never collide with one.
+fn own_hash_key(source_file: &Utf8Path) -> String {
+    format!("{source_file}\u{0}own")
+}
+
+/// Folds `used_protocols`' hashes into `own_hash` to produce the combined
+/// cache key a source file's classes depend on (ADR 0127 §10a; BT-3591) —
+/// see `detect_changes`'s doc. A protocol name with no entry in
+/// `protocol_hashes` (not provision-bearing, or not resolved by any
+/// currently-known compile path) contributes nothing, matching
+/// `trait_expansion::expand_module`'s own "protocols with no provisions need
+/// no AST" distinction. Sorted before folding so the combined hash is
+/// independent of `used_protocols`' original (parse) order.
+fn combined_content_hash(
+    own_hash: &str,
+    used_protocols: &[EcoString],
+    protocol_hashes: &HashMap<EcoString, String>,
+) -> String {
+    let mut protocol_hash_parts: Vec<&str> = used_protocols
+        .iter()
+        .filter_map(|name| protocol_hashes.get(name))
+        .map(String::as_str)
+        .collect();
+    if protocol_hash_parts.is_empty() {
+        return own_hash.to_string();
+    }
+    protocol_hash_parts.sort_unstable();
+
+    let mut buf = String::from(own_hash);
+    for part in protocol_hash_parts {
+        buf.push('\n');
+        buf.push_str(part);
+    }
+    sha256_hex(buf.as_bytes())
 }
 
 /// Find `bt@*` `.beam` files in the build directory that are not in the expected set.

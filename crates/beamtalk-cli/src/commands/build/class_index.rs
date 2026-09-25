@@ -46,6 +46,13 @@ pub(crate) struct ClassIndexResult {
     /// project-wide (and every dependency's) is included unconditionally.
     pub(crate) all_protocol_infos:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Full ASTs of provision-bearing protocols from same-package cross-file
+    /// declarations and dependency packages (ADR 0127 §10a; BT-3591) — the
+    /// trait-flattening counterpart to `all_protocol_infos`. Feeds
+    /// `ClassHierarchyContext::pre_loaded_protocol_defs` so a cross-file or
+    /// cross-package `uses:` flattens instead of reporting "unknown
+    /// protocol".
+    pub(crate) all_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     /// Project-wide standalone extension index from Pass 1.
     pub(crate) extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Dependency registry for cross-package collision detection.
@@ -59,6 +66,12 @@ pub(crate) struct ClassIndexResult {
     /// runs. Reused by `detect_changes` (Pass 2) so it doesn't re-hash a file
     /// whose content Pass 1 already hashed this same build.
     pub(crate) source_hashes: HashMap<String, String>,
+    /// Every class's `uses:` protocol names, keyed by the declaring file
+    /// (ADR 0127 §10a; BT-3591) — covers every source file Pass 1 knows
+    /// about, not just the ones re-scanned this build (see
+    /// `IncrementalPass1Result.file_protocol_uses`). Empty for
+    /// manifest-less builds, same as `cached_asts`.
+    pub(crate) file_protocol_uses: HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
 }
 
 /// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
@@ -93,6 +106,7 @@ pub(crate) fn build_class_index(
         cached_asts,
         force_pass2,
         source_hashes,
+        file_protocol_uses,
     ) = if let Some(pkg) = pkg_manifest {
         let result = crate::commands::build_cache::incremental_build_class_module_index(
             &env.source_files,
@@ -112,6 +126,7 @@ pub(crate) fn build_class_index(
             result.cached_asts,
             result.manifest_invalidated,
             result.source_hashes,
+            result.file_protocol_uses,
         )
     } else {
         (
@@ -121,6 +136,7 @@ pub(crate) fn build_class_index(
             beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             HashMap::new(),
             false,
+            HashMap::new(),
             HashMap::new(),
         )
     };
@@ -146,6 +162,7 @@ pub(crate) fn build_class_index(
     // merge with source-side infos via the collect_all_* helpers.
     let mut dep_class_infos = Vec::new();
     let mut dep_protocol_infos = Vec::new();
+    let mut dep_protocol_defs = Vec::new();
     let mut dep_alias_infos = Vec::new();
     for dep in &dep_ctx.resolved_deps {
         for (class_name, module_name) in &dep.class_module_index {
@@ -159,6 +176,7 @@ pub(crate) fn build_class_index(
         }
         dep_class_infos.extend(dep.class_infos.clone());
         dep_protocol_infos.extend(dep.protocol_infos.clone());
+        dep_protocol_defs.extend(dep.protocol_defs.clone());
         dep_alias_infos.extend(dep.alias_infos.clone());
     }
 
@@ -197,17 +215,18 @@ pub(crate) fn build_class_index(
     // here, on top of `build_class_module_index`'s own (incrementally
     // cached) scan for classes, was doing up to three full parses of every
     // file per build.
-    let (all_protocol_infos, all_alias_infos) =
+    let (all_protocol_infos, all_protocol_defs, all_alias_infos) =
         match package_identity(pkg_manifest, options.stdlib_mode) {
             Some(name) => {
-                let (source_protocol_infos, source_alias_infos) =
+                let (source_protocol_infos, source_protocol_defs, source_alias_infos) =
                     collect_project_protocol_and_alias_infos(&env.source_files, name);
                 (
                     collect_all_protocol_infos(&[&source_protocol_infos, &dep_protocol_infos]),
+                    [source_protocol_defs, dep_protocol_defs].concat(),
                     collect_all_alias_infos(&[&source_alias_infos, &dep_alias_infos]),
                 )
             }
-            None => (Vec::new(), Vec::new()),
+            None => (Vec::new(), Vec::new(), Vec::new()),
         };
 
     Ok(ClassIndexResult {
@@ -216,11 +235,13 @@ pub(crate) fn build_class_index(
         all_class_infos,
         all_alias_infos,
         all_protocol_infos,
+        all_protocol_defs,
         extension_index,
         dep_registry,
         cached_asts,
         force_pass2,
         source_hashes,
+        file_protocol_uses,
     })
 }
 
@@ -415,7 +436,7 @@ pub(crate) fn collect_project_alias_infos(
     source_files: &[Utf8PathBuf],
     pkg_name: &str,
 ) -> Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> {
-    collect_project_protocol_and_alias_infos(source_files, pkg_name).1
+    collect_project_protocol_and_alias_infos(source_files, pkg_name).2
 }
 
 /// Manifest-less "coherent package" fallback for cross-file type-alias
@@ -520,6 +541,18 @@ pub(crate) fn collect_project_protocol_infos(
     collect_project_protocol_and_alias_infos(source_files, "").0
 }
 
+/// Extracts full ASTs of every *provision-bearing* protocol declared in any
+/// project source file (ADR 0127 §10a; BT-3591) — the trait-flattening
+/// counterpart to [`collect_project_protocol_infos`]. Standalone wrapper for
+/// tests; the production path calls
+/// [`collect_project_protocol_and_alias_infos`] directly (see its doc).
+#[allow(dead_code)] // Used by tests; production path uses the combined extractor above
+pub(crate) fn collect_project_protocol_defs(
+    source_files: &[Utf8PathBuf],
+) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
+    collect_project_protocol_and_alias_infos(source_files, "").1
+}
+
 /// Extracts both protocol and type-alias declarations from every project
 /// source file in a single lex/parse pass per file.
 ///
@@ -538,14 +571,17 @@ pub(crate) fn collect_project_protocol_infos(
 /// `pkg_name` is only used to stamp `AliasInfo.package`; pass `""` when only
 /// the protocol half of the result is needed (see
 /// `collect_project_protocol_infos`, which never stamps a package anyway).
+#[allow(clippy::type_complexity)] // 3-tuple mirrors this module's other multi-output extractors
 fn collect_project_protocol_and_alias_infos(
     source_files: &[Utf8PathBuf],
     pkg_name: &str,
 ) -> (
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::ast::ProtocolDefinition>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 ) {
     let mut all_protocols = Vec::new();
+    let mut all_protocol_defs = Vec::new();
     let mut all_aliases = Vec::new();
     for file in source_files {
         let Ok(source) = fs::read_to_string(file) else {
@@ -560,6 +596,19 @@ fn collect_project_protocol_and_alias_infos(
             ),
         );
 
+        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // BT-3591) — a protocol with no provisions has nothing for
+        // `trait_expansion::expand_module` to flatten, and `ProtocolInfo`
+        // above already carries everything conformance/`extending:`
+        // resolution needs for it.
+        all_protocol_defs.extend(
+            module
+                .protocols
+                .iter()
+                .filter(|p| !p.provided_methods.is_empty())
+                .cloned(),
+        );
+
         let mut infos =
             beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
                 &module,
@@ -569,7 +618,7 @@ fn collect_project_protocol_and_alias_infos(
         }
         all_aliases.extend(infos);
     }
-    (all_protocols, all_aliases)
+    (all_protocols, all_protocol_defs, all_aliases)
 }
 
 /// Merge protocol infos from multiple sources (same-package cross-file +

@@ -33,6 +33,7 @@ fn make_resolved_dep(
         class_module_index: std::collections::HashMap::new(),
         class_infos: Vec::new(),
         protocol_infos: Vec::new(),
+        protocol_defs: Vec::new(),
         alias_infos: Vec::new(),
         is_direct: true,
         via_chain: Vec::new(),

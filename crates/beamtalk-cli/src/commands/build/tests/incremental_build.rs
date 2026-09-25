@@ -105,7 +105,15 @@ fn test_detect_changes_new_files_no_build_dir() {
     let source_files = vec![src_dir.join("counter.bt")];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(result.changed_files.len(), 1);
     assert!(result.unchanged_files.is_empty());
     assert!(result.orphaned_beam_files.is_empty());
@@ -125,7 +133,15 @@ fn test_detect_changes_no_beam_exists() {
     let source_files = vec![src_dir.join("counter.bt")];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         result.changed_files.len(),
         1,
@@ -154,12 +170,182 @@ fn test_detect_changes_up_to_date() {
     let source_files = vec![source_file.clone()];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(
         result.changed_files.is_empty(),
         "Up-to-date file should not be changed"
     );
     assert_eq!(result.unchanged_files.len(), 1);
+}
+
+/// ADR 0127 §10a / BT-3591: a class's `uses:` line makes its file's cache
+/// key depend on the protocol's content too — editing a protocol (its
+/// content hash changing) must rebuild its users even when their own source
+/// is completely untouched.
+#[test]
+fn test_detect_changes_protocol_hash_change_forces_rebuild_of_user() {
+    let temp = TempDir::new().unwrap();
+    let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_dir = project.join("src");
+    let build_dir = project.join("build");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::create_dir_all(&build_dir).unwrap();
+
+    // The user's own source never changes across this test — only the
+    // protocol it `uses:` does.
+    let source_file = src_dir.join("greeter.bt");
+    write_test_file(
+        &source_file,
+        "Object subclass: Greeter\n  uses: Greetable\n",
+    );
+    write_test_file(&build_dir.join("bt@greeter.beam"), "BEAM");
+
+    let source_files = vec![source_file.clone()];
+    let pairs = make_pairs(&source_files, &build_dir);
+
+    let mut file_protocol_uses = HashMap::new();
+    file_protocol_uses.insert(
+        source_file.clone(),
+        vec![ecow::EcoString::from("Greetable")],
+    );
+
+    // First build (forced, as a real `beamtalk build` would be on a clean
+    // checkout): establishes the baseline combined cache key under
+    // `Greetable`'s v1 hash, then persists it — mirroring
+    // `build/mod.rs`'s own detect-then-`save_beam_hash_cache` sequence.
+    let mut protocol_hashes_v1 = HashMap::new();
+    protocol_hashes_v1.insert(ecow::EcoString::from("Greetable"), "hash-v1".to_string());
+    let first = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        true,
+        &HashMap::new(),
+        &file_protocol_uses,
+        &protocol_hashes_v1,
+    );
+    super::super::super::build_cache::save_beam_hash_cache(&build_dir, &first.source_hashes);
+
+    // Second build: the user's source is byte-identical, but `Greetable`
+    // now hashes differently (as if its file had just been edited) — the
+    // user's combined cache key must differ, forcing a rebuild.
+    let mut protocol_hashes_v2 = HashMap::new();
+    protocol_hashes_v2.insert(ecow::EcoString::from("Greetable"), "hash-v2".to_string());
+    let second = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &file_protocol_uses,
+        &protocol_hashes_v2,
+    );
+    assert_eq!(
+        second.changed_files,
+        vec![source_file.clone()],
+        "editing a used protocol must rebuild its user even though the \
+         user's own source is unchanged"
+    );
+    assert!(second.unchanged_files.is_empty());
+
+    // Third build: same protocol hash as the second — now up-to-date, since
+    // both the source and every protocol it depends on are unchanged from
+    // the last (v2) build. Guards against the combined-key mechanism
+    // never converging (e.g. an unstable hash order) once a protocol's
+    // hash stops changing.
+    super::super::super::build_cache::save_beam_hash_cache(&build_dir, &second.source_hashes);
+    let third = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &file_protocol_uses,
+        &protocol_hashes_v2,
+    );
+    assert!(
+        third.changed_files.is_empty(),
+        "must settle to up-to-date once the protocol stops changing: {third:?}"
+    );
+    assert_eq!(third.unchanged_files, vec![source_file]);
+}
+
+/// ADR 0127 §10a / BT-3591 Blocker fix: a file's `uses:` protocol names
+/// must survive a Pass 1 cache hit, not just be known for files this build
+/// actually re-scanned. Before this fix, `file_protocol_uses` was derived
+/// only from `cached_asts` (Pass 1's freshly-parsed ASTs), which is empty
+/// for a cache-fresh file — silently breaking protocol-driven incremental
+/// rebuilds after the first build (the exact scenario this test drives:
+/// build once, then rebuild with an *unrelated* file changed so the
+/// `uses:` file itself is skipped as fresh).
+#[test]
+fn test_incremental_pass1_persists_protocol_uses_for_a_cache_fresh_file() {
+    let temp = TempDir::new().unwrap();
+    let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_dir = project.join("src");
+    let build_dir = project.join("build");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::create_dir_all(&build_dir).unwrap();
+
+    let greeter_file = src_dir.join("greeter.bt");
+    write_test_file(
+        &greeter_file,
+        "Object subclass: Greeter\n  uses: Greetable\n",
+    );
+    let other_file = src_dir.join("other.bt");
+    write_test_file(&other_file, "Object subclass: Other\n  m => 1\n");
+
+    let source_files = vec![greeter_file.clone(), other_file.clone()];
+
+    // First build: cache miss — both files scanned; greeter.bt's `uses:`
+    // is recorded from its fresh parse.
+    let first = super::super::super::build_cache::incremental_build_class_module_index(
+        &source_files,
+        Some(&src_dir),
+        "pkg",
+        &build_dir,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        first.file_protocol_uses.get(&greeter_file),
+        Some(&vec![ecow::EcoString::from("Greetable")]),
+        "first build must record greeter.bt's uses: from its fresh parse"
+    );
+
+    // Second build: only other.bt changed — greeter.bt is a cache hit
+    // (fresh, not re-scanned this build). Its recorded protocol uses must
+    // still be present, sourced from the persisted cache entry rather than
+    // a re-parse.
+    write_test_file(&other_file, "Object subclass: Other\n  m => 2\n");
+    let second = super::super::super::build_cache::incremental_build_class_module_index(
+        &source_files,
+        Some(&src_dir),
+        "pkg",
+        &build_dir,
+        None,
+        false,
+    )
+    .unwrap();
+    assert!(
+        !second.cached_asts.contains_key(&greeter_file),
+        "greeter.bt must be a cache hit (not re-scanned) for this test to be meaningful"
+    );
+    assert_eq!(
+        second.file_protocol_uses.get(&greeter_file),
+        Some(&vec![ecow::EcoString::from("Greetable")]),
+        "a cache-fresh file's uses: must survive from the persisted Pass 1 \
+         cache entry, not just files re-scanned this build"
+    );
 }
 
 #[test]
@@ -182,7 +368,15 @@ fn test_detect_changes_source_modified() {
     let source_files = vec![source_file];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         result.changed_files.len(),
         1,
@@ -216,7 +410,15 @@ fn test_detect_changes_touch_without_change_not_recompiled() {
     let source_files = vec![source_file];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(
         result.changed_files.is_empty(),
         "touch-without-change must not trigger recompilation"
@@ -261,7 +463,15 @@ fn test_detect_changes_trusts_known_hashes_over_rereading() {
         "not-the-real-hash".to_string(),
     );
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &known_hashes);
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &known_hashes,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         result.changed_files,
         vec![source_file],
@@ -299,7 +509,15 @@ fn test_detect_changes_branch_switch_scenario() {
     let source_files = vec![source_file.clone()];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         result.changed_files.len(),
         1,
@@ -327,7 +545,15 @@ fn test_detect_changes_force_flag() {
     let source_files = vec![source_file];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, true, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        true,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         result.changed_files.len(),
         1,
@@ -354,7 +580,15 @@ fn test_detect_changes_orphaned_beam() {
     let source_files = vec![src_dir.join("counter.bt")];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         result.orphaned_beam_files.len(),
         1,
@@ -396,7 +630,15 @@ fn test_detect_changes_mixed_states() {
     let source_files = vec![changed_file, src_dir.join("new_file.bt"), stable_file];
     let pairs = make_pairs(&source_files, &build_dir);
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert_eq!(
         result.changed_files.len(),
         2,
@@ -423,7 +665,15 @@ fn test_detect_changes_non_bt_beams_ignored() {
     let source_files: Vec<Utf8PathBuf> = Vec::new();
     let pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)> = Vec::new();
 
-    let result = detect_changes(&source_files, &build_dir, &pairs, false, &HashMap::new());
+    let result = detect_changes(
+        &source_files,
+        &build_dir,
+        &pairs,
+        false,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(
         result.orphaned_beam_files.is_empty(),
         "Non-bt@ beam files should not be flagged as orphaned"

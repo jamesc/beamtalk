@@ -93,6 +93,15 @@ use std::collections::HashMap;
 /// flattening `module` again here reproduces exactly the methods that
 /// `hierarchy`/`method_return_types` already describe (see the module doc).
 ///
+/// `external_protocols` must be the same map the driver's [`AnalysisResult`](
+/// crate::semantic_analysis::AnalysisResult) carries (its own field of the
+/// same name) — re-flattening `module` here only reproduces byte-for-byte
+/// what `analyse_full` already did (see the module doc) when it resolves a
+/// cross-file/cross-package `uses:` line against the same externally-carried
+/// protocol definitions. A caller with no such analysis to hand off (codegen's
+/// self-sufficient path) passes an empty map, same as it always could not
+/// resolve cross-file `uses:` either.
+///
 /// # Ordering
 ///
 /// Must run **after** the class hierarchy is built and method return types
@@ -105,12 +114,13 @@ pub fn lower_module_for_codegen(
     module: &mut Module,
     hierarchy: &ClassHierarchy,
     method_return_types: &HashMap<MethodReturnKey, InferredType>,
+    external_protocols: &HashMap<ecow::EcoString, crate::ast::ProtocolDefinition>,
 ) {
     // Flatten `uses:` provisions into their classes' own bodies so codegen
     // (which reads `ClassDefinition.methods` directly, with no knowledge of
     // `uses:`) emits them. Diagnostics are discarded — see the module doc's
     // "Closing the flattening/codegen boundary" for why that's safe here.
-    let (_diagnostics, _origins) = trait_expansion::expand_module(module);
+    let (_diagnostics, _origins) = trait_expansion::expand_module(module, external_protocols);
     // Writeback inferred return types into the AST so unannotated
     // methods appear in the emitted `method_return_types` map. Runs after
     // flattening so a flattened provision's own `(class, selector)` key
@@ -159,7 +169,12 @@ mod tests {
         let method_return_types = crate::semantic_analysis::type_checker::infer_method_return_types(
             &module, &hierarchy, None,
         );
-        lower_module_for_codegen(&mut module, &hierarchy, &method_return_types);
+        lower_module_for_codegen(
+            &mut module,
+            &hierarchy,
+            &method_return_types,
+            &HashMap::new(),
+        );
 
         let web_app = &module.classes[0];
         assert!(
@@ -194,7 +209,7 @@ mod tests {
                        uses: Describable\n";
         let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new());
+        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
 
         let report = &module.classes[0];
         assert!(
@@ -228,8 +243,8 @@ mod tests {
                        uses: Describable\n";
         let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new());
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new());
+        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
+        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
 
         let report = &module.classes[0];
         let count = report
@@ -251,7 +266,7 @@ mod tests {
         let src = "Object subclass: Foo\n  bar => 42";
         let mut module = parse_bt(src);
         let hierarchy = build_hierarchy(&module);
-        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new());
+        lower_module_for_codegen(&mut module, &hierarchy, &HashMap::new(), &HashMap::new());
         assert!(
             module.classes[0].methods[0].return_type.is_none(),
             "Expected no writeback without a precomputed map entry"

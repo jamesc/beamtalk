@@ -48,6 +48,14 @@ pub struct ResolvedDependency {
     /// modifier at the AST level, so every declared protocol is exported —
     /// unlike `alias_infos`, there is no seeding-boundary filter to apply.
     pub protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Full ASTs of provision-bearing protocols from this dependency's
+    /// source files (ADR 0127 §10a; BT-3591) — the trait-flattening
+    /// counterpart to `protocol_infos` above. Lets a consumer's cross-package
+    /// `uses: <this dep>@Name` flatten the protocol's provided methods,
+    /// rather than reporting "no source available". Empty when this
+    /// dependency's source is unavailable (compiled-only, not fetched) or
+    /// defines no provision-bearing protocol.
+    pub protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     /// Full type-alias metadata from the dependency's source files,
     /// each stamped with `.package = Some(name)`.
     ///
@@ -270,7 +278,7 @@ fn resolve_single_path_dep(
 
     info!(dep = %name, ebin = %ebin_path, "Resolved path dependency");
 
-    let (_, class_infos, protocol_infos, alias_infos) =
+    let (_, class_infos, protocol_infos, protocol_defs, alias_infos) =
         build_dep_class_index(&dep_root, name).unwrap_or_default();
 
     let stubs_dir = resolve_dep_stubs_dir(&dep_manifest, &dep_root);
@@ -282,6 +290,7 @@ fn resolve_single_path_dep(
         class_module_index: dep_class_module_index,
         class_infos,
         protocol_infos,
+        protocol_defs,
         alias_infos,
         is_direct: true, // Legacy path — all treated as direct
         via_chain: Vec::new(),
@@ -322,7 +331,7 @@ pub(crate) fn compile_dependency_at(
     let (ebin_path, class_module_index) =
         compile_dependency_with_context(project_root, dep_root, dep_name, options, prior_deps)?;
 
-    let (_, class_infos, protocol_infos, alias_infos) =
+    let (_, class_infos, protocol_infos, protocol_defs, alias_infos) =
         build_dep_class_index(dep_root, dep_name).unwrap_or_default();
 
     let stubs_dir = manifest::parse_manifest_full(&dep_root.join("beamtalk.toml"))
@@ -336,6 +345,7 @@ pub(crate) fn compile_dependency_at(
         class_module_index,
         class_infos,
         protocol_infos,
+        protocol_defs,
         alias_infos,
         is_direct: false, // Caller sets this based on graph knowledge
         via_chain: Vec::new(),
@@ -441,7 +451,14 @@ fn compile_dependency_with_context(
             class_module_index: class_module_index.clone(),
             class_superclass_index: class_superclass_index.clone(),
             pre_loaded_classes: all_class_infos.clone(),
+            // Same-package cross-file protocol resolution within a
+            // dependency's own multi-file compile is a pre-existing gap
+            // (mirrors `pre_loaded_protocols` above it, and `all_alias_infos`'s
+            // own "deferred as a follow-up" doc a few lines up) — not
+            // widened here; a dependency package with a cross-file `uses:`
+            // among its *own* files still needs same-file definitions.
             pre_loaded_protocols: Vec::new(),
+            pre_loaded_protocol_defs: Vec::new(),
             pre_loaded_aliases: all_alias_infos,
             // The dep's own project-wide extensions — its files see
             // each other's extensions during its own compilation. (Exporting
@@ -627,7 +644,7 @@ fn generate_dependency_app_file(
 /// Protocol and alias extraction reuses `build_class_module_index`'s cached,
 /// already-parsed ASTs rather than re-lexing/re-parsing the dependency's
 /// source files a second and third time.
-#[allow(clippy::type_complexity)] // 4-tuple mirrors ResolvedDependency's own fields; a type alias wouldn't clarify
+#[allow(clippy::type_complexity)] // 5-tuple mirrors ResolvedDependency's own fields; a type alias wouldn't clarify
 pub(crate) fn build_dep_class_index(
     dep_root: &Utf8Path,
     dep_name: &str,
@@ -635,6 +652,7 @@ pub(crate) fn build_dep_class_index(
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::ast::ProtocolDefinition>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 )> {
     // `stubs/` is excluded (ADR 0075) — it's type-only and never
@@ -642,7 +660,13 @@ pub(crate) fn build_dep_class_index(
     let src_dir = dep_root.join("src");
     let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
     if source_files.is_empty() {
-        return Ok((HashMap::new(), Vec::new(), Vec::new(), Vec::new()));
+        return Ok((
+            HashMap::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
     }
 
     let source_root = if src_dir.exists() {
@@ -664,6 +688,7 @@ pub(crate) fn build_dep_class_index(
     sorted_files.sort();
 
     let mut protocol_infos = Vec::new();
+    let mut protocol_defs = Vec::new();
     let mut alias_infos = Vec::new();
     for file in sorted_files {
         let module = &cached_asts[file].module;
@@ -671,6 +696,15 @@ pub(crate) fn build_dep_class_index(
             beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
                 module,
             ),
+        );
+        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
+        // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc.
+        protocol_defs.extend(
+            module
+                .protocols
+                .iter()
+                .filter(|p| !p.provided_methods.is_empty())
+                .cloned(),
         );
         let mut infos =
             beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
@@ -682,7 +716,13 @@ pub(crate) fn build_dep_class_index(
         alias_infos.extend(infos);
     }
 
-    Ok((class_module_index, class_infos, protocol_infos, alias_infos))
+    Ok((
+        class_module_index,
+        class_infos,
+        protocol_infos,
+        protocol_defs,
+        alias_infos,
+    ))
 }
 
 #[cfg(test)]
@@ -1100,7 +1140,7 @@ dep_utils = { path = "dep_utils" }"#,
         );
 
         let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
-        let (class_module_index, _class_infos, protocol_infos, alias_infos) =
+        let (class_module_index, _class_infos, protocol_infos, _protocol_defs, alias_infos) =
             build_dep_class_index(&dep_root, "dep_types").unwrap();
 
         assert!(

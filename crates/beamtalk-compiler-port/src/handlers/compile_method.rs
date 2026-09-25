@@ -251,6 +251,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         &mut merged_module,
         &analysis.class_hierarchy,
         &analysis.method_return_types,
+        &analysis.external_protocols,
     );
     let codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(&module_name)
         .with_workspace_mode(workspace_mode)
