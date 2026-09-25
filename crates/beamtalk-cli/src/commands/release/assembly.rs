@@ -481,6 +481,7 @@ fn build_assembly_eval(
                  io:format(standard_error, \"systools:make_script failed: ~p~n\", [MakeOther]), \
                  halt(1) \
          end, \
+         {staged_root_path_check} \
          BootSrc = RelFileNoExt ++ \".boot\", \
          BootDst = filename:join(filename:dirname(RelFileNoExt), \"start.boot\"), \
          case file:copy(BootSrc, BootDst) of \
@@ -504,6 +505,35 @@ fn build_assembly_eval(
         releases_root = escape_erlang_string(&to_forward_slash(releases_root.as_str())),
         release_name = escape_erlang_string(release_name),
         release_vsn = escape_erlang_string(release_vsn),
+        staged_root_path_check = staged_root_path_check_eval(release_dir_abs),
+    )
+}
+
+/// The `build_assembly_eval` step run right after `systools:make_script/2`:
+/// fail the build if any staged app's path in the generated `.script` still
+/// reads `$ROOT/lib/<app>-…`. systools silently falls back to `$ROOT`
+/// whenever `RELEASE_DIR` isn't a literal string prefix of the app dir it
+/// read back (see [`absolutize`]), and such a release boots under a bundled
+/// ERTS (where `$ROOT` is the release dir) but crashes with an `undef` under
+/// a host one. That has shipped three times — macOS's `/tmp` symlink,
+/// Windows 8.3 short names, and BT-3619's `/./` segment — so it now fails
+/// at build time instead. Relies on the eval's `StagedNames` and
+/// `RelFileNoExt` bindings; ends in a `,` so it splices in as one step.
+fn staged_root_path_check_eval(release_dir_abs: &Utf8Path) -> String {
+    format!(
+        "{{ok, [{{script, _, ScriptInstrs}}]}} = file:consult(RelFileNoExt ++ \".script\"), \
+         RootPaths = [P || {{path, Ps}} <- ScriptInstrs, P <- Ps, \
+             lists:any(fun(N) -> lists:prefix(\"$ROOT/lib/\" ++ atom_to_list(N) ++ \"-\", P) end, \
+                 StagedNames)], \
+         case lists:usort(RootPaths) of \
+             [] -> ok; \
+             BadPaths -> \
+                 io:format(standard_error, \
+                     \"staged apps resolved under $ROOT, not $RELEASE_DIR (~s): ~p~n\", \
+                     [\"{release_dir_abs}\", BadPaths]), \
+                 halt(1) \
+         end,",
+        release_dir_abs = escape_erlang_string(&to_forward_slash(release_dir_abs.as_str())),
     )
 }
 
@@ -520,16 +550,35 @@ fn build_assembly_eval(
 /// via a macOS-only CI failure (`ranch_app:start/2` undef at boot) that a
 /// prior version's `Utf8Path::canonicalize_utf8()` on the staged-ebin side
 /// alone, with no matching canonicalization on this side, produced.
+///
+/// The result is also lexically normalized the way Erlang's own
+/// `filename:join/1` normalizes the application directories `systools`
+/// reads back (BT-3619): `.` segments, repeated separators and a trailing
+/// separator are dropped, `..` segments are kept verbatim (Erlang keeps
+/// them too, and resolving them lexically would be wrong across a
+/// symlink). Without this, the default `beamtalk release` output dir —
+/// `./_build/release/<name>-<vsn>` joined onto the current directory —
+/// yields a `RELEASE_DIR` of `/proj/./_build/…` that never string-prefixes
+/// systools' `/proj/_build/…`, so every staged app falls back to
+/// `$ROOT/lib/…`. That is invisible under a bundled ERTS (where `$ROOT` *is*
+/// the release dir) and a `ranch_app:start/2` undef at boot under
+/// `--no-include-erts` (where `$ROOT` is the host OTP install).
 pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
-    if path.is_absolute() {
-        return Ok(path.to_owned());
-    }
-    let cwd = std::env::current_dir()
-        .into_diagnostic()
-        .wrap_err("Failed to read the current directory")?;
-    Utf8PathBuf::from_path_buf(cwd)
-        .map(|cwd| cwd.join(path))
-        .map_err(|p| miette::miette!("Current directory '{}' is not valid UTF-8", p.display()))
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        let cwd = std::env::current_dir()
+            .into_diagnostic()
+            .wrap_err("Failed to read the current directory")?;
+        Utf8PathBuf::from_path_buf(cwd)
+            .map(|cwd| cwd.join(path))
+            .map_err(|p| {
+                miette::miette!("Current directory '{}' is not valid UTF-8", p.display())
+            })?
+    };
+    // `components()` already drops `.` segments, repeated separators and a
+    // trailing separator, and keeps `..` — exactly `filename:join/1`'s rules.
+    Ok(absolute.components().collect())
 }
 
 /// Probe the building machine's ERTS root directory and version via a
@@ -1217,6 +1266,39 @@ mod tests {
         }
     }
 
+    /// BT-3619: the default output dir (`./_build/release/<name>-<vsn>`)
+    /// must not keep its `.` segment once absolutized — systools compares
+    /// `RELEASE_DIR` against `filename:join/1`-normalized app dirs, which
+    /// never contain one. Compared via `as_str`: `Utf8Path`'s own `==`
+    /// normalizes `.` away and would hide exactly this bug.
+    #[test]
+    fn absolutize_drops_cur_dir_segments_from_a_relative_path() {
+        let cwd = Utf8PathBuf::from_path_buf(std::env::current_dir().unwrap()).unwrap();
+        let abs = absolutize(Utf8Path::new("./_build/release/app-0.1.0")).unwrap();
+        let expected = cwd.join("_build").join("release").join("app-0.1.0");
+        assert_eq!(abs.as_str(), expected.as_str());
+    }
+
+    #[test]
+    fn absolutize_normalizes_an_absolute_path_like_erlang_filename_join() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        let messy = Utf8PathBuf::from(format!("{root}/./a//b/./"));
+        let expected = root.join("a").join("b");
+        assert_eq!(absolutize(&messy).unwrap().as_str(), expected.as_str());
+    }
+
+    #[test]
+    fn absolutize_keeps_parent_dir_segments() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        let with_parent = root.join("a").join("..").join("b");
+        assert_eq!(
+            absolutize(&with_parent).unwrap().as_str(),
+            with_parent.as_str()
+        );
+    }
+
     #[test]
     fn stage_apps_copies_files_into_lib_app_vsn_ebin() {
         let temp = TempDir::new().unwrap();
@@ -1574,6 +1656,11 @@ mod tests {
         assert!(eval.contains("release_handler:create_RELEASES"), "{eval}");
         assert!(eval.contains("\"start.boot\""), "{eval}");
         assert!(eval.contains("RELEASE_DIR"), "{eval}");
+        // BT-3619: the post-make_script `$ROOT` fallback guard runs, and
+        // runs before `start.boot` is copied from the checked script.
+        let guard = eval.find("\"$ROOT/lib/\"").expect(&eval);
+        assert!(guard > eval.find("systools:make_script").unwrap(), "{eval}");
+        assert!(guard < eval.find("\"start.boot\"").unwrap(), "{eval}");
         assert!(eval.contains("'orders'"), "{eval}");
         assert!(eval.contains("Seeds = ['kernel', 'stdlib']"), "{eval}");
         assert!(eval.contains("StagedNames = ['orders']"), "{eval}");
