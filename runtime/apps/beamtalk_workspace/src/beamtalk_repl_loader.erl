@@ -1509,13 +1509,23 @@ source is installable", so a compile failure here is reported, never raised.
     | {ok, compiled, binary(), [map()], atom()}
     | {error, term()}.
 compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) ->
-    compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, use_runtime_indexes).
+    StdlibMode = is_stdlib_path(Path),
+    handle_compile_reload_result(
+        beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride),
+        Path,
+        ExpectedClassName
+    ).
 
 -doc """
 `compile_reload_source/4`, additionally accepting a `PrebuiltIndexes` map
-forwarded straight to `beamtalk_repl_compiler:compile_file/5` (`use_runtime_indexes`
-reproduces `compile_reload_source/4`'s own behaviour exactly, since that is
-also what `compile_file/4` derives internally — see that function's doc).
+forwarded to `beamtalk_repl_compiler:compile_file/5` (a real map, always —
+unlike `compile_file/4`'s own internal `use_runtime_indexes` shortcut,
+which is `compile_file/5`'s to interpret, not this function's to pass
+through; doing so here previously widened this arity's declared domain
+past what `compile_file/5`'s own spec promises, which is exactly the kind
+of cross-function spec mismatch Dialyzer's whole-module success-typing
+propagates into unrelated "will never be called" findings elsewhere in
+this file — found via `just dialyzer` on this very change).
 
 BT-3593's protocol-reload fan-out is this arity's one production caller: it
 merges `beamtalk_repl_compiler:build_class_indexes/0` (the same superclass/
@@ -1524,30 +1534,46 @@ carrying the just-edited protocol's raw source, so each fanned-out user's
 own recompile flattens against the NEW provisions (ADR 0127 §10a) rather
 than resolving `uses:` against nothing.
 """.
--spec compile_reload_source(
-    string(), string(), binary() | undefined, atom() | undefined, use_runtime_indexes | map()
+-spec compile_reload_source(string(), string(), binary() | undefined, atom() | undefined, map()) ->
+    {ok, protocol_definition, map()}
+    | {ok, compiled, binary(), [map()], atom()}
+    | {error, term()}.
+compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, PrebuiltIndexes) when
+    is_map(PrebuiltIndexes)
+->
+    StdlibMode = is_stdlib_path(Path),
+    handle_compile_reload_result(
+        beamtalk_repl_compiler:compile_file(
+            Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
+        ),
+        Path,
+        ExpectedClassName
+    ).
+
+%% Shared compile-result dispatch both `compile_reload_source` arities above
+%% reduce to — see `compile_reload_source/4`'s own doc for the shapes this
+%% translates between.
+-spec handle_compile_reload_result(
+    {ok, protocol_definition, map(), [binary()]}
+    | {ok, binary(), [map()], atom()}
+    | {error, term()},
+    string(),
+    atom() | undefined
 ) ->
     {ok, protocol_definition, map()}
     | {ok, compiled, binary(), [map()], atom()}
     | {error, term()}.
-compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, PrebuiltIndexes) ->
-    StdlibMode = is_stdlib_path(Path),
-    case
-        beamtalk_repl_compiler:compile_file(
-            Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
-        )
-    of
-        %% Protocol definition — must match before generic 4-tuple.
-        {ok, protocol_definition, ProtocolInfo, _Warnings} ->
-            {ok, protocol_definition, ProtocolInfo};
-        {ok, Binary, ClassNames, ModuleName} ->
-            case verify_class_present(ExpectedClassName, ClassNames, Path) of
-                ok -> {ok, compiled, Binary, ClassNames, ModuleName};
-                {error, _} = Err -> Err
-            end;
-        {error, Reason} ->
-            {error, Reason}
-    end.
+handle_compile_reload_result(
+    {ok, protocol_definition, ProtocolInfo, _Warnings}, _Path, _ExpectedClassName
+) ->
+    {ok, protocol_definition, ProtocolInfo};
+handle_compile_reload_result({ok, Binary, ClassNames, ModuleName}, Path, ExpectedClassName) ->
+    case verify_class_present(ExpectedClassName, ClassNames, Path) of
+        ok -> {ok, compiled, Binary, ClassNames, ModuleName};
+        {error, _} = Err -> Err
+    end;
+handle_compile_reload_result({error, Reason}, _Path, _ExpectedClassName) ->
+    {error, Reason}.
 
 -doc """
 Install half of `reload_compile_and_load/4` — see `compile_reload_source/4`'s
