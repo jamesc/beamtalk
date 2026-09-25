@@ -456,3 +456,68 @@ fn parse_class_uses_excluding_non_symbol_element_is_error() {
         "Expected a not-a-symbol error, got: {diagnostics:?}"
     );
 }
+
+// ==========================================================================
+// Protocols are stateless (ADR 0127 §7, §13) — BT-3589
+// ==========================================================================
+
+#[test]
+fn parse_protocol_state_declaration_is_error() {
+    let diagnostics = parse_err(
+        "Protocol define: Counting
+  state: total :: Integer = 0
+  count -> Integer",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("protocols are stateless")),
+        "Expected a protocols-are-stateless error, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_protocol_field_declaration_is_error() {
+    let diagnostics = parse_err(
+        "Protocol define: Counting
+  field: total :: Integer = 0
+  count -> Integer",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("protocols are stateless")),
+        "Expected a protocols-are-stateless error, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_protocol_classvar_declaration_is_error() {
+    let diagnostics = parse_err(
+        "Protocol define: Counting
+  classState: total :: Integer = 0
+  count -> Integer",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("protocols are stateless")),
+        "Expected a protocols-are-stateless error, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_protocol_state_declaration_does_not_swallow_following_signature() {
+    // The rejected `field:` line must not silently end the protocol body —
+    // the required signature after it still parses (mirrors the `uses:`
+    // recovery test above).
+    let tokens = crate::source_analysis::lex_with_eof(
+        "Protocol define: Counting
+  field: total :: Integer = 0
+  count -> Integer",
+    );
+    let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+    let proto = &module.protocols[0];
+    assert_eq!(proto.method_signatures.len(), 1);
+    assert_eq!(proto.method_signatures[0].selector.name(), "count");
+}

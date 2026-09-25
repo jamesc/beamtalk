@@ -24,17 +24,24 @@
 //! flattened module through to codegen is BT-3590's job ("Codegen for
 //! flattened classes…"), not this pass's.
 //!
-//! This is the **expansion** half of ADR 0127 §3's two-part pass (steps
-//! 1–4, 6: collect provisions, apply `excluding:`, merge with conflict
-//! detection, drop provisions the class body already defines — "class
-//! wins" — and treat the result as the class's own body). It runs
-//! **before** `ClassHierarchy` is built, exactly where the ADR places it,
-//! so every later phase (protocol conformance, type inference, sendability,
-//! definite assignment) sees the flattened class. The **requirement**
-//! half (ADR 0127 §3 step 5, §3a: resolving each used trait's required
-//! selectors and checking the `overriding:` acknowledgement) needs
-//! `ClassHierarchy::resolves_selector` over the *flattened* hierarchy, so
-//! it necessarily runs afterward — that is BT-3589's pass, not this one.
+//! This file holds both halves of ADR 0127 §3's two-part pass:
+//!
+//! - **Expansion** (steps 1–4, 6: collect provisions, apply `excluding:`,
+//!   merge with conflict detection, drop provisions the class body already
+//!   defines — "class wins" — and treat the result as the class's own body).
+//!   [`expand_module`] runs it **before** `ClassHierarchy` is built, exactly
+//!   where the ADR places it, so every later phase (protocol conformance,
+//!   type inference, sendability, definite assignment) sees the flattened
+//!   class.
+//! - **The compile-time guarantees** (ADR 0127 §3 step 5, §3a, §5, §7;
+//!   BT-3589): resolving each used trait's required selectors, checking the
+//!   `overriding:` acknowledgement, and the protocol-side rules (self-send
+//!   bound, statelessness, reserved selectors). [`check_after_hierarchy`]
+//!   runs these **after** `ClassHierarchy` (and the `ProtocolRegistry`) are
+//!   built from the flattened module, because the requirement check needs
+//!   `ClassHierarchy::resolves_selector` and the `overriding:` check needs
+//!   the superclass chain — see that function's own doc for the full
+//!   breakdown.
 //!
 //! # Inputs and boundaries
 //!
@@ -64,11 +71,16 @@ use std::collections::{HashMap, HashSet};
 use ecow::EcoString;
 
 use crate::ast::{
-    ClassDefinition, ClassKind, Identifier, MethodDefinition, Module, ParameterDefinition,
-    ProtocolDefinition, ProtocolUse, TypeAnnotation, TypeParamDecl,
+    ClassDefinition, ClassKind, Expression, Identifier, MessageSelector, MethodDefinition,
+    MethodKind, Module, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
+    ProtocolUse, TypeAnnotation, TypeParamDecl,
 };
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::semantic_analysis::type_checker::is_generic_type_param;
+use crate::ast_walker::walk_expression;
+use crate::method_source_walker::collect_self_sends;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::receiver_knowledge;
+use crate::semantic_analysis::type_checker::{TypeChecker, is_generic_type_param};
 use crate::source_analysis::Diagnostic;
 
 /// Maps a flattened method back to the protocol that provided it, keyed by
@@ -626,6 +638,673 @@ fn self_type_replacement(
                 .collect(),
             span,
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Post-`ClassHierarchy` half (BT-3589): requirements, `overriding:`, and
+// protocol-side rules (ADR 0127 §3a, §5, §7, §13).
+// ---------------------------------------------------------------------------
+
+/// Reserved selectors a protocol may not *provide* (ADR 0127 §7, §13) —
+/// each one changes what the compiler or runtime does with a class (shape,
+/// dispatch, lifecycle), not just what it answers, so a trait providing one
+/// would change a class's shape or dispatch behind a `uses:` line.
+/// `migrateFromV<N>:` is matched separately, via [`crate::ast::migrate_from_v_version`]
+/// (its `N` varies, so it can't be a literal in this list).
+const RESERVED_PROVISION_SELECTORS: &[&str] = &[
+    "initialize",
+    "terminate:",
+    "doesNotUnderstand:args:",
+    "supervisionPolicy",
+    "supervisionSpec",
+];
+
+/// The two-selector allowlist exempt from the `overriding:` acknowledgement
+/// (ADR 0127 §3a): cosmetic defaults a class is expected to replace.
+const OVERRIDE_ALLOWLIST_SELECTORS: &[&str] = &["printString", "displayString"];
+
+/// The root classes the allowlist above applies to — only when the
+/// *inherited* method being replaced is itself defined on one of these, not
+/// for any class that happens to be named the same.
+const OVERRIDE_ALLOWLIST_ROOTS: &[&str] = &["Object", "Value"];
+
+/// Runs every post-`ClassHierarchy` trait check over `module` (already
+/// flattened by [`expand_module`]), given the `hierarchy` and
+/// `protocol_registry` built from that same flattened module.
+///
+/// Two independent halves, per the ADR's own split:
+///
+/// - **Protocol-side** (§5, §7, §13): each protocol with at least one
+///   provided method is checked once, regardless of whether any class uses
+///   it — "a protocol with no users is still checked" (§5) — for a
+///   self-send outside required ∪ provided ∪ `Object`, statelessness
+///   (`self.slot`), the reserved-selector list, `@primitive`/`@intrinsic`,
+///   `sealed`/`internal`, and the `equals:`/`hash` pairing.
+/// - **Class-side** (§3 step 5, §3a, §8): only classes with at least one
+///   `uses:` line — required-selector resolution, `excluding:`/`overriding:`
+///   name validity, "excluding can break conformance", the `overriding:`
+///   acknowledgement (and its staleness), and override-compatibility for a
+///   class-body method that replaced a dropped provision.
+///
+/// Called by `analyse_full` right after `ProtocolRegistry` is registered
+/// (Phase 0.5) — both class-side checks (`resolves_selector`, the
+/// superclass-chain walk) and protocol-side checks (`all_conformance_selectors`,
+/// which needs the registry for `extending:` transitivity) depend on it.
+pub fn check_after_hierarchy(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for protocol in &module.protocols {
+        check_protocol_provisions(protocol, hierarchy, protocol_registry, &mut diagnostics);
+    }
+
+    if module.classes.iter().any(|c| !c.uses.is_empty()) {
+        let protocols: HashMap<&EcoString, &ProtocolDefinition> =
+            module.protocols.iter().map(|p| (&p.name.name, p)).collect();
+        for class in &module.classes {
+            if class.uses.is_empty() {
+                continue;
+            }
+            check_class_trait_usage(class, &protocols, hierarchy, &mut diagnostics);
+        }
+    }
+
+    diagnostics
+}
+
+// --- Protocol-side checks (§5, §7, §13) -------------------------------------
+
+/// Runs every protocol-side check on `protocol` (ADR 0127 §5, §7, §13) —
+/// a no-op for a protocol with no provisions, since every check here is
+/// about a *provided* method's body or signature.
+fn check_protocol_provisions(
+    protocol: &ProtocolDefinition,
+    hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if protocol.provided_methods.is_empty() {
+        return;
+    }
+
+    // §5: "self bounded by the protocol's required ∪ provided selectors plus
+    // `Object`'s". `all_conformance_selectors` already gives required ∪
+    // provided, transitively through `extending:` (ADR 0127 §8) — the exact
+    // set `check_conformance_to_protocol` uses for the same reason.
+    let mut allowed_self_sends: HashSet<String> = HashSet::new();
+    if let Some(info) = protocol_registry.get(&protocol.name.name) {
+        for selector in info.all_conformance_selectors(protocol_registry) {
+            allowed_self_sends.insert(selector.to_string());
+        }
+    } else {
+        // Not found in the registry (e.g. a namespace collision already
+        // reported elsewhere) — fall back to this definition's own
+        // required/provided selectors with no `extending:` transitivity, so
+        // the self-send check still runs rather than silently skipping the
+        // protocol.
+        for sig in &protocol.method_signatures {
+            allowed_self_sends.insert(sig.selector.name().to_string());
+        }
+        for method in &protocol.provided_methods {
+            allowed_self_sends.insert(method.selector.name().to_string());
+        }
+    }
+    for method in hierarchy.all_methods("Object") {
+        allowed_self_sends.insert(method.selector.to_string());
+    }
+
+    for method in &protocol.provided_methods {
+        check_single_provision(protocol, method, &allowed_self_sends, diagnostics);
+    }
+
+    // A protocol providing exactly one of `equals:`/`hash` (§3a, §13).
+    let has_equals = protocol
+        .provided_methods
+        .iter()
+        .any(|m| m.selector.name() == "equals:");
+    let has_hash = protocol
+        .provided_methods
+        .iter()
+        .any(|m| m.selector.name() == "hash");
+    if has_equals != has_hash {
+        let (present, missing) = if has_equals {
+            ("equals:", "hash")
+        } else {
+            ("hash", "equals:")
+        };
+        diagnostics.push(Diagnostic::warning(
+            format!(
+                "{} provides `{present}` but not `{missing}` — a class using it may get \
+                 inconsistent equality and hashing; provide both or neither",
+                protocol.name.name
+            ),
+            protocol.span,
+        ));
+    }
+}
+
+/// Returns `true` when `expr` is the bare `self` pseudo-variable.
+fn is_self_identifier(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(id) if id.name == "self")
+}
+
+/// Runs every single-provision check (ADR 0127 §1, §5, §7, §13) on `method`,
+/// one of `protocol`'s provided methods.
+fn check_single_provision(
+    protocol: &ProtocolDefinition,
+    method: &MethodDefinition,
+    allowed_self_sends: &HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let selector = method.selector.name();
+
+    // Reserved selectors — a provision changing class shape/dispatch (§7, §13).
+    if RESERVED_PROVISION_SELECTORS.contains(&selector.as_str())
+        || crate::ast::migrate_from_v_version(&selector).is_some()
+    {
+        diagnostics.push(Diagnostic::error(
+            format!(
+                "a protocol cannot provide `{selector}`; it changes how the class is built or \
+                 dispatched. Declare it as a required method instead"
+            ),
+            method.span,
+        ));
+    }
+
+    // `sealed`/`internal` on a provided method — not yet supported (§13).
+    if method.is_sealed || method.is_internal {
+        diagnostics.push(Diagnostic::error(
+            "`sealed`/`internal` are not supported on provided methods in v1",
+            method.span,
+        ));
+    }
+
+    // Statelessness (`self.slot`) and `@primitive`/`@intrinsic` (§1, §7) —
+    // one walk of the body via the shared expression walker so neither check
+    // re-derives its own `Expression` match.
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |expr| match expr {
+            Expression::FieldAccess { receiver, span, .. } if is_self_identifier(receiver) => {
+                diagnostics.push(Diagnostic::error(
+                    "protocols are stateless — declare `slot -> Type` as a required method",
+                    *span,
+                ));
+            }
+            Expression::Primitive { span, .. } => {
+                diagnostics.push(Diagnostic::error(
+                    "provided methods cannot use primitives",
+                    *span,
+                ));
+            }
+            _ => {}
+        });
+    }
+
+    // §5: self bounded by required ∪ provided ∪ `Object`.
+    for hit in collect_self_sends(method) {
+        if !allowed_self_sends.contains(&hit.selector) {
+            diagnostics.push(Diagnostic::error(
+                format!(
+                    "`{}` is sent by `{selector}` but is neither required nor provided by {}; \
+                     declare it as required",
+                    hit.selector, protocol.name.name
+                ),
+                hit.span,
+            ));
+        }
+    }
+}
+
+// --- Class-side checks (§3 step 5, §3a, §8) ---------------------------------
+
+/// Renders a required signature for a diagnostic hint
+/// (`< other :: Self -> Boolean`, `do: block :: Block(E, Object)`) — a
+/// small, self-contained rendering for a one-line hint, not a full
+/// `Document`-pipeline unparse (`unparse::unparse_protocol_method_signature`
+/// is private to that module and returns a `Document`, which is more than a
+/// hint string needs).
+fn format_required_signature(sig: &ProtocolMethodSignature) -> String {
+    let mut out = String::new();
+    match &sig.selector {
+        MessageSelector::Unary(name) => out.push_str(name),
+        MessageSelector::Binary(op) => {
+            out.push_str(op);
+            if let Some(param) = sig.parameters.first() {
+                out.push(' ');
+                out.push_str(param.name.name.as_str());
+            }
+        }
+        MessageSelector::Keyword(parts) => {
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                out.push_str(part.keyword.as_str());
+                if let Some(param) = sig.parameters.get(i) {
+                    out.push(' ');
+                    out.push_str(param.name.name.as_str());
+                }
+            }
+        }
+    }
+    if let Some(param) = sig.parameters.first() {
+        if let Some(ty) = &param.type_annotation {
+            out.push_str(" :: ");
+            out.push_str(ty.type_name().as_str());
+        }
+    }
+    if let Some(rt) = &sig.return_type {
+        out.push_str(" -> ");
+        out.push_str(rt.type_name().as_str());
+    }
+    out
+}
+
+/// Runs every class-side check (ADR 0127 §3 step 5, §3a, §8) for one class
+/// that has at least one `uses:` line.
+fn check_class_trait_usage(
+    class: &ClassDefinition,
+    protocols: &HashMap<&EcoString, &ProtocolDefinition>,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(class_info) = hierarchy.get_class(class.name.name.as_str()) else {
+        return; // Not in the hierarchy — a namespace collision or similar
+        // already reported elsewhere; nothing sound to check here.
+    };
+
+    // ADR 0100: when the class's own method surface isn't known with
+    // certainty (a DNU override, a cross-file/parse-error-degraded
+    // ancestor), every "unresolved selector" diagnostic below downgrades
+    // from an error to a hint rather than risk a false positive.
+    let is_open_world =
+        !receiver_knowledge::classify_receiver(class.name.name.as_str(), hierarchy, false)
+            .is_closed_complete();
+
+    for use_ in &class.uses {
+        // Mirrors `expand_class`'s own protocol resolution — a
+        // package-qualified or unknown-name `uses:` was already diagnosed
+        // by `expand_module` (Phase -1); nothing further to check here.
+        let protocol = if use_.package.is_none() {
+            protocols.get(&use_.protocol.name).copied()
+        } else {
+            None
+        };
+        let Some(protocol) = protocol else {
+            continue;
+        };
+
+        check_excluding_and_overriding_names(
+            class,
+            class_info,
+            use_,
+            protocol,
+            hierarchy,
+            diagnostics,
+        );
+        check_required_selectors(class, use_, protocol, hierarchy, is_open_world, diagnostics);
+        check_dropped_provision_overrides(class, use_, protocol, hierarchy, diagnostics);
+    }
+
+    check_overriding_acknowledgement(class, class_info, hierarchy, is_open_world, diagnostics);
+}
+
+/// §5 "excluding: a required selector"/"excluding: names a selector T does
+/// not provide", the parallel "overriding: names a selector T does not
+/// provide" (§13), §5's "excluding can break conformance" warning, and the
+/// `overriding:` staleness check (§3a) for a *validly-named* entry — all
+/// four read `use_.excluding`/`use_.overriding` against what `protocol`
+/// actually requires/provides, so they run together over the same two lists.
+fn check_excluding_and_overriding_names(
+    class: &ClassDefinition,
+    class_info: &ClassInfo,
+    use_: &ProtocolUse,
+    protocol: &ProtocolDefinition,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let required: HashSet<EcoString> = protocol
+        .method_signatures
+        .iter()
+        .map(|s| s.selector.name())
+        .collect();
+    let provided: HashSet<EcoString> = protocol
+        .provided_methods
+        .iter()
+        .map(|m| m.selector.name())
+        .collect();
+
+    for id in &use_.excluding {
+        let sel = &id.name;
+        if provided.contains(sel) {
+            // A real exclusion — check it doesn't leave the class
+            // non-conforming (§5, "Excluding can break conformance").
+            if !hierarchy.resolves_selector(class.name.name.as_str(), sel) {
+                diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "{} uses {} but does not conform to {}: it excludes `{sel}` without \
+                         defining or inheriting it",
+                        class.name.name, protocol.name.name, protocol.name.name
+                    ),
+                    id.span,
+                ));
+            }
+        } else if required.contains(sel) {
+            diagnostics.push(Diagnostic::error(
+                format!(
+                    "`{sel}` is required by {}, not provided; requirements cannot be excluded",
+                    protocol.name.name
+                ),
+                id.span,
+            ));
+        } else {
+            diagnostics.push(Diagnostic::error(
+                format!("{} does not provide `{sel}`", protocol.name.name),
+                id.span,
+            ));
+        }
+    }
+
+    for id in &use_.overriding {
+        if !provided.contains(&id.name) {
+            diagnostics.push(Diagnostic::error(
+                format!("{} does not provide `{}`", protocol.name.name, id.name),
+                id.span,
+            ));
+            continue;
+        }
+
+        // Staleness (§3a): a validly-named `overriding:` entry that no
+        // longer replaces anything — the superclass dropped the method, the
+        // protocol dropped the provision (already excluded above by
+        // `!provided.contains`), or the class body now defines the selector
+        // itself (so `expand_class`'s class-wins step never spliced this
+        // provision in, and it carries no `origin` in the hierarchy).
+        let still_a_provision = class_info
+            .methods
+            .iter()
+            .find(|m| m.selector == id.name)
+            .is_some_and(|m| m.origin.as_ref() == Some(&protocol.name.name));
+        let still_inherited = still_a_provision
+            && class_info
+                .superclass
+                .as_deref()
+                .is_some_and(|superclass| hierarchy.find_method(superclass, &id.name).is_some());
+        if !still_inherited {
+            diagnostics.push(Diagnostic::warning(
+                format!(
+                    "`{}` in `overriding:` does not override an inherited method; remove it",
+                    id.name
+                ),
+                id.span,
+            ));
+        }
+    }
+}
+
+/// §3 step 5 / §5: every required selector of `use_`'s protocol (after
+/// exclusion) must resolve on the flattened class.
+fn check_required_selectors(
+    class: &ClassDefinition,
+    use_: &ProtocolUse,
+    protocol: &ProtocolDefinition,
+    hierarchy: &ClassHierarchy,
+    is_open_world: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let excluded: HashSet<&str> = use_.excluding.iter().map(|id| id.name.as_str()).collect();
+
+    for sig in &protocol.method_signatures {
+        let selector = sig.selector.name();
+        if excluded.contains(selector.as_str()) {
+            // Either a valid exclusion of a non-required selector (checked
+            // above) or an invalid exclusion of this very requirement,
+            // already reported by `check_excluding_and_overriding_names` —
+            // either way, checking resolution of an intentionally-excluded
+            // requirement would only pile on the same diagnostic.
+            continue;
+        }
+        if hierarchy.resolves_selector(class.name.name.as_str(), &selector) {
+            continue;
+        }
+
+        let message = format!(
+            "{} uses {} but does not implement required `{selector}`",
+            class.name.name, protocol.name.name
+        );
+        let hint = format!(
+            "{} requires `{}`",
+            protocol.name.name,
+            format_required_signature(sig)
+        );
+        diagnostics.push(if is_open_world {
+            Diagnostic::hint(message, use_.span).with_hint(hint)
+        } else {
+            Diagnostic::error(message, use_.span).with_hint(hint)
+        });
+    }
+}
+
+/// §8 "An override of a provision is checked against it": when `class`'s own
+/// body defines a selector that `use_`'s protocol also provides (so
+/// class-wins dropped the provision, per `expand_class` step 4), the class's
+/// method is checked against the *dropped* provision's signature — the same
+/// nominal-compatibility rule used for a method overriding an inherited one.
+fn check_dropped_provision_overrides(
+    class: &ClassDefinition,
+    use_: &ProtocolUse,
+    protocol: &ProtocolDefinition,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let excluded: HashSet<&str> = use_.excluding.iter().map(|id| id.name.as_str()).collect();
+    let Some(class_info) = hierarchy.get_class(class.name.name.as_str()) else {
+        return;
+    };
+
+    for provided in &protocol.provided_methods {
+        let selector = provided.selector.name();
+        if excluded.contains(selector.as_str()) {
+            continue;
+        }
+
+        // Only a class-body method — not a surviving provision from this or
+        // another `uses:` line — counts as "class wins" here. A synthesised
+        // `Value` accessor also drops a provision (`expand_class`'s
+        // `own_selectors`) but has no `MethodDefinition` in `class.methods`
+        // to compare a signature against, so there is nothing to check.
+        let is_own_body_method = class_info
+            .methods
+            .iter()
+            .find(|m| m.selector.as_str() == selector.as_str())
+            .is_some_and(|m| m.origin.is_none());
+        if !is_own_body_method {
+            continue;
+        }
+        let Some(own_method) = class
+            .methods
+            .iter()
+            .find(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
+        else {
+            continue;
+        };
+
+        let dropped = substitute_provision(provided, use_, protocol, class);
+        check_signature_override_compatibility(
+            class,
+            &dropped,
+            own_method,
+            protocol,
+            hierarchy,
+            diagnostics,
+        );
+    }
+}
+
+/// Compares `own_method` (the class body's method) against `dropped` (the
+/// substituted provision it replaced), warning on any parameter or return
+/// type that isn't compatible — [`TypeChecker::is_type_compatible`]'s
+/// nominal-chain rule, the same one `check_override_param_compatibility`
+/// uses for a method overriding an inherited one (ADR 0127 §8).
+fn check_signature_override_compatibility(
+    class: &ClassDefinition,
+    dropped: &MethodDefinition,
+    own_method: &MethodDefinition,
+    protocol: &ProtocolDefinition,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let selector = own_method.selector.name();
+
+    for (i, (own_param, dropped_param)) in own_method
+        .parameters
+        .iter()
+        .zip(dropped.parameters.iter())
+        .enumerate()
+    {
+        let (Some(own_ty), Some(dropped_ty)) =
+            (&own_param.type_annotation, &dropped_param.type_annotation)
+        else {
+            continue;
+        };
+        let own_name = own_ty.type_name();
+        let dropped_name = dropped_ty.type_name();
+        if !TypeChecker::is_type_compatible(&own_name, &dropped_name, hierarchy) {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Parameter {} of `{selector}` in {} has type {own_name}, incompatible \
+                         with {}'s {dropped_name}",
+                        i + 1,
+                        class.name.name,
+                        protocol.name.name
+                    ),
+                    own_method.span,
+                )
+                .with_hint(format!(
+                    "{} declares parameter type {dropped_name}",
+                    protocol.name.name
+                )),
+            );
+        }
+    }
+
+    if let (Some(own_rt), Some(dropped_rt)) = (&own_method.return_type, &dropped.return_type) {
+        let own_name = own_rt.type_name();
+        let dropped_name = dropped_rt.type_name();
+        if !TypeChecker::is_type_compatible(&own_name, &dropped_name, hierarchy) {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Return type of `{selector}` in {} is {own_name}, incompatible with {}'s \
+                         {dropped_name}",
+                        class.name.name, protocol.name.name
+                    ),
+                    own_method.span,
+                )
+                .with_hint(format!(
+                    "{} declares return type {dropped_name}",
+                    protocol.name.name
+                )),
+            );
+        }
+    }
+}
+
+/// §3a: every surviving provision that replaces an inherited method must be
+/// acknowledged with `overriding:` on its `uses:` line. The staleness check
+/// for an `overriding:` entry that no longer replaces anything lives in
+/// [`check_excluding_and_overriding_names`] instead, alongside the
+/// "does not provide" name check it would otherwise duplicate for an invalid
+/// entry.
+fn check_overriding_acknowledgement(
+    class: &ClassDefinition,
+    class_info: &ClassInfo,
+    hierarchy: &ClassHierarchy,
+    is_open_world: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(ref superclass) = class_info.superclass else {
+        return; // No superclass — nothing to inherit, nothing to override.
+    };
+
+    // Every provision that actually survived flattening into this class,
+    // keyed by selector — `MethodInfo::origin` is `Some` only for a method
+    // `expand_class` spliced in (never for a class-body method or a
+    // synthesised accessor, both `None`, per that field's own doc). Sorted
+    // by selector before iterating: `class_info.methods` order is already
+    // deterministic (`expand_class` splices provisions in selector-sorted
+    // order), but collecting through a `HashMap` first would randomise it
+    // again, and this loop pushes diagnostics — the same "no `RandomState`
+    // in emitted order" reasoning `expand_class`'s own splice-order comment
+    // gives.
+    let mut surviving_provisions: Vec<(EcoString, EcoString)> = class_info
+        .methods
+        .iter()
+        .filter_map(|m| m.origin.as_ref().map(|p| (m.selector.clone(), p.clone())))
+        .collect();
+    surviving_provisions.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    for (selector, protocol_name) in &surviving_provisions {
+        let Some(inherited) = hierarchy.find_method(superclass, selector) else {
+            continue; // Nothing inherited at this selector — not an override.
+        };
+
+        // Same-origin exemption: the inherited method came from the same
+        // protocol, un-customised by the superclass (§3a).
+        if inherited.origin.as_ref() == Some(protocol_name) {
+            continue;
+        }
+
+        // A sealed inherited method is already an error regardless of
+        // `overriding:` — enforced unconditionally by
+        // `ClassHierarchy::add_module_classes`'s existing sealed-override
+        // check, which runs over every class-body method (including a
+        // spliced-in provision, since flattening happens before the
+        // hierarchy is built). Adding a second §3a-flavoured error here
+        // would just duplicate that diagnostic.
+        if inherited.is_sealed {
+            continue;
+        }
+
+        // The two-selector allowlist: cosmetic `Object`/`Value` defaults a
+        // class is expected to replace.
+        if OVERRIDE_ALLOWLIST_SELECTORS.contains(&selector.as_str())
+            && OVERRIDE_ALLOWLIST_ROOTS.contains(&inherited.defined_in.as_str())
+        {
+            continue;
+        }
+
+        let acknowledged = class.uses.iter().any(|u| {
+            u.protocol.name == *protocol_name && u.overriding.iter().any(|id| id.name == *selector)
+        });
+        if acknowledged {
+            continue;
+        }
+
+        let use_span = class
+            .uses
+            .iter()
+            .find(|u| u.protocol.name == *protocol_name)
+            .map_or(class.span, |u| u.span);
+        let message = format!(
+            "{protocol_name} provides `{selector}`, which {} would otherwise inherit from {}",
+            class.name.name, inherited.defined_in
+        );
+        let hint = format!(
+            "to use {protocol_name}'s version, write\n  uses: {protocol_name} overriding: #(#{selector})\n\
+             to keep {}'s version, write\n  uses: {protocol_name} excluding: #(#{selector})",
+            inherited.defined_in
+        );
+        diagnostics.push(if is_open_world {
+            Diagnostic::hint(message, use_span).with_hint(hint)
+        } else {
+            Diagnostic::error(message, use_span).with_hint(hint)
+        });
     }
 }
 

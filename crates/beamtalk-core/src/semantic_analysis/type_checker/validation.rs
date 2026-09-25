@@ -770,7 +770,13 @@ impl TypeChecker {
     /// - Same type → compatible
     /// - `expected` appears in `actual`'s superclass chain → compatible (e.g., Integer for Number)
     /// - Either type is unknown to the hierarchy → compatible (conservative)
-    pub(super) fn is_type_compatible(
+    ///
+    /// `pub(crate)`, not `pub(super)`: `semantic_analysis::trait_expansion`'s
+    /// override-compatibility check (ADR 0127 §8, BT-3589) reuses this same
+    /// nominal-chain rule for a class-body method replacing a dropped trait
+    /// provision — "the same rule used for overriding an inherited method" —
+    /// rather than re-deriving type compatibility a second time.
+    pub(crate) fn is_type_compatible(
         actual: &EcoString,
         expected: &EcoString,
         hierarchy: &ClassHierarchy,
