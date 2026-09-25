@@ -1237,6 +1237,9 @@ loader_integration_test_() ->
             {"protocol reload refuses a stdlib protocol file", fun() ->
                 t_protocol_reload_refuses_stdlib(Proj)
             end},
+            {"protocol reload rollback merges ambient protocol sources", fun() ->
+                t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj)
+            end},
             {"reload_method_definition existing method span", fun() ->
                 t_reload_method_definition_existing(Proj)
             end},
@@ -1708,6 +1711,90 @@ t_protocol_reload_refuses_stdlib(Proj) ->
     ?assert(is_record(Err, beamtalk_error)),
     Msg = Err#beamtalk_error.message,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"read-only">>)).
+
+%% Claude BeamTalk Review finding on BT-3593's PR: `rollback_one_install/2`'s
+%% class branch must merge `beamtalk_workspace_meta:all_protocol_sources/0`
+%% (the ambient snapshot) into its rollback `protocol_sources` map, not just
+%% the reloaded file's own `OldProtocolSources` — otherwise a fan-out user
+%% that `uses:` MORE THAN ONE protocol fails its OWN rollback recompile with
+%% an "unknown protocol" diagnostic (the other protocol's source is simply
+%% missing from the map), leaving it stuck on its NEW post-reload code while
+%% every other rolled-back sibling correctly reverts to old code — exactly
+%% the half-applied state the two-stage all-or-nothing design exists to
+%% prevent.
+%%
+%% Reproduced by injecting a stage-2 install failure (via `meck`, mirroring
+%% `beamtalk_repl_loader_rewrite_sites_tests.erl`'s `partial_install_failure`
+%% — see that module's own doc for why `meck` is used at all) on a SECOND,
+%% unrelated fan-out user, so a multi-protocol user installed just before it
+%% is the one whose rollback must succeed. Relies on
+%% `beamtalk_protocol_registry:users_of/1` returning classes in the order
+%% they registered (`?USERS_TABLE`'s `bag` reverse index preserves
+%% `ets:insert/2` order for a single key in this implementation) — Multi is
+%% loaded (and so registers its `uses:`) before Simple.
+t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    P1Name = "Bt3593RbP1" ++ N,
+    P2Name = "Bt3593RbP2" ++ N,
+    MultiName = "Bt3593RbMulti" ++ N,
+    SimpleName = "Bt3593RbSimple" ++ N,
+    SimpleFile = SimpleName ++ ".bt",
+    P1Path = write_bt(
+        Proj,
+        P1Name ++ ".bt",
+        list_to_binary("Protocol define: " ++ P1Name ++ "\n  foo -> String => \"old\"\n")
+    ),
+    P2Path = write_bt(
+        Proj,
+        P2Name ++ ".bt",
+        list_to_binary("Protocol define: " ++ P2Name ++ "\n  bar -> String => \"bar\"\n")
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(P1Path, State0),
+    {ok, _, State2} = beamtalk_repl_loader:handle_load(P2Path, State1),
+    MultiPath = write_bt(
+        Proj,
+        MultiName ++ ".bt",
+        list_to_binary(
+            "Value subclass: " ++ MultiName ++ "\n  uses: " ++ P1Name ++ "\n  uses: " ++
+                P2Name ++ "\n"
+        )
+    ),
+    {ok, _, State3} = beamtalk_repl_loader:handle_load(MultiPath, State2),
+    SimplePath = write_bt(
+        Proj,
+        SimpleFile,
+        list_to_binary("Value subclass: " ++ SimpleName ++ "\n  uses: " ++ P1Name ++ "\n")
+    ),
+    {ok, _, _State4} = beamtalk_repl_loader:handle_load(SimplePath, State3),
+
+    MultiAtom = list_to_atom(MultiName),
+    FooBefore = stored_method_source(MultiAtom, foo),
+    ?assert(binary:match(FooBefore, <<"old">>) =/= nomatch),
+
+    meck:new(beamtalk_repl_loader, [passthrough]),
+    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+        case filename:basename(LoadPath) of
+            SimpleFile -> {error, {injected_fault, install_anomaly}};
+            _ -> meck:passthrough([Compiled, LoadPath])
+        end
+    end),
+    try
+        ok = file:write_file(
+            P1Path, "Protocol define: " ++ P1Name ++ "\n  foo -> String => \"new\"\n"
+        ),
+        Result = beamtalk_repl_loader:reload_class_file(P1Path),
+        ?assertMatch({error, _}, Result),
+
+        %% The rollback recompile must succeed even though Multi `uses:` TWO
+        %% protocols — before the fix, this failed with "unknown protocol
+        %% P2Name" (P2's source missing from the rollback's protocol_sources
+        %% map), leaving Multi stuck on its NEW `foo`.
+        FooAfter = stored_method_source(MultiAtom, foo),
+        ?assertEqual(FooBefore, FooAfter)
+    after
+        meck:unload(beamtalk_repl_loader)
+    end.
 
 t_new_class_multiple_classes(_Proj) ->
     %% A source declaring two classes is rejected by declared_class_name/1,

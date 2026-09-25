@@ -1852,7 +1852,11 @@ install_protocol_fanout(
         {NameBin, beamtalk_workspace_meta:get_protocol_source(NameBin)}
      || NameBin <- ProtocolNameBins
     ]),
-    case install_reload_result(ProtocolResult, Path) of
+    %% `?MODULE:` (not a bare local call) so this install can be intercepted
+    %% by `meck` the same way `install_reload_result/2`'s own doc explains
+    %% for `rewrite_sites/2` — see `beamtalk_repl_loader_tests.erl`'s
+    %% `t_protocol_reload_rollback_merges_ambient_protocol_sources`.
+    case ?MODULE:install_reload_result(ProtocolResult, Path) of
         {error, Reason} ->
             {error, protocol_reload_install_failed_error(protocol, Reason)};
         {ok, ProtocolClassNames} ->
@@ -1881,7 +1885,8 @@ install_fanout_users([], InstalledRev) ->
 install_fanout_users(
     [{ClassAtom, Path, {ok, compiled, Binary, ClassNames, ModuleName}} | Rest], InstalledRev
 ) ->
-    case install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) of
+    %% `?MODULE:` — see `install_protocol_fanout/4`'s own call for why.
+    case ?MODULE:install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) of
         {ok, InstalledClassNames} ->
             Installed = {ClassAtom, Path, InstalledClassNames},
             install_fanout_users(Rest, [Installed | InstalledRev]);
@@ -1939,9 +1944,22 @@ rollback_one_install({ClassAtom, Path, _ClassNames}, OldProtocolSources) ->
             ok;
         UserSource ->
             ModuleNameOverride = compute_package_module_name(Path),
+            %% Merge over the ambient snapshot the same way the forward-compile
+            %% path (`reload_protocol_fanout/3`) does — `OldProtocolSources`
+            %% only carries the name(s) *this reloaded file* defines, so a
+            %% user `uses:`ing a second, unrelated protocol would otherwise
+            %% fail this rollback recompile with an "unknown protocol"
+            %% diagnostic, leaving it stuck on its new (post-reload) code
+            %% while its siblings correctly roll back — exactly the
+            %% half-applied state the two-stage design exists to prevent.
             PrebuiltIndexes = maps:merge(
                 beamtalk_repl_compiler:build_class_indexes(),
-                #{protocol_sources => filter_defined(OldProtocolSources)}
+                #{
+                    protocol_sources => maps:merge(
+                        beamtalk_workspace_meta:all_protocol_sources(),
+                        filter_defined(OldProtocolSources)
+                    )
+                }
             ),
             case
                 compile_reload_source(
