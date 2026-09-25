@@ -1,7 +1,7 @@
 # ADR 0129: Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades
 
 ## Status
-Proposed (2026-09-25)
+Accepted (2026-09-25)
 
 Amends ADRs 0010, 0019, 0040, 0081 and 0125 (see [Amended ADRs](#amended-adrs)).
 Settles BT-3632 (§6).
