@@ -481,6 +481,7 @@ fn build_assembly_eval(
                  io:format(standard_error, \"systools:make_script failed: ~p~n\", [MakeOther]), \
                  halt(1) \
          end, \
+         {staged_root_path_check} \
          BootSrc = RelFileNoExt ++ \".boot\", \
          BootDst = filename:join(filename:dirname(RelFileNoExt), \"start.boot\"), \
          case file:copy(BootSrc, BootDst) of \
@@ -504,6 +505,35 @@ fn build_assembly_eval(
         releases_root = escape_erlang_string(&to_forward_slash(releases_root.as_str())),
         release_name = escape_erlang_string(release_name),
         release_vsn = escape_erlang_string(release_vsn),
+        staged_root_path_check = staged_root_path_check_eval(release_dir_abs),
+    )
+}
+
+/// The `build_assembly_eval` step run right after `systools:make_script/2`:
+/// fail the build if any staged app's path in the generated `.script` still
+/// reads `$ROOT/lib/<app>-…`. systools silently falls back to `$ROOT`
+/// whenever `RELEASE_DIR` isn't a literal string prefix of the app dir it
+/// read back (see [`absolutize`]), and such a release boots under a bundled
+/// ERTS (where `$ROOT` is the release dir) but crashes with an `undef` under
+/// a host one. That has shipped three times — macOS's `/tmp` symlink,
+/// Windows 8.3 short names, and BT-3619's `/./` segment — so it now fails
+/// at build time instead. Relies on the eval's `StagedNames` and
+/// `RelFileNoExt` bindings; ends in a `,` so it splices in as one step.
+fn staged_root_path_check_eval(release_dir_abs: &Utf8Path) -> String {
+    format!(
+        "{{ok, [{{script, _, ScriptInstrs}}]}} = file:consult(RelFileNoExt ++ \".script\"), \
+         RootPaths = [P || {{path, Ps}} <- ScriptInstrs, P <- Ps, \
+             lists:any(fun(N) -> lists:prefix(\"$ROOT/lib/\" ++ atom_to_list(N) ++ \"-\", P) end, \
+                 StagedNames)], \
+         case lists:usort(RootPaths) of \
+             [] -> ok; \
+             BadPaths -> \
+                 io:format(standard_error, \
+                     \"staged apps resolved under $ROOT, not $RELEASE_DIR (~s): ~p~n\", \
+                     [\"{release_dir_abs}\", BadPaths]), \
+                 halt(1) \
+         end,",
+        release_dir_abs = escape_erlang_string(&to_forward_slash(release_dir_abs.as_str())),
     )
 }
 
@@ -1626,6 +1656,11 @@ mod tests {
         assert!(eval.contains("release_handler:create_RELEASES"), "{eval}");
         assert!(eval.contains("\"start.boot\""), "{eval}");
         assert!(eval.contains("RELEASE_DIR"), "{eval}");
+        // BT-3619: the post-make_script `$ROOT` fallback guard runs, and
+        // runs before `start.boot` is copied from the checked script.
+        let guard = eval.find("\"$ROOT/lib/\"").expect(&eval);
+        assert!(guard > eval.find("systools:make_script").unwrap(), "{eval}");
+        assert!(guard < eval.find("\"start.boot\"").unwrap(), "{eval}");
         assert!(eval.contains("'orders'"), "{eval}");
         assert!(eval.contains("Seeds = ['kernel', 'stdlib']"), "{eval}");
         assert!(eval.contains("StagedNames = ['orders']"), "{eval}");
