@@ -1017,6 +1017,85 @@ fn cascade_receiver_span(receiver: &Expression) -> Span {
 }
 
 // ---------------------------------------------------------------------------
+// Self-send extraction (ADR 0127 §5)
+// ---------------------------------------------------------------------------
+
+/// One self-directed send discovered by [`collect_self_sends`]: the selector
+/// name and the span of the send (the whole message send, or a cascade
+/// message) that named it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelfSendHit {
+    /// The selector name, exactly as [`SendHit::selector`] would record it.
+    pub selector: String,
+    /// Span of the send (or cascade message) itself, for diagnostics.
+    pub span: Span,
+}
+
+/// Walks `method`'s already-parsed body collecting every send whose receiver
+/// is literally `self` — a cascade's later messages count too, since
+/// [`cascade_receiver_kind`] resolves them against the cascade's shared
+/// receiver, not just its first message.
+///
+/// Backs the trait-provision self-send check (ADR 0127 §5, BT-3589): each
+/// provided method is type-checked once, in its protocol, with `self`
+/// bounded by the protocol's required ∪ provided ∪ `Object`'s selectors, so
+/// the check needs exactly the set this returns — not `super`, not any other
+/// receiver kind, and (like [`collect_receiver_spans`]) no source text, since
+/// self/super detection never depends on FFI-module resolution.
+#[must_use]
+pub fn collect_self_sends(method: &MethodDefinition) -> Vec<SelfSendHit> {
+    let mut hits = Vec::new();
+    let mut visitor = SelfSendVisitor { hits: &mut hits };
+    for stmt in &method.body {
+        walk_expr(&stmt.expression, "", &mut visitor);
+    }
+    hits
+}
+
+// ---------------------------------------------------------------------------
+// Concrete visitor: SelfSendHit collection
+// ---------------------------------------------------------------------------
+
+struct SelfSendVisitor<'a> {
+    hits: &'a mut Vec<SelfSendHit>,
+}
+
+impl SendVisitor for SelfSendVisitor<'_> {
+    fn visit_send(
+        &mut self,
+        selector: &MessageSelector,
+        send_span: Span,
+        receiver: &Expression,
+        _source: &str,
+    ) {
+        if matches!(
+            self_or_super_kind(receiver),
+            Some(ReceiverKind::SelfReceiver)
+        ) {
+            self.hits.push(SelfSendHit {
+                selector: selector.name().to_string(),
+                span: send_span,
+            });
+        }
+    }
+
+    fn visit_cascade_message(
+        &mut self,
+        selector: &MessageSelector,
+        msg_span: Span,
+        cascade_receiver: &Expression,
+        _source: &str,
+    ) {
+        if cascade_receiver_kind(cascade_receiver) == ReceiverKind::SelfReceiver {
+            self.hits.push(SelfSendHit {
+                selector: selector.name().to_string(),
+                span: msg_span,
+            });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Class-reference extraction
 // ---------------------------------------------------------------------------
 

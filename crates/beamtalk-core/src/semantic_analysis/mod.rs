@@ -703,6 +703,21 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         result.diagnostics.extend(proto_diags);
     }
 
+    // Phase 0.55: Trait semantic checks (ADR 0127 §3 step 5, §3a, §5, §7;
+    // BT-3589) — the post-`ClassHierarchy` half of the two-part expansion
+    // pass Phase -1 started above. Needs both `class_hierarchy` (for
+    // `resolves_selector`/`find_method` over the *flattened* hierarchy and
+    // the `overriding:` superclass-chain walk) and `protocol_registry` (for
+    // the protocol-side self-send bound's `extending:` transitivity), so it
+    // cannot run any earlier than this. See `trait_expansion`'s module doc.
+    result
+        .diagnostics
+        .extend(trait_expansion::check_after_hierarchy(
+            module,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+        ));
+
     // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8)
     // Must happen after both the class hierarchy and protocol registry are
     // fully built for the current module — aliases share the class/protocol

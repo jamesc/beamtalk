@@ -2880,6 +2880,31 @@ impl Parser {
                 continue;
             }
 
+            // `state:`/`field:`/`classState:` — protocols are stateless (ADR
+            // 0127 §7, §13). Parsed and discarded (rather than left for the
+            // signature parser below, which would see a non-signature token
+            // and silently end the body early) so a real diagnostic is
+            // produced and the rest of the protocol body still parses.
+            // `self.slot` reads/writes inside a provision's *body* are a
+            // semantic-analysis concern (`trait_expansion::check_after_
+            // hierarchy`, BT-3589) — they parse as ordinary expressions and
+            // can't be rejected here.
+            if is_state_like_declaration_keyword(self.current_kind()) {
+                let decl_span = if is_class_state_keyword(self.current_kind()) {
+                    self.parse_classvar_declaration().map(|d| d.span)
+                } else {
+                    self.parse_state_declaration().map(|d| d.span)
+                };
+                if let Some(span) = decl_span {
+                    self.diagnostics.push(Diagnostic::error(
+                        "protocols are stateless — declare `slot -> Type` as a required method",
+                        span,
+                    ));
+                }
+                while self.match_token(&TokenKind::Period) {}
+                continue;
+            }
+
             // Collect the doc comment and any non-doc leading
             // comments *before* checking for `class` prefix, because both are
             // leading trivia on the `class` token and would be lost when we

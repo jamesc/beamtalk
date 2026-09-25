@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Unit tests for `trait_expansion` (ADR 0127 §3, BT-3588).
+//! Unit tests for `trait_expansion` (ADR 0127 §3, BT-3588 and BT-3589).
 
 use super::*;
 use crate::source_analysis::Severity;
@@ -529,4 +529,612 @@ fn class_with_no_uses_is_untouched() {
     assert!(diagnostics.is_empty());
     assert!(origins.is_empty());
     assert_eq!(module, before);
+}
+
+// =============================================================================
+// Post-`ClassHierarchy` half (BT-3589): requirements, `overriding:`, and
+// protocol-side rules.
+// =============================================================================
+
+/// Runs the full two-half pass over `source` — [`expand_module`],
+/// `ClassHierarchy::build`, [`apply_origins`], `ProtocolRegistry::register_module`,
+/// then [`check_after_hierarchy`] — mirroring `analyse_full`'s own Phase -1 /
+/// Phase 0 / Phase 0.5 / Phase 0.55 sequencing (`semantic_analysis::mod`)
+/// without pulling in every other analysis phase (name resolution, type
+/// checking, …) that would add unrelated diagnostics to every assertion.
+fn analyse(source: &str) -> Vec<Diagnostic> {
+    let mut module = parse_source(source);
+    let (mut diagnostics, origins) = expand_module(&mut module);
+
+    let (hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
+    let mut hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+    diagnostics.extend(hierarchy_diags);
+    apply_origins(&mut hierarchy, &origins);
+
+    let mut registry = crate::semantic_analysis::protocol_registry::ProtocolRegistry::new();
+    diagnostics.extend(registry.register_module(&module, &hierarchy));
+
+    diagnostics.extend(check_after_hierarchy(&module, &hierarchy, &registry));
+    diagnostics
+}
+
+fn find_diagnostic<'a>(diagnostics: &'a [Diagnostic], needle: &str) -> Option<&'a Diagnostic> {
+    diagnostics.iter().find(|d| d.message.contains(needle))
+}
+
+// ── §5: required selectors ──────────────────────────────────────────────
+
+#[test]
+fn unresolved_required_selector_is_error_in_closed_world() {
+    let diagnostics = analyse(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]
+
+Value subclass: Version
+  uses: Comparable
+  field: major :: Integer = 0",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "does not implement required `<`")
+        .unwrap_or_else(|| panic!("expected a required-selector error, got {diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+    assert!(
+        diag.hint
+            .as_ref()
+            .is_some_and(|h| h.contains("Comparable requires")),
+        "hint should carry the required signature: {:?}",
+        diag.hint
+    );
+}
+
+#[test]
+fn resolved_required_selector_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]
+
+Value subclass: Version
+  uses: Comparable
+  field: major :: Integer = 0
+
+  < other -> Boolean => self.major < other major",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "does not implement required").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn unresolved_required_selector_is_hint_in_open_world() {
+    // A class overriding `doesNotUnderstand:args:` is Open (ADR 0100 Rule 1)
+    // — the checker cannot prove `<` is truly missing, so this downgrades to
+    // a Hint rather than an Error. The trailing period after `uses:
+    // Comparable` forces the parser to end that line's statement before the
+    // next one starts — without it, `uses: Comparable` and the following
+    // `doesNotUnderstand: sel args: …` keyword method fold into a single
+    // `uses:doesNotUnderstand:args:` selector (a pre-existing parser
+    // ambiguity when a `uses:` line has no `excluding:`/`overriding:` clause
+    // and is immediately followed by a keyword-selector method with no
+    // intervening `state:`/`field:` line — unrelated to BT-3589, not fixed
+    // here).
+    let diagnostics = analyse(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+Value subclass: Proxy
+  uses: Comparable.
+
+  doesNotUnderstand: sel args: args => nil",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "does not implement required `<`")
+        .unwrap_or_else(|| panic!("expected a required-selector diagnostic, got {diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Hint);
+}
+
+#[test]
+fn excluding_a_required_selector_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+Value subclass: Version
+  uses: Comparable excluding: #(#<)
+  field: major :: Integer = 0",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "requirements cannot be excluded")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn excluding_unmatched_selector_is_error() {
+    // BT-3588 PR #4037 review: an `excluding:` selector that never actually
+    // matched a provided method silently no-op'd — deferred to BT-3589.
+    let diagnostics = analyse(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]
+
+Value subclass: Version
+  uses: Comparable excluding: #(#mx:)
+
+  < other -> Boolean => true",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "does not provide `mx:`")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn overriding_unmatched_selector_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Describable
+  printString -> String => \"describable\"
+
+Value subclass: Report
+  uses: Describable overriding: #(#bogusSelector)",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "does not provide `bogusSelector`")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn excluding_that_breaks_conformance_is_warning() {
+    let diagnostics = analyse(
+        "Protocol define: Sized
+  size -> Integer => 0
+
+Value subclass: Empty
+  uses: Sized excluding: #(#size)",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "does not conform to Sized")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Warning);
+}
+
+// ── §3a: `overriding:` acknowledgement (both directions) ────────────────
+
+#[test]
+fn provision_replacing_inherited_method_without_overriding_is_error() {
+    // "The superclass grows": `Record` already defines `summary`; a subclass
+    // uses a protocol that also provides `summary`, with no acknowledgement.
+    let diagnostics = analyse(
+        "Value subclass: Record
+  summary -> String => \"a record\"
+
+Protocol define: Describable
+  summary -> String => \"describable\"
+
+Record subclass: AuditRecord
+  uses: Describable",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "provides `summary`")
+        .unwrap_or_else(|| panic!("expected a §3a error, got {diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+    assert!(diag.message.contains("Record"));
+    let hint = diag.hint.as_ref().expect("hint with both fixes");
+    assert!(hint.contains("overriding:"));
+    assert!(hint.contains("excluding:"));
+}
+
+#[test]
+fn trait_growing_a_provision_that_shadows_inherited_method_is_error() {
+    // "The trait grows": a protocol already used by a class gains a new
+    // provision (`printString`) that the superclass already defines. From a
+    // one-shot compile's point of view this is the same shape as the
+    // superclass-grows case (both are "class-wins already ran, now a
+    // surviving provision collides with something inherited"), but the test
+    // fixture tells the *other* story: the trait, not the superclass, is the
+    // side that changed.
+    let diagnostics = analyse(
+        "Value subclass: Base
+  printString -> String => \"a base\"
+
+Protocol define: Describable
+  label -> String => \"labelled\"
+  printString -> String => \"describable\"
+
+Base subclass: Labelled
+  uses: Describable",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "provides `printString`")
+        .unwrap_or_else(|| panic!("expected a §3a error, got {diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn provision_replacing_inherited_method_with_overriding_is_silent() {
+    let diagnostics = analyse(
+        "Value subclass: Record
+  summary -> String => \"a record\"
+
+Protocol define: Describable
+  summary -> String => \"describable\"
+
+Record subclass: AuditRecord
+  uses: Describable overriding: #(#summary)",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "provides `summary`").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn printstring_from_value_is_allowlist_exempt() {
+    // ADR 0127 §3a: `printString`/`displayString` inherited from `Object`/
+    // `Value` are exempt — no `overriding:` needed.
+    let diagnostics = analyse(
+        "Protocol define: Describable
+  printString -> String => \"describable\"
+
+Value subclass: Report
+  uses: Describable",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "provides `printString`").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn non_allowlisted_root_method_still_needs_overriding() {
+    // The allowlist is exactly two selectors — `hash` (inherited from
+    // `Object`) still needs `overriding:` like any other inherited method.
+    // Also provides `equals:` so the (unrelated) "provides exactly one of
+    // equals:/hash" warning doesn't fire and get confused with the §3a
+    // message below by a loose substring match.
+    let diagnostics = analyse(
+        "Protocol define: ConstantHash
+  equals: other -> Boolean => true
+  hash -> Integer => 0
+
+Value subclass: Weird
+  uses: ConstantHash",
+    );
+
+    let diag = diagnostics
+        .iter()
+        .find(|d| {
+            d.message.contains("hash") && d.message.contains("would otherwise inherit from Object")
+        })
+        .unwrap_or_else(|| panic!("expected a §3a error for `hash`, got {diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn same_origin_provision_is_exempt() {
+    // The superclass already uses the same protocol and hasn't customised
+    // the selector — identical provisions, §3a does not fire.
+    let diagnostics = analyse(
+        "Protocol define: Describable
+  summary -> String => \"describable\"
+
+Value subclass: Base
+  uses: Describable
+
+Base subclass: Derived
+  uses: Describable",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "provides `summary`").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn stale_overriding_entry_is_warning() {
+    // The superclass never actually defines `summary` — `overriding:`
+    // acknowledges an override that doesn't exist.
+    let diagnostics = analyse(
+        "Value subclass: Plain
+
+Protocol define: Describable
+  summary -> String => \"describable\"
+
+Plain subclass: Labelled
+  uses: Describable overriding: #(#summary)",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "does not override an inherited method")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Warning);
+}
+
+#[test]
+fn sealed_inherited_method_is_not_double_reported_by_3a() {
+    // A provision replacing a *sealed* inherited method (`yourself`, sealed
+    // on `Object`) is already an error via `ClassHierarchy`'s existing
+    // sealed-override check (it runs over every class-body method, including
+    // a spliced-in provision, unconditionally — no `overriding:` can silence
+    // it). §3a must not add a second, differently-worded error for the same
+    // selector.
+    let diagnostics = analyse(
+        "Protocol define: Reflective
+  yourself -> Object => nil
+
+Value subclass: Weird
+  uses: Reflective",
+    );
+
+    let sealed_errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("sealed"))
+        .collect();
+    assert!(
+        !sealed_errors.is_empty(),
+        "expected the existing sealed-override error: {diagnostics:?}"
+    );
+    assert!(
+        find_diagnostic(&diagnostics, "provides `yourself`").is_none(),
+        "§3a must not duplicate the sealed-override diagnostic: {diagnostics:?}"
+    );
+}
+
+// ── §8: override-compatibility for a class-body override ────────────────
+
+#[test]
+fn class_body_override_of_dropped_provision_with_incompatible_type_is_warning() {
+    let diagnostics = analyse(
+        "Protocol define: Enumerable
+  each -> List => #()
+
+Value subclass: Bag
+  uses: Enumerable
+
+  each -> Integer => 0",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "incompatible with").unwrap_or_else(|| {
+        panic!("expected an override-compatibility warning, got {diagnostics:?}")
+    });
+    assert_eq!(diag.severity, Severity::Warning);
+}
+
+#[test]
+fn class_body_override_of_dropped_provision_with_compatible_type_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Enumerable
+  each -> List => #()
+
+Value subclass: Bag
+  uses: Enumerable
+
+  each -> List => #()",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "incompatible with").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+// ── Protocol-side checks (§5, §7, §13) ───────────────────────────────────
+
+#[test]
+fn self_send_outside_required_or_provided_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+  max: other -> Self => (self between: other) ifTrue: [other] ifFalse: [self]",
+    );
+
+    let diag = find_diagnostic(
+        &diagnostics,
+        "`between:` is sent by `max:` but is neither required nor provided by Comparable",
+    )
+    .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn self_send_to_required_selector_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "is neither required nor provided").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn self_send_to_another_provision_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Greeter
+  name -> String => \"world\"
+  greet -> String => \"hello \" ++ self name",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "is neither required nor provided").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn self_send_to_object_selector_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Loud
+  shout -> String => self printString",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "is neither required nor provided").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn self_field_read_in_provision_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Counting
+  count -> Integer => self.total",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "protocols are stateless")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn self_field_write_in_provision_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Counting
+  reset -> Self => self.total := 0",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "protocols are stateless")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn state_declaration_in_protocol_body_is_parse_error() {
+    // The parser rejects `state:`/`field:`/`classState:` inside a protocol
+    // body directly (ADR 0127 §7, §13) — it never reaches `ProtocolDefinition`
+    // at all, so this is a parser-level test, not `check_after_hierarchy`.
+    use crate::source_analysis::{lex_with_eof, parse};
+    let tokens = lex_with_eof(
+        "Protocol define: Counting
+  field: total :: Integer = 0
+  count -> Integer",
+    );
+    let (_module, diagnostics) = parse(tokens);
+    let diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("protocols are stateless"))
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn reserved_selector_provision_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Lifecycle
+  initialize -> Self => self",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "a protocol cannot provide `initialize`")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn migrate_from_v_selector_provision_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Versioned
+  migrateFromV1: state -> Object => state",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "a protocol cannot provide `migrateFromV1:`")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn primitive_in_provision_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Fast
+  fastAdd: n -> Integer => @primitive \"+\"",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "provided methods cannot use primitives")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn sealed_provided_method_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Locked
+  sealed value -> Integer => 0",
+    );
+
+    let diag = find_diagnostic(
+        &diagnostics,
+        "`sealed`/`internal` are not supported on provided methods",
+    )
+    .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn internal_provided_method_is_error() {
+    let diagnostics = analyse(
+        "Protocol define: Locked
+  internal value -> Integer => 0",
+    );
+
+    let diag = find_diagnostic(
+        &diagnostics,
+        "`sealed`/`internal` are not supported on provided methods",
+    )
+    .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Error);
+}
+
+#[test]
+fn equals_without_hash_is_warning() {
+    let diagnostics = analyse(
+        "Protocol define: Keyed
+  equals: other -> Boolean => true",
+    );
+
+    let diag = find_diagnostic(&diagnostics, "provides `equals:` but not `hash`")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert_eq!(diag.severity, Severity::Warning);
+}
+
+#[test]
+fn equals_and_hash_together_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Keyed
+  equals: other -> Boolean => true
+  hash -> Integer => 0",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "but not `hash`").is_none(),
+        "{diagnostics:?}"
+    );
+    assert!(
+        find_diagnostic(&diagnostics, "but not `equals:`").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn protocol_with_no_users_is_still_checked() {
+    // ADR 0127 §5: "a protocol with no users is still checked" — no class in
+    // this module uses `Lonely` at all.
+    let diagnostics = analyse(
+        "Protocol define: Lonely
+  initialize -> Self => self",
+    );
+
+    assert!(find_diagnostic(&diagnostics, "a protocol cannot provide `initialize`").is_some());
 }
