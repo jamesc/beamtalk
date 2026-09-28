@@ -1546,12 +1546,14 @@ of cross-function spec mismatch Dialyzer's whole-module success-typing
 propagates into unrelated "will never be called" findings elsewhere in
 this file — found via `just dialyzer` on this very change).
 
-BT-3593's protocol-reload fan-out is this arity's one production caller: it
-merges `beamtalk_repl_compiler:build_class_indexes/0` (the same superclass/
-module indexes an ordinary reload gets) with a `protocol_sources` entry
-carrying the just-edited protocol's raw source, so each fanned-out user's
-own recompile flattens against the NEW provisions (ADR 0127 §10a) rather
-than resolving `uses:` against nothing.
+BT-3593's protocol-reload fan-out was this arity's first production caller,
+and BT-3594's `reload_compile_and_load/4` (every stateless `Workspace load:`,
+not just an explicit reload) is now a second — both merge
+`beamtalk_repl_compiler:build_class_indexes/0` (the same superclass/module
+indexes an ordinary reload gets) with a `protocol_sources` entry, so a
+recompile flattens `uses:` against real provisions (ADR 0127 §10a) rather
+than resolving against nothing. See `reload_compile_and_load/4`'s own doc
+for why it needed this too.
 """.
 -spec compile_reload_source(string(), string(), binary() | undefined, atom() | undefined, map()) ->
     {ok, protocol_definition, map()}
