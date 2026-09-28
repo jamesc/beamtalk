@@ -2624,6 +2624,142 @@ open_shim_routes_mode_atoms_test() ->
     end).
 
 %%% ============================================================================
+%%% open:mode: / resolve_owner/0 — ownership tiers (BT-3635)
+%%%
+%%% resolve_owner/0's rule: get(beamtalk_session_pid), else
+%%% beamtalk_object_class:dispatch_caller_pid/0, else self(). These tests
+%%% exercise its priority order directly, independent of how the call
+%%% reaches it (dispatched vs. a direct call, ADR 0129 §2) — the function
+%%% itself does not know or care which happened.
+%%% ============================================================================
+
+-doc "Ensure the registry is running, whatever test order/isolation applies.".
+ensure_registry_started() ->
+    case whereis(beamtalk_file_handle_registry) of
+        undefined -> {ok, _} = beamtalk_file_handle_registry:start_link();
+        _ -> ok
+    end,
+    ok.
+
+owner_of(Path) ->
+    {_P, _M, Owner} = lists:keyfind(Path, 1, beamtalk_file_handle_registry:open_handles()),
+    Owner.
+
+resolve_owner_plain_process_owns_its_own_handle_test() ->
+    %% No session, no mirrored dispatch caller: a call reached directly (a
+    %% plain EUnit test process is exactly this shape) is owned by the
+    %% process that made it — never left unowned.
+    ok = ensure_registry_started(),
+    Path = <<"_bt_test_resolve_owner_plain.txt">>,
+    file:delete(Path),
+    try
+        #{'okValue' := Handle} = beamtalk_file:'open:mode:'(Path, write),
+        ?assertEqual(self(), owner_of(Path)),
+        beamtalk_file_handle:close_handle(Handle)
+    after
+        file:delete(Path)
+    end.
+
+resolve_owner_session_pid_wins_test() ->
+    %% Tier 1 (session) outranks both the self()-fallback and any mirrored
+    %% dispatch caller — the same priority `open:mode:` has always given the
+    %% session.
+    ok = ensure_registry_started(),
+    Path = <<"_bt_test_resolve_owner_session.txt">>,
+    file:delete(Path),
+    SessionPid = self(),
+    DispatchPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    put(beamtalk_dispatch_caller_pid, DispatchPid),
+    put(beamtalk_session_pid, SessionPid),
+    try
+        #{'okValue' := Handle} = beamtalk_file:'open:mode:'(Path, write),
+        ?assertEqual(SessionPid, owner_of(Path)),
+        beamtalk_file_handle:close_handle(Handle)
+    after
+        erase(beamtalk_session_pid),
+        erase(beamtalk_dispatch_caller_pid),
+        DispatchPid ! stop,
+        file:delete(Path)
+    end.
+
+resolve_owner_dispatch_caller_pid_wins_over_self_test() ->
+    %% Tier 2 (a caller mirrored in by dispatch_class_method/5, the
+    %% gen_server-dispatch path) outranks self() — the call is executing in
+    %% the class gen_server's own process, but the owner is the pid that
+    %% actually sent the message, not the process running this code.
+    ok = ensure_registry_started(),
+    Path = <<"_bt_test_resolve_owner_dispatch.txt">>,
+    file:delete(Path),
+    DispatchPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    put(beamtalk_dispatch_caller_pid, DispatchPid),
+    try
+        #{'okValue' := Handle} = beamtalk_file:'open:mode:'(Path, write),
+        ?assertEqual(DispatchPid, owner_of(Path)),
+        ?assertNotEqual(self(), owner_of(Path)),
+        beamtalk_file_handle:close_handle(Handle)
+    after
+        erase(beamtalk_dispatch_caller_pid),
+        DispatchPid ! stop,
+        file:delete(Path)
+    end.
+
+resolve_owner_reclaimed_on_owning_process_death_test_() ->
+    %% End-to-end: a handle opened by a plain (non-actor, non-session)
+    %% process — the exact shape of code running under `beamtalk test` or a
+    %% bare `beamtalk run` script — is reclaimed when that process dies, not
+    %% left leaking as unowned.
+    {timeout, 5, fun() ->
+        ok = ensure_registry_started(),
+        Path = <<"_bt_test_resolve_owner_death.txt">>,
+        file:delete(Path),
+        Self = self(),
+        Opener = spawn(fun() ->
+            #{'okValue' := _Handle} = beamtalk_file:'open:mode:'(Path, write),
+            Self ! opened,
+            receive
+                stop -> ok
+            end
+        end),
+        receive
+            opened -> ok
+        after 1000 -> ?assert(false)
+        end,
+        ?assertEqual(Opener, owner_of(Path)),
+        Opener ! stop,
+        wait_until(fun() ->
+            lists:keyfind(Path, 1, beamtalk_file_handle_registry:open_handles()) =:= false
+        end),
+        file:delete(Path)
+    end}.
+
+%% Poll Pred until it holds or the attempt budget is exhausted, then assert.
+%% Owner-death reclamation is only half-synchronous in the registry (the
+%% bookkeeping drop is synchronous with 'DOWN', the close itself follows
+%% shortly after on a transient process) — mirrors
+%% beamtalk_file_handle_registry_tests:wait_until/1.
+wait_until(Pred) ->
+    wait_until(Pred, 400).
+
+wait_until(Pred, 0) ->
+    ?assert(Pred());
+wait_until(Pred, Attempts) ->
+    case Pred() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(5),
+            wait_until(Pred, Attempts - 1)
+    end.
+
+%%% ============================================================================
 %%% open:mode: rejects non-regular paths
 %%% ============================================================================
 

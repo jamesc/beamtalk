@@ -218,19 +218,19 @@ TestCase subclass: FileHandleIoTest
     self deny: handle isOpen
     self assert: (File readAll: "target/bt-test-tmp/handle_owned.log") unwrap equals: "owned" ++ nl
 
-  // === BT-3020: open:mode: registers its handle against a resolved owner ===
+  // === BT-3020 / BT-3635: open:mode: registers its handle against a resolved owner ===
 
   // A test method runs in a plain spawned process (beamtalk_test_case's
-  // spawn_test_execution/6) — no REPL session, and not itself a Beamtalk
-  // actor — so open:mode: called directly from here resolves to tier 3:
-  // unowned, listed for diagnostics but reclaimed by nothing but `close`.
-  testOpenModeFromCompiledCodeIsUnowned =>
-    path := "target/bt-test-tmp/handle_unowned.txt"
+  // spawn_test_execution/6) — no REPL session — so open:mode: called
+  // directly from here is owned by that process itself (BT-3635: no
+  // handle is left unowned when there is a real caller to attribute it to).
+  testOpenModeFromCompiledCodeOwnedBySelf =>
+    path := "target/bt-test-tmp/handle_owned_by_self.txt"
     File delete: path
     handle := (File open: path mode: #write) unwrap
     entry := File openHandles detect: [:e | (e at: 1) =:= path]
     self assert: (entry at: 2) equals: #write
-    self assert: (entry at: 3) isNil
+    self assert: (entry at: 3) equals: (Erlang erlang self)
     handle close
     self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
 

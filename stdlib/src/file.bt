@@ -149,10 +149,10 @@ typed Object subclass: File native: beamtalk_file
   ///
   /// The caller owns the handle and must `close` it, but is not the only
   /// backstop: it is registered against the REPL session if there is one,
-  /// else the calling actor, else left unowned, and closed automatically
-  /// when that owner dies. `File openHandles` lists every outstanding
-  /// handle for diagnostics. Prefer `open:mode:do:` whenever a block scope
-  /// will do — it needs no owner at all.
+  /// else the calling process, and closed automatically when that owner
+  /// dies. `File openHandles` lists every outstanding handle for
+  /// diagnostics. Prefer `open:mode:do:` whenever a block scope will do —
+  /// it needs no owner at all.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -316,15 +316,14 @@ typed Object subclass: File native: beamtalk_file
   /// List every outstanding `open:mode:` handle for diagnostics (class method).
   ///
   /// Returns an Array of 3-element Arrays `#(path mode owner)`. `owner` is the
-  /// REPL session or actor pid that opened the handle, or `nil` if it was
-  /// opened from compiled code with neither. Handles from `open:do:` and
-  /// `open:mode:do:` never appear — they are block-scoped and always closed
-  /// before the call returns.
+  /// REPL session or calling-process pid that opened the handle. Handles
+  /// from `open:do:` and `open:mode:do:` never appear — they are
+  /// block-scoped and always closed before the call returns.
   ///
   /// ## Examples
   /// ```beamtalk
   /// h := (File open: "events.log" mode: #append) unwrap.
-  /// File openHandles   // => #(#("events.log" #append <a Pid> or nil))
+  /// File openHandles   // => #(#("events.log" #append <a Pid>))
   /// h close.
   /// ```
   class sealed openHandles -> Array => self delegate

@@ -11,9 +11,9 @@ EUnit tests for `beamtalk_file_handle_registry`.
 Covers the acceptance criteria:
 
 * a handle whose owner dies is closed and removed from the registry;
-* an unowned handle (registered with `Owner = undefined`, mirroring
-  `open:mode:` called from compiled code with neither a session nor a calling
-  actor) is listed but never reclaimed by any death;
+* an unowned handle (registered with `Owner = undefined` directly against the
+  registry — not a normal `beamtalk_file:resolve_owner/0` outcome, but
+  supported for API robustness) is listed but never reclaimed by any death;
 * `unregister/1` removes a handle immediately, so a closed handle does not
   linger in `open_handles/0` and a later owner `'DOWN'` cannot double-close it;
 * handles sharing an owner share a single monitor, torn down only once the
@@ -196,9 +196,11 @@ unowned_handle_listed_but_never_reclaimed_test_() ->
         ?_test(begin
             {Handle, TmpPath} = open_handle(),
             PathBin = list_to_binary(TmpPath),
-            %% Mirrors `open:mode:` called from compiled code with no session
-            %% and no calling actor: no owner to register, so nothing to
-            %% monitor — the handle is listed but reclaimed by nothing.
+            %% An explicit unowned registration (not something
+            %% `beamtalk_file:resolve_owner/0` produces any more — see
+            %% beamtalk_file_tests.erl — but still a supported registry
+            %% call): no owner to register, so nothing to monitor — the
+            %% handle is listed but reclaimed by nothing.
             ok = beamtalk_file_handle_registry:register(Handle, undefined),
             ok = sync(ok),
             ?assert(has_entry(PathBin, beamtalk_file_handle_registry:open_handles())),

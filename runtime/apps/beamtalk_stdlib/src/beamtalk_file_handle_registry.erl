@@ -19,14 +19,20 @@ against an *owner*, and closes an owner's handles when the owner dies.
 
 ## Ownership tiers
 
-`beamtalk_file:'open:mode:'/2` resolves an owner via a three-tier rule before
-calling `register/2`:
+`beamtalk_file:'open:mode:'/2` resolves an owner via `beamtalk_file:resolve_owner/0`
+before calling `register/2`:
 
 1. The REPL/workspace session shell pid (survives across eval-worker turns).
-2. Otherwise, the calling Beamtalk actor's pid.
-3. Otherwise, `undefined` — an unowned handle, registered for diagnostics
-   (`open_handles/0` / `File openHandles`) but reclaimed only by an explicit
-   `close` or node shutdown.
+2. Otherwise, the calling process's pid — whoever is running `open:mode:`,
+   whether reached by a direct call or mirrored in from a dispatched
+   class-side send. See `resolve_owner/0` for the full rule.
+
+This registry itself has no opinion on which pids are meaningful "owners" —
+it monitors whatever pid it is given. `Owner = undefined` (registered for
+diagnostics via `open_handles/0` / `File openHandles`, reclaimed only by an
+explicit `close` or node shutdown) is supported for API robustness and used
+by this module's own tests, but is not a normal `open:mode:` outcome:
+`resolve_owner/0` always resolves to a real pid.
 
 ## Lifecycle
 

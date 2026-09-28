@@ -434,10 +434,10 @@ Write-capable modes auto-create parent directories, matching
 
 The caller is responsible for `close`, but is not the sole backstop:
 the handle is registered against a resolved *owner* — the REPL/workspace
-session if there is one, else the calling Beamtalk actor, else unowned — and
+session if there is one, else the calling process — and
 `beamtalk_file_handle_registry` closes an owned handle when its owner dies.
-`File openHandles` lists every outstanding handle for diagnostics regardless
-of tier. Prefer `open:mode:do:` whenever a block scope will do.
+`File openHandles` lists every outstanding handle for diagnostics. Prefer
+`open:mode:do:` whenever a block scope will do.
 
 Returns a Result ok map holding the handle, or a Result error map.
 """.
@@ -458,35 +458,43 @@ Returns a Result ok map holding the handle, or a Result error map.
 -doc """
 Resolve the owner `open:mode:` registers its handle against.
 
-`open:mode:` is not call-site lowered (see `mode_options/1`), so this runs
-inside the File class gen_server, where `self()` is the class process rather
-than the caller. Two process-dictionary keys mirrored into *this* process for
-the duration of the call stand in for "who is calling":
+One rule, no branch on how this call arrived — static send, dynamic send, or
+REPL expression, `File` class-method dispatch or a direct call
+(`compute_direct_call_eligible`, ADR 0129 §2):
 
-1. `beamtalk_session_pid` — the long-lived REPL/workspace session shell pid,
-   explicitly carried by `class_send_dispatch/3` (ADR 0081) so
-   `Session current` works the same way from inside a class method. A pid here
-   outlives the short-lived eval worker that made this particular call, so it
-   survives across REPL turns — the property the rejected call-site-lowering
-   plan (see `mode_options/1`) could not deliver.
-2. The immediate caller's pid, via `beamtalk_object_class:dispatch_caller_pid/0`
-   — mirrored by `beamtalk_object_class:dispatch_class_method/5` from the
-   `From` every `handle_call` already carries (no wire-protocol change). Used
-   only when there is no session: if that pid is itself a Beamtalk actor
-   (`beamtalk_actor:is_beamtalk_actor/1`), the actor owns the handle.
+1. `get(beamtalk_session_pid)`, if it is a pid — the long-lived REPL/workspace
+   session shell.
+2. Otherwise, `beamtalk_object_class:dispatch_caller_pid/0`, if it is a pid —
+   the immediate caller, when this call arrived via
+   `beamtalk_object_class:dispatch_class_method/5` (a class-side send still
+   routed through the `File` class gen_server).
+3. Otherwise, `self()` — the process currently running this code.
 
-Otherwise the handle is unowned (tier 3): registered for `openHandles`
-diagnostics, reclaimed only by an explicit `close` or node shutdown.
+Tier 1 needs no dispatch-path awareness to begin with: `beamtalk_session_pid`
+is not mirrored per call. `beamtalk_repl_shell:seed_session_context/3` puts
+it directly into a REPL eval worker's own process dictionary once, at spawn,
+so `get/1` already returns the right shell pid from whatever process is
+currently executing — the eval worker itself (a direct call), or a class
+gen_server it was mirrored into for one nested call
+(`local_session_context/0`, unchanged by this rule).
 
-Tier 2 is *not* transitive the way tier 1 is: the session pid is re-emitted by
-`local_session_context/0` on every nested class-method call, so an actor
-calling `Logger openFor: path` (say) which itself calls `File open:mode:`
-still resolves the session correctly if one exists. But
-`beamtalk_dispatch_caller_pid` is only ever the *immediate* caller — in that
-same nested-call shape with no session, `open:mode:` sees `Logger`'s class
-gen_server pid (not a Beamtalk actor), not the originating actor, and the
-handle falls through to unowned. A future reader tempted to make tier 2
-transitive too should know this is a known, accepted gap, not an oversight.
+Tier 3 is what makes tier 2 dispatch-path-agnostic. `dispatch_caller_pid/0`
+is `undefined` outside a `dispatch_class_method/5` call — which is exactly
+the case when `open:mode:` was reached by a *direct* call: no gen_server hop
+happened, so nothing needed mirroring, because `self()` at the point this
+function runs already **is** the caller. A direct call does not fork a
+process, so nested direct calls between eligible classes keep `self()`
+unchanged across the whole chain — the one gap this leaves is a caller
+reached through two or more *dispatched* hops in a row, where `self()`
+resolves to an intermediate class's own gen_server rather than the
+originating actor; that pid is still real and still reclaimed on that
+class's death or reload, which is strictly better than the unowned fallback
+this replaced.
+
+There is no unowned (`undefined`) outcome in the normal flow any more:
+`self()` always returns a pid. `owner() :: pid() | undefined` stays in
+`beamtalk_file_handle_registry`'s type for defensiveness, not because this
+function is expected to produce it.
 """.
 -spec resolve_owner() -> pid() | undefined.
 resolve_owner() ->
@@ -495,13 +503,8 @@ resolve_owner() ->
             SessionPid;
         _ ->
             case beamtalk_object_class:dispatch_caller_pid() of
-                CallerPid when is_pid(CallerPid) ->
-                    case beamtalk_actor:is_beamtalk_actor(CallerPid) of
-                        true -> CallerPid;
-                        false -> undefined
-                    end;
-                undefined ->
-                    undefined
+                CallerPid when is_pid(CallerPid) -> CallerPid;
+                undefined -> self()
             end
     end.
 
@@ -509,9 +512,11 @@ resolve_owner() ->
 List every outstanding `open:mode:` handle for diagnostics.
 
 Returns an Array of 3-element Arrays `#(path mode owner)`. `owner` is the
-session/actor pid for tiers 1-2, `nil` for an unowned (tier 3) handle. Handles
-from `open:do:` / `open:mode:do:` never appear — they are block-scoped and
-always closed before the call returns, so there is nothing to enumerate.
+session or calling-process pid `resolve_owner/0` resolved when the handle was
+opened; `nil` only for a handle registered directly against the registry with
+no owner (not a normal `open:mode:` outcome). Handles from `open:do:` /
+`open:mode:do:` never appear — they are block-scoped and always closed before
+the call returns, so there is nothing to enumerate.
 """.
 -spec 'openHandles'() -> map().
 'openHandles'() ->
