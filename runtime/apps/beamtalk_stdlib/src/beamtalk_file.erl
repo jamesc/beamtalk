@@ -488,11 +488,15 @@ process, or a send through the File class gen_server):
 So this always returns a pid. `beamtalk_file_handle_registry:owner()` keeps
 `undefined` in its type for defensiveness only.
 
-Tier 2 is only as transitive as the dispatch path: a nested class-method call
-through a gen_server (say `Logger` calling `File open:mode:` on behalf of an
-actor, with no session) sees `Logger`'s class process as the caller. Nested
-direct calls collapse into the originating process, so for sealed, stateless
-classes the originating caller owns the handle.
+Tier 2 reaches back one gen_server hop at most. A static `File open:mode:`
+is a direct call, so it runs in whatever process issued it and reads *that*
+process's mirrored caller. Say an actor with no session sends to `Logger`,
+which opens a file: if the actor's send reached `Logger` through its class
+gen_server, the File call runs there with the actor mirrored in, and the actor
+owns the handle; if the actor's send was itself a direct call, the File call
+runs in the actor and `self()` is the actor. Only a *dynamic* File send made
+from inside a class gen_server re-enters File's own class process, and then the
+caller is that class process.
 """.
 -spec resolve_owner() -> pid().
 resolve_owner() ->
