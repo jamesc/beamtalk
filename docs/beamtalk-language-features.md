@@ -6547,14 +6547,20 @@ process, so it keeps working wherever the handle is held on this node — but it
 does not survive crossing a node boundary.
 
 A handle from `open:mode:` is yours to close, but you are not the only backstop.
-Beamtalk registers it against an *owner* — the REPL session if you're at the
-REPL, else the actor you're calling from, else unowned — and closes an
-owner's outstanding handles when the owner dies. `File openHandles` lists
-every outstanding handle as `#(path mode owner)` for diagnostics, `owner`
-being `nil` for an unowned handle (opened from compiled code with neither a
-session nor a calling actor — nothing reclaims those but an explicit `close`
-or node shutdown). Still, reach for `open:mode:do:` whenever a block scope
-will do — it needs no owner at all.
+Beamtalk registers it against an *owner* and closes an owner's outstanding
+handles when the owner dies. The rule is the same under the REPL,
+`beamtalk run`, `beamtalk test` and a release, and whether the send is static
+(`File open: p mode: m`) or dynamic (`File perform: #open:mode: ...`):
+
+1. At the REPL, the **session** owns it, so the handle survives from one
+   statement to the next.
+2. Otherwise the **calling process** owns it — an actor, a supervisor worker,
+   or the plain process a test method or `beamtalk run` script executes in.
+
+The underlying descriptor lives exactly as long as its owner, no longer and no
+shorter. `File openHandles` lists every outstanding handle as
+`#(path mode owner)` for diagnostics. Still, reach for `open:mode:do:`
+whenever a block scope will do — it needs no owner at all.
 
 **Open blocks run in your own process.** `open:do:` and `open:mode:do:` are
 lowered at the call site (ADR 0109), so only the open itself touches the `File`

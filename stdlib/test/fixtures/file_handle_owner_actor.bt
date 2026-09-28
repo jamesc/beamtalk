@@ -4,10 +4,15 @@
 // Fixture for file_handle_io_test.bt — an actor that opens a `File
 // open:mode:` handle and never closes it, so the handle's registered owner
 // (BT-3020 tier 2) is this actor's own pid, and killing the actor is the
-// only thing that reclaims it.
+// only thing that reclaims it. `openUnclosedDynamic:` does the same through a
+// dynamic send, which goes via the File class process (BT-3635).
 
 Actor subclass: FileHandleOwnerActor
 
   openUnclosed: path =>
     File open: path mode: #write
+    true
+
+  openUnclosedDynamic: path =>
+    File perform: #open:mode: withArguments: #(path, #write)
     true
