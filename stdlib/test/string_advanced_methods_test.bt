@@ -43,6 +43,15 @@ TestCase subclass: StringAdvancedMethodsTest
     self assert: ("def" >= "abc")
     self assert: ("abc" >= "abc")
 
+  // BT-3594 (ADR 0127 §9): `uses: Comparable` provides `between:and:`,
+  // `min:`, `max:` on top of String's own primitive `<`/`>`/`<=`/`>=`.
+  testComparableProvisions =>
+    self assert: ("bcd" between: "abc" and: "xyz")
+    self deny: ("abc" between: "bcd" and: "xyz")
+    self assert: ("abc" min: "def") equals: "abc"
+    self assert: ("abc" max: "def") equals: "def"
+    self assert: (String usesProtocol: #Comparable)
+
   testSplit => self assert: ("a,b,c" split: ",") equals: #("a", "b", "c")
 
   testAsInteger => self assert: "42" asInteger equals: 42

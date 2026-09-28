@@ -8,8 +8,9 @@
 /// formatting/parsing, and fixed UTC-offset conversion.
 ///
 /// `year`..`second` are wall-clock fields; `offsetMinutes` is the UTC offset
-/// they are expressed in (0 for UTC). Ordering (`<`, `>`, `<=`, `>=`),
-/// `asTimestamp`, and arithmetic all operate on the underlying instant, not
+/// they are expressed in (0 for UTC). Ordering (`<`, `>`, `<=`, `>=`,
+/// `between:and:`, `min:`, `max:` — the last three via `uses: Comparable`,
+/// ADR 0127 §9), `asTimestamp`, and arithmetic all operate on the underlying instant, not
 /// the raw wall-clock fields. Equality is different: `=:=`/`/=` cannot be
 /// overridden (they always compare the raw representation structurally, so
 /// a `+02:00` DateTime and its UTC equivalent are NOT `=:=`) — use
@@ -34,6 +35,7 @@
 /// dt format: "yyyy/MM/dd"                          // => "2026/02/18"
 /// ```
 sealed typed Value subclass: DateTime native: beamtalk_datetime
+  uses: Comparable
 
   // ===== Class Methods — Construction =====
 

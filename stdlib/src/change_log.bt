@@ -10,12 +10,17 @@
 /// workspace changed relative to disk?".
 ///
 /// A ChangeLog snapshot holds *every* logged entry, but its default collection
-/// views (`size`, `isEmpty`, `notEmpty`, `do:`, `dirtyMethods`) reflect only
+/// views (`size`, `isEmpty`, `notEmpty`, `do:`, `dirtyMethods`, plus
+/// `isNotEmpty`, `inject:into:`, `collect:`, `detect:ifNone:`, `anySatisfy:`,
+/// `count:` via `uses: Enumerable(ChangeEntry)`, ADR 0127 §9) reflect only
 /// the **active** entries: changes from the current epoch that have not been
 /// orphaned. Prior-epoch and orphan entries (whose memory state was lost on
 /// workspace restart, so they are no longer re-appliable) are excluded from
-/// those views — but `select:` ranges over the full set, so it can still reach
-/// them (e.g. `Workspace changes select: [:e | e isOrphan]`).
+/// those views — but `select:` ranges over the full set (this class's own
+/// method, kept over `Enumerable`'s provision — class wins, ADR 0127 §3), so
+/// it can still reach them (e.g. `Workspace changes select: [:e | e isOrphan]`).
+/// `notEmpty` (`self isEmpty not`) is likewise this class's own — distinct
+/// from, and unaffected by, `Enumerable`'s `isNotEmpty`.
 ///
 /// Backed by `beamtalk_workspace_changelog.erl` via FFI.
 ///
@@ -27,6 +32,7 @@
 /// Workspace changes select: [:e | e isOrphan]       // => _
 /// ```
 sealed typed Value subclass: ChangeLog
+  uses: Enumerable(ChangeEntry)
   field: entries :: List(ChangeEntry) = #()
 
   /// Return the active entries: current epoch, not orphaned, not shadowed by a
@@ -51,6 +57,19 @@ sealed typed Value subclass: ChangeLog
   /// Workspace changes allEntries   // => _
   /// ```
   allEntries -> List(ChangeEntry) => self.entries
+
+  // === Enumerable (ADR 0127 §9) ===
+
+  /// Required by `Enumerable(ChangeEntry)` — the active entries, the same
+  /// set the default collection views (`size`, `isEmpty`, `do:`) already
+  /// operate on. `select:` deliberately keeps ranging over the *full* entry
+  /// set (class wins, below) rather than this narrower snapshot.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes elements   // => Workspace changes activeEntries
+  /// ```
+  elements -> List(ChangeEntry) => self activeEntries
 
   // === Querying ===
 

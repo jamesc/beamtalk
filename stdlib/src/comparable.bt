@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Comparable — a total order derived from one required `<`.
+///
+/// A using class implements `<`; everything else — `>`, `<=`, `>=`,
+/// `between:and:`, `min:`, `max:` — is derived and provided (ADR 0127 §1,
+/// §9, decision 7). A class that already implements every selector below
+/// conforms to `Comparable` whether or not it `uses:` it (ADR 0068).
+///
+/// `Number` deliberately does **not** `uses: Comparable`: it already
+/// defines all four ordering operators and `between:and:` itself, and this
+/// protocol's `min:`/`max:` would change `Number`'s existing tie semantics
+/// (`3 max: 3.0` answers `3.0` today via `Number`'s own `max:`; this
+/// protocol's `(self < other) ifTrue: [other] ifFalse: [self]` would answer
+/// `3` instead). See `stdlib/src/number.bt` for `Number`'s own `min:`/`max:`.
+///
+/// ## Examples
+/// ```beamtalk
+/// (DateTime year: 2025 month: 1 day: 1) max: (DateTime year: 2026 month: 1 day: 1)
+/// // => DateTime(2026-01-01T00:00:00Z)
+/// (Duration seconds: 5) between: (Duration seconds: 1) and: (Duration seconds: 10)
+/// // => true
+/// ```
+Protocol define: Comparable
+  /// Required — strict ordering. The using class must implement this.
+  < other :: Self -> Boolean
+
+  // === Derived ordering ===
+
+  /// True if the receiver sorts after `other`.
+  > other :: Self -> Boolean => other < self
+
+  /// True if the receiver sorts before or the same as `other`.
+  <= other :: Self -> Boolean => (other < self) not
+
+  /// True if the receiver sorts after or the same as `other`.
+  >= other :: Self -> Boolean => (self < other) not
+
+  /// True if the receiver lies in the closed interval `[min, max]`.
+  between: min :: Self and: max :: Self -> Boolean =>
+    (self >= min) and: [self <= max]
+
+  /// Return the smaller of the receiver and `other`.
+  min: other :: Self -> Self => (self < other) ifTrue: [self] ifFalse: [other]
+
+  /// Return the larger of the receiver and `other`.
+  max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]

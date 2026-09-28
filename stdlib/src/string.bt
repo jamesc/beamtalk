@@ -9,6 +9,10 @@
 /// ## BEAM Mapping
 /// Beamtalk strings map directly to Erlang binaries.
 ///
+/// `uses: Comparable` (ADR 0127 §9) adds `between:and:`, `min:`, `max:` on
+/// top of String's own primitive `<`/`>`/`<=`/`>=` (lexicographic, by
+/// grapheme).
+///
 /// ## Examples
 /// ```beamtalk
 /// "hello" class         // => String
@@ -16,6 +20,7 @@
 /// "hello" ++ " world"   // => "hello world"
 /// ```
 sealed typed Binary subclass: String
+  uses: Comparable
 
   /// Create a String by joining a list of grapheme cluster strings.
   ///

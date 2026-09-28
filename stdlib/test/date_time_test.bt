@@ -195,6 +195,32 @@ TestCase subclass: DateTimeTest
     self assert: (d /= e)
     self deny: (d /= d)
 
+  // BT-3594 (ADR 0127 §9): `uses: Comparable` provides `between:and:`,
+  // `min:`, `max:` on top of DateTime's own primitive `<`/`>`/`<=`/`>=`
+  // (unchanged — asserted above by `testComparison`, since a class's own
+  // method always wins over the trait's provision, ADR 0127 §3).
+  testComparableProvisions =>
+    d := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    e := DateTime
+      year: 2026
+      month: 1
+      day: 2
+    f := DateTime
+      year: 2026
+      month: 1
+      day: 3
+    self assert: (e between: d and: f)
+    self deny: (d between: e and: f)
+    self assert: (d min: e) equals: d
+    self assert: (e min: d) equals: d
+    self assert: (d max: e) equals: e
+    self assert: (e max: d) equals: e
+    self assert: (DateTime usesProtocol: #Comparable)
+    self assert: (DateTime >> #between:and:) origin equals: #Comparable
+
   testErrorHandling =>
     // Invalid date raises error
     self

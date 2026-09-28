@@ -166,27 +166,8 @@ sealed typed Number subclass: Float
   /// ```
   abs -> Float => (self < 0.0) ifTrue: [self negated] ifFalse: [self]
 
-  /// Return the smaller of the receiver and `other`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// 1.5 min: 3.0     // => 1.5
-  /// ```
-  /// Return type is `Number` because `other` may be any numeric type;
-  /// if `other` is the smaller value, the result carries its runtime type.
-  min: other :: Number -> Number =>
-    (self < other) ifTrue: [self] ifFalse: [other]
-
-  /// Return the larger of the receiver and `other`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// 1.5 max: 3.0     // => 3.0
-  /// ```
-  /// Return type is `Number` because `other` may be any numeric type;
-  /// if `other` is the larger value, the result carries its runtime type.
-  max: other :: Number -> Number =>
-    (self > other) ifTrue: [self] ifFalse: [other]
+  // `min:`/`max:` are inherited from Number (ADR 0127 §9) — this used to
+  // duplicate Integer's copy verbatim.
 
   // === Rounding ===
 

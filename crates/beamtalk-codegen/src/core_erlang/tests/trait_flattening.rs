@@ -232,3 +232,28 @@ fn subclass_override_of_a_flattened_provision_is_reached_from_inherited_self_sen
         "expected Base's flattened announce/1 (self describe) in generated code, got:\n{code}"
     );
 }
+
+/// ADR 0127 §12 (BT-3594): `generate_protocol_registrations` must bake the
+/// protocol's own *provided* methods into its `register_protocol/1` call —
+/// `beamtalk_protocol_registry:provided_methods/1` (backing `Protocol
+/// providedMethods:` and, indirectly, browse/reflection tooling built on
+/// it) reads the `provided_methods` key straight off the registered map.
+/// Before this fix the registration call carried only `required_methods`/
+/// `required_class_methods`, so `Protocol providedMethods: #AnyRealTrait`
+/// silently answered `[]` for every protocol with real provisions.
+#[test]
+fn protocol_registration_bakes_provided_methods_key() {
+    let src = concat!(
+        "Protocol define: Bt3594RegComparable\n",
+        "  < other :: Self -> Boolean\n",
+        "  > other :: Self -> Boolean => other < self\n",
+    );
+    let module = parse_fixture(src);
+    let code = generate_module(&module, CodegenOptions::new("bt3594_reg_comparable"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("'provided_methods' => [~{'selector' => '>'"),
+        "expected the provided `>` method to be baked into the protocol's \
+         'provided_methods' registration key, got:\n{code}"
+    );
+}

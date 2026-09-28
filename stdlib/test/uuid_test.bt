@@ -166,6 +166,18 @@ TestCase subclass: UuidTest
     self assert: (a >= a)
     self deny: (a >= b)
 
+  // BT-3594 (ADR 0127 §9): `uses: Comparable` provides `between:and:`,
+  // `min:`, `max:` on top of Uuid's own primitive `<`/`>`/`<=`/`>=`.
+  testComparableProvisions =>
+    a := (Uuid fromString: "00000000-0000-7000-8000-000000000000") unwrap
+    b := (Uuid fromString: "80000000-0000-7000-8000-000000000000") unwrap
+    c := (Uuid fromString: "ffffffff-ffff-7fff-bfff-ffffffffffff") unwrap
+    self assert: (b between: a and: c)
+    self deny: (a between: b and: c)
+    self assert: (a min: b) =:= a
+    self assert: (a max: b) =:= b
+    self assert: (Uuid usesProtocol: #Comparable)
+
   // ===== Error handling =====
   testComparisonRejectsNonUuidArgument =>
     id := Uuid v4

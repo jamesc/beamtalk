@@ -83,6 +83,26 @@ TestCase subclass: NumberMethodsTest
     self assert: (3.14 min: 2.71) equals: 2.71
     self assert: (3.14 max: 2.71) equals: 3.14
 
+  // BT-3594 (ADR 0127 §9): Integer/Float min:/max: used to be duplicated
+  // verbatim; both now inherit one copy from Number (plain inheritance, not
+  // `uses: Comparable` — see comparable.bt's own doc for why Number opts
+  // out of the trait).
+  testIntegerMinMax =>
+    self assert: (3 min: 7) equals: 3
+    self assert: (10 min: 2) equals: 2
+    self assert: (3 max: 7) equals: 7
+    self assert: (10 max: 2) equals: 10
+
+  testMixedIntegerFloatMinMaxCarriesArgumentRuntimeType =>
+    // Return type is Number; the smaller/larger *argument*'s own runtime
+    // type is what comes back — unaffected by the Integer/Float -> Number
+    // move (both still resolve `min:`/`max:` to the exact same method).
+    self assert: (3 min: 2.5) class equals: Float
+    self assert: (3 max: 3.5) class equals: Float
+    self assert: (Integer usesProtocol: #Comparable) equals: false
+    self assert: (Float usesProtocol: #Comparable) equals: false
+    self assert: (Number usesProtocol: #Comparable) equals: false
+
   testFloatAsInteger =>
     // asInteger (truncates)
     self assert: 3.75 asInteger equals: 3

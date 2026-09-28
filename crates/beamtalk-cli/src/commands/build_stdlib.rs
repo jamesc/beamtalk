@@ -210,6 +210,18 @@ fn compile_all_stdlib_files(
     let mut core_files = Vec::new();
     let mut class_metadata = Vec::new();
     let mut protocol_modules = Vec::new();
+    // Mirrors `semantic_analysis::mod.rs`'s own `external_protocols` build
+    // from `pre_loaded_protocol_defs` — see `extract_class_metadata`'s doc
+    // for why this generator needs it too (ADR 0127 §10a; BT-3594).
+    let external_protocols: std::collections::HashMap<
+        ecow::EcoString,
+        beamtalk_core::ast::ProtocolDefinition,
+    > = compile_ctx
+        .hierarchy
+        .pre_loaded_protocol_defs
+        .iter()
+        .map(|p| (p.name.name.clone(), p.clone()))
+        .collect();
     for source_file in source_files {
         let module_name = module_name_from_path(source_file)?;
         let core_file = temp_path.join(format!("{module_name}.core"));
@@ -232,7 +244,7 @@ fn compile_all_stdlib_files(
         }
 
         // Extract class metadata (class_name, superclass) before compilation
-        let meta = extract_class_metadata(source_file, &module_name)?;
+        let meta = extract_class_metadata(source_file, &module_name, &external_protocols)?;
 
         // ADR 0119 step 2: validate the file-stem-derived
         // `module_name` (computed above by `module_name_from_path`, from the
@@ -1163,13 +1175,41 @@ fn is_protocol_only_file(path: &Utf8Path) -> Result<bool> {
 /// flags, state declarations, and method signatures. Each stdlib file
 /// contains exactly one class definition.
 #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to ClassMeta's fields
-fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMeta> {
+fn extract_class_metadata(
+    path: &Utf8Path,
+    module_name: &str,
+    external_protocols: &std::collections::HashMap<
+        ecow::EcoString,
+        beamtalk_core::ast::ProtocolDefinition,
+    >,
+) -> Result<ClassMeta> {
     let source = fs::read_to_string(path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{path}'"))?;
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (mut module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    // ADR 0127 §3/§10a (BT-3594): this generator does its own from-scratch
+    // parse of the file (not the real `compile_stdlib_file` pipeline a few
+    // lines up in `compile_all_stdlib_files`), so a `uses:` line's provided
+    // methods are never spliced into `class.methods` unless this flattens
+    // them itself — otherwise every provision a stdlib class gains (e.g.
+    // `DateTime uses: Comparable`'s `between:and:`/`min:`/`max:`) would be
+    // invisible to `generated_builtins.rs`, and every consumer of that
+    // static table (`beamtalk test`/`lint`/the LSP compiling a file that
+    // merely *references* the stdlib class, never recompiling it) would
+    // report a false "does not understand" for a selector the real,
+    // compiled stdlib class answers just fine. Diagnostics are dropped here
+    // — `compile_stdlib_file`'s own real compile of this same file already
+    // reports them once; this pass exists purely to keep this metadata
+    // snapshot in sync with what that compile actually produces.
+    if module.classes.iter().any(|c| !c.uses.is_empty()) {
+        let _ = beamtalk_core::semantic_analysis::trait_expansion::expand_module(
+            &mut module,
+            external_protocols,
+        );
+    }
 
     let class = module
         .classes
@@ -3334,10 +3374,18 @@ mod tests {
         let binary_path = root.join("stdlib/src/binary.bt");
         let string_path = root.join("stdlib/src/string.bt");
 
-        let binary_meta = extract_class_metadata(&binary_path, "bt@stdlib@binary")
-            .expect("binary.bt should parse");
-        let string_meta = extract_class_metadata(&string_path, "bt@stdlib@string")
-            .expect("string.bt should parse");
+        let binary_meta = extract_class_metadata(
+            &binary_path,
+            "bt@stdlib@binary",
+            &std::collections::HashMap::new(),
+        )
+        .expect("binary.bt should parse");
+        let string_meta = extract_class_metadata(
+            &string_path,
+            "bt@stdlib@string",
+            &std::collections::HashMap::new(),
+        )
+        .expect("string.bt should parse");
 
         let string_overrides: std::collections::HashSet<&str> = string_meta
             .methods
@@ -3758,9 +3806,10 @@ mod tests {
         let file = dir.join("Empty.bt");
         fs::write(&file, "// just a comment, no class here\n").unwrap();
 
-        let err = extract_class_metadata(&file, "bt@stdlib@empty")
-            .err()
-            .unwrap();
+        let err =
+            extract_class_metadata(&file, "bt@stdlib@empty", &std::collections::HashMap::new())
+                .err()
+                .unwrap();
         assert!(err.to_string().contains("No class definition"));
     }
 
@@ -3775,7 +3824,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = extract_class_metadata(&file, "bt@stdlib@two")
+        let err = extract_class_metadata(&file, "bt@stdlib@two", &std::collections::HashMap::new())
             .err()
             .unwrap();
         assert!(err.to_string().contains("Expected exactly one class"));
@@ -3795,7 +3844,12 @@ mod tests {
         )
         .unwrap();
 
-        let meta = extract_class_metadata(&file, "bt@stdlib@stdlib_logger").unwrap();
+        let meta = extract_class_metadata(
+            &file,
+            "bt@stdlib@stdlib_logger",
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(meta.initialize_assigns, vec!["log".to_string()]);
     }
 
@@ -3805,7 +3859,12 @@ mod tests {
         let file = dir.join("plain.bt");
         fs::write(&file, "Object subclass: StdlibPlain\n  noop => nil\n").unwrap();
 
-        let meta = extract_class_metadata(&file, "bt@stdlib@stdlib_plain").unwrap();
+        let meta = extract_class_metadata(
+            &file,
+            "bt@stdlib@stdlib_plain",
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(meta.initialize_assigns.is_empty());
     }
 
@@ -3821,7 +3880,9 @@ mod tests {
         )
         .unwrap();
 
-        let meta = extract_class_metadata(&file, "bt@stdlib@timer").unwrap();
+        let meta =
+            extract_class_metadata(&file, "bt@stdlib@timer", &std::collections::HashMap::new())
+                .unwrap();
         assert!(
             meta.class_methods
                 .iter()
@@ -3844,9 +3905,10 @@ mod tests {
         let file = dir.join("timer.bt");
         fs::write(&file, "Object subclass: Timer\n  class noop => nil\n").unwrap();
 
-        let err = extract_class_metadata(&file, "bt@stdlib@timer")
-            .err()
-            .unwrap();
+        let err =
+            extract_class_metadata(&file, "bt@stdlib@timer", &std::collections::HashMap::new())
+                .err()
+                .unwrap();
         assert!(err.to_string().contains("Timer"));
     }
 
@@ -3863,7 +3925,12 @@ mod tests {
         )
         .unwrap();
 
-        let meta = extract_class_metadata(&file, "bt@stdlib@parallel").unwrap();
+        let meta = extract_class_metadata(
+            &file,
+            "bt@stdlib@parallel",
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(meta.class_methods.iter().all(|m| m.spawns_block));
     }
 
@@ -3879,7 +3946,12 @@ mod tests {
         )
         .unwrap();
 
-        let meta = extract_class_metadata(&file, "bt@stdlib@collection").unwrap();
+        let meta = extract_class_metadata(
+            &file,
+            "bt@stdlib@collection",
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(meta.methods.iter().all(|m| m.spawns_block));
     }
 
@@ -3895,7 +3967,12 @@ mod tests {
         )
         .unwrap();
 
-        let meta = extract_class_metadata(&file, "bt@stdlib@wrapper").unwrap();
+        let meta = extract_class_metadata(
+            &file,
+            "bt@stdlib@wrapper",
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
 
         let getter = meta
             .methods
@@ -3937,7 +4014,9 @@ mod tests {
         )
         .unwrap();
 
-        let meta = extract_class_metadata(&file, "bt@stdlib@point2").unwrap();
+        let meta =
+            extract_class_metadata(&file, "bt@stdlib@point2", &std::collections::HashMap::new())
+                .unwrap();
 
         // User-defined "x" getter: not duplicated by the auto-getter.
         assert_eq!(meta.methods.iter().filter(|m| m.selector == "x").count(), 1);

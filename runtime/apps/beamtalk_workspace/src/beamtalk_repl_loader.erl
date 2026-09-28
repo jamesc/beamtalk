@@ -1480,7 +1480,26 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     %% protocol's OLD provisions until it, too, recompiles. See
     %% `reload_protocol_fanout/3`'s own doc for the two-stage atomicity this
     %% routes through instead of `install_reload_result/2` directly.
-    case compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) of
+    %%
+    %% ADR 0127 §10a (BT-3594): this call site is *every* stateless load —
+    %% `Workspace load:`'s `handle_load_after_native/1` (`beamtalk_repl_eval:
+    %% reload_class_file/1`) routes every first-time-or-not `Workspace load:`
+    %% through here, not just an explicit `Counter reload`/`:reload` — so
+    %% without the same `with_ambient_protocol_sources/1` merge `handle_load/
+    %% 2,3` already does for the *stateful* `:load` path, a class loaded via
+    %% `Workspace load:` whose `uses:` names a protocol defined in a
+    %% *different*, already-loaded file reported "unknown protocol" even
+    %% though the exact same two files load fine one after another via
+    %% `:load`/`beamtalk_repl_loader:handle_load/2`. `compile_reload_source/5`
+    %% already carries this merge for the reload-fanout's own recompile of a
+    %% protocol's users (see that arity's doc); this reuses it for every
+    %% caller instead of only that one.
+    PrebuiltIndexes = with_ambient_protocol_sources(
+        beamtalk_repl_compiler:build_class_indexes()
+    ),
+    case
+        compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, PrebuiltIndexes)
+    of
         {ok, protocol_definition, _ProtocolInfo} = ProtocolResult ->
             reload_protocol_fanout(ProtocolResult, Path, Source);
         {ok, _Tag, _, _, _} = CompiledResult ->

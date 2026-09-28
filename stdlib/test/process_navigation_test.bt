@@ -109,6 +109,36 @@ TestCase subclass: ProcessNavigationTest
     result := self sampleTree do: [:n | n kind]
     self assert: (result isKindOf: SupervisionTree)
 
+  // BT-3594 (ADR 0127 §9): `uses: Enumerable(SupervisionNode) excluding:
+  // #(#do:)` — `do:`/`select:`/`detect:`/`detect:ifNone:`/`collect:` stay
+  // this class's own methods (asserted above; class wins, ADR 0127 §3), and
+  // `elements` (required by Enumerable) is `self flatNodes`. What's new is
+  // `isNotEmpty`, `inject:into:`, `anySatisfy:`, `count:`.
+  testEnumerableElements =>
+    self assert: self sampleTree elements equals: self sampleTree flatNodes
+
+  testEnumerableIsNotEmpty =>
+    self assert: self sampleTree isNotEmpty
+    self deny: (SupervisionTree flatNodes: #()) isNotEmpty
+
+  testEnumerableInjectInto =>
+    total := self sampleTree inject: 0 into: [:acc :n | acc + n childCount]
+    self assert: total equals: 1
+
+  testEnumerableAnySatisfy =>
+    self assert: (self sampleTree anySatisfy: [:n | n isSupervisor])
+    self deny: (self sampleTree anySatisfy: [:n | n kind == #neverHappens])
+
+  testEnumerableCount =>
+    self assert: (self sampleTree count: [:n |
+      n behaviourClass == Counter
+    ]) equals: 2
+
+  testUsesEnumerableProtocol =>
+    self assert: (SupervisionTree usesProtocol: #Enumerable)
+    self assert: (SupervisionTree >> #isNotEmpty) origin equals: #Enumerable
+    self assert: (SupervisionTree >> #do:) origin equals: nil
+
   // === ProcessNavigation: constructors over the live tree (FFI, no workspace) ===
   testDefaultIsProcessNavigation =>
     self assert: (ProcessNavigation default isKindOf: ProcessNavigation)
