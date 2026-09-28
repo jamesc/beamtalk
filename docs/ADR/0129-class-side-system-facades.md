@@ -6,6 +6,28 @@ Accepted (2026-09-25)
 Amends ADRs 0010, 0019, 0040, 0081 and 0125 (see [Amended ADRs](#amended-adrs)).
 Settles BT-3632 (§6).
 
+## Implementation Tracking
+
+**Epic:** BT-3636
+**Issues:**
+- Phase 0a — BT-3637 (REPL direct-call eligibility)
+- Phase 0b — BT-3639 (direct dispatch for dynamic class sends; blocked by BT-3635)
+- Phase 1 — BT-3640 (`Beamtalk` facade)
+- Phase 2 — BT-3638 (`beamtalk_capability`: `require_workspace/1`, run-mode
+  compiler), BT-3641 (`Workspace` facade), BT-3643 (`Workspace globals` →
+  `bindings`)
+- Phase 3 — BT-3642 (`Transcript` facade)
+- Phase 4 — BT-3644 (compiler side), BT-3647 (runtime side)
+- Phase 5 — BT-3646 (docs sweep)
+- Phase 6 — BT-3632 (`SystemNavigation` class-side; Object-kind `new`)
+- Validation — BT-3648 (end-to-end: REPL, loaded methods, dynamic sends,
+  `beamtalk test`)
+
+**Related follow-ups (outside the epic):** BT-3633 (node introspection →
+`Node`), BT-3634 (`Program exit:` outside run mode), BT-3635 (`File` handle
+ownership; blocks Phase 0b).
+**Status:** Planned
+
 ## Context
 
 ### Problem
@@ -893,7 +915,8 @@ The work is one epic; main stays green after each phase.
   `is_protected_name` and `known_vars`.
 - **Phase 4** deletes the remaining machinery.
 - **Order.**
-  - Phases 0a and 0b come first.
+  - Phases 0a and 0b come first. Phase 0b needs BT-3635 (`File` handle
+    ownership) settled first.
   - Phase 1 can ship on its own after them.
   - Phase 6 depends on 0b.
   - Phase 5 follows the facade phases.
