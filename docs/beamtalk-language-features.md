@@ -20,6 +20,9 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Parametric Types — Generics (ADR 0068)](#parametric-types--generics-adr-0068)
 - [Structural Protocols (ADR 0068)](#structural-protocols-adr-0068)
   - [Printable Protocol and Display Methods](#printable-protocol-and-display-methods)
+- [Traits (ADR 0127)](#traits-adr-0127)
+  - [Which mechanism to use](#which-mechanism-to-use)
+  - [Reflection](#reflection)
 - [Union Types and Narrowing (ADR 0068)](#union-types-and-narrowing-adr-0068)
   - [Named Type Aliases (`type` Declarations) (ADR 0108)](#named-type-aliases-type-declarations-adr-0108)
 - [Actor Message Passing](#actor-message-passing)
@@ -1865,12 +1868,6 @@ Protocol define: Printable
   /// Return a developer-oriented representation (for debugging/REPL).
   printString -> String
 
-Protocol define: Comparable
-  < other :: Self -> Boolean
-  > other :: Self -> Boolean
-  <= other :: Self -> Boolean
-  >= other :: Self -> Boolean
-
 Protocol define: Collection(E)
   /// The number of elements in this collection.
   size -> Integer
@@ -1886,6 +1883,8 @@ Protocol define: Collection(E)
 ```
 
 Protocol bodies use **class-body style** — method signatures without `=>` implementations. Doc comments are supported on each required method.
+
+A protocol body may also carry **provided** methods — a signature with `=>` and a body, flattened into every class that names the protocol in a `uses:` line. That is a **trait**, covered in full in [§ Traits](#traits-adr-0127) below. The stdlib's own `Comparable` (`stdlib/src/comparable.bt`) is one: it requires only `<`, and provides `>`, `<=`, `>=`, `between:and:`, `min:`, `max:`.
 
 ### Using Protocols as Types
 
@@ -1981,6 +1980,214 @@ Protocol conformance issues are **warnings, never errors**:
 | Protocol conformance unverifiable | Warning |
 | Missing method for protocol | Warning |
 | Namespace collision (class + protocol same name) | Error (structural) |
+
+## Traits (ADR 0127)
+
+A **trait** is a `Protocol define:` body that carries at least one **provided**
+method — a signature with `=>` and a body, alongside the protocol's ordinary
+required signatures (no `=>`). There is no separate `Trait define:` keyword;
+a trait is just a protocol with provisions, and it is used exactly like any
+other protocol.
+
+```beamtalk
+// stdlib/src/comparable.bt
+Protocol define: Comparable
+  /// Required — the using class must implement this.
+  < other :: Self -> Boolean
+
+  // Provided — derived from `<`, flattened into every user.
+  > other :: Self -> Boolean => other < self
+  <= other :: Self -> Boolean => (other < self) not
+  >= other :: Self -> Boolean => (self < other) not
+  between: min :: Self and: max :: Self -> Boolean =>
+    (self >= min) and: [self <= max]
+  min: other :: Self -> Self => (self < other) ifTrue: [self] ifFalse: [other]
+  max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]
+```
+
+A class receives a trait's provisions by naming it in a `uses:` line at the
+top of its body, immediately after the header and before any `state:`/
+`field:`/`classState:` declaration or method:
+
+```beamtalk
+sealed typed Value subclass: DateTime native: beamtalk_datetime
+  uses: Comparable
+
+  < other :: DateTime -> Boolean => self delegate
+  // `>`, `<=`, `>=` stay hand-written (each its own FFI call) — DateTime's
+  // own methods win over Comparable's provisions (see Precedence below).
+  // Gained from Comparable: `between:and:`, `min:`, `max:`.
+```
+
+`Self` in a trait's signature is substituted with the using class at
+flattening time, so `Comparable>>max: other :: Self -> Self` becomes
+`DateTime>>max: other :: DateTime -> DateTime` on `DateTime` — exactly the
+signature a hand-written method would declare.
+
+### Composing more than one trait, and `excluding:`/`overriding:`
+
+The full grammar of a `uses:` line:
+
+```
+uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)] [overriding: #(#sel, …)]
+```
+
+One trait per `uses:` line — several traits are several lines:
+
+```beamtalk
+typed Actor subclass: WorkerPool
+  uses: Enumerable(Worker)
+  state: workers :: List(Worker) = #()
+
+  elements -> List(Worker) => self.workers
+```
+
+`excluding:` drops one or more of a trait's provisions (Pharo's `-`), keeping
+the class's own or inherited version instead:
+
+```beamtalk
+typed Value subclass: SupervisionTree
+  // This class's own `do:` answers `self` (chainable), not `Nil` —
+  // `Enumerable`'s provision is dropped before it can conflict.
+  uses: Enumerable(SupervisionNode) excluding: #(#do:)
+```
+
+`overriding:` acknowledges that a trait's provision replaces a method the
+class would otherwise **inherit** from its superclass — required because a
+trait provision never silently overrides an inherited method:
+
+```beamtalk
+Record subclass: AuditRecord
+  uses: Describable overriding: #(#printString)
+```
+
+Leaving out `overriding:` there is a **compile error** naming both sides and
+both fixes:
+
+```
+error: Describable provides `printString`, which AuditRecord would otherwise
+       inherit from Record.
+  hint: to use Describable's version, write
+          uses: Describable overriding: #(#printString)
+        to keep Record's version, write
+          uses: Describable excluding: #(#printString)
+```
+
+`printString` and `displayString` inherited from `Object`/`Value` are
+exempt (they're cosmetic defaults every class is expected to replace); every
+other inherited selector — including `equals:`/`hash` — needs `overriding:`.
+
+Two traits providing the same selector to one class is a compile error
+unless the class defines that selector itself or one `uses:` line excludes
+it:
+
+```beamtalk
+Value subclass: Report
+  uses: Labelled
+  uses: Describable
+  // error: `printString` is provided by both Labelled and Describable in Report.
+  //   Define `printString` in Report, or exclude one:
+  //     uses: Describable excluding: #(#printString)
+```
+
+### Precedence
+
+Flattening applies, highest precedence first: **class body → trait provision
+→ inherited**. A class's own method always wins over a trait's provision,
+and a trait's provision — once acknowledged where needed (`overriding:`
+above) — wins over what the class would otherwise inherit. This is exactly
+what a hand-written method in the class body would mean; after flattening,
+there is nothing trait-shaped left for the type checker, dispatch, `super`,
+or hot reload to know about.
+
+### Requirements
+
+Every required selector of a used trait must resolve on the class — from the
+class body, another used trait's provisions, or the superclass chain —
+or it's a compile error naming the missing selector:
+
+```beamtalk
+Value subclass: Version
+  uses: Comparable
+  field: major = 0
+// error: Version uses Comparable but does not implement required `<`
+//   hint: Comparable requires `< other :: Self -> Boolean`
+```
+
+`uses:` on a protocol with **no** provisions is a hint, not an error or
+warning — it only checks the protocol's requirements at the class
+definition ("assert conformance here"); conformance itself stays structural
+(ADR 0068).
+
+### Which mechanism to use
+
+Beamtalk has three ways to share behaviour, and each answers a different
+question:
+
+| Mechanism | Answers | Example |
+|---|---|---|
+| **Superclass** (`X subclass: Y`) | "What *is* this?" — shares representation, state, and a place in the class hierarchy | `Integer`/`Float` are `Number`s |
+| **Protocol with provisions** (`uses:`) | "What *capability* does this have?" — derived from a few required methods, usable across unrelated classes and class kinds | `DateTime`, `Duration`, `Uuid`, `String` all `uses: Comparable` despite sharing no common ancestor below `Object` |
+| **Extension method** (`Class >> sel => body`) | "This one class I don't own needs one more method" | A one-off addition to a stdlib or dependency class |
+
+A superclass spends the class's *one* superclass slot and claims a kinship
+("`DateTime` is-a `Magnitude`") that may not be true — `DateTime`, a
+`Duration`, and a `Uuid` share only that they can be ordered, not what they
+*are*. A protocol with provisions gives capabilities their own home and
+works across the class-kind wall (an `Actor` can use a trait a `Value` also
+uses, `Enumerable` above being one). Reach for an extension method only for
+a single class, typically one you don't own — it isn't reusable the way a
+trait is (two extensions repeating the same body on two classes is exactly
+the duplication traits remove).
+
+### Traits across the class kinds
+
+An **Actor** wanting enumeration over what it holds needs its trait's
+provisions to work by **snapshot**, not an internal iterator — a block
+passed through a self-send to an actor loses `^` and captured-local writes
+(BT-3580). `Enumerable(E)` (`stdlib/src/enumerable.bt`) is written this way:
+its one requirement is `elements -> List(E)`, and every provision
+(`size`, `isEmpty`, `isNotEmpty`, `do:`, `inject:into:`, `select:`,
+`collect:`, `detect:ifNone:`, `anySatisfy:`, `count:`) forwards to the
+matching `List` primitive over that snapshot — no block ever crosses a
+self-send, so every provision runs in the *caller's* process regardless of
+whether the receiver is a `Value` or an `Actor`.
+
+`Collection` does not `uses: Enumerable` itself (its own `select:`/
+`collect:` already answer `Self` via the species pattern, richer than
+`Enumerable`'s plain `List(E)`), but gains `elements -> List(E) => self
+asList` so every `List`, `Set`, `Array`, … **conforms** to `Enumerable`
+structurally, with no `uses:` needed.
+
+An `Object subclass:` (no instances) composes traits **class-side** only —
+an instance-side provision on an uninstantiable class is not an error, it
+simply flattens onto a class that will never be instantiated.
+
+### Reflection
+
+```beamtalk
+DateTime usedProtocols                        // => [#Comparable]
+DateTime usesProtocol: #Comparable             // => true
+DateTime usesProtocol: #Printable              // => false
+Protocol providedMethods: #Comparable          // => [#between:and:, #min:, #max:, #>, #<=, #>=]
+Protocol usersOf: #Comparable                  // => [#DateTime, #Duration, #Uuid, #String]
+(DateTime >> #between:and:) origin             // => Comparable
+(DateTime >> #<) origin                        // => nil  (class's own method)
+```
+
+`usedProtocols` is distinct from `protocols` (ADR 0068's structural
+conformance query, § Runtime Protocol Queries above): a class can
+structurally conform to a protocol it never `uses:`, and `usedProtocols`
+answers only what it actually composes via `uses:`. `allUsedProtocols`
+walks the superclass chain too. `CompiledMethod >> origin` names the
+protocol a method was flattened from, or `nil` for a method the class wrote
+itself.
+
+Editing a loaded protocol file's provisions and reloading it
+(`ProtocolName reload` / `:reload ProtocolName`) atomically recompiles and
+hot-swaps every loaded, source-backed user together — all-or-nothing: if any
+user's recompile fails against the edited protocol, nothing installs and the
+error names the failing user (ADR 0127 §11).
 
 ### Two-Protocol String Model (Debug / Display)
 

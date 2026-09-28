@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Enumerable(E) — iteration and query methods derived from one required
+/// snapshot: `elements -> List(E)` (ADR 0127 §9).
+///
+/// Every provision forwards to the matching `List` primitive over that
+/// snapshot — no block ever crosses a self-send. This is deliberate, not
+/// an optimisation: a block passed to a provided method that itself called
+/// another provision through a self-send (`do:` written in terms of a
+/// required `do:`, `size` as `self inject: 0 into: …`) loses `^` and
+/// captured-local writes when the using class is an `Actor` (BT-3580) — the
+/// block runs in the actor's process, and the NLR throw and any captured
+/// write never make it back out through the self-send. Forwarding to
+/// `elements` (a plain value, already snapshotted on the caller's side)
+/// sidesteps the bug entirely: every block below runs in the *caller's*
+/// process, exactly as sending it straight to a `List` would.
+///
+/// `Collection` does **not** `uses:` this protocol — its own `select:`/
+/// `collect:` already answer `Self` via the species pattern, richer than
+/// this protocol's plain `List(E)` answers. But `Collection` does gain
+/// `elements -> List(E) => self asList` (structural conformance only), so
+/// every `List`, `Set`, `Array`, … conforms to `Enumerable` without needing
+/// `uses:` — see `stdlib/src/collection.bt`.
+///
+/// ## Examples
+/// ```beamtalk
+/// pool elements select: [:w | w isIdle]    // caller-side, safe even for an Actor
+/// pool size                                // => pool elements size
+/// ```
+Protocol define: Enumerable(E)
+  /// Required — the elements, in the receiver's order, as a List snapshot.
+  elements -> List(E)
+
+  /// The number of elements.
+  size -> Integer => self elements size
+
+  /// True if there are no elements.
+  isEmpty -> Boolean => self elements isEmpty
+
+  /// True if there is at least one element.
+  isNotEmpty -> Boolean => self elements isNotEmpty
+
+  /// Iterate over each element, evaluating `block` with each one.
+  do: block :: Block(E, Object) -> Nil => self elements do: block
+
+  /// Reduce the elements with an accumulator, evaluating `block` with
+  /// `(accumulator, element)` for each one.
+  inject: initial :: A into: block :: Block(A, E, A) -> A =>
+    self elements inject: initial into: block
+
+  /// Return the elements for which `block` answers `true`.
+  select: block :: Block(E, Boolean) -> List(E) => self elements select: block
+
+  /// Collect the result of evaluating `block` on each element.
+  collect: block :: Block(E, R) -> List(R) => self elements collect: block
+
+  /// Find the first element matching `block`, or evaluate `noneBlock` if
+  /// none match.
+  detect: block :: Block(E, Boolean) ifNone: noneBlock :: Block(T) -> E | T =>
+    self elements detect: block ifNone: noneBlock
+
+  /// True if any element satisfies `block`.
+  anySatisfy: block :: Block(E, Boolean) -> Boolean =>
+    self elements anySatisfy: block
+
+  /// Count the elements for which `block` answers `true`.
+  count: block :: Block(E, Boolean) -> Integer => self elements count: block

@@ -81,6 +81,18 @@ TestCase subclass: DurationTest
     self assert: (a >= a)
     self deny: (a >= b)
 
+  // BT-3594 (ADR 0127 §9): `uses: Comparable` provides `between:and:`,
+  // `min:`, `max:` on top of Duration's own primitive `<`/`>`/`<=`/`>=`.
+  testComparableProvisions =>
+    a := Duration seconds: 1
+    b := Duration seconds: 2
+    c := Duration seconds: 3
+    self assert: (b between: a and: c)
+    self deny: (a between: b and: c)
+    self assert: (a min: b) asMilliseconds equals: a asMilliseconds
+    self assert: (a max: b) asMilliseconds equals: b asMilliseconds
+    self assert: (Duration usesProtocol: #Comparable)
+
   // Equality is raw Erlang term comparison, not a Duration method — `=:=`,
   // `=/=` and `/=` never dispatch (ADR 0002, BT-2997). It answers correctly
   // only because every constructor canonicalises to the single `millis` field,

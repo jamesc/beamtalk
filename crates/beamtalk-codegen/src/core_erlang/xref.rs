@@ -203,12 +203,13 @@ impl CoreErlangGenerator {
         instance_methods: &[&MethodDefinition],
         class_methods: &[&MethodDefinition],
     ) -> Document<'static> {
+        let class_name = class.name.name.as_str();
         let mut entries: Vec<Document<'static>> = Vec::new();
         for method in instance_methods {
-            entries.push(self.build_method_xref_entry(method, false));
+            entries.push(self.build_method_xref_entry(class_name, method, false));
         }
         for method in class_methods {
-            entries.push(self.build_method_xref_entry(method, true));
+            entries.push(self.build_method_xref_entry(class_name, method, true));
         }
         // ADR 0087 Phase 6: synthetic auto-accessor rows.
         entries.extend(self.build_synthetic_accessor_xref_entries(class));
@@ -263,9 +264,41 @@ impl CoreErlangGenerator {
         docvec!["[", join(entries, &Document::Str(", ")), "]"]
     }
 
+    /// Looks up `class_name`/`method`'s `MethodInfo.origin` in
+    /// `self.class_hierarchy` (ADR 0127 §12; BT-3594) — populated post
+    /// `trait_expansion::apply_origins` by the real `analyse_full` pipeline
+    /// (`driver.rs`). `build_method_xref_entry` bakes the result into
+    /// `'provenance' => 'protocol'` / `'origin' => <ProtocolName>` map keys,
+    /// which `beamtalk_xref:insert_one_method/3` already reads (with
+    /// `class_body`/`undefined` defaults for every other method), so
+    /// `CompiledMethod origin` on a trait-flattened method answers the
+    /// protocol name instead of always `nil`. A generator built without a
+    /// `class_hierarchy` (rare unit-test-only codegen paths) simply finds no
+    /// entry and keeps the pre-existing default, exactly as before this fix.
+    fn method_trait_origin(
+        &self,
+        class_name: &str,
+        method: &MethodDefinition,
+        class_side: bool,
+    ) -> Option<EcoString> {
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        let class_info = hierarchy.get_class(class_name)?;
+        let selector = method.selector.name();
+        let infos = if class_side {
+            &class_info.class_methods
+        } else {
+            &class_info.methods
+        };
+        infos
+            .iter()
+            .find(|m| m.selector.as_str() == selector.as_str())
+            .and_then(|m| m.origin.clone())
+    }
+
     /// Builds one `method_xref` entry map for a single method (ADR 0087 Phase 2).
     fn build_method_xref_entry(
         &self,
+        class_name: &str,
         method: &MethodDefinition,
         class_side: bool,
     ) -> Document<'static> {
@@ -273,6 +306,8 @@ impl CoreErlangGenerator {
             ReceiverKind, collect_receiver_spans, find_all_references_in_source,
             find_all_sends_in_source,
         };
+
+        let origin = self.method_trait_origin(class_name, method, class_side);
 
         // Erlang atoms cap at 255 bytes. A selector / class name longer than
         // that (e.g. a 20-keyword auto-constructor selector) can never exist as
@@ -376,6 +411,14 @@ impl CoreErlangGenerator {
             docvec!["[", join(ref_docs, &Document::Str(", ")), "]"]
         };
 
+        let origin_fields: Document<'static> = match origin {
+            Some(protocol_name) => docvec![
+                ", 'provenance' => 'protocol', 'origin' => ",
+                leaf::atom(protocol_name.to_string()),
+            ],
+            None => Document::Str(""),
+        };
+
         docvec![
             "~{'class_side' => ",
             if class_side { "'true'" } else { "'false'" },
@@ -387,7 +430,9 @@ impl CoreErlangGenerator {
             sends_doc,
             ", 'references' => ",
             refs_doc,
-            ", 'source_status' => 'indexed'}~",
+            ", 'source_status' => 'indexed'",
+            origin_fields,
+            "}~",
         ]
     }
 

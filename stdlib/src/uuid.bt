@@ -14,6 +14,9 @@
 /// Uuids are always structurally equal maps, so the inherited `=`/`hash`
 /// from Value already do the right thing — no per-class override needed.
 ///
+/// `uses: Comparable` (ADR 0127 §9) adds `between:and:`, `min:`, `max:` on
+/// top of Uuid's own primitive `<`/`>`/`<=`/`>=`.
+///
 /// ## Examples
 /// ```beamtalk
 /// id := Uuid v7
@@ -26,6 +29,7 @@
 /// Uuid isValid: "not-a-uuid"                  // => false
 /// ```
 sealed typed Value subclass: Uuid native: beamtalk_uuid
+  uses: Comparable
 
   // ===== Class Methods — Construction =====
 

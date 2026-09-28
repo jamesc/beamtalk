@@ -6,9 +6,17 @@
 /// A `SupervisionTree` is a thin, immutable wrapper over a flat
 /// `List(SupervisionNode)` plus the parent/child adjacency captured at snapshot
 /// time. It is the high-level view layered on the flat records: the full
-/// collection protocol (`do:`, `select:`, `detect:`, `collect:`) plus tree
+/// collection protocol (`do:`, `select:`, `detect:`, `collect:`, plus
+/// `isNotEmpty`, `inject:into:`, `anySatisfy:`, `count:` via
+/// `uses: Enumerable(SupervisionNode)`, ADR 0127 §9) plus tree
 /// navigation (`root`, `nodesOfKind:`, `findClass:`). Reach one via
 /// `ProcessNavigation default tree` or the `Workspace processes` alias.
+///
+/// `do:`, `select:`, `detect:`, `detect:ifNone:` and `collect:` stay this
+/// class's own hand-written methods (class wins, ADR 0127 §3) rather than
+/// `Enumerable`'s provisions — `do:` in particular answers `self` for
+/// chaining, not `Enumerable`'s `Nil`, which is why its `uses:` line
+/// excludes it explicitly.
 ///
 /// The snapshot is *best-effort point-in-time*: iterating a tree never re-enters
 /// OTP (it is frozen), so the walk is internally consistent. To observe change,
@@ -25,6 +33,7 @@
 /// tree findClass: Counter            // => List(SupervisionNode) for Counter actors
 /// ```
 typed Value subclass: SupervisionTree
+  uses: Enumerable(SupervisionNode) excluding: #(#do:)
   /// The backing flat node list (lite records, without sibling enrichment).
   field: flatNodes :: List(SupervisionNode) = #()
 
@@ -54,6 +63,19 @@ typed Value subclass: SupervisionTree
   /// ```
   root -> SupervisionNode | Nil =>
     (Erlang beamtalk_process_navigation) rootOf: self flatNodes
+
+  // === Enumerable (ADR 0127 §9) ===
+
+  /// Required by `Enumerable(SupervisionNode)` — the flat node list, already
+  /// the receiver's own snapshot (not `nodes`, which is an FFI enrich pass
+  /// adding parent/child navigation; `Enumerable`'s provisions need only the
+  /// flat list).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree elements   // => tree flatNodes
+  /// ```
+  elements -> List(SupervisionNode) => self flatNodes
 
   // === Querying ===
 

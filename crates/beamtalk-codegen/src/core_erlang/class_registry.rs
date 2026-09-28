@@ -25,7 +25,8 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, MethodKind, Module,
-    ProtocolMethodSignature, StateDeclaration, WellKnownSelector,
+    ParameterDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
+    WellKnownSelector,
 };
 use beamtalk_core::unparse::unparse_method_display_signature;
 
@@ -717,35 +718,28 @@ impl CoreErlangGenerator {
             // reusing the pre-pass's, which are discarded) is redundant
             // work, bounded by this protocol's own parameter/return-type
             // count, not worth threading a stashed value through for.
-            let build_method_list = |sigs: &[ProtocolMethodSignature]| -> Document<'static> {
-                let items: Vec<Document<'static>> = sigs
-                    .iter()
-                    .map(|sig| {
-                        let selector = sig.selector.name().to_string();
-                        let arity = sig.selector.arity();
-                        let param_types_doc: Document<'static> = if sig.parameters.is_empty() {
-                            Document::Str("[]")
-                        } else {
-                            let mut pt_parts: Vec<Document<'static>> = vec![Document::Str("[")];
-                            for (i, param) in sig.parameters.iter().enumerate() {
-                                if i > 0 {
-                                    pt_parts.push(Document::Str(", "));
-                                }
-                                pt_parts.push(param.type_annotation.as_ref().map_or(
-                                    Document::Str("{'type', 0, 'any', []}"),
-                                    |ann| {
-                                        super::spec_codegen::type_annotation_to_spec(
-                                            ann,
-                                            Some(&self.alias_registry),
-                                            None,
-                                        )
-                                    },
-                                ));
-                            }
-                            pt_parts.push(Document::Str("]"));
-                            Document::Vec(pt_parts)
-                        };
-                        let return_type_doc: Document<'static> = sig.return_type.as_ref().map_or(
+            // Shared per-method map builder — takes a selector/parameters/
+            // return-type triple so both a protocol's *required* signatures
+            // (`ProtocolMethodSignature`, no body) and its *provided* ones
+            // (`MethodDefinition`, ADR 0127 §12; BT-3594) build the identical
+            // map shape `beamtalk_protocol_registry`'s `required_methods`/
+            // `provided_methods` keys both expect — one emitter, not two
+            // near-duplicates that could drift apart.
+            let build_method_map_entry = |selector: &MessageSelector,
+                                          parameters: &[ParameterDefinition],
+                                          return_type: &Option<TypeAnnotation>|
+             -> Document<'static> {
+                let selector_name = selector.name().to_string();
+                let arity = selector.arity();
+                let param_types_doc: Document<'static> = if parameters.is_empty() {
+                    Document::Str("[]")
+                } else {
+                    let mut pt_parts: Vec<Document<'static>> = vec![Document::Str("[")];
+                    for (i, param) in parameters.iter().enumerate() {
+                        if i > 0 {
+                            pt_parts.push(Document::Str(", "));
+                        }
+                        pt_parts.push(param.type_annotation.as_ref().map_or(
                             Document::Str("{'type', 0, 'any', []}"),
                             |ann| {
                                 super::spec_codegen::type_annotation_to_spec(
@@ -754,18 +748,39 @@ impl CoreErlangGenerator {
                                     None,
                                 )
                             },
-                        );
-                        docvec![
-                            "~{'selector' => ",
-                            leaf::atom(selector),
-                            ", 'arity' => ",
-                            leaf::int_lit(i64::try_from(arity).unwrap_or(0)),
-                            ", 'param_types' => ",
-                            param_types_doc,
-                            ", 'return_type' => ",
-                            return_type_doc,
-                            "}~"
-                        ]
+                        ));
+                    }
+                    pt_parts.push(Document::Str("]"));
+                    Document::Vec(pt_parts)
+                };
+                let return_type_doc: Document<'static> =
+                    return_type
+                        .as_ref()
+                        .map_or(Document::Str("{'type', 0, 'any', []}"), |ann| {
+                            super::spec_codegen::type_annotation_to_spec(
+                                ann,
+                                Some(&self.alias_registry),
+                                None,
+                            )
+                        });
+                docvec![
+                    "~{'selector' => ",
+                    leaf::atom(selector_name),
+                    ", 'arity' => ",
+                    leaf::int_lit(i64::try_from(arity).unwrap_or(0)),
+                    ", 'param_types' => ",
+                    param_types_doc,
+                    ", 'return_type' => ",
+                    return_type_doc,
+                    "}~"
+                ]
+            };
+
+            let build_method_list = |sigs: &[ProtocolMethodSignature]| -> Document<'static> {
+                let items: Vec<Document<'static>> = sigs
+                    .iter()
+                    .map(|sig| {
+                        build_method_map_entry(&sig.selector, &sig.parameters, &sig.return_type)
                     })
                     .collect();
 
@@ -788,6 +803,36 @@ impl CoreErlangGenerator {
             // Build the required_methods and required_class_methods lists
             let methods_doc = build_method_list(&protocol.method_signatures);
             let class_methods_doc = build_method_list(&protocol.class_method_signatures);
+
+            // ADR 0127 §12 (BT-3594): the protocol's own *provided* (trait)
+            // methods, in the same map shape as `required_methods` above —
+            // `beamtalk_protocol_registry:provided_methods/1` (backing
+            // `Protocol providedMethods:` and, transitively, `usersOf:`'s
+            // sibling reflection) reads this `provided_methods` key, but
+            // nothing ever emitted it before this fix, so every protocol
+            // with real provisions (`Comparable`, `Enumerable`, …) reported
+            // an empty list regardless of how many methods it actually
+            // provided. `protocol.provided_methods` is instance-side only in
+            // v1 (§1: "class-side provided methods are not yet supported"),
+            // so there is no `provided_class_methods` counterpart.
+            let provided_methods_doc: Document<'static> = if protocol.provided_methods.is_empty() {
+                Document::Str("[]")
+            } else {
+                let items: Vec<Document<'static>> = protocol
+                    .provided_methods
+                    .iter()
+                    .map(|m| build_method_map_entry(&m.selector, &m.parameters, &m.return_type))
+                    .collect();
+                let mut list_parts: Vec<Document<'static>> = vec![Document::Str("[")];
+                for (i, m) in items.into_iter().enumerate() {
+                    if i > 0 {
+                        list_parts.push(Document::Str(", "));
+                    }
+                    list_parts.push(m);
+                }
+                list_parts.push(Document::Str("]"));
+                Document::Vec(list_parts)
+            };
 
             // Build type_params list
             let type_params: Vec<String> = protocol
@@ -823,6 +868,8 @@ impl CoreErlangGenerator {
                 methods_doc,
                 ", 'required_class_methods' => ",
                 class_methods_doc,
+                ", 'provided_methods' => ",
+                provided_methods_doc,
                 ", 'type_params' => ",
                 type_params_doc,
                 ", 'extending' => ",

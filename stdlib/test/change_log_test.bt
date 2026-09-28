@@ -411,3 +411,49 @@ TestCase subclass: ChangeLogTest
 
   testWorkspaceIncludesSelectorAutoflushSetter =>
     self assert: (WorkspaceInterface includesSelector: #autoflush:)
+
+  // --- ADR 0127 §9 (BT-3594): `uses: Enumerable(ChangeEntry)` ---
+  //
+  // `size`/`isEmpty`/`notEmpty`/`do:`/`select:` stay this class's own
+  // methods (class wins, ADR 0127 §3; exercised by the tests above).
+  // `elements` (required by Enumerable) is `self activeEntries`, so the new
+  // provisions (`isNotEmpty`, `inject:into:`, `collect:`, `detect:ifNone:`,
+  // `anySatisfy:`, `count:`) all range over the ACTIVE subset, same as
+  // `size`/`isEmpty`/`do:` already do — never the orphan/prior-epoch/
+  // shadowed/clean entries `select:` alone can still reach.
+  testEnumerableElementsIsActiveEntries =>
+    self assert: self mixedLog elements equals: self mixedLog activeEntries
+
+  testEnumerableIsNotEmpty =>
+    self assert: self mixedLog isNotEmpty
+    self deny: self emptyLog isNotEmpty
+
+  testEnumerableInjectInto =>
+    total := self mixedLog inject: 0 into: [:acc :e | acc + e seq]
+    self assert: total equals: (self activeEntry seq + self activeAgentEntry seq)
+
+  testEnumerableCollect =>
+    selectors := self mixedLog collect: [:e | e selector]
+    self assert: selectors size equals: 2
+
+  testEnumerableDetectIfNone =>
+    found := self mixedLog detect: [:e | e authorKind == #agent] ifNone: [nil]
+    self assert: found notNil
+    self assert: (self emptyLog detect: [:e |
+      true
+    ] ifNone: [#none]) equals: #none
+
+  testEnumerableAnySatisfy =>
+    self assert: (self mixedLog anySatisfy: [:e | e authorKind == #agent])
+    self deny: (self mixedLog anySatisfy: [:e |
+      e authorKind == #nonexistentKind
+    ])
+
+  testEnumerableCount =>
+    self assert: (self mixedLog count: [:e | e authorKind == #human]) equals: 1
+
+  testUsesEnumerableProtocol =>
+    self assert: (ChangeLog usesProtocol: #Enumerable)
+    self assert: (ChangeLog >> #isNotEmpty) origin equals: #Enumerable
+    self assert: (ChangeLog >> #select:) origin equals: nil
+    self assert: (ChangeLog >> #notEmpty) origin equals: nil

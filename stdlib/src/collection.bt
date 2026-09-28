@@ -507,3 +507,20 @@ abstract typed Value subclass: Collection(E)
 
   /// Return a string representation.
   asString -> String => self printString
+
+  // === Enumerable structural conformance (ADR 0127 §9) ===
+
+  /// The elements, in iteration order, as a List snapshot.
+  ///
+  /// `Collection` does not `uses: Enumerable(E)` itself — its own
+  /// `select:`/`collect:` already answer `Self` via the species pattern,
+  /// richer than what `Enumerable`'s provisions answer. This method exists
+  /// purely so every `List`, `Set`, `Array`, `Dictionary`, … **conforms** to
+  /// `Enumerable(E)` structurally (ADR 0068), with no `uses:` needed:
+  /// without it, no collection would satisfy `x :: Enumerable(E)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set withAll: #(1, 2, 3)) elements asSet size  // => 3
+  /// ```
+  elements -> List(E) => self asList

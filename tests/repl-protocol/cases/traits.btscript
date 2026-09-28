@@ -1,0 +1,269 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Traits — Protocols with Provided Methods (ADR 0127, epic
+// BT-3586, this issue BT-3594).
+//
+// Exercises, from the REPL surface (not just BUnit/EUnit): a user-defined
+// protocol with provisions used by both a Value and an Actor class,
+// `between:and:`/`max:` on the stdlib's own `DateTime uses: Comparable`,
+// `usedProtocols`/`origin` reflection, a two-trait selector conflict error,
+// a missing-`overriding:` error, and a live protocol-file edit reaching
+// every loaded user (ADR 0127 §11 / BT-3593's reload fan-out).
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session
+// across ~150 files (see `repl_flush_changes_dirty.btscript`'s note and
+// `adr_0115_recv_type_recheck_fanout.btscript`'s header) — every class/
+// protocol name here is prefixed `Bt3594` and kept distinctive so it can
+// never collide with an unrelated fixture elsewhere in the suite (the
+// BT-3593 PR's own attempt at this kind of test was pulled after hitting
+// exactly that collision).
+
+// ===========================================================================
+// `between:and:`/`max:` on DateTime (`uses: Comparable`, ADR 0127 §9)
+// ===========================================================================
+
+_bt3594Early := DateTime year: 2025 month: 1 day: 1
+// => _
+
+_bt3594Mid := DateTime year: 2026 month: 1 day: 1
+// => _
+
+_bt3594Late := DateTime year: 2027 month: 1 day: 1
+// => _
+
+_bt3594Mid between: _bt3594Early and: _bt3594Late
+// => true
+
+_bt3594Early between: _bt3594Mid and: _bt3594Late
+// => false
+
+(_bt3594Early max: _bt3594Late) =:= _bt3594Late
+// => true
+
+(_bt3594Early min: _bt3594Late) =:= _bt3594Early
+// => true
+
+// ===========================================================================
+// REFLECTION: usedProtocols, usesProtocol:, providedMethods:, usersOf:, origin
+// ===========================================================================
+
+DateTime usesProtocol: #Comparable
+// => true
+
+DateTime usesProtocol: #Printable
+// => false
+
+DateTime usedProtocols includes: #Comparable
+// => true
+
+(Protocol providedMethods: #Comparable) includes: #between:and:
+// => true
+
+(Protocol usersOf: #Comparable) includes: #DateTime
+// => true
+
+(DateTime >> #between:and:) origin
+// => Comparable
+
+(DateTime >> #<) origin
+// => nil
+
+// ===========================================================================
+// Every scenario below composes a user protocol with a user class, so each
+// one needs the SAME cross-turn visibility `uses:` needs for the protocol's
+// full AST (ADR 0127 §10a) — wired today only into the *file*-load path
+// (`beamtalk_repl_loader`'s `with_ambient_protocol_sources/1`, BT-3591/
+// BT-3593), not into a bare inline REPL expression. So every protocol and
+// every class using one, below, is written to a temp file (`File
+// tempDirectory`, per CLAUDE.md's cross-platform temp-path rule) and loaded
+// via `Workspace load:` — never defined inline — exactly like BT-3593's own
+// `t_protocol_reload_fanout_reaches_user` EUnit test does. One shared unique
+// suffix (`(Erlang erlang) unique_integer`) keeps every temp path distinct
+// across repeated runs; the class/protocol *names* stay fixed so later
+// expressions in this file can reference them directly. Every `.bt` file's
+// content stays on as few physical lines as the grammar allows (a `state:`/
+// `field:` default value keeps parsing as an expression until end of line,
+// so it needs a real line break before the next declaration; nothing else
+// here does) — a BLANK line or a `//`-comment line embedded in the content
+// would themselves be read by this harness's own line-based continuation
+// collector (`collect_continuation_lines`) as "stop", corrupting parsing of
+// the *outer* `File writeAll:contents:` expression, so neither ever appears
+// in the embedded source. Every provided method here returns an Integer
+// rather than a String, sidestepping Beamtalk's Smalltalk-style doubled-
+// `""` quote escaping (no backslash escape exists) that a nested String
+// literal would otherwise need.
+
+_bt3594Uid := (Erlang erlang) unique_integer asString
+// => _
+
+// ===========================================================================
+// A USER-DEFINED PROTOCOL WITH PROVISIONS, USED BY A VALUE AND AN ACTOR
+// ===========================================================================
+
+_bt3594GreetableProtoPath := File tempDirectory ++ "/Bt3594Greetable" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594GreeterValuePath := File tempDirectory ++ "/Bt3594GreeterValue" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594GreeterActorPath := File tempDirectory ++ "/Bt3594GreeterActor" ++ _bt3594Uid ++ ".bt"
+// => _
+
+File writeAll: _bt3594GreetableProtoPath contents: "Protocol define: Bt3594Greetable greeting -> Integer greetingPlusOne -> Integer => self greeting + 1"
+// => Result ok: nil
+
+Workspace load: _bt3594GreetableProtoPath
+// => _
+
+File writeAll: _bt3594GreeterValuePath contents: "Value subclass: Bt3594GreeterValue uses: Bt3594Greetable field: greeting :: Integer = 10"
+// => Result ok: nil
+
+Workspace load: _bt3594GreeterValuePath
+// => _
+
+File writeAll: _bt3594GreeterActorPath contents: "Actor subclass: Bt3594GreeterActor uses: Bt3594Greetable state: greeting :: Integer = 20
+  greeting -> Integer => self.greeting"
+// => Result ok: nil
+
+Workspace load: _bt3594GreeterActorPath
+// => _
+
+_bt3594Gv := Bt3594GreeterValue new
+// => _
+
+_bt3594Ga := Bt3594GreeterActor spawn
+// => Actor(Bt3594GreeterActor, _)
+
+_bt3594Gv greetingPlusOne
+// => 11
+
+_bt3594Ga greetingPlusOne
+// => 21
+
+Bt3594GreeterValue usedProtocols
+// => ["Bt3594Greetable"]
+
+Bt3594GreeterActor usesProtocol: #Bt3594Greetable
+// => true
+
+(Bt3594GreeterValue >> #greetingPlusOne) origin
+// => Bt3594Greetable
+
+(Bt3594GreeterValue >> #greeting) origin
+// => nil
+
+// ===========================================================================
+// CONFLICT ERROR: two protocols providing the same selector to one class
+// ===========================================================================
+
+_bt3594ConflictAPath := File tempDirectory ++ "/Bt3594ConflictA" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594ConflictBPath := File tempDirectory ++ "/Bt3594ConflictB" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594ConflictUserPath := File tempDirectory ++ "/Bt3594ConflictUser" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594ConflictResolvedPath := File tempDirectory ++ "/Bt3594ConflictResolved" ++ _bt3594Uid ++ ".bt"
+// => _
+
+File writeAll: _bt3594ConflictAPath contents: "Protocol define: Bt3594ConflictA tag -> Integer => 1"
+// => Result ok: nil
+
+Workspace load: _bt3594ConflictAPath
+// => _
+
+File writeAll: _bt3594ConflictBPath contents: "Protocol define: Bt3594ConflictB tag -> Integer => 2"
+// => Result ok: nil
+
+Workspace load: _bt3594ConflictBPath
+// => _
+
+File writeAll: _bt3594ConflictUserPath contents: "Value subclass: Bt3594ConflictUser uses: Bt3594ConflictA uses: Bt3594ConflictB"
+// => Result ok: nil
+
+Workspace load: _bt3594ConflictUserPath
+// => ERROR:
+
+// Excluding one resolves the conflict.
+File writeAll: _bt3594ConflictResolvedPath contents: "Value subclass: Bt3594ConflictResolved uses: Bt3594ConflictA uses: Bt3594ConflictB excluding: #(#tag)"
+// => Result ok: nil
+
+Workspace load: _bt3594ConflictResolvedPath
+// => _
+
+Bt3594ConflictResolved new tag
+// => 1
+
+// ===========================================================================
+// `overriding:` ERROR: a provision that would silently replace an inherited
+// method must be acknowledged
+// ===========================================================================
+
+_bt3594OverrideBasePath := File tempDirectory ++ "/Bt3594OverrideBase" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594LabeledProtoPath := File tempDirectory ++ "/Bt3594Labeled" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594OverrideChildPath := File tempDirectory ++ "/Bt3594OverrideChild" ++ _bt3594Uid ++ ".bt"
+// => _
+
+_bt3594OverrideChildOkPath := File tempDirectory ++ "/Bt3594OverrideChildOk" ++ _bt3594Uid ++ ".bt"
+// => _
+
+File writeAll: _bt3594OverrideBasePath contents: "Value subclass: Bt3594OverrideBase label -> Integer => 1"
+// => Result ok: nil
+
+Workspace load: _bt3594OverrideBasePath
+// => _
+
+File writeAll: _bt3594LabeledProtoPath contents: "Protocol define: Bt3594Labeled label -> Integer => 2"
+// => Result ok: nil
+
+Workspace load: _bt3594LabeledProtoPath
+// => _
+
+File writeAll: _bt3594OverrideChildPath contents: "Bt3594OverrideBase subclass: Bt3594OverrideChild uses: Bt3594Labeled"
+// => Result ok: nil
+
+Workspace load: _bt3594OverrideChildPath
+// => ERROR:
+
+// Acknowledging with `overriding:` fixes it.
+File writeAll: _bt3594OverrideChildOkPath contents: "Bt3594OverrideBase subclass: Bt3594OverrideChildOk uses: Bt3594Labeled overriding: #(#label)"
+// => Result ok: nil
+
+Workspace load: _bt3594OverrideChildOkPath
+// => _
+
+Bt3594OverrideChildOk new label
+// => 2
+
+// ===========================================================================
+// LIVE EDIT: editing a loaded protocol file and reloading it reaches every
+// loaded user, atomically (ADR 0127 §11 / BT-3593) — reusing the Value and
+// Actor users defined above.
+// ===========================================================================
+
+File writeAll: _bt3594GreetableProtoPath contents: "Protocol define: Bt3594Greetable greeting -> Integer greetingPlusOne -> Integer => self greeting + 100"
+// => Result ok: nil
+
+// Re-loading the SAME path re-triggers `reload_compile_and_load`'s protocol
+// branch (`reload_protocol_fanout`, ADR 0127 §11) exactly as an explicit
+// `ProtocolName reload` would — `Workspace load:` always routes through the
+// reload-capable path (`beamtalk_repl_eval:reload_class_file/1`), so this
+// finds Bt3594Greetable's existing users via the same users index and
+// atomically recompiles/hot-swaps them, with no separate `reload` send
+// needed.
+Workspace load: _bt3594GreetableProtoPath
+// => _
+
+// Both the Value and the Actor user pick up the new provision, live.
+_bt3594Gv greetingPlusOne
+// => 110
+
+_bt3594Ga greetingPlusOne
+// => 120

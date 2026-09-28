@@ -170,3 +170,17 @@ TestCase subclass: CollectionProtocolTest
     self assert: #() asArray asList equals: #()
     self assert: #() asSet size equals: 0
     self assert: #() asBag size equals: 0
+
+  // BT-3594 (ADR 0127 §9): `Collection` gains `elements -> List(E) => self
+  // asList` so every collection **conforms** to `Enumerable(E)`
+  // structurally — `Collection` itself does not `uses:` the trait (its own
+  // `select:`/`collect:` already answer `Self` via species, richer than
+  // `Enumerable`'s plain `List(E)`).
+  testElementsGivesEnumerableStructuralConformance =>
+    self assert: #(1, 2, 3) elements equals: #(1, 2, 3)
+    self assert: ((Set withAll: #(1, 2, 3)) elements asSet) equals: (Set withAll: #(1, 2, 3))
+    self assert: (List conformsTo: #Enumerable)
+    self assert: (Set conformsTo: #Enumerable)
+    self assert: (Array conformsTo: #Enumerable)
+    // Collection does not `uses:` Enumerable — no `uses:`-composition record.
+    self deny: (List usesProtocol: #Enumerable)

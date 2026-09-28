@@ -15,6 +15,9 @@
 /// `totalDays`) return Integers truncated toward zero — exact Integer
 /// arithmetic for deadlines was chosen over Float results.
 ///
+/// `uses: Comparable` (ADR 0127 §9) adds `between:and:`, `min:`, `max:` on
+/// top of Duration's own primitive `<`/`>`/`<=`/`>=`.
+///
 /// ## Examples
 /// ```beamtalk
 /// timeout := Duration seconds: 30
@@ -24,6 +27,7 @@
 /// Timer sleep: (Duration milliseconds: 10)         // => nil
 /// ```
 sealed typed Value subclass: Duration native: beamtalk_duration
+  uses: Comparable
 
   // ===== Class Methods — Construction =====
 

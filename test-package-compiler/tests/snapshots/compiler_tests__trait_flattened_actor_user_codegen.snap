@@ -442,7 +442,7 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
         in _Reg0
 
     of _ClassRegResult ->
-let <_ProtoReg_Greetable> = call 'beamtalk_protocol_registry':'register_protocol'(~{'name' => 'Greetable', 'module' => 'trait_flattened_actor_user', 'required_methods' => [], 'required_class_methods' => [], 'type_params' => [], 'extending' => 'undefined', 'doc' => 'none'}~) in
+let <_ProtoReg_Greetable> = call 'beamtalk_protocol_registry':'register_protocol'(~{'name' => 'Greetable', 'module' => 'trait_flattened_actor_user', 'required_methods' => [], 'required_class_methods' => [], 'provided_methods' => [~{'selector' => 'greet', 'arity' => 0, 'param_types' => [], 'return_type' => {'type', 0, 'binary', []}}~], 'type_params' => [], 'extending' => 'undefined', 'doc' => 'none'}~) in
         _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 

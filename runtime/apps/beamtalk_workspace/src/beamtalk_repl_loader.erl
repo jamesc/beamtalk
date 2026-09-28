@@ -1480,7 +1480,26 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     %% protocol's OLD provisions until it, too, recompiles. See
     %% `reload_protocol_fanout/3`'s own doc for the two-stage atomicity this
     %% routes through instead of `install_reload_result/2` directly.
-    case compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName) of
+    %%
+    %% ADR 0127 §10a (BT-3594): this call site is *every* stateless load —
+    %% `Workspace load:`'s `handle_load_after_native/1` (`beamtalk_repl_eval:
+    %% reload_class_file/1`) routes every first-time-or-not `Workspace load:`
+    %% through here, not just an explicit `Counter reload`/`:reload` — so
+    %% without the same `with_ambient_protocol_sources/1` merge `handle_load/
+    %% 2,3` already does for the *stateful* `:load` path, a class loaded via
+    %% `Workspace load:` whose `uses:` names a protocol defined in a
+    %% *different*, already-loaded file reported "unknown protocol" even
+    %% though the exact same two files load fine one after another via
+    %% `:load`/`beamtalk_repl_loader:handle_load/2`. `compile_reload_source/5`
+    %% already carries this merge for the reload-fanout's own recompile of a
+    %% protocol's users (see that arity's doc); this reuses it for every
+    %% caller instead of only that one.
+    PrebuiltIndexes = with_ambient_protocol_sources(
+        beamtalk_repl_compiler:build_class_indexes()
+    ),
+    case
+        compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, PrebuiltIndexes)
+    of
         {ok, protocol_definition, _ProtocolInfo} = ProtocolResult ->
             reload_protocol_fanout(ProtocolResult, Path, Source);
         {ok, _Tag, _, _, _} = CompiledResult ->
@@ -1527,12 +1546,14 @@ of cross-function spec mismatch Dialyzer's whole-module success-typing
 propagates into unrelated "will never be called" findings elsewhere in
 this file — found via `just dialyzer` on this very change).
 
-BT-3593's protocol-reload fan-out is this arity's one production caller: it
-merges `beamtalk_repl_compiler:build_class_indexes/0` (the same superclass/
-module indexes an ordinary reload gets) with a `protocol_sources` entry
-carrying the just-edited protocol's raw source, so each fanned-out user's
-own recompile flattens against the NEW provisions (ADR 0127 §10a) rather
-than resolving `uses:` against nothing.
+BT-3593's protocol-reload fan-out was this arity's first production caller,
+and BT-3594's `reload_compile_and_load/4` (every stateless `Workspace load:`,
+not just an explicit reload) is now a second — both merge
+`beamtalk_repl_compiler:build_class_indexes/0` (the same superclass/module
+indexes an ordinary reload gets) with a `protocol_sources` entry, so a
+recompile flattens `uses:` against real provisions (ADR 0127 §10a) rather
+than resolving against nothing. See `reload_compile_and_load/4`'s own doc
+for why it needed this too.
 """.
 -spec compile_reload_source(string(), string(), binary() | undefined, atom() | undefined, map()) ->
     {ok, protocol_definition, map()}
