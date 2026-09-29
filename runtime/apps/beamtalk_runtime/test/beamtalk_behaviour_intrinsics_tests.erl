@@ -2973,7 +2973,7 @@ class_remove_selector_class_side_extension_test_() ->
 
 %% Local-method removal on a node with no recorded workspace capabilities is
 %% refused by beamtalk_capability:require_workspace/1 with a no_workspace error.
-class_remove_selector_local_method_no_workspace_raises_runtime_error_test_() ->
+class_remove_selector_local_method_no_workspace_raises_no_workspace_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
