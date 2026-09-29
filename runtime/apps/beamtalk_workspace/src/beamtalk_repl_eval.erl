@@ -389,14 +389,10 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
 %% grow the atom table from client-supplied strings. A missing receiver or
 %% selector becomes a structured error the caller surfaces verbatim.
 %%
-%% The receiver name resolves through the same singleton-then-class order the
-%% REPL uses for a capitalised receiver (`beamtalk_workspace:
-%% resolve_class_reference/2`): a workspace singleton binding name (
-%% `Workspace`, `Transcript` — the set `beamtalk_workspace_config` declares)
-%% resolves to its live *instance* via `beamtalk_workspace:
-%% resolve_singleton_instance/1`, so `run-entry Workspace ...` reaches the live instance;
-%% any other name (including `Beamtalk`, ADR 0129) must be a registered class, dispatched class-side.
--type entry_receiver() :: {class, pid()} | {instance, term()}.
+%% The receiver name must be a registered class, dispatched class-side. That
+%% includes the class-side facades `Beamtalk`, `Workspace` and `Transcript`
+%% (ADR 0129): there are no singleton instances to resolve.
+-type entry_receiver() :: {class, pid()}.
 -spec resolve_entry(binary(), binary()) ->
     {ok, entry_receiver(), atom()} | {error, #beamtalk_error{}}.
 resolve_entry(ClassNameBin, SelectorBin) ->
@@ -416,26 +412,18 @@ resolve_entry(ClassNameBin, SelectorBin) ->
 resolve_entry_receiver(ClassNameBin) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
         {ok, Name} ->
-            case beamtalk_workspace:resolve_singleton_instance(Name) of
-                {ok, Instance} ->
-                    {ok, {instance, Instance}};
-                error ->
-                    case beamtalk_runtime_api:whereis_class(Name) of
-                        undefined -> error;
-                        ClassPid -> {ok, {class, ClassPid}}
-                    end
+            case beamtalk_runtime_api:whereis_class(Name) of
+                undefined -> error;
+                ClassPid -> {ok, {class, ClassPid}}
             end;
         {error, _} ->
             error
     end.
 
-%% Send a resolved entry: class-side through the class's gen_server, or an
-%% ordinary instance send to a workspace singleton.
+%% Send a resolved entry class-side through the class's gen_server.
 -spec send_entry(entry_receiver(), atom(), list()) -> term().
 send_entry({class, ClassPid}, Selector, Args) ->
-    beamtalk_class_dispatch:class_send(ClassPid, Selector, Args);
-send_entry({instance, Instance}, Selector, Args) ->
-    beamtalk_message_dispatch:send(Instance, Selector, Args).
+    beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
 
 %% True when the selector is the arity-1 keyword form (`main:`), i.e. it ends in
 %% a single trailing colon — the CLI validates the shape, so a non-empty binary

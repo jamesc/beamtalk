@@ -6987,7 +6987,7 @@
       "tags": [
         "22-workspace-globals"
       ],
-      "source": "TranscriptStream current show: \"Hello from compiled code\"\nWorkspace classes\nBeamtalk version",
+      "source": "Transcript showCr: \"Hello from compiled code\"\nWorkspace classes\nBeamtalk version",
       "explanation": "Code example from docs/learning/22-workspace-globals.md"
     },
     {
@@ -10012,19 +10012,16 @@
         "mutate",
         "mutation",
         "object",
-        "serial",
         "set",
-        "setUp",
         "subclassing",
-        "tearDown",
         "testOneDiskIsNil",
         "testPegNamesArePreserved",
         "testThreeDisksReturnsNil",
         "testTwoSeparateInstances",
         "testZeroDisksReturnsNil"
       ],
-      "source": "// BUnit tests for the Hanoi value type\n//\n// Note: solve:from:to:via: prints move instructions to Transcript\n// These tests verify correctness of the algorithm, not Transcript output\n// The number of moves for n disks is always 2^n - 1\n//\n// Run in the REPL:\n//   > :load src/hanoi.bt\n//   > :load test/hanoi_test.bt\n//   > HanoiTest runAll\n\nTestCase subclass: HanoiTest\n\n  class serial -> Boolean => true\n\n  setUp =>\n    self.old_ts := TranscriptStream current\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    self.old_ts ifNil: [\n      TranscriptStream resetCurrent\n    ] ifNotNil: [:t | TranscriptStream current: t]\n    self.ts ifNotNil: [:t | t stop]\n    self\n\n  testZeroDisksReturnsNil =>\n    // Base case: no disks to move\n    self\n      assert: (Hanoi new\n        solve: 0\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testOneDiskIsNil =>\n    // One disk: makes one move (printed to Transcript), returns nil\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testThreeDisksReturnsNil =>\n    // Smoke test: 3 disks (7 moves) completes without error\n    self\n      assert: (Hanoi new\n        solve: 3\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testPegNamesArePreserved =>\n    // Works with any string peg names\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"Left\"\n        to: \"Right\"\n        via: \"Middle\")\n      equals: nil\n\n  testTwoSeparateInstances =>\n    // Value types — each call is on a fresh instance with no shared state\n    h1 := Hanoi new\n    h2 := Hanoi new\n    self\n      assert: (h1\n        solve: 2\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n    self\n      assert: (h2\n        solve: 2\n        from: \"X\"\n        to: \"Z\"\n        via: \"Y\")\n      equals: nil",
-      "explanation": "BUnit tests for the Hanoi value type  Note: solve:from:to:via: prints move instructions to Transcript These tests verify correctness of the algorithm, not Transcript output The number of moves for n disks is always 2^n - 1  Run in the REPL:   > :load src/hanoi.bt   > :load test/hanoi_test.bt   > HanoiTest runAll"
+      "source": "// BUnit tests for the Hanoi value type\n//\n// Note: solve:from:to:via: prints move instructions via showCr:\n// These tests verify correctness of the algorithm, not the printed output\n// The number of moves for n disks is always 2^n - 1\n//\n// Run in the REPL:\n//   > :load src/hanoi.bt\n//   > :load test/hanoi_test.bt\n//   > HanoiTest runAll\n\nTestCase subclass: HanoiTest\n\n  testZeroDisksReturnsNil =>\n    // Base case: no disks to move\n    self\n      assert: (Hanoi new\n        solve: 0\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testOneDiskIsNil =>\n    // One disk: makes one move (printed to Transcript), returns nil\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testThreeDisksReturnsNil =>\n    // Smoke test: 3 disks (7 moves) completes without error\n    self\n      assert: (Hanoi new\n        solve: 3\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n\n  testPegNamesArePreserved =>\n    // Works with any string peg names\n    self\n      assert: (Hanoi new\n        solve: 1\n        from: \"Left\"\n        to: \"Right\"\n        via: \"Middle\")\n      equals: nil\n\n  testTwoSeparateInstances =>\n    // Value types — each call is on a fresh instance with no shared state\n    h1 := Hanoi new\n    h2 := Hanoi new\n    self\n      assert: (h1\n        solve: 2\n        from: \"A\"\n        to: \"C\"\n        via: \"B\")\n      equals: nil\n    self\n      assert: (h2\n        solve: 2\n        from: \"X\"\n        to: \"Z\"\n        via: \"Y\")\n      equals: nil",
+      "explanation": "BUnit tests for the Hanoi value type  Note: solve:from:to:via: prints move instructions via showCr: These tests verify correctness of the algorithm, not the printed output The number of moves for n disks is always 2^n - 1  Run in the REPL:   > :load src/hanoi.bt   > :load test/hanoi_test.bt   > HanoiTest runAll"
     },
     {
       "id": "examples-getting-started-test-hello-test",
@@ -10033,8 +10030,6 @@
       "tags": [
         "HelloTest",
         "TestCase",
-        "assign",
-        "assignment",
         "constructor",
         "create",
         "extends",
@@ -10042,19 +10037,13 @@
         "inherit",
         "inheritance",
         "instantiate",
-        "mutate",
-        "mutation",
         "object",
-        "serial",
-        "set",
-        "setUp",
         "subclassing",
-        "tearDown",
         "testClassIsHello",
         "testGreeting",
         "testTwoInstancesHaveSameGreeting"
       ],
-      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n\n  class serial -> Boolean => true\n\n  setUp =>\n    self.old_ts := TranscriptStream current\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    self.old_ts ifNil: [\n      TranscriptStream resetCurrent\n    ] ifNotNil: [:t | TranscriptStream current: t]\n    self.ts ifNotNil: [:t | t stop]\n    self\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via showCr: and returns self\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances output the same text\n    Hello new greeting\n    Hello new greeting\n    self assert: (self.ts recent includes: \"Hello, World!\")\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
+      "source": "// BUnit tests for the Hello value type.\n//\n// Run in the REPL:\n//   > :load src/hello.bt\n//   > :load test/hello_test.bt\n//   > HelloTest runAll\n\nTestCase subclass: HelloTest\n\n  testGreeting =>\n    // greeting outputs \"Hello, World!\" via showCr: and returns self\n    self assert: Hello new greeting class equals: Hello\n\n  testTwoInstancesHaveSameGreeting =>\n    // Both instances behave the same: greeting returns the receiver\n    self assert: Hello new greeting class equals: Hello\n    self assert: Hello new greeting class equals: Hello\n\n  testClassIsHello =>\n    // Hello is a value type — class name is the symbol #Hello\n    self assert: Hello new class name equals: #Hello",
       "explanation": "BUnit tests for the Hello value type.  Run in the REPL:   > :load src/hello.bt   > :load test/hello_test.bt   > HelloTest runAll"
     },
     {
@@ -10081,11 +10070,8 @@
         "mutation",
         "object",
         "process",
-        "serial",
         "set",
-        "setUp",
         "subclassing",
-        "tearDown",
         "testDecrementIsInherited",
         "testGetValueIsInherited",
         "testIncrementAndDecrementInteraction",
@@ -10094,7 +10080,7 @@
         "testIndependentInstances",
         "testInitialValueIsZero"
       ],
-      "source": "// BUnit tests for the LoggingCounter actor\n//\n// Requires counter.bt loaded first (LoggingCounter extends Counter)\n//\n// Run in the REPL:\n//   > :load src/counter.bt\n//   > :load src/logging_counter.bt\n//   > :load test/logging_counter_test.bt\n//   > LoggingCounterTest runAll\n\nTestCase subclass: LoggingCounterTest\n\n  class serial -> Boolean => true\n\n  setUp =>\n    self.old_ts := TranscriptStream current\n    self.ts := TranscriptStream spawn\n    TranscriptStream current: self.ts\n    self\n\n  tearDown =>\n    self.old_ts ifNil: [\n      TranscriptStream resetCurrent\n    ] ifNotNil: [:t | TranscriptStream current: t]\n    self.ts ifNotNil: [:t | t stop]\n    self\n\n  testInitialValueIsZero =>\n    // Inherits Counter's initial state\n    self assert: LoggingCounter spawn getValue equals: 0\n\n  testIncrementDelegatesToSuper =>\n    // LoggingCounter#increment logs then delegates to super — returns new value\n    self assert: LoggingCounter spawn increment equals: 1\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testIncrementLogs =>\n    // Each increment call produces a log message\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: (self.ts recent includes: \"increment called\")\n\n  testDecrementIsInherited =>\n    // decrement is inherited from Counter unchanged\n    self assert: LoggingCounter spawn decrement equals: -1\n\n  testGetValueIsInherited =>\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: lc getValue equals: 2\n\n  testIncrementAndDecrementInteraction =>\n    lc := LoggingCounter spawn\n    lc increment; increment; increment; decrement\n    self assert: lc getValue equals: 2\n\n  testIndependentInstances =>\n    // Each spawned actor has independent state\n    lc1 := LoggingCounter spawn\n    lc2 := LoggingCounter spawn\n    lc1 increment\n    lc1 increment\n    lc2 increment\n    self assert: lc1 getValue equals: 2\n    self assert: lc2 getValue equals: 1",
+      "source": "// BUnit tests for the LoggingCounter actor\n//\n// Requires counter.bt loaded first (LoggingCounter extends Counter)\n//\n// Run in the REPL:\n//   > :load src/counter.bt\n//   > :load src/logging_counter.bt\n//   > :load test/logging_counter_test.bt\n//   > LoggingCounterTest runAll\n\nTestCase subclass: LoggingCounterTest\n\n  testInitialValueIsZero =>\n    // Inherits Counter's initial state\n    self assert: LoggingCounter spawn getValue equals: 0\n\n  testIncrementDelegatesToSuper =>\n    // LoggingCounter#increment logs then delegates to super — returns new value\n    self assert: LoggingCounter spawn increment equals: 1\n\n  testIncrementLogs =>\n    // Each increment call logs, then delegates: the value advances each time\n    lc := LoggingCounter spawn\n    self assert: lc increment equals: 1\n    self assert: lc increment equals: 2\n\n  testDecrementIsInherited =>\n    // decrement is inherited from Counter unchanged\n    self assert: LoggingCounter spawn decrement equals: -1\n\n  testGetValueIsInherited =>\n    lc := LoggingCounter spawn\n    lc increment\n    lc increment\n    self assert: lc getValue equals: 2\n\n  testIncrementAndDecrementInteraction =>\n    lc := LoggingCounter spawn\n    lc increment; increment; increment; decrement\n    self assert: lc getValue equals: 2\n\n  testIndependentInstances =>\n    // Each spawned actor has independent state\n    lc1 := LoggingCounter spawn\n    lc2 := LoggingCounter spawn\n    lc1 increment\n    lc1 increment\n    lc2 increment\n    self assert: lc1 getValue equals: 2\n    self assert: lc2 getValue equals: 1",
       "explanation": "BUnit tests for the LoggingCounter actor  Requires counter.bt loaded first (LoggingCounter extends Counter)  Run in the REPL:   > :load src/counter.bt   > :load src/logging_counter.bt   > :load test/logging_counter_test.bt   > LoggingCounterTest runAll"
     },
     {
@@ -16699,24 +16685,6 @@
       ],
       "source": "// BT-1937: Regression tests for class var mutations performed by class\n// method self-sends used as sub-expressions of another message send.\n//\n// Before BT-1937, the inner self-send's `ClassVarsN` binding was scoped\n// inside the closed sub-expression and the outer dispatch fell back to the\n// pre-mutation `ClassVars`, silently dropping the update. The fix hoists the\n// inner open let-chain into a preamble emitted at the outer level so the\n// new ClassVarsN stays in scope when the outer call runs and when the\n// enclosing method returns its `class_var_result` tuple.\n\nTestCase subclass: ClassVarSubExprTest\n\n  setUp =>\n    ClassVarSubExpr resetCounter\n    self\n\n  // Baseline — confirms `tick` works when called at statement level.\n  testTickAloneMutatesClassVar =>\n    ClassVarSubExpr tick\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1937: tick called as the argument of another class method self-send.\n  // Both the value returned by the outer call AND the persisted class var\n  // must reflect the inner tick.\n  testTickAsArgumentReturnsCorrectString =>\n    result := ClassVarSubExpr tickAsArgument\n    self assert: result equals: \"1\"\n\n  testTickAsArgumentMutatesClassVar =>\n    ClassVarSubExpr tickAsArgument\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1937: tick called as the receiver of another message send (printString\n  // dispatched on the result of `self tick`). The class var must still\n  // increment even though the dispatch is unrelated to class vars.\n  testTickAsReceiverReturnsCorrectString =>\n    result := ClassVarSubExpr tickAsReceiver\n    self assert: result equals: \"1\"\n\n  testTickAsReceiverMutatesClassVar =>\n    ClassVarSubExpr tickAsReceiver\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1937: two sub-expression self-sends in one outer call. Each ticks the\n  // counter, so after one call the counter must be 2 and the second tick\n  // must observe the value produced by the first.\n  testTickPairThreadsBothMutations =>\n    result := ClassVarSubExpr tickPair\n    self assert: result equals: \"1,2\"\n\n  testTickPairCounterIsTwo =>\n    ClassVarSubExpr tickPair\n    self assert: ClassVarSubExpr currentCounter equals: 2\n\n  // BT-1937: subsequent statements after a sub-expression self-send must\n  // see the mutated class var. tickAsArgument leaves counter=1, then we\n  // tick again at statement level and confirm it's 2.\n  testStatementAfterSubExpressionSeesMutation =>\n    ClassVarSubExpr tickAsArgument\n    ClassVarSubExpr tick\n    self assert: ClassVarSubExpr currentCounter equals: 2\n\n  // BT-1937: class method self-send as a binary operator operand. Before the\n  // fix this also produced malformed Core Erlang (the let-chain was embedded\n  // inside the call without being closed).\n  testBinaryOperatorWithSubExpression =>\n    self assert: ClassVarSubExpr tickPlusOne equals: 2\n\n  testBinaryOperatorMutatesClassVar =>\n    ClassVarSubExpr tickPlusOne\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1937: class method self-sends as list literal elements. Each element\n  // ticks the counter, so the single call must leave counter at 3.\n  testListLiteralWithSubExpressions =>\n    ClassVarSubExpr tickList\n    self assert: ClassVarSubExpr currentCounter equals: 3\n\n  // BT-1937: class method self-send used in a `++` concat sub-expression.\n  testConcatWithSubExpression =>\n    self assert: ClassVarSubExpr tickConcat equals: \"n=1\"\n\n  testConcatMutatesClassVar =>\n    ClassVarSubExpr tickConcat\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1937 evaluation order: when arg1 is a plain class var read and arg2\n  // is a class method self-send that mutates the same class var, the read\n  // must observe the PRE-mutation value (left-to-right semantics) and the\n  // counter must end up incremented.\n  testReadThenTickPreservesEvalOrder =>\n    self assert: ClassVarSubExpr readThenTick equals: \"0,1\"\n\n  testReadThenTickMutatesClassVar =>\n    ClassVarSubExpr readThenTick\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // Inverse: arg1 mutates first, arg2 reads. The read must observe the\n  // POST-mutation value.\n  testTickThenReadPreservesEvalOrder =>\n    self assert: ClassVarSubExpr tickThenRead equals: \"1,1\"\n\n  testTickThenReadMutatesClassVar =>\n    ClassVarSubExpr tickThenRead\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1942: `(self tick) class` — ProtoObject `class` intrinsic with an\n  // open-scope receiver. The counter must increment and the result must be\n  // the class of the Integer returned by `tick`.\n  testTickClassMutatesClassVar =>\n    ClassVarSubExpr tickClass\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1942: `(self tick) isNil` / `notNil` — nil protocol intrinsics.\n  testTickIsNilMutatesClassVar =>\n    ClassVarSubExpr tickIsNil\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickIsNilReturnsFalse =>\n    self assert: ClassVarSubExpr tickIsNil equals: false\n\n  testTickNotNilMutatesClassVar =>\n    ClassVarSubExpr tickNotNil\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickNotNilReturnsTrue =>\n    self assert: ClassVarSubExpr tickNotNil equals: true\n\n  // BT-1942: `(self tick) ifNil:` / `ifNotNil:` — nil conditionals. The\n  // counter must increment regardless of which branch runs.\n  testTickIfNilMutatesClassVar =>\n    ClassVarSubExpr tickIfNil\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickIfNotNilMutatesClassVar =>\n    ClassVarSubExpr tickIfNotNil\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickIfNotNilReturnsPrintString =>\n    self assert: ClassVarSubExpr tickIfNotNil equals: \"1\"\n\n  // BT-1942: two-way nil conditionals.\n  testTickIfNilIfNotNilMutatesClassVar =>\n    ClassVarSubExpr tickIfNilIfNotNil\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickIfNotNilIfNilMutatesClassVar =>\n    ClassVarSubExpr tickIfNotNilIfNil\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1942: `(self tick) yourself` / `hash` — object identity intrinsics.\n  testTickYourselfMutatesClassVar =>\n    ClassVarSubExpr tickYourself\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickYourselfReturnsTickResult =>\n    self assert: ClassVarSubExpr tickYourself equals: 1\n\n  testTickHashMutatesClassVar =>\n    ClassVarSubExpr tickHash\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1942: `(self tick) respondsTo:` — object reflection intrinsic.\n  testTickRespondsToMutatesClassVar =>\n    ClassVarSubExpr tickRespondsTo\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickRespondsToReturnsTrue =>\n    self assert: ClassVarSubExpr tickRespondsTo equals: true\n\n  // BT-1942: `someBlock value: (self tick)` — value keyword guard on a\n  // non-block-literal receiver. Must compile AND increment the counter.\n  testTickAsBlockValueArgMutatesClassVar =>\n    ClassVarSubExpr tickAsBlockValueArg\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1942: `Logger info: <arg with (self tick)>` — logger intrinsic.\n  // The counter must mutate even though Logger returns nil.\n  testTickAsLoggerArgMutatesClassVar =>\n    ClassVarSubExpr tickAsLoggerArg\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // BT-1942: `(self tick) > 0 ifTrue: [...]` inside a loop body —\n  // exercises `generate_if_true_with_mutations` with an open-scope\n  // receiver from BT-1937's binary op hoisting. Before this fix the\n  // generated Core Erlang was malformed (the open let-chain was embedded\n  // inside `let _Cond = ... in case`); the test runs the method to\n  // confirm compilation + execution succeed. The loop runs once (1 to: 1),\n  // tick > 0 is true, so hits increments to 1. The class var mutation\n  // observed by the enclosing method is a separate concern (class vars\n  // don't thread through `to:do:` loops — pre-existing limitation, BT-2308).\n  testTickInLoopConditionalCompilesAndRuns =>\n    result := ClassVarSubExpr tickInLoopConditional\n    self assert: result equals: 1\n\n  // BT-1942: Explicit `^` return with an open-scope receiver.\n  // `generate_class_method_return` must hoist the open let-chain so\n  // ClassVarsN stays in scope for the wrapping `class_var_result` tuple.\n  testTickReturnClassMutatesClassVar =>\n    ClassVarSubExpr tickReturnClass\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickReturnIsNilMutatesClassVar =>\n    ClassVarSubExpr tickReturnIsNil\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  testTickReturnIsNilReturnsFalse =>\n    self assert: ClassVarSubExpr tickReturnIsNil equals: false\n\n  // BT-2349: class var mutated earlier, then a last-position foldl list-op that\n  // mutates an outer local. The folded value must be returned (not the raw\n  // {value, StateAcc} tuple) AND the earlier class var mutation must persist —\n  // i.e. the result is wrapped in `{class_var_result, Value, ClassVarsN}`.\n  testTickThenSumReturnsAccumulator =>\n    self assert: (ClassVarSubExpr tickThenSum: #(1, 2, 3)) equals: 6\n\n  testTickThenSumPersistsClassVar =>\n    ClassVarSubExpr tickThenSum: #(1, 2, 3)\n    self assert: ClassVarSubExpr currentCounter equals: 1\n\n  // ADR 0118 phase 5a (BT-3421): a bare self-send as the non-last statement\n  // of a class method's own flat body (not nested in a loop/conditional/\n  // assignment-RHS, and not a sub-expression of another send) — the shape\n  // `lower_class_method_body` now splices as a real `Bind` instead of an\n  // opaque `Document`. Must both mutate the class var AND leave it visible\n  // to the following (last) statement's read.\n  testTickThenReadCounterReturnsMutatedValue =>\n    self assert: ClassVarSubExpr tickThenReadCounter equals: 1\n\n  testTickThenReadCounterMutatesClassVar =>\n    ClassVarSubExpr tickThenReadCounter\n    self assert: ClassVarSubExpr currentCounter equals: 1",
       "explanation": "BT-1937: Regression tests for class var mutations performed by class method self-sends used as sub-expressions of another message send.  Before BT-1937, the inner self-send's `ClassVarsN` binding was scoped inside the closed sub-expression and the outer dispatch fell back to the pre-mutation `ClassVars`, silently dropping the update. The fix hoists the inner open let-chain into a preamble emitted at the outer level so the new ClassVarsN stays in scope when the outer call runs and when the enclosing method returns its `class_var_result` tuple."
-    },
-    {
-      "id": "stdlib-test-class-variables-singleton-test",
-      "title": "ClassVariablesSingletonTest",
-      "category": "stdlib-tests",
-      "tags": [
-        "ClassVariablesSingletonTest",
-        "TestCase",
-        "class_variables_singleton_test",
-        "extends",
-        "inherit",
-        "inheritance",
-        "object",
-        "subclassing",
-        "testSingletonCurrentAccessors"
-      ],
-      "source": "// BT-488, ADR 0019 Phase 1: Tests that the TranscriptStream singleton exposes\n// a current accessor that returns nil before initialization. (`Workspace` and\n// `Beamtalk` are class-side facades with no `current` — ADR 0129.)\n\nTestCase subclass: ClassVariablesSingletonTest\n\n  testSingletonCurrentAccessors =>\n    // TranscriptStream has current accessor\n    self assert: TranscriptStream current equals: nil",
-      "explanation": "BT-488, ADR 0019 Phase 1: Tests that the TranscriptStream singleton exposes a current accessor that returns nil before initialization. (`Workspace` and `Beamtalk` are class-side facades with no `current` — ADR 0129.)"
     },
     {
       "id": "stdlib-test-class-variables-test",
@@ -31256,6 +31224,7 @@
         "mutation",
         "object",
         "raise",
+        "serial",
         "set",
         "subclassing",
         "testActiveDebugTargetsIsList",
@@ -31267,6 +31236,7 @@
         "testInfoReturnsNil",
         "testInfoWithMetadata",
         "testLogFormatIsTextOrJson",
+        "testLogLevelErrorIsSymbol",
         "testLogLevelReturnsSymbol",
         "testLogLevelRoundTrip",
         "testLoggerInfoIsString",
@@ -31274,7 +31244,7 @@
         "testWarnWithMetadata",
         "throw"
       ],
-      "source": "// Tests the Logger class — info:, warn:, error:, debug:, metadata variants, and runtime\n// logging configuration (logLevel, logFormat, debug targets)\n\nTestCase subclass: LoggerTest\n\n  testInfoReturnsNil =>\n    // info: returns nil\n    self assert: (Logger info: \"test info message\") equals: nil\n\n  testInfoWithMetadata =>\n    // info:metadata: returns nil\n    self assert: (Logger info: \"test info\" metadata: #{\n      \"key\" => \"value\"\n    }) equals: nil\n\n  testWarnReturnsNil =>\n    // warn: returns nil\n    self assert: (Logger warn: \"test warn message\") equals: nil\n\n  testWarnWithMetadata =>\n    // warn:metadata: returns nil\n    self assert: (Logger warn: \"test warn\" metadata: #{\n      \"attempt\" => 2\n    }) equals: nil\n\n  testErrorReturnsNil =>\n    // error: returns nil\n    self assert: (Logger error: \"test error message\") equals: nil\n\n  testErrorWithMetadata =>\n    // error:metadata: returns nil\n    self assert: (Logger error: \"test error\" metadata: #{\n      \"reason\" => \"timeout\"\n    }) equals: nil\n\n  testDebugReturnsNil =>\n    // debug: returns nil\n    self assert: (Logger debug: \"test debug message\") equals: nil\n\n  testDebugWithMetadata =>\n    // debug:metadata: returns nil\n    self assert: (Logger debug: \"test debug\" metadata: #{\n      \"count\" => 42\n    }) equals: nil\n\n  // === Logging configuration (BT-3653: moved from Beamtalk) ===\n  testLogLevelReturnsSymbol => self assert: (Logger logLevel isKindOf: Symbol)\n\n  testLogLevelRoundTrip =>\n    saved := Logger logLevel\n    [\n      Logger logLevel: #notice\n      self assert: Logger logLevel equals: #notice\n    ]\n      ensure: [\n        // Restore the level BUnit started with (test sys.config uses #error),\n        // even if the assertion above fails. Not asserted: the `#error` atom\n        // is coerced to a Result on return.\n        Logger logLevel: #error\n      ]\n    self assert: (saved isKindOf: Symbol)\n\n  testLogFormatIsTextOrJson =>\n    fmt := Logger logFormat\n    self assert: ((fmt == #text) or: [fmt == #json])\n\n  testDebugTargetsIsList => self assert: (Logger debugTargets isKindOf: List)\n\n  testActiveDebugTargetsIsList =>\n    self assert: (Logger activeDebugTargets isKindOf: List)\n\n  testLoggerInfoIsString => self assert: (Logger loggerInfo isKindOf: String)",
+      "source": "// Tests the Logger class — info:, warn:, error:, debug:, metadata variants, and runtime\n// logging configuration (logLevel, logFormat, debug targets)\n\nTestCase subclass: LoggerTest\n\n  // The tests mutate the node-wide log level, so they must not run concurrently.\n  class serial -> Boolean => true\n\n  testInfoReturnsNil =>\n    // info: returns nil\n    self assert: (Logger info: \"test info message\") equals: nil\n\n  testInfoWithMetadata =>\n    // info:metadata: returns nil\n    self assert: (Logger info: \"test info\" metadata: #{\n      \"key\" => \"value\"\n    }) equals: nil\n\n  testWarnReturnsNil =>\n    // warn: returns nil\n    self assert: (Logger warn: \"test warn message\") equals: nil\n\n  testWarnWithMetadata =>\n    // warn:metadata: returns nil\n    self assert: (Logger warn: \"test warn\" metadata: #{\n      \"attempt\" => 2\n    }) equals: nil\n\n  testErrorReturnsNil =>\n    // error: returns nil\n    self assert: (Logger error: \"test error message\") equals: nil\n\n  testErrorWithMetadata =>\n    // error:metadata: returns nil\n    self assert: (Logger error: \"test error\" metadata: #{\n      \"reason\" => \"timeout\"\n    }) equals: nil\n\n  testDebugReturnsNil =>\n    // debug: returns nil\n    self assert: (Logger debug: \"test debug message\") equals: nil\n\n  testDebugWithMetadata =>\n    // debug:metadata: returns nil\n    self assert: (Logger debug: \"test debug\" metadata: #{\n      \"count\" => 42\n    }) equals: nil\n\n  // === Logging configuration (BT-3653: moved from Beamtalk) ===\n  testLogLevelReturnsSymbol => self assert: (Logger logLevel isKindOf: Symbol)\n\n  testLogLevelRoundTrip =>\n    saved := Logger logLevel\n    [\n      Logger logLevel: #notice\n      self assert: Logger logLevel equals: #notice\n    ]\n      ensure: [\n        // Restore the level BUnit started with, even if the assertion above fails.\n        Logger logLevel: saved\n      ]\n    self assert: (saved isKindOf: Symbol)\n\n  testLogLevelErrorIsSymbol =>\n    saved := Logger logLevel\n    [\n      Logger logLevel: #error\n      self assert: Logger logLevel equals: #error\n      Logger logLevel: Logger logLevel\n      self assert: Logger logLevel equals: #error\n    ] ensure: [Logger logLevel: saved]\n\n  testLogFormatIsTextOrJson =>\n    fmt := Logger logFormat\n    self assert: ((fmt == #text) or: [fmt == #json])\n\n  testDebugTargetsIsList => self assert: (Logger debugTargets isKindOf: List)\n\n  testActiveDebugTargetsIsList =>\n    self assert: (Logger activeDebugTargets isKindOf: List)\n\n  testLoggerInfoIsString => self assert: (Logger loggerInfo isKindOf: String)",
       "explanation": "Tests the Logger class — info:, warn:, error:, debug:, metadata variants, and runtime logging configuration (logLevel, logFormat, debug targets)"
     },
     {
@@ -32732,22 +32702,11 @@
       "tags": [
         "ProgramTest",
         "TestCase",
-        "assign",
-        "assignment",
         "extends",
-        "for each",
-        "for-each",
-        "forEach",
         "inherit",
         "inheritance",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
         "object",
         "program_test",
-        "set",
         "subclassing",
         "testCommandNameDefaultsToBeamtalk",
         "testCommandNameReturnsString",
@@ -32756,9 +32715,9 @@
         "testExitUnderTestRaisesProgramExit",
         "testExitZeroUnderTestRaisesProgramExit",
         "testNameIsReflectiveClassName",
-        "testPackageIsRootPackageNeverNil"
+        "testPackageRaisesNoProgramPackageForStdlibSuite"
       ],
-      "source": "// BUnit tests for the Program class (ADR 0099 §2, BT-2686).\n//\n// `Program commandName` reads the beamtalk_runtime `program_name` app env,\n// defaulting to \"beamtalk\" when unset (the run-mode / connected-workspace value).\n// The escript path overrides it with the script name in Phase 4.\n\nTestCase subclass: ProgramTest\n\n  testCommandNameReturnsString =>\n    self assert: Program commandName class equals: String\n\n  testCommandNameDefaultsToBeamtalk =>\n    // Under the test workspace the program_name env is unset, so commandName\n    // defaults to the run-mode literal \"beamtalk\".\n    self assert: Program commandName equals: \"beamtalk\"\n\n  testNameIsReflectiveClassName =>\n    // `name` stays the sealed reflective class-identity accessor — defining the\n    // invocation accessor as `commandName` (not `name`) keeps this intact, so\n    // SystemNavigation's class-universe walk does not break (BT-2686 regression).\n    self assert: Program name equals: #Program\n\n  testExitNonIntegerRaisesTypeError =>\n    @expect type\n    self should: [Program exit: \"two\"] raise: #type_error\n\n  testExitOutOfRangeRaisesError =>\n    // Out of POSIX 0..255 is a wrong value (validated before the node-owning\n    // gate), consistent with System halt:.\n    self should: [Program exit: 999] raise: #invalid_argument\n\n  testExitUnderTestRaisesProgramExit =>\n    // No workspace runs under `beamtalk test`, so nothing owns the node: a\n    // structured #program_exit error, never a raw throw and never a halt\n    // (BT-3634). Code that calls Program exit: is testable this way.\n    self should: [Program exit: 3] raise: #program_exit\n\n  testPackageIsRootPackageNeverNil =>\n    // BT-3651: `beamtalk test` records the root package only when exactly one\n    // package is under test. Either way the answer is never nil — a Package, or\n    // a structured error (#ambiguous_program_package / #package_not_loaded).\n    result := [Program package] on: Error do: [:e | e kind]\n    self deny: result isNil\n    self assert: ((result isKindOf: Package) or: [result isKindOf: Symbol])\n\n  testExitZeroUnderTestRaisesProgramExit =>\n    self should: [Program exit] raise: #program_exit\n\n// NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an\n// error — it raises a tagged `script_exit` signal that the session evaluator\n// catches to end the session and report exit code N to the connecting client\n// (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,\n// so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block\n// here has no session evaluator to catch the signal).",
+      "source": "// BUnit tests for the Program class (ADR 0099 §2, BT-2686).\n//\n// `Program commandName` reads the beamtalk_runtime `program_name` app env,\n// defaulting to \"beamtalk\" when unset (the run-mode / connected-workspace value).\n// The escript path overrides it with the script name in Phase 4.\n\nTestCase subclass: ProgramTest\n\n  testCommandNameReturnsString =>\n    self assert: Program commandName class equals: String\n\n  testCommandNameDefaultsToBeamtalk =>\n    // Under the test workspace the program_name env is unset, so commandName\n    // defaults to the run-mode literal \"beamtalk\".\n    self assert: Program commandName equals: \"beamtalk\"\n\n  testNameIsReflectiveClassName =>\n    // `name` stays the sealed reflective class-identity accessor — defining the\n    // invocation accessor as `commandName` (not `name`) keeps this intact, so\n    // SystemNavigation's class-universe walk does not break (BT-2686 regression).\n    self assert: Program name equals: #Program\n\n  testExitNonIntegerRaisesTypeError =>\n    @expect type\n    self should: [Program exit: \"two\"] raise: #type_error\n\n  testExitOutOfRangeRaisesError =>\n    // Out of POSIX 0..255 is a wrong value (validated before the node-owning\n    // gate), consistent with System halt:.\n    self should: [Program exit: 999] raise: #invalid_argument\n\n  testExitUnderTestRaisesProgramExit =>\n    // No workspace runs under `beamtalk test`, so nothing owns the node: a\n    // structured #program_exit error, never a raw throw and never a halt\n    // (BT-3634). Code that calls Program exit: is testable this way.\n    self should: [Program exit: 3] raise: #program_exit\n\n  testPackageRaisesNoProgramPackageForStdlibSuite =>\n    // BT-3651/BT-3661: `beamtalk test` records a root package only for a\n    // project with a beamtalk.toml. The stdlib suite (stdlib/) has none, so\n    // there is no program package: a structured #no_program_package error,\n    // never nil.\n    self should: [Program package] raise: #no_program_package\n\n  testExitZeroUnderTestRaisesProgramExit =>\n    self should: [Program exit] raise: #program_exit\n\n// NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an\n// error — it raises a tagged `script_exit` signal that the session evaluator\n// catches to end the session and report exit code N to the connecting client\n// (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,\n// so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block\n// here has no session evaluator to catch the signal).",
       "explanation": "BUnit tests for the Program class (ADR 0099 §2, BT-2686).  `Program commandName` reads the beamtalk_runtime `program_name` app env, defaulting to \"beamtalk\" when unset (the run-mode / connected-workspace value). The escript path overrides it with the script name in Phase 4."
     },
     {
@@ -34110,31 +34069,18 @@
       "tags": [
         "ShowCrTest",
         "TestCase",
-        "assign",
-        "assignment",
-        "async",
-        "concurrent",
         "extends",
-        "gen_server",
-        "genserver",
         "inherit",
         "inheritance",
-        "mutate",
-        "mutation",
         "object",
-        "process",
-        "set",
-        "setUp",
         "show_cr_test",
         "subclassing",
-        "tearDown",
-        "testShowCrNilSafeWhenNoTranscript",
-        "testShowCrRoutesOutputWhenTranscriptSet",
-        "testShowNilSafeWhenNoTranscript",
-        "testShowRoutesOutputWhenTranscriptSet"
+        "testShowCrAcceptsNonStringValue",
+        "testShowCrReturnsReceiver",
+        "testShowReturnsReceiver"
       ],
-      "source": "// BT-984: BUnit tests for Object>>show: and Object>>showCr:\n//\n// Verifies:\n// - Silent no-op when TranscriptStream current is nil\n// - Output is routed when a transcript instance is set as current\n\nTestCase subclass: ShowCrTest\n\n  setUp =>\n    // Ensure current is nil before each test (default in test environment)\n    TranscriptStream resetCurrent\n    self\n\n  tearDown =>\n    // Stop per-test transcript actor when one was set\n    TranscriptStream current ifNotNil: [:t | t stop]\n    // Restore nil state after each test\n    TranscriptStream resetCurrent\n    self\n\n  testShowCrNilSafeWhenNoTranscript =>\n    // When TranscriptStream current is nil, showCr: is a no-op and returns self\n    TranscriptStream resetCurrent\n    self assert: (42 showCr: \"hello\") equals: 42\n\n  testShowNilSafeWhenNoTranscript =>\n    // When TranscriptStream current is nil, show: is a no-op and returns self\n    TranscriptStream resetCurrent\n    self assert: (42 show: \"hello\") equals: 42\n\n  testShowCrRoutesOutputWhenTranscriptSet =>\n    // When a TranscriptStream is set as current, showCr: routes output to it\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    42 showCr: \"hello\"\n    self assert: (ts recent includes: \"hello\")\n\n  testShowRoutesOutputWhenTranscriptSet =>\n    // When a TranscriptStream is set as current, show: routes output to it\n    ts := TranscriptStream spawn\n    TranscriptStream current: ts\n    42 show: \"world\"\n    self assert: (ts recent includes: \"world\")",
-      "explanation": "BT-984: BUnit tests for Object>>show: and Object>>showCr:  Verifies: - Silent no-op when TranscriptStream current is nil - Output is routed when a transcript instance is set as current"
+      "source": "// BT-984 / BT-3642: BUnit tests for Object>>show: and Object>>showCr:\n//\n// Both delegate to the `Transcript` class-side facade (ADR 0129 §5). Under\n// `beamtalk test` there is no interactive workspace, so the output is a Logger\n// notice; the tests assert on return values, not on captured output.\n\nTestCase subclass: ShowCrTest\n\n  testShowCrReturnsReceiver => self assert: (42 showCr: \"hello\") equals: 42\n\n  testShowReturnsReceiver => self assert: (42 show: \"hello\") equals: 42\n\n  testShowCrAcceptsNonStringValue =>\n    self assert: (\"abc\" showCr: 7) equals: \"abc\"",
+      "explanation": "BT-984 / BT-3642: BUnit tests for Object>>show: and Object>>showCr:  Both delegate to the `Transcript` class-side facade (ADR 0129 §5). Under `beamtalk test` there is no interactive workspace, so the output is a Logger notice; the tests assert on return values, not on captured output."
     },
     {
       "id": "stdlib-test-singleton-match-exhaustiveness-test",
@@ -36405,6 +36351,32 @@
       ],
       "source": "// BT-3625 (ADR 0127 Phase 0 pin, §6): what an inherited actor method's\n// self-send reaches when a further subclass overrides the selector.\n//\n// `announce` is a trait provision flattened into `TraitLabelledBase` (the\n// trait lives in its own file — fixtures/trait_labelled.bt — so this is a\n// legal cross-file `uses:`). It self-sends the required `label`.\n// `TraitLabelledOverride` (a further subclass) overrides `label`.\n//\n// `TraitPlainBase`/`TraitPlainOverride` are the hand-written control: the\n// identical shape with `announce` written in the class body instead of\n// flattened in. Flattening means \"exactly the class with the provisions\n// written into its body\" (ADR 0127 §3), so the trait and hand-written\n// variants must behave identically — whatever an inherited actor method's\n// self-send reaches for the hand-written class, it reaches for the flattened\n// one, no more and no less.\n\nTestCase subclass: TraitOverrideDispatchTest\n  field: base = nil\n  field: sub = nil\n  field: plainBase = nil\n  field: plainSub = nil\n\n  setUp =>\n    (((self withBase: TraitLabelledBase spawn) withSub: TraitLabelledOverride spawn) withPlainBase: TraitPlainBase spawn) withPlainSub: TraitPlainOverride spawn\n\n  tearDown =>\n    self.base isNil ifFalse: [self.base stop]\n    self.sub isNil ifFalse: [self.sub stop]\n    self.plainBase isNil ifFalse: [self.plainBase stop]\n    self.plainSub isNil ifFalse: [self.plainSub stop]\n\n  testFlattenedProvisionUsesTheUsersOwnRequiredMethod =>\n    self assert: self.base announce equals: \"announce: base\"\n\n  testHandWrittenControlUsesItsOwnRequiredMethod =>\n    self assert: self.plainBase announce equals: \"announce: base\"\n\n  testFlattenedProvisionBehavesLikeTheHandWrittenControlForASubclassOverride =>\n    self assert: self.sub announce equals: self.plainSub announce",
       "explanation": "BT-3625 (ADR 0127 Phase 0 pin, §6): what an inherited actor method's self-send reaches when a further subclass overrides the selector.  `announce` is a trait provision flattened into `TraitLabelledBase` (the trait lives in its own file — fixtures/trait_labelled.bt — so this is a legal cross-file `uses:`). It self-sends the required `label`. `TraitLabelledOverride` (a further subclass) overrides `label`.  `TraitPlainBase`/`TraitPlainOverride` are the hand-written control: the identical shape with `announce` written in the class body instead of flattened in. Flattening means \"exactly the class with the provisions written into its body\" (ADR 0127 §3), so the trait and hand-written variants must behave identically — whatever an inherited actor method's self-send reaches for the hand-written class, it reaches for the flattened one, no more and no less."
+    },
+    {
+      "id": "stdlib-test-transcript-test",
+      "title": "TranscriptTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "TestCase",
+        "TranscriptTest",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing",
+        "testCascadeSucceeds",
+        "testClearRaisesNoWorkspace",
+        "testCrIsNoOp",
+        "testHasNoStreamProtocol",
+        "testRecentRaisesNoWorkspace",
+        "testRespondsToFacadeSelectors",
+        "testShowCrSucceeds",
+        "testShowNonStringSucceeds",
+        "testShowSucceeds",
+        "transcript_test"
+      ],
+      "source": "// BUnit tests for the `Transcript` class-side facade (BT-3642, ADR 0129 §5).\n//\n// Under `beamtalk test` there is no interactive workspace (no REPL server, so\n// no `TranscriptStream`): `show:` / `showCr:` log a plain Logger notice and\n// `cr` is a no-op, so all of them succeed. `recent` and `clear` are\n// workspace-only and raise `no_workspace`. Routing to the REPL stream is\n// covered by tests/repl-protocol/cases/transcript.btscript.\n\nTestCase subclass: TranscriptTest\n\n  testShowSucceeds => self assert: (Transcript show: \"hello\") equals: nil\n\n  testShowNonStringSucceeds => self assert: (Transcript show: 42) equals: nil\n\n  testCrIsNoOp => self assert: Transcript cr equals: nil\n\n  testShowCrSucceeds => self assert: (Transcript showCr: \"hello\") equals: nil\n\n  testCascadeSucceeds =>\n    self assert: (Transcript show: \"a\"; cr; show: \"b\") equals: nil\n\n  testRecentRaisesNoWorkspace =>\n    self should: [Transcript recent] raise: #no_workspace\n\n  testClearRaisesNoWorkspace =>\n    self should: [Transcript clear] raise: #no_workspace\n\n  testRespondsToFacadeSelectors =>\n    self assert: (Transcript class includesSelector: #show:)\n    self assert: (Transcript class includesSelector: #showCr:)\n    self assert: (Transcript class includesSelector: #cr)\n    self assert: (Transcript class includesSelector: #recent)\n    self assert: (Transcript class includesSelector: #clear)\n\n  testHasNoStreamProtocol =>\n    self deny: (Transcript class includesSelector: #subscribe)\n    self deny: (Transcript class includesSelector: #current)",
+      "explanation": "BUnit tests for the `Transcript` class-side facade (BT-3642, ADR 0129 §5).  Under `beamtalk test` there is no interactive workspace (no REPL server, so no `TranscriptStream`): `show:` / `showCr:` log a plain Logger notice and `cr` is a no-op, so all of them succeed. `recent` and `clear` are workspace-only and raise `no_workspace`. Routing to the REPL stream is covered by tests/repl-protocol/cases/transcript.btscript."
     },
     {
       "id": "stdlib-test-tuple-test",
@@ -39199,7 +39171,7 @@
         "unless",
         "value"
       ],
-      "source": "// Towers of Hanoi — e2e test fixture.\n// Canonical source lives in examples/getting-started/src/hanoi.bt.\n\nValue subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        TranscriptStream current show: \"Move disk from \" ++ source ++ \" to \" ++ target\n        TranscriptStream current cr\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
+      "source": "// Towers of Hanoi — e2e test fixture.\n// Canonical source lives in examples/getting-started/src/hanoi.bt.\n\nValue subclass: Hanoi\n\n  solve: n from: source to: target via: auxiliary =>\n    (n > 0)\n      ifTrue: [\n        self\n          solve: n - 1\n          from: source\n          to: auxiliary\n          via: target\n        Transcript showCr: \"Move disk from \" ++ source ++ \" to \" ++ target\n        self\n          solve: n - 1\n          from: auxiliary\n          to: target\n          via: source\n      ]\n      ifFalse: [nil]",
       "explanation": "Towers of Hanoi — e2e test fixture. Canonical source lives in examples/getting-started/src/hanoi.bt."
     },
     {

@@ -416,17 +416,16 @@ stop_supervisor_not_attached_raises_runtime_error(#{tmp := Tmp, unique := U}) ->
 
 %%====================================================================
 %% resolve_name/2, resolve_class_reference/2, resolve_singleton_instance/1 —
-%% Tier 3 (singleton) and Tier 4 (class registry) hits (ADR 0081
-%% Phase 1). The existing suite only reaches Tier 1/2/5.
+%% Tier 3 (class registry) hits (ADR 0081 Phase 1). There is no singleton
+%% tier since ADR 0129. The existing suite only reaches Tier 1/2/4.
 %%====================================================================
 
-%% Tier 3: `Workspace` is a configured singleton binding name; resolve_name/2
-%% resolves it live via lookup_singleton/1 -> handle_session_bindings/1.
+%% `Workspace` is a class-side facade (ADR 0129): it resolves as a class.
 resolve_name_singleton_tier_hit(_Ctx) ->
     Result = beamtalk_workspace_interface_primitives:resolve_name(#{}, 'Workspace'),
-    [?_assert(is_map(Result) orelse is_tuple(Result))].
+    [?_assertMatch({beamtalk_object, _, _, _}, Result)].
 
-%% Tier 4: a real registered class resolves to a `{beamtalk_object, '<Name>
+%% Tier 3: a real registered class resolves to a `{beamtalk_object, '<Name>
 %% class', Module, Pid}` tuple via lookup_class_object/1.
 resolve_name_class_registry_tier_hit(#{tmp := Tmp, unique := U}) ->
     ClassName = list_to_binary("WiResolveName" ++ U),
@@ -442,7 +441,7 @@ resolve_name_class_registry_tier_hit(#{tmp := Tmp, unique := U}) ->
 
 resolve_class_reference_singleton_tier_hit(_Ctx) ->
     Result = beamtalk_workspace_interface_primitives:resolve_class_reference(#{}, 'Workspace'),
-    [?_assert(is_map(Result) orelse is_tuple(Result))].
+    [?_assertMatch({beamtalk_object, _, _, _}, Result)].
 
 resolve_class_reference_class_registry_tier_hit(#{tmp := Tmp, unique := U}) ->
     ClassName = list_to_binary("WiResolveClsRef" ++ U),
@@ -452,12 +451,15 @@ resolve_class_reference_class_registry_tier_hit(#{tmp := Tmp, unique := U}) ->
     [?_assertMatch({beamtalk_object, _, _, _}, Result)].
 
 resolve_singleton_instance_hit_and_miss(_Ctx) ->
-    Hit = beamtalk_workspace_interface_primitives:resolve_singleton_instance('Workspace'),
+    %% No singleton bindings since ADR 0129: always `error`.
+    Workspace = beamtalk_workspace_interface_primitives:resolve_singleton_instance('Workspace'),
+    Transcript = beamtalk_workspace_interface_primitives:resolve_singleton_instance('Transcript'),
     Miss = beamtalk_workspace_interface_primitives:resolve_singleton_instance(
         'NotASingletonNameXyz'
     ),
     [
-        ?_assertMatch({ok, _}, Hit),
+        ?_assertEqual(error, Workspace),
+        ?_assertEqual(error, Transcript),
         ?_assertEqual(error, Miss)
     ].
 

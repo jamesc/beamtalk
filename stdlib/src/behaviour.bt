@@ -266,7 +266,7 @@ abstract Object subclass: Behaviour
   ///
   /// ## Examples
   /// ```beamtalk
-  /// TranscriptStream classVarNames   // => [current]
+  /// Object classVarNames   // => #()
   /// ```
   sealed classVarNames -> List(Symbol) => @primitive "classClassVarNames"
 
@@ -274,7 +274,7 @@ abstract Object subclass: Behaviour
   ///
   /// ## Examples
   /// ```beamtalk
-  /// TranscriptStream allClassVarNames   // => [current]
+  /// Object allClassVarNames   // => #()
   /// ```
   sealed allClassVarNames -> List(Symbol) => @primitive "classAllClassVarNames"
 

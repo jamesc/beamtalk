@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for `Program package` in a REPL with no project (BT-3651, BT-3661).
+//
+// The aggregate REPL-protocol session is a bare REPL: no launcher recorded a
+// `root_package`, so `Program package` must raise a structured error naming the
+// missing package, never answer `nil` (ADR 0129 / principles §4). The
+// single-package, library-project and ambiguous-package contexts are covered
+// by EUnit (`beamtalk_program_tests`, `beamtalk_package_tests`) and the CLI
+// launcher unit tests in `repl_startup.rs`.
+
+Program package
+// => ERROR: This program has no root package

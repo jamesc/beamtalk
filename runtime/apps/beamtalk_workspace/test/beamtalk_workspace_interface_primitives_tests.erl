@@ -310,6 +310,21 @@ bind_and_unbind_test_() ->
                             ?assertEqual(name_conflict, Err#beamtalk_error.kind)
                     end
                 end},
+                {"bind:as: tolerates a class dying mid-call (BT-3658)", fun() ->
+                    Name = 'BT3658DyingBindName',
+                    Dying = spawn(fun() ->
+                        receive
+                            {'$gen_call', _From, _Req} -> exit(shutdown)
+                        end
+                    end),
+                    true = register(beamtalk_class_registry:registry_name(Name), Dying),
+                    ?assertEqual(
+                        nil,
+                        beamtalk_workspace_interface_primitives:dispatch(
+                            'bind:as:', [42, Name], Self
+                        )
+                    )
+                end},
                 {"bind:as: raises type_error for non-atom name", fun() ->
                     try
                         beamtalk_workspace_interface_primitives:dispatch(
@@ -879,10 +894,10 @@ autoflush_default_is_false_test() ->
 %%====================================================================
 %% resolve_name/2 Tests (ADR 0081 Phase 1)
 %%
-%% Resolution order: locals -> bind:as: ETS -> singleton registry ->
-%% class registry -> undefined_variable. Tiers 1, 2, 5 and ordering are
-%% deterministic in EUnit; tiers 3/4 need a live workspace and are exercised
-%% by the repl-protocol parity tests.
+%% Resolution order: locals -> bind:as: ETS -> class registry ->
+%% undefined_variable. Tiers 1, 2, 4 and ordering are deterministic in EUnit;
+%% tier 3 needs a live workspace and is exercised by the repl-protocol parity
+%% tests.
 %%====================================================================
 
 %% Tier 1: a name present in the locals map resolves to its local value.

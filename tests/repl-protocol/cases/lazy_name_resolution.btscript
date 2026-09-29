@@ -7,21 +7,20 @@
 // These tests require E2E because they exercise the runtime name resolver
 // (beamtalk_workspace:resolve_name/2) wired in by the REPL codegen: a free
 // identifier that misses the session locals map falls through to the shared
-// resolver (locals -> bind:as: ETS -> singleton registry -> class registry ->
-// undefined_variable). The behaviour must match the pre-injection model.
+// resolver (locals -> bind:as: ETS -> class registry -> undefined_variable). The behaviour must match the pre-injection model.
 
 // ===========================================================================
-// LAZY SINGLETON RESOLUTION (no eager injection)
+// LAZY CLASS-FACADE RESOLUTION (no eager injection)
 // ===========================================================================
 
-// A workspace singleton resolves even though it is never injected into the
-// session binding map — it is resolved lazily from the singleton registry.
+// Transcript is a class-side facade (ADR 0129): it resolves as an ordinary
+// class, never injected into the session binding map.
 Transcript
-// => Actor(TranscriptStream, _)
+// => Transcript
 
-// Singleton receiver dispatch still works (binding-aware class send).
+// Facade receiver dispatch works.
 Transcript show: "hi"
-// => Actor(TranscriptStream, _)
+// => nil
 
 // ===========================================================================
 // SHADOWING: a session local shadows a workspace binding of the same name
@@ -29,7 +28,7 @@ Transcript show: "hi"
 //
 // resolve_name/2 checks the session locals map BEFORE the bind:as: registry,
 // so a local assignment shadows a workspace binding within that session.
-// (Singletons like Transcript are capitalised ClassReferences and cannot be
+// (Class facades like Transcript are capitalised ClassReferences and cannot be
 // assignment targets, so shadowing is demonstrated with a lowercase name.)
 
 // Register a workspace (global) binding.
@@ -89,7 +88,7 @@ lazyBound
 // emitted a bare maps:get/2 (and singleton dispatch resolved post-arg), so any
 // singleton or bind:as: name used inside a block crashed with {badkey,_}.
 
-// A singleton (Transcript) dispatched from inside a do: block — no badkey.
+// A class facade (Transcript) dispatched from inside a do: block — no badkey.
 #(1, 2, 3) do: [:n | Transcript show: "tick"]
 // => _
 
@@ -112,17 +111,14 @@ Workspace unbind: #loopBase
 // => nil
 
 // ===========================================================================
-// NO SPURIOUS "Unresolved class" WARNING FOR LAZILY-RESOLVED SINGLETONS
+// NO SPURIOUS "Unresolved class" WARNING FOR CLASS FACADES
 // ===========================================================================
 //
-// Regression guard: ADR 0081 Phase 1 stopped eagerly injecting the singletons
-// into the session bindings map, so they dropped out of the KnownVars list sent
-// to the compiler and the structural validator began flagging `Workspace` (and
-// friends) as `Unresolved class`. known_vars/1 now re-adds the singleton binding
-// names from beamtalk_workspace_config, so a singleton send must compile cleanly
-// with no diagnostic warning.
+// Regression guard: `Workspace`, `Beamtalk` and `Transcript` are ordinary
+// classes (ADR 0129), so the compiler knows them via the class hierarchy and
+// a send must compile cleanly with no diagnostic warning.
 
-// Sending to a singleton must NOT warn that it is an unresolved class.
+// Sending to a class facade must NOT warn that it is an unresolved class.
 Workspace classes
 // => NO-WARNING: Unresolved class
 

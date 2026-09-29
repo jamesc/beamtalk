@@ -10,31 +10,14 @@
 
 TestCase subclass: HelloTest
 
-  class serial -> Boolean => true
-
-  setUp =>
-    self.old_ts := TranscriptStream current
-    self.ts := TranscriptStream spawn
-    TranscriptStream current: self.ts
-    self
-
-  tearDown =>
-    self.old_ts ifNil: [
-      TranscriptStream resetCurrent
-    ] ifNotNil: [:t | TranscriptStream current: t]
-    self.ts ifNotNil: [:t | t stop]
-    self
-
   testGreeting =>
     // greeting outputs "Hello, World!" via showCr: and returns self
-    Hello new greeting
-    self assert: (self.ts recent includes: "Hello, World!")
+    self assert: Hello new greeting class equals: Hello
 
   testTwoInstancesHaveSameGreeting =>
-    // Both instances output the same text
-    Hello new greeting
-    Hello new greeting
-    self assert: (self.ts recent includes: "Hello, World!")
+    // Both instances behave the same: greeting returns the receiver
+    self assert: Hello new greeting class equals: Hello
+    self assert: Hello new greeting class equals: Hello
 
   testClassIsHello =>
     // Hello is a value type — class name is the symbol #Hello

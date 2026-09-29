@@ -988,7 +988,7 @@ render_class_header_skips_unsafe_names_test() ->
     {ok, _Tokens, _} = erl_scan:string(binary_to_list(Bin)).
 
 %%====================================================================
-%% regenerate_native_class_header/1
+%% regenerate_native_class_header/2
 %%====================================================================
 
 regenerate_native_class_header_writes_file_test() ->
@@ -997,7 +997,7 @@ regenerate_native_class_header_writes_file_test() ->
     %% The first write reports `true` (content changed from nothing).
     Dir = filename:absname(make_temp_dir()),
     try
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
         HrlPath = filename:join(
             beamtalk_repl_ops_load:native_generated_include_dir(Dir),
             "beamtalk_classes.hrl"
@@ -1015,8 +1015,8 @@ regenerate_native_class_header_idempotent_test() ->
     %% .tmp files should remain.
     Dir = filename:absname(make_temp_dir()),
     try
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
-        ?assertEqual(false, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
+        ?assertEqual(false, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
         IncludeDir = beamtalk_repl_ops_load:native_generated_include_dir(Dir),
         {ok, Entries} = file:list_dir(IncludeDir),
         ?assertEqual(
@@ -1047,7 +1047,7 @@ compile_native_uses_generated_class_header_test() ->
     Dir = filename:absname(make_temp_dir()),
     try
         %% Regenerate the header into _build/dev/native/include/.
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
         NativeDir = filename:join(Dir, "native"),
         ok = file:make_dir(NativeDir),
         %% A native module that includes the generated header. Even with an
@@ -1155,26 +1155,55 @@ test_load_excludes_native_test_helper_without_flag_test() ->
 %% Source-AST-derived class index (cold-load header parity)
 %%====================================================================
 
-read_package_name_reads_toml_test() ->
-    Dir = filename:absname(make_temp_dir()),
+resolve_package_name_request_wins_test() ->
+    %% An explicit request/option name wins over the root_package env.
+    with_root_package(<<"envpkg">>, fun() ->
+        ?assertEqual(<<"reqpkg">>, beamtalk_repl_ops_load:resolve_package_name("/x", <<"reqpkg">>))
+    end).
+
+resolve_package_name_falls_back_to_root_package_test() ->
+    %% No request name, no known launcher project path: the root_package fact.
+    with_root_package(<<"envpkg">>, fun() ->
+        ?assertEqual(<<"envpkg">>, beamtalk_repl_ops_load:resolve_package_name("/x", undefined)),
+        ?assertEqual(<<"envpkg">>, beamtalk_repl_ops_load:resolve_package_name("/x", <<>>))
+    end).
+
+resolve_package_name_none_test() ->
+    %% No request name and no root_package: undefined (never parses a manifest,
+    %% even when a beamtalk.toml is present).
+    with_root_package(undefined, fun() ->
+        Dir = filename:absname(make_temp_dir()),
+        try
+            write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"my_pkg\"\n">>),
+            ?assertEqual(undefined, beamtalk_repl_ops_load:resolve_package_name(Dir, undefined))
+        after
+            rm_temp_dir(Dir)
+        end
+    end).
+
+resolve_package_name_ambiguous_test() ->
+    with_root_package(ambiguous, fun() ->
+        ?assertEqual(undefined, beamtalk_repl_ops_load:resolve_package_name("/x", undefined))
+    end).
+
+%% Run Fun with the `root_package` app env set to Value (undefined = unset),
+%% restoring the previous value afterwards.
+with_root_package(Value, Fun) ->
+    Prev = application:get_env(beamtalk_runtime, root_package),
+    case Value of
+        undefined -> application:unset_env(beamtalk_runtime, root_package);
+        _ -> application:set_env(beamtalk_runtime, root_package, Value)
+    end,
     try
-        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"my_pkg\"\n">>),
-        ?assertEqual(<<"my_pkg">>, beamtalk_repl_ops_load:read_package_name(Dir))
+        Fun()
     after
-        rm_temp_dir(Dir)
+        case Prev of
+            {ok, V} -> application:set_env(beamtalk_runtime, root_package, V);
+            undefined -> application:unset_env(beamtalk_runtime, root_package)
+        end
     end.
 
-read_package_name_missing_manifest_test() ->
-    %% No beamtalk.toml → undefined (the index builder then falls back to the
-    %% live registry alone, the previous behaviour).
-    Dir = filename:absname(make_temp_dir()),
-    try
-        ?assertEqual(undefined, beamtalk_repl_ops_load:read_package_name(Dir))
-    after
-        rm_temp_dir(Dir)
-    end.
-
-%% build_source_class_module_index/1 indexes each file via the
+%% build_source_class_module_index/2 indexes each file via the
 %% compiler port (beamtalk_compiler:build_class_module_index_in_source/3)
 %% instead of a regex + hand-rolled snake-case, so every test below needs the
 %% compiler application (and its port) running. Idempotent and never stopped
@@ -1234,7 +1263,7 @@ build_source_class_module_index_cold_test() ->
             "bar.bt",
             <<"Actor subclass: Bar\n  state: x = 0\n\nValue subclass: Baz\n">>
         ),
-        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir),
+        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir, <<"coldpkg">>),
         ?assertEqual(<<"bt@coldpkg@foo">>, maps:get(<<"Foo">>, Index)),
         ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Bar">>, Index)),
         ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Baz">>, Index))
@@ -1250,7 +1279,7 @@ build_source_class_module_index_no_package_test() ->
         SrcDir = filename:join(Dir, "src"),
         ok = file:make_dir(SrcDir),
         write_temp_file(SrcDir, "foo.bt", <<"Object subclass: Foo\n">>),
-        ?assertEqual(#{}, beamtalk_repl_ops_load:build_source_class_module_index(Dir))
+        ?assertEqual(#{}, beamtalk_repl_ops_load:build_source_class_module_index(Dir, undefined))
     after
         rm_temp_dir(Dir)
     end.
@@ -1274,14 +1303,14 @@ build_source_class_module_index_subdir_casing_mismatch_test() ->
             "HttpResponse.bt",
             <<"Object subclass: HttpResponse\n  ok -> Boolean => true\n">>
         ),
-        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir),
+        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir, <<"webpkg">>),
         ?assertEqual(<<"bt@webpkg@util@http_response">>, maps:get(<<"HttpResponse">>, Index))
     after
         rm_temp_dir(Dir)
     end.
 
 regenerate_header_includes_cold_source_class_test() ->
-    %% Acceptance: regenerate_native_class_header/1 must emit a
+    %% Acceptance: regenerate_native_class_header/2 must emit a
     %% -define for a class defined in src/ even though it is NOT registered
     %% (cold load). The previous registry-only path produced no macro for it.
     ensure_compiler_started(),
@@ -1291,7 +1320,9 @@ regenerate_header_includes_cold_source_class_test() ->
         SrcDir = filename:join(Dir, "src"),
         ok = file:make_dir(SrcDir),
         write_temp_file(SrcDir, "widget.bt", <<"Object subclass: Widget\n">>),
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        ?assertEqual(
+            true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, <<"coldhdr">>)
+        ),
         HrlPath = filename:join(
             beamtalk_repl_ops_load:native_generated_include_dir(Dir),
             "beamtalk_classes.hrl"
@@ -1321,7 +1352,9 @@ cold_load_native_macro_compiles_test() ->
         %% A source class that is NOT registered into the live class registry.
         write_temp_file(SrcDir, "gadget.bt", <<"Object subclass: Gadget\n">>),
         %% Regenerate the header from source (cold path).
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        ?assertEqual(
+            true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, <<"e2ecold">>)
+        ),
         NativeDir = filename:join(Dir, "native"),
         ok = file:make_dir(NativeDir),
         %% A native module that expands the macro for the same-package class.
@@ -1419,7 +1452,7 @@ parity_assert(Proj) ->
     %% The atom the source-AST index derives — built the same way the CLI does
     %% (build.rs compute_relative_module → to_module_name), so this binary is
     %% byte-identical to the CLI-generated `.beam' module name.
-    SourceIndex = beamtalk_repl_ops_load:build_source_class_module_index(Proj),
+    SourceIndex = beamtalk_repl_ops_load:build_source_class_module_index(Proj, <<"paritypkg">>),
     SourceModuleBin = maps:get(<<"HttpResponse">>, SourceIndex),
     %% Compare the casing-sensitive class-name segment (the last `@'-part) of the
     %% live atom against the source/CLI atom. The package prefix can legitimately

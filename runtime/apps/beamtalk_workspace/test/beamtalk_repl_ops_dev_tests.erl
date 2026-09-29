@@ -1437,12 +1437,12 @@ context_completion_expression_empty_prefix() ->
     ?assert(lists:member(<<"next">>, Result)).
 
 classify_uppercase_binding() ->
-    %% `Transcript` is an existing atom but not a registered class here, so the
+    %% `BtBindingProbe` is an existing atom but not a registered class, so the
     %% uppercase branch of classify_receiver falls back to the binding lookup.
     %% The binding holds an integer (primitive_class_of → 'Integer'), and the
     %% Integer fixture class is registered, so completion offers Integer methods.
-    Bindings = #{'Transcript' => 99},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"Transcript ab">>, Bindings),
+    Bindings = #{'BtBindingProbe' => 99},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"BtBindingProbe ab">>, Bindings),
     ?assert(lists:member(<<"abs">>, Result)).
 
 context_completion_qualified_receiver() ->

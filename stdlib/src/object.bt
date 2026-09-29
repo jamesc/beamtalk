@@ -358,28 +358,28 @@ ProtoObject subclass: Object
 
   // === Transcript output ===
 
-  /// Send aValue to the current transcript without a trailing newline.
+  /// Send aValue to `Transcript` without a trailing newline.
   ///
-  /// Nil-safe: does nothing when no transcript is set (batch compile, tests).
+  /// Outside an interactive workspace this is a `Logger` notice (ADR 0129 §5).
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 show: "value: "
   /// ```
   show: aValue :: Object -> Self =>
-    TranscriptStream current ifNotNil: [:t | t show: aValue]
+    Transcript show: aValue
     self
 
-  /// Send aValue to the current transcript followed by a newline.
+  /// Send aValue to `Transcript` followed by a newline.
   ///
-  /// Nil-safe: does nothing when no transcript is set (batch compile, tests).
+  /// Outside an interactive workspace this is a `Logger` notice (ADR 0129 §5).
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 showCr: "hello world"
   /// ```
   showCr: aValue :: Object -> Self =>
-    TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
+    Transcript showCr: aValue
     self
 
   // === Type testing ===
