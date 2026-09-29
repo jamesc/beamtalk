@@ -139,6 +139,10 @@ tcp_integration_test_() ->
 tcp_setup() ->
     process_flag(trap_exit, true),
     application:ensure_all_started(beamtalk_workspace),
+    %% The node-wide actor registry (BT-3633) replays every tracked actor to a
+    %% newly subscribed session; earlier suites leave actors in it, so run this
+    %% fixture against an empty one.
+    ok = beamtalk_test_actor_registry:begin_isolated(),
     %% Find a free port and start workspace, with retry on port conflict
     {Port, SupPid} = tcp_start_workspace(3),
     timer:sleep(100),
@@ -167,6 +171,7 @@ tcp_start_workspace(Retries) ->
     end.
 
 tcp_cleanup({_Port, SupPid}) ->
+    ok = beamtalk_test_actor_registry:end_isolated(),
     %% Stop cowboy listener before killing supervisor (ADR 0020)
     _ = cowboy:stop_listener(beamtalk_repl_ws),
     case is_pid(SupPid) andalso is_process_alive(SupPid) of

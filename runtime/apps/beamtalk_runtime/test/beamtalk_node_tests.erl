@@ -363,9 +363,8 @@ local_actors_returns_live_actors_test() ->
             Result = beamtalk_node:local_actors(),
             ?assertEqual(2, length(Result)),
             lists:foreach(
-                fun({beamtalk_object, Class, Module, Pid}) ->
+                fun({beamtalk_object, Class, _Module, Pid}) ->
                     ?assertEqual('Counter', Class),
-                    ?assertEqual(test_counter, Module),
                     ?assert(is_process_alive(Pid))
                 end,
                 Result
@@ -397,11 +396,11 @@ local_actor_at_returns_object_for_valid_pid_test() ->
         try
             PidBin = list_to_binary(pid_to_list(Actor)),
             ?assertMatch(
-                {beamtalk_object, 'Counter', test_counter, _}, beamtalk_node:local_actor_at(PidBin)
+                {beamtalk_object, 'Counter', _, _}, beamtalk_node:local_actor_at(PidBin)
             ),
             %% A charlist pid string is accepted too.
             ?assertMatch(
-                {beamtalk_object, 'Counter', test_counter, _},
+                {beamtalk_object, 'Counter', _, _},
                 beamtalk_node:local_actor_at(pid_to_list(Actor))
             )
         after

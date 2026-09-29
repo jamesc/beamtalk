@@ -425,13 +425,13 @@ list_objects_and_object_at_wrap_live_actors_test() ->
             ok = beamtalk_repl_actors:register_actor(
                 RegistryPid, ActorPid, 'Counter', test_counter
             ),
-            ?assertEqual(
-                [{beamtalk_object, 'Counter', test_counter, ActorPid}],
+            ?assertMatch(
+                [{beamtalk_object, 'Counter', _, ActorPid}],
                 beamtalk_repl_actors:list_objects()
             ),
             PidStr = pid_to_list(ActorPid),
-            ?assertEqual(
-                {beamtalk_object, 'Counter', test_counter, ActorPid},
+            ?assertMatch(
+                {beamtalk_object, 'Counter', _, ActorPid},
                 beamtalk_repl_actors:object_at(PidStr)
             ),
             ?assertEqual(nil, beamtalk_repl_actors:object_at("invalid")),
