@@ -3981,7 +3981,7 @@
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "DateTime usedProtocols                        // => [#Comparable]\nDateTime usesProtocol: #Comparable             // => true\nDateTime usesProtocol: #Printable              // => false\nProtocol providedMethods: #Comparable          // => [#between:and:, #min:, #max:, #>, #<=, #>=]\nProtocol usersOf: #Comparable                  // => [#DateTime, #Duration, #Uuid, #String]\n(DateTime >> #between:and:) origin             // => Comparable\n(DateTime >> #<) origin                        // => nil  (class's own method)",
+      "source": "DateTime usedProtocols                        // => [#Comparable]\nDateTime usesProtocol: #Comparable             // => true\nDateTime usesProtocol: #Printable              // => false\nProtocol providedMethods: #Comparable          // => [#between:and:, #min:, #max:, #>, #<=, #>=]\nProtocol usersOf: #Comparable                  // => [DateTime, Duration, Uuid, String]\n(DateTime >> #between:and:) origin             // => Comparable\n(DateTime >> #<) origin                        // => nil  (class's own method)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
