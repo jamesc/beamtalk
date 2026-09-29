@@ -67,7 +67,7 @@ The MCP server is automatically available when configured in your MCP settings.
 > **Session state** (variable bindings) is read and reset through `evaluate`, not
 > a dedicated tool. The `get_bindings` and `clear` tools were removed in BT-2369
 > (ADR 0081 Phase 6). Use `evaluate "Session current bindings keys"` (session
-> locals) and `evaluate "Workspace bindings keys"` (workspace globals) to read
+> locals) and `evaluate "Workspace bindings keys"` (workspace bindings) to read
 > binding names, `evaluate "Session current clear"` to reset session locals, and
 > `evaluate "(Session withId: id) bindings keys"` to read another session
 > (enumerate ids via `evaluate "Workspace sessions collect: [:s | s id]"`).

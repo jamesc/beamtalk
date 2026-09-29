@@ -2152,7 +2152,7 @@ user-defined classes remain bindable (with a reload warning).
 is_stdlib_class_name(Name) ->
     case beamtalk_class_registry:whereis_class(Name) of
         Pid when is_pid(Pid) ->
-            beamtalk_class_registry:is_stdlib_module(beamtalk_object_class:module_name(Pid));
+            beamtalk_class_registry:is_stdlib_module(beamtalk_object_class:module_name_safe(Pid));
         undefined ->
             false
     end.
