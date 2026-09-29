@@ -846,13 +846,17 @@ save_section(_ClassBin, _NewName, OldName, BeforeSelector, _BeforeSide) when
             <<"save-section requires exactly one of old_name or before_selector, not both">>,
             <<"Pass old_name to rename, or before_selector to insert; never both.">>
         )};
-save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide) when
-    is_binary(ClassBin),
+save_section(ClassBin0, NewName, OldName, BeforeSelector, BeforeSide0) when
+    is_binary(ClassBin0),
     is_binary(NewName),
     is_binary(OldName),
     is_binary(BeforeSelector),
-    is_binary(BeforeSide)
+    is_binary(BeforeSide0)
 ->
+    %% ADR 0127 §11: a divider inserted above a FLATTENED (`uses:`-provided)
+    %% method belongs in the protocol's file — writing it into the class file
+    %% would target a method that file does not define.
+    {ClassBin, BeforeSide} = section_target(ClassBin0, BeforeSelector, BeforeSide0),
     case valid_section_name(NewName) of
         false ->
             {error, invalid_section_name_error()};
@@ -881,6 +885,31 @@ save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide) when
                             end
                     end
             end
+    end.
+
+%% Resolve the class whose file a `save-section` insert writes to: the
+%% `before_selector`'s protocol (its `origin`, ADR 0127 §12) when that
+%% selector was flattened into `ClassBin` by `uses:`, else `ClassBin` itself.
+%% Provisions are instance-side only, so a class-side anchor never reroutes.
+-spec section_target(binary(), binary(), binary()) -> {binary(), binary()}.
+section_target(ClassBin, <<>>, BeforeSide) ->
+    {ClassBin, BeforeSide};
+section_target(ClassBin, _BeforeSelector, <<"class">> = BeforeSide) ->
+    {ClassBin, BeforeSide};
+section_target(ClassBin, BeforeSelector, BeforeSide) ->
+    case
+        {
+            beamtalk_repl_errors:safe_to_existing_atom(ClassBin),
+            beamtalk_repl_errors:safe_to_existing_atom(BeforeSelector)
+        }
+    of
+        {{ok, ClassName}, {ok, Selector}} ->
+            case beamtalk_xref:method_origin(ClassName, false, Selector) of
+                nil -> {ClassBin, BeforeSide};
+                Protocol -> {atom_to_binary(Protocol, utf8), <<"instance">>}
+            end;
+        _ ->
+            {ClassBin, BeforeSide}
     end.
 
 %% Without this check, `new_name` could be spliced verbatim into the

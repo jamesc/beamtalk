@@ -254,6 +254,30 @@ pub(crate) fn find_matching_definitions<'a>(
         collect_matches(class_def, selector, side, &mut matches);
     }
 
+    // Protocol provisions (ADR 0127 §1): a protocol's provided methods are
+    // instance-side definitions living inside the protocol body, so a
+    // `Protocol >> selector` live patch / removal resolves to the same
+    // doc-comment-inclusive full-line span a class-body method does — which
+    // is what lets the ChangeLog flush splice a protocol patch into the
+    // protocol's own file. Class-side provisions do not exist in v1.
+    for protocol in &module.protocols {
+        if protocol.name.name.as_str() != class {
+            continue;
+        }
+        class_seen = true;
+        if side != MethodSide::Instance {
+            continue;
+        }
+        for method in &protocol.provided_methods {
+            if method.selector.matches(selector) {
+                matches.push(MatchedDefinition {
+                    method,
+                    resolve_span: method.span,
+                });
+            }
+        }
+    }
+
     // Standalone `Class >> selector` extension definitions (ADR 0066). These
     // live at module level rather than inside a class body. They count as the
     // same class for span-resolution purposes. `resolve_span` uses the
@@ -444,6 +468,32 @@ typed Object subclass: AtomicCounter
             "fixture should parse cleanly, got diagnostics: {diagnostics:?}"
         );
         result
+    }
+
+    #[test]
+    fn resolves_protocol_provided_method() {
+        // ADR 0127 §1: a protocol's provision resolves like a class method,
+        // and a required signature (no body) is not a match.
+        let src = "\
+Protocol define: Greetable
+  greeting -> Integer
+
+  /// One more than the greeting.
+  greetingPlusOne -> Integer => self greeting + 1
+";
+        let span = resolve(src, "Greetable", "greetingPlusOne", MethodSide::Instance)
+            .expect("provision should resolve");
+        let text = &src[span.as_range()];
+        assert!(text.starts_with("  /// One more"), "got: {text:?}");
+        assert!(text.ends_with('\n'), "got: {text:?}");
+        assert!(matches!(
+            resolve(src, "Greetable", "greeting", MethodSide::Instance),
+            Err(SpanResolveError::SelectorNotFound { .. })
+        ));
+        assert!(matches!(
+            resolve(src, "Greetable", "greetingPlusOne", MethodSide::Class),
+            Err(SpanResolveError::SelectorNotFound { .. })
+        ));
     }
 
     #[test]
