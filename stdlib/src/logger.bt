@@ -124,13 +124,14 @@ sealed typed Object subclass: Logger
   class sealed logLevel -> LogLevel | #all | #none =>
     (Erlang beamtalk_logging_config) logLevel
 
-  /// Set the OTP primary log level.
+  /// Set the OTP primary log level. Accepts every value `logLevel` can return
+  /// (including `#all`/`#none`), so `Logger logLevel: Logger logLevel` is a no-op.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Logger logLevel: #debug
   /// ```
-  class sealed logLevel: level :: LogLevel -> Nil =>
+  class sealed logLevel: level :: LogLevel | #all | #none -> Nil =>
     (Erlang beamtalk_logging_config) logLevel: level
 
   /// Return the current log format as a singleton symbol (`#text` or `#json`).

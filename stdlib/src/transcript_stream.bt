@@ -1,12 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// TranscriptStream — Per-workspace shared log with pub/sub semantics.
+/// TranscriptStream — the REPL's shared log stream, with pub/sub semantics.
 ///
-/// TranscriptStream is a real actor (gen_server) that acts as a shared
-/// log within a workspace. Each workspace has its own Transcript instance.
-/// Subscribers receive output in real-time; unsubscribed output goes to
-/// buffer only. Analogous to Smalltalk's `Transcript` global.
+/// TranscriptStream is a real actor (gen_server): a ring buffer of recent
+/// output plus subscribers that receive output in real time. The workspace
+/// supervisor starts one, registered as `Transcript`, only alongside the REPL
+/// server. User code does not talk to it directly: use the `Transcript`
+/// class-side facade (ADR 0129 §5), which routes output to this stream inside
+/// an interactive workspace and to `Logger` everywhere else.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -15,33 +17,6 @@
 /// Transcript recent
 /// ```
 typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream
-  late classState: current :: TranscriptStream
-
-  // === Class-side Singleton ===
-
-  /// Return the current singleton instance (nil before workspace bootstrap).
-  ///
-  /// `@expect type`: a class method's `self hasField:` send infers as
-  /// `Dynamic` rather than its declared `Boolean` return type — a
-  /// pre-existing type-checker gap (ADR 0124 B4's `has_clear_class_var_actor.bt`
-  /// fixture hits the same thing), not something this conversion introduces.
-  @expect type
-  class current -> TranscriptStream | Nil =>
-    (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
-
-  /// Set the current singleton instance.
-  class current: instance :: TranscriptStream -> TranscriptStream =>
-    self.current := instance
-
-  /// Clear the current singleton instance (reset to nil).
-  ///
-  /// `@expect type`: a class method's `self clearField:` send infers as
-  /// `Dynamic` rather than its declared `Self` return type — the same
-  /// pre-existing type-checker gap `current`'s `self hasField:` hits above.
-  @expect type
-  class resetCurrent -> Nil =>
-    self clearField: #current
-    nil
 
   // === Writing ===
 

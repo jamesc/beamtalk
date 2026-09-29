@@ -10,7 +10,7 @@
 // introspection (`Workspace class includesSelector:`). Live functionality tests
 // are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt
 //
-// Covers: classes, testClasses, globals, load:, test, test:, bind:as:, unbind:
+// Covers: classes, testClasses, bindings, load:, test, test:, bind:as:, unbind:
 
 TestCase subclass: WorkspaceTest
 
@@ -20,8 +20,8 @@ TestCase subclass: WorkspaceTest
   testIncludesSelectorTestClasses =>
     self assert: (Workspace class includesSelector: #testClasses)
 
-  testIncludesSelectorGlobals =>
-    self assert: (Workspace class includesSelector: #globals)
+  testIncludesSelectorBindings =>
+    self assert: (Workspace class includesSelector: #bindings)
 
   testIncludesSelectorLoadColon =>
     self assert: (Workspace class includesSelector: #load:)

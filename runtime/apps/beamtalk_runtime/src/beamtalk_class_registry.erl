@@ -123,8 +123,9 @@ live_class_entries() ->
                     Mod = beamtalk_object_class:module_name_safe(Pid),
                     {true, {Name, Mod, Pid}}
                 catch
-                    exit:{noproc, _} -> false;
-                    exit:{timeout, _} -> false
+                    %% noproc/timeout, or the class process dying mid-call
+                    %% (exits with its real termination reason).
+                    exit:_ -> false
                 end
             end,
             ClassPids
@@ -163,8 +164,9 @@ user_classes() ->
                             {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
                     end
                 catch
-                    exit:{noproc, _} -> false;
-                    exit:{timeout, _} -> false
+                    %% noproc/timeout, or the class process dying mid-call
+                    %% (exits with its real termination reason).
+                    exit:_ -> false
                 end
             end,
             ClassPids

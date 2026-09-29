@@ -392,9 +392,10 @@ impl ReplClient {
         path: &str,
         include_tests: bool,
     ) -> Result<ReplResponse> {
-        let raw = self
-            .inner
-            .send_raw(&RequestBuilder::load_project(path, include_tests))?;
+        let raw = self.inner.send_raw(&RequestBuilder::with_package_name(
+            RequestBuilder::load_project(path, include_tests),
+            crate::commands::manifest::package_name_for_project(path).as_deref(),
+        ))?;
         serde_json::from_value(raw)
             .map_err(|e| miette::miette!("Failed to parse load-project response: {e}"))
     }

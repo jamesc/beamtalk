@@ -2191,6 +2191,14 @@ hot-swaps every loaded, source-backed user together — all-or-nothing: if any
 user's recompile fails against the edited protocol, nothing installs and the
 error names the failing user (ADR 0127 §11).
 
+At the REPL, `Describable >> summary => …` adds or replaces a provision in the
+protocol's own source, and `Describable removeSelector: #summary` removes one.
+Both run through the same all-or-nothing re-expansion of every user, are
+recorded in the ChangeLog against the protocol (so `Workspace flush` writes the
+protocol file), and are refused for stdlib protocols. This is a live-image
+edit only: put a provision in a `.bt` file by writing it inside the
+`Protocol define:` body.
+
 ### Two-Protocol String Model (Debug / Display)
 
 Beamtalk follows a **two-string-protocol** model (ADR 0094), mirroring Rust's `Debug` / `Display` split:
@@ -2247,10 +2255,10 @@ The related display methods on `Object` are:
 | `printString` | **Debug** representation — self-describing, structural; the REPL default and what nested rendering uses |
 | `displayString` | **Display** representation — the string-interpolation `{...}` hook; defaults to `printString`, override for a natural human form |
 | `inspect` | Opens an `Inspector` cursor on the receiver (`Inspector on: self`) — a navigable, drillable view (ADR 0095). For the structural Debug string, use `printString`. |
-| `show: value` | Write `value` to Transcript (nil-safe, returns `self`) |
-| `showCr: value` | Write `value` to Transcript followed by newline (nil-safe, returns `self`) |
+| `show: value` | Write `value` to `Transcript` (returns `self`) |
+| `showCr: value` | Write `value` to `Transcript` followed by newline (returns `self`) |
 
-`show:` and `showCr:` are convenience methods on `Object` that delegate to `TranscriptStream`. They are nil-safe — when no transcript is active (e.g. batch compilation), they silently do nothing and return `self`, making them safe for cascaded chains:
+`show:` and `showCr:` are convenience methods on `Object` that delegate to the `Transcript` class-side facade (ADR 0129). Inside an interactive workspace the output goes to the REPL's transcript; everywhere else (`beamtalk run`, `beamtalk test`, releases) it is one plain `Logger` notice per call in the `[beamtalk, user, transcript]` domain, so they are always safe to call and return `self`. Programs should prefer `Logger` or `Console`; `Transcript recent` and `Transcript clear` are workspace-only and raise `no_workspace` elsewhere:
 
 ```beamtalk
 // Cascaded output
@@ -2261,7 +2269,7 @@ Transcript show: "Hello"; cr; show: "World"
 42 showCr: "hello world"
 ```
 
-`TranscriptStream >> show:` accepts any `Printable` value, so custom classes that conform to `Printable` work directly with `Transcript show:` without manual `asString` conversion.
+`Transcript show:` accepts any `Printable` value, so custom classes that conform to `Printable` work directly with `Transcript show:` without manual `asString` conversion.
 
 ### Navigable Inspector (ADR 0095)
 
@@ -5068,6 +5076,14 @@ package's `.app`. It never returns `nil`; it raises a structured error instead:
 | `no_program_package` | No project (bare `beamtalk repl`) |
 | `ambiguous_program_package` | `beamtalk test` runs several packages at once (a single package under test is the root) |
 | `package_not_loaded` | The root package's `.app` is not on the code path (run `beamtalk build`) |
+
+`Package classes` reads the `classes` list of the package's `.app`, which
+`beamtalk build` writes. A workspace `sync` (`load-project`, `Workspace sync`,
+`:sync`) refreshes that in-memory list from the live class registry, so a class
+added to the project's `src/` appears in `Package classes` after the sync
+without a rebuild. A class defined only by evaluating source in the REPL is
+listed once it is synced from a file; the `.app` file on disk is only rewritten
+by `beamtalk build`.
 
 ### `SystemNavigation` — Cross-class code queries
 

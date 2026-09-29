@@ -446,17 +446,14 @@ its callers want the bare `#beamtalk_error{}` for programmatic use.
 """.
 -spec format_error_message(term()) -> binary().
 format_error_message(#{'$beamtalk_class' := Class, error := Error}) ->
-    Enriched = maybe_use_singleton_binding_name(Error),
     ClassName = atom_to_binary(Class, utf8),
-    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Enriched)]);
+    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Error)]);
 format_error_message({eval_error, _Class, #{'$beamtalk_class' := ExClass, error := Error}}) ->
-    Enriched = maybe_use_singleton_binding_name(Error),
     ClassName = atom_to_binary(ExClass, utf8),
-    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Enriched)]);
+    iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Error)]);
 format_error_message(Reason) ->
     Error = beamtalk_repl_errors:ensure_structured_error(Reason),
-    Enriched = maybe_use_singleton_binding_name(Error),
-    beamtalk_error:format(Enriched).
+    beamtalk_error:format(Error).
 
 %%% Internal Helpers
 
@@ -466,27 +463,3 @@ format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
-
--doc """
-Rewrite DNU error class names for singleton instances.
-
-When a singleton instance (e.g., Workspace) gets a DNU, the error uses the
-class name (Workspace) which is confusing — the user typed "Workspace".
-Replace the class name with the binding name so errors read naturally.
-""".
--spec maybe_use_singleton_binding_name(beamtalk_error:error()) -> beamtalk_error:error().
-maybe_use_singleton_binding_name(
-    #beamtalk_error{kind = does_not_understand, class = Class} = Error
-) when is_atom(Class) ->
-    case beamtalk_workspace_config:binding_name_for_class(Class) of
-        {ok, BindingName} ->
-            %% Regenerate the message with the binding name.
-            NewMessage = beamtalk_error:generate_message(
-                does_not_understand, BindingName, Error#beamtalk_error.selector
-            ),
-            Error#beamtalk_error{message = NewMessage};
-        undefined ->
-            Error
-    end;
-maybe_use_singleton_binding_name(Error) ->
-    Error.

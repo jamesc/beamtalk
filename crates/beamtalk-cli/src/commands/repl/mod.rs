@@ -1182,8 +1182,8 @@ fn handle_clear(client: &mut ReplClient) {
 ///
 /// ADR 0081 Phase 6: the `bindings` op was removed; this evaluates
 /// `Session current bindings keys`, whose result `value` is a list of
-/// binding-name symbols. Workspace globals are a separate layer
-/// (`Workspace globals keys`).
+/// binding-name symbols. Workspace bindings are a separate layer
+/// (`Workspace bindings keys`).
 fn handle_bindings(client: &mut ReplClient) {
     match client.get_bindings() {
         Ok(response) => {

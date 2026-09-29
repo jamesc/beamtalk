@@ -59,7 +59,7 @@ for manipulating state during REPL sessions.
     %%   user         :: binary() | undefined -- authenticated user (LiveView)
     %%   connected_at :: integer()| undefined -- system_time microsecond at start
     client_meta :: map(),
-    %% holds ONLY session locals. Workspace globals
+    %% holds ONLY session locals. Workspace bindings
     %% (singletons + bind:as: names) are resolved lazily at eval time rather than
     %% injected here, so there is no injected_ws_keys reconciliation field.
     bindings :: map(),

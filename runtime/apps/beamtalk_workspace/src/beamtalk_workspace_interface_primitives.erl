@@ -38,7 +38,7 @@ into REPL session state. Workspace readiness is detected via
 |---------------|-----------------------------------------------------|
 | `classes'     | List all loaded user classes                        |
 | `load:'       | Compile and load a .bt file                         |
-| `globals'     | Full workspace namespace snapshot (Dictionary)      |
+| `bindings'    | Full workspace namespace snapshot (Dictionary)      |
 | `sync'        | Incremental project sync (compile changed files)   |
 | `bind:as:'    | Register a value in workspace namespace             |
 | `unbind:'     | Remove a value from workspace namespace             |
@@ -66,7 +66,7 @@ into REPL session state. Workspace readiness is detected via
 %% long-lived process (prevents table from being deleted when eval workers exit)
 -export([create_bindings_table/0]).
 %% Direct exports for Erlang FFI calls from sealed Object Workspace
--export([classes/0, load/1, globals/0, bind/2, unbind/1]).
+-export([classes/0, load/1, bindings/0, bind/2, unbind/1]).
 
 -export([currentSession/0, sessions/0]).
 %% Supervisor lifecycle management
@@ -115,8 +115,8 @@ dispatch(classes, [], _Self) ->
     classes();
 dispatch('load:', [Path], _Self) ->
     load(Path);
-dispatch(globals, [], _Self) ->
-    globals();
+dispatch(bindings, [], _Self) ->
+    bindings();
 dispatch('bind:as:', [Value, Name], _Self) ->
     bind(Value, Name);
 dispatch('unbind:', [Name], _Self) ->
@@ -1241,12 +1241,12 @@ setAutoflush(Other) ->
 
 -doc """
 Return the full workspace namespace snapshot.
-Called via `(Erlang beamtalk_workspace_interface_primitives) globals`.
+Called via `(Erlang beamtalk_workspace_interface_primitives) bindings`.
 """.
--spec globals() -> map().
-globals() ->
+-spec bindings() -> map().
+bindings() ->
     UserBindings = all_user_bindings(),
-    handle_globals(UserBindings).
+    handle_bindings(UserBindings).
 
 -doc """
 Register a value in the workspace namespace under a given atom name.
@@ -1605,19 +1605,12 @@ get_user_bindings() ->
     end.
 
 -doc """
-Return non-class workspace globals for session binding injection.
-Includes singletons (Transcript, Workspace) and user-registered
-bind:as: names. Class objects are excluded.
+Return non-class workspace globals for session binding injection:
+the user-registered bind:as: names. Class objects are excluded.
 """.
 -spec get_session_bindings() -> #{atom() => term()}.
 get_session_bindings() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
-            #{};
-        _ ->
-            UserBindings = all_user_bindings(),
-            handle_session_bindings(UserBindings)
-    end.
+    get_user_bindings().
 
 -doc """
 Resolve a bare name against the session locals and the live workspace sources.
@@ -1630,11 +1623,11 @@ identifier is resolved lazily, in order:
    a workspace global of the same name (e.g. `x := 5` then `x` resolves to the
    local even if `x` is also a `bind:as:` entry);
 2. `bind:as:` registry (the workspace user-bindings ETS table);
-3. singleton registry (`Transcript`/`Workspace`, resolved live from
-   their class instances via `beamtalk_workspace_config:singletons/0` +
-   `value_singletons/0`);
-4. class registry (`Counter`, `Integer`, `Session`, …) → a class object;
-5. otherwise raise `undefined_variable`.
+3. class registry (`Counter`, `Integer`, `Transcript`, …) → a class object;
+4. otherwise raise `undefined_variable`.
+
+(There is no singleton tier since ADR 0129: `Beamtalk`, `Workspace` and
+`Transcript` are ordinary class-side facades.)
 
 Used by **both** the REPL codegen free-identifier fallthrough and (later)
 `Session resolve:`, so the two cannot drift. `Locals` is the eval-time
@@ -1652,23 +1645,18 @@ resolve_name(Locals, Name) when is_map(Locals), is_atom(Name) ->
             resolve_workspace_name(Name)
     end.
 
-%% Tiers 2–5 of resolve_name/2: the live workspace sources, checked after locals.
+%% Tiers 2–4 of resolve_name/2: the live workspace sources, checked after locals.
 -spec resolve_workspace_name(atom()) -> term().
 resolve_workspace_name(Name) ->
     case lookup_user_binding(Name) of
         {ok, BindValue} ->
             BindValue;
         error ->
-            case lookup_singleton(Name) of
-                {ok, SingletonValue} ->
-                    SingletonValue;
+            case lookup_class_object(Name) of
+                {ok, ClassObj} ->
+                    ClassObj;
                 error ->
-                    case lookup_class_object(Name) of
-                        {ok, ClassObj} ->
-                            ClassObj;
-                        error ->
-                            raise_undefined_variable(Name)
-                    end
+                    raise_undefined_variable(Name)
             end
     end.
 
@@ -1685,36 +1673,7 @@ lookup_user_binding(Name) ->
             end
     end.
 
-%% Tier 3: singleton registry (Transcript/Workspace), resolved live.
-%%
-%% Delegates to handle_session_bindings/1 — the same builder the eager-injection
-%% path used — so a singleton resolves to exactly the value it would have had if
-%% injected (including the `Workspace` tagged-map fallback when its class var is
-%% not yet wired). Only the three singleton binding names ever match here; any
-%% other name returns `error` so resolution falls through to the class registry.
--spec lookup_singleton(atom()) -> {ok, term()} | error.
-lookup_singleton(Name) ->
-    case is_singleton_binding_name(Name) of
-        false ->
-            error;
-        true ->
-            Singletons = handle_session_bindings(#{}),
-            case maps:find(Name, Singletons) of
-                {ok, Value} -> {ok, Value};
-                error -> error
-            end
-    end.
-
-%% True iff Name is one of the configured singleton binding names
-%% (Transcript / Workspace).
--spec is_singleton_binding_name(atom()) -> boolean().
-is_singleton_binding_name(Name) ->
-    Configs =
-        beamtalk_workspace_config:singletons() ++
-            beamtalk_workspace_config:value_singletons(),
-    lists:any(fun(#{binding_name := BName}) -> BName =:= Name end, Configs).
-
-%% Tier 4: class registry → a class object tuple, mirroring REPL codegen for a
+%% Tier 3: class registry → a class object tuple, mirroring REPL codegen for a
 %% capitalised name (`{beamtalk_object, '<Name> class', Module, ClassPid}`).
 %%
 %% Caveat: reachable from inside an ADR 0109 foreign-process block (directly,
@@ -1741,7 +1700,7 @@ lookup_class_object(Name) ->
             end
     end.
 
-%% Tier 5: genuinely unknown name — raise undefined_variable (same error the
+%% Tier 4: genuinely unknown name — raise undefined_variable (same error the
 %% REPL surfaces today for an unbound identifier).
 -spec raise_undefined_variable(atom()) -> no_return().
 raise_undefined_variable(Name) ->
@@ -1752,7 +1711,7 @@ Resolve a capitalised class reference whose name is not a session local.
 
 ADR 0081 Phase 1: the REPL codegen for a `ClassReference` checks the
 session locals map first (so a session local of the same name takes precedence)
-and, on a miss, calls this. Reuses the same singleton + class-registry tiers as
+and, on a miss, calls this. Reuses the same class-registry tier as
 `resolve_name/2` so resolution cannot drift, but raises `class_not_found`
 (not `undefined_variable`) for a genuinely unknown class — preserving the
 existing "Class 'X' not found" REPL error.
@@ -1767,32 +1726,26 @@ before reaching here.
 """.
 -spec resolve_class_reference(map(), atom()) -> term().
 resolve_class_reference(_Locals, Name) when is_atom(Name) ->
-    case lookup_singleton(Name) of
-        {ok, SingletonValue} ->
-            SingletonValue;
+    case lookup_class_object(Name) of
+        {ok, ClassObj} ->
+            ClassObj;
         error ->
-            case lookup_class_object(Name) of
-                {ok, ClassObj} ->
-                    ClassObj;
-                error ->
-                    raise_class_not_found(Name)
-            end
+            raise_class_not_found(Name)
     end.
 
 -doc """
 Resolve a singleton binding name to its live instance, or `error`.
 
 ADR 0081 Phase 1: used by the REPL codegen's binding-aware class-send
-fallback. When a message is sent to a singleton receiver (`Workspace bind:as:`,
-`Transcript show:`) the name is no longer eagerly injected into the session map,
-so the `maps:find` receiver lookup misses. This recovers the live instance so the
-message dispatches to it (via `beamtalk_message_dispatch:send`) instead of being
-mis-routed to a non-existent class. Returns `error` for any non-singleton name so
-real class names still fall through to class-method dispatch.
+fallback. Since ADR 0129 there are no singleton bindings (`Beamtalk`,
+`Workspace` and `Transcript` are class-side facades), so this always returns
+`error` and real class names fall through to class-method dispatch. The
+codegen call site and this function are removed with the compiler-side
+injected-binding machinery (ADR 0129 Phase 4).
 """.
 -spec resolve_singleton_instance(atom()) -> {ok, term()} | error.
 resolve_singleton_instance(Name) when is_atom(Name) ->
-    lookup_singleton(Name).
+    error.
 
 -spec raise_class_not_found(atom()) -> no_return().
 raise_class_not_found(Name) ->
@@ -1972,10 +1925,10 @@ handle_load_after_native(Path) ->
             {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
     end.
 
--doc "Return the full workspace globals snapshot.".
--spec handle_globals(map()) -> map().
-handle_globals(UserBindings) ->
-    Base = handle_session_bindings(UserBindings),
+-doc "Return the full workspace bindings snapshot.".
+-spec handle_bindings(map()) -> map().
+handle_bindings(UserBindings) ->
+    Base = UserBindings,
     Classes = handle_classes(),
     lists:foldl(
         fun
@@ -1988,17 +1941,6 @@ handle_globals(UserBindings) ->
         Base,
         Classes
     ).
-
--doc "Return non-class session bindings: singletons + user bind:as: entries.".
--spec handle_session_bindings(map()) -> map().
-handle_session_bindings(UserBindings) ->
-    Base0 = UserBindings,
-    Base1 =
-        case resolve_singleton('TranscriptStream') of
-            nil -> Base0;
-            TranscriptObj -> Base0#{'Transcript' => TranscriptObj}
-        end,
-    Base1.
 
 -doc "Convert a name argument to an atom.".
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
@@ -2032,8 +1974,32 @@ check_bind_conflicts(AtomName) ->
     end.
 
 -spec is_protected_name(atom()) -> boolean().
-is_protected_name('Transcript') -> true;
-is_protected_name(_) -> false.
+is_protected_name('Transcript') ->
+    true;
+is_protected_name(Name) ->
+    is_stdlib_class_name(Name).
+
+-doc """
+Whether `Name` is a live stdlib class (ADR 0129 §7): `bind:as:` must not
+shadow any stdlib class name. Only stdlib-provided classes are protected;
+user-defined classes remain bindable (with a reload warning).
+""".
+-spec is_stdlib_class_name(atom()) -> boolean().
+is_stdlib_class_name(Name) ->
+    case beamtalk_class_registry:whereis_class(Name) of
+        Pid when is_pid(Pid) ->
+            %% The class may die between `whereis_class/1` and the call (hot
+            %% reload, `removeFromSystem`): treat that as "no longer a class".
+            try
+                beamtalk_class_registry:is_stdlib_module(
+                    beamtalk_object_class:module_name_safe(Pid)
+                )
+            catch
+                exit:_ -> false
+            end;
+        undefined ->
+            false
+    end.
 
 -doc "Warn if name is an existing loaded class.".
 -spec maybe_warn_loaded_class(atom()) -> ok.
@@ -2058,20 +2024,6 @@ maybe_warn_loaded_class(AtomName) ->
             ?LOG_WARNING("~s", [WarningMsg], #{domain => [beamtalk, runtime]});
         false ->
             ok
-    end.
-
--doc "Resolve a singleton class instance.".
--spec resolve_singleton(atom()) -> tuple() | 'nil'.
-resolve_singleton(ClassName) ->
-    case beamtalk_runtime_api:whereis_class(ClassName) of
-        undefined ->
-            nil;
-        ClassPid ->
-            try
-                beamtalk_class_dispatch:class_send(ClassPid, current, [])
-            catch
-                _:_ -> nil
-            end
     end.
 
 -doc """

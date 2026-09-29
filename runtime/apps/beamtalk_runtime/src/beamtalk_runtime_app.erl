@@ -63,6 +63,10 @@ start(_StartType, _StartArgs) ->
     %% callback is too. Workspace-only bookkeeping hangs off `actor_spawned_hook`.
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
 
+    %% ADR 0129 §5: plain-format handler for `Transcript` output outside an
+    %% interactive workspace. Installed before any user code can run.
+    ok = beamtalk_logging_config:install_transcript_handler(),
+
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of

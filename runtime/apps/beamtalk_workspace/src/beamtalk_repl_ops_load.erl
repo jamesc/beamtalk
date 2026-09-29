@@ -32,11 +32,11 @@ respectively.
     find_erl_files/2,
     compile_native_erl_files/2,
     render_class_header/1,
-    regenerate_native_class_header/1,
+    regenerate_native_class_header/2,
     native_generated_include_dir/1,
-    build_source_class_module_index/1,
+    build_source_class_module_index/2,
     relative_bt_path/2,
-    read_package_name/1,
+    resolve_package_name/2,
     extract_bt_class_info/1,
     sort_bt_files_by_deps/1,
     structured_file_errors/2,
@@ -76,6 +76,10 @@ order, and returns a result map with summary statistics.
   - `include_tests` (boolean, default false) — include test/ directory
   - `force` (boolean, default false) — recompile all files regardless of mtime
   - `session_pid` (pid() | undefined) — REPL session for module tracking
+  - `package_name` (binary()) — the project's package name, as supplied by the
+    caller (the `load-project` request's optional `package_name` field). When
+    absent it falls back to the `root_package` runtime fact if `Path` is the
+    launcher's project root (see `resolve_package_name/2`).
 
 Returns `{ok, ResultMap}` where ResultMap contains:
   - `classes` — list of loaded class name binaries
@@ -95,6 +99,7 @@ sync_project(Path, Options) ->
     Force = maps:get(force, Options, false),
     SessionPid = maps:get(session_pid, Options, undefined),
     AbsPath = filename:absname(Path),
+    PackageName = resolve_package_name(AbsPath, maps:get(package_name, Options, undefined)),
     ManifestPath = filename:join(AbsPath, "beamtalk.toml"),
     case filelib:is_file(ManifestPath) of
         false ->
@@ -106,13 +111,13 @@ sync_project(Path, Options) ->
                     <<"Provide a directory path containing beamtalk.toml">>
                 )};
         true ->
-            do_sync_project(AbsPath, IncludeTests, Force, SessionPid)
+            do_sync_project(AbsPath, IncludeTests, Force, SessionPid, PackageName)
     end.
 
 -doc "Core sync logic, called after validating beamtalk.toml exists.".
--spec do_sync_project(string(), boolean(), boolean(), pid() | undefined) ->
+-spec do_sync_project(string(), boolean(), boolean(), pid() | undefined, binary() | undefined) ->
     {ok, map()} | {error, #beamtalk_error{}}.
-do_sync_project(AbsPath, IncludeTests, Force0, SessionPid) ->
+do_sync_project(AbsPath, IncludeTests, Force0, SessionPid, PackageName) ->
     %% ADR 0098 Phase 4: provenance gate, evaluated BEFORE any module is loaded so
     %% a failure leaves the code server in its pre-attach state (no partial loads
     %% to roll back, per ADR §4).
@@ -127,14 +132,16 @@ do_sync_project(AbsPath, IncludeTests, Force0, SessionPid) ->
     case collect_stale_dep_provenance(AbsPath) of
         [] ->
             do_sync_project_clean(
-                AbsPath, IncludeTests, Force0 orelse ProvenanceStale, SessionPid
+                AbsPath, IncludeTests, Force0 orelse ProvenanceStale, SessionPid, PackageName
             );
         StaleDeps ->
             fail_stale_dep_attach(StaleDeps)
     end.
 
--spec do_sync_project_clean(string(), boolean(), boolean(), pid() | undefined) -> {ok, map()}.
-do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
+-spec do_sync_project_clean(
+    string(), boolean(), boolean(), pid() | undefined, binary() | undefined
+) -> {ok, map()}.
+do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid, PackageName) ->
     %% Activate pre-compiled dependency modules before loading project files,
     %% so that project classes can reference dependency classes (e.g. HTTPClient).
     DepErrors = beamtalk_workspace_bootstrap:activate_dependency_modules(AbsPath),
@@ -266,7 +273,7 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
     %% the package's `beamtalk test` CLI is green. The CLI regenerates this header
     %% on every build (build.rs generate_class_header/2); the workspace
     %% incremental path must do the same to stay in sync.
-    HeaderChanged = regenerate_native_class_header(AbsPath),
+    HeaderChanged = regenerate_native_class_header(AbsPath, PackageName),
     %% Decide which native .erl to (re)compile. The mtime check only
     %% catches .erl edits; it misses the case where the *header* changed (a class
     %% added/moved/renamed) while the .erl is byte-identical — the already-loaded
@@ -315,6 +322,12 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
     ],
     record_file_mtimes_from_snapshot(SuccessfulBtMtimes),
     Errors = lists:reverse(NativeErrors, BtErrors),
+    %% BT-3662: `beamtalk build` is the only writer of the `.app` class list, so
+    %% classes loaded here (or defined in the REPL) would stay invisible to
+    %% `Package classes` until the next build. Refresh the loaded `.app`'s
+    %% `classes` env from the live registry — the in-memory equivalent of
+    %% regenerating it.
+    ok = refresh_package_classes(PackageName),
     ClassNames =
         [
             case maps:get(name, C, "") of
@@ -368,7 +381,8 @@ handle_term(<<"load-project">>, Params, _Msg, SessionPid) ->
     Options = #{
         include_tests => IncludeTests,
         force => Force,
-        session_pid => SessionPid
+        session_pid => SessionPid,
+        package_name => maps:get(<<"package_name">>, Params, undefined)
     },
     case sync_project(Path, Options) of
         {error, Err} ->
@@ -548,7 +562,7 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
     _ =
         case ProjectRoot of
             undefined -> ok;
-            Root -> regenerate_native_class_header(Root)
+            Root -> regenerate_native_class_header(Root, resolve_package_name(Root, undefined))
         end,
     %% Compile the EDITED buffer against a temp `.erl` in the same directory (so
     %% relative includes resolve identically) — never the real file — so a compile
@@ -846,13 +860,17 @@ save_section(_ClassBin, _NewName, OldName, BeforeSelector, _BeforeSide) when
             <<"save-section requires exactly one of old_name or before_selector, not both">>,
             <<"Pass old_name to rename, or before_selector to insert; never both.">>
         )};
-save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide) when
-    is_binary(ClassBin),
+save_section(ClassBin0, NewName, OldName, BeforeSelector, BeforeSide0) when
+    is_binary(ClassBin0),
     is_binary(NewName),
     is_binary(OldName),
     is_binary(BeforeSelector),
-    is_binary(BeforeSide)
+    is_binary(BeforeSide0)
 ->
+    %% ADR 0127 §11: a divider inserted above a FLATTENED (`uses:`-provided)
+    %% method belongs in the protocol's file — writing it into the class file
+    %% would target a method that file does not define.
+    {ClassBin, BeforeSide} = section_target(ClassBin0, BeforeSelector, BeforeSide0),
     case valid_section_name(NewName) of
         false ->
             {error, invalid_section_name_error()};
@@ -881,6 +899,31 @@ save_section(ClassBin, NewName, OldName, BeforeSelector, BeforeSide) when
                             end
                     end
             end
+    end.
+
+%% Resolve the class whose file a `save-section` insert writes to: the
+%% `before_selector`'s protocol (its `origin`, ADR 0127 §12) when that
+%% selector was flattened into `ClassBin` by `uses:`, else `ClassBin` itself.
+%% Provisions are instance-side only, so a class-side anchor never reroutes.
+-spec section_target(binary(), binary(), binary()) -> {binary(), binary()}.
+section_target(ClassBin, <<>>, BeforeSide) ->
+    {ClassBin, BeforeSide};
+section_target(ClassBin, _BeforeSelector, <<"class">> = BeforeSide) ->
+    {ClassBin, BeforeSide};
+section_target(ClassBin, BeforeSelector, BeforeSide) ->
+    case
+        {
+            beamtalk_repl_errors:safe_to_existing_atom(ClassBin),
+            beamtalk_repl_errors:safe_to_existing_atom(BeforeSelector)
+        }
+    of
+        {{ok, ClassName}, {ok, Selector}} ->
+            case beamtalk_xref:method_origin(ClassName, false, Selector) of
+                nil -> {ClassBin, BeforeSide};
+                Protocol -> {atom_to_binary(Protocol, utf8), <<"instance">>}
+            end;
+        _ ->
+            {ClassBin, BeforeSide}
     end.
 
 %% Without this check, `new_name` could be spliced verbatim into the
@@ -1463,12 +1506,12 @@ header. The header is written to `_build/dev/native/include/beamtalk_classes.hrl
 `compile_native_erl_files/2`. Best-effort: a write failure is logged and returns
 `false` rather than aborting the load.
 """.
--spec regenerate_native_class_header(string()) -> boolean().
-regenerate_native_class_header(ProjectRoot) ->
+-spec regenerate_native_class_header(string(), binary() | undefined) -> boolean().
+regenerate_native_class_header(ProjectRoot, PackageName) ->
     %% Union the source-AST-derived index (complete on a cold load)
     %% with the live registry (canonical module atoms on the warm path). The
     %% registry wins on conflict via the second arg to maps:merge/2.
-    SourceIndex = build_source_class_module_index(ProjectRoot),
+    SourceIndex = build_source_class_module_index(ProjectRoot, PackageName),
     RegistryIndex = beamtalk_repl_compiler:build_class_module_index(),
     Index = maps:merge(SourceIndex, RegistryIndex),
     IncludeDir = native_generated_include_dir(ProjectRoot),
@@ -1551,7 +1594,8 @@ package-qualified module atom `bt@<pkg>@<relative@path>` via the shared
 (`build.rs`) uses — so this index and a `beamtalk build` of the same project can
 never diverge on either class extraction or module-name casing (see
 CLAUDE.md's "No duplicate implementations" rule). The package name is read from
-`beamtalk.toml`.
+`PackageName` argument (never re-parsed from `beamtalk.toml` here; see
+`resolve_package_name/2`).
 
 Returns an empty map (no entries, never a crash) when the package name cannot be
 determined or `src/` is absent — the caller then falls back to the live registry
@@ -1560,9 +1604,10 @@ alone, exactly the previous behaviour. A single file that fails to index (an
 failure) is skipped with a logged warning rather than failing the whole index —
 the same best-effort contract the previous implementation had.
 """.
--spec build_source_class_module_index(string()) -> #{binary() => binary()}.
-build_source_class_module_index(ProjectRoot) ->
-    case read_package_name(ProjectRoot) of
+-spec build_source_class_module_index(string(), binary() | undefined) ->
+    #{binary() => binary()}.
+build_source_class_module_index(ProjectRoot, PackageName0) ->
+    case PackageName0 of
         undefined ->
             #{};
         PackageName ->
@@ -1641,35 +1686,56 @@ relative_bt_path(Path, SrcDir) ->
     iolist_to_binary(lists:join("/", RelSegments)).
 
 -doc """
-Read the `[package] name` field from `<ProjectRoot>/beamtalk.toml`.
+The package name to use for `ProjectRoot`'s source class index.
 
-Returns the package name binary, or `undefined` if the manifest is missing or
-has no package name (TOML uses double-quoted strings; the name must be a bare
-`[a-z][a-z0-9_]*` identifier, matching `beamtalk_workspace_meta`'s detection).
+Resolution order (no `beamtalk.toml` parsing in Erlang; Rust owns the manifest):
+
+  1. `Requested`, when the caller supplied one (the `load-project` request's
+     `package_name` field, or the `package_name` sync option).
+  2. The `root_package` runtime fact recorded by the launcher
+     (`beamtalk_package:root_package_name/0`), when `ProjectRoot` is the
+     launcher's project root (or the workspace does not know its project path).
+  3. `undefined` - the source index is then empty and the class header relies on
+     the live registry alone.
 """.
--spec read_package_name(string()) -> binary() | undefined.
-read_package_name(ProjectRoot) ->
-    ManifestPath = filename:join(ProjectRoot, "beamtalk.toml"),
-    case file:read_file(ManifestPath) of
-        {ok, Content} ->
-            %% Anchor the name lookup to the [package] section: match
-            %% `name = "..."` only within the run of non-`[` text following the
-            %% [package] header (i.e. before the next `[section]`), so a `name`
-            %% key in an earlier section (e.g. `[tool.foo]`) can't be picked up
-            %% by mistake.
-            case
-                re:run(
-                    Content,
-                    <<"\\[package\\][^\\[]*name\\s*=\\s*\"([a-z][a-z0-9_]*)\"">>,
-                    [{capture, [1], binary}]
-                )
-            of
-                {match, [Name]} -> Name;
-                nomatch -> undefined
-            end;
-        {error, _} ->
-            undefined
+-spec resolve_package_name(string(), binary() | undefined) -> binary() | undefined.
+resolve_package_name(_ProjectRoot, Requested) when is_binary(Requested), Requested =/= <<>> ->
+    Requested;
+resolve_package_name(ProjectRoot, _Requested) ->
+    case beamtalk_package:root_package_name() of
+        undefined ->
+            undefined;
+        RootName ->
+            case launcher_project_path() of
+                undefined ->
+                    RootName;
+                LauncherRoot ->
+                    case same_dir(LauncherRoot, ProjectRoot) of
+                        true -> RootName;
+                        false -> undefined
+                    end
+            end
     end.
+
+-doc "Refresh the root package's loaded `.app` class list (BT-3662).".
+-spec refresh_package_classes(binary() | undefined) -> ok.
+refresh_package_classes(undefined) ->
+    ok;
+refresh_package_classes(PackageName) ->
+    _ = beamtalk_package:refresh_app_classes(PackageName),
+    ok.
+
+-spec launcher_project_path() -> string() | undefined.
+launcher_project_path() ->
+    case beamtalk_workspace_meta:get_metadata() of
+        {ok, #{project_path := P}} when is_binary(P) -> binary_to_list(P);
+        _ -> undefined
+    end.
+
+-spec same_dir(string(), string()) -> boolean().
+same_dir(A, B) ->
+    string:trim(filename:absname(A), trailing, "/") =:=
+        string:trim(filename:absname(B), trailing, "/").
 
 -doc """
 Render the `beamtalk_classes.hrl` contents from a class→module index.

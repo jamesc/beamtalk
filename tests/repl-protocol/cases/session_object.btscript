@@ -90,27 +90,27 @@ Session current bindings includesKey: #sx
 // WORKSPACE GLOBALS — same live BindingsView type, synchronous writes
 // ===========================================================================
 
-// Workspace globals is a BindingsView (shares the Dictionary protocol).
-Workspace globals class
+// Workspace bindings is a BindingsView (shares the Dictionary protocol).
+Workspace bindings class
 // => BindingsView
 
-// Singletons are visible through the globals view.
-Workspace globals includesKey: #Transcript
-// => true
+// Class facades (Transcript) are not bindings (ADR 0129).
+Workspace bindings includesKey: #Transcript
+// => false
 
 // Workspace-global writes are SYNCHRONOUS (route through bind:as:), so the new
 // binding is observable immediately as a bare name on the next line.
-Workspace globals at: #gZ put: 7
+Workspace bindings at: #gZ put: 7
 // => 7
 
 gZ
 // => 7
 
 // removeKey: routes through unbind: and returns nil.
-Workspace globals removeKey: #gZ
+Workspace bindings removeKey: #gZ
 // => nil
 
-Workspace globals includesKey: #gZ
+Workspace bindings includesKey: #gZ
 // => false
 
 // ===========================================================================

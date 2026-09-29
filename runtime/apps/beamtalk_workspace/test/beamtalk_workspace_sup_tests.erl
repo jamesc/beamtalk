@@ -506,12 +506,10 @@ workspace_meta_config_test() ->
 %%% exact child-id list is asserted below, so a child added to (or dropped
 %%% from) a mode shows up here.
 
-%% Ids common to every mode, in start order: meta, changelog, the actor
-%% singletons (beamtalk_workspace_config:singletons/0), the actor registry,
-%% bootstrap, actor_sup.
+%% Ids common to every mode, in start order: meta, changelog, bootstrap,
+%% actor_sup.
 base_child_ids() ->
     [beamtalk_workspace_capability_guard, beamtalk_workspace_meta, beamtalk_workspace_changelog] ++
-        [maps:get(module, S) || S <- beamtalk_workspace_config:singletons()] ++
         [beamtalk_workspace_bootstrap, beamtalk_actor_sup].
 
 live_development_child_ids() ->
@@ -523,8 +521,11 @@ live_development_child_ids() ->
         beamtalk_workspace_findings_store
     ].
 
+%% The `'Transcript'` stream (beamtalk_workspace_config:singletons/0) starts
+%% alongside the REPL server only (ADR 0129 §5), never in `run` mode.
 console_child_ids() ->
-    [beamtalk_session_sup, beamtalk_repl_server].
+    [maps:get(module, S) || S <- beamtalk_workspace_config:singletons()] ++
+        [beamtalk_session_sup, beamtalk_repl_server].
 
 child_ids(Config) ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
@@ -562,6 +563,15 @@ with_capabilities_restored(Fun) ->
     after
         beamtalk_capability:clear()
     end.
+
+run_mode_has_no_transcript_stream_test() ->
+    %% ADR 0129 §5: the 'Transcript' process starts only alongside the REPL server.
+    with_capabilities_restored(fun() ->
+        ?assertNot(lists:member(beamtalk_transcript_stream, child_ids(run_mode_config()))),
+        ?assert(lists:member(beamtalk_transcript_stream, child_ids(test_config()))),
+        ?assertNot(lists:member(beamtalk_transcript_stream, child_ids(release_mode_config()))),
+        ?assert(lists:member(beamtalk_transcript_stream, child_ids(release_console_config())))
+    end).
 
 run_mode_child_ids_test() ->
     %% Run mode: the base set only — no REPL listener, no idle monitor, no

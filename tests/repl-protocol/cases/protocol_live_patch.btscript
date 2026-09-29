@@ -1,0 +1,238 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for live protocol patching (ADR 0127 §11, BT-3630): `P >> sel =>`
+// adds/replaces a provision, `P removeSelector: #sel` removes one, both through
+// the two-stage all-or-nothing reload fan-out (BT-3593) — plus the fan-out's
+// rejection path (a rejected edit installs nothing) and the stdlib read-only
+// refusal.
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session across
+// ~150 files, so every class/protocol name here is prefixed `Bt3630` and never
+// reused elsewhere (a naively-named `Greeter` collides with an unrelated
+// fixture in `sync_project.btscript` — the reason BT-3593's own reload-fanout
+// e2e coverage was pulled). Fixture files are written to `File tempDirectory`
+// with a per-run unique suffix, kept on one physical line each (a blank or `//`
+// line inside the embedded content would end this harness's continuation
+// collector), and every provision returns an Integer to sidestep String-quote
+// escaping. See `traits.btscript` for the same conventions.
+
+_bt3630Uid := (Erlang erlang) unique_integer asString
+// => _
+
+// ===========================================================================
+// FIXTURES: a protocol with one provision, and a Value + an Actor using it
+// ===========================================================================
+
+_bt3630ProtoPath := File tempDirectory ++ "/Bt3630Greetable" ++ _bt3630Uid ++ ".bt"
+// => _
+
+_bt3630ValuePath := File tempDirectory ++ "/Bt3630GreeterValue" ++ _bt3630Uid ++ ".bt"
+// => _
+
+_bt3630ActorPath := File tempDirectory ++ "/Bt3630GreeterActor" ++ _bt3630Uid ++ ".bt"
+// => _
+
+File writeAll: _bt3630ProtoPath contents: "Protocol define: Bt3630Greetable
+  greeting -> Integer
+  greetingPlusOne -> Integer => self greeting + 1"
+// => Result ok: nil
+
+Workspace load: _bt3630ProtoPath
+// => _
+
+File writeAll: _bt3630ValuePath contents: "Value subclass: Bt3630GreeterValue uses: Bt3630Greetable field: greeting :: Integer = 10"
+// => Result ok: nil
+
+Workspace load: _bt3630ValuePath
+// => _
+
+File writeAll: _bt3630ActorPath contents: "Actor subclass: Bt3630GreeterActor uses: Bt3630Greetable state: greeting :: Integer = 20
+  greeting -> Integer => self.greeting"
+// => Result ok: nil
+
+Workspace load: _bt3630ActorPath
+// => _
+
+_bt3630Gv := Bt3630GreeterValue new
+// => _
+
+_bt3630Ga := Bt3630GreeterActor spawn
+// => Actor(Bt3630GreeterActor, _)
+
+_bt3630Gv greetingPlusOne
+// => 11
+
+_bt3630Ga greetingPlusOne
+// => 21
+
+// ===========================================================================
+// `P >> sel =>` ADDS a provision — reaching every existing user, live
+// ===========================================================================
+
+Bt3630Greetable >> greetingPlusTwo => self greeting + 2
+// => _
+
+(Protocol providedMethods: #Bt3630Greetable) includes: #greetingPlusTwo
+// => true
+
+_bt3630Gv greetingPlusTwo
+// => 12
+
+_bt3630Ga greetingPlusTwo
+// => 22
+
+(Bt3630GreeterValue >> #greetingPlusTwo) origin
+// => Bt3630Greetable
+
+// ===========================================================================
+// `P >> sel =>` REPLACES an existing provision
+// ===========================================================================
+
+Bt3630Greetable >> greetingPlusOne => self greeting + 100
+// => _
+
+_bt3630Gv greetingPlusOne
+// => 110
+
+_bt3630Ga greetingPlusOne
+// => 120
+
+// ===========================================================================
+// `P removeSelector: #sel` REMOVES a provision from the protocol and every user
+// ===========================================================================
+
+Bt3630Greetable removeSelector: #greetingPlusTwo
+// => _
+
+(Protocol providedMethods: #Bt3630Greetable) includes: #greetingPlusTwo
+// => false
+
+Bt3630GreeterValue new respondsTo: #greetingPlusTwo
+// => false
+
+// The provision that was NOT removed is untouched.
+Bt3630GreeterValue new greetingPlusOne
+// => 110
+
+// ===========================================================================
+// A REJECTED edit installs nothing: removing a provision another protocol's
+// requirement relies on (ADR 0127 §5 / §11) is refused, and the protocol and
+// its user keep working exactly as before.
+// ===========================================================================
+
+_bt3630NeedsPath := File tempDirectory ++ "/Bt3630NeedsTag" ++ _bt3630Uid ++ ".bt"
+// => _
+
+_bt3630ProvidesPath := File tempDirectory ++ "/Bt3630ProvidesTag" ++ _bt3630Uid ++ ".bt"
+// => _
+
+_bt3630TagUserPath := File tempDirectory ++ "/Bt3630TagUser" ++ _bt3630Uid ++ ".bt"
+// => _
+
+File writeAll: _bt3630NeedsPath contents: "Protocol define: Bt3630NeedsTag
+  tag -> Integer"
+// => Result ok: nil
+
+Workspace load: _bt3630NeedsPath
+// => _
+
+File writeAll: _bt3630ProvidesPath contents: "Protocol define: Bt3630ProvidesTag
+  tag -> Integer => 7"
+// => Result ok: nil
+
+Workspace load: _bt3630ProvidesPath
+// => _
+
+File writeAll: _bt3630TagUserPath contents: "Value subclass: Bt3630TagUser uses: Bt3630NeedsTag uses: Bt3630ProvidesTag"
+// => Result ok: nil
+
+Workspace load: _bt3630TagUserPath
+// => _
+
+Bt3630TagUser new tag
+// => 7
+
+Bt3630ProvidesTag removeSelector: #tag
+// => ERROR:
+
+(Protocol providedMethods: #Bt3630ProvidesTag) includes: #tag
+// => true
+
+Bt3630TagUser new tag
+// => 7
+
+// Same for a patch that a user cannot accept: `tag` is already provided by
+// Bt3630ProvidesTag, so a second protocol providing it conflicts on the shared
+// user (ADR 0127 §4) and the whole edit is rejected.
+Bt3630NeedsTag >> tag => 9
+// => ERROR:
+
+Bt3630TagUser new tag
+// => 7
+
+// ===========================================================================
+// FILE RELOAD of a protocol is all-or-nothing too (BT-3593 fan-out): an edited
+// file that one user cannot compile against loads NOTHING — not even the
+// protocol — and the error is raised instead of a partial install.
+// ===========================================================================
+
+_bt3630RejAPath := File tempDirectory ++ "/Bt3630RejA" ++ _bt3630Uid ++ ".bt"
+// => _
+
+_bt3630RejBPath := File tempDirectory ++ "/Bt3630RejB" ++ _bt3630Uid ++ ".bt"
+// => _
+
+_bt3630RejUserPath := File tempDirectory ++ "/Bt3630RejUser" ++ _bt3630Uid ++ ".bt"
+// => _
+
+File writeAll: _bt3630RejAPath contents: "Protocol define: Bt3630RejA a -> Integer => 1"
+// => Result ok: nil
+
+Workspace load: _bt3630RejAPath
+// => _
+
+File writeAll: _bt3630RejBPath contents: "Protocol define: Bt3630RejB b -> Integer => 2"
+// => Result ok: nil
+
+Workspace load: _bt3630RejBPath
+// => _
+
+File writeAll: _bt3630RejUserPath contents: "Value subclass: Bt3630RejUser uses: Bt3630RejA uses: Bt3630RejB"
+// => Result ok: nil
+
+Workspace load: _bt3630RejUserPath
+// => _
+
+Bt3630RejUser new b
+// => 2
+
+// Editing RejB to ALSO provide `a` conflicts with RejA on the shared user.
+File writeAll: _bt3630RejBPath contents: "Protocol define: Bt3630RejB b -> Integer => 2
+  a -> Integer => 3"
+// => Result ok: nil
+
+Workspace load: _bt3630RejBPath
+// => ERROR:
+
+(Protocol providedMethods: #Bt3630RejB) includes: #a
+// => false
+
+Bt3630RejUser new a
+// => 1
+
+Bt3630RejUser new b
+// => 2
+
+// ===========================================================================
+// STDLIB PROTOCOLS ARE READ-ONLY in the workspace (ADR 0127 §11)
+// ===========================================================================
+
+Comparable >> bt3630Extra => 1
+// => ERROR:
+
+Comparable removeSelector: #max:
+// => ERROR:
+
+(Protocol providedMethods: #Comparable) includes: #max:
+// => true

@@ -8,27 +8,30 @@
 -moduledoc """
 Single source of truth for workspace singleton configuration.
 
-Centralises the mapping between binding names (Transcript),
-class names (TranscriptStream),
-and Erlang modules (beamtalk_transcript_stream, etc.).
+Maps the supervised singleton process (`'Transcript'`, the REPL stream) to its
+class (`TranscriptStream`) and Erlang module (`beamtalk_transcript_stream`).
+
+Since ADR 0129 no workspace singleton is a REPL binding: `Transcript` is a
+class-side facade (`beamtalk_transcript_facade`) that routes to the registered
+process when it is the workspace's `TranscriptStream`. The process keeps its
+registered name; nothing here is injected into REPL scope.
 
 Singletons are split into two categories:
 - Actor singletons: `singletons/0` — started as gen_server children by the
-  workspace supervisor, registered under their binding_name.
+  workspace supervisor (REPL server modes only), registered under their
+  `registered_name`.
 - Value singletons: `value_singletons/0` — `sealed Object subclass:` instances
-  (tagged maps, no process). Bootstrapped by `beamtalk_workspace_bootstrap`
-  via `Module:new()`.
+  (tagged maps, no process). Empty since ADR 0129; removed in Phase 4.
 
 Used by:
 - beamtalk_workspace_sup — to build supervisor child specs (actor singletons only)
-- beamtalk_workspace_bootstrap — to wire class variables (both kinds)
-- beamtalk_repl_ops_eval / beamtalk_repl_ops_dev — to filter workspace binding names
+- beamtalk_workspace_bootstrap — to wire value singleton class variables
 """.
 
--export([singletons/0, value_singletons/0, binding_names/0, binding_name_for_class/1]).
+-export([singletons/0, value_singletons/0]).
 
 -type singleton_config() :: #{
-    binding_name := atom(),
+    registered_name := atom(),
     class_name := atom(),
     module := module(),
     start_args := [term()]
@@ -46,7 +49,7 @@ Used by:
 Return the actor workspace singleton definitions.
 
 Each entry defines a workspace singleton backed by a gen_server:
-- binding_name: the REPL convenience name (e.g. 'Transcript')
+- registered_name: the process's registered name (e.g. 'Transcript')
 - class_name: the Beamtalk class name (e.g. 'TranscriptStream')
 - module: the Erlang implementation module
 - start_args: extra arguments after the registration tuple for start_link
@@ -58,7 +61,7 @@ actor registry interleaving is managed by beamtalk_workspace_sup.
 singletons() ->
     [
         #{
-            binding_name => 'Transcript',
+            registered_name => 'Transcript',
             class_name => 'TranscriptStream',
             module => beamtalk_transcript_stream,
             start_args => [1000]
@@ -79,27 +82,3 @@ value_singletons() ->
     %% Empty since ADR 0129: `Beamtalk` and `Workspace` are class-side facades
     %% (no instance, no `current`, no injected binding).
     [].
-
--doc """
-Return the list of all workspace binding names (the actor singletons; there
-are no value singletons since ADR 0129).
-Used to filter these from :bindings display.
-""".
--spec binding_names() -> [atom()].
-binding_names() ->
-    [maps:get(binding_name, S) || S <- singletons()].
-
--doc """
-Map a singleton class name to its user-facing binding name.
-
-Returns `{ok, BindingName}` if the class is a known singleton,
-`undefined` otherwise. Used by error formatting to show binding names
-(e.g., "Transcript" instead of "TranscriptStream") in REPL errors.
-""".
--spec binding_name_for_class(atom()) -> {ok, atom()} | undefined.
-binding_name_for_class(ClassName) ->
-    All = singletons() ++ value_singletons(),
-    case lists:search(fun(#{class_name := C}) -> C =:= ClassName end, All) of
-        {value, #{binding_name := Name}} -> {ok, Name};
-        false -> undefined
-    end.

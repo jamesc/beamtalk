@@ -36,11 +36,13 @@ use std::collections::{HashMap, HashSet};
 /// `analyse_full` runs, so hover and the other hierarchy-backed LSP queries
 /// see the same provenance as diagnostics (BT-3655). `external_protocols`
 /// carries provision-bearing protocols from other files/packages, keyed by
-/// bare name. Expansion diagnostics are discarded: `diagnostics()` already
+/// bare name and is supplied lazily (`external_protocols`), so the (clone-heavy)
+/// cross-file collection only runs when some class has a `uses:` line.
+/// Expansion diagnostics are discarded: `diagnostics()` already
 /// reports them via the full analysis pipeline.
 pub(crate) fn build_hierarchy_with_trait_origins(
     module: &beamtalk_core::ast::Module,
-    external_protocols: &HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition>,
+    external_protocols: impl FnOnce() -> HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition>,
 ) -> (Result<ClassHierarchy, SemanticError>, Vec<Diagnostic>) {
     use beamtalk_core::semantic_analysis::trait_expansion;
 
@@ -49,7 +51,7 @@ pub(crate) fn build_hierarchy_with_trait_origins(
     }
     let mut expanded = module.clone();
     let (_expansion_diags, origins) =
-        trait_expansion::expand_module(&mut expanded, external_protocols);
+        trait_expansion::expand_module(&mut expanded, &external_protocols());
     let (result, diags) = ClassHierarchy::build(&expanded);
     let result = result.map(|mut hierarchy| {
         trait_expansion::apply_origins(&mut hierarchy, &origins);
@@ -241,7 +243,7 @@ impl ProjectIndex {
             .collect();
         for (path, module) in parsed {
             let (file_hierarchy_result, hierarchy_diags) =
-                build_hierarchy_with_trait_origins(&module, &stdlib_protocols);
+                build_hierarchy_with_trait_origins(&module, || stdlib_protocols.clone());
             all_diagnostics.extend(hierarchy_diags);
             let mut file_hierarchy = match file_hierarchy_result {
                 Ok(h) => h,
@@ -966,6 +968,22 @@ impl Default for ProjectIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trait_origins_external_protocols_only_collected_when_uses_present() {
+        use beamtalk_core::source_analysis::{lex_with_eof, parse};
+        let calls = std::cell::Cell::new(0);
+        let supply = || {
+            calls.set(calls.get() + 1);
+            HashMap::new()
+        };
+        let (plain, _) = parse(lex_with_eof("Object subclass: Plain\n  foo => 1"));
+        let _ = build_hierarchy_with_trait_origins(&plain, supply);
+        assert_eq!(calls.get(), 0, "no `uses:` => no cross-file collection");
+        let (with_uses, _) = parse(lex_with_eof("Object subclass: Uses\n  uses: Comparable"));
+        let _ = build_hierarchy_with_trait_origins(&with_uses, supply);
+        assert_eq!(calls.get(), 1, "`uses:` => collected exactly once");
+    }
 
     #[test]
     fn new_has_only_builtins() {

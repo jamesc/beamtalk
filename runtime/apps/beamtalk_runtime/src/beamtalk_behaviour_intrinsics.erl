@@ -1017,6 +1017,31 @@ classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
 remove_selector(Self, Selector) ->
     {Side, ClassPid} = removal_target(Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    case Side =:= instance andalso beamtalk_protocol_registry:is_protocol(ClassName) of
+        true -> remove_protocol_selector(ClassName, Selector);
+        false -> remove_class_selector(Self, ClassName, Side, Selector)
+    end.
+
+%% ADR 0127 §11: `Describable removeSelector: #sel` removes a protocol's
+%% PROVISION (a required signature is not removable this way — that is a
+%% protocol-definition edit) and re-expands its users through the same
+%% two-stage, all-or-nothing fan-out a protocol file reload uses. The
+%% workspace loader performs it (and raises its structured refusal for a
+%% stdlib protocol or a user that can no longer compile); this side only
+%% decides present-vs-absent.
+-spec remove_protocol_selector(atom(), atom()) -> removed | absent.
+remove_protocol_selector(ClassName, Selector) ->
+    case lists:member(Selector, beamtalk_protocol_registry:provided_methods(ClassName)) of
+        false ->
+            absent;
+        true ->
+            remove_local_method(ClassName, Selector, instance),
+            removed
+    end.
+
+-spec remove_class_selector(#beamtalk_object{}, atom(), instance | class, atom()) ->
+    removed | absent.
+remove_class_selector(Self, ClassName, Side, Selector) ->
     EtsClass = extension_ets_class(ClassName, Side),
     case beamtalk_extensions:has(EtsClass, Selector) of
         true ->
@@ -1191,6 +1216,10 @@ remove_local_method(ClassName, Selector, Side) ->
         {ok, _} ->
             log_local_removal(ClassNameBin, Selector, Side),
             ok;
+        {error, #beamtalk_error{} = Structured} ->
+            %% A refusal the workspace already worded (e.g. a stdlib protocol,
+            %% a protocol edit rejected by its users' recompile).
+            beamtalk_error:raise(Structured);
         {error, Reason} ->
             Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
             Msg = iolist_to_binary(

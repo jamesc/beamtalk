@@ -281,7 +281,7 @@ init({SessionId, Meta}) when is_map(Meta) ->
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
     %%
     %% ADR 0081 Phase 1: the session binding map starts EMPTY — it holds
-    %% only session locals. Workspace globals (singletons + bind:as: names) are no
+    %% only session locals. Workspace bindings (singletons + bind:as: names) are no
     %% longer eagerly injected here; a free identifier that misses the locals map is
     %% resolved lazily at eval time via beamtalk_workspace:resolve_name/2.
     State0c = beamtalk_repl_state:new(undefined, 0, #{client_meta => Meta}),
@@ -398,7 +398,7 @@ handle_call(get_session_meta, _From, {SessionId, State, Worker}) ->
     Meta = beamtalk_repl_state:get_client_meta(State),
     {reply, {ok, SessionId, Meta}, {SessionId, State, Worker}};
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
-    %% ADR 0081 Phase 1: clear only the session locals. Workspace globals
+    %% ADR 0081 Phase 1: clear only the session locals. Workspace bindings
     %% (singletons + bind:as: names) are no longer copied into the session map, so
     %% there is nothing to re-inject — they remain available via lazy resolution.
     ClearedKeys = maps:keys(beamtalk_repl_state:get_bindings(State)),

@@ -190,6 +190,22 @@ impl RequestBuilder {
         })
     }
 
+    /// Attach the loaded project's package name to a `load-project` request.
+    ///
+    /// The Rust client already parses `beamtalk.toml`; passing the name lets
+    /// the workspace resolve the per-project package without parsing TOML in
+    /// Erlang (BT-3661). A `None` leaves the request unchanged.
+    #[must_use]
+    pub fn with_package_name(
+        mut request: serde_json::Value,
+        package_name: Option<&str>,
+    ) -> serde_json::Value {
+        if let Some(name) = package_name {
+            request["package_name"] = serde_json::Value::String(name.to_string());
+        }
+        request
+    }
+
     // --- Session operations ---
     //
     // ADR 0081 Phase 6: the `clear` and `bindings` ops were removed.
@@ -690,6 +706,26 @@ mod tests {
         assert_eq!(req["path"], "/my/project");
         assert_eq!(req["include_tests"], false);
         assert!(req.get("force").is_none());
+    }
+
+    #[test]
+    fn with_package_name_attaches_name() {
+        let req = RequestBuilder::with_package_name(
+            RequestBuilder::load_project("/my/project", false),
+            Some("my_pkg"),
+        );
+        assert_eq!(req["op"], "load-project");
+        assert_eq!(req["path"], "/my/project");
+        assert_eq!(req["package_name"], "my_pkg");
+    }
+
+    #[test]
+    fn with_package_name_none_leaves_request_unchanged() {
+        let req = RequestBuilder::with_package_name(
+            RequestBuilder::load_project("/my/project", false),
+            None,
+        );
+        assert!(req.get("package_name").is_none());
     }
 
     #[test]

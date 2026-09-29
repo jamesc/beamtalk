@@ -22,7 +22,6 @@ Architecture (from ADR 0004):
 beamtalk_workspace_sup
   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
   ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082)
-  ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: Workspace)
   ├─ beamtalk_actor_sup           % Supervises user actors
@@ -33,6 +32,7 @@ beamtalk_workspace_sup
   ├─ beamtalk_workspace_shape_recheck_worker % Serialised shape re-check queue (ADR 0105)
   ├─ beamtalk_workspace_findings_store % Reload-induced findings store (ADR 0105)
   │   -- mode => workspace, or mode => release with console => true --
+  ├─ 'Transcript' (beamtalk_transcript_stream) % REPL stream (ADR 0129 §5)
   ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
   │   -- mode => workspace only --
@@ -45,12 +45,12 @@ The config's required `mode` key selects the child set:
 
 | | `run` | `workspace` | `release` |
 |---|---|---|---|
-| bootstrap, `beamtalk_actor_sup`, singletons | ✓ | ✓ | ✓ |
+| bootstrap, `beamtalk_actor_sup` | ✓ | ✓ | ✓ |
 | `beamtalk_compiler` app | ✓ (unless `start_compiler => false`) | ✓ | only with `include_compiler => true` |
 | workspace file logger | ✗ | ✓ | ✗ |
 | ChangeLog | memory-only | on disk | memory-only |
 | ADR 0105 stores + recheck worker, `alias_xref` | ✗ | ✓ | ✗ |
-| `beamtalk_session_sup` + `beamtalk_repl_server` | ✗ | ✓ | only with `console => true` |
+| `'Transcript'` stream + `beamtalk_session_sup` + `beamtalk_repl_server` | ✗ | ✓ | only with `console => true` |
 | `beamtalk_idle_monitor` | ✗ | ✓ | never |
 
 `init/1` also records the node's capabilities (`beamtalk_capability:set/1`),
@@ -254,26 +254,20 @@ init(Config) ->
                 shutdown => 5000,
                 type => worker,
                 modules => [beamtalk_workspace_changelog]
-            }
+            },
 
-            %% Actor singleton — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
-            %% These assume beamtalk_stdlib has already been started elsewhere in the system.
-            %% Each registers via gen_server name registration ({local, Name}).
-            %% Specs derived from beamtalk_workspace_config:singletons/0.
-            %% (Workspace is a class-side facade, bootstrapped
-            %% by beamtalk_workspace_bootstrap after the actor registry is started.)
-        ] ++ singleton_child_specs() ++
-            [
+            %% The actor registry is runtime-owned (BT-3633). The `Transcript`
+            %% stream is a REPL-server child (see console_child_specs/1) and
+            %% `Workspace` is a class-side facade with no process.
+
                 %% The bespoke class-loaded / bindings-changed /
                 %% flush-completion pub/sub gen_servers were retired. Those
                 %% workspace push streams now ride the SystemAnnouncer bus
                 %% (`beamtalk_announcements`, started under `beamtalk_runtime_sup`)
                 %% and are subscribed through `beamtalk_repl_subscriptions`.
 
-                %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
-                %% and activates compiled project modules.
-                %% Must start after all singletons but before REPL server accepts connections.
-                %% Monitors singleton PIDs and re-sets class vars on restart.
+                %% Bootstrap worker — activates compiled project modules.
+                %% Must start before REPL server accepts connections.
                 #{
                     id => beamtalk_workspace_bootstrap,
                     start => {beamtalk_workspace_bootstrap, start_link, [ProjectPath]},
@@ -485,45 +479,50 @@ that order (see the comment on `beamtalk_session_sup` below).
 """.
 -spec console_child_specs(map()) -> [supervisor:child_spec()].
 console_child_specs(#{tcp_port := TcpPort, workspace_id := WorkspaceId, bind_addr := BindAddr}) ->
-    [
-        %% Session supervisor (one child per REPL connection).
-        %%
-        %% MUST start before beamtalk_repl_server: the REPL server's init/1 binds
-        %% the cowboy `/ws` listener AND writes the port file (the CLI's readiness
-        %% signal) before returning. If session_sup started after repl_server, the
-        %% CLI could discover the port and open a `/ws` connection during the window
-        %% where session_sup does not yet exist, so beamtalk_ws_handler's
-        %% create_session -> supervisor:start_child(beamtalk_session_sup, _) exits
-        %% with `noproc`, the handler crashes, and the connection is dropped. The CLI
-        %% sees "port accepting TCP but WebSocket health check failed" and retries on
-        %% a fresh node (flaky workspace-startup CI failures). Ordering
-        %% session_sup first gates the port file behind a ready session tier.
-        #{
-            id => beamtalk_session_sup,
-            start => {beamtalk_session_sup, start_link, []},
-            restart => permanent,
-            shutdown => infinity,
-            type => supervisor,
-            modules => [beamtalk_session_sup]
-        },
+    %% The registered `'Transcript'` process is the REPL's shared log
+    %% (ADR 0129 §5), so it starts only alongside the REPL server, never in
+    %% `run` mode. It keeps its registered name; `Transcript` output routes to
+    %% it only while it is registered and is a `TranscriptStream`.
+    [singleton_to_child_spec(S) || S <- beamtalk_workspace_config:singletons()] ++
+        [
+            %% Session supervisor (one child per REPL connection).
+            %%
+            %% MUST start before beamtalk_repl_server: the REPL server's init/1 binds
+            %% the cowboy `/ws` listener AND writes the port file (the CLI's readiness
+            %% signal) before returning. If session_sup started after repl_server, the
+            %% CLI could discover the port and open a `/ws` connection during the window
+            %% where session_sup does not yet exist, so beamtalk_ws_handler's
+            %% create_session -> supervisor:start_child(beamtalk_session_sup, _) exits
+            %% with `noproc`, the handler crashes, and the connection is dropped. The CLI
+            %% sees "port accepting TCP but WebSocket health check failed" and retries on
+            %% a fresh node (flaky workspace-startup CI failures). Ordering
+            %% session_sup first gates the port file behind a ready session tier.
+            #{
+                id => beamtalk_session_sup,
+                start => {beamtalk_session_sup, start_link, []},
+                restart => permanent,
+                shutdown => infinity,
+                type => supervisor,
+                modules => [beamtalk_session_sup]
+            },
 
-        %% REPL WebSocket server (session-per-connection architecture)
-        #{
-            id => beamtalk_repl_server,
-            start =>
-                {beamtalk_repl_server, start_link, [
-                    #{
-                        port => TcpPort,
-                        workspace_id => WorkspaceId,
-                        bind_addr => BindAddr
-                    }
-                ]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_repl_server]
-        }
-    ].
+            %% REPL WebSocket server (session-per-connection architecture)
+            #{
+                id => beamtalk_repl_server,
+                start =>
+                    {beamtalk_repl_server, start_link, [
+                        #{
+                            port => TcpPort,
+                            workspace_id => WorkspaceId,
+                            bind_addr => BindAddr
+                        }
+                    ]},
+                restart => permanent,
+                shutdown => 5000,
+                type => worker,
+                modules => [beamtalk_repl_server]
+            }
+        ].
 
 -doc """
 The idle monitor (workspace mode only). Its `max_idle_seconds` expiry calls
@@ -561,21 +560,11 @@ changelog_workspace_id(release, _WorkspaceId) -> undefined.
 
 %%% Singleton Child Specs
 
--doc """
-Generate supervisor child specs for actor workspace singletons.
-Starts actor singletons from beamtalk_workspace_config:singletons/0. (The
-actor registry is owned by beamtalk_runtime_sup — BT-3633.) Value singletons (Workspace)
-are not started here — they are bootstrapped by beamtalk_workspace_bootstrap.
-""".
-singleton_child_specs() ->
-    Singletons = beamtalk_workspace_config:singletons(),
-    [singleton_to_child_spec(S) || S <- Singletons].
-
 -doc "Convert a singleton config to a supervisor child spec.".
-singleton_to_child_spec(#{binding_name := BindingName, module := Module, start_args := Args}) ->
+singleton_to_child_spec(#{registered_name := RegName, module := Module, start_args := Args}) ->
     #{
         id => Module,
-        start => {Module, start_link, [{local, BindingName} | Args]},
+        start => {Module, start_link, [{local, RegName} | Args]},
         restart => permanent,
         shutdown => 5000,
         type => worker,

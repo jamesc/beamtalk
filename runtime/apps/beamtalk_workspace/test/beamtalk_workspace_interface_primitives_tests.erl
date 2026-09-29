@@ -11,7 +11,7 @@ Tests the Phase 2 dispatch/3 interface for Workspace primitives:
 - actorAt: selector
 - classes selector
 - load: selector (including value_type_name/1 coverage)
-- globals selector
+- bindings selector
 - bind:as: selector (including to_atom_name/1 error paths)
 - unbind: selector
 - get_user_bindings/0 external API
@@ -237,7 +237,7 @@ load_file_not_found_test() ->
     end.
 
 %%====================================================================
-%% bind:as: / unbind: / globals Tests
+%% bind:as: / unbind: / bindings Tests
 %%====================================================================
 
 bind_and_unbind_test_() ->
@@ -263,12 +263,12 @@ bind_and_unbind_test_() ->
                     ),
                     ?assertEqual(nil, Result)
                 end},
-                {"globals includes bound value", fun() ->
+                {"bindings includes bound value", fun() ->
                     beamtalk_workspace_interface_primitives:dispatch(
                         'bind:as:', [99, anotherVar], Self
                     ),
                     Globals = beamtalk_workspace_interface_primitives:dispatch(
-                        globals, [], Self
+                        bindings, [], Self
                     ),
                     ?assert(is_map(Globals)),
                     ?assert(maps:is_key(anotherVar, Globals)),
@@ -283,7 +283,7 @@ bind_and_unbind_test_() ->
                     ),
                     ?assertEqual(nil, Result),
                     Globals = beamtalk_workspace_interface_primitives:dispatch(
-                        globals, [], Self
+                        bindings, [], Self
                     ),
                     ?assertNot(maps:is_key(toRemove, Globals))
                 end},
@@ -309,6 +309,21 @@ bind_and_unbind_test_() ->
                         error:#{error := Err} ->
                             ?assertEqual(name_conflict, Err#beamtalk_error.kind)
                     end
+                end},
+                {"bind:as: tolerates a class dying mid-call (BT-3658)", fun() ->
+                    Name = 'BT3658DyingBindName',
+                    Dying = spawn(fun() ->
+                        receive
+                            {'$gen_call', _From, _Req} -> exit(shutdown)
+                        end
+                    end),
+                    true = register(beamtalk_class_registry:registry_name(Name), Dying),
+                    ?assertEqual(
+                        nil,
+                        beamtalk_workspace_interface_primitives:dispatch(
+                            'bind:as:', [42, Name], Self
+                        )
+                    )
                 end},
                 {"bind:as: raises type_error for non-atom name", fun() ->
                     try
@@ -879,10 +894,10 @@ autoflush_default_is_false_test() ->
 %%====================================================================
 %% resolve_name/2 Tests (ADR 0081 Phase 1)
 %%
-%% Resolution order: locals -> bind:as: ETS -> singleton registry ->
-%% class registry -> undefined_variable. Tiers 1, 2, 5 and ordering are
-%% deterministic in EUnit; tiers 3/4 need a live workspace and are exercised
-%% by the repl-protocol parity tests.
+%% Resolution order: locals -> bind:as: ETS -> class registry ->
+%% undefined_variable. Tiers 1, 2, 4 and ordering are deterministic in EUnit;
+%% tier 3 needs a live workspace and is exercised by the repl-protocol parity
+%% tests.
 %%====================================================================
 
 %% Tier 1: a name present in the locals map resolves to its local value.

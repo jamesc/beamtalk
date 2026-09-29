@@ -302,3 +302,61 @@ fn hover_on_cross_file_trait_provided_method_shows_provenance() {
         "cross-file provided method should show provenance"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Go-to-definition / completion on trait-provided methods (ADR 0127 §12, BT-3630)
+// ---------------------------------------------------------------------------
+
+const TRAIT_PROTOCOL_SOURCE: &str = "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]
+";
+
+const TRAIT_USER_SOURCE: &str = "Value subclass: Version
+  uses: Comparable
+  field: major :: Integer = 0
+  < other => self major < other major
+
+Version new max: Version new
+";
+
+#[test]
+fn goto_definition_on_trait_provided_method_jumps_to_protocol() {
+    let mut service = SimpleLanguageService::new();
+    let proto_file = Utf8PathBuf::from("comparable.bt");
+    let user_file = Utf8PathBuf::from("version.bt");
+    service.update_file(proto_file.clone(), TRAIT_PROTOCOL_SOURCE.to_string());
+    service.update_file(user_file.clone(), TRAIT_USER_SOURCE.to_string());
+
+    let location = service
+        .goto_definition(&user_file, Position::new(5, 14))
+        .expect("expected a definition for the provided selector `max:`");
+    assert_eq!(
+        location.file, proto_file,
+        "a flattened method must resolve to the protocol file, not the class file"
+    );
+    let start = location.span.start() as usize;
+    assert!(
+        TRAIT_PROTOCOL_SOURCE[start..].starts_with("max:"),
+        "span should point at the provision, got: {:?}",
+        &TRAIT_PROTOCOL_SOURCE[start..]
+    );
+}
+
+#[test]
+fn completion_after_class_receiver_lists_trait_provided_method() {
+    let mut service = SimpleLanguageService::new();
+    let proto_file = Utf8PathBuf::from("comparable.bt");
+    let user_file = Utf8PathBuf::from("version.bt");
+    service.update_file(proto_file, TRAIT_PROTOCOL_SOURCE.to_string());
+    let source = format!("{TRAIT_USER_SOURCE}Version new ");
+    service.update_file(user_file.clone(), source);
+
+    let completions = service.completions(&user_file, Position::new(6, 12));
+    let labels: Vec<String> = completions.iter().map(|c| c.label.to_string()).collect();
+    assert!(
+        labels.iter().any(|l| l == "max:"),
+        "provided method `max:` should be offered, got: {labels:?}"
+    );
+}

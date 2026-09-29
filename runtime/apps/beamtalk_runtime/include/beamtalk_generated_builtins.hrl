@@ -119,6 +119,7 @@
     'TimeoutProxy',
     'Timer',
     'Tracing',
+    'Transcript',
     'TranscriptStream',
     'True',
     'Tuple',

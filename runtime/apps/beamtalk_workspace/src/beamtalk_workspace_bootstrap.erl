@@ -7,19 +7,19 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Bootstrap worker for singleton class variables (ADR 0019 Phase 2).
+Bootstrap worker for the workspace (ADR 0019 Phase 2).
 
-Sets class variables on singleton stdlib classes after workspace supervisor
-starts the singleton actors. Monitors singleton PIDs and re-sets class
-variables when children restart.
+Sets the `current` class variable on value singleton stdlib classes
+(`beamtalk_workspace_config:value_singletons/0`, empty since ADR 0129). The
+actor singleton (`'Transcript'`, the REPL stream) is no longer wired to a class
+variable: `Transcript` is a class-side facade that finds the process at call
+time.
 
 Also activates compiled project modules at startup. When a project
 path is provided, first activates dependency classes from `_build/deps/*/ebin/`
 and native code paths, then scans `_build/dev/ebin/` for `bt@*.beam` modules
 (excluding `bt@stdlib@*`) and calls `register_class/0` on each, making them
 visible in the class registry without requiring `:load`.
-
-Singleton mapping derived from beamtalk_workspace_config:singletons/0.
 """.
 
 -export([start_link/0, start_link/1]).
@@ -33,9 +33,7 @@ Singleton mapping derived from beamtalk_workspace_config:singletons/0.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--record(state, {
-    monitors = #{} :: #{reference() => {ClassName :: atom(), RegName :: atom()}}
-}).
+-record(state, {}).
 
 -doc "Start the bootstrap worker without project module activation.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
@@ -69,40 +67,9 @@ init([ProjectPath]) ->
     %% Activate project modules synchronously before returning so that
     %% beamtalk_repl_server (the next child) does not write the port file
     %% until all compiled project classes are registered and visible.
-    %% The gen_server name is registered by OTP before init/1 is called, so
-    %% any DOWN signals from monitored singletons that arrive during activation
-    %% safely queue in the mailbox and are handled immediately after we return.
     activate_project_modules(ProjectPath),
     {ok, State}.
 
-handle_info({'DOWN', MonRef, process, _Pid, _Reason}, State) ->
-    case maps:get(MonRef, State#state.monitors, undefined) of
-        undefined ->
-            {noreply, State};
-        {ClassName, RegName} ->
-            Monitors = maps:remove(MonRef, State#state.monitors),
-            NewState = State#state{monitors = Monitors},
-            %% Re-bootstrap after a short delay to allow the supervisor
-            %% to restart the child process
-            erlang:send_after(100, self(), {rebootstrap, ClassName, RegName, 0}),
-            {noreply, NewState}
-    end;
-handle_info({rebootstrap, ClassName, RegName, Retries}, State) when Retries < 5 ->
-    case erlang:whereis(RegName) of
-        undefined ->
-            erlang:send_after(200, self(), {rebootstrap, ClassName, RegName, Retries + 1}),
-            {noreply, State};
-        _Pid ->
-            NewState = bootstrap_singleton(ClassName, RegName, State),
-            {noreply, NewState}
-    end;
-handle_info({rebootstrap, ClassName, RegName, _Retries}, State) ->
-    ?LOG_ERROR("Bootstrap: failed to rewire singleton after retries", #{
-        class => ClassName,
-        name => RegName,
-        domain => [beamtalk, runtime]
-    }),
-    {noreply, State};
 handle_info({rebootstrap_value, ClassName, Module, Retries}, State) when Retries < 5 ->
     bootstrap_value_singleton(ClassName, Module, Retries),
     {noreply, State};
@@ -126,16 +93,8 @@ terminate(_Reason, _State) ->
 
 %%% Internal functions
 
--doc "Bootstrap all singletons.".
+-doc "Bootstrap all value singletons.".
 bootstrap_all(State) ->
-    ActorState = lists:foldl(
-        fun(#{class_name := ClassName, binding_name := RegName}, AccState) ->
-            bootstrap_singleton(ClassName, RegName, AccState)
-        end,
-        State,
-        beamtalk_workspace_config:singletons()
-    ),
-    %% Bootstrap value singletons (sealed Object subclass:, no gen_server process).
     %% Create a value object instance and set the class variable `current`.
     lists:foreach(
         fun(#{class_name := ClassName, module := Module}) ->
@@ -143,26 +102,7 @@ bootstrap_all(State) ->
         end,
         beamtalk_workspace_config:value_singletons()
     ),
-    ActorState.
-
--doc "Bootstrap a single singleton: set class var and monitor.".
-bootstrap_singleton(ClassName, RegName, State) ->
-    case erlang:whereis(RegName) of
-        undefined ->
-            ?LOG_WARNING("Bootstrap: singleton not registered yet", #{
-                name => RegName, domain => [beamtalk, runtime]
-            }),
-            State;
-        Pid ->
-            Obj = build_object_ref(ClassName, Pid),
-            _ = set_class_variable(ClassName, Obj),
-            MonRef = erlang:monitor(process, Pid),
-            ?LOG_DEBUG("Bootstrap: wired singleton", #{
-                class => ClassName, pid => Pid, domain => [beamtalk, runtime]
-            }),
-            Monitors = maps:put(MonRef, {ClassName, RegName}, State#state.monitors),
-            State#state{monitors = Monitors}
-    end.
+    State.
 
 -doc """
 Bootstrap a value singleton: create a tagged-map instance and set class var.
@@ -199,25 +139,6 @@ bootstrap_value_singleton(ClassName, Module, Retries) ->
                 domain => [beamtalk, runtime]
             }),
             erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1})
-    end.
-
--doc "Build the beamtalk_object reference tuple for a singleton.".
-build_object_ref(ClassName, Pid) ->
-    {beamtalk_object, ClassName, class_module(ClassName), Pid}.
-
--doc "Map class name to its Erlang module using workspace config.".
-class_module(ClassName) ->
-    Singletons = beamtalk_workspace_config:singletons(),
-    case lists:search(fun(#{class_name := C}) -> C =:= ClassName end, Singletons) of
-        {value, #{module := Module}} ->
-            Module;
-        false ->
-            Err0 = beamtalk_error:new(class_not_found, ClassName),
-            Err = beamtalk_error:with_hint(
-                Err0,
-                <<"Not a registered workspace singleton.">>
-            ),
-            error(Err)
     end.
 
 -doc """

@@ -410,6 +410,27 @@ load_class_module(ClassInfo, Expression, State) ->
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 reload_method_definition(MethodInfo, Warnings, Expression, State) ->
     #{class_name := ClassNameBin} = MethodInfo,
+    case is_protocol_name(ClassNameBin) of
+        true ->
+            %% ADR 0127 §11: `P >> sel => ...` at the REPL edits the protocol's
+            %% own source and re-expands every user (two-stage fan-out).
+            patch_protocol_provision(
+                ClassNameBin,
+                maps:get(selector, MethodInfo),
+                method_source_binary(MethodInfo),
+                MethodInfo#{intent => maps:get(intent, MethodInfo, durable)},
+                Warnings,
+                State
+            );
+        false ->
+            reload_class_method_definition(MethodInfo, Warnings, Expression, State)
+    end.
+
+-spec reload_class_method_definition(map(), [binary()], string(), beamtalk_repl_state:state()) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+reload_class_method_definition(MethodInfo, Warnings, Expression, State) ->
+    #{class_name := ClassNameBin} = MethodInfo,
     ExistingSource = beamtalk_workspace_meta:get_class_source(ClassNameBin),
     case ExistingSource of
         undefined ->
@@ -1685,12 +1706,15 @@ Otherwise runs two stages, per the ADR's "all-or-nothing" requirement:
    same reasoning `rewrite_sites/2`'s doc gives for its own install pass),
    but is still handled: if install fails partway through, every module
    THIS call already installed in stage 2 — protocol included — is rolled
-   back to its previous binary (captured via `code:get_object_code/1`
-   immediately before that module's own install) before the error is
-   returned, so a partial-install failure can never leave some users on the
-   new provisions and others on the old ones. A module with no previous
-   binary (its first-ever load) has nothing to roll back to; it is left on
-   the code this call just installed, since there is no "before" state.
+   back to its previous code before the error is returned, so a
+   partial-install failure can never leave some users on the new provisions
+   and others on the old ones. "Previous code" is recompiled from the
+   previously-tracked source (`beamtalk_workspace_meta`), NOT a binary
+   captured via `code:get_object_code/1` — that call reliably returns
+   `error` for every REPL-loaded class (see `install_protocol_fanout`'s own
+   comment). A module with no previously-tracked source (its first-ever
+   load) has nothing to roll back to; it is left on the code this call just
+   installed, since there is no "before" state.
 
 Returns `{ok, AllClassNames}` — the protocol's own pseudo-class entries
 followed by every successfully-installed user's, in the same
@@ -2236,6 +2260,62 @@ install_method(
     State,
     IsClassMethod
 ) ->
+    case is_protocol_name(ClassNameBin) of
+        true ->
+            %% ADR 0127 §11 (IDE save / `compile:source:` / MCP `save_method`
+            %% on a protocol provision): same two-stage protocol patch as the
+            %% REPL's `P >> sel =>`.
+            patch_protocol_provision(
+                ClassNameBin,
+                SelectorBin,
+                MethodSource,
+                #{
+                    is_class_method => IsClassMethod,
+                    intent => Intent,
+                    author => Author,
+                    author_kind => AuthorKind
+                },
+                Warnings,
+                State
+            );
+        false ->
+            install_class_method(
+                ClassNameBin,
+                SelectorBin,
+                MethodSource,
+                Intent,
+                Author,
+                AuthorKind,
+                Warnings,
+                State,
+                IsClassMethod
+            )
+    end.
+
+-spec install_class_method(
+    binary(),
+    binary(),
+    binary(),
+    durable | ephemeral,
+    binary(),
+    human | agent,
+    [binary()],
+    beamtalk_repl_state:state(),
+    boolean()
+) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+install_class_method(
+    ClassNameBin,
+    SelectorBin,
+    MethodSource,
+    Intent,
+    Author,
+    AuthorKind,
+    Warnings,
+    State,
+    IsClassMethod
+) ->
     case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
         undefined ->
             ErrorMsg =
@@ -2664,6 +2744,14 @@ calls `emit_remove_change_entry/5` afterward.
     {ok, binary()} | {error, term()}.
 remove_method(ClassNameBin, Selector, Side) ->
     SelectorBin = method_selector_binary(Selector),
+    case is_protocol_name(ClassNameBin) of
+        true -> remove_protocol_provision(ClassNameBin, SelectorBin, Side);
+        false -> remove_class_method(ClassNameBin, SelectorBin, Side)
+    end.
+
+-spec remove_class_method(binary(), binary(), instance | class) ->
+    {ok, binary()} | {error, term()}.
+remove_class_method(ClassNameBin, SelectorBin, Side) ->
     case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
         undefined ->
             {error,
@@ -4372,6 +4460,320 @@ load_recompiled_method(
     end.
 
 %%% ----------------------------------------------------------------------------
+%%% Live protocol patching (ADR 0127 §11, BT-3630)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+True iff `NameBin` names a registered protocol (ADR 0068/0127) — the routing
+test `reload_method_definition/4`, `install_method/9` and `remove_method/3`
+share to send a protocol target through the two-stage protocol edit below
+instead of the class recompile path. Uses `safe_to_existing_atom/1`, so an
+arbitrary user-typed name never mints an atom.
+""".
+-spec is_protocol_name(binary()) -> boolean().
+is_protocol_name(NameBin) when is_binary(NameBin) ->
+    case beamtalk_repl_server:safe_to_existing_atom(NameBin) of
+        {ok, Name} -> beamtalk_protocol_registry:is_protocol(Name);
+        {error, _} -> false
+    end.
+
+%% The BEAM module that defines protocol `Name`, if it is registered.
+-spec protocol_module(atom()) -> {ok, atom()} | error.
+protocol_module(Name) ->
+    case beamtalk_protocol_registry:protocol_info(Name) of
+        #{module := Module} -> {ok, Module};
+        _ -> error
+    end.
+
+-doc """
+Live-patch one provision of protocol `ProtocolBin` (`P >> sel => …` at the REPL,
+IDE save, MCP `save_method`) — ADR 0127 §11.
+
+Adds `MethodSource` as a provision of the protocol's tracked source, or
+replaces the same-selector one, then runs the WHOLE edited source through
+`apply_protocol_edit/5`: the same two-stage compile-everything-then-install
+fan-out a protocol file reload uses (`reload_protocol_fanout/3`), so a patch a
+user cannot accept (a conflict, an unmet requirement, a self-send outside the
+required/provided set) is rejected as a whole and nothing changes. On success
+it is recorded in the ChangeLog against the PROTOCOL (`class` = the protocol
+name, resolved to the protocol's file — never a user class's file) so
+`Workspace flush` splices it into the protocol file (ADR 0113).
+
+Refuses stdlib protocols (read-only, like stdlib classes), class-side
+provisions (not supported in v1, ADR 0127 §13), and a protocol with no tracked
+source (defined inline at the REPL rather than loaded from a file).
+""".
+-spec patch_protocol_provision(
+    binary(), binary(), binary(), map(), [binary()], beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+patch_protocol_provision(ProtocolBin, SelectorBin, MethodSource, Opts, Warnings, State) ->
+    case patch_protocol_provision_edit(ProtocolBin, SelectorBin, MethodSource, Opts) of
+        ok ->
+            Intent = maps:get(intent, Opts, durable),
+            emit_change_entry(#{
+                class_name => ProtocolBin,
+                selector => SelectorBin,
+                is_class_method => false,
+                method_source => MethodSource,
+                intent => Intent,
+                author => maps:get(author, Opts, <<"repl">>),
+                author_kind => maps:get(author_kind, Opts, human)
+            }),
+            maybe_autoflush(Intent),
+            Result = <<ProtocolBin/binary, ">>", SelectorBin/binary>>,
+            {ok, Result, <<>>, Warnings, State};
+        {error, Reason} ->
+            {error, Reason, <<>>, Warnings, State}
+    end.
+
+-spec patch_protocol_provision_edit(binary(), binary(), binary(), map()) -> ok | {error, term()}.
+patch_protocol_provision_edit(ProtocolBin, SelectorBin, MethodSource, Opts) ->
+    case maps:get(is_class_method, Opts, false) of
+        true ->
+            {error, protocol_class_side_provision_error(ProtocolBin, SelectorBin)};
+        false ->
+            case protocol_edit_target(ProtocolBin, SelectorBin, <<"recompile">>) of
+                {error, _} = Err ->
+                    Err;
+                {ok, Path, Source} ->
+                    case patched_protocol_source(Source, ProtocolBin, SelectorBin, MethodSource) of
+                        {error, _} = Err ->
+                            Err;
+                        {ok, NewSource} ->
+                            Captures = protocol_user_captures(ProtocolBin, fun(UserBin) ->
+                                capture_signature_generation(#{
+                                    class_name => UserBin,
+                                    selector => SelectorBin,
+                                    is_class_method => false,
+                                    return_type => maps:get(return_type, Opts, <<"Dynamic">>),
+                                    param_types => maps:get(param_types, Opts, [])
+                                })
+                            end),
+                            apply_protocol_edit(
+                                ProtocolBin, Path, NewSource, Captures, SelectorBin
+                            )
+                    end
+            end
+    end.
+
+-doc """
+Remove provision `SelectorBin` from protocol `ProtocolBin` (`P removeSelector:
+#sel`, ADR 0112 / ADR 0127 §11) and re-expand every user through the two-stage
+fan-out of `apply_protocol_edit/5`. Rejected — nothing changes — when a user can
+no longer compile without it (e.g. it relied on the provision to satisfy
+another protocol's requirement, §5). The caller (`removeSelector:`'s primitive)
+records the `remove-method` ChangeLog entry, exactly as for a class method.
+Only the instance side exists for provisions.
+""".
+-spec remove_protocol_provision(binary(), binary(), instance | class) ->
+    {ok, binary()} | {error, term()}.
+remove_protocol_provision(ProtocolBin, SelectorBin, class) ->
+    {error, protocol_class_side_provision_error(ProtocolBin, SelectorBin)};
+remove_protocol_provision(ProtocolBin, SelectorBin, instance) ->
+    case protocol_edit_target(ProtocolBin, SelectorBin, <<"remove">>) of
+        {error, _} = Err ->
+            Err;
+        {ok, Path, Source} ->
+            SourceBin = unicode:characters_to_binary(Source),
+            case
+                beamtalk_compiler:resolve_method_span(
+                    SourceBin, ProtocolBin, SelectorBin, instance
+                )
+            of
+                {ok, Span, _Body} ->
+                    NewSource = unicode:characters_to_list(splice_out_span(SourceBin, Span)),
+                    Captures = protocol_user_captures(ProtocolBin, fun(UserBin) ->
+                        capture_signature_removal(UserBin, SelectorBin, instance)
+                    end),
+                    case apply_protocol_edit(ProtocolBin, Path, NewSource, Captures, SelectorBin) of
+                        ok -> {ok, ProtocolBin};
+                        {error, _} = Err -> Err
+                    end;
+                {error, Reason, _Msg} ->
+                    {error, {method_not_found, Reason}}
+            end
+    end.
+
+%% The protocol's tracked source + file path, or the structured refusal. `Verb`
+%% (`recompile` | `remove`) only shapes the stdlib refusal message.
+-spec protocol_edit_target(binary(), binary(), binary()) ->
+    {ok, string(), string()} | {error, term()}.
+protocol_edit_target(ProtocolBin, SelectorBin, Verb) ->
+    Path =
+        case class_source_file(ProtocolBin) of
+            nil -> "";
+            FileBin -> binary_to_list(FileBin)
+        end,
+    case beamtalk_workspace_meta:get_protocol_source(ProtocolBin) of
+        undefined ->
+            case no_source_reason(ProtocolBin) of
+                <<"stdlib">> ->
+                    {error, stdlib_protocol_patch_read_only_error(ProtocolBin, SelectorBin, Verb)};
+                _ ->
+                    {error,
+                        {compile_error,
+                            <<"Protocol source not available for ", ProtocolBin/binary,
+                                " (it must be loaded from a file to be patched)">>}}
+            end;
+        Source ->
+            case is_stdlib_path(Path) of
+                true ->
+                    {error, stdlib_protocol_patch_read_only_error(ProtocolBin, SelectorBin, Verb)};
+                false ->
+                    {ok, Path, Source}
+            end
+    end.
+
+%% Splice `MethodSource` into the protocol's `Source` (as text): replace the
+%% same-selector provision in place, or append after a blank line — the same
+%% convention `Workspace flush` uses for a brand-new method. The result is
+%% only ever a candidate: `apply_protocol_edit/5` compiles it before anything
+%% is installed, and the selector is re-resolved on it here so a body declaring
+%% a different selector than asked for is rejected loudly.
+-spec patched_protocol_source(string(), binary(), binary(), binary()) ->
+    {ok, string()} | {error, term()}.
+patched_protocol_source(Source, ProtocolBin, SelectorBin, MethodSource) ->
+    SourceBin = unicode:characters_to_binary(Source),
+    {Span, Indent, PrevSource} =
+        case beamtalk_compiler:resolve_method_span(SourceBin, ProtocolBin, SelectorBin, instance) of
+            {ok, S, Prev} -> {S, beamtalk_workspace_reshape:leading_ws(Prev), Prev};
+            {error, _, _} -> {undefined, sibling_method_indent(SourceBin), undefined}
+        end,
+    case beamtalk_compiler:reindent_method_source(MethodSource, Indent) of
+        {ok, Reindented} ->
+            NewBin =
+                case Span of
+                    undefined ->
+                        Trimmed = beamtalk_workspace_reshape:strip_trailing_newlines(SourceBin),
+                        Added = beamtalk_workspace_reshape:ensure_trailing_newline(Reindented),
+                        <<Trimmed/binary, "\n\n", Added/binary>>;
+                    _ ->
+                        splice_replace(
+                            SourceBin, Span, match_trailing_newline(Reindented, PrevSource)
+                        )
+                end,
+            case
+                beamtalk_compiler:resolve_method_span(NewBin, ProtocolBin, SelectorBin, instance)
+            of
+                {ok, _, _} ->
+                    {ok, unicode:characters_to_list(NewBin)};
+                {error, _, _} ->
+                    {error,
+                        {compile_error,
+                            <<"Method selector mismatch: asked to patch '", SelectorBin/binary,
+                                "' but the source defines a different selector">>}}
+            end;
+        {error, _Reason, Msg} ->
+            {error, {compile_error, Msg}}
+    end.
+
+%% Compile the edited protocol source and run it through the atomic fan-out
+%% (`reload_protocol_fanout/3`: compile protocol + every source-backed user, and
+%% install only if all compiled; rollback on a partial install failure).
+%% `Captures` are ADR 0105 signature-generation captures taken BEFORE the
+%% install for every user (see `protocol_user_captures/2`): on success each
+%% user's known dependents are re-checked exactly as for a class method patch —
+%% `activate_module/4`'s own shape re-check only covers field-shape changes, so
+%% this is what makes a changed/removed provision's signature re-check the
+%% senders of that selector on every user; on failure each capture is undone.
+-spec apply_protocol_edit(
+    binary(), string(), string(), [{binary(), capture_outcome()}], binary()
+) -> ok | {error, term()}.
+apply_protocol_edit(ProtocolBin, Path, NewSource, Captures, SelectorBin) ->
+    ModuleNameOverride = compute_package_module_name(Path),
+    PrebuiltIndexes = with_ambient_protocol_sources(beamtalk_repl_compiler:build_class_indexes()),
+    Result =
+        case
+            compile_reload_source(NewSource, Path, ModuleNameOverride, undefined, PrebuiltIndexes)
+        of
+            {ok, protocol_definition, _Info} = ProtocolResult ->
+                reload_protocol_fanout(ProtocolResult, Path, NewSource);
+            {ok, _Tag, _, _, _} ->
+                {error,
+                    {compile_error,
+                        <<"Edited source for ", ProtocolBin/binary,
+                            " no longer defines a protocol">>}};
+            {error, _} = Err ->
+                Err
+        end,
+    case Result of
+        {ok, _ClassNames} ->
+            lists:foreach(
+                fun({UserBin, Capture}) ->
+                    maybe_trigger_recheck(UserBin, SelectorBin, instance, Capture)
+                end,
+                Captures
+            );
+        {error, Reason} ->
+            lists:foreach(
+                fun({UserBin, Capture}) ->
+                    rollback_signature_generation(UserBin, SelectorBin, instance, Capture)
+                end,
+                Captures
+            ),
+            {error, Reason}
+    end.
+
+%% `{UserClassBin, Capture}` for every loaded, source-backed user of the
+%% protocol — the same set `discover_fanout_targets/1` will recompile — where
+%% `Capture` is `CaptureFun(UserClassBin)`.
+-spec protocol_user_captures(binary(), fun((binary()) -> capture_outcome())) ->
+    [{binary(), capture_outcome()}].
+protocol_user_captures(ProtocolBin, CaptureFun) ->
+    case beamtalk_repl_server:safe_to_existing_atom(ProtocolBin) of
+        {ok, Protocol} ->
+            {Targets, _Skipped} = discover_fanout_targets([Protocol]),
+            [
+                {UserBin, CaptureFun(UserBin)}
+             || User <- Targets, UserBin <- [normalize_class_source_key(User)]
+            ];
+        {error, _} ->
+            []
+    end.
+
+-spec protocol_class_side_provision_error(binary(), binary()) -> #beamtalk_error{}.
+protocol_class_side_provision_error(ProtocolBin, SelectorBin) ->
+    Err0 = beamtalk_error:new(runtime_error, 'Protocol'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([
+            <<"Cannot patch class-side '">>,
+            SelectorBin,
+            <<"' on protocol '">>,
+            ProtocolBin,
+            <<"': protocols provide instance-side methods only">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Err1, <<"Class-side provisions are not supported yet (ADR 0127 section 13).">>
+    ).
+
+%% Structured refusal for a live patch/removal against a stdlib protocol —
+%% the message ADR 0127 §11 approved, mirroring
+%% `beamtalk_repl_eval:stdlib_method_read_only_error/2`'s class-level one.
+-spec stdlib_protocol_patch_read_only_error(binary(), binary(), binary()) -> #beamtalk_error{}.
+stdlib_protocol_patch_read_only_error(ProtocolBin, SelectorBin, Verb) ->
+    Err0 = beamtalk_error:new(runtime_error, 'Protocol'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([
+            <<"Cannot ">>,
+            Verb,
+            <<" '">>,
+            SelectorBin,
+            <<"' on stdlib protocol '">>,
+            ProtocolBin,
+            <<"': built-in protocols are read-only in the workspace">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Err1,
+        <<"Built-in (stdlib) protocols ship with the standard library; edit them in the Beamtalk source tree and rebuild, not from the workspace.">>
+    ).
+
+%%% ----------------------------------------------------------------------------
 %%% New-class creation (ADR 0082 Phase 1)
 %%% ----------------------------------------------------------------------------
 
@@ -6061,7 +6463,7 @@ class_module(ClassNameBin) ->
                 Pid when is_pid(Pid) ->
                     {ok, beamtalk_object_class:module_name_safe(Pid)};
                 _ ->
-                    error
+                    protocol_module(ClassName)
             end;
         {error, _} ->
             error
@@ -6632,7 +7034,14 @@ class_source_file(ClassNameBin) ->
                     ModuleName = beamtalk_object_class:module_name_safe(Pid),
                     beamtalk_reflection:source_file_from_module(ModuleName);
                 _ ->
-                    nil
+                    %% ADR 0127: a protocol's provision patch/removal is
+                    %% recorded (and flushed) against the PROTOCOL's own file.
+                    case protocol_module(ClassName) of
+                        {ok, ProtocolModule} ->
+                            beamtalk_reflection:source_file_from_module(ProtocolModule);
+                        error ->
+                            nil
+                    end
             end;
         {error, _} ->
             nil

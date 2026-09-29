@@ -108,34 +108,29 @@ Beamtalk help: Integer selector: #factorial  // show method documentation
 
 ## Access from compiled code
 
-The convenience binding `Transcript` is injected
-by the workspace and is only available in the REPL and btscript contexts.
-`Workspace` and `Beamtalk` are ordinary class-side facades: send to them
-directly anywhere (`Workspace` raises `no_workspace` when no workspace is
-running; `Workspace isAvailable` asks without raising).
-
-In compiled code (inside `.bt` class files), use the explicit form for Transcript:
+`Transcript`, `Workspace` and `Beamtalk` are ordinary class-side facades:
+send to them directly anywhere, including compiled code (`Workspace` raises
+`no_workspace` when no workspace is running; `Workspace isAvailable` asks
+without raising). `Transcript` writes to the REPL's transcript inside an
+interactive workspace and to a plain `Logger` notice elsewhere; programs
+should use `Logger` or `Console`.
 
 ```beamtalk
-TranscriptStream current show: "Hello from compiled code"
+Transcript showCr: "Hello from compiled code"
 Workspace classes
 Beamtalk version
 ```
 
-`TranscriptStream` stores its instance in a `current` class variable, set
-during workspace bootstrap.
-
 ## Summary
 
-**Transcript** (actor — shared log):
+**Transcript** (class-side facade — the REPL's shared log):
 
 ```text
-Transcript show: value      → self (appends to buffer)
-Transcript cr               → self (appends newline)
-Transcript recent           → List (buffer contents)
-Transcript clear            → nil (empties buffer)
-Transcript subscribe        → self (subscribe to output)
-Transcript unsubscribe      → self (unsubscribe)
+Transcript show: value      → nil (appends to buffer / Logger notice)
+Transcript cr               → nil (appends newline / no-op)
+Transcript showCr: value    → nil (show: then cr)
+Transcript recent           → List (buffer contents; no_workspace outside the REPL)
+Transcript clear            → nil (empties buffer; no_workspace outside the REPL)
 ```
 
 **Workspace** (value object — workspace introspection):

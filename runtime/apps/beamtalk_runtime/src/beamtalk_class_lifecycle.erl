@@ -137,7 +137,28 @@ module) from `beamtalk_protocol_registry`.
 """.
 -spec purge_protocol(atom()) -> ok.
 purge_protocol(Module) ->
-    beamtalk_protocol_registry:unregister_protocol(Module).
+    %% Capture the names BEFORE unregistering (the registry row is what maps
+    %% Module -> protocol names), then drop each one's tracked source from
+    %% `beamtalk_workspace_meta` via the registered-name cast (no compile-time
+    %% dependency on `beamtalk_workspace`, as with `purge_workspace_class_source/1`).
+    Names = [
+        Name
+     || Name <- beamtalk_protocol_registry:all_protocol_names(),
+        case beamtalk_protocol_registry:protocol_info(Name) of
+            #{module := Module} -> true;
+            _ -> false
+        end
+    ],
+    ok = beamtalk_protocol_registry:unregister_protocol(Module),
+    lists:foreach(
+        fun(Name) ->
+            gen_server:cast(
+                beamtalk_workspace_meta,
+                {remove_protocol_source, atom_to_binary(Name, utf8)}
+            )
+        end,
+        Names
+    ).
 
 -doc """
 Remove `ClassName` from the ADR 0127 §12 users index (`beamtalk_protocol_

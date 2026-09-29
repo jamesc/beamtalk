@@ -348,25 +348,21 @@ Stream(from: 1) | select: [...]
 
 **⚠️ Side effects are lazy:** In a pipeline like `stream collect: [:x | Transcript show: x. x * 2]`, the `show:` only runs when a terminal operation pulls elements through — not when the pipeline is defined.
 
-## Workspace Singletons
+## Transcript
 
-The REPL provides convenience bindings for workspace singletons. You can use either the short binding name or the explicit class method:
+`Transcript` is a class-side facade (no instance): inside the REPL it writes to the workspace's transcript; in compiled code, `beamtalk run` and tests it becomes a plain `Logger` notice. It works the same everywhere:
 
 ```beamtalk
-// Convenience binding (available in REPL)
 > Transcript show: "hello"
-hello
-
-// Explicit form (works everywhere, including loaded classes)
-> TranscriptStream current show: "hello"
 hello
 ```
 
-Both forms work in the REPL. In loaded classes (`.bt` files), use the explicit form since convenience bindings are only available in REPL sessions.
+| Selector | Description |
+|----------|-------------|
+| `show:` / `showCr:` / `cr` | Write output |
+| `recent` / `clear` | Read or empty the REPL transcript buffer (REPL only) |
 
-| Convenience Binding | Explicit Form | Description |
-|---------------------|---------------|-------------|
-| `Transcript` | `TranscriptStream current` | Output stream for debugging |
+Programs should use `Logger` or `Console` for output.
 
 ## Exiting the REPL
 
