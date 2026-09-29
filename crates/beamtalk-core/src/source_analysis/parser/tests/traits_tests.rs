@@ -521,3 +521,36 @@ fn parse_protocol_state_declaration_does_not_swallow_following_signature() {
     assert_eq!(proto.method_signatures.len(), 1);
     assert_eq!(proto.method_signatures[0].selector.name(), "count");
 }
+
+#[test]
+fn parse_class_uses_line_followed_by_keyword_method_without_period() {
+    // BT-3620: no clause, no period, no intervening state line — the next
+    // keyword method must not be folded into a `uses:<selector>` method.
+    let module = parse_ok(
+        "Value subclass: Proxy
+  uses: Comparable
+
+  doesNotUnderstand: sel args: args => nil",
+    );
+    let class = &module.classes[0];
+    assert_eq!(class.uses.len(), 1);
+    assert_eq!(class.uses[0].protocol.name, "Comparable");
+    assert_eq!(class.methods.len(), 1);
+    assert_eq!(class.methods[0].selector.name(), "doesNotUnderstand:args:");
+}
+
+#[test]
+fn parse_class_multi_part_method_named_uses_on_one_line_is_a_method() {
+    let module = parse_ok(
+        "Value subclass: Weird
+  uses: a other: b => a",
+    );
+    let class = &module.classes[0];
+    assert!(class.uses.is_empty());
+    assert!(
+        class
+            .methods
+            .iter()
+            .any(|m| m.selector.name() == "uses:other:")
+    );
+}
