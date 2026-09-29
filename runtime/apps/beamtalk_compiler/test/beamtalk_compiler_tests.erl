@@ -49,7 +49,7 @@ compiler_test_() ->
         {"compile_core_erlang parse error", fun compile_core_erlang_parse_error/0},
         {"backend defaults to port", fun backend_default_port/0},
         {"multiple compiles on same server", fun multiple_compiles/0},
-        {"compile file with workspace_mode=false", fun compile_file_workspace_mode/0},
+        {"compile file with default options", fun compile_file_default_options/0},
         {"compile_expression with class definition", fun compile_expression_class_def/0},
         {"compiler app module callbacks", fun compiler_app_callbacks/0},
         {"resolve_method_span instance method", fun resolve_method_span_instance/0},
@@ -227,9 +227,9 @@ multiple_compiles() ->
     {ok, _, []} = beamtalk_compiler:compile_expression(<<"3 * 4">>, <<"m2">>, []),
     {ok, _, []} = beamtalk_compiler:compile_expression(<<"5 - 1">>, <<"m3">>, []).
 
-compile_file_workspace_mode() ->
+compile_file_default_options() ->
     Source = <<"Actor subclass: WsModeTest\n  value => 42">>,
-    {ok, Result} = beamtalk_compiler:compile(Source, #{workspace_mode => false}),
+    {ok, Result} = beamtalk_compiler:compile(Source, #{}),
     ?assert(is_map(Result)),
     ?assert(is_binary(maps:get(core_erlang, Result))).
 

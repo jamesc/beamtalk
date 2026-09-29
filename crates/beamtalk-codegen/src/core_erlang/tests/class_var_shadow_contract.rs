@@ -80,8 +80,7 @@ fn shadow_key_atom_in_hrl_fixture_matches_compiled_codegen_output() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("bt@shadowcontractcounter")
-            .with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("bt@shadowcontractcounter"),
     )
     .expect("codegen should succeed");
 

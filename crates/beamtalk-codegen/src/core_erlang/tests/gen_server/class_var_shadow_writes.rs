@@ -17,11 +17,8 @@ fn test_class_var_mutation_emits_shadow_write() {
     let src = "Object subclass: ShadowCounter\n  classState: runs = 0\n\n  class bump =>\n    self.runs := self.runs + 1\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@shadowcounter").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code = generate_module(&module, CodegenOptions::new("bt@shadowcounter"))
+        .expect("codegen should succeed");
     assert!(
         code.contains(
             "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
@@ -51,10 +48,7 @@ fn test_class_var_mutation_in_while_loop_body_compiles_and_threads_class_vars() 
     let src = "Object subclass: LoopShadowCounter\n  classState: runs = 0\n\n  class countUpTo: n =>\n    i := 0\n    [i < n] whileTrue: [\n      self.runs := self.runs + 1\n      i := i + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@loopshadowcounter").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@loopshadowcounter"));
     let code = result.unwrap_or_else(|e| {
         panic!("self.runs := ... inside a whileTrue: body must compile. Got: {e:?}")
     });
@@ -84,10 +78,7 @@ fn test_bare_class_var_mutation_in_times_repeat_body_hits_existing_stored_closur
     let src = "Object subclass: TimesRepeatShadowCounter\n  classState: runs = 0\n\n  class bumpN: n =>\n    n timesRepeat: [self.runs := self.runs + 1]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@timesrepeatshadowcounter").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@timesrepeatshadowcounter"));
     assert!(
         matches!(
             result,
@@ -111,10 +102,7 @@ fn test_class_var_mutation_alongside_local_in_times_repeat_body_compiles() {
     let src = "Object subclass: TimesRepeatShadowCounter2\n  classState: runs = 0\n\n  class bumpN: n =>\n    seen := 0\n    n timesRepeat: [\n      self.runs := self.runs + 1\n      seen := seen + 1\n    ]\n    seen";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@timesrepeatshadowcounter2").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@timesrepeatshadowcounter2"));
     let code = result.unwrap_or_else(|e| {
         panic!(
             "self.runs := ... alongside a local mutation inside a timesRepeat: body must \
@@ -138,11 +126,8 @@ fn test_class_var_mutation_before_loop_still_emits_shadow_write() {
     let src = "Object subclass: LoopShadowCounterOk\n  classState: runs = 0\n\n  class bumpThenLoop: n =>\n    self.runs := self.runs + 1\n    i := 0\n    [i < n] whileTrue: [i := i + 1]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@loopshadowcounterok").with_workspace_mode(true),
-    )
-    .expect("mutation before the loop, at top frame, must still compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@loopshadowcounterok"))
+        .expect("mutation before the loop, at top frame, must still compile");
     assert!(
         code.contains("$bt_class_vars_shadow"),
         "top-frame class-var mutation before the loop must still emit the \
@@ -168,10 +153,7 @@ fn test_nested_letrec_direct_field_mutation_in_inner_loop_is_compile_error() {
     let src = "Object subclass: NestedLoopShadowCounter\n  classState: runs = 0\n\n  class nestedBump: n =>\n    i := 0\n    [i < n] whileTrue: [\n      j := 0\n      [j < n] whileTrue: [\n        self.runs := self.runs + 1\n        j := j + 1\n      ]\n      i := i + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@nestedloopshadowcounter").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@nestedloopshadowcounter"));
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
             assert_eq!(mutation, "class variable 'runs'");
@@ -194,10 +176,7 @@ fn test_nested_letrec_self_send_mutation_in_inner_loop_is_compile_error() {
     let src = "Object subclass: NestedLoopSelfSendCounter\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedBumpViaSelfSend: n =>\n    i := 0\n    [i < n] whileTrue: [\n      j := 0\n      [j < n] whileTrue: [\n        self bump\n        j := j + 1\n      ]\n      i := i + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@nestedloopselfsendcounter").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@nestedloopselfsendcounter"));
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
             assert_eq!(mutation, "'self bump'");
@@ -224,10 +203,7 @@ fn test_nested_timesrepeat_class_var_mutation_in_inner_loop_is_compile_error() {
     let src = "Object subclass: NestedCountedLoopCounter\n  classState: runs = 0\n\n  class nestedBumpTimes: n =>\n    seen := 0\n    n timesRepeat: [\n      n timesRepeat: [\n        self.runs := self.runs + 1\n      ]\n      seen := seen + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@nestedcountedloopcounter").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@nestedcountedloopcounter"));
     assert!(
         matches!(
             result,
@@ -245,11 +221,8 @@ fn test_instance_field_mutation_does_not_emit_shadow_write() {
     let src = "Actor subclass: PlainCounter\n  state: count = 0\n\n  bump => self.count := self.count + 1";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@plaincounter").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code = generate_module(&module, CodegenOptions::new("bt@plaincounter"))
+        .expect("codegen should succeed");
     assert!(
         !code.contains("$bt_class_vars_shadow"),
         "instance field mutation must not emit the class-var shadow write. Got:\n{code}"

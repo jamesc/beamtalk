@@ -29,10 +29,6 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         .and_then(term_to_bool)
         .unwrap_or(false);
 
-    let workspace_mode = map_get(request, "workspace_mode")
-        .and_then(term_to_bool)
-        .unwrap_or(true);
-
     let pre_class_hierarchy = extract_class_hierarchy(request);
     // A class/protocol-defining compile needs the ambient protocol
     // cache too, not just `diagnostics/3` — see `extract_protocol_registry`'s
@@ -92,7 +88,6 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode,
         allow_primitives: false,
-        workspace_mode,
         suppress_warnings: false,
         ..Default::default()
     };
@@ -226,7 +221,6 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // Generate Core Erlang
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
     let mut codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(&module_name)
-        .with_workspace_mode(workspace_mode)
         .with_source(&source)
         .with_class_module_index(class_module_index)
         .with_class_superclass_index(class_superclass_index)

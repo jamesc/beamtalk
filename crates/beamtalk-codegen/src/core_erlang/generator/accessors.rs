@@ -55,20 +55,6 @@ impl CoreErlangGenerator {
         self.repl_context_mut().repl_loop_mutated = value;
     }
 
-    /// Returns `true` if workspace mode is active.
-    // widened from `pub(crate)` — `beamtalk-repl` queries/sets this
-    // around its own generation calls.
-    pub fn workspace_mode(&self) -> bool {
-        self.repl_context
-            .as_ref()
-            .is_some_and(|ctx| ctx.workspace_mode)
-    }
-
-    /// Sets workspace mode, initialising the context if absent.
-    pub fn set_workspace_mode(&mut self, value: bool) {
-        self.repl_context_mut().workspace_mode = value;
-    }
-
     /// Returns a mutable reference to the REPL context, creating it if absent.
     pub(in crate::core_erlang) fn repl_context_mut(&mut self) -> &mut ReplContext {
         self.repl_context.get_or_insert_with(ReplContext::new)

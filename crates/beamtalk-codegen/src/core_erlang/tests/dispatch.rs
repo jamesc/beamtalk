@@ -2123,11 +2123,8 @@ fn test_cast_send_in_actor_method_compiles() {
     let src = "Actor subclass: Sender\n  state: target = nil\n\n  fire =>\n    target increment!\n    \"done\"\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("sender").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("sender")).expect("codegen should succeed");
 
     eprintln!("Generated code for cast send in actor method:\n{code}");
 
@@ -2665,10 +2662,7 @@ fn test_class_side_clear_field_nested_in_loop_is_compile_error() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvclearinloop").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvclearinloop"));
     let err = match result {
         Err(err @ CodeGenError::UnsupportedFeature { .. }) => err,
         other => panic!("Expected UnsupportedFeature for a nested clearField:. Got: {other:?}"),
@@ -2699,10 +2693,7 @@ fn test_class_side_clear_field_nested_in_conditional_is_compile_error() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvclearinconditional").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvclearinconditional"));
     let err = match result {
         Err(err @ CodeGenError::UnsupportedFeature { .. }) => err,
         other => panic!("Expected UnsupportedFeature for a nested clearField:. Got: {other:?}"),

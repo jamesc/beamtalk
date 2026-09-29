@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3644 (ADR 0129 §10): a class-side send to a class that does not exist
+// raises `class_not_found` in batch-compiled code. The same source loaded
+// into the REPL raises the same error (no `nil` fallback for workspace-loaded
+// method bodies) — see tests/repl-protocol/cases/class_side_missing_class.btscript.
+
+TestCase subclass: ClassSideMissingClassTest
+
+  /// A class-side send to an unknown class raises `class_not_found`.
+  testMissingClassSendRaisesClassNotFound =>
+    self should: [BT3644NoSuchClass someMessage] raise: #class_not_found
+
+  /// The same holds for a keyword send with arguments.
+  testMissingClassKeywordSendRaisesClassNotFound =>
+    self should: [BT3644NoSuchClass with: 1 and: 2] raise: #class_not_found

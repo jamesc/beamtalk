@@ -44,11 +44,8 @@ fn test_value_type_field_write_in_to_do_threads_self_through_tail_call() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtloopselfthread").with_workspace_mode(true),
-    )
-    .expect("value-type field write inside to:do: must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtloopselfthread"))
+        .expect("value-type field write inside to:do: must compile");
 
     assert!(
         code.contains("fun (_loopidx3, StateAcc, Self)"),
@@ -94,11 +91,8 @@ fn test_value_type_field_only_loop_packs_from_fresh_map_not_state() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtloopselfonly").with_workspace_mode(true),
-    )
-    .expect("a field-write-only value-type loop must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtloopselfonly"))
+        .expect("a field-write-only value-type loop must compile");
 
     assert!(
         code.contains("call 'maps':'new'()"),
@@ -129,11 +123,8 @@ fn test_value_type_field_write_in_if_true_merges_self_out_of_branch() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtcondselfthread").with_workspace_mode(true),
-    )
-    .expect("value-type field write inside ifTrue: must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtcondselfthread"))
+        .expect("value-type field write inside ifTrue: must compile");
 
     assert!(
         code.contains("{Seen, Self1}"),
@@ -167,11 +158,8 @@ fn test_value_type_field_write_in_if_true_if_false_merges_both_arms() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtcondbothselfthread").with_workspace_mode(true),
-    )
-    .expect("value-type field writes in both conditional arms must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtcondbothselfthread"))
+        .expect("value-type field writes in both conditional arms must compile");
 
     // No outer-local mutation at all here: the merge tuple's only slot is
     // `Self`, so each arm returns a 1-tuple and the rebind reads element 1.
@@ -206,10 +194,7 @@ fn test_value_type_field_write_in_nested_loop_is_compile_error() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtnestedloopself").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@vtnestedloopself"));
     match result {
         Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop { mutation, .. }) => {
             assert_eq!(mutation, "field 'self.total'");
@@ -241,10 +226,7 @@ fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtcondselflast").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@vtcondselflast"));
     assert!(
         matches!(
             result,
@@ -638,11 +620,8 @@ fn test_value_type_multiple_top_level_field_writes_in_loop_still_thread() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtmultitopwrite").with_workspace_mode(true),
-    )
-    .expect("two bare top-level value-type writes must still compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtmultitopwrite"))
+        .expect("two bare top-level value-type writes must still compile");
     assert_compiles_through_erlc("bt@vtmultitopwrite", &code);
 }
 
@@ -666,11 +645,8 @@ fn test_value_type_field_write_in_non_last_conditional_threads_self_out() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtcondselfnonlast").with_workspace_mode(true),
-    )
-    .expect("a top-level field write in a non-last conditional branch must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtcondselfnonlast"))
+        .expect("a top-level field write in a non-last conditional branch must compile");
     assert!(
         code.contains("call 'maps':'get'('total', Self1)"),
         "the method's trailing field read must see the branch-merged Self1. Got:\n{code}"

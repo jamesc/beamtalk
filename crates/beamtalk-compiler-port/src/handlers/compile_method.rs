@@ -50,9 +50,6 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     let stdlib_mode = map_get(request, "stdlib_mode")
         .and_then(term_to_bool)
         .unwrap_or(false);
-    let workspace_mode = map_get(request, "workspace_mode")
-        .and_then(term_to_bool)
-        .unwrap_or(true);
     let pre_class_hierarchy = extract_class_hierarchy(request);
     // See `handle_compile`'s equivalent comment — a `compile_method`
     // patch is a class-defining/-patching compile too, so it needs the
@@ -209,7 +206,6 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode,
         allow_primitives: false,
-        workspace_mode,
         suppress_warnings: false,
         ..Default::default()
     };
@@ -262,7 +258,6 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         &analysis.external_protocols,
     );
     let codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(&module_name)
-        .with_workspace_mode(workspace_mode)
         .with_source(&merged_class_source)
         .with_class_module_index(class_module_index)
         .with_class_superclass_index(class_superclass_index)

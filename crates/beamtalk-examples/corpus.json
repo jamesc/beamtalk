@@ -16468,6 +16468,25 @@
       "explanation": "BT-773: self and explicit class name in class methods should both use direct dispatch (not actor message send) to avoid deadlock BT-1201: class method assigning result of self classMethod to local var"
     },
     {
+      "id": "stdlib-test-class-side-missing-class-test",
+      "title": "ClassSideMissingClassTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ClassSideMissingClassTest",
+        "TestCase",
+        "class_side_missing_class_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing",
+        "testMissingClassKeywordSendRaisesClassNotFound",
+        "testMissingClassSendRaisesClassNotFound"
+      ],
+      "source": "// BT-3644 (ADR 0129 §10): a class-side send to a class that does not exist\n// raises `class_not_found` in batch-compiled code. The same source loaded\n// into the REPL raises the same error (no `nil` fallback for workspace-loaded\n// method bodies) — see tests/repl-protocol/cases/class_side_missing_class.btscript.\n\nTestCase subclass: ClassSideMissingClassTest\n\n  /// A class-side send to an unknown class raises `class_not_found`.\n  testMissingClassSendRaisesClassNotFound =>\n    self should: [BT3644NoSuchClass someMessage] raise: #class_not_found\n\n  /// The same holds for a keyword send with arguments.\n  testMissingClassKeywordSendRaisesClassNotFound =>\n    self should: [BT3644NoSuchClass with: 1 and: 2] raise: #class_not_found",
+      "explanation": "BT-3644 (ADR 0129 §10): a class-side send to a class that does not exist raises `class_not_found` in batch-compiled code. The same source loaded into the REPL raises the same error (no `nil` fallback for workspace-loaded method bodies) — see tests/repl-protocol/cases/class_side_missing_class.btscript."
+    },
+    {
       "id": "stdlib-test-class-state-supervisor-test",
       "title": "ClassStateSupervisorTest",
       "category": "stdlib-tests",

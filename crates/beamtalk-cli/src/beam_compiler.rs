@@ -750,7 +750,6 @@ pub fn write_core_erlang_with_bindings(
     let mut codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(module_name)
         .with_bindings(bindings.clone())
         .with_source_opt(source_text)
-        .with_workspace_mode(options.workspace_mode)
         .with_stdlib_mode(options.stdlib_mode)
         .with_class_module_index(hierarchy.class_module_index.clone())
         .with_class_superclass_index(hierarchy.class_superclass_index.clone())
@@ -981,7 +980,6 @@ pub(crate) fn compile_source_with_bindings(
     let returned_diags = diagnostics;
 
     // Generate Core Erlang (with source text for CompiledMethod introspection, and bindings)
-    // Pass workspace_mode for workspace binding dispatch
     // Use an absolute path so reload works regardless of the
     // working directory at reload time. Always pass the source path so that
     // line annotations and the 'file' attribute populate BEAM stacktraces

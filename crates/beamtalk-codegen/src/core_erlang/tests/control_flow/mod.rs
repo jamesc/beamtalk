@@ -42,10 +42,7 @@ use super::*;
 fn field_assignment_rejection_field(src: &str, module_name: &str) -> String {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new(module_name).with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new(module_name));
     let err = match result {
         Err(err @ CodeGenError::FieldAssignmentInUnsupportedBlock { .. }) => err,
         other => {

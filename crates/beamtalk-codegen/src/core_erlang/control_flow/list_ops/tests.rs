@@ -1879,7 +1879,7 @@ fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2122,7 +2122,7 @@ fn test_select_wrong_arity_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2143,7 +2143,7 @@ fn test_reject_wrong_arity_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2165,7 +2165,7 @@ fn test_any_satisfy_wrong_arity_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2187,7 +2187,7 @@ fn test_all_satisfy_wrong_arity_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2208,7 +2208,7 @@ fn test_detect_wrong_arity_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2229,7 +2229,7 @@ fn test_detect_if_none_wrong_arity_predicate_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2250,7 +2250,7 @@ fn test_detect_if_none_wrong_arity_if_none_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2490,7 +2490,7 @@ fn test_do_wrong_arity_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -2511,7 +2511,7 @@ fn test_collect_wrong_arity_block_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(

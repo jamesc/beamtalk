@@ -1016,10 +1016,15 @@ fn test_class_method_call_generation() {
 
     let code = generate_repl_expression(&expr, "repl_eval").expect("codegen should succeed");
 
-    // ADR 0019: Beamtalk should check bindings first, then class_send fallback
+    // ADR 0129 §7: REPL sends check session bindings, then the class registry
+    // via class_send. There is no singleton step any more.
     assert!(
         code.contains("maps':'find") && code.contains("class_send"),
         "Beamtalk should check bindings then class_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("resolve_singleton_instance"),
+        "Beamtalk send should not consult the singleton registry. Got:\n{code}"
     );
     assert!(
         !code.contains("persistent_term"),
@@ -1042,10 +1047,10 @@ fn test_class_method_call_generation() {
     let code2 = generate_repl_expression(&expr2, "repl_eval2")
         .expect("codegen should succeed for non-binding class");
 
-    // ADR 0019: In REPL, all class references check bindings then class_send
+    // ADR 0129 §7: REPL class sends check session bindings, then class_send.
     assert!(
         code2.contains("maps':'find") && code2.contains("class_send"),
-        "Non-binding class should check bindings then class_send. Got:\n{code2}"
+        "Class send should check bindings then class_send. Got:\n{code2}"
     );
     assert!(
         !code2.contains("persistent_term"),
@@ -1340,27 +1345,24 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // ADR 0081 Phase 1: an unqualified REPL class reference checks the
-    // session locals map first (so a local shadows the class), then delegates to
-    // the shared runtime resolver. The class object construction and dynamic
-    // module_name lookup now live in beamtalk_workspace:resolve_class_reference/2.
-
-    // Should check the session locals map first (shadowing support).
+    // ADR 0129 §7: a REPL class reference checks the session map first (a
+    // binding shadows the class), then the class registry inline — no runtime
+    // resolver.
     assert!(
         code.contains("call 'maps':'find'('Point', "),
         "Should check locals map for the class name first. Got:\n{code}"
     );
-
-    // Should delegate the miss path to the shared runtime resolver.
     assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_class_reference'("),
-        "Should delegate to resolve_class_reference on a locals miss. Got:\n{code}"
+        code.contains("call 'beamtalk_class_registry':'whereis_class'('Point')"),
+        "Should look the class up in the class registry. Got:\n{code}"
     );
-
-    // Should pass the class name as an atom to the resolver.
     assert!(
-        code.contains("'resolve_class_reference'(") && code.contains("'Point')"),
-        "Should pass the class name atom to the resolver. Got:\n{code}"
+        !code.contains("resolve_class_reference"),
+        "Should not delegate to the runtime resolver. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'Point class'"),
+        "Should build the class object with the display name. Got:\n{code}"
     );
 }
 
@@ -1394,23 +1396,23 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // ADR 0081 Phase 1: undefined-class validation now happens in the
-    // runtime resolver (beamtalk_workspace:resolve_class_reference/2), which
-    // raises the same class_not_found error. The REPL codegen emits a locals
-    // check then delegates to that resolver.
-
-    // Should check the session locals map first (shadowing support).
+    // ADR 0129 §10: an undefined class raises class_not_found from the
+    // registry lookup itself, identically to batch-compiled code.
     assert!(
         code.contains("call 'maps':'find'('NonExistentClass', "),
         "Should check locals map for the class name first. Got:\n{code}"
     );
-
-    // Should delegate to the shared resolver, which raises class_not_found for
-    // a genuinely unknown class.
     assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_class_reference'(")
-            && code.contains("'NonExistentClass')"),
-        "Should delegate undefined-class handling to resolve_class_reference. Got:\n{code}"
+        code.contains("call 'beamtalk_class_registry':'whereis_class'('NonExistentClass')"),
+        "Should look the class up in the class registry. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_not_found', 'NonExistentClass'"),
+        "Should raise class_not_found for an undefined class. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("resolve_class_reference"),
+        "Should not delegate to the runtime resolver. Got:\n{code}"
     );
 }
 

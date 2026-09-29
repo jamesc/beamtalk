@@ -108,19 +108,13 @@ fn test_bt_1944_typed_param_does_not_change_actor_codegen() {
 
     let tokens_u = beamtalk_core::source_analysis::lex_with_eof(untyped_src);
     let (module_u, _) = beamtalk_core::source_analysis::parse(tokens_u);
-    let code_u = generate_module(
-        &module_u,
-        CodegenOptions::new("test_actor").with_workspace_mode(true),
-    )
-    .expect("untyped should compile");
+    let code_u = generate_module(&module_u, CodegenOptions::new("test_actor"))
+        .expect("untyped should compile");
 
     let tokens_t = beamtalk_core::source_analysis::lex_with_eof(typed_src);
     let (module_t, _) = beamtalk_core::source_analysis::parse(tokens_t);
-    let code_t = generate_module(
-        &module_t,
-        CodegenOptions::new("test_actor").with_workspace_mode(true),
-    )
-    .expect("typed should compile");
+    let code_t = generate_module(&module_t, CodegenOptions::new("test_actor"))
+        .expect("typed should compile");
 
     // Strip metadata lines that naturally differ (source text, param types).
     // Everything else — dispatch, body, exports — must be identical.
