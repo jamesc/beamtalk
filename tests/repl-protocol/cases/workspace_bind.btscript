@@ -19,8 +19,8 @@ Workspace bind: 42 as: #MyValue
 MyValue
 // => 42
 
-// Workspace globals includes the registered name
-globals := Workspace globals
+// Workspace bindings includes the registered name
+globals := Workspace bindings
 // => _
 
 globals includesKey: #MyValue
@@ -48,8 +48,8 @@ MyValue
 Workspace unbind: #MyValue
 // => nil
 
-// Workspace globals no longer includes the unbound name
-globals2 := Workspace globals
+// Workspace bindings no longer includes the unbound name
+globals2 := Workspace bindings
 // => _
 
 globals2 includesKey: #MyValue

@@ -1148,3 +1148,20 @@ reg_value(provided_methods, _, Row, Selectors) -> [Row(S) || S <- Selectors];
 reg_value(type_params, _, _, _) -> [];
 reg_value(extending, _, _, _) -> undefined;
 reg_value(doc, _, _, _) -> none.
+
+%%% ============================================================================
+%%% Class process dying mid-call (BT-3658)
+%%% ============================================================================
+
+%% A stand-in class process that answers the first call by exiting with
+%% `shutdown`: the caller's gen_server:call exits with that real reason,
+%% not noproc/timeout.
+to_class_objects_drops_class_dying_mid_call_test() ->
+    Name = 'BT3658DyingClass',
+    Pid = spawn(fun() ->
+        receive
+            {'$gen_call', _From, _Req} -> exit(shutdown)
+        end
+    end),
+    true = register(beamtalk_class_registry:registry_name(Name), Pid),
+    ?assertEqual([], beamtalk_protocol_registry:to_class_objects([Name])).

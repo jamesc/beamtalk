@@ -159,7 +159,9 @@ do_eval_main(ClassStr, SelectorStr, RestArgs) ->
                     catch io:put_chars(
                         standard_error, [beamtalk_error:format_safe(Err, []), $\n]
                     ),
-                    erlang:halt(1)
+                    %% The entry's call chain can fail (e.g. time out) while an
+                    %% actor's `Program exit: N` graceful stop is in flight.
+                    beamtalk_script_harness:halt_unless_stopping(1)
             end;
         {error, Err} ->
             catch io:put_chars(standard_error, [beamtalk_error:format_safe(Err, []), $\n]),
