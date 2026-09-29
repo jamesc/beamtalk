@@ -56,7 +56,11 @@ The config's required `mode` key selects the child set:
 
 `init/1` also records the node's capabilities (`beamtalk_capability:set/1`),
 which is what makes a `release` node refuse compiler and workspace
-operations (ADR 0125 §1.5), and, for `release` mode, logs a boot warning if
+operations (ADR 0125 §1.5) and a node without a compiler (`start_compiler =>
+false`, or a release without `include_compiler`) refuse compile operations
+(ADR 0129 §4). `include_compiler` is recorded in every mode, derived from
+`starts_compiler/2`. The first child, `beamtalk_workspace_capability_guard`,
+clears the capabilities when this supervisor shuts down. Also, for `release` mode, logs a boot warning if
 `bind_addr` is non-loopback (`maybe_warn_non_loopback_console/3`, ADR 0125
 §1.6). The console-cookie boot refusal (also §1.6) is checked one level up,
 in `beamtalk_workspace_app:maybe_start_workspace/0`, before this
@@ -127,12 +131,6 @@ init(Config) ->
     %% but never silent (ADR 0125 §1.6).
     maybe_warn_non_loopback_console(Mode, Console, BindAddr),
 
-    %% Record what this node may do before any child (or REPL op) runs, so a
-    %% release refuses compiler and workspace operations (ADR 0125 §1.5).
-    ok = beamtalk_capability:set(#{
-        mode => Mode, include_compiler => maps:get(include_compiler, Config, false)
-    }),
-
     %% Set up file logging before children start (they may log during init).
     %% Workspace mode only — run and release modes create no workspace
     %% artifacts on disk.
@@ -160,6 +158,12 @@ init(Config) ->
     %% a programming error, not a runtime input, so it should crash rather than
     %% be silently coerced.
     StartsCompiler = starts_compiler(Mode, Config),
+    %% Record what this node may do before any child (or REPL op) runs, so a
+    %% release refuses compiler and workspace operations (ADR 0125 §1.5) and a
+    %% node without a compiler refuses compile operations in every mode
+    %% (ADR 0129 §4). `include_compiler` is derived from `starts_compiler/2`.
+    Capabilities = #{mode => Mode, include_compiler => StartsCompiler},
+    ok = beamtalk_capability:set(Capabilities),
     %% A release built with `include-compiler` opted into a live-patchable
     %% production image (ADR 0125 §1.5) — name the three risks that decision
     %% carries every time this node boots, not just at build time, so an
@@ -195,7 +199,19 @@ init(Config) ->
 
     ChildSpecs =
         [
-            %% Workspace metadata (must start first - others may query it)
+            %% Capability guard: starts first so it stops last, and clears the
+            %% recorded capabilities when this supervisor shuts down (a stopped
+            %% workspace must not look present, ADR 0129 §4).
+            #{
+                id => beamtalk_workspace_capability_guard,
+                start => {beamtalk_workspace_capability_guard, start_link, [Capabilities]},
+                restart => permanent,
+                shutdown => 5000,
+                type => worker,
+                modules => [beamtalk_workspace_capability_guard]
+            },
+
+            %% Workspace metadata (must start first among the stores - others may query it)
             #{
                 id => beamtalk_workspace_meta,
                 start =>

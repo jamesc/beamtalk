@@ -29,9 +29,11 @@ Each operation falls into one of three classes:
 * `always` — needs nothing a release lacks (`run-entry`, `inspect`,
   `actors`, `actor-stats`, `pid-stats`, `sessions`, …). Anything
   `classify/1` does not name is `always`.
-* `compiler` — compiles source. Refused in `release` mode with
-  `release_mode_no_compiler` unless the release was built with
-  `include_compiler`.
+* `compiler` — compiles source. Refused whenever the node records
+  `include_compiler => false`: in `release` mode with
+  `release_mode_no_compiler` (unless the release was built with
+  `include_compiler`), and in `run`/`workspace` mode with
+  `run_mode_no_compiler` (a packaged escript starts no compiler).
 * `workspace` — writes to (or rewrites) the working tree or its on-disk
   ChangeLog. Refused in `release` mode with `release_mode_no_workspace`,
   **even with** `include_compiler`: a release has no working tree to flush to.
@@ -58,6 +60,9 @@ narrows what a node that *declared* itself a release may do.
     set/1,
     clear/0,
     current/0,
+    recorded/0,
+    require_workspace/1,
+    require_workspace/2,
     classify/1,
     available/1,
     available/2,
@@ -97,6 +102,17 @@ evaluated only if the operation is actually refused.
     "[release] include-compiler = true (see ADR 0125 section 1.5)."
 >>).
 
+-define(NO_WORKSPACE_HINT, <<
+    "Workspace operations are available in the REPL (beamtalk repl), "
+    "beamtalk run and releases, not under beamtalk test. "
+    "For class lookup use Beamtalk classNamed:."
+>>).
+
+-define(RUN_COMPILER_HINT, <<
+    "This node was started without a compiler (a packaged escript ships none). "
+    "Run the project with beamtalk run or beamtalk repl to compile source."
+>>).
+
 -define(WORKSPACE_HINT, <<
     "To change this code: edit the source, `beamtalk release`, and deploy. "
     "[release] include-compiler = true does not re-enable workspace "
@@ -118,7 +134,11 @@ set(#{mode := Mode, include_compiler := IncludeCompiler} = Caps) when
     %% persistent_term:put/2 of an unchanged value is a no-op (no global GC).
     persistent_term:put(?KEY, Caps).
 
--doc "Forget this node's recorded capabilities (tests).".
+-doc """
+Forget this node's recorded capabilities. Called when
+`beamtalk_workspace_sup` shuts down (via its capability guard child), so a
+stopped workspace no longer looks present, and by tests.
+""".
 -spec clear() -> ok.
 clear() ->
     _ = persistent_term:erase(?KEY),
@@ -130,7 +150,51 @@ workspace supervisor has recorded any.
 """.
 -spec current() -> capabilities().
 current() ->
-    persistent_term:get(?KEY, #{mode => workspace, include_compiler => true}).
+    case recorded() of
+        {ok, Caps} -> Caps;
+        none -> #{mode => workspace, include_compiler => true}
+    end.
+
+-doc """
+The capabilities a workspace supervisor recorded on this node, or `none` if
+none has (a bare runtime, e.g. under `beamtalk test`, or after the workspace
+shut down). Unlike `current/0` this has no permissive default.
+""".
+-spec recorded() -> {ok, capabilities()} | none.
+recorded() ->
+    case persistent_term:get(?KEY, undefined) of
+        undefined -> none;
+        Caps -> {ok, Caps}
+    end.
+
+-doc """
+Require a running workspace for `Selector` (ADR 0129 §4). Returns `ok` once a
+workspace supervisor has recorded capabilities on this node (any mode),
+otherwise raises `#beamtalk_error{kind = no_workspace}` with class
+`'Workspace'`. Deliberately stricter than `current/0`, whose permissive
+default keeps bare-runtime unit tests working.
+""".
+-spec require_workspace(atom()) -> ok.
+require_workspace(Selector) ->
+    require_workspace(Selector, 'Workspace').
+
+-doc "Like `require_workspace/1`, naming `Class` as the refused receiver.".
+-spec require_workspace(atom(), atom()) -> ok.
+require_workspace(Selector, Class) when is_atom(Selector), is_atom(Class) ->
+    case recorded() of
+        {ok, _Caps} ->
+            ok;
+        none ->
+            Message = iolist_to_binary(
+                io_lib:format(
+                    "~ts>>~ts needs a running workspace; none is running on this node",
+                    [Class, Selector]
+                )
+            ),
+            Err0 = beamtalk_error:new(no_workspace, Class, Selector),
+            Err1 = beamtalk_error:with_message(Err0, Message),
+            beamtalk_error:raise(beamtalk_error:with_hint(Err1, ?NO_WORKSPACE_HINT))
+    end.
 
 %%% Classification (ADR 0125 §1.5)
 
@@ -200,9 +264,8 @@ available(Op, Caps) ->
 
 -spec permitted(capability_class(), capabilities()) -> boolean().
 permitted(always, _Caps) -> true;
-permitted(_Class, #{mode := Mode}) when Mode =/= release -> true;
 permitted(compiler, #{include_compiler := IncludeCompiler}) -> IncludeCompiler;
-permitted(workspace, _Caps) -> false.
+permitted(workspace, #{mode := Mode}) -> Mode =/= release.
 
 %%% Checks
 
@@ -231,7 +294,7 @@ check(Op, Class, Subject, Caps) ->
     CapClass = classify(Op),
     case permitted(CapClass, Caps) of
         true -> ok;
-        false -> {error, refusal(CapClass, Op, Class, subject_text(Subject))}
+        false -> {error, refusal(CapClass, Op, Class, subject_text(Subject), Caps)}
     end.
 
 -doc """
@@ -251,8 +314,18 @@ require(Op, Class, Subject) ->
 subject_text(Subject) when is_binary(Subject) -> Subject;
 subject_text(Subject) when is_function(Subject, 0) -> Subject().
 
--spec refusal(compiler | workspace, operation(), atom(), binary()) -> #beamtalk_error{}.
-refusal(compiler, Op, Class, Subject) ->
+-spec refusal(compiler | workspace, operation(), atom(), binary(), capabilities()) ->
+    #beamtalk_error{}.
+refusal(compiler, Op, Class, Subject, #{mode := Mode}) when Mode =/= release ->
+    Message = iolist_to_binary([
+        Subject,
+        <<
+            " cannot be compiled.\n\n"
+            "  This node was started without a compiler."
+        >>
+    ]),
+    build(run_mode_no_compiler, Op, Class, Message, ?RUN_COMPILER_HINT, Mode);
+refusal(compiler, Op, Class, Subject, _Caps) ->
     Message = iolist_to_binary([
         Subject,
         <<
@@ -261,8 +334,8 @@ refusal(compiler, Op, Class, Subject) ->
             "  source. Live method patching is a development-mode operation."
         >>
     ]),
-    build(release_mode_no_compiler, Op, Class, Message, ?COMPILER_HINT);
-refusal(workspace, Op, Class, Subject) ->
+    build(release_mode_no_compiler, Op, Class, Message, ?COMPILER_HINT, release);
+refusal(workspace, Op, Class, Subject, _Caps) ->
     Message = iolist_to_binary([
         Subject,
         <<
@@ -272,11 +345,11 @@ refusal(workspace, Op, Class, Subject) ->
             "  operations."
         >>
     ]),
-    build(release_mode_no_workspace, Op, Class, Message, ?WORKSPACE_HINT).
+    build(release_mode_no_workspace, Op, Class, Message, ?WORKSPACE_HINT, release).
 
--spec build(atom(), operation(), atom(), binary(), binary()) -> #beamtalk_error{}.
-build(Kind, Op, Class, Message, Hint) ->
+-spec build(atom(), operation(), atom(), binary(), binary(), mode()) -> #beamtalk_error{}.
+build(Kind, Op, Class, Message, Hint, Mode) ->
     Err0 = beamtalk_error:new(Kind, Class),
     Err1 = beamtalk_error:with_message(Err0, Message),
     Err2 = beamtalk_error:with_hint(Err1, Hint),
-    beamtalk_error:with_details(Err2, #{mode => release, operation => Op}).
+    beamtalk_error:with_details(Err2, #{mode => Mode, operation => Op}).
