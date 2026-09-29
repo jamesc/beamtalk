@@ -28,9 +28,9 @@ pub fn generate_protocol_bif(selector: &str, params: &[String]) -> Option<Docume
         }
         "protocolConformingClasses" => {
             let arg = params.first()?;
-            // Returns class name atoms — runtime converts to class objects
+            // Registry converts class-name atoms to `Behaviour` class objects (BT-3627)
             Some(docvec![
-                "call 'beamtalk_protocol_registry':'conforming_classes'(",
+                "call 'beamtalk_protocol_registry':'conforming_class_objects'(",
                 leaf::var(arg.clone()),
                 ")"
             ])
@@ -59,7 +59,7 @@ pub fn generate_protocol_bif(selector: &str, params: &[String]) -> Option<Docume
         "protocolUsersOf" => {
             let arg = params.first()?;
             Some(docvec![
-                "call 'beamtalk_protocol_registry':'users_of'(",
+                "call 'beamtalk_protocol_registry':'user_class_objects'(",
                 leaf::var(arg.clone()),
                 ")"
             ])
@@ -94,7 +94,8 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'beamtalk_protocol_registry':'conforming_classes'(ProtocolName)".to_string()
+                "call 'beamtalk_protocol_registry':'conforming_class_objects'(ProtocolName)"
+                    .to_string()
             )
         );
     }
@@ -140,7 +141,9 @@ mod tests {
         ));
         assert_eq!(
             result,
-            Some("call 'beamtalk_protocol_registry':'users_of'(ProtocolName)".to_string())
+            Some(
+                "call 'beamtalk_protocol_registry':'user_class_objects'(ProtocolName)".to_string()
+            )
         );
     }
 

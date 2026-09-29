@@ -269,7 +269,8 @@ protocol_name_from_class_self_test_() ->
                     class = 'TestProto1 class', class_mod = beamtalk_protocol_object, pid = self()
                 },
                 Result = beamtalk_protocol_object:class_conformingClasses(ClassSelf, #{}),
-                ?assert(is_list(Result))
+                ?assert(is_list(Result)),
+                ?assert(lists:all(fun(O) -> is_record(O, beamtalk_object) end, Result))
             end}
         ]
     end}.

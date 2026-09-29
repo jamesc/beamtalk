@@ -60,7 +60,7 @@ DateTime usedProtocols includes: #Comparable
 (Protocol providedMethods: #Comparable) includes: #between:and:
 // => true
 
-(Protocol usersOf: #Comparable) includes: #DateTime
+(Protocol usersOf: #Comparable) includes: DateTime
 // => true
 
 (DateTime >> #between:and:) origin
