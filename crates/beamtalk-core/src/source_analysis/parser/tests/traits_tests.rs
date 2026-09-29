@@ -191,6 +191,26 @@ fn parse_class_uses_line_basic() {
 }
 
 #[test]
+fn parse_class_two_line_uses_multipart_method_degrades_to_uses_line() {
+    // BT-3620 documented restriction on `is_uses_line_before_next_method`: a
+    // multi-part method literally named `uses:other:` must keep all its
+    // selector parts on one line. Split across two lines it is
+    // indistinguishable from a `uses: a` line followed by an `other: b =>`
+    // method, and is parsed as exactly that.
+    let tokens = crate::source_analysis::lex_with_eof(
+        "Value subclass: Split
+  uses: a
+  other: b => b",
+    );
+    let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+    let class = &module.classes[0];
+    assert_eq!(class.uses.len(), 1);
+    assert_eq!(class.uses[0].protocol.name, "a");
+    assert_eq!(class.methods.len(), 1);
+    assert_eq!(class.methods[0].selector.name(), "other:");
+}
+
+#[test]
 fn parse_class_uses_line_package_qualified() {
     let tokens = crate::source_analysis::lex_with_eof(
         "Value subclass: LenientParser

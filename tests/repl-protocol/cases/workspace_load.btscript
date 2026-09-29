@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for Workspace phase 3 methods (BT-846 / ADR 0040 Phase 3):
-// classes, testClasses, globals, load:, test, test:
+// classes, testClasses, bindings, load:, test, test:
 //
 // These tests require E2E because Workspace is a singleton actor that
 // only exists in the live REPL process. Workspace variable persistence across
@@ -20,8 +20,8 @@ Workspace respondsTo: #classes
 Workspace respondsTo: #testClasses
 // => true
 
-// Workspace respondsTo: #globals
-Workspace respondsTo: #globals
+// Workspace respondsTo: #bindings
+Workspace respondsTo: #bindings
 // => true
 
 // Workspace respondsTo: #load:
@@ -40,8 +40,8 @@ Workspace respondsTo: #test:
 // WORKSPACE GLOBALS
 // ===========================================================================
 
-// Workspace globals returns a map (Dictionary snapshot)
-wsGlobals := Workspace globals
+// Workspace bindings returns a map (Dictionary snapshot)
+wsGlobals := Workspace bindings
 // => _
 
 // globals includes the Transcript singleton, not the Workspace facade (ADR 0129)

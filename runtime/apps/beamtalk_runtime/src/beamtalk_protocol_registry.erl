@@ -155,6 +155,10 @@ concurrently (e.g. during test teardown).
     user_class_objects/1
 ]).
 
+-ifdef(TEST).
+-export([to_class_objects/1]).
+-endif.
+
 -define(PROTOCOL_TABLE, beamtalk_protocol_registry).
 -define(CONFORMS_CACHE_TABLE, beamtalk_protocol_conforms_cache).
 %% ADR 0127 §12: `Class -> [ProtocolName, ...]` (uses: declaration order).
@@ -897,8 +901,9 @@ resolve_class_object_safe(Name) ->
     try
         beamtalk_class_registry:resolve_class_object(Name)
     catch
-        exit:{noproc, _} -> undefined;
-        exit:{timeout, _} -> undefined
+        %% noproc/timeout, or the class process dying mid-call (exits with its
+        %% real termination reason: normal, shutdown, ...).
+        exit:_ -> undefined
     end.
 
 -doc "Collect all required instance methods including from extending protocols.".
