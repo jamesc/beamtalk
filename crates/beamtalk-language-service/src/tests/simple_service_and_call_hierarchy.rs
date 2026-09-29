@@ -202,3 +202,103 @@ fn simple_language_service_find_references() {
     let refs = service.find_references(&file, Position::new(0, 0));
     assert_eq!(refs.len(), 2); // Assignment and usage
 }
+
+// ---------------------------------------------------------------------------
+// Hover trait provenance (ADR 0127 §12, BT-3655)
+// ---------------------------------------------------------------------------
+
+const TRAIT_HOVER_SOURCE: &str = "Protocol define: Comparable
+  < other :: Self -> Boolean
+
+  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]
+  min: other -> Self => (self < other) ifTrue: [self] ifFalse: [other]
+
+Value subclass: Version
+  uses: Comparable
+  field: major :: Integer = 0
+  < other => self major < other major
+  min: other => self
+
+Version new max: Version new
+Version new min: Version new
+Version new major
+";
+
+/// Hover documentation for the last occurrence of `needle` in
+/// `TRAIT_HOVER_SOURCE`.
+fn hover_doc_on_last(service: &SimpleLanguageService, file: &Utf8PathBuf, needle: &str) -> String {
+    let offset = TRAIT_HOVER_SOURCE.rfind(needle).unwrap();
+    let before = &TRAIT_HOVER_SOURCE[..offset];
+    let line = before.matches('\n').count();
+    let col = offset - before.rfind('\n').map_or(0, |i| i + 1);
+    let hover = service
+        .hover(
+            file,
+            Position::new(u32::try_from(line).unwrap(), u32::try_from(col).unwrap()),
+        )
+        .unwrap_or_else(|| panic!("expected hover on `{needle}`"));
+    hover.documentation.unwrap_or_default().to_string()
+}
+
+#[test]
+fn hover_on_trait_provided_method_shows_provenance() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("version.bt");
+    service.update_file(file.clone(), TRAIT_HOVER_SOURCE.to_string());
+
+    let doc = hover_doc_on_last(&service, &file, "max:");
+    assert!(
+        doc.contains("*provided by* `Comparable`"),
+        "provided method should show provenance, got: {doc}"
+    );
+}
+
+#[test]
+fn hover_on_override_of_provided_method_has_no_provenance() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("version.bt");
+    service.update_file(file.clone(), TRAIT_HOVER_SOURCE.to_string());
+
+    let doc = hover_doc_on_last(&service, &file, "min:");
+    assert!(
+        doc.contains("Resolved on `Version`") && !doc.contains("provided by"),
+        "class-body override must hover as today, got: {doc}"
+    );
+}
+
+#[test]
+fn hover_on_plain_method_has_no_provenance() {
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("version.bt");
+    service.update_file(file.clone(), TRAIT_HOVER_SOURCE.to_string());
+
+    let doc = hover_doc_on_last(&service, &file, "major");
+    assert!(
+        doc.contains("Resolved on `Version`") && !doc.contains("provided by"),
+        "plain method must hover as today, got: {doc}"
+    );
+}
+
+#[test]
+fn hover_on_cross_file_trait_provided_method_shows_provenance() {
+    let mut service = SimpleLanguageService::new();
+    let proto_file = Utf8PathBuf::from("comparable.bt");
+    let user_file = Utf8PathBuf::from("version.bt");
+    service.update_file(
+        proto_file,
+        "Protocol define: Comparable\n  < other :: Self -> Boolean\n\n  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n".to_string(),
+    );
+    let user_source = "Value subclass: Version\n  uses: Comparable\n  field: major :: Integer = 0\n  < other => self major < other major\n\nVersion new max: Version new\n";
+    service.update_file(user_file.clone(), user_source.to_string());
+
+    let hover = service
+        .hover(&user_file, Position::new(5, 14))
+        .expect("expected hover on cross-file provided selector");
+    assert!(
+        hover
+            .documentation
+            .unwrap_or_default()
+            .contains("*provided by* `Comparable`"),
+        "cross-file provided method should show provenance"
+    );
+}

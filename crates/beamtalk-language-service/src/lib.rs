@@ -1683,8 +1683,18 @@ impl LanguageService for SimpleLanguageService {
         // This is intentionally lightweight (ClassHierarchy::build only, not full
         // analyse()) since diagnostic_provider lazily runs full semantic analysis
         // when diagnostics are requested, avoiding duplicate work.
+        //
+        // Trait provenance (ADR 0127, BT-3655): flatten `uses:` and stamp
+        // `MethodInfo::origin` here, at the source that builds `MethodInfo`
+        // for the LSP path, so hover needn't re-derive it.
+        let external_protocols: std::collections::HashMap<_, _> = self
+            .project_index
+            .cross_file_protocol_defs_for(&file)
+            .into_iter()
+            .map(|p| (p.name.name.clone(), p))
+            .collect();
         let (class_hierarchy_result, hierarchy_diags) =
-            beamtalk_core::semantic_analysis::ClassHierarchy::build(&module);
+            crate::project_index::build_hierarchy_with_trait_origins(&module, &external_protocols);
         if let Ok(mut class_hierarchy) = class_hierarchy_result {
             // Register protocol definitions as synthetic class entries
             // so LSP features (completions, has_class) work with protocol names.
