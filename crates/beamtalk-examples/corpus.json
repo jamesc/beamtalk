@@ -925,7 +925,7 @@
         "to_string",
         "where"
       ],
-      "source": "tree := Node current processes unwrap   // == ProcessNavigation default tree\ntree root                          // => the snapshot root SupervisionNode\ntree size                          // => total node count\ntree do: [:node | Transcript showCr: node printString]\ntree select: [:node | node isSupervisor]\ntree findClass: Counter            // => every running Counter as SupervisionNodes\ntree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)",
+      "source": "tree := Node current processes unwrap   // == ProcessNavigation default tree\ntree root                          // => the snapshot root SupervisionNode\ntree size                          // => total node count\ntree do: [:node | Transcript showLine: node printString]\ntree select: [:node | node isSupervisor]\ntree findClass: Counter            // => every running Counter as SupervisionNodes\ntree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1933,7 +1933,7 @@
         "toString",
         "to_string"
       ],
-      "source": "a := Announcer new\n\n// Subscribe: returns a Subscription token. The handler block receives the event.\nsub := a when: PriceChanged do: [:e | Transcript showCr: \"now \" ++ e newPrice printString]\nsub class       // => Subscription\nsub isActive    // => true\n\n// Publish asynchronously (fire-and-forget). Every matching subscriber runs.\na announce: (PriceChanged newPrice: 42)    // prints \"now 42\"\n\n// Stop listening.\nsub unsubscribe\nsub isActive    // => false",
+      "source": "a := Announcer new\n\n// Subscribe: returns a Subscription token. The handler block receives the event.\nsub := a when: PriceChanged do: [:e | Transcript showLine: \"now \" ++ e newPrice printString]\nsub class       // => Subscription\nsub isActive    // => true\n\n// Publish asynchronously (fire-and-forget). Every matching subscriber runs.\na announce: (PriceChanged newPrice: 42)    // prints \"now 42\"\n\n// Stop listening.\nsub unsubscribe\nsub isActive    // => false",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1980,7 +1980,7 @@
         "property",
         "subclassing"
       ],
-      "source": "Announcement subclass: UIEvent\nUIEvent subclass: ButtonClicked\n  field: buttonId :: String = \"\"\n\na when: UIEvent do: [:e | Transcript showCr: \"ui event\"]\na announce: (ButtonClicked buttonId: \"submit\")   // matches — \"ui event\"",
+      "source": "Announcement subclass: UIEvent\nUIEvent subclass: ButtonClicked\n  field: buttonId :: String = \"\"\n\na when: UIEvent do: [:e | Transcript showLine: \"ui event\"]\na announce: (ButtonClicked buttonId: \"submit\")   // matches — \"ui event\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2001,7 +2001,7 @@
         "loop",
         "process"
       ],
-      "source": "SystemAnnouncer current when: ActorSpawned do: [:e |\n  Transcript showCr: e actorClass asString\n]\nCounter spawn    // the subscription fires: prints \"Counter\"",
+      "source": "SystemAnnouncer current when: ActorSpawned do: [:e |\n  Transcript showLine: e actorClass asString\n]\nCounter spawn    // the subscription fires: prints \"Counter\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -14184,10 +14184,10 @@
     },
     {
       "id": "stdlib-test-beamtalk-interface-test",
-      "title": "BeamtalkFacadeTest",
+      "title": "BeamtalkInterfaceTest",
       "category": "stdlib-tests",
       "tags": [
-        "BeamtalkFacadeTest",
+        "BeamtalkInterfaceTest",
         "TestCase",
         "assign",
         "assignment",
@@ -14211,7 +14211,7 @@
         "testReleaseInfoIsDictionary",
         "testVersionIsNonEmptyString"
       ],
-      "source": "// BUnit live-behaviour tests for the class-side `Beamtalk` facade\n// (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends\n// work under `beamtalk test` (no workspace binding required).\n//\n// Covers: version, allClasses, classNamed:, help:, help:selector:,\n// erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the\n// removed `current`/`globals` API.\n\nTestCase subclass: BeamtalkFacadeTest\n\n  testClassNamedFindsIntegerClass =>\n    self assert: (Beamtalk classNamed: #Integer) equals: Integer\n\n  testClassNamedUnknownIsNil =>\n    self assert: (Beamtalk classNamed: #NoSuchClassAnywhere) isNil\n\n  testAllClassesIncludesIntegerAndBeamtalk =>\n    classes := Beamtalk allClasses\n    self assert: (classes includes: Integer)\n    self assert: (classes includes: Beamtalk)\n\n  testVersionIsNonEmptyString =>\n    self assert: (Beamtalk version isKindOf: String)\n    self assert: Beamtalk version isEmpty not\n\n  testHelpMentionsClassName =>\n    self assert: ((Beamtalk help: Integer) includesSubstring: \"Integer\")\n\n  testHelpSelectorReturnsString =>\n    self assert: ((Beamtalk help: Integer selector: #'+') isKindOf: String)\n\n  testErlangHelpReturnsString =>\n    self assert: ((Beamtalk erlangHelp: \"lists\") isKindOf: String)\n\n  testReleaseInfoIsDictionary =>\n    self assert: (Beamtalk releaseInfo isKindOf: Dictionary)\n\n  testInheritsFromObject => self assert: (Beamtalk inheritsFrom: Object)\n\n  testCurrentAndGlobalsAreRemoved =>\n    self deny: (Beamtalk class includesSelector: #current)\n    self deny: (Beamtalk class includesSelector: #globals)\n    self deny: (Beamtalk class includesSelector: #resetCurrent)",
+      "source": "// BUnit live-behaviour tests for the class-side `Beamtalk` facade\n// (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends\n// work under `beamtalk test` (no workspace binding required).\n//\n// Covers: version, allClasses, classNamed:, help:, help:selector:,\n// erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the\n// removed `current`/`globals` API.\n\nTestCase subclass: BeamtalkInterfaceTest\n\n  testClassNamedFindsIntegerClass =>\n    self assert: (Beamtalk classNamed: #Integer) equals: Integer\n\n  testClassNamedUnknownIsNil =>\n    self assert: (Beamtalk classNamed: #NoSuchClassAnywhere) isNil\n\n  testAllClassesIncludesIntegerAndBeamtalk =>\n    classes := Beamtalk allClasses\n    self assert: (classes includes: Integer)\n    self assert: (classes includes: Beamtalk)\n\n  testVersionIsNonEmptyString =>\n    self assert: (Beamtalk version isKindOf: String)\n    self assert: Beamtalk version isEmpty not\n\n  testHelpMentionsClassName =>\n    self assert: ((Beamtalk help: Integer) includesSubstring: \"Integer\")\n\n  testHelpSelectorReturnsString =>\n    self assert: ((Beamtalk help: Integer selector: #'+') isKindOf: String)\n\n  testErlangHelpReturnsString =>\n    self assert: ((Beamtalk erlangHelp: \"lists\") isKindOf: String)\n\n  testReleaseInfoIsDictionary =>\n    self assert: (Beamtalk releaseInfo isKindOf: Dictionary)\n\n  testInheritsFromObject => self assert: (Beamtalk inheritsFrom: Object)\n\n  testCurrentAndGlobalsAreRemoved =>\n    self deny: (Beamtalk class includesSelector: #current)\n    self deny: (Beamtalk class includesSelector: #globals)\n    self deny: (Beamtalk class includesSelector: #resetCurrent)",
       "explanation": "BUnit live-behaviour tests for the class-side `Beamtalk` facade (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends work under `beamtalk test` (no workspace binding required).  Covers: version, allClasses, classNamed:, help:, help:selector:, erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the removed `current`/`globals` API."
     },
     {
