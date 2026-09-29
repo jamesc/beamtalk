@@ -1646,7 +1646,7 @@ criterion — moot while flattening already gives per-class sealing).
 ## Implementation Tracking
 
 **Epic:** [BT-3586](https://linear.app/beamtalk/issue/BT-3586)
-**Status:** Planned
+**Status:** Implemented (v1); post-v1 items tracked in [BT-3595](https://linear.app/beamtalk/issue/BT-3595)
 
 | ADR phase | Issue | Title | Size | Blocked by |
 |---|---|---|---|---|
@@ -1659,6 +1659,8 @@ criterion — moot while flattening already gives per-class sealing).
 | 5 | [BT-3593](https://linear.app/beamtalk/issue/BT-3593) | All-or-nothing reload and live patching | M | BT-3591, BT-3592 |
 | 6 | [BT-3594](https://linear.app/beamtalk/issue/BT-3594) | Stdlib adoption, Traits docs, end-to-end test | M | BT-3589, BT-3593 |
 | 7 | [BT-3595](https://linear.app/beamtalk/issue/BT-3595) | Post-v1 (needs-spec) | L | v1 |
+
+Merged phase PRs: BT-3587 (#4034), BT-3588 (#4037), BT-3589 (#4044), BT-3590 (#4049), BT-3591 (#4051), BT-3592 (#4052), BT-3593 (#4054), BT-3594 (#4060).
 
 Related: [BT-3580](https://linear.app/beamtalk/issue/BT-3580) (actor self-send block bug; not blocking).
 

@@ -1044,11 +1044,11 @@ remove_selector(Self, Selector) ->
 %%
 %% Keyed off `beamtalk_xref:method_origin/3` (`provenance := protocol,
 %% origin`, ADR 0127 §12) rather than a separate check — the same row
-%% `CompiledMethod origin` reads. Codegen does not bake this provenance into
-%% flattened methods yet (ADR 0127 §10 is a later phase), so this refusal is
-%% dormant (never fires) until then; it is fully exercised today by tests
-%% that install a `protocol`-provenance row directly via
-%% `beamtalk_xref:register_class/2`.
+%% `CompiledMethod origin` reads. Codegen stamps `'provenance' => 'protocol'`
+%% and `'origin'` on every flattened `uses:` provision (`xref.rs`), so this
+%% refusal fires for real compiled classes; `rename_selector_test.bt`
+%% covers it end-to-end against `DateTime` (`uses: Comparable`), and the
+%% EUnit tests install a `protocol`-provenance row directly.
 %%
 %% Does NOT cover the second §11 case — removing a class's own override that
 %% would *re-expose* a hidden provision failing §3a — which needs per-class

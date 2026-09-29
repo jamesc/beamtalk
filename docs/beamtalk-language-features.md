@@ -2159,9 +2159,11 @@ whether the receiver is a `Value` or an `Actor`.
 asList` so every `List`, `Set`, `Array`, … **conforms** to `Enumerable`
 structurally, with no `uses:` needed.
 
-An `Object subclass:` (no instances) composes traits **class-side** only —
-an instance-side provision on an uninstantiable class is not an error, it
-simply flattens onto a class that will never be instantiated.
+Provisions are **instance-side only** in v1 (`class sel … =>` in a protocol
+is rejected). An `Object subclass:` (no instances) that composes a trait is
+not an error, but gets nothing useful from it: the provisions flatten onto a
+class that will never be instantiated. Class-side provisions are a post-v1
+item, tracked in BT-3595.
 
 ### Reflection
 
