@@ -3465,14 +3465,14 @@ See [ADR 0079](ADR/0079-named-actor-registration.md) for the full design and exp
 
 ### Introspecting the Live Supervision Tree (ADR 0092)
 
-Where supervision *syntax* declares a tree, **`Workspace processes`** lets you
-walk the *live* one — the dynamic counterpart to `Workspace actors`, and the
+Where supervision *syntax* declares a tree, **`Node current processes`** lets you
+walk the *live* one — the dynamic counterpart to `Node current actors`, and the
 process-structure twin of `SystemNavigation`. It returns a navigable
 `SupervisionTree` snapshot of the running OTP supervision tree, built as a thin
 wrapper over `supervisor:which_children` (no new bookkeeping process).
 
 ```beamtalk
-tree := Workspace processes        // == ProcessNavigation default tree
+tree := Node current processes unwrap   // == ProcessNavigation default tree
 tree root                          // => the snapshot root SupervisionNode
 tree size                          // => total node count
 tree do: [:node | Transcript showLine: node printString]
@@ -3508,7 +3508,7 @@ caught mid-restart.
 **Snapshot semantics.** Construction freezes the tree once; iterating it never
 re-enters OTP, so a walk is internally consistent and can never deadlock or block
 on a busy process. Construction itself is *not* atomic, so the snapshot is a
-best-effort point-in-time view — re-call `Workspace processes` to refresh. A node
+best-effort point-in-time view — re-call `Node current processes` to refresh. A node
 whose pid has since died is detected lazily: `node status` returns `nil` rather
 than raising.
 
@@ -3517,8 +3517,8 @@ issues a timeout-guarded `sys:get_status` against the node's pid *then* —
 returning a `Dictionary` for an alive, `sys`-compliant process, or `nil` for one
 that is dead, timed out, or not `sys`-compliant.
 
-**Scopes and scale.** `ProcessNavigation default` (the `Workspace processes`
-alias) filters runtime plumbing; `ProcessNavigation system` shows everything,
+**Scopes and scale.** `ProcessNavigation default` (what `Node current processes`
+wraps) filters runtime plumbing; `ProcessNavigation system` shows everything,
 including runtime internals — a privileged view (ADR 0091). A `from:` constructor
 roots a walk at a `Supervisor` handle or a `Pid`, returning a `Result` (the root
 may be dead). A `simple_one_for_one` `DynamicSupervisor` with more children than
@@ -4568,7 +4568,7 @@ Cart reload
 // => Cart
 ⛔ reload: 1 instance of Cart left suspended — migrateFromV1: raised
    does_not_understand: List>>summ (Cart class >> migrateFromV1:, cart.bt:9)
-   state intact at v1; fix the hook and `Cart reload` again, or `Workspace actorAt: kill`
+   state intact at v1; fix the hook and `Cart reload` again, or stop the instances via `Node current actors`
 ```
 
 The suspended instance's state is intact and inspectable — but not through
@@ -4713,8 +4713,14 @@ Beamtalk classNamed: #Counter
 
 ### `Workspace` — Project operations (Workspace)
 
-Provides file loading, testing, and actor introspection. Scoped to the running
-workspace. Analogous to Pharo's `Smalltalk` project facade.
+Provides file loading, testing, bindings and the flush/change-log loop. Scoped to
+the running workspace: every selector raises `no_workspace` where no workspace runs
+(e.g. `beamtalk test`); `Workspace isAvailable` asks without raising.
+Analogous to Pharo's `Smalltalk` project facade.
+
+Facts about the BEAM node or the running program are **not** on `Workspace`
+(ADR 0129 amendment): node introspection lives on [`Node`](#node-introspection-adr-0129-amendment)
+and the root supervisor on `Program rootSupervisor`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -4727,9 +4733,6 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 | `sessions` | `List(Session)` | All live REPL sessions as `Session` values |
 | `test` | `TestResult` | Run all loaded test classes |
 | `test: AClass` | `TestResult` | Run a specific test class |
-| `actors` | `List` | All live actors as object references |
-| `actorAt: pidStr` | `Object` or `nil` | Look up a live actor by pid string |
-| `actorsOf: AClass` | `List` | All live actors of the given class |
 | `bind: value as: #Name` | `Nil` | Register a value in the workspace namespace |
 | `unbind: #Name` | `Nil` | Remove a registered name from the namespace |
 | `changes` | `ChangeLog` | Pending in-memory changes (ADR 0082) — see [Saving live edits back to disk](#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082) |
@@ -4737,6 +4740,7 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 | `flush: filter` | `FlushResult` | Flush a subset (Class / Symbol kind / `#{#file => path}`) |
 | `autoflush` | `Boolean` | Workspace setting (default `false`); persists across restarts |
 | `autoflush: enabled` | `Boolean` | Toggle write-through: every durable patch immediately flushes (best-effort) |
+| `startSupervisor: AClass` / `stopSupervisor: AClass` | `Supervisor` / `Nil` | Attach / stop a supervisor under the workspace supervisor (workspace-only) |
 
 ```beamtalk
 (Workspace load: "examples/counter.bt")
@@ -4751,8 +4755,39 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 (Workspace test: CounterTest) failed
 // => 0  (all tests pass)
 
-(Workspace actors) size
-// => 3  (number of live actors)
+Node current actors unwrap size
+// => 3  (number of live actors; see Node introspection below)
+```
+
+### Node introspection (ADR 0129 amendment)
+
+Reads of *node* state are per-node queries on `Node` (ADR 0126), not `Workspace`
+selectors. Every one answers a `Result` on every receiver, including
+`Node current`, so a selector has one return type; a peer is reached via `erpc`
+and its failures come back as `Error` values (`node_down`, `timeout`,
+`insecure_distribution`, `remote_code_mismatch`), never raised. They work in every
+boot context, including `beamtalk test`.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `aNode actors` | `Result(List(Actor), Error)` | Every live actor on the node (runtime-owned actor registry) |
+| `aNode actorsOf: AClass` | `Result(List(Actor), Error)` | Live actors of the class or a subclass |
+| `aNode actorAt: pidStr` | `Result(Actor \| Nil, Error)` | The live actor with that pid string, or `nil` |
+| `aNode processes` | `Result(SupervisionTree, Error)` | The node's `default`-scope supervision tree (ADR 0092) |
+| `aNode supervisors` | `Result(List(Supervisor), Error)` | Root application supervisor plus workspace-attached ones |
+| `aNode shapeSkew` | `Result(Integer, Error)` | Classes whose shape version differs from this node's (ADR 0126 §8) |
+| `Node connected` | `List(Node)` | Visible connected peers (replaces `Workspace nodes`) |
+
+`aNode actors` lists **every** live actor, whereas `Actor allRegistered` /
+`Actor allRegisteredOn: aNode` list only the **name-registered** ones (`Actor named:`).
+The root supervisor and the declared supervisor class are program/manifest facts:
+
+```beamtalk
+Node current actors unwrap size          // every live actor on this node
+Node current actorsOf: Counter           // => Result ok: #(...)
+Node connected collect: [:n | n shapeSkew unwrap]
+Program rootSupervisor                   // running application's root supervisor, or nil
+(Package named: "my_app") supervisorClass  // declared [application] supervisor class, or nil
 ```
 
 ### Class-based reload via `Behaviour >> reload`
@@ -5836,7 +5871,7 @@ SystemAnnouncer current when: NodeShapeSkew do: [:e |
   version differs. It **never refuses the connection** — doing so would make
   ADR 0125's rolling-upgrade procedure impossible — it only makes skew
   visible before the first send actually fails on it (the per-message check
-  above is the real safety net). `Workspace nodes` (below) surfaces the same
+  above is the real safety net). `aNode shapeSkew` (below) surfaces the same
   information as a point-in-time, queryable snapshot rather than only a
   live event stream.
 
@@ -5851,14 +5886,14 @@ node it came from:
 (ProcessNavigation on: worker) unwrap tree nodesOfKind: #beamtalkActor
 ```
 
-`Workspace nodes` lists every visible connected node together with its
-current shape-skew count (how many classes differ in version from this
-node's own), reached identically from the REPL, MCP, and LiveView surfaces
-— the cross-surface `nodes` operation (see
+`aNode shapeSkew` answers a node's current shape-skew count (how many classes
+differ in version from this node's own); mapping it over `Node connected`
+gives the cross-surface `nodes` operation reached identically from the REPL,
+MCP, and LiveView surfaces (see
 [`docs/development/surface-parity.md`](development/surface-parity.md)).
-`Workspace actors` (and the local-only `ProcessNavigation default`/`system`
-scopes) remain deliberately **node-local** — they were not extended into a
-cluster-wide actor inventory.
+The per-node queries `aNode actors`, `actorsOf:`, `actorAt:`, `processes` and
+`supervisors` reach a peer via `erpc` and answer `Result` values; a down peer
+yields an `Error` tagged `node_down`, never a raise.
 
 ### Security model
 

@@ -55,3 +55,8 @@ TestCase subclass: ProgramTest
 // (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,
 // so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block
 // here has no session evaluator to catch the signal).
+
+  testRootSupervisorNilWithoutApplication =>
+    // BT-3633: `beamtalk test` starts no [application] callback, so no root
+    // supervisor is registered. Works without a workspace.
+    self assert: Program rootSupervisor isNil

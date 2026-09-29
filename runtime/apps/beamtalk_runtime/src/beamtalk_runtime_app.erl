@@ -52,8 +52,16 @@ start(_StartType, _StartArgs) ->
     %% the application master so it survives class process crashes.
     beamtalk_class_registry:ensure_backing_module_index_table(),
 
+    %% Root application supervisor registry (`Program rootSupervisor`), owned by
+    %% the runtime so it works in REPL, run, service and release alike.
+    beamtalk_supervisor:ensure_root_table(),
+
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
+
+    %% Actor spawn callback: the registry is runtime-owned (BT-3633), so the
+    %% callback is too. Workspace-only bookkeeping hangs off `actor_spawned_hook`.
+    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
 
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)

@@ -10,8 +10,7 @@
 // introspection (`Workspace class includesSelector:`). Live functionality tests
 // are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt
 //
-// Covers: classes, testClasses, globals, load:, test, test:, actors,
-//         actorAt:, actorsOf:, bind:as:, unbind:
+// Covers: classes, testClasses, globals, load:, test, test:, bind:as:, unbind:
 
 TestCase subclass: WorkspaceTest
 
@@ -69,14 +68,17 @@ TestCase subclass: WorkspaceTest
   testIncludesSelectorTestColon =>
     self assert: (Workspace class includesSelector: #test:)
 
-  testIncludesSelectorActors =>
-    self assert: (Workspace class includesSelector: #actors)
-
-  testIncludesSelectorActorAt =>
-    self assert: (Workspace class includesSelector: #actorAt:)
-
-  testIncludesSelectorActorsOf =>
-    self assert: (Workspace class includesSelector: #actorsOf:)
+  // BT-3633: node/program introspection moved off Workspace (ADR 0129
+  // amendment): actors/actorAt:/actorsOf:/processes/supervisors -> Node,
+  // supervisor -> Program rootSupervisor, nodes -> Node connected + shapeSkew.
+  testNodeIntrospectionSelectorsAreNotOnWorkspace =>
+    self deny: (Workspace class includesSelector: #actors)
+    self deny: (Workspace class includesSelector: #actorAt:)
+    self deny: (Workspace class includesSelector: #actorsOf:)
+    self deny: (Workspace class includesSelector: #processes)
+    self deny: (Workspace class includesSelector: #supervisors)
+    self deny: (Workspace class includesSelector: #supervisor)
+    self deny: (Workspace class includesSelector: #nodes)
 
   testIncludesSelectorBindAs =>
     self assert: (Workspace class includesSelector: #bind:as:)

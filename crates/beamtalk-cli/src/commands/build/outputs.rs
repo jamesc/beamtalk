@@ -54,8 +54,10 @@ pub(crate) fn generate_package_outputs(
     let alias_metadata = build_alias_metadata(outputs.source_files);
 
     // Generate OTP application callback when [application] supervisor is set.
+    let application_config = manifest::find_application_config(project_root)?;
+    let application_supervisor = application_config.as_ref().map(|c| c.supervisor.clone());
     let app_callback_module =
-        if let Some(ref app_config) = manifest::find_application_config(project_root)? {
+        if let Some(ref app_config) = application_config {
             let cb_module_name = format!("beamtalk_{}_app", pkg.name);
             // Resolve the supervisor's actual Erlang module via the class index.
             // This correctly handles classes in subdirectories (e.g. src/app/app_sup.bt).
@@ -105,6 +107,7 @@ pub(crate) fn generate_package_outputs(
         outputs.bt_dep_names,
         outputs.hex_dep_names,
         &alias_metadata,
+        application_supervisor.as_deref(),
     )?;
     info!(name = %pkg.name, "Generated .app file");
 

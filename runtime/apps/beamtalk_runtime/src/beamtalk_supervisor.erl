@@ -54,6 +54,7 @@ functions that call OTP APIs from the caller's process context.
     is_supervisor/1,
     register_root/1,
     get_root/0,
+    ensure_root_table/0,
     clear_root/0,
     run_initialize/1,
     start_child_via_class_method/4,
@@ -707,7 +708,7 @@ register_root(SupervisorTuple) ->
 -doc """
 Return the registered OTP application root supervisor, or `nil`.
 
-Called by `Workspace supervisor` via the workspace interface primitives.
+Called by `Program rootSupervisor` (`beamtalk_program:rootSupervisor/0`).
 Returns the `{beamtalk_supervisor, ClassName, Module, Pid}` tuple registered
 by `register_root/1`, or the Beamtalk `nil` atom if no root supervisor has
 been registered (e.g. no `[application]` section in `beamtalk.toml`).
@@ -1387,8 +1388,10 @@ stale_handle_error(ClassName, Selector) ->
 
 -doc """
 Ensure the root supervisor ETS table exists.
-Uses `public` access so the generated app callback and workspace primitives
-can both read/write without process ownership constraints.
+Uses `public` access so the generated app callback and `Program rootSupervisor`
+can both read/write without process ownership constraints. `beamtalk_runtime_app`
+creates it at application start so it is owned by the runtime (not by whichever
+short-lived process registers a root first) and exists in every boot context.
 """.
 -spec ensure_root_table() -> ok.
 ensure_root_table() ->

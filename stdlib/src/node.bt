@@ -131,6 +131,80 @@ sealed typed Value subclass: Node native: beamtalk_node
   /// ```
   shapeManifest -> Result(Dictionary, Error) => self delegate
 
+  // === Introspection (ADR 0129 amendment, BT-3633) ===
+  //
+  // Reads of node state. Every query answers a `Result` on every receiver,
+  // including `Node current`, so one selector has one return type; a peer is
+  // reached via `erpc` and its failures come back as `Error` values
+  // (`node_down`, `timeout`, `insecure_distribution`, `remote_code_mismatch`),
+  // never raised.
+
+  /// Every live actor on this node, from the runtime-owned actor registry
+  /// (available in every boot context, including `beamtalk test`).
+  ///
+  /// Not the same set as `Actor allRegisteredOn:`, which lists only the
+  /// *name-registered* actors (`Actor named:`). Every named actor is a live
+  /// actor, but most live actors are unnamed.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current actors isOk                     // => true
+  /// (Node named: #'worker@localhost') unwrap actors   // => Result ok: #()
+  /// ```
+  actors -> Result(List(Actor), Error) => self delegate
+
+  /// Every live actor on this node whose class is `aClass` or a subclass.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current actorsOf: Counter               // => Result ok: #()
+  /// ```
+  actorsOf: aClass :: Class -> Result(List(Actor), Error) =>
+    self actors map: [:all | all select: [:a | a class includesBehaviour: aClass]]
+
+  /// The live actor whose pid prints as `pidString` (e.g. `"<0.132.0>"`), or
+  /// `nil` when the string is not a pid or names no live actor.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current actorAt: "invalid"              // => Result ok: nil
+  /// ```
+  actorAt: pidString :: String -> Result(Actor | Nil, Error) => self delegate
+
+  /// A navigable snapshot of this node's live supervision tree (ADR 0092): the
+  /// `default`-scope tree, `== (ProcessNavigation on: self) unwrap tree`.
+  /// Best-effort and point-in-time; re-call to refresh. For the privileged
+  /// whole-node view use `ProcessNavigation system tree`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current processes isOk                  // => true
+  /// ```
+  processes -> Result(SupervisionTree, Error) =>
+    (ProcessNavigation on: self) map: [:nav | nav tree]
+
+  /// Supervisors visible on this node: the running application's root
+  /// supervisor (if any) plus those attached to a workspace with
+  /// `Workspace startSupervisor:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current supervisors isOk                // => true
+  /// ```
+  supervisors -> Result(List(Supervisor), Error) => self delegate
+
+  /// The number of classes currently shape-skewed between this node and `self`
+  /// (ADR 0126 §8), from the live tally behind the `NodeShapeSkew`
+  /// announcement. `0` for the current node; an error (`node_down`) for a
+  /// peer this node is not connected to.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Node current shapeSkew                       // => Result ok: 0
+  /// Node connected collect: [:n | n shapeSkew]   // => #()
+  /// ```
+  shapeSkew -> Result(Integer, Error) => self delegate
+
   // === Printing ===
 
   /// Human-readable representation: `Node(name@host)`.

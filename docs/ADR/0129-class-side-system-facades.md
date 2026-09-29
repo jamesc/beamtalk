@@ -1088,6 +1088,41 @@ The work is one epic; main stays green after each phase.
 REPL users type what they typed before. beamtalk-exdura switches
 `resolveWorkflowClassNames:` to `Beamtalk classNamed:` once Phase 1 ships.
 
+## Amendment (BT-3633): homes for the ADR 0040 method sets
+
+ADR 0040's `WorkspaceInterface` held selectors that are facts about a BEAM node
+or the running program, not about the development workspace. Under §1 (a service
+lives where its scope lives) and §8 (facades are node-local; the instance
+carries the node), they move. The `Workspace` facade keeps the development-loop
+operations only.
+
+**Rule.** Reads of node state go to `Node`. Facts about the running program go
+to `Program`. Declared manifest facts go to `Package`. Development-loop
+operations stay on `Workspace`.
+
+| ADR 0040 selector | New home | Notes |
+|---|---|---|
+| `Workspace actors` / `actorsOf:` / `actorAt:` | `aNode actors` / `actorsOf:` / `actorAt:` | `Result(…, Error)` on every receiver, `Node current` included; a peer is queried via `erpc` (ADR 0126 §5.1, §7). Backed by `beamtalk_actor_registry`, now started by `beamtalk_runtime_sup`, so it holds in every boot context. Every actor tracks itself from its lifecycle-start telemetry; the REPL spawn path's explicit registration is idempotent. |
+| `Workspace processes` | `aNode processes` | `Result(SupervisionTree, Error)`, the `default`-scope tree (ADR 0092), `== (ProcessNavigation on: aNode) unwrap tree`. |
+| `Workspace supervisors` | `aNode supervisors` | Root application supervisor plus workspace-attached ones. |
+| `Workspace nodes` | `Node connected` + `aNode shapeSkew` | `shapeSkew` is a per-node accessor on the queryable skew tally. `connectedWithSkew` is removed; the MCP `nodes` tool and the LiveView `nodes` op map `shapeSkew` over `Node connected`. |
+| `Workspace supervisor` | `Program rootSupervisor` | `beamtalk_supervisor:get_root/0`. The registry table is created by `beamtalk_runtime`'s application start, so REPL, `run`, service and release all answer without a workspace; `nil` when no `[application]` has started. A node has one root slot and only the root package gets an app callback; `Program` is chosen over `Node` for semantics and future multi-app releases, not to fix a bug. |
+| (new) | `Package supervisorClass` | Reads the `{supervisor, 'X'}` entry `beamtalk build` now writes into the `.app` env for every package with an `[application]` section, path dependencies included. Class or `nil`. |
+| `Workspace startSupervisor:` / `stopSupervisor:` | stay on `Workspace` | They start the supervisor as a child of `beamtalk_workspace_sup`, so they are workspace-only. |
+
+`aNode actors` and `Actor allRegistered` / `allRegisteredOn:` are not
+duplicates. The former lists **every** live actor; the latter list only
+**name-registered** actors (`Actor named:`). Their doc comments cross-reference
+each other. `Node` stays a stateless sealed `Value` with no class state (§2). No
+shims are left behind (§9): the removed `Workspace` selectors raise
+`does_not_understand`.
+
+**Logging control (BT-3653).** `Beamtalk`'s logging selectors move to a
+class-side `Logger` facade. ADR 0064's Alternative E rejected a *singleton*
+logger object (an injected instance with mutable state). A stateless, sealed,
+class-side facade over the runtime's own logger configuration is a different
+thing and satisfies §1 and §2, so that rejection does not apply.
+
 ## Amended ADRs
 
 - **ADR 0010.**
@@ -1102,7 +1137,8 @@ REPL users type what they typed before. beamtalk-exdura switches
     show:` is a DNU".
 - **ADR 0040.**
   - The `Beamtalk`/`Workspace` split stands, as classes rather than
-    instances.
+    instances. Node and program facts leave `Workspace` (BT-3633
+    amendment).
   - `Beamtalk globals` is removed; `Workspace globals` becomes `Workspace
     bindings`.
   - The resolution chain has no singleton layer.
@@ -1117,9 +1153,10 @@ REPL users type what they typed before. beamtalk-exdura switches
   - `beamtalk_capability` gains `no_workspace` and `run_mode_no_compiler`,
     alongside `release_mode_no_compiler` and `release_mode_no_workspace`.
   - Compiler availability is recorded in `run` mode.
-- **ADR 0126.** Consistent, with no change in substance. Facades are
-  node-local like every class, and remote access follows the `Node`-handle
-  pattern (§8).
+- **ADR 0126.** Consistent. Facades are node-local like every class, and
+  remote access follows the `Node`-handle pattern (§8). `Node` gains the
+  introspection queries listed in the BT-3633 amendment; see the note in
+  ADR 0126.
 
 ## References
 - Related issues: BT-3631 (this ADR); BT-3622 (`classNamed:` dynamic symbols);

@@ -221,8 +221,8 @@ Counter respondsTo: #size
 // Two system singletons provide rich introspection:
 Beamtalk allClasses        // All registered classes (class objects)
 Beamtalk help: Counter     // Formatted documentation
-Workspace actors           // All live actors in the workspace
-Workspace actorsOf: Counter // All Counter instances
+Node current actors unwrap           // All live actors in the workspace
+(Node current actorsOf: Counter) unwrap // All Counter instances
 Workspace classes          // All loaded user classes
 ```
 
@@ -273,13 +273,13 @@ Workspace bind: server as: #chatServer  // Register for later lookup
 // Agent disconnects
 
 // Tuesday: Agent reconnects — actors are still running
-Workspace actors                        // Discover live actors
-server := Workspace actorsOf: ChatServer // Rebind to the running actor
+Node current actors unwrap                        // Discover live actors
+server := (Node current actorsOf: ChatServer) unwrap // Rebind to the running actor
 (server first) rooms                    // => #("general") — state preserved!
 (server first) addRoom: "dev"           // Continue where we left off
 ```
 
-The actors and their state survive across sessions; REPL variable *bindings* are session-local and must be reestablished (via `Workspace actors`, `actorsOf:`, or `actorAt:`). The workspace **becomes** the agent's persistent memory — not a text file the agent re-reads, but living objects the agent rediscovers and picks back up. Workspaces use detached BEAM nodes with supervision trees — processes survive REPL disconnections, state lives in running actors, and multiple sessions can share a workspace.
+The actors and their state survive across sessions; REPL variable *bindings* are session-local and must be reestablished (via `Node current actors`, `actorsOf:`, or `actorAt:`). The workspace **becomes** the agent's persistent memory — not a text file the agent re-reads, but living objects the agent rediscovers and picks back up. Workspaces use detached BEAM nodes with supervision trees — processes survive REPL disconnections, state lives in running actors, and multiple sessions can share a workspace.
 
 ### 4.5 Incremental Verification, Not Batch Testing
 
@@ -922,7 +922,7 @@ In a beamtalk workspace, the program is something that exists in **running objec
 
 ```beamtalk
 // Agent joins a workspace where code is already running (ADR 0004)
-Workspace actors              // Discover what's running
+Node current actors unwrap              // Discover what's running
 
 // Agent asks the system about the relevant code
 ChatServer methods

@@ -14,7 +14,7 @@
 //! `:actors`, `:kill`, `:inspect`, and `:sessions` are deliberately **not**
 //! in this table: `docs/development/surface-parity.md` records that actor
 //! listing/termination/inspection and session listing are reached via
-//! message-sends (`Workspace actors`, `anActor stop`) or are surface-specific
+//! message-sends (`Node current actors`, `anActor stop`) or are surface-specific
 //! to non-CLI callers (`inspect` is agent-only; `sessions` belongs to the
 //! transport handshake) — not REPL meta-commands. They were speculative
 //! completion entries from before the `Workspace`/`Beamtalk` object model
@@ -265,7 +265,7 @@ mod tests {
     fn dead_actor_session_completions_are_absent() {
         // These were offered by tab-completion with no dispatch arm
         // — surface-parity.md documents the real capability as message-sends
-        // (`Workspace actors`, `anActor stop`) or as not REPL-exposed at all
+        // (`Node current actors`, `anActor stop`) or as not REPL-exposed at all
         // (`inspect` is agent-only, `sessions` is transport-handshake-only).
         let forms: Vec<&str> = all_forms().collect();
         for dead in [":actors", ":a", ":kill", ":inspect", ":sessions"] {

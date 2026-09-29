@@ -44,6 +44,7 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
     find_app_for_package/1,
     root_package/0,
     root_package_name/0,
+    supervisorClass/1,
     set_root_package/1,
     set_ambiguous_root_package/0,
     %% Beamtalk FFI shim: `Package packageNameFor: #ClassName`
@@ -74,6 +75,35 @@ all() ->
         end,
         Apps
     ).
+
+-doc """
+The package's declared `[application]` supervisor class (`Package supervisorClass`),
+read from the `{supervisor, 'X'}` entry `beamtalk build` writes into the `.app`
+env for every package with an `[application]` section (path deps included).
+Answers the class object, or `nil` when the package declares none or the class
+is not loaded. A manifest fact, distinct from `Program rootSupervisor` (the live
+supervisor process).
+""".
+-spec supervisorClass(map()) -> term().
+supervisorClass(#{'$beamtalk_class' := 'Package', name := PkgName}) ->
+    case find_app_for_package(PkgName) of
+        {ok, AppName} ->
+            case application:get_env(AppName, supervisor) of
+                {ok, ClassName} when is_atom(ClassName) ->
+                    case beamtalk_class_registry:whereis_class(ClassName) of
+                        undefined ->
+                            nil;
+                        ClassPid ->
+                            Module = beamtalk_object_class:module_name_safe(ClassPid),
+                            {beamtalk_object, beamtalk_class_registry:class_object_tag(ClassName),
+                                Module, ClassPid}
+                    end;
+                _ ->
+                    nil
+            end;
+        error ->
+            nil
+    end.
 
 -doc """
 Returns a package info map for the given package name.

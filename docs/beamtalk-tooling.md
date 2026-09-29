@@ -734,10 +734,10 @@ Integer
 > Workspace classes
 #(Counter, ...)
 
-> Workspace actors
+> Node current actors unwrap
 #(Actor(Counter, 0.234.0), ...)
 
-> Workspace actorsOf: Counter
+> (Node current actorsOf: Counter) unwrap
 #(Actor(Counter, 0.234.0))
 
 > Workspace test
@@ -859,7 +859,7 @@ Actor(Counter, 0.234.0)
 > c isAlive
 true
 
-> Workspace actors              // See all live actors
+> Node current actors              // See all live actors
 #(Actor(Counter, 0.234.0))
 
 > c stop                        // Graceful shutdown

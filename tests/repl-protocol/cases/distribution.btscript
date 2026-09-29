@@ -76,14 +76,40 @@ remoteCounter getValue
 // => 1
 
 // ===========================================================================
-// NODES — the cross-surface cluster op (ADR 0126 §8/§10, Phase 7)
+// NODE INTROSPECTION — per-node queries via erpc (ADR 0129 amendment, BT-3633)
 // ===========================================================================
 
-(Workspace nodes collect: [:row | row at: #name]) includes: peer name
+(Node connected collect: [:n | n name]) includes: peer name
 // => true
 
-((Workspace nodes detect: [:row | (row at: #name) =:= peer name]) at: #skewCount) >= 0
+peer shapeSkew unwrap >= 0
 // => true
+
+(Node connected collect: [:n | n shapeSkew unwrap]) allSatisfy: [:c | c >= 0]
+// => true
+
+peer actors isOk
+// => true
+
+// The remote Counter spawned above is tracked by the peer's actor registry.
+(peer actorsOf: Counter) unwrap isEmpty
+// => false
+
+(peer actorAt: "invalid") unwrap
+// => nil
+
+peer supervisors isOk
+// => true
+
+peer processes isOk
+// => true
+
+// A down peer answers an Error result, never a raise.
+(Node named: #'ghost@localhost') unwrap actors error kind
+// => #node_down
+
+(Node named: #'ghost@localhost') unwrap shapeSkew error kind
+// => #node_down
 
 // ===========================================================================
 // PROCESSNAVIGATION ON: — remote supervision-tree snapshot (ADR 0126 §8)

@@ -37,7 +37,7 @@ mechanism settled for the `program_name` Open Question (ADR 0099 §2). Absent
 %% unqualified.
 -compile({no_auto_import, [exit/1]}).
 
--export([commandName/0, package/0, exit/0, 'exit:'/1, exit/1]).
+-export([commandName/0, package/0, rootSupervisor/0, exit/0, 'exit:'/1, exit/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -53,6 +53,17 @@ commandName() ->
         {ok, Name} when is_list(Name) -> list_to_binary(Name);
         _ -> <<"beamtalk">>
     end.
+
+-doc """
+The running application's root supervisor (`Program rootSupervisor`): the
+`Supervisor` handle the generated `beamtalk_<pkg>_app` callback registered when
+its `[application] supervisor` started, or `nil` when no `[application]` has
+started (legitimate for a library). Reads `beamtalk_supervisor:get_root/0`, whose
+table is owned by `beamtalk_runtime`, so it needs no workspace.
+""".
+-spec rootSupervisor() -> tuple() | nil.
+rootSupervisor() ->
+    beamtalk_supervisor:get_root().
 
 -doc """
 The program's root package (BT-3651): `Package named: <root_package>`, where

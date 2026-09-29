@@ -23,7 +23,6 @@ beamtalk_workspace_sup
   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
   ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082)
   ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
-  ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: Workspace)
   ├─ beamtalk_actor_sup           % Supervises user actors
@@ -564,23 +563,13 @@ changelog_workspace_id(release, _WorkspaceId) -> undefined.
 
 -doc """
 Generate supervisor child specs for actor workspace singletons.
-Starts actor singletons from beamtalk_workspace_config:singletons/0, then
-the actor registry. Value singletons (Workspace)
+Starts actor singletons from beamtalk_workspace_config:singletons/0. (The
+actor registry is owned by beamtalk_runtime_sup — BT-3633.) Value singletons (Workspace)
 are not started here — they are bootstrapped by beamtalk_workspace_bootstrap.
 """.
 singleton_child_specs() ->
     Singletons = beamtalk_workspace_config:singletons(),
-    [singleton_to_child_spec(S) || S <- Singletons] ++
-        [
-            #{
-                id => beamtalk_actor_registry,
-                start => {beamtalk_repl_actors, start_link, [registered]},
-                restart => permanent,
-                shutdown => 5000,
-                type => worker,
-                modules => [beamtalk_repl_actors]
-            }
-        ].
+    [singleton_to_child_spec(S) || S <- Singletons].
 
 -doc "Convert a singleton config to a supervisor child spec.".
 singleton_to_child_spec(#{binding_name := BindingName, module := Module, start_args := Args}) ->
