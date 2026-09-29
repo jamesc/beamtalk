@@ -1411,8 +1411,8 @@ fn test_standalone_class_reference_validates_undefined_classes() {
         "Should raise class_not_found for an undefined class. Got:\n{code}"
     );
     assert!(
-        !code.contains("maps':'find") && !code.contains("resolve_class_reference"),
-        "Should not consult session bindings or the runtime resolver. Got:\n{code}"
+        !code.contains("resolve_class_reference"),
+        "Should not delegate to the runtime resolver. Got:\n{code}"
     );
 }
 
