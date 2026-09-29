@@ -1203,7 +1203,7 @@ with_root_package(Value, Fun) ->
         end
     end.
 
-%% build_source_class_module_index/1 indexes each file via the
+%% build_source_class_module_index/2 indexes each file via the
 %% compiler port (beamtalk_compiler:build_class_module_index_in_source/3)
 %% instead of a regex + hand-rolled snake-case, so every test below needs the
 %% compiler application (and its port) running. Idempotent and never stopped
@@ -1310,7 +1310,7 @@ build_source_class_module_index_subdir_casing_mismatch_test() ->
     end.
 
 regenerate_header_includes_cold_source_class_test() ->
-    %% Acceptance: regenerate_native_class_header/1 must emit a
+    %% Acceptance: regenerate_native_class_header/2 must emit a
     %% -define for a class defined in src/ even though it is NOT registered
     %% (cold load). The previous registry-only path produced no macro for it.
     ensure_compiler_started(),

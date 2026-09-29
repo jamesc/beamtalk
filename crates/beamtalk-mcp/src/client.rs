@@ -666,10 +666,9 @@ impl ReplClient {
         include_tests: bool,
         force: bool,
     ) -> Result<ReplResponse, String> {
-        self.send_once(&RequestBuilder::load_project_with_force(
-            path,
-            include_tests,
-            force,
+        self.send_once(&RequestBuilder::with_package_name(
+            RequestBuilder::load_project_with_force(path, include_tests, force),
+            beamtalk_cli::manifest::package_name_for_project(path).as_deref(),
         ))
         .await
     }
