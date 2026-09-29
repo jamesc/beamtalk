@@ -2772,11 +2772,8 @@ mod tests {
 
     #[test]
     fn test_module_name_from_path_non_primitive() {
-        let path = Utf8PathBuf::from("lib/beamtalk_interface.bt");
-        assert_eq!(
-            module_name_from_path(&path).unwrap(),
-            "bt@stdlib@beamtalk_interface"
-        );
+        let path = Utf8PathBuf::from("lib/beamtalk.bt");
+        assert_eq!(module_name_from_path(&path).unwrap(), "bt@stdlib@beamtalk");
     }
 
     #[test]

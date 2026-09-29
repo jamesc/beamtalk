@@ -357,7 +357,7 @@ generate_message(index_out_of_bounds, Class, Selector) ->
 %% non-matches.
 %%
 %% Deliberately generic wording: `not_found` also covers non-collection
-%% receivers (`AtomicCounter named:`, `Ets named:`, `BeamtalkInterface`), which
+%% receivers (`AtomicCounter named:`, `Ets named:`, `Beamtalk`), which
 %% otherwise fall through to the `~s error in ...` fallback. A collection-
 %% flavoured "no matching element" would read as nonsense on those. The
 %% specifics belong in the hint, which every call site already sets.

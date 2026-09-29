@@ -81,9 +81,9 @@ TestCase subclass: ProtocolQueriesTest
     self assert: (methods includes: #printString)
 
   testProtocolObjectConformingClasses =>
-    // Direct message send returns conforming class names (atoms)
+    // Direct message send returns conforming class objects (BT-3627)
     classes := HasSize conformingClasses
-    self assert: (classes includes: #String)
+    self assert: (classes includes: String)
 
   testProtocolObjectSuperclass =>
     // Protocol objects are subclasses of Protocol

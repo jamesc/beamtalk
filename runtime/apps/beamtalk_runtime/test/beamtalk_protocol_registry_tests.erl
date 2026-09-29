@@ -1036,6 +1036,53 @@ class_start_registers_uses_from_class_info_test() ->
     ?assertEqual([], beamtalk_protocol_registry:users_of('BT3592UsesFixtureProto')).
 
 -doc """
+BT-3627: `user_class_objects/1` resolves the users index to real `Behaviour`
+class objects (not raw name atoms), matching `Protocol usersOf:`'s declared
+`List(Behaviour)` type, and `conforming_class_objects/1` does the same for
+structural conformers.
+""".
+class_objects_resolve_registered_classes_test() ->
+    rt_setup(),
+    ClassInfo = #{
+        name => 'BT3627UserClass',
+        module => bt3627_user_class_mod,
+        instance_methods => #{bt3627Ping => #{block => fun() -> pong end, arity => 0}},
+        uses => ['BT3627Proto']
+    },
+    {ok, Pid} = beamtalk_object_class:start('BT3627UserClass', ClassInfo),
+    [Obj] = beamtalk_protocol_registry:user_class_objects('BT3627Proto'),
+    ?assertMatch(#beamtalk_object{class = 'BT3627UserClass class', pid = Pid}, Obj),
+    %% A users-index entry for a class that is not registered is dropped.
+    ok = beamtalk_protocol_registry:register_uses('BT3627Ghost', ['BT3627Proto']),
+    ?assertEqual([Obj], beamtalk_protocol_registry:user_class_objects('BT3627Proto')),
+    ok = beamtalk_protocol_registry:unregister_uses('BT3627Ghost'),
+    %% Conformers come back as class objects too (the fixture class defines bt3627Ping).
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'BT3627Conform',
+        required_methods => [#{selector => bt3627Ping, arity => 0}],
+        required_class_methods => [],
+        type_params => [],
+        extending => undefined
+    }),
+    Objs = beamtalk_protocol_registry:conforming_class_objects('BT3627Conform'),
+    %% Other loaded classes (e.g. stdlib) may also define bt3627Ping-shaped
+    %% surfaces, so assert membership rather than an exact list.
+    ?assert(
+        lists:any(
+            fun(O) -> is_record(O, beamtalk_object) andalso O#beamtalk_object.pid =:= Pid end,
+            Objs
+        )
+    ),
+    ?assert(lists:all(fun(O) -> is_record(O, beamtalk_object) end, Objs)),
+    ?assertEqual(
+        length(beamtalk_protocol_registry:conforming_classes('BT3627Conform')),
+        length(Objs)
+    ),
+    stop_class_process(Pid),
+    ok = beamtalk_class_lifecycle:class_removed('BT3627UserClass', bt3627_user_class_mod),
+    ?assertEqual([], beamtalk_protocol_registry:user_class_objects('BT3627Proto')).
+
+-doc """
 A class with no `uses` key in `ClassInfo` (every class compiled before ADR
 0127 §10a codegen support, and every hand-built `ClassInfo` in this test
 file) registers an empty uses list rather than crashing or leaving a stale

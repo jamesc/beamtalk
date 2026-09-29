@@ -6,8 +6,8 @@
 -moduledoc """
 Integration tests for workspace singleton registration.
 
-Tests that TranscriptStream and BeamtalkInterface singletons
-register themselves via gen_server name registration when
+Tests that the TranscriptStream singleton
+registers itself via gen_server name registration when
 started with a named server reference.
 """.
 -include_lib("eunit/include/eunit.hrl").
@@ -39,33 +39,6 @@ transcript_cleanup_on_stop_test() ->
     gen_server:stop(Pid),
     %% Registered name is cleaned up automatically by BEAM when process dies
     ?assertEqual(undefined, whereis('Transcript')).
-
-%%====================================================================
-%% Tests — BeamtalkInterface registration
-%%====================================================================
-
-sysdict_registered_name_test() ->
-    {ok, Pid} = 'bt@stdlib@beamtalk_interface':start_link({local, 'Beamtalk'}, #{}),
-    try
-        ?assertEqual(Pid, whereis('Beamtalk'))
-    after
-        cleanup(Pid)
-    end.
-
-sysdict_non_named_no_registration_test() ->
-    %% Non-named start_link should NOT register a name
-    {ok, Pid} = 'bt@stdlib@beamtalk_interface':start_link(#{}),
-    try
-        ?assertEqual(undefined, whereis('Beamtalk'))
-    after
-        gen_server:stop(Pid)
-    end.
-
-sysdict_cleanup_on_stop_test() ->
-    {ok, Pid} = 'bt@stdlib@beamtalk_interface':start_link({local, 'Beamtalk'}, #{}),
-    ?assertEqual(Pid, whereis('Beamtalk')),
-    gen_server:stop(Pid),
-    ?assertEqual(undefined, whereis('Beamtalk')).
 
 %%====================================================================
 %% Helpers

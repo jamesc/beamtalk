@@ -2170,7 +2170,7 @@ DateTime usedProtocols                        // => [#Comparable]
 DateTime usesProtocol: #Comparable             // => true
 DateTime usesProtocol: #Printable              // => false
 Protocol providedMethods: #Comparable          // => [#between:and:, #min:, #max:, #>, #<=, #>=]
-Protocol usersOf: #Comparable                  // => [#DateTime, #Duration, #Uuid, #String]
+Protocol usersOf: #Comparable                  // => [DateTime, Duration, Uuid, String]
 (DateTime >> #between:and:) origin             // => Comparable
 (DateTime >> #<) origin                        // => nil  (class's own method)
 ```

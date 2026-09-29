@@ -1674,7 +1674,7 @@ get_user_bindings() ->
 
 -doc """
 Return non-class workspace globals for session binding injection.
-Includes singletons (Transcript, Beamtalk, Workspace) and user-registered
+Includes singletons (Transcript, Workspace) and user-registered
 bind:as: names. Class objects are excluded.
 """.
 -spec get_session_bindings() -> #{atom() => term()}.
@@ -1698,7 +1698,7 @@ identifier is resolved lazily, in order:
    a workspace global of the same name (e.g. `x := 5` then `x` resolves to the
    local even if `x` is also a `bind:as:` entry);
 2. `bind:as:` registry (the workspace user-bindings ETS table);
-3. singleton registry (`Transcript`/`Beamtalk`/`Workspace`, resolved live from
+3. singleton registry (`Transcript`/`Workspace`, resolved live from
    their class instances via `beamtalk_workspace_config:singletons/0` +
    `value_singletons/0`);
 4. class registry (`Counter`, `Integer`, `Session`, …) → a class object;
@@ -1753,7 +1753,7 @@ lookup_user_binding(Name) ->
             end
     end.
 
-%% Tier 3: singleton registry (Transcript/Beamtalk/Workspace), resolved live.
+%% Tier 3: singleton registry (Transcript/Workspace), resolved live.
 %%
 %% Delegates to handle_session_bindings/1 — the same builder the eager-injection
 %% path used — so a singleton resolves to exactly the value it would have had if
@@ -1774,7 +1774,7 @@ lookup_singleton(Name) ->
     end.
 
 %% True iff Name is one of the configured singleton binding names
-%% (Transcript / Beamtalk / Workspace).
+%% (Transcript / Workspace).
 -spec is_singleton_binding_name(atom()) -> boolean().
 is_singleton_binding_name(Name) ->
     Configs =
@@ -2104,19 +2104,14 @@ handle_session_bindings(UserBindings) ->
             nil -> Base0;
             TranscriptObj -> Base0#{'Transcript' => TranscriptObj}
         end,
-    Base2 =
-        case resolve_singleton('BeamtalkInterface') of
-            nil -> Base1;
-            BeamtalkObj -> Base1#{'Beamtalk' => BeamtalkObj}
-        end,
-    %% Resolve Workspace from singleton state, same as Beamtalk/Transcript.
+    %% Resolve Workspace from singleton state, same as Transcript.
     %% Falls back to a plain tagged-map if the class var hasn't been wired yet.
     WorkspaceObj =
         case resolve_singleton('WorkspaceInterface') of
             nil -> #{'$beamtalk_class' => 'WorkspaceInterface'};
             Obj -> Obj
         end,
-    Base2#{'Workspace' => WorkspaceObj}.
+    Base1#{'Workspace' => WorkspaceObj}.
 
 -doc "Convert a name argument to an atom.".
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
@@ -2151,7 +2146,6 @@ check_bind_conflicts(AtomName) ->
 
 -spec is_protected_name(atom()) -> boolean().
 is_protected_name('Transcript') -> true;
-is_protected_name('Beamtalk') -> true;
 is_protected_name('Workspace') -> true;
 is_protected_name(_) -> false.
 

@@ -92,6 +92,10 @@ pub fn generate_module_with_warnings(
     // eliminating a second full type-checking pass per compiled module. `None`
     // preserves the previous self-sufficient behaviour for callers that don't
     // run analysis separately (unit tests, ad-hoc codegen).
+    // Self-sufficient path only: the `uses:`-flattened clone of `module` (so
+    // return-type inference below sees flattened provisions) and its origins.
+    let mut self_flattened: Option<Module> = None;
+    let self_flattened_origins;
     let (mut hierarchy, analysis_handed_off, mut driver_method_return_types) =
         if let Some(analysis) = options.analysis {
             generator.semantic_facts = analysis.semantic_facts;
@@ -124,25 +128,17 @@ pub fn generate_module_with_warnings(
             // a block, loop, or self-send needing state-threading — not
             // just make `hierarchy` blind to it, which is the narrower
             // failure a hierarchy-only fix would have left in place.
-            // Diagnostics are discarded — same rationale as
-            // `lower_module_for_codegen`'s own `expand_module` call (see
-            // that function's module doc).
-            let flattened_module_storage;
-            let flattened_module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
-                let mut owned = module.clone();
-                // No driver-supplied cross-file/cross-package protocols to
-                // flatten against here (no `AnalysisResult` was handed off —
-                // see this branch's own doc above) — same limitation this
-                // path already had for `uses:` in general; tracked in
-                // BT-3626 alongside this path's other fidelity gaps.
-                let _ = beamtalk_core::semantic_analysis::trait_expansion::expand_module(
-                    &mut owned,
-                    &std::collections::HashMap::new(),
-                );
-                flattened_module_storage = owned;
-                &flattened_module_storage
-            } else {
-                module
+            // Diagnostics are *not* discarded here, unlike
+            // `lower_module_for_codegen`'s own `expand_module` call: this
+            // branch only runs when `analyse_full` never ran, so there is no
+            // other pipeline to surface an unknown-protocol / provision-
+            // conflict error (BT-3626). They are returned as warnings.
+            let (flattened, origins, diagnostics) = flatten_uses_self_sufficient(module);
+            generator.codegen_warnings.extend(diagnostics);
+            self_flattened_origins = origins;
+            let flattened_module: &Module = match flattened {
+                Some(owned) => self_flattened.insert(owned),
+                None => module,
             };
 
             // Compute semantic facts before codegen begins.
@@ -154,8 +150,14 @@ pub fn generate_module_with_warnings(
                 beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(
                     flattened_module,
                 );
-            let hierarchy = hierarchy_result
+            let mut hierarchy = hierarchy_result
                 .map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
+            // Stamp `MethodInfo::origin` for flattened provisions, exactly as
+            // `analyse_full` does for the driver-handoff path (BT-3626).
+            beamtalk_core::semantic_analysis::trait_expansion::apply_origins(
+                &mut hierarchy,
+                &self_flattened_origins,
+            );
             (hierarchy, false, None)
         };
 
@@ -206,7 +208,11 @@ pub fn generate_module_with_warnings(
             driver_method_return_types.take().unwrap_or_default();
         module
     } else {
-        module_owned = module.clone();
+        // On the self-sufficient path start from the already-flattened clone
+        // so `infer_types_and_returns` below sees flattened provisions
+        // (BT-3626); `lower_module_for_codegen`'s own re-flatten is then an
+        // idempotent no-op (class-body selectors win over provisions).
+        module_owned = self_flattened.take().unwrap_or_else(|| module.clone());
         // A driver that handed off `AnalysisResult` already wrote its
         // (narrower-hierarchy) inference into `module_owned` before we got
         // here — but `added_beam_meta`/`added_superclasses` just proved that
@@ -243,7 +249,7 @@ pub fn generate_module_with_warnings(
         // No cross-file/cross-package `external_protocols` map survives into
         // this branch (self-sufficient codegen, or a stale hand-off being
         // re-inferred from scratch) — same tracked limitation as this file's
-        // other self-sufficient `expand_module` call above (BT-3626).
+        // other self-sufficient `expand_module` call above.
         beamtalk_core::semantic_analysis::lower_module_for_codegen(
             &mut module_owned,
             &hierarchy,
@@ -295,6 +301,28 @@ pub fn generate_module_with_warnings(
         code: doc.to_pretty_string(),
         warnings: generator.codegen_warnings,
     })
+}
+
+/// Flattens `uses:` on a clone of `module` for the self-sufficient path
+/// (no `AnalysisResult` handed off), returning `None` for the clone when no
+/// class has a `uses:` line. Cross-file protocols are unavailable here, so
+/// `uses:` only resolves same-module.
+fn flatten_uses_self_sufficient(
+    module: &Module,
+) -> (
+    Option<Module>,
+    beamtalk_core::semantic_analysis::trait_expansion::OriginMap,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+) {
+    if !module.classes.iter().any(|c| !c.uses.is_empty()) {
+        return (None, std::collections::HashMap::new(), Vec::new());
+    }
+    let mut owned = module.clone();
+    let (diagnostics, origins) = beamtalk_core::semantic_analysis::trait_expansion::expand_module(
+        &mut owned,
+        &std::collections::HashMap::new(),
+    );
+    (Some(owned), origins, diagnostics)
 }
 
 /// Generates Core Erlang code with default module name `bt_module`.

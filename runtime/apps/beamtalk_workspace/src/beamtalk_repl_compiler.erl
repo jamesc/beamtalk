@@ -282,7 +282,7 @@ free identifier:
 
 - user variable bindings — session locals plus `bind:as:' globals, both already
   present as atom keys in `Bindings' (internal `__'-prefixed keys excluded);
-- workspace singleton binding names (`Transcript'/`Beamtalk'/`Workspace'),
+- workspace singleton binding names (`Transcript'/`Workspace'),
   derived from `beamtalk_workspace_config:binding_names/0' — the same single
   source of truth the resolver's singleton tier uses.
 

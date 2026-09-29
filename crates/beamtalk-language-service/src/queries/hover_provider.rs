@@ -1397,10 +1397,16 @@ fn resolved_selector_hover_info(
     let typed_sig = method_info_signature(&method);
     let summary = format!("```beamtalk\n{typed_sig}\n```");
 
-    let resolution_context = format!(
+    let mut resolution_context = format!(
         "Resolved on `{receiver_class}` (defined in `{}`)",
         method.defined_in
     );
+    // ADR 0127 §12: trait provenance. `origin` is `None` for class-body
+    // methods (including overrides of a provided selector), so those hover
+    // exactly as before.
+    if let Some(origin) = method.origin.as_deref() {
+        resolution_context = format!("{resolution_context}\n\n*provided by* `{origin}`");
+    }
     let mut meta = dispatch.to_string();
     if method.is_sealed {
         meta.push_str(", sealed");

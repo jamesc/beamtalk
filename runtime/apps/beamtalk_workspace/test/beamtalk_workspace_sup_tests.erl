@@ -61,7 +61,7 @@ children_count_test() ->
     %% workspace_shape_recheck_worker, workspace_findings_store,
     %% transcript_stream, actor_registry, workspace_bootstrap, repl_server,
     %% idle_monitor, actor_sup, session_sup.
-    %% BeamtalkInterface and WorkspaceInterface are value singletons (no gen_server).
+    %% WorkspaceInterface is a value singleton (no gen_server).
     %% the class_events / bindings_events / flush_events pub/sub
     %% gen_servers were retired — those push streams now ride the SystemAnnouncer
     %% bus (`beamtalk_announcements`, supervised under `beamtalk_runtime_sup`).
@@ -77,7 +77,7 @@ children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
     %% Verify all expected children are present.
-    %% BeamtalkInterface and WorkspaceInterface are value singletons —
+    %% WorkspaceInterface is a value singleton —
     %% they are NOT gen_server children of this supervisor.
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
@@ -89,7 +89,7 @@ children_ids_test() ->
     %% ADR 0108 hot-reload re-check trigger.
     ?assert(lists:member(beamtalk_alias_xref, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
-    ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
+    ?assertNot(lists:member('bt@stdlib@beamtalk', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
     %% class_events / bindings_events / flush_events retired.
@@ -201,8 +201,8 @@ transcript_stream_spec_test() ->
 system_dictionary_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% BeamtalkInterface is a value singleton — it must NOT appear as a supervisor child.
-    Specs = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@beamtalk_interface'],
+    %% Beamtalk is a plain class, not a singleton — it must NOT appear as a supervisor child.
+    Specs = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@beamtalk'],
     ?assertEqual([], Specs).
 
 singletons_after_metadata_test() ->
@@ -303,7 +303,7 @@ all_children_alive_test() ->
         Children = supervisor:which_children(Sup),
 
         %% Verify each child has correct ID and is alive.
-        %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
+        %% WorkspaceInterface is a value singleton — not children.
         %% class_events / bindings_events / flush_events retired (those
         %% push streams now ride the SystemAnnouncer bus).
         ExpectedIds = [
@@ -459,7 +459,7 @@ singleton_specs_have_local_registration_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
     %% Actor singletons use {local, Name} registration.
-    %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
+    %% WorkspaceInterface is a value singleton — not children.
     SingletonIds = [
         beamtalk_transcript_stream
     ],

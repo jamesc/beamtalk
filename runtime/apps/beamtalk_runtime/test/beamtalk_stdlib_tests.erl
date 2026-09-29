@@ -57,7 +57,7 @@ stdlib_test_() ->
         {"UndefinedObject class is registered", fun nil_class_registered_test/0},
         {"Block class is registered", fun block_class_registered_test/0},
         {"Tuple class is registered", fun tuple_class_registered_test/0},
-        {"BeamtalkInterface class is registered", fun system_dictionary_class_registered_test/0},
+        {"Beamtalk class is registered", fun system_dictionary_class_registered_test/0},
         {"TranscriptStream class is registered", fun transcript_stream_class_registered_test/0},
         {"backing-module reverse index reflects real native stdlib classes (BT-2736)",
             fun backing_module_index_reflects_real_stdlib_native_classes_test/0},
@@ -71,7 +71,6 @@ stdlib_test_() ->
         {"Beamtalk classNamed: finds existing class", fun beamtalk_class_named_found_test/0},
         {"Beamtalk classNamed: returns nil for missing class",
             fun beamtalk_class_named_not_found_test/0},
-        {"Beamtalk globals returns map", fun beamtalk_globals_test/0},
         {"Beamtalk version returns version string", fun beamtalk_version_test/0},
         {"Beamtalk has_method returns true for known methods", fun beamtalk_has_method_test/0}
     ]}.
@@ -105,7 +104,7 @@ init_registers_all_classes_test() ->
     ?assert(lists:member('Block', ClassesAfter)),
     ?assert(lists:member('Tuple', ClassesAfter)),
     ?assert(lists:member('Float', ClassesAfter)),
-    ?assert(lists:member('BeamtalkInterface', ClassesAfter)),
+    ?assert(lists:member('Beamtalk', ClassesAfter)),
     ?assert(lists:member('TranscriptStream', ClassesAfter)).
 
 init_idempotent_test() ->
@@ -156,9 +155,9 @@ tuple_class_registered_test() ->
     ?assertEqual('Tuple', beamtalk_object_class:class_name(Pid)).
 
 system_dictionary_class_registered_test() ->
-    Pid = beamtalk_class_registry:whereis_class('BeamtalkInterface'),
+    Pid = beamtalk_class_registry:whereis_class('Beamtalk'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('BeamtalkInterface', beamtalk_object_class:class_name(Pid)).
+    ?assertEqual('Beamtalk', beamtalk_object_class:class_name(Pid)).
 
 transcript_stream_class_registered_test() ->
     Pid = beamtalk_class_registry:whereis_class('TranscriptStream'),
@@ -256,7 +255,7 @@ beamtalk_all_classes_test() ->
     ?assert(lists:member('True class', ClassTags)),
     ?assert(lists:member('False class', ClassTags)),
     ?assert(lists:member('Block class', ClassTags)),
-    ?assert(lists:member('BeamtalkInterface class', ClassTags)),
+    ?assert(lists:member('Beamtalk class', ClassTags)),
     ?assert(lists:member('TranscriptStream class', ClassTags)),
     ?assert(lists:member('ProtoObject class', ClassTags)),
     ?assert(lists:member('Object class', ClassTags)),
@@ -281,13 +280,6 @@ beamtalk_class_named_not_found_test() ->
     %% Should return nil
     ?assertEqual(nil, Result).
 
-beamtalk_globals_test() ->
-    %% Call Beamtalk globals
-    Globals = beamtalk_stdlib:dispatch(globals, [], 'Beamtalk'),
-
-    %% Should return a map (currently empty placeholder)
-    ?assert(is_map(Globals)).
-
 beamtalk_version_test() ->
     %% Call Beamtalk version
     Version = beamtalk_stdlib:dispatch(version, [], 'Beamtalk'),
@@ -300,7 +292,6 @@ beamtalk_has_method_test() ->
     %% Check has_method for known methods
     ?assert(beamtalk_stdlib:has_method(allClasses)),
     ?assert(beamtalk_stdlib:has_method('classNamed:')),
-    ?assert(beamtalk_stdlib:has_method(globals)),
     ?assert(beamtalk_stdlib:has_method(version)),
 
     %% Check has_method for unknown methods

@@ -53,9 +53,3 @@ Beamtalk releaseInfo
 
 Beamtalk shapeManifest
 // => _
-
-BeamtalkInterface releaseInfo
-// => _
-
-BeamtalkInterface shapeManifest
-// => _
