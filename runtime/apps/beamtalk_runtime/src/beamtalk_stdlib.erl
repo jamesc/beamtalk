@@ -262,7 +262,6 @@ Dispatch a class method on the Beamtalk global class.
 The Beamtalk class provides system reflection methods:
 - allClasses: Returns list of all registered classes (class objects)
 - classNamed: Look up a class by name (returns class object or nil)
-- globals: Returns global namespace (placeholder - returns empty map)
 - version: Returns Beamtalk version string
 """.
 -spec dispatch(atom(), list(), term()) -> term().
@@ -295,9 +294,6 @@ dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
         Pid ->
             {beamtalk_object, ClassName, beamtalk_object_class, Pid}
     end;
-dispatch(globals, [], _Receiver) ->
-    %% Placeholder - global namespace not yet implemented
-    #{};
 dispatch(version, [], _Receiver) ->
     %% Return Beamtalk version from OTP application metadata
     case application:get_key(beamtalk_runtime, vsn) of
@@ -324,6 +320,5 @@ format_bt_module(Mod) ->
 -spec has_method(atom()) -> boolean().
 has_method(allClasses) -> true;
 has_method('classNamed:') -> true;
-has_method(globals) -> true;
 has_method(version) -> true;
 has_method(_) -> false.

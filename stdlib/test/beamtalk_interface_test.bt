@@ -1,34 +1,54 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)
+// BUnit live-behaviour tests for the class-side `Beamtalk` facade
+// (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends
+// work under `beamtalk test` (no workspace binding required).
 //
-// Tests use class-level introspection (includesSelector:, inheritsFrom:) since
-// the Beamtalk workspace singleton is not available in the BUnit test context
-// (workspace_mode: false). Live functionality tests are in E2E:
-// tests/repl-protocol/cases/workspace_native_api.bt
-//
-// Covers: version, allClasses, classNamed:, globals, help:, help:selector:
+// Covers: version, allClasses, classNamed:, help:, help:selector:,
+// erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the
+// removed `current`/`globals` API.
 
 TestCase subclass: BeamtalkInterfaceTest
 
-  testIncludesSelectorVersion =>
-    self assert: (BeamtalkInterface includesSelector: #version)
+  testClassNamedFindsIntegerClass =>
+    self assert: (Beamtalk classNamed: #Integer) equals: Integer
 
-  testIncludesSelectorAllClasses =>
-    self assert: (BeamtalkInterface includesSelector: #allClasses)
+  testClassNamedUnknownIsNil =>
+    self assert: (Beamtalk classNamed: #NoSuchClassAnywhere) isNil
 
-  testIncludesSelectorClassNamed =>
-    self assert: (BeamtalkInterface includesSelector: #classNamed:)
+  testAllClassesIncludesIntegerAndBeamtalk =>
+    classes := Beamtalk allClasses
+    self assert: (classes includes: Integer)
+    self assert: (classes includes: Beamtalk)
 
-  testIncludesSelectorGlobals =>
-    self assert: (BeamtalkInterface includesSelector: #globals)
+  testVersionIsNonEmptyString =>
+    self assert: (Beamtalk version isKindOf: String)
+    self assert: Beamtalk version isEmpty not
 
-  testIncludesSelectorHelp =>
-    self assert: (BeamtalkInterface includesSelector: #help:)
+  testHelpMentionsClassName =>
+    self assert: ((Beamtalk help: Integer) includesSubstring: "Integer")
 
-  testIncludesSelectorHelpSelector =>
-    self assert: (BeamtalkInterface includesSelector: #help:selector:)
+  testHelpSelectorReturnsString =>
+    self assert: ((Beamtalk help: Integer selector: #'+') isKindOf: String)
 
-  testInheritsFromObject =>
-    self assert: (BeamtalkInterface inheritsFrom: Object)
+  testErlangHelpReturnsString =>
+    self assert: ((Beamtalk erlangHelp: "lists") isKindOf: String)
+
+  testLogLevelReturnsSymbol => self assert: (Beamtalk logLevel isKindOf: Symbol)
+
+  testLogFormatIsTextOrJson =>
+    fmt := Beamtalk logFormat
+    self assert: ((fmt == #text) or: [fmt == #json])
+
+  testDebugTargetsIsList => self assert: (Beamtalk debugTargets isKindOf: List)
+
+  testReleaseInfoIsDictionary =>
+    self assert: (Beamtalk releaseInfo isKindOf: Dictionary)
+
+  testInheritsFromObject => self assert: (Beamtalk inheritsFrom: Object)
+
+  testCurrentAndGlobalsAreRemoved =>
+    self deny: (Beamtalk class includesSelector: #current)
+    self deny: (Beamtalk class includesSelector: #globals)
+    self deny: (Beamtalk class includesSelector: #resetCurrent)

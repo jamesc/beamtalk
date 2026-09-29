@@ -1789,3 +1789,35 @@ fn repl_without_hierarchy_keeps_class_send() {
         "Expected class_send in: {code}"
     );
 }
+
+// ---- BT-3640 (ADR 0129 Phase 1): `Beamtalk` is a class-side facade ----
+
+#[test]
+fn repl_beamtalk_class_named_emits_direct_call() {
+    let hierarchy = beamtalk_core::semantic_analysis::ClassHierarchy::with_builtins();
+    let module = parse_ok("Beamtalk classNamed: #Integer");
+    let exprs: Vec<Expression> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+    let index = std::collections::HashMap::from([(
+        "Beamtalk".to_string(),
+        "bt@stdlib@beamtalk".to_string(),
+    )]);
+    let code = beamtalk_repl::codegen::generate_repl_expressions_with_hierarchy(
+        &exprs,
+        "repl_beamtalk_direct",
+        index,
+        &hierarchy,
+    )
+    .expect("codegen should work");
+    assert!(
+        code.contains("call 'bt@stdlib@beamtalk':"),
+        "Expected a direct call into bt@stdlib@beamtalk in: {code}"
+    );
+    assert!(
+        !code.contains("'class_send'"),
+        "Beamtalk classNamed: must not go through class_send in: {code}"
+    );
+}

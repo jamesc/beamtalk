@@ -16,7 +16,6 @@
 //   Beamtalk version          (informational)
 //   Beamtalk allClasses       (class registry inspection)
 //   Beamtalk classNamed:      (class lookup by name)
-//   Beamtalk globals          (global namespace snapshot)
 
 // ===========================================================================
 // BEAMTALK VERSION
@@ -62,21 +61,6 @@ Beamtalk classNamed: #Integer
 // classNamed: returns nil for unknown classes
 Beamtalk classNamed: #NoSuchClassXyzzy
 // => nil
-
-// ===========================================================================
-// BEAMTALK GLOBALS
-// ===========================================================================
-
-// Beamtalk globals returns a Dictionary snapshot
-btGlobals := Beamtalk globals
-// => _
-
-// globals includes core stdlib classes
-btGlobals includesKey: #Integer
-// => true
-
-btGlobals includesKey: #String
-// => true
 
 // ===========================================================================
 // BEAMTALK HELP: — native equivalent of :help / docs protocol op
@@ -152,8 +136,9 @@ rc increment
 // ===========================================================================
 
 // Workspace globals is a live BindingsView over the workspace singletons +
-// bind:as: layer (ADR 0081). It includes the singletons Workspace, Beamtalk,
-// Transcript, but NOT the class registry — classes live in Beamtalk globals.
+// bind:as: layer (ADR 0081). It includes the singletons Workspace and
+// Transcript, but NOT the class registry (`Beamtalk` is a plain class now,
+// ADR 0129) — classes live behind `Beamtalk classNamed:`.
 wsGlobals := Workspace globals
 // => _
 
@@ -161,16 +146,16 @@ wsGlobals includesKey: #Workspace
 // => true
 
 wsGlobals includesKey: #Beamtalk
-// => true
+// => false
 
 // Loaded user classes are NOT in Workspace globals (they are in Beamtalk
 // globals, the class registry — a separate layer per ADR 0081).
 wsGlobals includesKey: #Counter
 // => false
 
-// The class registry (Beamtalk globals) is where the Counter class lives.
-(Beamtalk globals) includesKey: #Counter
-// => true
+// The class registry (`Beamtalk classNamed:`) is where the Counter class lives.
+Beamtalk classNamed: #Counter
+// => Counter
 
 // ===========================================================================
 // SYSTEMNAVIGATION IMPLEMENTORSOF: — find classes that locally define a selector
@@ -189,7 +174,7 @@ wsGlobals includesKey: #Counter
 // implementorsOf: returns a non-empty list for a selector with known implementors.
 // SysnavFixture and SysnavFixtureB both define #asString locally (see fixture),
 // so the result must include at least these two fixture-controlled classes.
-asStringImpls := SystemNavigation default implementorsOf: #asString
+asStringImpls := SystemNavigation implementorsOf: #asString
 // => _
 
 asStringImpls isEmpty
@@ -205,30 +190,31 @@ asStringImpls includes: SysnavFixtureB
 
 // User-loaded classes show up in results when they implement the selector.
 // Counter (loaded above) locally defines #increment.
-(SystemNavigation default implementorsOf: #increment) includes: Counter
+(SystemNavigation implementorsOf: #increment) includes: Counter
 // => true
 
 // Selectors with no implementors return an empty list
-SystemNavigation default implementorsOf: #thisSelectorIsNotDefinedAnywhereXyzzy
+SystemNavigation implementorsOf: #thisSelectorIsNotDefinedAnywhereXyzzy
 // => []
 
 // implementorsOf: does NOT walk inheritance — #class is defined on
 // ProtoObject; Integer inherits it but is not an implementor.
-classImpls := SystemNavigation default implementorsOf: #class
+classImpls := SystemNavigation implementorsOf: #class
 // => _
 
 classImpls includes: Integer
 // => false
 
 // implementorsOf: also finds class-side implementors as metaclass objects.
-// `SystemNavigation class` defines `class default` — that hit appears as
+// `SystemNavigation class` defines `class actorClasses` — that hit appears as
 // `SystemNavigation class` (the metaclass object). This is a stable fixture
-// anchor: `default` is a class-side method on SystemNavigation itself, which
-// is the feature under test, so it cannot disappear without breaking this suite.
-withDefaultImpls := SystemNavigation default implementorsOf: #default
+// anchor: `actorClasses` is a class-side method on SystemNavigation itself,
+// which is the feature under test, so it cannot disappear without breaking this
+// suite.
+withActorClassesImpls := SystemNavigation implementorsOf: #actorClasses
 // => _
 
-withDefaultImpls includes: SystemNavigation class
+withActorClassesImpls includes: SystemNavigation class
 // => true
 
 // superclassChain works on metaclass receivers — walks the parallel hierarchy.
@@ -253,7 +239,7 @@ metaChain size
 // selectors but `Counter` never is. This retires the BT-2614 synthetic
 // per-class xref rows that used to make every actor subclass its own
 // "implementor" too.
-spawnImpls := SystemNavigation default implementorsOf: #spawn
+spawnImpls := SystemNavigation implementorsOf: #spawn
 // => _
 
 spawnImpls includes: Actor class
@@ -262,7 +248,7 @@ spawnImpls includes: Actor class
 spawnImpls includes: Counter class
 // => false
 
-spawnWithImpls := SystemNavigation default implementorsOf: #spawnWith:
+spawnWithImpls := SystemNavigation implementorsOf: #spawnWith:
 // => _
 
 spawnWithImpls includes: Actor class
@@ -271,7 +257,7 @@ spawnWithImpls includes: Actor class
 spawnWithImpls includes: Counter class
 // => false
 
-newImpls := SystemNavigation default implementorsOf: #new
+newImpls := SystemNavigation implementorsOf: #new
 // => _
 
 newImpls includes: Actor class
@@ -280,7 +266,7 @@ newImpls includes: Actor class
 newImpls includes: Counter class
 // => false
 
-newColonImpls := SystemNavigation default implementorsOf: #new:
+newColonImpls := SystemNavigation implementorsOf: #new:
 // => _
 
 newColonImpls includes: Actor class
@@ -297,7 +283,7 @@ newColonImpls includes: Counter class
 // sendersOf: returns a non-empty list for a widely-sent binary selector.
 // Counter (loaded above) sends `+` from `increment`, so `+` must have
 // at least one sender in a workspace that has Counter loaded.
-plusSenders := SystemNavigation default sendersOf: #+
+plusSenders := SystemNavigation sendersOf: #+
 // => _
 
 plusSenders isEmpty
@@ -341,11 +327,11 @@ plusLineList allSatisfy: [:n | n > 0]
 // => true
 
 // sendersOf: with a selector that nobody sends returns an empty list.
-SystemNavigation default sendersOf: #neverCalledByAnybodyXyzzy
+SystemNavigation sendersOf: #neverCalledByAnybodyXyzzy
 // => []
 
 // Symbol argument is required — passing a String raises a useful error.
-[SystemNavigation default sendersOf: "+"] on: Error do: [:e | #ok]
+[SystemNavigation sendersOf: "+"] on: Error do: [:e | #ok]
 // => ok
 
 // BT-2195: Class-side method bodies participate. `SystemNavigation class
@@ -354,7 +340,7 @@ SystemNavigation default sendersOf: #neverCalledByAnybodyXyzzy
 // (the metaclass object), not `SystemNavigation`. Confirms the walker
 // recurses through `cls class` as well as `cls`, and that the metaclass
 // object is what shows up in the record.
-newSenders := SystemNavigation default sendersOf: #new
+newSenders := SystemNavigation sendersOf: #new
 // => _
 
 newSenderClasses := newSenders collect: [:r | r at: #class]
@@ -376,7 +362,7 @@ extSendersSource := "describe => self btTwoTwoOneSixSrcSenderMarker"
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixSrcSenderExt fun: extSendersFun owner: #test source: extSendersSource
 // => Result ok: nil
 
-extSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSenderMarker
+extSenderHits := SystemNavigation sendersOf: #btTwoTwoOneSixSrcSenderMarker
 // => _
 
 (extSenderHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixSrcSenderExt
@@ -396,7 +382,7 @@ extBareSendersFun := [:a :s | s]
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixBareSenderExt fun: extBareSendersFun owner: #test
 // => Result ok: nil
 
-extBareSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSenderMarker
+extBareSenderHits := SystemNavigation sendersOf: #btTwoTwoOneSixSrcSenderMarker
 // => _
 
 (extBareSenderHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixBareSenderExt
@@ -419,7 +405,7 @@ extMetaSource := "describe => self btTwoTwoOneSixMetaSenderMarker"
 Erlang beamtalk_extensions register: #'Integer class' selector: #btTwoTwoOneSixMetaSenderExt fun: extMetaFun owner: #test source: extMetaSource
 // => Result ok: nil
 
-extMetaHits := SystemNavigation default sendersOf: #btTwoTwoOneSixMetaSenderMarker
+extMetaHits := SystemNavigation sendersOf: #btTwoTwoOneSixMetaSenderMarker
 // => _
 
 (extMetaHits collect: [:r | r at: #class]) includes: Integer class
@@ -440,7 +426,7 @@ Erlang ets delete: #beamtalk_extension_sources key: #(#'Integer class', #btTwoTw
 // literal class name `SysnavFixture` in its body, so referencesTo: must find
 // at least one hit. This avoids depending on stdlib mentioning Integer
 // (fragile to stdlib churn — BT-2220).
-fixtureRefs := SystemNavigation default referencesTo: SysnavFixture
+fixtureRefs := SystemNavigation referencesTo: SysnavFixture
 // => _
 
 fixtureRefs isEmpty
@@ -470,26 +456,26 @@ fixtureLineList allSatisfy: [:n | n > 0]
 // referencesTo: with a class that nothing mentions returns an empty list.
 // (Bag class is a metaclass — nothing in the source tree spells
 // `Bag class` as a single class-reference token, so this is a stable empty.)
-SystemNavigation default referencesTo: Bag class
+SystemNavigation referencesTo: Bag class
 // => []
 
-// BT-2195: Class-side method bodies participate. `SystemNavigation class
-// >> #default` declares return type `-> SystemNavigation` which is a
-// class reference, so the references to `SystemNavigation` must include
-// at least one record whose `#class` is `SystemNavigation class`.
-navRefs := SystemNavigation default referencesTo: SystemNavigation
+// BT-2195: Class-side method bodies participate. `Regex class >> #from:`
+// declares return type `-> Result(Regex, Error)` which is a class reference,
+// so the references to `Regex` must include at least one record whose `#class`
+// is `Regex class`.
+navRefs := SystemNavigation referencesTo: Regex
 // => _
 
-(navRefs collect: [:r | r at: #class]) includes: SystemNavigation class
+(navRefs collect: [:r | r at: #class]) includes: Regex class
 // => true
 
 // Class object argument is required — passing a Symbol raises a useful error.
 // This is the most common mistake since `sendersOf:` takes a Symbol.
-[SystemNavigation default referencesTo: #Integer] on: Error do: [:e | #ok]
+[SystemNavigation referencesTo: #Integer] on: Error do: [:e | #ok]
 // => ok
 
 // Passing a String also raises.
-[SystemNavigation default referencesTo: "Integer"] on: Error do: [:e | #ok]
+[SystemNavigation referencesTo: "Integer"] on: Error do: [:e | #ok]
 // => ok
 
 // BT-2196: Extension method bodies registered via `register/5` (with source)
@@ -507,7 +493,7 @@ extRefsSource := "asInt => Integer new"
 Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixSrcRefExt fun: extRefsFun owner: #test source: extRefsSource
 // => Result ok: nil
 
-extRefHits := SystemNavigation default referencesTo: Integer
+extRefHits := SystemNavigation referencesTo: Integer
 // => _
 
 (extRefHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixSrcRefExt
@@ -526,7 +512,7 @@ extBareRefsFun := [:a :s | s]
 Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixBareRefExt fun: extBareRefsFun owner: #test
 // => Result ok: nil
 
-extBareRefHits := SystemNavigation default referencesTo: Integer
+extBareRefHits := SystemNavigation referencesTo: Integer
 // => _
 
 (extBareRefHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixBareRefExt
@@ -556,7 +542,7 @@ Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefEx
 // publishes (AnnounceEventA via announce:, AnnounceEventB via announceAndWait:),
 // sorted by name. The dynamic-argument emit (`announce: e`) is unresolvable and
 // skipped, so the distinct set is exactly {AnnounceEventA, AnnounceEventB}.
-emitted := SystemNavigation default announcementsSentBy: AnnounceEmitter
+emitted := SystemNavigation announcementsSentBy: AnnounceEmitter
 // => _
 
 emitted size
@@ -572,12 +558,12 @@ emitted includes: AnnounceEventB
 
 // A class that emits nothing returns an empty list (SysnavFixture, loaded above,
 // has no announce: sends).
-SystemNavigation default announcementsSentBy: SysnavFixture
+SystemNavigation announcementsSentBy: SysnavFixture
 // => []
 
 // Site-level form: #{#class, #selector, #line, #announcementClass} — the
 // sendersOf: record shape plus the resolved event class.
-sites := SystemNavigation default announcementSitesSentBy: AnnounceEmitter
+sites := SystemNavigation announcementSitesSentBy: AnnounceEmitter
 // => _
 
 sites isEmpty
@@ -622,11 +608,11 @@ siteEvents includes: AnnounceEventB
 // => true
 
 // Argument validation parity with sendersOf: / referencesTo:: a Symbol raises.
-[SystemNavigation default announcementsSentBy: #AnnounceEmitter] on: Error do: [:e | #ok]
+[SystemNavigation announcementsSentBy: #AnnounceEmitter] on: Error do: [:e | #ok]
 // => ok
 
 // A String argument also raises (the common sendersOf:-takes-a-Symbol mistake).
-[SystemNavigation default announcementsSentBy: "AnnounceEmitter"] on: Error do: [:e | #ok]
+[SystemNavigation announcementsSentBy: "AnnounceEmitter"] on: Error do: [:e | #ok]
 // => ok
 
 // BT-2196 parity: source-bearing extension methods that target the publisher
@@ -641,7 +627,7 @@ extEmitSource := "emitExt => announcer announce: (AnnounceEventB new)"
 Erlang beamtalk_extensions register: #AnnounceEmitter selector: #emitExt fun: extEmitFun owner: #test source: extEmitSource
 // => Result ok: nil
 
-extEmitSites := SystemNavigation default announcementSitesSentBy: AnnounceEmitter
+extEmitSites := SystemNavigation announcementSitesSentBy: AnnounceEmitter
 // => _
 
 (extEmitSites collect: [:r | r at: #selector]) includes: #emitExt
@@ -670,7 +656,7 @@ Erlang ets delete: #beamtalk_extension_sources key: #(#AnnounceEmitter, #emitExt
 // fieldReadersOf:in: finds every method that reads the named slot. The
 // `tally` slot is read by `readTally` and by `bumpTally` (RHS of its
 // assignment), so the result must be non-empty.
-tallyReaders := SystemNavigation default fieldReadersOf: #tally in: FieldFixture
+tallyReaders := SystemNavigation fieldReadersOf: #tally in: FieldFixture
 // => _
 
 tallyReaders isEmpty
@@ -714,7 +700,7 @@ tallyReaderSelectors includes: #clearTally
 
 // fieldWritersOf:in: finds every method that writes (assigns) the slot.
 // `bumpTally` and `clearTally` both assign `self.tally`.
-tallyWriters := SystemNavigation default fieldWritersOf: #tally in: FieldFixture
+tallyWriters := SystemNavigation fieldWritersOf: #tally in: FieldFixture
 // => _
 
 tallyWriterSelectors := tallyWriters collect: [:r | r at: #selector]
@@ -742,13 +728,13 @@ tallyWriterSelectors includes: #readTally
 // fieldReadersOf:/Writers: walk `aClass allSubclasses`. `FieldChild`
 // inherits `tally` and defines `childBump` (`self.tally := self.tally + 2`),
 // which reads and writes it. Scanning the PARENT must surface the child hit.
-childReaders := SystemNavigation default fieldReadersOf: #tally in: FieldFixture
+childReaders := SystemNavigation fieldReadersOf: #tally in: FieldFixture
 // => _
 
 (childReaders collect: [:r | r at: #selector]) includes: #childBump
 // => true
 
-childWriters := SystemNavigation default fieldWritersOf: #tally in: FieldFixture
+childWriters := SystemNavigation fieldWritersOf: #tally in: FieldFixture
 // => _
 
 (childWriters collect: [:r | r at: #selector]) includes: #childBump
@@ -765,7 +751,7 @@ childWriters := SystemNavigation default fieldWritersOf: #tally in: FieldFixture
 // `spawnCount` is a class-side field touched only by class-side methods. The
 // metaclass walk (`cls class`) must find them; the #class is the metaclass
 // object. `bumpSpawnCount` reads and writes it; `readSpawnCount` reads it.
-spawnReaders := SystemNavigation default fieldReadersOf: #spawnCount in: FieldFixture
+spawnReaders := SystemNavigation fieldReadersOf: #spawnCount in: FieldFixture
 // => _
 
 (spawnReaders collect: [:r | r at: #selector]) includes: #bumpSpawnCount
@@ -779,7 +765,7 @@ spawnReaders := SystemNavigation default fieldReadersOf: #spawnCount in: FieldFi
   collect: [:r | r at: #class]) includes: FieldFixture class
 // => true
 
-spawnWriters := SystemNavigation default fieldWritersOf: #spawnCount in: FieldFixture
+spawnWriters := SystemNavigation fieldWritersOf: #spawnCount in: FieldFixture
 // => _
 
 (spawnWriters collect: [:r | r at: #selector]) includes: #bumpSpawnCount
@@ -793,20 +779,20 @@ spawnWriters := SystemNavigation default fieldWritersOf: #spawnCount in: FieldFi
 
 // `untouched` is a declared slot that no method reads or writes. Both queries
 // return an empty list (NOT an error — it is a real slot).
-SystemNavigation default fieldReadersOf: #untouched in: FieldFixture
+SystemNavigation fieldReadersOf: #untouched in: FieldFixture
 // => []
 
-SystemNavigation default fieldWritersOf: #untouched in: FieldFixture
+SystemNavigation fieldWritersOf: #untouched in: FieldFixture
 // => []
 
 // --- slot-name typo raises ---
 
 // A name that is not a declared slot raises (typo guard) rather than silently
 // returning [].
-[SystemNavigation default fieldReadersOf: #notARealSlotXyzzy in: FieldFixture] on: Error do: [:e | #ok]
+[SystemNavigation fieldReadersOf: #notARealSlotXyzzy in: FieldFixture] on: Error do: [:e | #ok]
 // => ok
 
-[SystemNavigation default fieldWritersOf: #notARealSlotXyzzy in: FieldFixture] on: Error do: [:e | #ok]
+[SystemNavigation fieldWritersOf: #notARealSlotXyzzy in: FieldFixture] on: Error do: [:e | #ok]
 // => ok
 
 // --- Symbol slot name required ---
@@ -815,7 +801,7 @@ SystemNavigation default fieldWritersOf: #untouched in: FieldFixture
 // the typed `:: Symbol` parameter does not reject the bad argument at compile
 // time. (perform args must be a literal #(...) array, which can't hold a class
 // reference, so the scope stays #FieldFixture; the slot-name guard runs first.)
-[SystemNavigation default perform: #fieldReadersOf:in: withArguments: #(42, #FieldFixture)] on: Error do: [:e | #ok]
+[SystemNavigation perform: #fieldReadersOf:in: withArguments: #(42, #FieldFixture)] on: Error do: [:e | #ok]
 // => ok
 
 // ===========================================================================
@@ -826,7 +812,7 @@ SystemNavigation default fieldWritersOf: #untouched in: FieldFixture
 // method body. SysnavFixture >> #btIfTrueBodyMarker sends `ifTrue:` in its
 // body (see fixture), so the search must produce at least one hit. Using a
 // fixture-controlled method avoids depending on stdlib bodies (BT-2220).
-ifTrueMethods := SystemNavigation default methodsMatching: (Regex from: "ifTrue:") unwrap
+ifTrueMethods := SystemNavigation methodsMatching: (Regex from: "ifTrue:") unwrap
 // => _
 
 ifTrueMethods isEmpty
@@ -847,7 +833,7 @@ ifTrueMethodRecord includesKey: #selector
 // SysnavFixture >> #btNegatedBodyMarker contains `self negated` in its body
 // (see fixture). Confirm the record appears — this is fixture-controlled and
 // stable against stdlib refactoring (BT-2220).
-negatedMatches := SystemNavigation default methodsMatching: (Regex from: "self negated") unwrap
+negatedMatches := SystemNavigation methodsMatching: (Regex from: "self negated") unwrap
 // => _
 
 (negatedMatches collect: [:r | r at: #class]) includes: SysnavFixture
@@ -862,22 +848,22 @@ negatedMatches := SystemNavigation default methodsMatching: (Regex from: "self n
 absent := "xyzzyAbsentNeed" ++ "leZZ1n0Wh3re"
 // => _
 
-SystemNavigation default methodsMatching: (Regex from: absent) unwrap
+SystemNavigation methodsMatching: (Regex from: absent) unwrap
 // => []
 
 // Regex argument is required — passing a String (raw pattern) raises a
 // useful error, mirroring sendersOf:'s Symbol-only contract.
-[SystemNavigation default methodsMatching: "ifTrue:"] on: Error do: [:e | #ok]
+[SystemNavigation methodsMatching: "ifTrue:"] on: Error do: [:e | #ok]
 // => ok
 
 // BT-2195: Class-side method bodies participate. `SystemNavigation class
-// >> #default` body contains the literal `self new`, so a regex over
-// that literal must include a record whose `#class` is `SystemNavigation
+// >> #allClasses` body contains the literal `beamtalk_interface`, so a regex
+// over that literal must include a record whose `#class` is `SystemNavigation
 // class`.
-newSelfMatches := SystemNavigation default methodsMatching: (Regex from: "self new") unwrap
+interfaceMatches := SystemNavigation methodsMatching: (Regex from: "beamtalk_interface") unwrap
 // => _
 
-(newSelfMatches collect: [:r | r at: #class]) includes: SystemNavigation class
+(interfaceMatches collect: [:r | r at: #class]) includes: SystemNavigation class
 // => true
 
 // BT-2196: Extension methods registered via `register/5` (with source)
@@ -892,7 +878,7 @@ extMatchSource := "xyzzy => 42 // bt-two-two-one-six-method-marker"
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixMatchExt fun: extMatchFun owner: #test source: extMatchSource
 // => Result ok: nil
 
-extMatchHits := SystemNavigation default methodsMatching: (Regex from: "bt-two-two-one-six-method-marker") unwrap
+extMatchHits := SystemNavigation methodsMatching: (Regex from: "bt-two-two-one-six-method-marker") unwrap
 // => _
 
 (extMatchHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneSixMatchExt
@@ -912,7 +898,7 @@ Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixM
 // `#btAppendMarker` (see fixture), so a search for "append" must produce at
 // least this hit. Using a fixture-controlled selector avoids depending on
 // stdlib having selectors that contain "append" (BT-2220).
-appendHits := SystemNavigation default selectorsMatching: "append"
+appendHits := SystemNavigation selectorsMatching: "append"
 // => _
 
 appendHits isEmpty
@@ -924,7 +910,7 @@ appendHits allSatisfy: [:s | s asString lowercase includesSubstring: "append"]
 // => true
 
 // Case-insensitive: an uppercase pattern returns the same hits as lowercase.
-upperHits := SystemNavigation default selectorsMatching: "APPEND"
+upperHits := SystemNavigation selectorsMatching: "APPEND"
 // => _
 
 upperHits size == appendHits size
@@ -939,7 +925,7 @@ appendHits size == (appendHits unique) size
 // => true
 
 // `#=` is defined on many classes but appears once in the deduped result.
-equalsHits := SystemNavigation default selectorsMatching: "="
+equalsHits := SystemNavigation selectorsMatching: "="
 // => _
 
 equalsHits size == (equalsHits unique) size
@@ -947,12 +933,12 @@ equalsHits size == (equalsHits unique) size
 
 // Counter (loaded above) locally defines `increment` — that selector shows up
 // in a substring search for "incr".
-(SystemNavigation default selectorsMatching: "incr") includes: #increment
+(SystemNavigation selectorsMatching: "incr") includes: #increment
 // => true
 
-// Class-side selectors participate. `default` is a class-side method on
-// SystemNavigation, so it appears in a search for "default".
-(SystemNavigation default selectorsMatching: "default") includes: #default
+// Class-side selectors participate. `actorClasses` is a class-side method on
+// SystemNavigation, so it appears in a search for "actorClass".
+(SystemNavigation selectorsMatching: "actorClass") includes: #actorClasses
 // => true
 
 // Extension methods (ADR 0066) participate. Register a uniquely-named
@@ -963,22 +949,22 @@ extFun := [:a :s | s]
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoFourExtMarker fun: extFun owner: #test
 // => Result ok: nil
 
-(SystemNavigation default selectorsMatching: "btTwoTwoFourExtMarker") includes: #btTwoTwoFourExtMarker
+(SystemNavigation selectorsMatching: "btTwoTwoFourExtMarker") includes: #btTwoTwoFourExtMarker
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoFourExtMarker)
 // => true
 
 // No-match returns an empty list.
-SystemNavigation default selectorsMatching: "ZzZxYwQpPpNoSuchSelectorXyzzy"
+SystemNavigation selectorsMatching: "ZzZxYwQpPpNoSuchSelectorXyzzy"
 // => []
 
 // Empty pattern is rejected with a typed error.
-[SystemNavigation default selectorsMatching: ""] on: Error do: [:e | #ok]
+[SystemNavigation selectorsMatching: ""] on: Error do: [:e | #ok]
 // => ok
 
 // Non-String argument is rejected with a typed error.
-[SystemNavigation default selectorsMatching: #notAString] on: Error do: [:e | #ok]
+[SystemNavigation selectorsMatching: #notAString] on: Error do: [:e | #ok]
 // => ok
 
 // ===========================================================================
@@ -996,7 +982,7 @@ SystemNavigation default selectorsMatching: "ZzZxYwQpPpNoSuchSelectorXyzzy"
 // => Loaded: PerformSender
 
 // unimplementedSelectors returns a List of records (selector + sites).
-unimpl := SystemNavigation default unimplementedSelectors
+unimpl := SystemNavigation unimplementedSelectors
 // => _
 
 // The deliberate typo `printOnStream:` (sent in TypoSender >> describe:, defined
@@ -1083,7 +1069,7 @@ unimplSelectors includes: #perform:
 // => Loaded: UnusedPerform
 
 // unusedSelectors returns a List of #{#class, #selector} records.
-unused := SystemNavigation default unusedSelectors
+unused := SystemNavigation unusedSelectors
 // => _
 
 // The stdlib has many public-but-internally-unsent selectors, so the live
@@ -1130,7 +1116,7 @@ unusedSelectors includes: #hash
 
 // The override's body is real (non-primitive) Beamtalk, confirming the exclusion
 // above is doing the work rather than the primitive heuristic.
-SystemNavigation default isPrimitiveMethod: #hash in: UnusedRuntimeCalled
+SystemNavigation isPrimitiveMethod: #hash in: UnusedRuntimeCalled
 // => false
 
 // A TestCase subclass's `testSomething` / `setUp` / `tearDown` are NOT flagged —
@@ -1156,11 +1142,11 @@ unusedSelectors includes: #fieldAt:put:
 // => false
 
 // The primitive heuristic helper agrees: a stdlib intrinsic reads as primitive.
-SystemNavigation default isPrimitiveMethod: #hash in: Object
+SystemNavigation isPrimitiveMethod: #hash in: Object
 // => true
 
 // ...while an ordinary stdlib method does not.
-SystemNavigation default isPrimitiveMethod: #displayString in: Object
+SystemNavigation isPrimitiveMethod: #displayString in: Object
 // => false
 
 // Documented limitation: a method reached ONLY via `self perform: #dynamicOnly`
@@ -1190,7 +1176,7 @@ unusedSelectors includes: #caller
 // ffiSitesFor: "lists:reverse" finds every method that calls lists:reverse
 // through the FFI bridge. FfiFixture >> #revInstance: and the class-side
 // #revClassSide: both call it, so the result must be non-empty.
-revSites := SystemNavigation default ffiSitesFor: "lists:reverse"
+revSites := SystemNavigation ffiSitesFor: "lists:reverse"
 // => _
 
 revSites isEmpty
@@ -1245,20 +1231,20 @@ revSiteSelectors includes: #revClassSide:
 
 // lists:reverse is called with arity 1 in the fixture. The arity-qualified spec
 // "lists:reverse/1" still matches `revInstance:`...
-revArity1 := SystemNavigation default ffiSitesFor: "lists:reverse/1"
+revArity1 := SystemNavigation ffiSitesFor: "lists:reverse/1"
 // => _
 
 (revArity1 collect: [:r | r at: #selector]) includes: #revInstance:
 // => true
 
 // ...while "lists:reverse/2" matches nothing (no arity-2 reverse call exists).
-SystemNavigation default ffiSitesFor: "lists:reverse/2"
+SystemNavigation ffiSitesFor: "lists:reverse/2"
 // => []
 
 // --- different function is matched independently ---
 
 // "lists:seq" finds `seqInstance` (a lists:seq/2 call) but NOT the reverse sites.
-seqSites := SystemNavigation default ffiSitesFor: "lists:seq"
+seqSites := SystemNavigation ffiSitesFor: "lists:seq"
 // => _
 
 (seqSites collect: [:r | r at: #selector]) includes: #seqInstance
@@ -1268,7 +1254,7 @@ seqSites := SystemNavigation default ffiSitesFor: "lists:seq"
 // => false
 
 // The arity-qualified "lists:seq/2" matches (seq: 1 to: 10 is arity 2).
-seqArity2 := SystemNavigation default ffiSitesFor: "lists:seq/2"
+seqArity2 := SystemNavigation ffiSitesFor: "lists:seq/2"
 // => _
 
 (seqArity2 collect: [:r | r at: #selector]) includes: #seqInstance
@@ -1287,7 +1273,7 @@ extFfiSource := "describe: xs => (Erlang lists) reverse: xs"
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneOneFfiExt fun: extFfiFun owner: #test source: extFfiSource
 // => Result ok: nil
 
-extFfiHits := SystemNavigation default ffiSitesFor: "lists:reverse"
+extFfiHits := SystemNavigation ffiSitesFor: "lists:reverse"
 // => _
 
 (extFfiHits collect: [:r | r at: #selector]) includes: #btTwoTwoOneOneFfiExt
@@ -1303,18 +1289,18 @@ Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneOneF
 
 // A well-formed spec for a function that nobody calls returns an empty list
 // (NOT an error).
-SystemNavigation default ffiSitesFor: "lists:noSuchFunctionXyzzy"
+SystemNavigation ffiSitesFor: "lists:noSuchFunctionXyzzy"
 // => []
 
 // --- malformed spec raises ---
 
 // A spec that does not match the module:function[/arity] shape raises (kind
 // #user_error), so a typo surfaces rather than silently returning [].
-[SystemNavigation default ffiSitesFor: "nocolon"] on: Error do: [:e | #ok]
+[SystemNavigation ffiSitesFor: "nocolon"] on: Error do: [:e | #ok]
 // => ok
 
-[SystemNavigation default ffiSitesFor: "a:b:c"] on: Error do: [:e | #ok]
+[SystemNavigation ffiSitesFor: "a:b:c"] on: Error do: [:e | #ok]
 // => ok
 
-[SystemNavigation default ffiSitesFor: "lists:reverse/x"] on: Error do: [:e | #ok]
+[SystemNavigation ffiSitesFor: "lists:reverse/x"] on: Error do: [:e | #ok]
 // => ok

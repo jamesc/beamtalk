@@ -9,7 +9,7 @@
 ADR 0114 Phase 1 validation spike.
 
 `renameTo:`'s planned site-discovery mechanism (not yet implemented — see ADR
-0114 § Decision) is the union of `SystemNavigation default referencesTo:
+0114 § Decision) is the union of `SystemNavigation referencesTo:
 aClass` (ADR 0087) and `beamtalk_class_registry:direct_subclasses/1`. This
 module is the spike the ADR's Phase 1 row calls for: confirm that union is
 exhaustive against real, compiled stdlib code before any rename primitive is

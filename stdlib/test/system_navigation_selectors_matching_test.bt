@@ -21,7 +21,7 @@ TestCase subclass: SystemNavigationSelectorsMatchingTest
 
   // --- selector existence ---
   testIncludesSelectorSelectorsMatching =>
-    self assert: (SystemNavigation includesSelector: #selectorsMatching:)
+    self assert: (SystemNavigation class includesSelector: #selectorsMatching:)
 
   // --- composition primitives must be in place ---
 
@@ -30,7 +30,7 @@ TestCase subclass: SystemNavigationSelectorsMatchingTest
   // methods`, and the extension registry, then filters by lowercase
   // substring. All of those primitives have to be present.
   testCompositionPrimitivesPresent =>
-    self assert: (SystemNavigation includesSelector: #allClasses)
+    self assert: (SystemNavigation class includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #methods)
     self assert: (String includesSelector: #lowercase)
     self assert: (String includesSelector: #includesSubstring:)
@@ -42,10 +42,10 @@ TestCase subclass: SystemNavigationSelectorsMatchingTest
   // The internal helpers `selectorsForClass:` and `extensionSelectorsFor:`
   // factor out per-class iteration so they can be unit-checked separately.
   testHelperSelectorsForClassIsDefined =>
-    self assert: (SystemNavigation includesSelector: #selectorsForClass:)
+    self assert: (SystemNavigation class includesSelector: #selectorsForClass:)
 
   testHelperExtensionSelectorsForIsDefined =>
-    self assert: (SystemNavigation includesSelector: #extensionSelectorsFor:)
+    self assert: (SystemNavigation class includesSelector: #extensionSelectorsFor:)
 
   // --- BT-2302: xref-backed read path + miss-policy fallback ---
   //
@@ -63,4 +63,4 @@ TestCase subclass: SystemNavigationSelectorsMatchingTest
   // registry + xref server are required. The check below covers the extension
   // gather split out for the index path.
   testHelperExtensionSelectorsForBothSidesIsDefined =>
-    self assert: (SystemNavigation includesSelector: #extensionSelectorsForBothSides:)
+    self assert: (SystemNavigation class includesSelector: #extensionSelectorsForBothSides:)

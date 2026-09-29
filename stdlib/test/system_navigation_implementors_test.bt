@@ -21,10 +21,10 @@ TestCase subclass: SystemNavigationImplementorsTest
 
   // --- selector existence ---
   testIncludesSelectorImplementorsOf =>
-    self assert: (SystemNavigation includesSelector: #implementorsOf:)
+    self assert: (SystemNavigation class includesSelector: #implementorsOf:)
 
-  testIncludesSelectorDefault =>
-    self assert: (SystemNavigation class includesSelector: #default)
+  testMetaclassIncludesSelectorAllClasses =>
+    self assert: (SystemNavigation class includesSelector: #allClasses)
 
   // --- composition primitives must be in place ---
 
@@ -32,7 +32,7 @@ TestCase subclass: SystemNavigationImplementorsTest
   // and filters by includesSelector:. That primitive has to be present on
   // Behaviour.
   testCompositionPrimitivesPresent =>
-    self assert: (SystemNavigation includesSelector: #allClasses)
+    self assert: (SystemNavigation class includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #includesSelector:)
 
   // --- BT-2302: xref-backed read path + miss-policy fallback ---
@@ -48,7 +48,7 @@ TestCase subclass: SystemNavigationImplementorsTest
   // registry + xref server are required. The check below covers the shared
   // owner-tag/class-side -> class-object resolver that maps the indexed rows.
   testHelperSenderClassForIsDefined =>
-    self assert: (SystemNavigation includesSelector: #senderClassFor:classSide:)
+    self assert: (SystemNavigation class includesSelector: #senderClassFor:classSide:)
 
   // --- BT-2304 / ADR 0087 Phase 6: synthetic auto-accessor parity exception ---
   //

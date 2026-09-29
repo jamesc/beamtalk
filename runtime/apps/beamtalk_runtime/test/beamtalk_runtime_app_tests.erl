@@ -101,7 +101,7 @@ system_dictionary_loaded_after_start_test() ->
     %% Start (or get already running) supervisor
     Result = start_runtime(),
 
-    %% The BeamtalkInterface class provides system reflection (allClasses, classNamed:, etc.).
+    %% The Beamtalk class provides system reflection (allClasses, classNamed:, etc.).
     %% The primitives are dispatched via beamtalk_interface (Phase 2).
     %% Verify the dispatch module is available and can handle allClasses (selector with no args).
     ?assertEqual(

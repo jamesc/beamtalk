@@ -13,7 +13,7 @@ delegate `textDocument/{references,implementation,callHierarchy}` (and the
 matching MCP tools) to `SystemNavigation` / `beamtalk_xref` rather than its
 in-process AST walker.
 
-Why a structured op (vs. an `eval` of `SystemNavigation default sendersOf:`):
+Why a structured op (vs. an `eval` of `SystemNavigation sendersOf:`):
 
 * `eval` serialises result values through `beamtalk_repl_json:term_to_json/1`,
   which converts Beamtalk `Dictionary` tagged maps to their inspect string

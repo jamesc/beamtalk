@@ -635,7 +635,7 @@ abstract Object subclass: Behaviour
   /// Rename this class to `aNewName`, rewriting every in-project reference
   /// site and re-registering it under the new name.
   ///
-  /// Site discovery is the union of `SystemNavigation default referencesTo:
+  /// Site discovery is the union of `SystemNavigation referencesTo:
   /// self` (body/type-annotation/extension references) and
   /// `direct_subclasses:` (superclass-declaration references) — the one
   /// reference kind `referencesTo:` doesn't cover — reusing already-shipped

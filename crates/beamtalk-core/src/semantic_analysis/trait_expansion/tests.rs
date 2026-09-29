@@ -1292,6 +1292,53 @@ fn state_declaration_in_protocol_body_is_parse_error() {
 }
 
 #[test]
+fn late_state_declaration_in_protocol_body_leaks_no_phantom_late_selector() {
+    use crate::source_analysis::{lex_with_eof, parse};
+    for decl in [
+        "late state: total :: Integer = 0",
+        "late field: total :: Integer = 0",
+        "late classState: total :: Integer = 0",
+    ] {
+        let src = format!("Protocol define: Counting\n  {decl}\n  count -> Integer");
+        let (module, diagnostics) = parse(lex_with_eof(&src));
+        let stateless: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("protocols are stateless"))
+            .collect();
+        assert_eq!(stateless.len(), 1, "{decl}: {diagnostics:?}");
+        assert_eq!(diagnostics.len(), 1, "{decl}: {diagnostics:?}");
+        let proto = module.protocols.first().expect("protocol parsed");
+        let sels: Vec<String> = proto
+            .method_signatures
+            .iter()
+            .map(|m| m.selector.name().to_string())
+            .collect();
+        assert_eq!(sels, vec!["count".to_string()], "{decl}");
+    }
+}
+
+#[test]
+fn required_signature_hint_interleaves_keyword_param_types() {
+    let diagnostics = analyse(
+        "Protocol define: Store
+  at: key :: String put: value :: Object -> Object
+
+Value subclass: Box
+  uses: Store
+  field: x :: Integer = 0",
+    );
+    let diag = find_diagnostic(&diagnostics, "does not implement required")
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert!(
+        diag.hint
+            .as_ref()
+            .is_some_and(|h| h.contains("at: key :: String put: value :: Object -> Object")),
+        "{:?}",
+        diag.hint
+    );
+}
+
+#[test]
 fn reserved_selector_provision_is_error() {
     let diagnostics = analyse(
         "Protocol define: Lifecycle

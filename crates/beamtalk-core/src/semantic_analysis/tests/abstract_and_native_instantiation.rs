@@ -350,6 +350,51 @@ Value subclass: Caller
     );
 }
 
+#[test]
+fn test_object_self_new_in_class_method_rejected() {
+    // ADR 0129 §6: receiver spelling must not matter.
+    let source = "
+Object subclass: MyService
+  class default => self new
+  class other => super new
+  class sized => self new: 3
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("cannot be instantiated"))
+        .collect();
+    assert_eq!(errors.len(), 3, "got: {:?}", result.diagnostics);
+    assert!(
+        errors[0]
+            .hint
+            .as_ref()
+            .is_some_and(|h| h.contains("stateless service"))
+    );
+}
+
+#[test]
+fn test_value_self_new_in_class_method_allowed() {
+    let source = "
+Value subclass: Point
+  class origin => self new
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("cannot be instantiated")),
+        "got: {:?}",
+        result.diagnostics
+    );
+}
+
 // ── `new` on an opaque `native:` class ──
 
 /// Collects the "cannot be instantiated" errors `analyse` reports for `source`.

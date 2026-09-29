@@ -18,7 +18,7 @@
 /// ```
 sealed typed Object subclass: WorkspaceInterface
   // Stays inline FFI rather than `native:` (ADR 0101 / BT-2731): like
-  // BeamtalkInterface, this is a receiver-ignoring singleton facade. Its backing
+  // the former `BeamtalkInterface`, this is a receiver-ignoring singleton facade. Its backing
   // functions are arity-0/N and operate on workspace/ETS state without
   // consulting the receiver, so the self-threading `self delegate` form would be
   // wrong. The methods stay receiver-ignoring instance FFI, wrapped-by-default
@@ -154,7 +154,7 @@ sealed typed Object subclass: WorkspaceInterface
   ///
   /// Writes are synchronous: `at:put:` routes through `bind:as:` and
   /// `removeKey:` through `unbind:`, inheriting their protected-name conflict
-  /// checks. (`Beamtalk globals` — the class registry — stays a `Dictionary`;
+  /// checks (the class registry, `Beamtalk allClasses`, stays a `List`;
   /// it is not a mutable binding layer.)
   ///
   /// ## Examples

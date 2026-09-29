@@ -19,14 +19,14 @@
 TestCase subclass: SystemNavigationAnnouncementsSentByTest
   field: nav = nil
 
-  setUp => self.nav := SystemNavigation default
+  setUp => self.nav := SystemNavigation
 
   // --- selector existence ---
   testIncludesSelectorAnnouncementsSentBy =>
-    self assert: (SystemNavigation includesSelector: #announcementsSentBy:)
+    self assert: (SystemNavigation class includesSelector: #announcementsSentBy:)
 
   testIncludesSelectorAnnouncementSitesSentBy =>
-    self assert: (SystemNavigation includesSelector: #announcementSitesSentBy:)
+    self assert: (SystemNavigation class includesSelector: #announcementSitesSentBy:)
 
   // --- composition primitives must be in place ---
   //
@@ -40,20 +40,20 @@ TestCase subclass: SystemNavigationAnnouncementsSentByTest
 
   // The per-scope and per-method helpers are present.
   testHelperCollectAnnounceSitesIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectAnnounceSitesIn:into:)
+    self assert: (SystemNavigation class includesSelector: #collectAnnounceSitesIn:into:)
 
   testHelperAppendAnnounceSitesIsDefined =>
-    self assert: (SystemNavigation includesSelector: #appendAnnounceSitesIn:class:methodSelector:into:)
+    self assert: (SystemNavigation class includesSelector: #appendAnnounceSitesIn:class:methodSelector:into:)
 
   // The extension-scan helper is present (the body delegates to it after the
   // class-side walk). Behavioural coverage of the extension-source path lives
   // in the E2E REPL-protocol suite.
   testHelperCollectExtensionAnnounceSitesIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectExtensionAnnounceSitesFor:into:)
+    self assert: (SystemNavigation class includesSelector: #collectExtensionAnnounceSitesFor:into:)
 
   // The Announcement-subclass gate is present.
   testHelperIsAnnouncementClassIsDefined =>
-    self assert: (SystemNavigation includesSelector: #isAnnouncementClass:)
+    self assert: (SystemNavigation class includesSelector: #isAnnouncementClass:)
 
   // --- isAnnouncementClass: gate (works without the compiler port) ---
   //

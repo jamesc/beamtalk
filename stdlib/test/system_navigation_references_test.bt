@@ -18,7 +18,7 @@ TestCase subclass: SystemNavigationReferencesTest
 
   // --- selector existence ---
   testIncludesSelectorReferencesTo =>
-    self assert: (SystemNavigation includesSelector: #referencesTo:)
+    self assert: (SystemNavigation class includesSelector: #referencesTo:)
 
   // --- composition primitives must be in place ---
 
@@ -33,11 +33,11 @@ TestCase subclass: SystemNavigationReferencesTest
   // The internal helper `collectReferencesFor:in:into:` factors out
   // per-class iteration so it can be unit-checked separately.
   testHelperCollectReferencesIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectReferencesFor:in:into:)
+    self assert: (SystemNavigation class includesSelector: #collectReferencesFor:in:into:)
 
   // The per-method appender helper exists too.
   testHelperAppendReferencesIsDefined =>
-    self assert: (SystemNavigation includesSelector: #appendReferencesIn:targetName:owner:methodSelector:into:)
+    self assert: (SystemNavigation class includesSelector: #appendReferencesIn:targetName:owner:methodSelector:into:)
 
   // --- BT-2195: class-side scanning ---
   //
@@ -51,8 +51,8 @@ TestCase subclass: SystemNavigationReferencesTest
   // walker relies on: `methods` returns class-side selectors, and `>>`
   // returns a CompiledMethod with non-empty source for those selectors.
   testMetaclassScopePrimitivesPresent =>
-    self assert: ((SystemNavigation class) methods includes: #default)
-    cm := (SystemNavigation class) >> #default
+    self assert: ((SystemNavigation class) methods includes: #allClasses)
+    cm := (SystemNavigation class) >> #allClasses
     self deny: cm isNil
     self deny: cm source isEmpty
 
@@ -64,7 +64,7 @@ TestCase subclass: SystemNavigationReferencesTest
   // compiler port needed to parse extension source bodies is not running
   // under BUnit.
   testHelperCollectExtensionReferencesIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectExtensionReferencesFor:into:)
+    self assert: (SystemNavigation class includesSelector: #collectExtensionReferencesFor:into:)
 
   // --- BT-2302: xref-backed read path + miss-policy fallback ---
   //
@@ -81,10 +81,10 @@ TestCase subclass: SystemNavigationReferencesTest
   // The index-row -> result-record mapper is present (the `referencesTo:` body
   // delegates to it for the indexed reference sites; shared with `sendersOf:`).
   testHelperIndexedSiteRecordsIsDefined =>
-    self assert: (SystemNavigation includesSelector: #indexedSiteRecordsFrom:into:)
+    self assert: (SystemNavigation class includesSelector: #indexedSiteRecordsFrom:into:)
 
   // The owner-tag/class-side -> `#class` resolver is present (shared with
   // `sendersOf:`; instance-side hits report the class object, class-side hits
   // the metaclass object).
   testHelperSenderClassForIsDefined =>
-    self assert: (SystemNavigation includesSelector: #senderClassFor:classSide:)
+    self assert: (SystemNavigation class includesSelector: #senderClassFor:classSide:)

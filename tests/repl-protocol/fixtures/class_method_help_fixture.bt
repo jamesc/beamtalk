@@ -6,4 +6,4 @@
 Object subclass: HelpTestWidget
 
   /// Create a new widget with the given name.
-  class create: name :: String -> HelpTestWidget => self new: name
+  class create: name :: String -> HelpTestWidget => self error: "fixture only"

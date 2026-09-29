@@ -2159,9 +2159,11 @@ whether the receiver is a `Value` or an `Actor`.
 asList` so every `List`, `Set`, `Array`, … **conforms** to `Enumerable`
 structurally, with no `uses:` needed.
 
-An `Object subclass:` (no instances) composes traits **class-side** only —
-an instance-side provision on an uninstantiable class is not an error, it
-simply flattens onto a class that will never be instantiated.
+Provisions are **instance-side only** in v1 (`class sel … =>` in a protocol
+is rejected). An `Object subclass:` (no instances) that composes a trait is
+not an error, but gets nothing useful from it: the provisions flatten onto a
+class that will never be instantiated. Class-side provisions are a post-v1
+item, tracked in BT-3595.
 
 ### Reflection
 
@@ -5012,7 +5014,10 @@ continue to use the generic `TextEdit` shape, gated on the file being open.
 ### `SystemNavigation` — Cross-class code queries
 
 `SystemNavigation` provides Smalltalk-style live-image queries over the loaded
-class registry. Reach the singleton via `SystemNavigation default`.
+class registry. It is a stateless class-side facade (ADR 0129): every query is a
+`class sealed` method sent to the class itself — there is no instance to
+construct, and `SystemNavigation new` is a compile error. The class is a plain
+value, so `nav := SystemNavigation` and `nav actorClasses` work too.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -5057,7 +5062,7 @@ dispatch) is unresolvable by construction and is silently skipped, so the result
 is discoverability, never a sound or exhaustive emission contract.
 
 ```beamtalk
-nav := SystemNavigation default
+nav := SystemNavigation
 
 nav implementorsOf: #printString
 // => [Object, Integer, String, ...]

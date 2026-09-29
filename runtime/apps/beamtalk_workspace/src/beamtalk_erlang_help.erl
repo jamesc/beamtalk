@@ -7,7 +7,7 @@
 
 -moduledoc """
 Erlang FFI help formatting — shared by the REPL `:h Erlang` command,
-`BeamtalkInterface erlangHelp:`, and MCP `docs` tool.
+`Beamtalk erlangHelp:`, and MCP `docs` tool.
 
 All public functions return `{ok, Text}` or `{error, Reason}` — callers
 handle protocol encoding.

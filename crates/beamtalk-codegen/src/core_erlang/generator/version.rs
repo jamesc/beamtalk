@@ -272,6 +272,12 @@ impl CoreErlangGenerator {
     /// construction, every non-class-method context, where no code path
     /// ever advances `class_var_version` at all).
     ///
+    /// **Guarded against a direct call** (ADR 0129 Phase 0b): a `class sealed`
+    /// method of a stateless class is called in the caller with `nil` in place
+    /// of the class tuple, so there is no `element(2, ClassSelf)` to key the
+    /// shadow on — the read answers `'undefined'` (nothing shadow-written; the
+    /// class has no class variables), never `badarg`.
+    ///
     /// **Guarded against a false-positive shadow read** (found during
     /// review): `class_var_version` advances on EVERY class-method
     /// self-send (`emit_class_var_result_unwrap` calls `next_class_var()`
@@ -303,11 +309,15 @@ impl CoreErlangGenerator {
         Some(docvec![
             "let ",
             leaf::var(shadow_raw.clone()),
-            " = call 'erlang':'get'({",
+            " = case ",
+            leaf::var("ClassSelf"),
+            " of <_> when call 'erlang':'is_tuple'(",
+            leaf::var("ClassSelf"),
+            ") -> call 'erlang':'get'({",
             leaf::atom("$bt_class_vars_shadow"),
             ", call 'erlang':'element'(2, ",
             leaf::var("ClassSelf"),
-            ")}) in let ",
+            ")}) <_> when 'true' -> 'undefined' end in let ",
             leaf::var(cv_new),
             " = case ",
             leaf::var(shadow_raw),

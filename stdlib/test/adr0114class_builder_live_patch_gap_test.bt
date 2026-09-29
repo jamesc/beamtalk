@@ -42,7 +42,7 @@ TestCase subclass: Adr0114ClassBuilderLivePatchGapTest
         #makeCounter => [:_self | AtomicCounter new: #adr0114BuilderProbe]
       };
       register
-    nav := SystemNavigation default
+    nav := SystemNavigation
     refs := nav referencesTo: AtomicCounter
     owners := refs collect: [:r | r at: #class]
     // THE GAP: the just-registered class's method plainly references

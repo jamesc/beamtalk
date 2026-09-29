@@ -23,9 +23,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
-%% Fake Self — BeamtalkInterface primitives ignore Self entirely.
+%% Fake Self — Beamtalk primitives ignore Self entirely.
 fake_self() ->
-    {beamtalk_object, 'BeamtalkInterface class', 'bt@stdlib@beamtalk_interface', self()}.
+    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', self()}.
 
 with_compiler_stopped(Fun) ->
     WasStarted = lists:keymember(beamtalk_compiler, 1, application:which_applications()),
@@ -87,7 +87,7 @@ erlang_help_dispatch_non_binary_module_raises_type_error_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('BeamtalkInterface', Err#beamtalk_error.class)
+            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
     end.
 
 erlang_help_dispatch_unknown_module_raises_not_found_test() ->
@@ -133,7 +133,7 @@ erlang_help_1_non_binary_raises_type_error_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('BeamtalkInterface', Err#beamtalk_error.class)
+            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
     end.
 
 erlang_help_1_unknown_module_raises_not_found_test() ->
@@ -212,7 +212,7 @@ find_senders_in_non_binary_source_raises_type_error_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('BeamtalkInterface', Err#beamtalk_error.class)
+            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
     end.
 
 find_senders_in_integer_selector_raises_type_error_test() ->
@@ -241,7 +241,7 @@ all_sends_in_non_binary_raises_type_error_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('BeamtalkInterface', Err#beamtalk_error.class)
+            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
     end.
 
 %%====================================================================

@@ -2015,7 +2015,7 @@ module_for_value_tagged_variants_test_() ->
                 'TestResult',
                 'Package',
                 'CompiledMethod',
-                'BeamtalkInterface',
+                'Beamtalk',
                 'WorkspaceInterface'
             ],
             lists:foreach(

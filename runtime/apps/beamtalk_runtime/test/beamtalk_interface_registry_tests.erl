@@ -8,10 +8,9 @@
 -moduledoc """
 EUnit tests for beamtalk_interface module.
 
-Tests the Phase 2 dispatch/3 interface for BeamtalkInterface primitives:
+Tests the Phase 2 dispatch/3 interface for Beamtalk primitives:
 - allClasses selector
 - classNamed: selector
-- globals selector
 - help: selector
 - help:selector: selector
 - version selector
@@ -24,9 +23,9 @@ Tests the Phase 2 dispatch/3 interface for BeamtalkInterface primitives:
 %% Fixtures
 %%====================================================================
 
-%% A fake Self value — BeamtalkInterface primitives ignore Self entirely.
+%% A fake Self value — Beamtalk primitives ignore Self entirely.
 fake_self() ->
-    {beamtalk_object, 'BeamtalkInterface class', 'bt@stdlib@beamtalk_interface', self()}.
+    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', self()}.
 
 %%====================================================================
 %% Setup/Teardown
@@ -196,7 +195,7 @@ class_named_test_() ->
             {"integer argument returns type_error", fun() ->
                 Result = beamtalk_interface:dispatch('classNamed:', [42], fake_self()),
                 ?assertMatch(
-                    {error, #beamtalk_error{kind = type_error, class = 'BeamtalkInterface'}}, Result
+                    {error, #beamtalk_error{kind = type_error, class = 'Beamtalk'}}, Result
                 )
             end}
         ]
@@ -301,39 +300,6 @@ class_object_for_pid_test_() ->
     end}.
 
 %%====================================================================
-%% globals Tests
-%%====================================================================
-
-globals_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            {"returns a map", fun() ->
-                Result = beamtalk_interface:dispatch(globals, [], fake_self()),
-                ?assert(is_map(Result))
-            end},
-            {"map is non-empty", fun() ->
-                Result = beamtalk_interface:dispatch(globals, [], fake_self()),
-                ?assert(map_size(Result) > 0)
-            end},
-            {"keys are atoms and values are beamtalk_object tuples", fun() ->
-                Result = beamtalk_interface:dispatch(globals, [], fake_self()),
-                maps:foreach(
-                    fun(Key, Val) ->
-                        ?assert(is_atom(Key)),
-                        ?assertMatch({beamtalk_object, _, _, _}, Val)
-                    end,
-                    Result
-                )
-            end},
-            {"includes registered classes", fun() ->
-                Result = beamtalk_interface:dispatch(globals, [], fake_self()),
-                ?assert(maps:is_key('Counter', Result)),
-                ?assert(maps:is_key('Object', Result))
-            end}
-        ]
-    end}.
-
-%%====================================================================
 %% help: Tests
 %%====================================================================
 
@@ -368,7 +334,7 @@ help_test_() ->
                 catch
                     error:#{error := Err} ->
                         ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-                        ?assertEqual('BeamtalkInterface', Err#beamtalk_error.class)
+                        ?assertEqual('Beamtalk', Err#beamtalk_error.class)
                 end
             end},
             {"invalid argument raises type_error", fun() ->
@@ -466,7 +432,7 @@ unknown_selector_test_() ->
                 catch
                     error:#{error := Err} ->
                         ?assertEqual(does_not_understand, Err#beamtalk_error.kind),
-                        ?assertEqual('BeamtalkInterface', Err#beamtalk_error.class),
+                        ?assertEqual('Beamtalk', Err#beamtalk_error.class),
                         ?assertEqual(unknownSelector, Err#beamtalk_error.selector)
                 end
             end}

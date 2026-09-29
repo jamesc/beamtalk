@@ -1000,6 +1000,13 @@ fn check_single_provision(
 /// `Document`-pipeline unparse (`unparse::unparse_protocol_method_signature`
 /// is private to that module and returns a `Document`, which is more than a
 /// hint string needs).
+fn push_param_type(out: &mut String, param: &ParameterDefinition) {
+    if let Some(ty) = &param.type_annotation {
+        out.push_str(" :: ");
+        out.push_str(ty.type_name().as_str());
+    }
+}
+
 fn format_required_signature(sig: &ProtocolMethodSignature) -> String {
     let mut out = String::new();
     match &sig.selector {
@@ -1009,6 +1016,7 @@ fn format_required_signature(sig: &ProtocolMethodSignature) -> String {
             if let Some(param) = sig.parameters.first() {
                 out.push(' ');
                 out.push_str(param.name.name.as_str());
+                push_param_type(&mut out, param);
             }
         }
         MessageSelector::Keyword(parts) => {
@@ -1020,14 +1028,9 @@ fn format_required_signature(sig: &ProtocolMethodSignature) -> String {
                 if let Some(param) = sig.parameters.get(i) {
                     out.push(' ');
                     out.push_str(param.name.name.as_str());
+                    push_param_type(&mut out, param);
                 }
             }
-        }
-    }
-    if let Some(param) = sig.parameters.first() {
-        if let Some(ty) = &param.type_annotation {
-            out.push_str(" :: ");
-            out.push_str(ty.type_name().as_str());
         }
     }
     if let Some(rt) = &sig.return_type {

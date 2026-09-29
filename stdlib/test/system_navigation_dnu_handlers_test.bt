@@ -12,30 +12,28 @@ TestCase subclass: SystemNavigationDnuHandlersTest
 
   // --- selector existence ---
   testDnuHandlersSelectorDefined =>
-    self assert: (SystemNavigation includesSelector: #dnuHandlers)
+    self assert: (SystemNavigation class includesSelector: #dnuHandlers)
 
   // ProtoObject is the root definer of `doesNotUnderstand:args:` and is included.
   testIncludesProtoObjectRoot =>
-    self assert: ((SystemNavigation default dnuHandlers) includes: ProtoObject)
+    self assert: ((SystemNavigation dnuHandlers) includes: ProtoObject)
 
   // A stdlib proxy that overrides the handler (TimeoutProxy forwards all sends).
   testIncludesStdlibProxy =>
-    self assert: ((SystemNavigation default dnuHandlers) includes: TimeoutProxy)
+    self assert: ((SystemNavigation dnuHandlers) includes: TimeoutProxy)
 
   // A user-defined proxy fixture (SimpleProxy) is included.
   testIncludesUserProxyFixture =>
-    self assert: ((SystemNavigation default dnuHandlers) includes: SimpleProxy)
+    self assert: ((SystemNavigation dnuHandlers) includes: SimpleProxy)
 
   // Plain classes that only inherit the base handler are excluded —
   // `includesSelector:` reports local definitions only.
   testExcludesNonOverriders =>
-    handlers := SystemNavigation default dnuHandlers
+    handlers := SystemNavigation dnuHandlers
     self deny: (handlers includes: Object)
     self deny: (handlers includes: Integer)
 
   // Result is sorted alphabetically by class name (stable snapshot order).
   testAlphabeticalOrder =>
-    names := (SystemNavigation default dnuHandlers) collect: [:c |
-      c name asString
-    ]
+    names := (SystemNavigation dnuHandlers) collect: [:c | c name asString]
     self assert: names equals: names sort

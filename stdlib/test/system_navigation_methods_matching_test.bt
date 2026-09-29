@@ -22,7 +22,7 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
 
   // --- selector existence ---
   testIncludesSelectorMethodsMatching =>
-    self assert: (SystemNavigation includesSelector: #methodsMatching:)
+    self assert: (SystemNavigation class includesSelector: #methodsMatching:)
 
   // --- composition primitives must be in place ---
 
@@ -38,7 +38,7 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   // The internal helper `collectMethodsMatching:in:into:` factors out
   // per-class iteration so it can be checked separately.
   testHelperCollectMethodsMatchingIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectMethodsMatching:in:into:)
+    self assert: (SystemNavigation class includesSelector: #collectMethodsMatching:in:into:)
 
   // --- argument type check ---
 
@@ -46,14 +46,14 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   // compiled Regex, not a raw pattern string. The runtime `isKindOf:`
   // guard must trip even when the caller bypasses the static check.
   testStringArgumentRaisesError =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     @expect type
     self should: [nav methodsMatching: "ifTrue:"] raise: #user_error
 
   // Symbol is another tempting wrong-type input (callers used to fuzzy
   // selector search by symbol). Same rejection.
   testSymbolArgumentRaisesError =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     @expect type
     self should: [nav methodsMatching: #ifTrue:] raise: #user_error
 
@@ -65,7 +65,7 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   // the per-class helper keeps the BUnit run fast — full-registry shape
   // assertions are covered by the REPL-protocol E2E suite.
   testStdlibMatchHasShape =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     pat := (Regex from: "ifTrue:") unwrap
     results := nav
       collectMethodsMatching: pat
@@ -82,7 +82,7 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   // is genuinely a regex match, not a naive substring scan that happens to
   // also accept the same literal. Scoped to `Integer`.
   testRegexAnchorsAndCharClasses =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     pat := (Regex from: "if(True|False):") unwrap
     results := nav
       collectMethodsMatching: pat
@@ -98,7 +98,7 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   // literally contains the assembled pattern. Defeats the "the test file
   // itself matches the pattern it searches for" loophole.
   testNoMatchReturnsEmpty =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     needle := "xyzzyA" ++ "bsentNeedleZZ" ++ "1n0Wh3re"
     results := nav
       collectMethodsMatching: (Regex from: needle) unwrap
@@ -112,7 +112,7 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   // literal that appears in `Integer >> #abs` so #abs must be in the
   // resulting selector set. Scoping to `Integer` keeps the test fast.
   testKnownSelectorAppears =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     pat := (Regex from: "self negated") unwrap
     results := nav
       collectMethodsMatching: pat
@@ -125,22 +125,22 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   //
   // `methodsMatching:` matches in pure Beamtalk (via `String >>
   // #matchesRegex:`) — no compiler port required — so the metaclass scope
-  // walk is testable directly here. `SystemNavigation class >> #default`
-  // is a class-side method whose body contains the literal `self new`, so
-  // scoping to `SystemNavigation class` and matching `self new` must
-  // include `#default`. Confirms class-side source is preserved end-to-end
+  // walk is testable directly here. `SystemNavigation class >> #allClasses`
+  // is a class-side method whose body contains the literal `beamtalk_interface`, so
+  // scoping to `SystemNavigation class` and matching `beamtalk_interface` must
+  // include `#allClasses`. Confirms class-side source is preserved end-to-end
   // (codegen -> class_method_source -> {class_method, _} ->
   // CompiledMethod.source) and that `collectMethodsMatching:in:into:`
   // accepts a metaclass scope.
   testMetaclassScopeMatch =>
-    nav := SystemNavigation default
-    pat := (Regex from: "self new") unwrap
+    nav := SystemNavigation
+    pat := (Regex from: "beamtalk_interface") unwrap
     results := nav
       collectMethodsMatching: pat
       in: SystemNavigation class
       into: List new
     selectors := results collect: [:r | r at: #selector]
-    self assert: (selectors includes: #default)
+    self assert: (selectors includes: #allClasses)
 
   // --- BT-2196: extension method scanning ---
 
@@ -152,4 +152,4 @@ TestCase subclass: SystemNavigationMethodsMatchingTest
   // here in BUnit, unlike the `sendersOf:` / `referencesTo:` path which
   // requires the compiler port to be running.
   testHelperCollectExtensionMethodsMatchingIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectExtensionMethodsMatching:into:)
+    self assert: (SystemNavigation class includesSelector: #collectExtensionMethodsMatching:into:)
