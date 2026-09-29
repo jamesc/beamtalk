@@ -123,8 +123,8 @@ stop_requested() ->
         Code -> {ok, Code}
     end.
 
--doc "Forget a recorded stop request (tests only; a real stop ends the node).".
 -ifdef(TEST).
+-doc "Forget a recorded stop request (tests only; a real stop ends the node).".
 -spec clear_stop_requested() -> ok.
 clear_stop_requested() ->
     _ = persistent_term:erase(?STOP_KEY),
