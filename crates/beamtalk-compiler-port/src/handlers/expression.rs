@@ -254,10 +254,11 @@ pub(crate) fn handle_compile_expression(request: &Map) -> Term {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    match beamtalk_repl::codegen::generate_repl_expressions_with_index(
+    match beamtalk_repl::codegen::generate_repl_expressions_with_hierarchy(
         &expressions,
         &module_name,
         class_module_index,
+        &analysis.class_hierarchy,
     ) {
         Ok(code) => ok_response(&code, &warnings),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
@@ -291,12 +292,11 @@ pub(crate) fn handle_compile_expression_trace(request: &Map) -> Term {
     let pre_loaded_aliases = extract_known_type_aliases(request);
 
     // Trace mode never defines classes/protocols/aliases (rejected below), so
-    // neither the `referenced_aliases` nor the rest of the `AnalysisResult`
-    // this also computes has a consumer here —
-    // trace-mode expressions never reach a `generate_module` call that could
-    // use it, and can't reference an alias in a position that needs xref
-    // registration either.
-    let (module, warnings, _analysis) = match parse_and_check_expression(
+    // `referenced_aliases` has no consumer here — trace-mode expressions never
+    // reach a `generate_module` call and can't reference an alias in a position
+    // that needs xref registration. Only `analysis.class_hierarchy` is used, to
+    // compute direct-call eligibility (ADR 0129 Phase 0a).
+    let (module, warnings, analysis) = match parse_and_check_expression(
         &source,
         &known_vars,
         pre_class_hierarchy,
@@ -335,11 +335,12 @@ pub(crate) fn handle_compile_expression_trace(request: &Map) -> Term {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    match beamtalk_repl::codegen::generate_repl_expressions_traced(
+    match beamtalk_repl::codegen::generate_repl_expressions_traced_with_hierarchy(
         &expressions,
         &source,
         &module_name,
         class_module_index,
+        &analysis.class_hierarchy,
     ) {
         Ok(code) => ok_response(&code, &warnings),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
