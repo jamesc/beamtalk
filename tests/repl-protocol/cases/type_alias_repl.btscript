@@ -163,8 +163,8 @@ type HotReloadColor = #red | #green | #blue | #alpha
 // => HotReloadColor
 
 // Poll the findings store until the async re-check worker has posted a
-// finding for the dependent class (capped retries, ~2s).
-_hrPollCount := 0. [((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty and: [_hrPollCount < 100]] whileTrue: [Timer sleep: 20. _hrPollCount := _hrPollCount + 1]. ((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty
+// finding for the dependent class (capped retries, ~30s: the worker is async and a loaded CI runner can take well past 2s; the loop exits as soon as the finding lands).
+_hrPollCount := 0. [((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty and: [_hrPollCount < 1500]] whileTrue: [Timer sleep: 20. _hrPollCount := _hrPollCount + 1]. ((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty
 // => false
 
 // The finding is classified as an alias-change re-check and names the
