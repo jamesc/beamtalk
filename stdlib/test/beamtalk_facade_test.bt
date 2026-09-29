@@ -9,7 +9,7 @@
 // erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the
 // removed `current`/`globals` API.
 
-TestCase subclass: BeamtalkInterfaceTest
+TestCase subclass: BeamtalkFacadeTest
 
   testClassNamedFindsIntegerClass =>
     self assert: (Beamtalk classNamed: #Integer) equals: Integer

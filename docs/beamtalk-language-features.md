@@ -1209,7 +1209,7 @@ beamtalk generate stubs lists maps string
 
 ### Loading Code into the Workspace
 
-Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` singleton. Loaded classes are immediately available — existing actors pick up new code on next dispatch.
+Beamtalk source files are loaded into the live workspace via `:load` or the `Workspace` class-side facade. Loaded classes are immediately available — existing actors pick up new code on next dispatch.
 
 ```beamtalk
 // Via REPL shortcut
@@ -1230,7 +1230,7 @@ Counter reload
 :reload Counter
 ```
 
-See [Workspace and Reflection API](#workspace-and-reflection-api) for the full `Workspace` singleton interface.
+See [Workspace and Reflection API](#workspace-and-reflection-api) for the full `Workspace` facade interface.
 
 ---
 
@@ -3483,7 +3483,7 @@ wrapper over `supervisor:which_children` (no new bookkeeping process).
 tree := Node current processes unwrap   // == ProcessNavigation default tree
 tree root                          // => the snapshot root SupervisionNode
 tree size                          // => total node count
-tree do: [:node | Transcript showLine: node printString]
+tree do: [:node | Transcript showCr: node printString]
 tree select: [:node | node isSupervisor]
 tree findClass: Counter            // => every running Counter as SupervisionNodes
 tree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)
@@ -4682,22 +4682,41 @@ String class >> banner => "=== String ==="
 
 ## Workspace and Reflection API
 
-Beamtalk exposes workspace operations and system reflection as typed message sends
-(ADR 0040). Two singleton objects provide the primary interface:
+Beamtalk exposes system reflection and workspace operations as typed message
+sends to **class-side facades** (ADR 0040, ADR 0129). `Beamtalk`, `Workspace`,
+`Transcript` and `SystemNavigation` are ordinary sealed, stateless classes:
+every operation is a `class sealed` method sent to the class itself, there is no
+instance to construct, and `Beamtalk new` (etc.) is a compile error. They are
+not injected names, so they resolve exactly like `Integer` does and mean the same
+thing in the REPL, `beamtalk run`, `beamtalk test` and releases. There is no
+`current`, `default` or singleton accessor to call first.
 
-### `Beamtalk` — System reflection (BeamtalkInterface)
+| Facade | Purpose | Needs a workspace? |
+|--------|---------|--------------------|
+| [`Beamtalk`](#beamtalk--system-reflection) | Class registry, help, release reflection | No |
+| [`Workspace`](#workspace--project-operations) | Loading, testing, bindings, flush/change log | Yes (except `isAvailable`) |
+| [`Transcript`](#transcript--the-repls-shared-log) | REPL shared log; day-0 output convenience | Only `recent` / `clear` |
+| [`SystemNavigation`](#systemnavigation--cross-class-code-queries) | Cross-class code queries | No |
 
-Provides access to the class registry, documentation, and system namespace.
-Analogous to Pharo's `Smalltalk` image facade.
+Facts about the BEAM node or the running program are on `Node` and `Program`, and
+logging control is on `Logger`; none of these are on `Beamtalk`.
+
+### `Beamtalk` — System reflection
+
+Provides access to the class registry, documentation and release provenance.
+Analogous to Smalltalk's `Smalltalk` global. Works everywhere, with no workspace.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `version` | `String` | Beamtalk version string |
-| `allClasses` | `List` | All registered classes (class objects) |
-| `classNamed: #Name` | `Object` or `nil` | Look up a class by name |
-| `globals` | `Dictionary` | Snapshot of system namespace (class names → class objects) |
-| `help: aClass` | `String` | Class documentation: name, superclass, method signatures |
+| `allClasses` | `List(Class)` | All registered classes (class objects) |
+| `classNamed: #Name` | `Class` or `nil` | Look up a class by name |
+| `help: aClass` | `String` | Class documentation: name, superclass, method signatures. Accepts a class, a Symbol or a String |
 | `help: aClass selector: #sel` | `String` | Documentation for a specific method |
+| `erlangHelp: "module"` | `String` | Type signatures and EEP-48 docs for an Erlang module |
+| `erlangHelp: "module" selector: #fun` | `String` | Documentation for one function of an Erlang module |
+| `releaseInfo` | `Dictionary` | This node's release provenance; `#{#release => nil}` on a non-release node (never an error) |
+| `shapeManifest` | `Dictionary` | `className -> #{#version, #fields, #migrations}` for every registered project class (ADR 0125 §3.4) |
 
 ```beamtalk
 Beamtalk version
@@ -4709,22 +4728,35 @@ Beamtalk allClasses includes: Integer
 Beamtalk classNamed: #Counter
 // => Counter (or nil if not loaded)
 
-(Beamtalk globals) at: #Integer
-// => Integer
-
-(Beamtalk help: Integer)
+Beamtalk help: Integer
 // => "== Integer < Number ==\n..."
 
-(Beamtalk help: Integer selector: #+)
+Beamtalk help: Integer selector: #+
 // => "Integer >> +\n..."
 ```
 
-### `Workspace` — Project operations (Workspace)
+`Beamtalk` has no namespace-snapshot accessor. Use `Beamtalk classNamed:` / `Beamtalk allClasses`
+for the class registry, or `SystemNavigation` for queries over it.
+
+**Logging and debug control are on `Logger`, not `Beamtalk`** (ADR 0129 §3,
+BT-3653). The selectors are unchanged and, like `Logger info:`, need no
+workspace:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `Logger logLevel` / `Logger logLevel: level` | `LogLevel \| #all \| #none` / `Nil` | Read / set the OTP primary log level |
+| `Logger logFormat` / `Logger logFormat: format` | `LogFormat` / `Nil` | Read / set the log output format |
+| `Logger debugTargets` | `List(Symbol)` | Debug targets available to enable |
+| `Logger enableDebug: target` / `Logger disableDebug: target` | `Nil` | Turn debug logging on or off for a target |
+| `Logger activeDebugTargets` | `List(Symbol)` | Targets with debug logging currently on |
+| `Logger disableAllDebug` | `Nil` | Turn all debug logging off |
+
+### `Workspace` — Project operations
 
 Provides file loading, testing, bindings and the flush/change-log loop. Scoped to
-the running workspace: every selector raises `no_workspace` where no workspace runs
-(e.g. `beamtalk test`); `Workspace isAvailable` asks without raising.
-Analogous to Pharo's `Smalltalk` project facade.
+the running workspace: every selector raises a structured `no_workspace` error where
+no workspace runs (e.g. `beamtalk test`); `Workspace isAvailable` asks without
+raising. It works under `beamtalk run`, `workspace` and `release` modes.
 
 Facts about the BEAM node or the running program are **not** on `Workspace`
 (ADR 0129 amendment): node introspection lives on [`Node`](#node-introspection-adr-0129-amendment)
@@ -4732,32 +4764,42 @@ and the root supervisor on `Program rootSupervisor`.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `load: "path"` | `nil` or Error | Compile and load a `.bt` file or directory |
+| `isAvailable` | `Boolean` | True iff a workspace is running on this node. Never raises |
+| `load: "path"` | `List(Behaviour)` or Error | Compile and load a `.bt` file or directory |
 | `newClass: source at: path` | `List(Behaviour)` | Create a brand-new class from source at `path`; logs a `kind: #'new-class'` ChangeEntry (ADR 0082) |
-| `classes` | `List` | All loaded user classes (those with a recorded source file) |
-| `testClasses` | `List` | Loaded classes that inherit from `TestCase` |
-| `globals` | `BindingsView` | Live, write-through view of the workspace-globals layer: singletons + `bind:as:` entries (see [Sessions and binding layers](#sessions-and-binding-layers-adr-0081)) |
+| `moveClass: AClass to: "path"` | `Behaviour` | Move a class's declaration to another file (ADR 0114) |
+| `classes` | `List(Behaviour)` | All loaded user classes (those with a recorded source file) |
+| `testClasses` | `List(Behaviour)` | Loaded classes that inherit from `TestCase` |
+| `bindings` | `BindingsView` | Live, write-through view of the `bind:as:` entries (see [Sessions and binding layers](#sessions-and-binding-layers-adr-0081)) |
+| `bind: value as: #Name` | `Nil` | Register a value under a name for REPL evals. Refuses any registered class name (`name_conflict`) |
+| `unbind: #Name` | `Nil` | Remove a registered name; raises if it is not found |
 | `currentSession` | `Session` or `nil` | The calling process's REPL session (same value as `Session current`); `nil` outside a REPL eval |
 | `sessions` | `List(Session)` | All live REPL sessions as `Session` values |
+| `sync` | `Dictionary` | Incrementally compile the project's changed files (`:sync`) |
+| `recheckImage` | `Dictionary` | Whole-image type re-check, with `checked` / `stale` / `findings` (ADR 0105) |
 | `test` | `TestResult` | Run all loaded test classes |
 | `test: AClass` | `TestResult` | Run a specific test class |
-| `bind: value as: #Name` | `Nil` | Register a value in the workspace namespace |
-| `unbind: #Name` | `Nil` | Remove a registered name from the namespace |
 | `changes` | `ChangeLog` | Pending in-memory changes (ADR 0082) — see [Saving live edits back to disk](#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082) |
-| `flush` | `FlushResult` | Write every durable + flushable ChangeEntry back to its source file (ADR 0082) |
-| `flush: filter` | `FlushResult` | Flush a subset (Class / Symbol kind / `#{#file => path}`) |
+| `flush` | `Dictionary` | Write every durable + flushable ChangeEntry back to its source file (ADR 0082) |
+| `flush: filter` | `Dictionary` | Flush a subset (Class / Symbol kind / `#{#file => path}`) |
+| `flush: filter confirmDestructive: bool` | `Dictionary` | Flush a subset, confirming destructive entries (ADR 0113) |
+| `flushIncludingDestructive` | `Dictionary` | Flush including destructive entries (ADR 0113) |
 | `autoflush` | `Boolean` | Workspace setting (default `false`); persists across restarts |
 | `autoflush: enabled` | `Boolean` | Toggle write-through: every durable patch immediately flushes (best-effort) |
-| `startSupervisor: AClass` / `stopSupervisor: AClass` | `Supervisor` / `Nil` | Attach / stop a supervisor under the workspace supervisor (workspace-only) |
+| `startSupervisor: AClass` / `stopSupervisor: AClass` | `Supervisor` / `Nil` | Attach / stop a supervisor under the workspace supervisor |
+| `dependencies` | `Dictionary(String, Package)` | Direct dependency packages of the workspace |
 
 ```beamtalk
-(Workspace load: "examples/counter.bt")
-// => nil  (Counter is now registered)
+Workspace isAvailable
+// => true  (false under `beamtalk test`, where every other selector raises no_workspace)
 
-(Workspace classes) includes: Counter
+Workspace load: "examples/counter.bt"
+// => #(Counter)  (Counter is now registered)
+
+Workspace classes includes: Counter
 // => true
 
-(Workspace testClasses) includes: CounterTest
+Workspace testClasses includes: CounterTest
 // => true
 
 (Workspace test: CounterTest) failed
@@ -4766,6 +4808,36 @@ and the root supervisor on `Program rootSupervisor`.
 Node current actors unwrap size
 // => 3  (number of live actors; see Node introspection below)
 ```
+
+### `Transcript` — The REPL's shared log
+
+`Transcript` is a sealed, stateless class-side facade (ADR 0129 §5). It has no
+instance, no stream protocol and no capture API. Its behaviour depends on whether
+an interactive workspace is running:
+
+| Selector | In an interactive workspace | Elsewhere (`run`, `test`, releases) |
+|----------|-----------------------------|-------------------------------------|
+| `show: value` | Appends the value's text to the workspace transcript | One Logger `notice` event, domain `[beamtalk, user, transcript]` |
+| `cr` | Appends a newline | No-op |
+| `showCr: value` | `show:` then `cr` | One Logger event |
+| `recent` | The buffered lines (`List(String)`) | Raises `no_workspace` |
+| `clear` | Empties the buffer | Raises `no_workspace` |
+
+```beamtalk
+Transcript showCr: "Hello"
+Transcript show: "a"; cr; show: "b"
+Transcript recent
+```
+
+Outside a workspace the Logger route prints plain text, one line per event, so two
+consecutive `show:` sends are two events, not one line, and ordering relative to
+`Console` (which writes synchronously) is not guaranteed. Silencing or redirecting
+the output is ordinary Logger configuration on the transcript domain.
+
+**Guidance:** `Transcript` exists for newcomers and REPL use. Programs should use
+`Logger` (structured logging, ADR 0064) for diagnostics and `Console` for plain
+stdout/stderr. The `show:` / `showCr:` convenience methods on `Object` delegate to
+`Transcript`. There is no `showLine:`; use `showCr:`.
 
 ### Node introspection (ADR 0129 amendment)
 
@@ -5198,25 +5270,32 @@ nav ffiSitesFor: "lists:reverse"
 
 ### Sessions and binding layers (ADR 0081)
 
-The REPL resolves a bare name (`x`, `Transcript`, `Counter`) against **two
-binding layers**, each owned by a different object:
+A free identifier in a REPL expression (`x`, `answer`, `Counter`) resolves through
+**three tiers**, in this order:
 
-| Layer | Owner | Source | Accessor |
-|-------|-------|--------|----------|
-| **Session locals** | the session (per connection) | `x := 42` typed in the shell | `Session current bindings` |
-| **Workspace globals** | the workspace (shared) | singletons (`Transcript`, `Beamtalk`, `Workspace`) + `bind:as:` entries | `Workspace globals` |
+| Tier | Owner | Source | Accessor |
+|------|-------|--------|----------|
+| 1. **Session locals** | the session (per connection) | `x := 42` typed in the shell | `Session current bindings` |
+| 2. **Workspace bindings** | the workspace (shared) | `Workspace bind: v as: #name` entries | `Workspace bindings` |
+| 3. **Class registry** | the runtime | every loaded class (`Counter`, `Integer`, `Transcript`, `Beamtalk`, `Workspace`) | `Beamtalk allClasses` |
 
-Locals are checked first, so a local **shadows** a global of the same name.
-Names not found in either layer fall through to the class registry (`Counter`,
-`Integer`), then raise `undefined_variable`.
+An earlier tier **shadows** a later one: a local named `answer` hides a workspace
+binding of the same name, and `Integer := 3` creates a session local that shadows
+the `Integer` class for that session. A name found in no tier raises
+`undefined_variable`.
+
+Only tiers 1 and 2 are REPL-specific. Method bodies and batch-compiled code (a
+`.bt` file under `beamtalk run`, `beamtalk test` or a release) use **only the class
+registry**, so `Transcript`, `Beamtalk`, `Workspace` and `SystemNavigation` resolve
+there exactly as `Integer` does. They are classes, not entries in a binding layer,
+so `Workspace bindings` does not list them.
 
 #### `Session` — a first-class session value
 
 `Session` is a factory, mirroring `Date today` / `Smalltalk current`: two
 class-side methods return a session *value* you then message. There is **no**
-class-side operation mirror (no `Session bindings`) and **no** `globals`
-accessor on `Session` — globals are workspace state, reached via `Workspace
-globals`.
+class-side operation mirror (no `Session bindings`). Workspace-wide bindings are
+workspace state, reached via `Workspace bindings`.
 
 | Class method | Returns | Description |
 |--------------|---------|-------------|
@@ -5226,8 +5305,8 @@ globals`.
 | Instance method | Returns | Description |
 |-----------------|---------|-------------|
 | `bindings` | `BindingsView` | Live view of this session's locals (the `x := 42` layer) |
-| `resolve: #name` | `Object` | Resolve a name the way bare-name lookup does (locals → globals → classes). Shares the one resolver with bare-name lookup, so it raises `undefined_variable` for a name that resolves nowhere — exactly as typing the bare name would |
-| `clear` | `nil` | Clear this session's locals (globals remain) |
+| `resolve: #name` | `Object` | Resolve a name the way bare-name lookup does (locals → workspace bindings → classes). Shares the one resolver with bare-name lookup, so it raises `undefined_variable` for a name that resolves nowhere — exactly as typing the bare name would |
+| `clear` | `nil` | Clear this session's locals (workspace bindings remain) |
 | `id` | `String` | Stable session identifier (matches the protocol session id) |
 
 ```beamtalk
@@ -5241,7 +5320,7 @@ Session current bindings at: #x
 // => 42
 
 Session current resolve: #Transcript
-// => the Transcript singleton
+// => Transcript (the class, from the class registry)
 
 Session current resolve: #notDefinedAnywhere
 // => Error: Undefined variable: notDefinedAnywhere
@@ -5259,7 +5338,7 @@ Session current ifNotNil: [:s | s clear]
 
 #### `BindingsView` — a live, write-through Dictionary view
 
-Both `Session current bindings` and `Workspace globals` return a `BindingsView`:
+Both `Session current bindings` and `Workspace bindings` return a `BindingsView`:
 a small Dictionary-protocol value (`at:`, `at:put:`, `removeKey:`,
 `includesKey:`, `keys`, `values`, `size`, `do:`) backed by live state. `at:put:`
 returns the value put; `removeKey:` returns `nil`.
@@ -5271,9 +5350,9 @@ Session current bindings at: #y put: 99
 y
 // => 99
 
-// Workspace-global write — SYNCHRONOUS (routes through bind:as:),
+// Workspace-binding write — SYNCHRONOUS (routes through bind:as:),
 // visible immediately on the next line:
-Workspace globals at: #answer put: 42
+Workspace bindings at: #answer put: 42
 // => 42
 answer
 // => 42
@@ -5281,12 +5360,12 @@ answer
 
 **One documented asymmetry under the shared type:** session-local writes are
 deferred to the end of the current eval (the eval worker holds a state
-snapshot), so a same-expression read-back sees the *old* value; workspace-global
-writes hit shared ETS immediately. Writing a protected system name through the
-globals view raises the same conflict as `Workspace bind:as:`:
+snapshot), so a same-expression read-back sees the *old* value; workspace-binding
+writes hit shared ETS immediately. `bind:as:` and `Workspace bindings at:put:` refuse
+to shadow any registered class name (`name_conflict`):
 
 ```beamtalk
-Workspace globals at: #Workspace put: nil
+Workspace bindings at: #Workspace put: nil
 // => Error: Workspace is a system name and cannot be shadowed
 ```
 
@@ -5531,7 +5610,7 @@ event class       // => PriceChanged
 a := Announcer new
 
 // Subscribe: returns a Subscription token. The handler block receives the event.
-sub := a when: PriceChanged do: [:e | Transcript showLine: "now " ++ e newPrice printString]
+sub := a when: PriceChanged do: [:e | Transcript showCr: "now " ++ e newPrice printString]
 sub class       // => Subscription
 sub isActive    // => true
 
@@ -5591,7 +5670,7 @@ Announcement subclass: UIEvent
 UIEvent subclass: ButtonClicked
   field: buttonId :: String = ""
 
-a when: UIEvent do: [:e | Transcript showLine: "ui event"]
+a when: UIEvent do: [:e | Transcript showCr: "ui event"]
 a announce: (ButtonClicked buttonId: "submit")   // matches — "ui event"
 ```
 
@@ -5603,7 +5682,7 @@ once and filters by event class instead of wiring bespoke notification channels:
 
 ```beamtalk
 SystemAnnouncer current when: ActorSpawned do: [:e |
-  Transcript showLine: e actorClass asString
+  Transcript showCr: e actorClass asString
 ]
 Counter spawn    // the subscription fires: prints "Counter"
 ```
@@ -5864,13 +5943,13 @@ polling API — subscribe to the event class you care about:
 
 ```beamtalk
 SystemAnnouncer current when: NodeUp do: [:e |
-  Transcript showLine: "joined: ", e node name asString
+  Transcript showCr: "joined: ", e node name asString
 ]
 SystemAnnouncer current when: NodeDown do: [:e |
-  Transcript showLine: "lost ", e node name asString, " (", e reason asString, ")"
+  Transcript showCr: "lost ", e node name asString, " (", e reason asString, ")"
 ]
 SystemAnnouncer current when: NodeShapeSkew do: [:e |
-  Transcript showLine: e node name asString, ": ", e className asString,
+  Transcript showCr: e node name asString, ": ", e className asString,
     " local v", e localVersion printString, " remote v", e remoteVersion printString
 ]
 ```
@@ -6198,7 +6277,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | `!` message send | `gen_server:cast` — async fire-and-forget |
 | Block | Erlang fun (closure) |
 | Image | Running node(s) |
-| Workspace | Connected REPL to live node (`Workspace` singleton) |
+| Workspace | Connected REPL to live node (`Workspace` class-side facade) |
 | Class browser | REPL introspection: `Beamtalk allClasses`, `Beamtalk help: Class` |
 
 ---

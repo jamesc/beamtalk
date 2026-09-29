@@ -1,52 +1,49 @@
-## Workspace & Globals
+## Workspace & Bindings
 
-When you start the Beamtalk REPL, three global objects are automatically available:
-**Transcript**, **Workspace**, and **Beamtalk**. These are workspace-scoped
-singletons that provide logging, introspection, and class management.
+Beamtalk's system services are **class-side facades**: `Transcript`, `Workspace`
+and `Beamtalk` are ordinary classes, so you send messages straight to them, in
+the REPL and in compiled code alike. They provide logging, introspection and
+class management. A REPL session can also hold **bindings**: names you register
+yourself with `Workspace bind:as:`.
 
 ## Transcript — the shared log
 
-`Transcript` is an actor that acts as a shared output log, similar to Smalltalk's
-Transcript window. Use it for debugging and tracing:
+`Transcript` is the REPL's shared output log, similar to Smalltalk's Transcript
+window. Use it for debugging and tracing at the prompt:
 
 ```beamtalk
-Transcript show: "Hello from Beamtalk"
+Transcript showCr: "Hello from Beamtalk"
 Transcript show: "Step 1 complete"; cr
 Transcript show: 42
 ```
 
-`show:` accepts any value, converts it to a string, and appends it to an
-internal buffer. `cr` adds a newline. Both return `self`, so you can
-cascade them:
+`show:` accepts any value and appends its text (a String as-is, anything else as
+its `printString`). `cr` adds a newline and `showCr:` is `show:` then `cr`. All
+return `nil`; cascade them with `;`:
 
 ```beamtalk
 Transcript show: "Name: "; show: "Alice"; cr; show: "Done"
 ```
 
-Retrieve recent output or clear the buffer:
+Retrieve recent output or clear the buffer (in an interactive workspace):
 
 ```beamtalk
-Transcript recent   // returns the buffer contents as a list
-Transcript clear     // empties the buffer
+Transcript recent   // returns the buffer contents as a list of lines
+Transcript clear    // empties the buffer
 ```
 
-### Pub/sub
-
-Processes can subscribe to Transcript output in real-time:
-
-```beamtalk
-Transcript subscribe    // subscribe the current process
-Transcript unsubscribe  // unsubscribe
-```
-
-Subscribers receive messages whenever `show:` or `cr` is called. The Transcript
-automatically removes dead subscribers.
+Outside an interactive workspace (`beamtalk run`, `beamtalk test`, a release)
+there is no transcript buffer. `show:` and `showCr:` emit a plain Logger notice
+instead, `cr` does nothing, and `recent` / `clear` raise `no_workspace`. Programs
+should use `Logger` for diagnostics or `Console` for plain stdout/stderr;
+`Transcript` is for newcomers and REPL use.
 
 ## Workspace — introspection and binding management
 
-`Workspace` is a value object (not an actor) that provides per-workspace
-introspection. Use it to explore loaded classes, manage actors, and register
-custom bindings.
+`Workspace` is a class-side facade over the running workspace. Use it to explore
+loaded classes, load files, run tests and register custom bindings. Every
+selector raises `no_workspace` when no workspace runs (for example under
+`beamtalk test`); `Workspace isAvailable` asks without raising.
 
 ### Exploring classes
 
@@ -57,8 +54,10 @@ Workspace testClasses   // list TestCase subclasses
 
 ### Working with actors
 
+Live actors are a fact about the node, so they live on `Node`:
+
 ```beamtalk
-Node current actors unwrap              // list all live actors
+Node current actors unwrap                // list all live actors
 (Node current actorsOf: Counter) unwrap   // find actors of a specific class
 ```
 
@@ -81,12 +80,15 @@ Register your own workspace-level names:
 
 ```beamtalk
 Workspace bind: myConfig as: #Config   // register a binding
-Workspace globals                       // see all bindings as a Dictionary
+Workspace bindings                     // live view of all bindings
 Workspace unbind: #Config              // remove a binding
 ```
 
-The system prevents binding names that conflict with built-in globals
-(`Transcript`, `Workspace`, `Beamtalk`) or loaded class names.
+A bare name in the REPL resolves in three steps: your session's local variables
+first, then `Workspace` bindings, then the class registry (`Integer`,
+`Counter`, `Transcript`, ...). The system refuses to bind a name that is already
+a registered class. Bindings are visible only to REPL evaluations; compiled code
+sees just the class registry.
 
 ## Beamtalk — system reflection
 
@@ -96,7 +98,6 @@ The system prevents binding names that conflict with built-in globals
 Beamtalk version              // the Beamtalk version string
 Beamtalk allClasses           // list all registered classes
 Beamtalk classNamed: #Integer // look up a class by name
-Beamtalk globals              // Dictionary of all system-level names
 ```
 
 ### Getting help
@@ -108,12 +109,9 @@ Beamtalk help: Integer selector: #factorial  // show method documentation
 
 ## Access from compiled code
 
-`Transcript`, `Workspace` and `Beamtalk` are ordinary class-side facades:
-send to them directly anywhere, including compiled code (`Workspace` raises
-`no_workspace` when no workspace is running; `Workspace isAvailable` asks
-without raising). `Transcript` writes to the REPL's transcript inside an
-interactive workspace and to a plain `Logger` notice elsewhere; programs
-should use `Logger` or `Console`.
+`Transcript`, `Workspace` and `Beamtalk` are ordinary classes, so compiled code
+can send to them directly (`Workspace` raises `no_workspace` when no workspace
+is running):
 
 ```beamtalk
 Transcript showCr: "Hello from compiled code"
@@ -133,28 +131,33 @@ Transcript recent           → List (buffer contents; no_workspace outside the 
 Transcript clear            → nil (empties buffer; no_workspace outside the REPL)
 ```
 
-**Workspace** (value object — workspace introspection):
+**Workspace** (class-side facade — workspace operations):
 
 ```text
+Workspace isAvailable        → Boolean (never raises)
 Workspace classes            → List of loaded classes
 Workspace testClasses        → List of TestCase subclasses
-Node current actors             → Result(List of live actors)
-Node current actorsOf: aClass   → Result(List of actors of that class)
 Workspace load: path         → compile and load a .bt file
 Workspace test               → run all test classes
 Workspace test: testClass    → run a specific test class
 Workspace bind: val as: name → register a binding
 Workspace unbind: name       → remove a binding
-Workspace globals            → Dictionary of all bindings
+Workspace bindings           → live view of all bindings
 ```
 
-**Beamtalk** (value object — system reflection):
+**Node** (a BEAM node value — live actors):
+
+```text
+Node current actors             → Result(List of live actors)
+Node current actorsOf: aClass   → Result(List of actors of that class)
+```
+
+**Beamtalk** (class-side facade — system reflection):
 
 ```text
 Beamtalk version                      → String
 Beamtalk allClasses                   → List of class objects
 Beamtalk classNamed: name             → class object or nil
-Beamtalk globals                      → Dictionary of system names
 Beamtalk help: aClass                 → class documentation
 Beamtalk help: aClass selector: sel   → method documentation
 ```

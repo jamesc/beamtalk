@@ -681,20 +681,24 @@ nil
 ERROR: Integer has no source file
 ```
 
-### Workspace and Reflection Singletons
+### Workspace and Reflection Facades
 
-Two global singleton objects provide introspection and project operations. These are available in the REPL, in compiled code, and via the MCP server.
+`Beamtalk` and `Workspace` are ordinary sealed, stateless classes whose API is entirely class-side (ADR 0129) — no `current` accessor, no injected name. `Beamtalk` works in the REPL, in compiled code and via the MCP server; `Workspace` works wherever a workspace runs and raises `no_workspace` elsewhere (`Workspace isAvailable` asks without raising). See the [language reference](beamtalk-language-features.md#workspace-and-reflection-api) for the full tables.
 
-**`Beamtalk`** (class: `BeamtalkInterface`) — system reflection:
+**`Beamtalk`** — system reflection:
 
 | Method | Description |
 |--------|-------------|
 | `version` | Beamtalk version string |
 | `allClasses` | All registered classes as class objects |
 | `classNamed: #Counter` | Look up a class by name |
-| `globals` | Snapshot of system namespace as a Dictionary |
 | `help: Counter` | Formatted class documentation |
 | `help: Counter selector: #increment` | Formatted method documentation |
+| `erlangHelp: "lists"` | Documentation for an Erlang module (`erlangHelp:selector:` for one function) |
+| `releaseInfo` | This node's release provenance (`#{#release => nil}` outside a release) |
+| `shapeManifest` | Shape manifest of every registered project class |
+
+Logging and debug control (`logLevel`, `enableDebug:`, ...) live on `Logger`, not `Beamtalk`.
 
 ```beamtalk
 > Beamtalk version
@@ -705,9 +709,6 @@ Two global singleton objects provide introspection and project operations. These
 
 > Beamtalk classNamed: #Integer
 Integer
-
-> Beamtalk globals
-#{#Integer => Integer, #String => String, ...}
 ```
 
 **`Workspace`** (class: `Workspace`) — project operations:
@@ -718,14 +719,14 @@ Integer
 | `sync` | Sync workspace with project (`beamtalk.toml`) |
 | `classes` | All loaded user classes |
 | `testClasses` | All loaded test classes |
-| `globals` | Snapshot of project namespace as a Dictionary |
-| `actors` | All live actors |
-| `actorAt: pidString` | Look up an actor by pid string |
-| `actorsOf: Counter` | All live instances of a class |
+| `isAvailable` | True iff a workspace is running (never raises) |
+| `bindings` | Live view of the `bind:as:` entries |
 | `test` | Run all test classes |
 | `test: CounterTest` | Run a specific test class |
 | `bind: value as: #Name` | Register a value in the workspace namespace |
 | `unbind: #Name` | Remove a workspace binding |
+
+Node facts (`actors`, `actorsOf:`, `actorAt:`, `processes`, `supervisors`) are on `Node`, e.g. `Node current actors`.
 
 ```beamtalk
 > Workspace load: "examples/counter.bt"
@@ -759,18 +760,20 @@ REPL variable bindings are **session-local** — each connected REPL session has
 
 Workspace bindings (via `Workspace bind:as:`) are **workspace-level** — they persist across sessions and are visible to all connected clients.
 
-Name resolution follows a scoped chain:
+Name resolution in a REPL expression follows a three-tier chain (ADR 0129 §7):
 
 ```
-Session locals  →  Workspace user bindings  →  Workspace globals  →  Beamtalk globals
-  x = 42            MyTool = <actor>            Transcript = ...      Integer = <class>
-  counter = ...                                  Counter = <class>     String = <class>
+Session locals  →  Workspace bindings  →  Class registry
+  x = 42            MyTool = <actor>       Integer = <class>
+  counter = ...                            Counter = <class>
+                                           Transcript = <class>
 ```
 
 1. **Session locals** — per-connection variables (`x := 42`), created by `:=` assignment
-2. **Workspace user bindings** — workspace-level names registered via `Workspace bind:as:`
-3. **Workspace globals** — project-level entries (Transcript, loaded classes, singletons)
-4. **Beamtalk globals** — system-level entries (all registered classes, version)
+2. **Workspace bindings** — workspace-level names registered via `Workspace bind:as:` (listed by `Workspace bindings`)
+3. **Class registry** — every registered class, including the stdlib and the `Beamtalk`, `Workspace`, `Transcript` and `SystemNavigation` facades, which are ordinary classes rather than bindings
+
+Method bodies and batch-compiled code use only the class registry. `bind:as:` refuses to shadow a registered class name; a plain assignment such as `Integer := 3` creates a session local that shadows the class for that session only.
 
 ### Common Workflows
 
