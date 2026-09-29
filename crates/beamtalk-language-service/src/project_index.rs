@@ -28,6 +28,36 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
+/// Builds `module`'s [`ClassHierarchy`] with ADR 0127 trait provenance.
+///
+/// Flattens every `uses:` line into a *clone* of `module` (the caller's AST
+/// is untouched), builds the hierarchy from the flattened clone so provided
+/// methods are present, then stamps `MethodInfo::origin` — the same sequence
+/// `analyse_full` runs, so hover and the other hierarchy-backed LSP queries
+/// see the same provenance as diagnostics (BT-3655). `external_protocols`
+/// carries provision-bearing protocols from other files/packages, keyed by
+/// bare name. Expansion diagnostics are discarded: `diagnostics()` already
+/// reports them via the full analysis pipeline.
+pub(crate) fn build_hierarchy_with_trait_origins(
+    module: &beamtalk_core::ast::Module,
+    external_protocols: &HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition>,
+) -> (Result<ClassHierarchy, SemanticError>, Vec<Diagnostic>) {
+    use beamtalk_core::semantic_analysis::trait_expansion;
+
+    if !module.classes.iter().any(|c| !c.uses.is_empty()) {
+        return ClassHierarchy::build(module);
+    }
+    let mut expanded = module.clone();
+    let (_expansion_diags, origins) =
+        trait_expansion::expand_module(&mut expanded, external_protocols);
+    let (result, diags) = ClassHierarchy::build(&expanded);
+    let result = result.map(|mut hierarchy| {
+        trait_expansion::apply_origins(&mut hierarchy, &origins);
+        hierarchy
+    });
+    (result, diags)
+}
+
 /// Package stamp used for a same-project (non-dependency, non-stdlib) file
 /// under no known workspace root's `AliasInfo.package`.
 ///
@@ -192,10 +222,26 @@ impl ProjectIndex {
     ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
         let mut index = Self::new();
         let mut all_diagnostics = Vec::new();
-        for (path, source) in stdlib_sources {
-            let tokens = lex_with_eof(source);
-            let (module, _parse_diagnostics) = parse(tokens);
-            let (file_hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
+        // Parse every file first so a trait declared in one stdlib file can
+        // be flattened into a class that `uses:` it in another (BT-3655);
+        // the per-file hierarchy build below needs all provision-bearing
+        // protocols up front, regardless of file order.
+        let parsed: Vec<_> = stdlib_sources
+            .iter()
+            .map(|(path, source)| {
+                let (module, _parse_diagnostics) = parse(lex_with_eof(source));
+                (path, module)
+            })
+            .collect();
+        let stdlib_protocols: HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition> = parsed
+            .iter()
+            .flat_map(|(_, module)| module.protocols.iter())
+            .filter(|p| !p.provided_methods.is_empty())
+            .map(|p| (p.name.name.clone(), p.clone()))
+            .collect();
+        for (path, module) in parsed {
+            let (file_hierarchy_result, hierarchy_diags) =
+                build_hierarchy_with_trait_origins(&module, &stdlib_protocols);
             all_diagnostics.extend(hierarchy_diags);
             let mut file_hierarchy = match file_hierarchy_result {
                 Ok(h) => h,
