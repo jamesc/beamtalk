@@ -1693,3 +1693,99 @@ fn codegen_empty_match_errors() {
     let result = beamtalk_repl::codegen::generate_test_expression(expr, "test_match");
     assert!(result.is_err(), "Empty match should fail codegen");
 }
+
+// ---- BT-3637 (ADR 0129 Phase 0a): direct-call eligibility in REPL codegen ----
+
+const FACADE_SOURCE: &str = "\
+sealed Object subclass: Facade
+  class sealed osName -> String => \"linux\"
+  class plain -> Integer => 1
+
+sealed Object subclass: Stateful
+  classState: count = 0
+  class sealed peek -> Integer => self.count
+";
+
+/// Generates REPL Core Erlang for `expr_source` against a hierarchy built from
+/// [`FACADE_SOURCE`].
+fn repl_code_with_facade_hierarchy(expr_source: &str) -> String {
+    let (hierarchy, _diags) =
+        beamtalk_core::semantic_analysis::ClassHierarchy::build(&parse_ok(FACADE_SOURCE));
+    let hierarchy = hierarchy.expect("hierarchy should build");
+    let module = parse_ok(expr_source);
+    let exprs: Vec<Expression> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+    let index = std::collections::HashMap::from([
+        ("Facade".to_string(), "bt@facade".to_string()),
+        ("Stateful".to_string(), "bt@stateful".to_string()),
+    ]);
+    beamtalk_repl::codegen::generate_repl_expressions_with_hierarchy(
+        &exprs,
+        "repl_direct_call",
+        index,
+        &hierarchy,
+    )
+    .expect("codegen should work")
+}
+
+#[test]
+fn repl_sealed_stateless_class_method_emits_direct_call() {
+    let code = repl_code_with_facade_hierarchy("Facade osName");
+    assert!(
+        code.contains("call 'bt@facade':"),
+        "Expected a direct call into the class module in: {code}"
+    );
+    assert!(
+        !code.contains("'class_send'"),
+        "Eligible send must not go through class_send in: {code}"
+    );
+}
+
+#[test]
+fn repl_non_sealed_class_method_still_emits_class_send() {
+    let code = repl_code_with_facade_hierarchy("Facade plain");
+    assert!(
+        code.contains("'class_send'"),
+        "Non-sealed class method must keep class_send in: {code}"
+    );
+    assert!(
+        !code.contains("call 'bt@facade':"),
+        "Non-sealed class method must not be called directly in: {code}"
+    );
+}
+
+#[test]
+fn repl_class_with_class_state_still_emits_class_send() {
+    let code = repl_code_with_facade_hierarchy("Stateful peek");
+    assert!(
+        code.contains("'class_send'"),
+        "Class with classState: must keep class_send in: {code}"
+    );
+    assert!(
+        !code.contains("call 'bt@stateful':"),
+        "Class with classState: must not be called directly in: {code}"
+    );
+}
+
+#[test]
+fn repl_without_hierarchy_keeps_class_send() {
+    let module = parse_ok("Facade osName");
+    let exprs: Vec<Expression> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+    let code = generate_repl_expressions_with_index(
+        &exprs,
+        "repl_no_hierarchy",
+        std::collections::HashMap::new(),
+    )
+    .expect("codegen should work");
+    assert!(
+        code.contains("'class_send'"),
+        "Expected class_send in: {code}"
+    );
+}

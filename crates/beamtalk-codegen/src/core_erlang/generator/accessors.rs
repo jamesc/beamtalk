@@ -241,6 +241,20 @@ impl CoreErlangGenerator {
         self.class_context_mut().class_module_registry = registry;
     }
 
+    /// Computes and installs the direct-call eligibility table from `hierarchy`.
+    ///
+    /// Reuses [`CoreErlangGenerator::compute_direct_call_eligible`] (the single
+    /// implementation of the eligibility gates) so REPL expression codegen makes
+    /// the same decision as module codegen (ADR 0129 §2, Phase 0a). Call this
+    /// *after* [`Self::set_class_module_index`] so the target module names resolve
+    /// against the REPL's class-module index.
+    pub fn set_direct_call_eligible_from_hierarchy(
+        &mut self,
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+    ) {
+        self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
+    }
+
     /// Returns a reference to the sealed method selectors set.
     pub(in crate::core_erlang) fn sealed_method_selectors(
         &self,

@@ -22,6 +22,7 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, var};
 use beamtalk_codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_core::ast::{Expression, Pattern};
+use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 
 // ── Public API ──────────────────────────────────────────────────────────
 
@@ -89,6 +90,42 @@ pub fn generate_repl_expressions_with_index(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
+    generate_repl_expressions_impl(expressions, module_name, class_module_index, None)
+}
+
+/// Like [`generate_repl_expressions_with_index`] but also computes direct-call
+/// eligibility from `hierarchy` (ADR 0129 §2, Phase 0a).
+///
+/// Sends to sealed, stateless class-side facades (`System osPlatform`) then emit
+/// a direct `call 'Module':'Fn'(...)` in the caller's process instead of
+/// `beamtalk_object_class:class_send`. The gates are the ones module codegen
+/// uses (`CoreErlangGenerator::compute_direct_call_eligible`).
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+#[allow(clippy::implicit_hasher)]
+pub fn generate_repl_expressions_with_hierarchy(
+    expressions: &[Expression],
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+    hierarchy: &ClassHierarchy,
+) -> Result<String> {
+    generate_repl_expressions_impl(
+        expressions,
+        module_name,
+        class_module_index,
+        Some(hierarchy),
+    )
+}
+
+#[allow(clippy::implicit_hasher)]
+fn generate_repl_expressions_impl(
+    expressions: &[Expression],
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+    hierarchy: Option<&ClassHierarchy>,
+) -> Result<String> {
     if expressions.is_empty() {
         return Err(CodeGenError::UnsupportedFeature {
             feature: "empty expression list".to_string(),
@@ -97,6 +134,9 @@ pub fn generate_repl_expressions_with_index(
     }
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_class_module_index(class_module_index);
+    if let Some(hierarchy) = hierarchy {
+        generator.set_direct_call_eligible_from_hierarchy(hierarchy);
+    }
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_repl_module_multi(expressions)?;
     Ok(doc.to_pretty_string())
@@ -121,6 +161,46 @@ pub fn generate_repl_expressions_traced(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
+    generate_repl_expressions_traced_impl(
+        expressions,
+        source,
+        module_name,
+        class_module_index,
+        None,
+    )
+}
+
+/// Like [`generate_repl_expressions_traced`] but also computes direct-call
+/// eligibility from `hierarchy` (ADR 0129 §2, Phase 0a).
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+#[allow(clippy::implicit_hasher)]
+pub fn generate_repl_expressions_traced_with_hierarchy(
+    expressions: &[Expression],
+    source: &str,
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+    hierarchy: &ClassHierarchy,
+) -> Result<String> {
+    generate_repl_expressions_traced_impl(
+        expressions,
+        source,
+        module_name,
+        class_module_index,
+        Some(hierarchy),
+    )
+}
+
+#[allow(clippy::implicit_hasher)]
+fn generate_repl_expressions_traced_impl(
+    expressions: &[Expression],
+    source: &str,
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+    hierarchy: Option<&ClassHierarchy>,
+) -> Result<String> {
     if expressions.is_empty() {
         return Err(CodeGenError::UnsupportedFeature {
             feature: "empty expression list".to_string(),
@@ -139,6 +219,9 @@ pub fn generate_repl_expressions_traced(
 
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_class_module_index(class_module_index);
+    if let Some(hierarchy) = hierarchy {
+        generator.set_direct_call_eligible_from_hierarchy(hierarchy);
+    }
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_repl_module_multi_traced(expressions, &source_texts)?;
     Ok(doc.to_pretty_string())
