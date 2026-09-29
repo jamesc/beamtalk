@@ -2698,6 +2698,18 @@ stub_registry_loop(ClassName, ActorPid) ->
 %% actually moves: old name gone, new name resolves to a *different* pid than
 %% removeFromSystem's teardown-and-recreate would give (same live process,
 %% re-keyed in place — beamtalk_object_class:rename/2's contract).
+%% After the registry identity has moved, a no_workspace refusal from the
+%% reference-site rewrite must come back as {error, workspace_unavailable} so
+%% classRenameTo/2 reports a partial rename rather than a bare no_workspace.
+rewrite_after_identity_move_no_workspace_is_error_tuple_test() ->
+    ok = beamtalk_capability:clear(),
+    ?assertEqual(
+        {error, workspace_unavailable},
+        beamtalk_behaviour_intrinsics:rewrite_after_identity_move(
+            'BTRewriteAfterMove', #{path => <<"x.bt">>}, [], #{not_flushable_reason => <<"dynamic">>}
+        )
+    ).
+
 classRenameTo_dynamic_class_reregisters_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         {ClassObj, Pid} = register_class('BT3278RenameEUnitTarget', #{}, #{}),

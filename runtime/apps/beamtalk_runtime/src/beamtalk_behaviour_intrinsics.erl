@@ -147,6 +147,10 @@ that the Behaviour/Class libraries can rely on.
     install_class_rename/3
 ]).
 
+-ifdef(TEST).
+-export([rewrite_after_identity_move/4]).
+-endif.
+
 %%% ============================================================================
 %%% Public Intrinsics
 %%% ============================================================================
@@ -1389,7 +1393,11 @@ do_rename_and_rewrite(
     case validate_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
         ok ->
             NewPid = install_class_rename(OldName, NewName, Classification),
-            case rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+            case
+                rewrite_after_identity_move(
+                    OldName, DefinitionSite, ReferenceSites, Classification
+                )
+            of
                 {ok, RewriteResult} ->
                     log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult),
                     beamtalk_class_registry:class_object_from_pid(NewPid);
@@ -1806,6 +1814,22 @@ rewrite_class_sites(
 rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification, Selector) ->
     ok = beamtalk_capability:require_workspace(Selector, OldName),
     erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites]).
+
+%% The reference-site rewrite that runs AFTER `install_class_rename/3` has
+%% already moved the registry identity. A `no_workspace` refusal here (the
+%% workspace stopped between validation and this rewrite) must not escape as
+%% a bare raise: it is reported as `{error, workspace_unavailable}` so the
+%% caller raises `rename_partial_failure_error/3`, which tells the user the
+%% class HAS been renamed but its reference sites were not rewritten.
+-spec rewrite_after_identity_move(atom(), map() | undefined, [map()], map()) ->
+    {ok, map()} | {error, term()}.
+rewrite_after_identity_move(OldName, DefinitionSite, ReferenceSites, Classification) ->
+    try
+        rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification)
+    catch
+        error:#{error := #beamtalk_error{kind = no_workspace}} ->
+            {error, workspace_unavailable}
+    end.
 
 %% `rewrite_class_sites/4`'s own non-mutating validation half — same shape
 %% and same trivial-success shortcut for a freestanding dynamic class with
