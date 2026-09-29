@@ -2706,7 +2706,9 @@ rewrite_after_identity_move_no_workspace_is_error_tuple_test() ->
     ?assertEqual(
         {error, workspace_unavailable},
         beamtalk_behaviour_intrinsics:rewrite_after_identity_move(
-            'BTRewriteAfterMove', #{path => <<"x.bt">>}, [], #{not_flushable_reason => <<"dynamic">>}
+            'BTRewriteAfterMove', #{path => <<"x.bt">>}, [], #{
+                not_flushable_reason => <<"dynamic">>
+            }
         )
     ).
 
