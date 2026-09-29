@@ -2747,6 +2747,9 @@ Best-effort and fault-isolated via `do_announce_actor_lifecycle/2`.
 maybe_announce_lifecycle([beamtalk, actor, lifecycle, start], Metadata) ->
     Class = maps:get(class, Metadata, unknown),
     Pid = maps:get(pid, Metadata, self()),
+    %% BT-3633: every actor is tracked by the runtime-owned registry so
+    %% `Node current actors` holds in every boot context (fire-and-forget).
+    ok = beamtalk_repl_actors:track_spawned(Pid, Class),
     do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid});
 maybe_announce_lifecycle([beamtalk, actor, lifecycle, stop], Metadata) ->
     Class = maps:get(class, Metadata, unknown),

@@ -735,25 +735,6 @@ compile_activation_fixture_with_source(ModName, ClassName, SourcePath) ->
     {ok, ModName, BeamBin} = compile:forms(Forms, []),
     BeamBin.
 
-%% Dynamically compile and load a minimal module with new/0 -> #{}.
-%% Used to exercise the class_not_found path in bootstrap_value_singleton
-%% where Module:new() succeeds but the class is not in the registry.
-compile_mock_new_module() ->
-    Idx = erlang:unique_integer([positive]),
-    ModName = list_to_atom("bt_test_mock_new_" ++ integer_to_list(Idx)),
-    Forms = [
-        {attribute, 1, module, ModName},
-        {attribute, 2, export, [{new, 0}]},
-        {function, 3, new, 0, [{clause, 3, [], [], [{map, 3, []}]}]}
-    ],
-    {ok, ModName, BeamBin} = compile:forms(Forms, []),
-    {module, ModName} = code:load_binary(ModName, [], BeamBin),
-    ModName.
-
-purge_mock_module(ModName) ->
-    code:purge(ModName),
-    code:delete(ModName).
-
 cleanup_test_source_class(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->

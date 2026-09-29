@@ -1291,6 +1291,24 @@ both peers. Neither simplification is expected to change any verdict above
 but Phase 2/3 should re-run at least (c) against a real compiled `.bt`
 actor once the wire lands, since that is the one open bug.
 
+## Amendment (BT-3633): `Node` introspection
+
+`Node` gains per-node introspection queries, moved from `WorkspaceInterface`
+(ADR 0129 amendment): `actors`, `actorsOf:`, `actorAt:`, `processes`,
+`supervisors` and `shapeSkew`. Each answers a `Result(…, Error)` on every
+receiver, `Node current` included, so one selector has one return type (ADR
+0060). A peer is queried via `erpc` after the §9 host policy; returned actors
+cross the wire per §5.1. Failures are `Error` values tagged `node_down`,
+`timeout`, `insecure_distribution` or `remote_code_mismatch` (§7), never raised.
+
+- `aNode actors` lists every live actor (the runtime-owned
+  `beamtalk_actor_registry`). `Actor allRegisteredOn:` (§3) still lists only
+  name-registered actors, and the two doc comments say so.
+- `aNode shapeSkew` is the per-node form of the §8 tally. `Workspace nodes` and
+  `connectedWithSkew` are removed; the `nodes` surface operation (§10) maps
+  `shapeSkew` over `Node connected`.
+- `Node` stays a stateless `Value` with no class state.
+
 ## Migration Path
 
 No existing Beamtalk code changes behaviour for local sends. Two observable

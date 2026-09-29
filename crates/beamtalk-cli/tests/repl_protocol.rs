@@ -2506,7 +2506,7 @@ fn node_name_from_print_string(rendered: &str) -> String {
 /// formatting, splices it into `distribution.btscript`'s `__PEER_NODE__`
 /// placeholder, and runs the case file against the *primary* node's REPL —
 /// exactly the two-node scenario `Node current` / `Node named:aPeer
-/// connect` / `Counter spawnOn:` / `Workspace nodes` / `ProcessNavigation
+/// connect` / `Counter spawnOn:` / `Node connected` / `ProcessNavigation
 /// on:` exercise from a real REPL session.
 ///
 /// Boots two independently-spawned distributed-Erlang nodes, both named

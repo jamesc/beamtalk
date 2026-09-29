@@ -103,6 +103,18 @@ init([]) ->
             type => worker,
             modules => [beamtalk_object_instances]
         },
+        %% Node-wide actor registry (BT-3633): backs `Node current actors` in
+        %% every boot context (test, run, REPL, release). Registers itself as
+        %% `beamtalk_actor_registry`; actors track themselves from their
+        %% lifecycle-start telemetry.
+        #{
+            id => beamtalk_actor_registry,
+            start => {beamtalk_repl_actors, start_link, [registered]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_repl_actors]
+        },
         %% Supervisor for Subprocess gen_servers (simple_one_for_one, temporary)
         #{
             id => beamtalk_subprocess_sup,

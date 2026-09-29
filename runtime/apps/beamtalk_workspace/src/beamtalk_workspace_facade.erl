@@ -22,16 +22,11 @@ inside `beamtalk_workspace_interface_primitives`.
 
 `testScope/0` and `testTarget/1` guard the two `Workspace test` selectors,
 whose bodies are pure Beamtalk (`TestRunner ...`), and return the value the
-body then passes on. `processes/0` returns the default-scope supervision
-snapshot the `Workspace processes` body wraps.
+body then passes on.
 """.
 
 -export([
     isAvailable/0,
-    actors/0,
-    processes/0,
-    nodes/0,
-    actorAt/1,
     classes/0,
     bindings/0,
     currentSession/0,
@@ -50,10 +45,8 @@ snapshot the `Workspace processes` body wraps.
     testTarget/1,
     bind/2,
     unbind/1,
-    supervisor/0,
     startSupervisor/1,
     stopSupervisor/1,
-    supervisors/0,
     autoflush/0,
     autoflush/1,
     dependencies/0
@@ -63,30 +56,6 @@ snapshot the `Workspace processes` body wraps.
 -spec isAvailable() -> boolean().
 isAvailable() ->
     beamtalk_capability:recorded() =/= none.
-
--doc "`Workspace actors`, guarded by `require_workspace/1`.".
--spec actors() -> term().
-actors() ->
-    ok = beamtalk_capability:require_workspace(actors),
-    beamtalk_workspace_interface_primitives:actors().
-
--doc "`Workspace processes`, guarded by `require_workspace/1`.".
--spec processes() -> term().
-processes() ->
-    ok = beamtalk_capability:require_workspace(processes),
-    beamtalk_process_navigation:default_snapshot().
-
--doc "`Workspace nodes`, guarded by `require_workspace/1`.".
--spec nodes() -> term().
-nodes() ->
-    ok = beamtalk_capability:require_workspace(nodes),
-    beamtalk_node_monitor:connectedWithSkew().
-
--doc "`Workspace actorAt:`, guarded by `require_workspace/1`.".
--spec actorAt(term()) -> term().
-actorAt(PidString) ->
-    ok = beamtalk_capability:require_workspace('actorAt:'),
-    beamtalk_workspace_interface_primitives:actorAt(PidString).
 
 -doc "`Workspace classes`, guarded by `require_workspace/1`.".
 -spec classes() -> term().
@@ -196,12 +165,6 @@ unbind(Name) ->
     ok = beamtalk_capability:require_workspace('unbind:'),
     beamtalk_workspace_interface_primitives:unbind(Name).
 
--doc "`Workspace supervisor`, guarded by `require_workspace/1`.".
--spec supervisor() -> term().
-supervisor() ->
-    ok = beamtalk_capability:require_workspace(supervisor),
-    beamtalk_workspace_interface_primitives:rootSupervisor().
-
 -doc "`Workspace startSupervisor:`, guarded by `require_workspace/1`.".
 -spec startSupervisor(term()) -> term().
 startSupervisor(ClassArg) ->
@@ -213,12 +176,6 @@ startSupervisor(ClassArg) ->
 stopSupervisor(ClassArg) ->
     ok = beamtalk_capability:require_workspace('stopSupervisor:'),
     beamtalk_workspace_interface_primitives:stopSupervisor(ClassArg).
-
--doc "`Workspace supervisors`, guarded by `require_workspace/1`.".
--spec supervisors() -> term().
-supervisors() ->
-    ok = beamtalk_capability:require_workspace(supervisors),
-    beamtalk_workspace_interface_primitives:supervisors().
 
 -doc "`Workspace autoflush`, guarded by `require_workspace/1`.".
 -spec autoflush() -> term().

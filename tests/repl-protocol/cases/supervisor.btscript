@@ -194,7 +194,7 @@ wsSup children
 // => ["Counter"]
 
 // supervisors lists all user-attached supervisors
-Workspace supervisors size
+Node current supervisors unwrap size
 // => 1
 
 // startSupervisor: is idempotent — returns existing if already attached
@@ -206,7 +206,7 @@ Workspace stopSupervisor: E2EAppSupervisor
 // => nil
 
 // supervisors is now empty
-Workspace supervisors size
+Node current supervisors unwrap size
 // => 0
 
 // Re-attaching after stopping works (iterative development)
@@ -236,5 +236,5 @@ Workspace stopSupervisor: E2EWorkerPool
 Workspace stopSupervisor: E2EAppSupervisor
 // => nil
 
-Workspace supervisors size
+Node current supervisors unwrap size
 // => 0

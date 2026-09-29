@@ -108,10 +108,10 @@ pub(crate) fn print_help() {
     println!("  keywords (e.g. at:), or := continue on the next line (..> prompt).");
     println!("  Press Ctrl+C to cancel multi-line input.");
     println!();
-    println!("Workspace introspection:");
-    println!("  Workspace actors           # List all live actors");
-    println!("  Workspace actorAt: '<pid>' # Look up actor by PID");
-    println!("  Workspace actorsOf: Counter # All actors of a class");
+    println!("Node introspection:");
+    println!("  Node current actors            # List all live actors");
+    println!("  Node current actorAt: '<pid>' # Look up actor by PID");
+    println!("  Node current actorsOf: Counter # All actors of a class");
     println!();
     println!("Actor message sends return Futures, which are automatically");
     println!("awaited for a synchronous REPL experience.");

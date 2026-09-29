@@ -59,7 +59,7 @@ defmodule BtAttach.Facade do
     bindings: :read,
     actors: :read,
     # ADR 0092: the `default`-scope supervision-tree snapshot
-    # (`Workspace processes`) is a Read op, scoped exactly like `actors` — it
+    # (`Node current processes`) is a Read op, scoped exactly like `actors` — it
     # adds supervision structure but no new power, safe for the Observer role.
     processes: :read,
     # ADR 0092: the `system`-scope snapshot (`ProcessNavigation system`) is NOT

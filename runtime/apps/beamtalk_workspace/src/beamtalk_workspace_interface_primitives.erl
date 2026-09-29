@@ -36,8 +36,6 @@ into REPL session state. Workspace readiness is detected via
 
 | Selector      | Description                                         |
 |---------------|-----------------------------------------------------|
-| `actors'      | List all live actor object references               |
-| `actorAt:'    | Look up actor by pid string                         |
 | `classes'     | List all loaded user classes                        |
 | `load:'       | Compile and load a .bt file                         |
 | `bindings'    | Full workspace namespace snapshot (Dictionary)      |
@@ -64,11 +62,11 @@ into REPL session state. Workspace readiness is detected via
 %% long-lived process (prevents table from being deleted when eval workers exit)
 -export([create_bindings_table/0]).
 %% Direct exports for Erlang FFI calls from sealed Object Workspace
--export([actors/0, actorAt/1, classes/0, load/1, bindings/0, bind/2, unbind/1, rootSupervisor/0]).
+-export([classes/0, load/1, bindings/0, bind/2, unbind/1]).
 
 -export([currentSession/0, sessions/0]).
 %% Supervisor lifecycle management
--export([startSupervisor/1, stopSupervisor/1, supervisors/0]).
+-export([startSupervisor/1, stopSupervisor/1]).
 %% Package reflection (ADR 0070 Phase 5)
 -export([dependencies/0]).
 %% Project sync
@@ -109,10 +107,6 @@ Retained for backward compatibility. The compiled sealed Object module
 uses Erlang FFI calls to the direct exports instead of this dispatch/3.
 """.
 -spec dispatch(atom(), list(), term()) -> term().
-dispatch(actors, [], _Self) ->
-    actors();
-dispatch('actorAt:', [PidStr], _Self) ->
-    actorAt(PidStr);
 dispatch(classes, [], _Self) ->
     classes();
 dispatch('load:', [Path], _Self) ->
@@ -123,8 +117,6 @@ dispatch('bind:as:', [Value, Name], _Self) ->
     bind(Value, Name);
 dispatch('unbind:', [Name], _Self) ->
     unbind(Name);
-dispatch(rootSupervisor, [], _Self) ->
-    rootSupervisor();
 dispatch(currentSession, [], _Self) ->
     currentSession();
 dispatch(sessions, [], _Self) ->
@@ -133,8 +125,6 @@ dispatch('startSupervisor:', [ClassArg], _Self) ->
     startSupervisor(ClassArg);
 dispatch('stopSupervisor:', [ClassArg], _Self) ->
     stopSupervisor(ClassArg);
-dispatch(supervisors, [], _Self) ->
-    supervisors();
 dispatch(sync, [], _Self) ->
     sync();
 dispatch('newClass:at:', [Source, Path], _Self) ->
@@ -167,22 +157,6 @@ dispatch(Selector, _Args, _Self) ->
 %%% ============================================================================
 %%% Direct exports for Erlang FFI (called via ErlangModule proxy)
 %%% ============================================================================
-
--doc """
-Return a list of all live actors as beamtalk_object references.
-Called via `(Erlang beamtalk_workspace_interface_primitives) actors`.
-""".
--spec actors() -> [tuple()].
-actors() ->
-    handle_actors().
-
--doc """
-Look up a specific actor by pid string.
-Called via `(Erlang beamtalk_workspace_interface_primitives) actorAt: pidString`.
-""".
--spec actorAt(binary() | list() | term()) -> tuple() | 'nil'.
-actorAt(PidStr) ->
-    handle_actor_at(PidStr).
 
 -doc """
 Return all loaded user classes.
@@ -1321,21 +1295,6 @@ unbind(Name) ->
             end
     end.
 
--doc """
-Return the OTP application root supervisor, or nil.
-
-Called via `(Erlang beamtalk_workspace_interface_primitives) rootSupervisor`.
-Delegates to `beamtalk_supervisor:get_root/0` which reads from the ETS
-registry populated by the generated `beamtalk_{appname}_app:start/2`.
-
-Returns the `{beamtalk_supervisor, ClassName, Module, Pid}` tuple when an
-OTP application with `[application] supervisor` has started, or the atom
-`nil` if no root has been registered.
-""".
--spec rootSupervisor() -> tuple() | nil.
-rootSupervisor() ->
-    beamtalk_supervisor:get_root().
-
 %%% ============================================================================
 %%% Session navigation (ADR 0081 Phases 5 & 7)
 %%% ============================================================================
@@ -1555,33 +1514,6 @@ raise_stop_supervisor_type_error(Message) ->
     Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
-
--doc """
-List all supervisors in the workspace supervision tree.
-
-Called via `(Erlang beamtalk_workspace_interface_primitives) supervisors`.
-Returns a list of `{beamtalk_supervisor, ClassName, Module, Pid}` tuples
-including the root application supervisor (if registered) and all
-supervisors attached via `startSupervisor:`.
-""".
--spec supervisors() -> [tuple()].
-supervisors() ->
-    Root =
-        case beamtalk_supervisor:get_root() of
-            nil -> [];
-            RootSup -> [RootSup]
-        end,
-    Children = supervisor:which_children(beamtalk_workspace_sup),
-    UserSups = lists:filtermap(
-        fun
-            ({{user_supervisor, ClassName}, Pid, supervisor, [Module]}) when is_pid(Pid) ->
-                {true, {beamtalk_supervisor, ClassName, Module, Pid}};
-            (_) ->
-                false
-        end,
-        Children
-    ),
-    Root ++ UserSups.
 
 -doc """
 Return the direct dependencies of the current workspace package.
@@ -1861,44 +1793,6 @@ all_user_bindings() ->
 %%% Internal method implementations
 %%% ============================================================================
 
--doc "Get all live actors as beamtalk_object references.".
--spec handle_actors() -> [tuple()].
-handle_actors() ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            [];
-        RegistryPid ->
-            Actors = beamtalk_repl_actors:list_actors(RegistryPid),
-            lists:filtermap(fun wrap_actor/1, Actors)
-    end.
-
--doc "Look up a specific actor by pid string.".
--spec handle_actor_at(binary() | list()) -> tuple() | 'nil'.
-handle_actor_at(PidStr) when is_binary(PidStr) ->
-    handle_actor_at(binary_to_list(PidStr));
-handle_actor_at(PidStr) when is_list(PidStr) ->
-    try
-        Pid = list_to_pid(PidStr),
-        case whereis(beamtalk_actor_registry) of
-            undefined ->
-                nil;
-            RegistryPid ->
-                case beamtalk_repl_actors:get_actor(RegistryPid, Pid) of
-                    {ok, Metadata} ->
-                        case wrap_actor(Metadata) of
-                            {true, Obj} -> Obj;
-                            false -> nil
-                        end;
-                    {error, not_found} ->
-                        nil
-                end
-        end
-    catch
-        error:badarg -> nil
-    end;
-handle_actor_at(_) ->
-    nil.
-
 -doc "Return all loaded user classes (those with a source file recorded).".
 -spec handle_classes() -> [tuple()].
 handle_classes() ->
@@ -2106,16 +2000,6 @@ maybe_warn_loaded_class(AtomName) ->
             ?LOG_WARNING("~s", [WarningMsg], #{domain => [beamtalk, runtime]});
         false ->
             ok
-    end.
-
--doc "Wrap actor metadata into a beamtalk_object tuple.".
--spec wrap_actor(beamtalk_repl_actors:actor_metadata()) -> {true, tuple()} | false.
-wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
-    case is_process_alive(Pid) of
-        true ->
-            {true, {beamtalk_object, Class, Module, Pid}};
-        false ->
-            false
     end.
 
 -doc """

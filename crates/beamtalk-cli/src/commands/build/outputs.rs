@@ -54,36 +54,37 @@ pub(crate) fn generate_package_outputs(
     let alias_metadata = build_alias_metadata(outputs.source_files);
 
     // Generate OTP application callback when [application] supervisor is set.
-    let app_callback_module =
-        if let Some(ref app_config) = manifest::find_application_config(project_root)? {
-            let cb_module_name = format!("beamtalk_{}_app", pkg.name);
-            // Resolve the supervisor's actual Erlang module via the class index.
-            // This correctly handles classes in subdirectories (e.g. src/app/app_sup.bt).
-            let sup_module = hierarchy
-                .class_module_index
-                .get(&app_config.supervisor)
-                .ok_or_else(|| {
-                    miette::miette!(
-                        "Cannot find compiled module for supervisor class '{}'. \
+    let application_config = manifest::find_application_config(project_root)?;
+    let application_supervisor = application_config.as_ref().map(|c| c.supervisor.clone());
+    let app_callback_module = if let Some(ref app_config) = application_config {
+        let cb_module_name = format!("beamtalk_{}_app", pkg.name);
+        // Resolve the supervisor's actual Erlang module via the class index.
+        // This correctly handles classes in subdirectories (e.g. src/app/app_sup.bt).
+        let sup_module = hierarchy
+            .class_module_index
+            .get(&app_config.supervisor)
+            .ok_or_else(|| {
+                miette::miette!(
+                    "Cannot find compiled module for supervisor class '{}'. \
                          Ensure the class is defined in a .bt source file in this package.",
-                        app_config.supervisor
-                    )
-                })?;
-            generate_otp_app_callback(
-                build_dir,
-                &app_config.supervisor,
-                sup_module,
-                &cb_module_name,
-            )?;
-            info!(
-                supervisor = %app_config.supervisor,
-                module = %cb_module_name,
-                "Generated OTP application callback"
-            );
-            Some(cb_module_name)
-        } else {
-            None
-        };
+                    app_config.supervisor
+                )
+            })?;
+        generate_otp_app_callback(
+            build_dir,
+            &app_config.supervisor,
+            sup_module,
+            &cb_module_name,
+        )?;
+        info!(
+            supervisor = %app_config.supervisor,
+            module = %cb_module_name,
+            "Generated OTP application callback"
+        );
+        Some(cb_module_name)
+    } else {
+        None
+    };
 
     // Include the generated callback module in the .app modules list so release
     // tooling (appup generation, etc.) can account for it.
@@ -105,6 +106,7 @@ pub(crate) fn generate_package_outputs(
         outputs.bt_dep_names,
         outputs.hex_dep_names,
         &alias_metadata,
+        application_supervisor.as_deref(),
     )?;
     info!(name = %pkg.name, "Generated .app file");
 

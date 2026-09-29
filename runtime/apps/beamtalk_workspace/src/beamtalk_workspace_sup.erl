@@ -22,7 +22,6 @@ Architecture (from ADR 0004):
 beamtalk_workspace_sup
   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
   ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082)
-  ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: Workspace)
   ├─ beamtalk_actor_sup           % Supervises user actors
@@ -255,41 +254,40 @@ init(Config) ->
                 shutdown => 5000,
                 type => worker,
                 modules => [beamtalk_workspace_changelog]
+            },
+
+            %% The actor registry is runtime-owned (BT-3633). The `Transcript`
+            %% stream is a REPL-server child (see console_child_specs/1) and
+            %% `Workspace` is a class-side facade with no process.
+
+            %% The bespoke class-loaded / bindings-changed /
+            %% flush-completion pub/sub gen_servers were retired. Those
+            %% workspace push streams now ride the SystemAnnouncer bus
+            %% (`beamtalk_announcements`, started under `beamtalk_runtime_sup`)
+            %% and are subscribed through `beamtalk_repl_subscriptions`.
+
+            %% Bootstrap worker — activates compiled project modules.
+            %% Must start before REPL server accepts connections.
+            #{
+                id => beamtalk_workspace_bootstrap,
+                start => {beamtalk_workspace_bootstrap, start_link, [ProjectPath]},
+                restart => permanent,
+                shutdown => 5000,
+                type => worker,
+                modules => [beamtalk_workspace_bootstrap]
+            },
+
+            %% Actor supervisor (shared across all sessions)
+            #{
+                id => beamtalk_actor_sup,
+                start => {beamtalk_actor_sup, start_link, []},
+                restart => permanent,
+                % Give actors time to shut down gracefully
+                shutdown => infinity,
+                type => supervisor,
+                modules => [beamtalk_actor_sup]
             }
-
-            %% The actor registry. (The `Transcript` stream is a REPL-server
-            %% child; see console_child_specs/1. `Workspace` is a class-side
-            %% facade with no process.)
-        ] ++ actor_registry_child_specs() ++
-            [
-                %% The bespoke class-loaded / bindings-changed /
-                %% flush-completion pub/sub gen_servers were retired. Those
-                %% workspace push streams now ride the SystemAnnouncer bus
-                %% (`beamtalk_announcements`, started under `beamtalk_runtime_sup`)
-                %% and are subscribed through `beamtalk_repl_subscriptions`.
-
-                %% Bootstrap worker — activates compiled project modules.
-                %% Must start before REPL server accepts connections.
-                #{
-                    id => beamtalk_workspace_bootstrap,
-                    start => {beamtalk_workspace_bootstrap, start_link, [ProjectPath]},
-                    restart => permanent,
-                    shutdown => 5000,
-                    type => worker,
-                    modules => [beamtalk_workspace_bootstrap]
-                },
-
-                %% Actor supervisor (shared across all sessions)
-                #{
-                    id => beamtalk_actor_sup,
-                    start => {beamtalk_actor_sup, start_link, []},
-                    restart => permanent,
-                    % Give actors time to shut down gracefully
-                    shutdown => infinity,
-                    type => supervisor,
-                    modules => [beamtalk_actor_sup]
-                }
-            ] ++
+        ] ++
             repl_child_specs(Mode, #{
                 console => Console,
                 tcp_port => TcpPort,
@@ -561,23 +559,6 @@ changelog_workspace_id(workspace, WorkspaceId) -> WorkspaceId;
 changelog_workspace_id(release, _WorkspaceId) -> undefined.
 
 %%% Singleton Child Specs
-
--doc """
-The actor registry child. Actor singletons (the `Transcript` stream) are
-REPL-server children: see `console_child_specs/1`.
-""".
--spec actor_registry_child_specs() -> [supervisor:child_spec()].
-actor_registry_child_specs() ->
-    [
-        #{
-            id => beamtalk_actor_registry,
-            start => {beamtalk_repl_actors, start_link, [registered]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_repl_actors]
-        }
-    ].
 
 -doc """
 Child spec for the REPL-only `'Transcript'` process: a

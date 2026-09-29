@@ -73,7 +73,7 @@ skew appears", useless for "how much skew is there right now" (the question
 the `nodes` cross-surface op answers). `announce_if_skewed/4` therefore also
 casts this process a `{skew_detected, _, _}` / `{skew_cleared, _, _}` message
 per class it checks, kept in `#state.skew` (a per-peer set of currently-
-skewed class names) and read back via `connectedWithSkew/0` — the tally is
+skewed class names) and read back via `skew_count/1` (`Node>>shapeSkew`) — the tally is
 exactly "what this module's own checks have found and not yet found
 resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
 """.
@@ -82,12 +82,7 @@ resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
 -include_lib("kernel/include/logger.hrl").
 
 %% API
-%% `connectedWithSkew/0` is camelCase, matching `workspace.bt`'s
-%% `Workspace nodes` FFI selector verbatim (the same convention
-%% `beamtalk_workspace_changelog`'s `changeLog/0` documents) — the FFI
-%% dispatches on the selector verbatim, so this entry point must be named to
-%% match, not `connected_with_skew/0`.
--export([start_link/0, normalize_reason/1, skew_count/1, connectedWithSkew/0]).
+-export([start_link/0, normalize_reason/1, skew_count/1]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
@@ -134,25 +129,12 @@ normalize_reason(_Reason) -> unknown.
 -doc """
 The number of classes currently skewed against `Node` (ADR 0126 §8, Phase 7)
 — `0` for a node with no detected skew, including one this VM isn't even
-connected to. Backs the `nodes` cross-surface op (BT-3605); see
-`connectedWithSkew/0` for the batch form every surface actually calls.
+connected to. Backs `Node>>shapeSkew` (BT-3633); the `nodes` tool maps it over
+`Node connected`.
 """.
 -spec skew_count(node()) -> non_neg_integer().
 skew_count(Node) ->
     gen_server:call(?MODULE, {skew_count, Node}).
-
--doc """
-Every currently-**visible-connected** node (`erlang:nodes/0`, matching
-`Node>>connected`'s own hidden-node exclusion) paired with its shape-skew
-count — the one shared implementation the `nodes` op reaches identically
-from the REPL, MCP, and LiveView surfaces (CLAUDE.md "No duplicate
-implementations"; ADR 0126 §8/§10). Returns
-`[#{name := node(), skewCount := non_neg_integer()}]`, sorted by node name —
-the `Workspace nodes` FFI seam (`workspace.bt`).
-""".
--spec connectedWithSkew() -> [#{name := node(), skewCount := non_neg_integer()}].
-connectedWithSkew() ->
-    gen_server:call(?MODULE, connected_with_skew).
 
 %%% ============================================================================
 %%% gen_server callbacks
@@ -171,12 +153,6 @@ init([]) ->
 
 handle_call({skew_count, Node}, _From, #state{skew = Skew} = State) ->
     {reply, sets:size(skew_set_for(Node, Skew)), State};
-handle_call(connected_with_skew, _From, #state{skew = Skew} = State) ->
-    Rows = [
-        #{name => N, skewCount => sets:size(skew_set_for(N, Skew))}
-     || N <- lists:sort(nodes())
-    ],
-    {reply, Rows, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -217,7 +193,7 @@ handle_info({nodedown, Node, Info}, #state{skew = Skew} = State) ->
     Reason = normalize_reason(proplists:get_value(nodedown_reason, Info, unknown)),
     announce('NodeDown', #{node => beamtalk_node:from_atom(Node), reason => Reason}),
     %% A disconnected peer has no meaningful skew count — drop its entry so
-    %% `connectedWithSkew/0` (which only ever lists `nodes()`) can't leak a
+    %% `skew_count/1` readers can't leak a
     %% stale count if the peer reconnects and is momentarily not yet
     %% re-checked, and so the tally map doesn't grow unboundedly across
     %% repeated connect/disconnect cycles.
@@ -411,7 +387,7 @@ check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
 
 -doc """
 Announce `NodeShapeSkew` iff `LocalEntry`/`RemoteEntry`'s `version` differ,
-and keep this process's queryable skew tally (`connectedWithSkew/0`) in
+and keep this process's queryable skew tally (`skew_count/1`) in
 sync either way — the `nodes` op's per-peer count is exactly "how many
 classes this function has found skewed for that peer and not yet found
 matching again" (ADR 0126 §8, Phase 7 / BT-3605). Runs in a spawned,

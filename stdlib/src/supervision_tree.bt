@@ -10,7 +10,7 @@
 /// `isNotEmpty`, `inject:into:`, `anySatisfy:`, `count:` via
 /// `uses: Enumerable(SupervisionNode)`, ADR 0127 §9) plus tree
 /// navigation (`root`, `nodesOfKind:`, `findClass:`). Reach one via
-/// `ProcessNavigation default tree` or the `Workspace processes` alias.
+/// `ProcessNavigation default tree` or `Node current processes`.
 ///
 /// `do:`, `select:`, `detect:`, `detect:ifNone:` and `collect:` stay this
 /// class's own hand-written methods (class wins, ADR 0127 §3) rather than
@@ -210,7 +210,7 @@ typed Value subclass: SupervisionTree
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace processes printString   // => "#SupervisionTree<3 nodes, root: #AppSup>"
+  /// Node current processes unwrap printString   // => "#SupervisionTree<3 nodes, root: #AppSup>"
   /// ```
   printString -> String =>
     self isEmpty ifTrue: [^"#SupervisionTree<empty>"]

@@ -4,8 +4,8 @@
 // BT-2427: Tests for the SupervisionNode value class (ADR 0092 Phase 1).
 //
 // SupervisionNode records are minted by the runtime shim
-// (beamtalk_process_navigation) and surfaced via `Workspace processes`. The
-// end-to-end `Workspace processes` path needs a live workspace tree and is
+// (beamtalk_process_navigation) and surfaced via `Node current processes`. The
+// end-to-end `Node current processes` path needs a live workspace tree and is
 // covered by the REPL e2e suite (BT-2433); here we exercise the value class
 // directly via its auto-generated keyword constructor.
 
