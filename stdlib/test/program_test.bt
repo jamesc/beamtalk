@@ -32,6 +32,15 @@ TestCase subclass: ProgramTest
     // gate), consistent with System halt:.
     self should: [Program exit: 999] raise: #invalid_argument
 
+  testExitUnderTestRaisesProgramExit =>
+    // No workspace runs under `beamtalk test`, so nothing owns the node: a
+    // structured #program_exit error, never a raw throw and never a halt
+    // (BT-3634). Code that calls Program exit: is testable this way.
+    self should: [Program exit: 3] raise: #program_exit
+
+  testExitZeroUnderTestRaisesProgramExit =>
+    self should: [Program exit] raise: #program_exit
+
 // NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an
 // error — it raises a tagged `script_exit` signal that the session evaluator
 // catches to end the session and report exit code N to the connecting client

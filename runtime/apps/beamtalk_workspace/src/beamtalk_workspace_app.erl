@@ -223,6 +223,9 @@ env_workspace_config(Mode) ->
         mode => Mode,
         console => env(console, false),
         include_compiler => env(include_compiler, false),
+        %% A release booted through the app env (`foreground`) *is* the
+        %% program, so it owns the node (BT-3634, ADR 0125 §1.7).
+        node_owning => Mode =:= release,
         tcp_port => env(tcp_port, undefined),
         bind_addr => parse_bind_addr(env(bind, "127.0.0.1")),
         auto_cleanup => env(auto_cleanup, false)

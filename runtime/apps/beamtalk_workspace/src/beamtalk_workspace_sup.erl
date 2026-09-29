@@ -85,6 +85,10 @@ supervisor is even asked to start — see that module's doc.
     %% `release` mode only: the release bundles the compiler, so start it and
     %% re-enable the compiler-dependent ops (default `false`; ADR 0125 §1.5).
     include_compiler => boolean(),
+    %% The program owns the node (`beamtalk run`, escript, release `eval` /
+    %% `foreground`), so `Program exit:` stops it gracefully and `System halt:`
+    %% halts it. Recorded as a capability (BT-3634). Default `false`.
+    node_owning => boolean(),
     %% `run` / `workspace` modes only: `false` skips starting the compiler app
     %% (a packaged escript ships no compiler port). Default `true`.
     start_compiler => boolean(),
@@ -162,7 +166,11 @@ init(Config) ->
     %% release refuses compiler and workspace operations (ADR 0125 §1.5) and a
     %% node without a compiler refuses compile operations in every mode
     %% (ADR 0129 §4). `include_compiler` is derived from `starts_compiler/2`.
-    Capabilities = #{mode => Mode, include_compiler => StartsCompiler},
+    Capabilities = #{
+        mode => Mode,
+        include_compiler => StartsCompiler,
+        node_owning => maps:get(node_owning, Config, false)
+    },
     ok = beamtalk_capability:set(Capabilities),
     %% A release built with `include-compiler` opted into a live-patchable
     %% production image (ADR 0125 §1.5) — name the three risks that decision

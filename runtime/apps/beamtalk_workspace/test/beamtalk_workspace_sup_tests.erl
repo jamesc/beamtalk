@@ -642,11 +642,13 @@ release_mode_records_capabilities_test() ->
     with_capabilities_restored(fun() ->
         _ = child_ids(release_mode_config()),
         ?assertEqual(
-            #{mode => release, include_compiler => false}, beamtalk_capability:current()
+            #{mode => release, include_compiler => false, node_owning => false},
+            beamtalk_capability:current()
         ),
         _ = child_ids((release_mode_config())#{include_compiler => true}),
         ?assertEqual(
-            #{mode => release, include_compiler => true}, beamtalk_capability:current()
+            #{mode => release, include_compiler => true, node_owning => false},
+            beamtalk_capability:current()
         )
     end).
 
@@ -654,7 +656,8 @@ workspace_mode_records_capabilities_test() ->
     with_capabilities_restored(fun() ->
         _ = child_ids(test_config()),
         ?assertEqual(
-            #{mode => workspace, include_compiler => true}, beamtalk_capability:current()
+            #{mode => workspace, include_compiler => true, node_owning => false},
+            beamtalk_capability:current()
         )
     end).
 
@@ -664,13 +667,28 @@ run_mode_records_compiler_availability_test() ->
     with_capabilities_restored(fun() ->
         _ = child_ids(run_mode_config()),
         ?assertEqual(
-            {ok, #{mode => run, include_compiler => true}}, beamtalk_capability:recorded()
+            {ok, #{mode => run, include_compiler => true, node_owning => false}},
+            beamtalk_capability:recorded()
         ),
         _ = child_ids((run_mode_config())#{start_compiler => false}),
         ?assertEqual(
-            {ok, #{mode => run, include_compiler => false}}, beamtalk_capability:recorded()
+            {ok, #{mode => run, include_compiler => false, node_owning => false}},
+            beamtalk_capability:recorded()
         ),
         ?assertNot(beamtalk_capability:available('load:'))
+    end).
+
+%% BT-3634: `node_owning` is recorded as a capability from the start config, and
+%% `exit_policy/0` follows it (`none` with nothing recorded).
+node_owning_recorded_as_capability_test() ->
+    with_capabilities_restored(fun() ->
+        _ = child_ids((run_mode_config())#{node_owning => true}),
+        ?assertMatch({ok, #{node_owning := true}}, beamtalk_capability:recorded()),
+        ?assertEqual(node, beamtalk_capability:exit_policy()),
+        _ = child_ids(run_mode_config()),
+        ?assertEqual(shared, beamtalk_capability:exit_policy()),
+        beamtalk_capability:clear(),
+        ?assertEqual(none, beamtalk_capability:exit_policy())
     end).
 
 %% ADR 0129 §4: the capability guard (first child) clears the capabilities

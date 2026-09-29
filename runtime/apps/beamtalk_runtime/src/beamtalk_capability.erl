@@ -61,6 +61,8 @@ narrows what a node that *declared* itself a release may do.
     clear/0,
     current/0,
     recorded/0,
+    node_owning/0,
+    exit_policy/0,
     require_workspace/1,
     require_workspace/2,
     classify/1,
@@ -72,11 +74,33 @@ narrows what a node that *declared* itself a release may do.
     require/3
 ]).
 
--export_type([mode/0, capabilities/0, capability_class/0, operation/0, subject/0]).
+-export_type([
+    mode/0, capabilities/0, capability_class/0, operation/0, subject/0, exit_policy/0
+]).
 
 -type mode() :: run | workspace | release.
 
--type capabilities() :: #{mode := mode(), include_compiler := boolean()}.
+-doc """
+What this node records. `node_owning` (default `false` when absent) is true
+when the *program* owns the node: `beamtalk run`, a packaged escript, a
+release `eval`, or a release booted with `foreground`. See `exit_policy/0`.
+""".
+-type capabilities() :: #{
+    mode := mode(),
+    include_compiler := boolean(),
+    node_owning => boolean()
+}.
+
+-doc """
+Who owns the node, and so what `Program exit:` / `System halt:` may do
+(ADR 0099 §3, amended by BT-3634):
+
+* `node` — the program owns it (`run`, escript, release `eval`/`foreground`).
+* `shared` — a shared workspace owns it (REPL, MCP, LSP, connected `run`).
+* `none` — nothing does: no workspace supervisor recorded capabilities
+  (`beamtalk test`, a bare runtime).
+""".
+-type exit_policy() :: node | shared | none.
 
 -type capability_class() :: always | compiler | workspace.
 
@@ -129,7 +153,8 @@ check is a constant-time read with no process round-trip.
 -spec set(capabilities()) -> ok.
 set(#{mode := Mode, include_compiler := IncludeCompiler} = Caps) when
     (Mode =:= run orelse Mode =:= workspace orelse Mode =:= release),
-    is_boolean(IncludeCompiler)
+    is_boolean(IncludeCompiler),
+    (not is_map_key(node_owning, Caps) orelse is_boolean(map_get(node_owning, Caps)))
 ->
     %% persistent_term:put/2 of an unchanged value is a no-op (no global GC).
     persistent_term:put(?KEY, Caps).
@@ -166,6 +191,25 @@ recorded() ->
         undefined -> none;
         Caps -> {ok, Caps}
     end.
+
+-doc """
+Who owns this node (`node`, `shared` or `none`). Process-independent and set
+by `beamtalk_workspace_sup:init/1` before any user code runs, so it replaces
+the former `beamtalk_runtime` `node_owning` application env. With no
+capabilities recorded (`beamtalk test`, a bare runtime) nobody owns the node.
+""".
+-spec exit_policy() -> exit_policy().
+exit_policy() ->
+    case recorded() of
+        none -> none;
+        {ok, #{node_owning := true}} -> node;
+        {ok, _Caps} -> shared
+    end.
+
+-doc "Does the program own this node (`exit_policy/0` is `node`)?".
+-spec node_owning() -> boolean().
+node_owning() ->
+    exit_policy() =:= node.
 
 -doc """
 Require a running workspace for `Selector` (ADR 0129 §4). Returns `ok` once a

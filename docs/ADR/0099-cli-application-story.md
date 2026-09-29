@@ -372,6 +372,44 @@ Hello, Alice!
 - **`--entry` default.** If the project manifest declares a single obvious
   entry (future `[scripts]` table, ADR 0061), `--entry` may be omitted.
 
+### Amendment to §3 (BT-3634): exit outside run-mode
+
+§3's two-way split ("node-owning" vs "shared") left two contexts undefined: a
+normally booted release, and `beamtalk test`. The `node_owning` application env
+also could not say who owns the node in a release, where `eval` and
+`foreground` share `mode => release`. This amendment replaces that env.
+
+* **Node ownership is a `beamtalk_capability` fact.** `beamtalk_workspace_sup`
+  records `node_owning` next to `include_compiler`; launchers pass
+  `node_owning => true` in its start config (`beamtalk run`, escript, release
+  `eval` and `foreground`; every `mode => release` node, including one built
+  with `console = true`, is program-owned). `beamtalk_capability:exit_policy/0` answers `node`
+  (the program owns it), `shared` (a workspace owns it: REPL, MCP, LSP,
+  connected `run`) or `none` (no workspace supervisor recorded capabilities:
+  `beamtalk test`, a bare runtime). The `beamtalk_runtime` `node_owning` app env
+  is removed. Like the env, the capability is process-independent and set before
+  user code runs.
+* **`Program exit: N` is graceful where the program owns the node**, resolving
+  the "graceful shutdown, not a raw `halt`" wording above. The throw unwinds to
+  the nearest harness, which calls `init:stop(N)`; the calling process then
+  blocks until the node dies. From an actor (off any harness's call chain) it
+  calls `init:stop(N)` directly, so the actor no longer just restarts.
+  `init:stop/1` is asynchronous and bounded by supervisor shutdown timeouts: a
+  hanging `terminate/2` delays the exit.
+* **`System halt: N` is the immediate `erlang:halt(N)` wherever the program owns
+  the node**, after flushing Logger handlers. Elsewhere it raises `unsupported`.
+* **In a shared workspace**, `Program exit:` on the entry chain still ends only
+  the session. From an actor it raises
+  `#beamtalk_error{kind = program_exit_outside_entry}` (return a status to the
+  entry method and call it there) instead of a `nocatch` crash.
+* **With no workspace**, `Program exit: N` raises
+  `#beamtalk_error{kind = program_exit, details = #{status => N}}`, so tests can
+  assert on it with `should: [...] raise: #program_exit`.
+
+No context leaks an uncaught `{beamtalk_script_exit, _}` throw from an actor or a
+test. A plain spawned process with no harness on its stack is not detected and
+still throws.
+
 ### Amendment to ADR 0061
 
 ADR 0061 fixed the entry point at two positional tokens (`ClassName` + a unary

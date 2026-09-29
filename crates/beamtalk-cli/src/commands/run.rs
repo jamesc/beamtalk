@@ -505,11 +505,11 @@ fn build_script_eval_cmd(
         "{hex_deps_start}\
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          application:set_env(beamtalk_runtime, program_name, <<\"beamtalk\">>), \
-         application:set_env(beamtalk_runtime, node_owning, true), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
          #{{workspace_id => <<\"{workspace_id}\">>, \
          project_path => <<\"{project_path_escaped}\">>, \
-         mode => run}}), \
+         mode => run, \
+         node_owning => true}}), \
          ClassPid = beamtalk_class_registry:whereis_class('{class_name}'), \
          case ClassPid of \
              undefined -> \
@@ -1220,14 +1220,18 @@ mod tests {
     }
 
     #[test]
-    fn test_script_eval_cmd_seeds_node_owning_env() {
-        // node_owning app env is seeded at boot so `System halt:` / `Program exit:`
-        // know the program owns the node (ADR 0099 §3). Absent on the
+    fn test_script_eval_cmd_records_node_owning_capability() {
+        // node_owning is recorded as a capability at boot so `System halt:` / `Program exit:`
+        // know the program owns the node (ADR 0099 §3, BT-3634). Not set on the
         // shared/persistent path, where halt is refused.
         let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[]);
         assert!(
-            cmd.contains("application:set_env(beamtalk_runtime, node_owning, true)"),
-            "Run-mode boot should seed node_owning: {cmd}"
+            cmd.contains("node_owning => true"),
+            "Run-mode boot should record node_owning: {cmd}"
+        );
+        assert!(
+            !cmd.contains("set_env(beamtalk_runtime, node_owning"),
+            "node_owning must not be an app env any more: {cmd}"
         );
     }
 }

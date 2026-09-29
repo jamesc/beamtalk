@@ -48,16 +48,16 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
 
 Expects `init:get_plain_arguments/0` to be `[ClassStr, SelectorStr | Args]`
 (the launcher script word-splits the quoted `"Class selector [args]"` and
-passes the pieces after `-extra`). Sets `node_owning = true` (ADR 0099 §3 —
-`Program exit: N` halts this throwaway VM directly, the same contract the
-escript boot module uses), starts the runtime closure, and dispatches through
-the shared synchronous path.
+passes the pieces after `-extra`). The release's workspace boots with
+`node_owning = true` (a capability, BT-3634), so `Program exit: N` stops this
+throwaway VM gracefully with status `N` (`beamtalk_script_harness:stop_node/1`,
+the same contract the escript boot module uses). Starts the runtime closure
+and dispatches through the shared synchronous path.
 """.
 -spec eval_main() -> no_return().
 eval_main() ->
     case init:get_plain_arguments() of
         [ClassStr, SelectorStr | RestArgs] ->
-            application:set_env(beamtalk_runtime, node_owning, true),
             application:set_env(
                 beamtalk_runtime, program_name, <<"eval">>
             ),
@@ -87,7 +87,7 @@ eval_main() ->
                         "Error: could not start the runtime (~p)~n",
                         [Reason]
                     ),
-                    erlang:halt(1)
+                    beamtalk_script_harness:halt_unless_stopping(1)
             end;
         _ ->
             io:format(
@@ -152,9 +152,9 @@ do_eval_main(ClassStr, SelectorStr, RestArgs) ->
         {ok, ValidArgv} ->
             case beamtalk_repl_eval:dispatch_sync(ClassBin, SelectorBin, ValidArgv) of
                 {ok, _Value} ->
-                    erlang:halt(0);
+                    beamtalk_script_harness:halt_unless_stopping(0);
                 {script_exit, Code} ->
-                    erlang:halt(Code);
+                    beamtalk_script_harness:stop_node(Code);
                 {error, Err} ->
                     catch io:put_chars(
                         standard_error, [beamtalk_error:format_safe(Err, []), $\n]

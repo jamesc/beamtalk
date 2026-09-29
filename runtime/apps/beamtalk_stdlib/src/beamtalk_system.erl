@@ -180,8 +180,8 @@ to stop *now*.
 **Refused outside a node-owning context.** Halting the node inside a live,
 shared workspace would kill the service and every other connected session, so
 `System halt:` raises a `#beamtalk_error` (pointing at `Program exit:`) unless
-the `beamtalk_runtime` `node_owning` app env is set — which only the run-mode
-and escript entry harnesses set, at boot.
+the node is program-owned (`beamtalk_capability:exit_policy/0` is `node`) —
+run-mode, escript, and release `eval`/`foreground`.
 """.
 -spec 'halt:'(integer()) -> no_return().
 'halt:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
@@ -228,27 +228,33 @@ unsetEnv(Name) -> 'unsetEnv:'(Name).
 %%% ============================================================================
 
 -doc """
-Halt the node with `Code` if this invocation owns it; otherwise refuse with a
-`#beamtalk_error` directing the caller to the safe `Program exit:`.
+Halt the node with `Code` if the program owns it (`beamtalk_capability:
+exit_policy/0` is `node`: run-mode, escript, release `eval`/`foreground`);
+otherwise refuse with a `#beamtalk_error{}` directing the caller to
+`Program exit:`.
 """.
 -spec do_halt(integer(), atom()) -> no_return().
 do_halt(Code, Selector) ->
-    case application:get_env(beamtalk_runtime, node_owning, false) of
-        true ->
-            erlang:halt(Code);
-        _ ->
-            beamtalk_error:raise(
-                beamtalk_error:new(
-                    unsupported,
-                    'System',
-                    Selector,
-                    <<
-                        "System halt: halts the whole node, which would kill a shared "
-                        "workspace and every other connected session. Use Program exit: "
-                        "to end just this program/session."
-                    >>
-                )
-            )
+    case beamtalk_capability:exit_policy() of
+        node ->
+            beamtalk_script_harness:halt_node(Code);
+        Policy ->
+            Hint =
+                case Policy of
+                    none ->
+                        <<
+                            "This node has no workspace (for example under beamtalk test), so "
+                            "nothing may halt it. Program exit: raises #program_exit here, "
+                            "which a test can assert on with should:raise:."
+                        >>;
+                    shared ->
+                        <<
+                            "System halt: halts the whole node, which would kill a shared "
+                            "workspace and every other connected session. Use Program exit: "
+                            "to end just this program/session."
+                        >>
+                end,
+            beamtalk_error:raise(beamtalk_error:new(unsupported, 'System', Selector, Hint))
     end.
 
 -doc "Map os:type() Name atom to platform string.".

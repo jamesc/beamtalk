@@ -41,6 +41,44 @@ fn run_script_mode_invokes_class_method() {
         .stderr(contains("Building..."));
 }
 
+/// BT-3634: in run mode the program owns the node, so `Program exit: 3` (from
+/// the entry's own call chain and from an actor) stops it gracefully with
+/// status 3, and `System halt: 4` halts it with status 4.
+#[test]
+fn run_script_mode_program_exit_and_system_halt_status() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Quitter.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Actor subclass: Quitter\n\
+         \n\
+         \x20\x20quit => Program exit: 3\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/Exits.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Exits\n\
+         \n\
+         \x20\x20class direct => Program exit: 3\n\
+         \x20\x20class viaActor => Quitter spawn quit\n\
+         \x20\x20class halted => System halt: 4\n",
+    )
+    .unwrap();
+
+    for (selector, code) in [("direct", 3), ("viaActor", 3), ("halted", 4)] {
+        cli_common::beamtalk()
+            .current_dir(project.path())
+            .args(["run", "Exits", selector])
+            .assert()
+            .code(code);
+    }
+}
+
 #[test]
 fn run_script_mode_dispatches_subdirectory_class_by_name() {
     // ADR 0119 Phase 3: package-compiler/e2e regression test for the

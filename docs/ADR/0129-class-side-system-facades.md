@@ -611,9 +611,9 @@ follows.
 **Separate follow-ups:**
 
 - **`Program exit:` depends on the `node_owning` application
-  environment (BT-3634).** In a normally booted release it throws
-  `{beamtalk_script_exit, N}`, which crashes the calling process while the
-  node keeps running. What it means in a release needs its own decision.
+  environment (BT-3634).** Resolved: node ownership is now a
+  `beamtalk_capability` fact and every context either performs the defined
+  action or raises a structured error (ADR 0099 §3 amendment).
 - **File-handle ownership differs by context (BT-3635).** `beamtalk_file:
   resolve_owner` makes a handle belong to the session shell in the REPL
   and to the calling process elsewhere.
