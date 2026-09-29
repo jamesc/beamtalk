@@ -3,13 +3,13 @@
 
 // E2E tests for workspace bindings (BT-376 / ADR 0010 Phase 4).
 //
-// These tests require E2E because workspace bindings (Transcript, Beamtalk)
+// These tests require E2E because workspace bindings (Transcript)
 // are singleton actors registered in the REPL process via persistent_term.
 // They are REPL-specific: BUnit tests run in compiled code without access to
 // workspace binding infrastructure. Cross-turn variable persistence and
 // subscribe/unsubscribe lifecycle are also tested here.
 //
-// Workspace bindings (Transcript, Beamtalk) are singleton actors
+// Workspace bindings (Transcript) are singleton actors
 // accessed via workspace convenience bindings. The explicit form
 // (e.g., TranscriptStream current) also works via class variables
 // (ADR 0019).
@@ -46,9 +46,9 @@ Transcript respondsTo: #nonExistentMethod
 // BEAMTALK BINDING — CLASS INTROSPECTION
 // ===========================================================================
 
-// Beamtalk class returns BeamtalkInterface
+// Beamtalk is a class; `Beamtalk class` is its metaclass
 Beamtalk class
-// => BeamtalkInterface
+// => Beamtalk class
 
 // Beamtalk respondsTo: #allClasses returns true
 Beamtalk respondsTo: #allClasses
@@ -82,14 +82,6 @@ version isEmpty
 // Cascade on workspace binding: all messages dispatched to same actor
 Transcript show: "Hello"; cr; show: "World"
 // => Actor(TranscriptStream, _)
-
-// ===========================================================================
-// BEAMTALK BINDING — GLOBALS
-// ===========================================================================
-
-// Beamtalk globals returns a map (class registry snapshot)
-globals := Beamtalk globals
-// => _
 
 // ===========================================================================
 // BEAMTALK BINDING — CLASS NAMED
@@ -149,7 +141,3 @@ Transcript unsubscribe
 // TranscriptStream current returns the same singleton as Transcript binding
 TranscriptStream current show: "hello from explicit form"
 // => Actor(TranscriptStream, _)
-
-// BeamtalkInterface current works as explicit form of Beamtalk
-BeamtalkInterface current version
-// => _

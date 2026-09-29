@@ -14182,22 +14182,33 @@
       "tags": [
         "BeamtalkInterfaceTest",
         "TestCase",
+        "assign",
+        "assignment",
         "beamtalk_interface_test",
         "extends",
         "inherit",
         "inheritance",
+        "mutate",
+        "mutation",
         "object",
+        "set",
         "subclassing",
-        "testIncludesSelectorAllClasses",
-        "testIncludesSelectorClassNamed",
-        "testIncludesSelectorGlobals",
-        "testIncludesSelectorHelp",
-        "testIncludesSelectorHelpSelector",
-        "testIncludesSelectorVersion",
-        "testInheritsFromObject"
+        "testAllClassesIncludesIntegerAndBeamtalk",
+        "testClassNamedFindsIntegerClass",
+        "testClassNamedUnknownIsNil",
+        "testCurrentAndGlobalsAreRemoved",
+        "testDebugTargetsIsList",
+        "testErlangHelpReturnsString",
+        "testHelpMentionsClassName",
+        "testHelpSelectorReturnsString",
+        "testInheritsFromObject",
+        "testLogFormatIsTextOrJson",
+        "testLogLevelReturnsSymbol",
+        "testReleaseInfoIsDictionary",
+        "testVersionIsNonEmptyString"
       ],
-      "source": "// BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Beamtalk workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/repl-protocol/cases/workspace_native_api.bt\n//\n// Covers: version, allClasses, classNamed:, globals, help:, help:selector:\n\nTestCase subclass: BeamtalkInterfaceTest\n\n  testIncludesSelectorVersion =>\n    self assert: (BeamtalkInterface includesSelector: #version)\n\n  testIncludesSelectorAllClasses =>\n    self assert: (BeamtalkInterface includesSelector: #allClasses)\n\n  testIncludesSelectorClassNamed =>\n    self assert: (BeamtalkInterface includesSelector: #classNamed:)\n\n  testIncludesSelectorGlobals =>\n    self assert: (BeamtalkInterface includesSelector: #globals)\n\n  testIncludesSelectorHelp =>\n    self assert: (BeamtalkInterface includesSelector: #help:)\n\n  testIncludesSelectorHelpSelector =>\n    self assert: (BeamtalkInterface includesSelector: #help:selector:)\n\n  testInheritsFromObject =>\n    self assert: (BeamtalkInterface inheritsFrom: Object)",
-      "explanation": "BUnit tests for BeamtalkInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Beamtalk workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_native_api.bt  Covers: version, allClasses, classNamed:, globals, help:, help:selector:"
+      "source": "// BUnit live-behaviour tests for the class-side `Beamtalk` facade\n// (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends\n// work under `beamtalk test` (no workspace binding required).\n//\n// Covers: version, allClasses, classNamed:, help:, help:selector:,\n// erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the\n// removed `current`/`globals` API.\n\nTestCase subclass: BeamtalkInterfaceTest\n\n  testClassNamedFindsIntegerClass =>\n    self assert: (Beamtalk classNamed: #Integer) equals: Integer\n\n  testClassNamedUnknownIsNil =>\n    self assert: (Beamtalk classNamed: #NoSuchClassAnywhere) isNil\n\n  testAllClassesIncludesIntegerAndBeamtalk =>\n    classes := Beamtalk allClasses\n    self assert: (classes includes: Integer)\n    self assert: (classes includes: Beamtalk)\n\n  testVersionIsNonEmptyString =>\n    self assert: (Beamtalk version isKindOf: String)\n    self assert: Beamtalk version isEmpty not\n\n  testHelpMentionsClassName =>\n    self assert: ((Beamtalk help: Integer) includesSubstring: \"Integer\")\n\n  testHelpSelectorReturnsString =>\n    self assert: ((Beamtalk help: Integer selector: #'+') isKindOf: String)\n\n  testErlangHelpReturnsString =>\n    self assert: ((Beamtalk erlangHelp: \"lists\") isKindOf: String)\n\n  testLogLevelReturnsSymbol => self assert: (Beamtalk logLevel isKindOf: Symbol)\n\n  testLogFormatIsTextOrJson =>\n    fmt := Beamtalk logFormat\n    self assert: ((fmt == #text) or: [fmt == #json])\n\n  testDebugTargetsIsList => self assert: (Beamtalk debugTargets isKindOf: List)\n\n  testReleaseInfoIsDictionary =>\n    self assert: (Beamtalk releaseInfo isKindOf: Dictionary)\n\n  testInheritsFromObject => self assert: (Beamtalk inheritsFrom: Object)\n\n  testCurrentAndGlobalsAreRemoved =>\n    self deny: (Beamtalk class includesSelector: #current)\n    self deny: (Beamtalk class includesSelector: #globals)\n    self deny: (Beamtalk class includesSelector: #resetCurrent)",
+      "explanation": "BUnit live-behaviour tests for the class-side `Beamtalk` facade (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends work under `beamtalk test` (no workspace binding required).  Covers: version, allClasses, classNamed:, help:, help:selector:, erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the removed `current`/`globals` API."
     },
     {
       "id": "stdlib-test-beamtalk-release-interface-test",
@@ -14209,12 +14220,9 @@
         "assign",
         "assignment",
         "beamtalk_release_interface_test",
-        "constructor",
-        "create",
         "extends",
         "inherit",
         "inheritance",
-        "instantiate",
         "mutate",
         "mutation",
         "object",
@@ -14222,14 +14230,12 @@
         "subclassing",
         "testClassIncludesSelectorReleaseInfo",
         "testClassIncludesSelectorShapeManifest",
-        "testIncludesSelectorReleaseInfo",
-        "testIncludesSelectorShapeManifest",
         "testReleaseInfoOnNonReleaseNodeIsRelease",
         "testReleaseInfoReturnsADictionary",
         "testShapeManifestReturnsADictionary"
       ],
-      "source": "// BUnit tests for `Beamtalk releaseInfo` / `Beamtalk shapeManifest`\n// (ADR 0125 §1.8/§3.4, BT-3575).\n//\n// `BeamtalkInterface releaseInfo`/`shapeManifest` are declared as `class`\n// methods precisely so they are reachable without the `Beamtalk` singleton\n// binding (see stdlib/src/beamtalk_interface.bt) — which is unavailable in\n// the BUnit test context (`workspace_mode: false`), the same reason\n// `beamtalk_interface_test.bt` tests `BeamtalkInterface` directly rather\n// than through `Beamtalk`, and the same reason a `BeamtalkInterface new`\n// is not attempted here either (`Object` subclasses are not instantiable\n// from Beamtalk source — only the workspace bootstrap's Erlang-side\n// `Module:new()` call creates the singleton). Both sends run against this\n// BUnit run's own live class registry, which is exactly \"a workspace node\"\n// from the registry's point of view (`beamtalk_class_registry`/\n// `beamtalk_release_shapes` do not distinguish BUnit from a full REPL\n// workspace) — the instance-side `Beamtalk releaseInfo`/`shapeManifest`\n// eval form and release-mode-specific behaviour (`#{#release => nil}` on a\n// non-release node, run-entry reachability with no compiler) are covered\n// by `tests/repl-protocol/cases/release_console_default.btscript` /\n// `release_console_include_compiler.btscript` instead, which are the only\n// places a genuine `mode => release` node and a bootstrapped `Beamtalk`\n// singleton both exist.\n\nTestCase subclass: BeamtalkReleaseInterfaceTest\n\n  testIncludesSelectorReleaseInfo =>\n    self assert: (BeamtalkInterface includesSelector: #releaseInfo)\n\n  testIncludesSelectorShapeManifest =>\n    self assert: (BeamtalkInterface includesSelector: #shapeManifest)\n\n  testClassIncludesSelectorReleaseInfo =>\n    self assert: (BeamtalkInterface class includesSelector: #releaseInfo)\n\n  testClassIncludesSelectorShapeManifest =>\n    self assert: (BeamtalkInterface class includesSelector: #shapeManifest)\n\n  // This BUnit run is not an OTP release (no `-boot_var RELEASE_DIR`), so\n  // `releaseInfo` degrades to `#{#release => nil}` — never an error, and\n  // never a crash reaching all the way to this test.\n  testReleaseInfoOnNonReleaseNodeIsRelease =>\n    info := BeamtalkInterface releaseInfo\n    self assert: (info at: #release) isNil\n\n  testReleaseInfoReturnsADictionary =>\n    self assert: (BeamtalkInterface releaseInfo isKindOf: Dictionary)\n\n  testShapeManifestReturnsADictionary =>\n    self assert: (BeamtalkInterface shapeManifest isKindOf: Dictionary)",
-      "explanation": "BUnit tests for `Beamtalk releaseInfo` / `Beamtalk shapeManifest` (ADR 0125 §1.8/§3.4, BT-3575).  `BeamtalkInterface releaseInfo`/`shapeManifest` are declared as `class` methods precisely so they are reachable without the `Beamtalk` singleton binding (see stdlib/src/beamtalk_interface.bt) — which is unavailable in the BUnit test context (`workspace_mode: false`), the same reason `beamtalk_interface_test.bt` tests `BeamtalkInterface` directly rather than through `Beamtalk`, and the same reason a `BeamtalkInterface new` is not attempted here either (`Object` subclasses are not instantiable from Beamtalk source — only the workspace bootstrap's Erlang-side `Module:new()` call creates the singleton). Both sends run against this BUnit run's own live class registry, which is exactly \"a workspace node\" from the registry's point of view (`beamtalk_class_registry`/ `beamtalk_release_shapes` do not distinguish BUnit from a full REPL workspace) — the instance-side `Beamtalk releaseInfo`/`shapeManifest` eval form and release-mode-specific behaviour (`#{#release => nil}` on a non-release node, run-entry reachability with no compiler) are covered by `tests/repl-protocol/cases/release_console_default.btscript` / `release_console_include_compiler.btscript` instead, which are the only places a genuine `mode => release` node and a bootstrapped `Beamtalk` singleton both exist."
+      "source": "// BUnit tests for `Beamtalk releaseInfo` / `Beamtalk shapeManifest`\n// (ADR 0125 §1.8/§3.4, BT-3575).\n//\n// `Beamtalk releaseInfo`/`shapeManifest` are class-side sends on the sealed,\n// stateless `Beamtalk` class (ADR 0129), so they work under `beamtalk test`\n// and, with no compiler, through `run-entry`. Both run against this BUnit\n// run's own live class registry. Release-mode-specific behaviour\n// (`#{#release => nil}` on a non-release node, run-entry reachability with\n// no compiler) is covered by\n// `tests/repl-protocol/cases/release_console_default.btscript` /\n// `release_console_include_compiler.btscript`.\n\nTestCase subclass: BeamtalkReleaseInterfaceTest\n\n  testClassIncludesSelectorReleaseInfo =>\n    self assert: (Beamtalk class includesSelector: #releaseInfo)\n\n  testClassIncludesSelectorShapeManifest =>\n    self assert: (Beamtalk class includesSelector: #shapeManifest)\n\n  // This BUnit run is not an OTP release (no `-boot_var RELEASE_DIR`), so\n  // `releaseInfo` degrades to `#{#release => nil}` — never an error, and\n  // never a crash reaching all the way to this test.\n  testReleaseInfoOnNonReleaseNodeIsRelease =>\n    info := Beamtalk releaseInfo\n    self assert: (info at: #release) isNil\n\n  testReleaseInfoReturnsADictionary =>\n    self assert: (Beamtalk releaseInfo isKindOf: Dictionary)\n\n  testShapeManifestReturnsADictionary =>\n    self assert: (Beamtalk shapeManifest isKindOf: Dictionary)",
+      "explanation": "BUnit tests for `Beamtalk releaseInfo` / `Beamtalk shapeManifest` (ADR 0125 §1.8/§3.4, BT-3575).  `Beamtalk releaseInfo`/`shapeManifest` are class-side sends on the sealed, stateless `Beamtalk` class (ADR 0129), so they work under `beamtalk test` and, with no compiler, through `run-entry`. Both run against this BUnit run's own live class registry. Release-mode-specific behaviour (`#{#release => nil}` on a non-release node, run-entry reachability with no compiler) is covered by `tests/repl-protocol/cases/release_console_default.btscript` / `release_console_include_compiler.btscript`."
     },
     {
       "id": "stdlib-test-behaviour-hierarchy-test",
@@ -16704,25 +16710,16 @@
       "tags": [
         "ClassVariablesSingletonTest",
         "TestCase",
-        "assign",
-        "assignment",
         "class_variables_singleton_test",
-        "constructor",
-        "create",
         "extends",
         "inherit",
         "inheritance",
-        "instantiate",
-        "mutate",
-        "mutation",
         "object",
-        "set",
         "subclassing",
-        "testSetAndGetCurrent",
         "testSingletonCurrentAccessors"
       ],
-      "source": "// BT-488, ADR 0019 Phase 1: Tests that singleton classes (BeamtalkInterface,\n// TranscriptStream) expose a current accessor that returns nil before\n// initialization. WorkspaceInterface.current is always set by bootstrap.\n\nTestCase subclass: ClassVariablesSingletonTest\n\n  testSingletonCurrentAccessors =>\n    self assert: BeamtalkInterface current equals: nil\n    // TranscriptStream has current accessor\n    self assert: TranscriptStream current equals: nil\n    // WorkspaceInterface.current is set by bootstrap; nil in BUnit context (BT-1873)\n    // Typed as -> WorkspaceInterface for LSP completions; nil only before bootstrap.\n    self assert: WorkspaceInterface current equals: nil\n\n  testSetAndGetCurrent =>\n    // Verify that current returns the singleton (set during workspace bootstrap)\n    // We can't create a new BeamtalkInterface since Object-kind classes are\n    // not instantiable — just verify the accessor returns a consistent value.\n    current := BeamtalkInterface current\n    self assert: BeamtalkInterface current equals: current",
-      "explanation": "BT-488, ADR 0019 Phase 1: Tests that singleton classes (BeamtalkInterface, TranscriptStream) expose a current accessor that returns nil before initialization. WorkspaceInterface.current is always set by bootstrap."
+      "source": "// BT-488, ADR 0019 Phase 1: Tests that singleton classes (TranscriptStream,\n// WorkspaceInterface) expose a current accessor that returns nil before\n// initialization. WorkspaceInterface.current is always set by bootstrap.\n\nTestCase subclass: ClassVariablesSingletonTest\n\n  testSingletonCurrentAccessors =>\n    // TranscriptStream has current accessor\n    self assert: TranscriptStream current equals: nil\n    // WorkspaceInterface.current is set by bootstrap; nil in BUnit context (BT-1873)\n    // Typed as -> WorkspaceInterface for LSP completions; nil only before bootstrap.\n    self assert: WorkspaceInterface current equals: nil",
+      "explanation": "BT-488, ADR 0019 Phase 1: Tests that singleton classes (TranscriptStream, WorkspaceInterface) expose a current accessor that returns nil before initialization. WorkspaceInterface.current is always set by bootstrap."
     },
     {
       "id": "stdlib-test-class-variables-test",
@@ -34058,11 +34055,10 @@
         "object",
         "singleton_reset_current_test",
         "subclassing",
-        "testBeamtalkInterfaceResetCurrentClearsSingleton",
         "testWorkspaceInterfaceResetCurrentClearsSingleton"
       ],
-      "source": "// BT-3566: BeamtalkInterface and WorkspaceInterface each gained a\n// resetCurrent class method mirroring TranscriptStream's, for symmetry\n// after BT-3559 converted their `current` classState singleton to a\n// `late` slot with no default. Verifies resetCurrent is safe to call and\n// leaves the singleton unassigned (current == nil), the same shape as\n// TranscriptStream's own resetCurrent test (show_cr_test.bt).\n\nTestCase subclass: SingletonResetCurrentTest\n\n  testBeamtalkInterfaceResetCurrentClearsSingleton =>\n    BeamtalkInterface resetCurrent\n    self assert: BeamtalkInterface current equals: nil\n\n  testWorkspaceInterfaceResetCurrentClearsSingleton =>\n    WorkspaceInterface resetCurrent\n    self assert: WorkspaceInterface current equals: nil",
-      "explanation": "BT-3566: BeamtalkInterface and WorkspaceInterface each gained a resetCurrent class method mirroring TranscriptStream's, for symmetry after BT-3559 converted their `current` classState singleton to a `late` slot with no default. Verifies resetCurrent is safe to call and leaves the singleton unassigned (current == nil), the same shape as TranscriptStream's own resetCurrent test (show_cr_test.bt)."
+      "source": "// BT-3566: WorkspaceInterface gained a resetCurrent class method mirroring\n// TranscriptStream's, for symmetry after BT-3559 converted its `current`\n// classState singleton to a `late` slot with no default. Verifies\n// resetCurrent is safe to call and leaves the singleton unassigned\n// (current == nil), the same shape as TranscriptStream's own resetCurrent\n// test (show_cr_test.bt). (`Beamtalk` no longer has a singleton — ADR 0129.)\n\nTestCase subclass: SingletonResetCurrentTest\n\n  testWorkspaceInterfaceResetCurrentClearsSingleton =>\n    WorkspaceInterface resetCurrent\n    self assert: WorkspaceInterface current equals: nil",
+      "explanation": "BT-3566: WorkspaceInterface gained a resetCurrent class method mirroring TranscriptStream's, for symmetry after BT-3559 converted its `current` classState singleton to a `late` slot with no default. Verifies resetCurrent is safe to call and leaves the singleton unassigned (current == nil), the same shape as TranscriptStream's own resetCurrent test (show_cr_test.bt). (`Beamtalk` no longer has a singleton — ADR 0129.)"
     },
     {
       "id": "stdlib-test-source-file-reload-test",

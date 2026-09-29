@@ -49,17 +49,12 @@ value_singletons_returns_list_test() ->
     Result = beamtalk_workspace_config:value_singletons(),
     ?assert(is_list(Result)).
 
-value_singletons_has_two_entries_test() ->
+value_singletons_has_one_entry_test() ->
     Result = beamtalk_workspace_config:value_singletons(),
-    ?assertEqual(2, length(Result)).
-
-value_singletons_beamtalk_binding_test() ->
-    [Beamtalk, _Workspace] = beamtalk_workspace_config:value_singletons(),
-    ?assertEqual('Beamtalk', maps:get(binding_name, Beamtalk)),
-    ?assertEqual('BeamtalkInterface', maps:get(class_name, Beamtalk)).
+    ?assertEqual(1, length(Result)).
 
 value_singletons_workspace_binding_test() ->
-    [_Beamtalk, Workspace] = beamtalk_workspace_config:value_singletons(),
+    [Workspace] = beamtalk_workspace_config:value_singletons(),
     ?assertEqual('Workspace', maps:get(binding_name, Workspace)),
     ?assertEqual('WorkspaceInterface', maps:get(class_name, Workspace)).
 
@@ -67,21 +62,21 @@ value_singletons_workspace_binding_test() ->
 %%% binding_names/0
 %%% ============================================================================
 
-binding_names_returns_three_test() ->
+binding_names_returns_two_test() ->
     Names = beamtalk_workspace_config:binding_names(),
-    ?assertEqual(3, length(Names)).
+    ?assertEqual(2, length(Names)).
 
 binding_names_exact_order_test() ->
     Names = beamtalk_workspace_config:binding_names(),
-    ?assertEqual(['Transcript', 'Beamtalk', 'Workspace'], Names).
+    ?assertEqual(['Transcript', 'Workspace'], Names).
 
 binding_names_contains_transcript_test() ->
     Names = beamtalk_workspace_config:binding_names(),
     ?assert(lists:member('Transcript', Names)).
 
-binding_names_contains_beamtalk_test() ->
+binding_names_excludes_beamtalk_test() ->
     Names = beamtalk_workspace_config:binding_names(),
-    ?assert(lists:member('Beamtalk', Names)).
+    ?assertNot(lists:member('Beamtalk', Names)).
 
 binding_names_contains_workspace_test() ->
     Names = beamtalk_workspace_config:binding_names(),
@@ -95,12 +90,6 @@ binding_name_for_class_transcript_stream_test() ->
     ?assertEqual(
         {ok, 'Transcript'},
         beamtalk_workspace_config:binding_name_for_class('TranscriptStream')
-    ).
-
-binding_name_for_class_beamtalk_interface_test() ->
-    ?assertEqual(
-        {ok, 'Beamtalk'},
-        beamtalk_workspace_config:binding_name_for_class('BeamtalkInterface')
     ).
 
 binding_name_for_class_workspace_interface_test() ->

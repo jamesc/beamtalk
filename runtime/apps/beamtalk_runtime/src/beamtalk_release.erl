@@ -9,10 +9,9 @@
 The two parity-neutral reflective sends ADR 0125 §1.8/§3.4 defines so an
 operator or a deploy tool can ask a live node what it is: `info/0`
 (`Beamtalk releaseInfo`) and `shape_manifest/0` (`Beamtalk shapeManifest`).
-Both are reachable through `eval` (the instance-side `BeamtalkInterface`
-methods delegate to the class-side ones here) **and** through `run-entry`
-with no compiler (`{class: "BeamtalkInterface", selector: "releaseInfo" |
-"shapeManifest"}`) — see `stdlib/src/beamtalk_interface.bt`'s `class`
+Both are class-side sends on `Beamtalk`, reachable through `eval` **and**
+through `run-entry` with no compiler (`{class: "Beamtalk", selector: "releaseInfo" |
+"shapeManifest"}`) — see `stdlib/src/beamtalk.bt`'s class
 methods, which are this module's only callers.
 
 ## `info/0` — `releases/<vsn>/beamtalk-provenance.json`, from the running node

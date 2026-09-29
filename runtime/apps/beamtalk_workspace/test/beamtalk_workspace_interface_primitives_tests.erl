@@ -310,17 +310,6 @@ bind_and_unbind_test_() ->
                             ?assertEqual(name_conflict, Err#beamtalk_error.kind)
                     end
                 end},
-                {"bind:as: raises name_conflict for protected name Beamtalk", fun() ->
-                    try
-                        beamtalk_workspace_interface_primitives:dispatch(
-                            'bind:as:', [42, 'Beamtalk'], Self
-                        ),
-                        ?assert(false)
-                    catch
-                        error:#{error := Err} ->
-                            ?assertEqual(name_conflict, Err#beamtalk_error.kind)
-                    end
-                end},
                 {"bind:as: raises name_conflict for protected name Workspace", fun() ->
                     try
                         beamtalk_workspace_interface_primitives:dispatch(

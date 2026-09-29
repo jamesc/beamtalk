@@ -3,7 +3,7 @@
 
 // E2E tests for Beamtalk help: and help:selector: methods (BT-847, ADR 0040 Phase 4).
 //
-// These tests require E2E because help: methods are on the BeamtalkInterface
+// These tests require E2E because help: methods are on the Beamtalk
 // singleton actor, accessible only through the Beamtalk workspace binding.
 // BUnit tests cannot access workspace bindings.
 

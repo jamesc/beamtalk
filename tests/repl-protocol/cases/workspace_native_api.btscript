@@ -16,7 +16,6 @@
 //   Beamtalk version          (informational)
 //   Beamtalk allClasses       (class registry inspection)
 //   Beamtalk classNamed:      (class lookup by name)
-//   Beamtalk globals          (global namespace snapshot)
 
 // ===========================================================================
 // BEAMTALK VERSION
@@ -62,21 +61,6 @@ Beamtalk classNamed: #Integer
 // classNamed: returns nil for unknown classes
 Beamtalk classNamed: #NoSuchClassXyzzy
 // => nil
-
-// ===========================================================================
-// BEAMTALK GLOBALS
-// ===========================================================================
-
-// Beamtalk globals returns a Dictionary snapshot
-btGlobals := Beamtalk globals
-// => _
-
-// globals includes core stdlib classes
-btGlobals includesKey: #Integer
-// => true
-
-btGlobals includesKey: #String
-// => true
 
 // ===========================================================================
 // BEAMTALK HELP: — native equivalent of :help / docs protocol op
@@ -152,8 +136,9 @@ rc increment
 // ===========================================================================
 
 // Workspace globals is a live BindingsView over the workspace singletons +
-// bind:as: layer (ADR 0081). It includes the singletons Workspace, Beamtalk,
-// Transcript, but NOT the class registry — classes live in Beamtalk globals.
+// bind:as: layer (ADR 0081). It includes the singletons Workspace and
+// Transcript, but NOT the class registry (`Beamtalk` is a plain class now,
+// ADR 0129) — classes live behind `Beamtalk classNamed:`.
 wsGlobals := Workspace globals
 // => _
 
@@ -161,16 +146,16 @@ wsGlobals includesKey: #Workspace
 // => true
 
 wsGlobals includesKey: #Beamtalk
-// => true
+// => false
 
 // Loaded user classes are NOT in Workspace globals (they are in Beamtalk
 // globals, the class registry — a separate layer per ADR 0081).
 wsGlobals includesKey: #Counter
 // => false
 
-// The class registry (Beamtalk globals) is where the Counter class lives.
-(Beamtalk globals) includesKey: #Counter
-// => true
+// The class registry (`Beamtalk classNamed:`) is where the Counter class lives.
+Beamtalk classNamed: #Counter
+// => Counter
 
 // ===========================================================================
 // SYSTEMNAVIGATION IMPLEMENTORSOF: — find classes that locally define a selector

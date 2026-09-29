@@ -2745,7 +2745,7 @@ stdlib_gate_test_() ->
     {setup, fun stdlib_gate_setup/0, fun stdlib_gate_cleanup/1, [
         {"compile_method on a stdlib class is refused", fun compile_method_stdlib_refused/0},
         {"resolve_entry finds a loaded class + selector", fun resolve_entry_loaded_class/0},
-        {"run-entry resolves the Beamtalk global singleton (BT-3612)",
+        {"run-entry resolves the Beamtalk class (BT-3612, ADR 0129)",
             fun dispatch_sync_beamtalk_singleton/0}
     ]}.
 
@@ -2797,37 +2797,18 @@ resolve_entry_loaded_class() ->
     ).
 
 %% BT-3612 / ADR 0125 §1.1's headline example, verbatim: `rpc "Beamtalk
-%% releaseInfo"`. `Beamtalk` is a workspace singleton *instance* of
-%% `BeamtalkInterface`, not a registered class, so run-entry resolution must
-%% fall back to the singleton binding and send to the live instance —
-%% answering the same Dictionary the class-side `BeamtalkInterface
-%% releaseInfo` does. This fixture runs no workspace bootstrap, so the
-%% singleton's `current` class var is wired here the same way
-%% `beamtalk_workspace_bootstrap:bootstrap_value_singleton/3` does it.
+%% releaseInfo"`. `Beamtalk` is a sealed, stateless class with class-side
+%% methods (ADR 0129), so run-entry resolves it like any other class and
+%% answers the release Dictionary.
 dispatch_sync_beamtalk_singleton() ->
-    ClassPid = beamtalk_runtime_api:whereis_class('BeamtalkInterface'),
-    ?assert(is_pid(ClassPid)),
-    Prev = beamtalk_class_dispatch:class_send(ClassPid, current, []),
-    _ = beamtalk_class_dispatch:class_send(
-        ClassPid, 'current:', ['bt@stdlib@beamtalk_interface':new()]
+    ?assertMatch(
+        {ok, {class, _}, releaseInfo},
+        beamtalk_repl_eval:resolve_entry(<<"Beamtalk">>, <<"releaseInfo">>)
     ),
-    try
-        ?assertMatch(
-            {ok, {instance, _}, releaseInfo},
-            beamtalk_repl_eval:resolve_entry(<<"Beamtalk">>, <<"releaseInfo">>)
-        ),
-        ViaGlobal = beamtalk_repl_eval:dispatch_sync(<<"Beamtalk">>, <<"releaseInfo">>, []),
-        ViaClass = beamtalk_repl_eval:dispatch_sync(
-            <<"BeamtalkInterface">>, <<"releaseInfo">>, []
-        ),
-        ?assertMatch({ok, #{release := nil}}, ViaGlobal),
-        ?assertEqual(ViaClass, ViaGlobal)
-    after
-        case Prev of
-            nil -> beamtalk_class_dispatch:class_send(ClassPid, resetCurrent, []);
-            _ -> beamtalk_class_dispatch:class_send(ClassPid, 'current:', [Prev])
-        end
-    end.
+    ?assertMatch(
+        {ok, #{release := nil}},
+        beamtalk_repl_eval:dispatch_sync(<<"Beamtalk">>, <<"releaseInfo">>, [])
+    ).
 
 stdlib_gate_setup() ->
     application:ensure_all_started(beamtalk_runtime),

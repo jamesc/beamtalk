@@ -41,7 +41,6 @@ cleanup_bootstrap() ->
 cleanup_all() ->
     cleanup_bootstrap(),
     cleanup_singleton('Transcript'),
-    cleanup_singleton('Beamtalk'),
     cleanup_singleton('Workspace').
 
 %%====================================================================
@@ -56,23 +55,6 @@ bootstrap_sets_transcript_class_var_test_() ->
                 {ok, TPid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 1000),
                 {ok, _BPid} = beamtalk_workspace_bootstrap:start_link(),
                 ?assertEqual(TPid, whereis('Transcript'))
-            end)
-        ]
-    end}.
-
-%% Test that bootstrap wires BeamtalkInterface value singleton (class variable current)
-%% BeamtalkInterface is a sealed Object subclass: (value type, no gen_server).
-%% Bootstrap calls Module:new() and sets the class variable 'current'.
-bootstrap_sets_beamtalk_class_var_test_() ->
-    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
-        [
-            ?_test(begin
-                {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-                ClassPid = beamtalk_class_registry:whereis_class('BeamtalkInterface'),
-                ?assertNotEqual(undefined, ClassPid),
-                Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
-                ?assertNotEqual(nil, Current),
-                ?assert(is_map(Current))
             end)
         ]
     end}.

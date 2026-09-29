@@ -1181,7 +1181,7 @@ impl ReplClient {
     /// compile-free path `bin/<name> eval|rpc` and connected-mode
     /// `beamtalk run --connect` use. Always available, including on a
     /// release with no compiler — this is how a no-compiler release-mode
-    /// fixture reaches `BeamtalkInterface releaseInfo`/`shapeManifest`
+    /// fixture reaches `Beamtalk releaseInfo`/`shapeManifest`
     /// (both `class` methods, dispatched to the class itself).
     fn run_entry(
         &mut self,
@@ -2247,7 +2247,7 @@ fn run_release_console_cases(
 /// `release_mode_no_workspace`; `run-entry`, `inspect`, `actors` and
 /// `sessions` still answer, and `Beamtalk releaseInfo`/`shapeManifest` are
 /// reachable through `run-entry` (the only compile-free path — `class`
-/// methods on `BeamtalkInterface`, see `stdlib/src/beamtalk_interface.bt`).
+/// methods on `Beamtalk`, see `stdlib/src/beamtalk.bt`).
 /// `release_console_default.btscript` skips `clear_bindings` (itself an
 /// `eval`) — see `run_test_file_opts`'s doc.
 #[test]

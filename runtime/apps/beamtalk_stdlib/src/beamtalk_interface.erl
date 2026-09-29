@@ -6,11 +6,11 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-Method implementations for the BeamtalkInterface sealed Object.
+Method implementations for the `Beamtalk` sealed Object.
 
-Implements methods for the BeamtalkInterface class. BeamtalkInterface is
+Implements methods for the `Beamtalk` class. `Beamtalk` is
 a `sealed Object subclass:` (value type, no gen_server process). Methods
-are called via Erlang FFI from the compiled Beamtalk module using the
+are called from the compiled Beamtalk module via `native:` delegation or the
 ErlangModule proxy pattern: `(Erlang beamtalk_interface) fn: arg`.
 
 The `dispatch/3` function is used by EUnit tests and runtime bootstrap.
@@ -24,7 +24,6 @@ dictionary or ETS state is required.
 |-------------------|---------------------------------------------------|
 | `allClasses'      | List of all registered classes (class objects)     |
 | `classNamed:'     | Class object reference by name, or nil            |
-| `globals'         | Class registry snapshot as a map                  |
 | `help:'           | Formatted class documentation                     |
 | `help:selector:'  | Formatted method documentation                    |
 | `erlangHelp:'     | Formatted Erlang module documentation              |
@@ -36,12 +35,11 @@ dictionary or ETS state is required.
 -include_lib("kernel/include/logger.hrl").
 
 -export([dispatch/3]).
-%% Direct exports for Erlang FFI calls from sealed Object BeamtalkInterface
+%% Direct exports for Erlang FFI calls from sealed Object Beamtalk
 -export([
     allClasses/0,
     classNamed/1,
     findClass/1,
-    globals/0,
     help/1, help/2,
     erlangHelp/1, erlangHelp/2,
     version/0,
@@ -72,7 +70,7 @@ dictionary or ETS state is required.
 %%% ============================================================================
 
 -doc """
-Dispatch a primitive method call for BeamtalkInterface.
+Dispatch a primitive method call for Beamtalk.
 
 Called by the compiled `bt@stdlib@beamtalk_interface:dispatch/3`.
 """.
@@ -81,8 +79,6 @@ dispatch(allClasses, [], _Self) ->
     allClasses();
 dispatch('classNamed:', [ClassName], _Self) ->
     handle_class_named(ClassName);
-dispatch(globals, [], _Self) ->
-    handle_globals();
 dispatch('help:', [ClassArg], _Self) ->
     case handle_help(ClassArg) of
         {error, Err} -> beamtalk_error:raise(Err);
@@ -103,7 +99,7 @@ dispatch(version, [], _Self) ->
         _ -> <<"unknown">>
     end;
 dispatch(Selector, _Args, _Self) ->
-    Err0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
     beamtalk_error:raise(Err1).
 
@@ -146,14 +142,6 @@ findClass(ClassName) ->
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
     end.
-
--doc """
-Return class registry snapshot as a map from class name to class object.
-Called via `(Erlang beamtalk_interface) globals`.
-""".
--spec globals() -> map().
-globals() ->
-    handle_globals().
 
 -doc """
 Format class documentation (help: aClass).
@@ -237,7 +225,7 @@ findSendersIn(Source, Selector) when
             []
     end;
 findSendersIn(_Source, _Selector) ->
-    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, 'findSendersIn:selector:'),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -288,7 +276,7 @@ allSendsIn(Source) when is_binary(Source) ->
             []
     end;
 allSendsIn(_Source) ->
-    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, 'allSendsIn:'),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -336,7 +324,7 @@ announceSitesIn(Source) when is_binary(Source) ->
             []
     end;
 announceSitesIn(_Source) ->
-    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, 'announceSitesIn:'),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -378,7 +366,7 @@ findReferencesToIn(Source, ClassName) when
             []
     end;
 findReferencesToIn(_Source, _ClassName) ->
-    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, 'findReferencesToIn:class:'),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -457,7 +445,7 @@ find_field_access(Source, Field, Kind, Selector) when
             []
     end;
 find_field_access(_Source, _IVar, _Kind, Selector) ->
-    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -509,7 +497,7 @@ ffiSitesIn(Source, Module, Function, Arity) when
             []
     end;
 ffiSitesIn(_Source, _Module, _Function, _Arity) ->
-    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, 'ffiSitesIn:module:function:arity:'),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -609,7 +597,7 @@ handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
                 {ok, Text} ->
                     Text;
                 {error, not_found} ->
-                    Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+                    Err = beamtalk_error:new(not_found, 'Beamtalk'),
                     Err1 = beamtalk_error:with_message(
                         Err,
                         iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
@@ -622,7 +610,7 @@ handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
             end
     catch
         error:badarg ->
-            Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+            Err = beamtalk_error:new(not_found, 'Beamtalk'),
             Err1 = beamtalk_error:with_message(
                 Err,
                 iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
@@ -634,7 +622,7 @@ handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
             beamtalk_error:raise(Err2)
     end;
 handle_erlang_help(_ModuleArg) ->
-    Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:'),
     Err2 = beamtalk_error:with_message(
         Err1, <<"erlangHelp: expects a binary module name">>
@@ -653,7 +641,7 @@ handle_erlang_help(ModuleBin, SelectorArg) when
                 {ok, Text} ->
                     Text;
                 {error, not_found} ->
-                    Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+                    Err = beamtalk_error:new(not_found, 'Beamtalk'),
                     Err1 = beamtalk_error:with_message(
                         Err,
                         iolist_to_binary([ModuleBin, <<":">>, FunctionBin, <<" not found">>])
@@ -670,7 +658,7 @@ handle_erlang_help(ModuleBin, SelectorArg) when
             end
     catch
         error:badarg ->
-            Err = beamtalk_error:new(not_found, 'BeamtalkInterface'),
+            Err = beamtalk_error:new(not_found, 'Beamtalk'),
             Err1 = beamtalk_error:with_message(
                 Err,
                 iolist_to_binary([<<"Erlang module '">>, ModuleBin, <<"' not found">>])
@@ -682,7 +670,7 @@ handle_erlang_help(ModuleBin, SelectorArg) when
             beamtalk_error:raise(Err2)
     end;
 handle_erlang_help(_ModuleArg, _SelectorArg) ->
-    Err = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err = beamtalk_error:new(type_error, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:selector:'),
     Err2 = beamtalk_error:with_message(
         Err1, <<"erlangHelp:selector: expects a binary module name and atom/binary function name">>
@@ -711,7 +699,7 @@ handle_class_named(ClassName) when is_atom(ClassName) ->
             class_object_for_pid(ClassName, Pid)
     end;
 handle_class_named(_ClassName) ->
-    Error0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Error0 = beamtalk_error:new(type_error, 'Beamtalk'),
     Error1 = beamtalk_error:with_selector(Error0, 'classNamed:'),
     Error2 = beamtalk_error:with_hint(
         Error1, <<"classNamed: expects an atom or binary class name">>
@@ -797,19 +785,6 @@ resolve_metaclass_tag(Tag) ->
                 error:badarg -> nil
             end
     end.
-
--doc "Get workspace global bindings as a map from class name to class object.".
--spec handle_globals() -> map().
-handle_globals() ->
-    lists:foldl(
-        fun({Name, ModuleName, Pid}, Acc) ->
-            ClassTag = beamtalk_class_registry:class_object_tag(Name),
-            ClassObj = {beamtalk_object, ClassTag, ModuleName, Pid},
-            Acc#{Name => ClassObj}
-        end,
-        #{},
-        beamtalk_class_registry:live_class_entries()
-    ).
 
 -doc "Format class documentation for help:.".
 -spec handle_help(term()) -> binary() | {error, #beamtalk_error{}}.
@@ -954,10 +929,10 @@ resolve_class_name(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
         {ok, Name}
     catch
         exit:{noproc, _} ->
-            Error0 = beamtalk_error:new(class_not_found, 'BeamtalkInterface'),
+            Error0 = beamtalk_error:new(class_not_found, 'Beamtalk'),
             {error, beamtalk_error:with_message(Error0, <<"Class process no longer alive">>)};
         exit:{timeout, _} ->
-            Error0 = beamtalk_error:new(class_not_found, 'BeamtalkInterface'),
+            Error0 = beamtalk_error:new(class_not_found, 'Beamtalk'),
             {error, beamtalk_error:with_message(Error0, <<"Class process not responding">>)}
     end;
 resolve_class_name(Name) when is_atom(Name) ->
@@ -970,7 +945,7 @@ resolve_class_name(Name) when is_binary(Name) ->
             {error, make_class_not_found_error(Name)}
     end;
 resolve_class_name(_Other) ->
-    Error0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Error0 = beamtalk_error:new(type_error, 'Beamtalk'),
     {error, beamtalk_error:with_message(Error0, <<"Expected a class or symbol argument">>)}.
 
 -doc "Ensure a selector argument is an existing atom.".
@@ -981,7 +956,7 @@ ensure_atom(B) when is_binary(B) ->
         binary_to_existing_atom(B, utf8)
     catch
         error:badarg ->
-            Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+            Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
             Err1 = beamtalk_error:with_selector(Err0, 'help:selector:'),
             {error,
                 beamtalk_error:with_message(
@@ -1432,7 +1407,7 @@ group_by_class(Methods) ->
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->
     NameBin = to_binary(ClassName),
-    Err0 = beamtalk_error:new(class_not_found, 'BeamtalkInterface'),
+    Err0 = beamtalk_error:new(class_not_found, 'Beamtalk'),
     Err1 = beamtalk_error:with_message(
         Err0,
         iolist_to_binary([<<"Class '">>, NameBin, <<"' not found.">>])

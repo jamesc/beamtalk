@@ -8,8 +8,8 @@
 -moduledoc """
 Single source of truth for workspace singleton configuration.
 
-Centralises the mapping between binding names (Transcript, Beamtalk, Workspace),
-class names (TranscriptStream, BeamtalkInterface, WorkspaceInterface),
+Centralises the mapping between binding names (Transcript, Workspace),
+class names (TranscriptStream, WorkspaceInterface),
 and Erlang modules (beamtalk_transcript_stream, etc.).
 
 Singletons are split into two categories:
@@ -70,18 +70,13 @@ Return value singleton definitions (sealed Object subclass:, no process).
 
 Each entry defines a singleton that is a value type (tagged map, no gen_server).
 Bootstrapped by calling `Module:new()` and setting the class variable `current`.
-- binding_name: the REPL convenience name (e.g. 'Beamtalk')
+- binding_name: the REPL convenience name (e.g. 'Workspace')
 - class_name: the Beamtalk class name
 - module: the compiled Erlang module (provides new/0)
 """.
 -spec value_singletons() -> [value_singleton_config()].
 value_singletons() ->
     [
-        #{
-            binding_name => 'Beamtalk',
-            class_name => 'BeamtalkInterface',
-            module => 'bt@stdlib@beamtalk_interface'
-        },
         #{
             binding_name => 'Workspace',
             class_name => 'WorkspaceInterface',
