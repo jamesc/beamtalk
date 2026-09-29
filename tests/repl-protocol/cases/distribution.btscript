@@ -106,10 +106,10 @@ peer processes isOk
 
 // A down peer answers an Error result, never a raise.
 (Node named: #'ghost@localhost') unwrap actors error kind
-// => #node_down
+// => node_down
 
 (Node named: #'ghost@localhost') unwrap shapeSkew error kind
-// => #node_down
+// => node_down
 
 // ===========================================================================
 // PROCESSNAVIGATION ON: — remote supervision-tree snapshot (ADR 0126 §8)
