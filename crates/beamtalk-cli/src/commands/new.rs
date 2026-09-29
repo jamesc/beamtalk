@@ -205,12 +205,7 @@ Supervisor subclass: {sup_name}
 /// Run with: beamtalk run Main run
 Object subclass: {main_name}
 
-  class run =>
-    self new run
-
-  run =>
-    Console printLine: "Hello from {name}!".
-    self
+  class run => Console printLine: "Hello from {name}!"
 "#
     );
     fs::write(
@@ -537,6 +532,10 @@ mod tests {
         let content = fs::read_to_string(main_path).unwrap();
         assert!(content.contains("Object subclass: Main"));
         assert!(content.contains("Console printLine:"));
+        assert!(
+            !content.contains("self new"),
+            "Main is a class-side entry point; Object subclasses are not instantiable"
+        );
     }
 
     #[test]
