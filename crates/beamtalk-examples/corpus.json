@@ -32631,22 +32631,11 @@
       "tags": [
         "ProgramTest",
         "TestCase",
-        "assign",
-        "assignment",
         "extends",
-        "for each",
-        "for-each",
-        "forEach",
         "inherit",
         "inheritance",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
         "object",
         "program_test",
-        "set",
         "subclassing",
         "testCommandNameDefaultsToBeamtalk",
         "testCommandNameReturnsString",
@@ -32655,9 +32644,9 @@
         "testExitUnderTestRaisesProgramExit",
         "testExitZeroUnderTestRaisesProgramExit",
         "testNameIsReflectiveClassName",
-        "testPackageIsRootPackageNeverNil"
+        "testPackageRaisesNoProgramPackageForStdlibSuite"
       ],
-      "source": "// BUnit tests for the Program class (ADR 0099 §2, BT-2686).\n//\n// `Program commandName` reads the beamtalk_runtime `program_name` app env,\n// defaulting to \"beamtalk\" when unset (the run-mode / connected-workspace value).\n// The escript path overrides it with the script name in Phase 4.\n\nTestCase subclass: ProgramTest\n\n  testCommandNameReturnsString =>\n    self assert: Program commandName class equals: String\n\n  testCommandNameDefaultsToBeamtalk =>\n    // Under the test workspace the program_name env is unset, so commandName\n    // defaults to the run-mode literal \"beamtalk\".\n    self assert: Program commandName equals: \"beamtalk\"\n\n  testNameIsReflectiveClassName =>\n    // `name` stays the sealed reflective class-identity accessor — defining the\n    // invocation accessor as `commandName` (not `name`) keeps this intact, so\n    // SystemNavigation's class-universe walk does not break (BT-2686 regression).\n    self assert: Program name equals: #Program\n\n  testExitNonIntegerRaisesTypeError =>\n    @expect type\n    self should: [Program exit: \"two\"] raise: #type_error\n\n  testExitOutOfRangeRaisesError =>\n    // Out of POSIX 0..255 is a wrong value (validated before the node-owning\n    // gate), consistent with System halt:.\n    self should: [Program exit: 999] raise: #invalid_argument\n\n  testExitUnderTestRaisesProgramExit =>\n    // No workspace runs under `beamtalk test`, so nothing owns the node: a\n    // structured #program_exit error, never a raw throw and never a halt\n    // (BT-3634). Code that calls Program exit: is testable this way.\n    self should: [Program exit: 3] raise: #program_exit\n\n  testPackageIsRootPackageNeverNil =>\n    // BT-3651: `beamtalk test` records the root package only when exactly one\n    // package is under test. Either way the answer is never nil — a Package, or\n    // a structured error (#ambiguous_program_package / #package_not_loaded).\n    result := [Program package] on: Error do: [:e | e kind]\n    self deny: result isNil\n    self assert: ((result isKindOf: Package) or: [result isKindOf: Symbol])\n\n  testExitZeroUnderTestRaisesProgramExit =>\n    self should: [Program exit] raise: #program_exit\n\n// NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an\n// error — it raises a tagged `script_exit` signal that the session evaluator\n// catches to end the session and report exit code N to the connecting client\n// (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,\n// so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block\n// here has no session evaluator to catch the signal).",
+      "source": "// BUnit tests for the Program class (ADR 0099 §2, BT-2686).\n//\n// `Program commandName` reads the beamtalk_runtime `program_name` app env,\n// defaulting to \"beamtalk\" when unset (the run-mode / connected-workspace value).\n// The escript path overrides it with the script name in Phase 4.\n\nTestCase subclass: ProgramTest\n\n  testCommandNameReturnsString =>\n    self assert: Program commandName class equals: String\n\n  testCommandNameDefaultsToBeamtalk =>\n    // Under the test workspace the program_name env is unset, so commandName\n    // defaults to the run-mode literal \"beamtalk\".\n    self assert: Program commandName equals: \"beamtalk\"\n\n  testNameIsReflectiveClassName =>\n    // `name` stays the sealed reflective class-identity accessor — defining the\n    // invocation accessor as `commandName` (not `name`) keeps this intact, so\n    // SystemNavigation's class-universe walk does not break (BT-2686 regression).\n    self assert: Program name equals: #Program\n\n  testExitNonIntegerRaisesTypeError =>\n    @expect type\n    self should: [Program exit: \"two\"] raise: #type_error\n\n  testExitOutOfRangeRaisesError =>\n    // Out of POSIX 0..255 is a wrong value (validated before the node-owning\n    // gate), consistent with System halt:.\n    self should: [Program exit: 999] raise: #invalid_argument\n\n  testExitUnderTestRaisesProgramExit =>\n    // No workspace runs under `beamtalk test`, so nothing owns the node: a\n    // structured #program_exit error, never a raw throw and never a halt\n    // (BT-3634). Code that calls Program exit: is testable this way.\n    self should: [Program exit: 3] raise: #program_exit\n\n  testPackageRaisesNoProgramPackageForStdlibSuite =>\n    // BT-3651/BT-3661: `beamtalk test` records a root package only for a\n    // project with a beamtalk.toml. The stdlib suite (stdlib/) has none, so\n    // there is no program package: a structured #no_program_package error,\n    // never nil.\n    self should: [Program package] raise: #no_program_package\n\n  testExitZeroUnderTestRaisesProgramExit =>\n    self should: [Program exit] raise: #program_exit\n\n// NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an\n// error — it raises a tagged `script_exit` signal that the session evaluator\n// catches to end the session and report exit code N to the connecting client\n// (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,\n// so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block\n// here has no session evaluator to catch the signal).",
       "explanation": "BUnit tests for the Program class (ADR 0099 §2, BT-2686).  `Program commandName` reads the beamtalk_runtime `program_name` app env, defaulting to \"beamtalk\" when unset (the run-mode / connected-workspace value). The escript path overrides it with the script name in Phase 4."
     },
     {

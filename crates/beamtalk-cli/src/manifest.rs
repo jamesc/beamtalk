@@ -987,6 +987,20 @@ pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>>
     }
 }
 
+/// The package name declared by the `beamtalk.toml` in `project_root`, if any.
+///
+/// Used by `load-project` clients to tell the workspace which package a loaded
+/// project root belongs to (BT-3661), so the Erlang side never parses TOML.
+/// A missing or malformed manifest yields `None`: the load itself reports
+/// manifest problems, and the workspace falls back to the registry-only path.
+#[must_use]
+pub fn package_name_for_project(project_root: &str) -> Option<String> {
+    find_manifest(Utf8Path::new(project_root))
+        .ok()
+        .flatten()
+        .map(|manifest| manifest.name)
+}
+
 /// Look for `beamtalk.toml` in the given directory and parse it fully
 /// (including dependencies) if found.
 ///
@@ -1374,6 +1388,34 @@ version = "0.1.0"
 
         let result = find_manifest(&path).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_package_name_for_project() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "named_app"
+version = "0.1.0"
+"#,
+        );
+        assert_eq!(
+            package_name_for_project(path.as_str()),
+            Some("named_app".to_string())
+        );
+    }
+
+    #[test]
+    fn test_package_name_for_project_missing_or_malformed_is_none() {
+        let temp = TempDir::new().unwrap();
+        let missing = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        assert_eq!(package_name_for_project(missing.as_str()), None);
+
+        let bad = TempDir::new().unwrap();
+        let bad_path = write_manifest(&bad, "not valid toml {{{{");
+        assert_eq!(package_name_for_project(bad_path.as_str()), None);
     }
 
     #[test]
