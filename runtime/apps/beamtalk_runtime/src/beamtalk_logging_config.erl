@@ -50,7 +50,7 @@ Debug targets are tracked in an ETS table so that
 -define(DEBUG_TABLE, beamtalk_debug_targets).
 
 -define(VALID_LEVELS, [
-    emergency, alert, critical, error, warning, notice, info, debug
+    emergency, alert, critical, error, warning, notice, info, debug, all, none
 ]).
 
 -define(VALID_FORMATS, [text, json]).

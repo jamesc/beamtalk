@@ -38,7 +38,15 @@ for reserved selectors (class, ==, /=, self, etc.).
 See: ADR 0028 §1 (Module Proxy Pattern)
 """.
 
--export([coerce_result/1, direct_call/3, dispatch/3, has_method/1, native_call/4, new/1]).
+-export([
+    coerce_ffi_result/2,
+    coerce_result/1,
+    direct_call/3,
+    dispatch/3,
+    has_method/1,
+    native_call/4,
+    new/1
+]).
 
 -include("beamtalk.hrl").
 
@@ -737,8 +745,9 @@ coerce_ffi_result(Module, Result) ->
     end.
 
 -doc """
-Like coerce_result/1 but skips charlist coercion on inner values.
-Used for Beamtalk modules whose lists are genuine typed values.
+Like coerce_result/1 but skips charlist coercion on inner values and does not
+coerce the bare atom `error` (a legitimate value, e.g. the `error` log level).
+Used for Beamtalk modules whose values are genuine typed values.
 """.
 -spec coerce_result_no_charlist(term()) -> term().
 coerce_result_no_charlist({ok, Value}) ->
@@ -747,8 +756,12 @@ coerce_result_no_charlist({error, Reason}) ->
     beamtalk_result:from_tagged_tuple({error, Reason});
 coerce_result_no_charlist(ok) ->
     beamtalk_result:from_tagged_tuple({ok, nil});
-coerce_result_no_charlist(error) ->
-    beamtalk_result:from_tagged_tuple({error, nil});
+%% The bare atom `error` is deliberately NOT coerced here (BT-3660): it is a
+%% valid value for Beamtalk-owned modules (e.g. the `error` OTP log level
+%% returned by `beamtalk_logging_config:logLevel/0`). No `.bt` caller relies on
+%% a bare `error` return from a `beamtalk_*` module; such functions signal
+%% failure with `{error, Reason}` or `#beamtalk_error{}`. Stock Erlang modules
+%% (e.g. `maps:find/2`) still get the bare-atom coercion in `coerce_result/1`.
 coerce_result_no_charlist(Other) ->
     Other.
 

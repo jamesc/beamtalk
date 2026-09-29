@@ -816,6 +816,24 @@ coerce_result_bare_ok_atom_test() ->
     ?assertEqual(true, maps:get('isOk', Result)),
     ?assertEqual(nil, maps:get('okValue', Result)).
 
+coerce_ffi_result_beamtalk_module_bare_error_passthrough_test() ->
+    %% BT-3660: bare `error` from a beamtalk_* module is a value, not a sentinel
+    ?assertEqual(error, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_logging_config, error)),
+    ?assertEqual(error, beamtalk_erlang_proxy:coerce_ffi_result('bt@stdlib@list', error)),
+    %% ...but {error, _} and ok are still coerced
+    ?assertEqual(
+        'Result',
+        maps:get(
+            '$beamtalk_class',
+            beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_logging_config, {error, x})
+        )
+    ),
+    %% stock Erlang modules keep the sentinel coercion
+    ?assertEqual(
+        false,
+        maps:get('isOk', beamtalk_erlang_proxy:coerce_ffi_result(maps, error))
+    ).
+
 coerce_result_bare_error_atom_test() ->
     %% bare error → Result error: nil (nil wrapped as Exception)
     Result = beamtalk_erlang_proxy:coerce_result(error),
