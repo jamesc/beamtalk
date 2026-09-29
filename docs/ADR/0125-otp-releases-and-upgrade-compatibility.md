@@ -682,8 +682,10 @@ does.)
 **ADR 0099's exit contract in a release (amended by BT-3634).** Node
 ownership is a `beamtalk_capability` fact (`node_owning`, ADR 0099 §3
 amendment), not an application env. `eval` and `foreground` both record
-`node_owning = true`: in a release, the release *is* the program. What
-follows:
+`node_owning = true`: in a release, the release *is* the program. This holds for
+every release node, including one with `[release] console = true`, whose
+`remote_console` sessions therefore also share a program-owned node (so
+`System halt:` is permitted there). What follows:
 
 - `eval`: `Program exit: N` stops that throwaway VM gracefully
   (`init:stop(N)`) and the launcher adopts `N`. This is the data-migration

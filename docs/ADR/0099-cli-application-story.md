@@ -382,7 +382,8 @@ also could not say who owns the node in a release, where `eval` and
 * **Node ownership is a `beamtalk_capability` fact.** `beamtalk_workspace_sup`
   records `node_owning` next to `include_compiler`; launchers pass
   `node_owning => true` in its start config (`beamtalk run`, escript, release
-  `eval` and `foreground`). `beamtalk_capability:exit_policy/0` answers `node`
+  `eval` and `foreground`; every `mode => release` node, including one built
+  with `console = true`, is program-owned). `beamtalk_capability:exit_policy/0` answers `node`
   (the program owns it), `shared` (a workspace owns it: REPL, MCP, LSP,
   connected `run`) or `none` (no workspace supervisor recorded capabilities:
   `beamtalk test`, a bare runtime). The `beamtalk_runtime` `node_owning` app env

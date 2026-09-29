@@ -25,7 +25,18 @@ actor, `Program exit:` itself calls `stop_node/1`. `System halt: N` is the
 immediate `halt_node/1`.
 """.
 
--export([dispatch/3, stop_node/1, halt_node/1, halt_unless_stopping/1, flush_loggers/0]).
+-export([
+    dispatch/3,
+    stop_node/1,
+    halt_node/1,
+    halt_unless_stopping/1,
+    flush_loggers/0,
+    stop_requested/0,
+    mark_stop_requested/1,
+    clear_stop_requested/0
+]).
+
+-define(STOP_KEY, {?MODULE, stop_requested}).
 
 %%% ============================================================================
 %%% Public API
@@ -55,41 +66,82 @@ dispatch(ClassPid, Selector, Args) ->
             %% exited (a detached node), `io:put_chars` raises an exit-class
             %% exception; swallow it with `catch` so the contract's `halt(1)`
             %% always runs rather than letting the node crash out of dispatch/3.
-            catch io:put_chars(
-                standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]
-            ),
+            %%
+            %% If a graceful stop is already requested (an actor's `Program exit:`),
+            %% this failure is the shutdown taking the entry's call down, not a
+            %% crash: do not report it.
+            case stop_requested() of
+                none ->
+                    catch io:put_chars(
+                        standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]
+                    );
+                {ok, _} ->
+                    ok
+            end,
             halt_unless_stopping(1)
     end.
 
 -doc """
 Stop the node gracefully with exit status `Code` (`Program exit:` where the
-program owns the node). `init:stop/1` is asynchronous: it runs the supervision
-tree down (`terminate/2`) and flushes Logger handlers, bounded by the
-supervisors' shutdown timeouts, so a hanging `terminate/2` delays the exit. The
-calling process then blocks until the node dies, so `Program exit:` never
+program owns the node). The request is recorded synchronously
+(`mark_stop_requested/1`) *before* the asynchronous `init:stop/1`, so a harness
+on another process (the entry's own call chain) can see it immediately and
+defer instead of racing it with an implicit `halt/1`. `init:stop/1` runs the
+supervision tree down (`terminate/2`) and flushes Logger handlers, bounded by
+the supervisors' shutdown timeouts, so a hanging `terminate/2` delays the exit.
+The calling process then blocks until the node dies, so `Program exit:` never
 returns.
 """.
 -spec stop_node(0..255) -> no_return().
 stop_node(Code) ->
+    mark_stop_requested(Code),
     init:stop(Code),
     receive
     after infinity -> ok
     end.
 
 -doc """
-Halt with the implicit exit status `Code`, unless a graceful stop is already
-under way. An actor's `Program exit: N` calls `init:stop(N)` and the entry's
-own call then fails as the tree shuts down; that failure must not race the
-requested status with an implicit `halt(1)`, so wait for the stop to finish.
+Record, synchronously, that a graceful stop with status `Code` was requested.
+The first request wins (as it does for `init:stop/1`).
+""".
+-spec mark_stop_requested(0..255) -> ok.
+mark_stop_requested(Code) ->
+    case persistent_term:get(?STOP_KEY, none) of
+        none -> persistent_term:put(?STOP_KEY, Code);
+        _ -> ok
+    end.
+
+-doc "The status of a requested graceful stop, or `none`.".
+-spec stop_requested() -> {ok, 0..255} | none.
+stop_requested() ->
+    case persistent_term:get(?STOP_KEY, none) of
+        none -> none;
+        Code -> {ok, Code}
+    end.
+
+-doc "Forget a recorded stop request (tests only; a real stop ends the node).".
+-spec clear_stop_requested() -> ok.
+clear_stop_requested() ->
+    _ = persistent_term:erase(?STOP_KEY),
+    ok.
+
+-doc """
+Halt with the implicit exit status `Code`, unless a graceful stop was already
+requested. An actor's `Program exit: N` records the request and calls
+`init:stop(N)` from a process off the entry's call chain; the entry may finish
+normally or fail as the tree shuts down. Either way it must not override `N` with
+an implicit `halt/1`, so it waits for the stop to finish. The synchronous flag
+(not `init:get_status/0`, which lags the asynchronous `init:stop/1`) is what
+makes this race-free.
 """.
 -spec halt_unless_stopping(0..255) -> no_return().
 halt_unless_stopping(Code) ->
-    case init:get_status() of
-        {stopping, _} ->
+    case stop_requested() of
+        {ok, _} ->
             receive
             after infinity -> ok
             end;
-        _ ->
+        none ->
             erlang:halt(Code)
     end.
 
