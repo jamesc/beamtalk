@@ -7,7 +7,7 @@
 // workspace meta process, so a workspace-scoped view reads empty here. Live
 // read + write-through against a real session and a real workspace are covered
 // by tests/repl-protocol/cases/session_object.btscript (session-locals view +
-// the synchronous Workspace globals view). These tests verify the
+// the synchronous Workspace bindings view). These tests verify the
 // Dictionary-protocol shape and the empty-view read behaviour.
 
 TestCase subclass: BindingsViewTest
@@ -16,7 +16,7 @@ TestCase subclass: BindingsViewTest
   setUp =>
     // A workspace-scoped view is just a tagged map (no liveness/PID needed),
     // so it can be minted directly. Reads return empty in the BUnit context.
-    self.view := (Erlang beamtalk_session_primitives) globalsView
+    self.view := (Erlang beamtalk_session_primitives) bindingsView
     self
 
   // ===== Dictionary-protocol selectors present =====

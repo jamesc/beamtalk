@@ -16,7 +16,7 @@
 ///
 /// There is **no** class-side operation mirror (no `Session bindings`, no
 /// `Session clear`) and **no** `globals` accessor — globals are workspace
-/// state, reached via `Workspace globals`. You write `Session current bindings`
+/// state, reached via `Workspace bindings`. You write `Session current bindings`
 /// or `(Session withId: anId) bindings`.
 ///
 /// Cross-session access (via `withId:`) is **read-only**: reads work against any
@@ -63,7 +63,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// session state (write-through, for the calling session only).
   ///
   /// There is no `globals` here — globals are workspace-owned; use
-  /// `Workspace globals`.
+  /// `Workspace bindings`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -82,7 +82,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```
   resolve: aName :: Symbol -> Object => self delegate
 
-  /// Clear this session's local bindings. Workspace globals remain.
+  /// Clear this session's local bindings. Workspace bindings remain.
   ///
   /// ## Examples
   /// ```beamtalk

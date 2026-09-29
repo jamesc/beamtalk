@@ -353,6 +353,22 @@ live_class_entries_test_() ->
             end}
         ]}.
 
+live_class_entries_skips_class_dying_mid_call_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    %% Answers the first call by exiting `shutdown` (not noproc/timeout).
+    Pid = spawn(fun() ->
+        receive
+            {'$gen_call', _From, _Req} -> exit(shutdown)
+        end
+    end),
+    ok = pg:join(beamtalk_classes, Pid),
+    try
+        Pids = [P || {_, _, P} <- beamtalk_class_registry:live_class_entries()],
+        ?assertNot(lists:member(Pid, Pids))
+    after
+        pg:leave(beamtalk_classes, Pid)
+    end.
+
 %%% ============================================================================
 %%% loaded-class name index tests
 %%% ============================================================================

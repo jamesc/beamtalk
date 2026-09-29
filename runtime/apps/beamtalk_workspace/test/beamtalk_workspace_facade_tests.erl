@@ -23,7 +23,7 @@ guarded_entries() ->
         {nodes, []},
         {actorAt, [<<"<0.1.0>">>]},
         {classes, []},
-        {globals, []},
+        {bindings, []},
         {currentSession, []},
         {sessions, []},
         {sync, []},

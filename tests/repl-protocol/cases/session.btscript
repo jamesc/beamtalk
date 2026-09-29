@@ -6,7 +6,7 @@
 // This case complements `session_object.btscript` (which exercises the basic
 // read/write-through view) by covering the surface the ADR singles out as
 // integration-critical: `bindings keys`, `resolve:` for undefined names, the
-// `Workspace globals` protected-name conflict, and `Session withId:` (re-acquire
+// `Workspace bindings` protected-name conflict, and `Session withId:` (re-acquire
 // by id, instance reads, unknown-id nil). The cross-session WRITE-rejection path
 // needs a second live session and is covered by EUnit (see the note below).
 //
@@ -84,28 +84,28 @@ Session current resolve: #notDefinedAnywhere
 // WORKSPACE GLOBALS — live view: write-through + protected-name conflict
 // ===========================================================================
 
-// Workspace globals is the same live BindingsView type.
-Workspace globals class
+// Workspace bindings is the same live BindingsView type.
+Workspace bindings class
 // => BindingsView
 
 // Workspace-global writes are SYNCHRONOUS (route through bind:as:): the new
 // binding is observable immediately as a bare name on the next line.
-Workspace globals at: #gTool put: 7
+Workspace bindings at: #gTool put: 7
 // => 7
 
 gTool
 // => 7
 
 // removeKey: routes through unbind: and returns nil.
-Workspace globals removeKey: #gTool
+Workspace bindings removeKey: #gTool
 // => nil
 
-Workspace globals includesKey: #gTool
+Workspace bindings includesKey: #gTool
 // => false
 
 // Writing a protected system name through the globals view raises a conflict
 // (same check as Workspace bind:as:).
-Workspace globals at: #Transcript put: nil
+Workspace bindings at: #Transcript put: nil
 // => ERROR: is a system name and cannot be shadowed
 
 // ===========================================================================

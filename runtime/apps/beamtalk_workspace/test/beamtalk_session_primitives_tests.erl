@@ -313,7 +313,7 @@ bindings_view_includes_key_workspace_test_() ->
                 beamtalk_workspace_interface_primitives:create_bindings_table(),
                 maybe_register_meta(),
                 try
-                    View = beamtalk_session_primitives:globalsView(),
+                    View = beamtalk_session_primitives:bindingsView(),
                     ?assertMatch(
                         #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
                     ),
@@ -446,7 +446,7 @@ resolve_for_finds_local_test_() ->
     end}.
 
 %%====================================================================
-%% globalsView/0 — workspace scope read + write-through
+%% bindingsView/0 — workspace scope read + write-through
 %%====================================================================
 
 globals_view_write_through_test_() ->
@@ -459,7 +459,7 @@ globals_view_write_through_test_() ->
                 %% the bind:as: ETS (the production path always has meta up).
                 maybe_register_meta(),
                 try
-                    View = beamtalk_session_primitives:globalsView(),
+                    View = beamtalk_session_primitives:bindingsView(),
                     ?assertMatch(
                         #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
                     ),
