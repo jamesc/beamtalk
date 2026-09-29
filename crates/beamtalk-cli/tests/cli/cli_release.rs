@@ -622,6 +622,113 @@ fn release_launcher_eval_adopts_program_exit_code_test() {
     );
 }
 
+/// Add a `Quitter` actor and a `Trigger` entry class (BT-3634): `Trigger
+/// exitFromActor` makes the actor call `Program exit: 3`; `Trigger haltNode`
+/// makes it call `System halt: 4`.
+fn add_quitter_classes(project: &std::path::Path) {
+    std::fs::write(
+        project.join("src/Quitter.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Actor subclass: Quitter\n\
+         \n\
+         \x20\x20quit => Program exit: 3\n\
+         \x20\x20halt => System halt: 4\n",
+    )
+    .expect("write src/Quitter.bt");
+    std::fs::write(
+        project.join("src/Trigger.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Trigger\n\
+         \n\
+         \x20\x20class exitFromActor => Quitter spawn quit\n\
+         \x20\x20class haltNode => Quitter spawn halt\n",
+    )
+    .expect("write src/Trigger.bt");
+}
+
+/// BT-3634 (ADR 0125 §1.7, ADR 0099 §3 amendment): in a release booted with
+/// `foreground`, the program owns the node. An actor's `Program exit: 3`
+/// stops the node gracefully with status 3 (instead of restarting the actor),
+/// and `System halt: 4` halts it with status 4.
+#[test]
+fn release_foreground_actor_program_exit_and_system_halt_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    make_releasable(project.path());
+    add_quitter_classes(project.path());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&output_dir)
+        .timeout(std::time::Duration::from_secs(180))
+        .assert()
+        .success();
+
+    let name = "cli_subprocess_fixture";
+    let cookie = format!("bt3634_test_cookie_{}", std::process::id());
+    for (entry, expected_status, tag) in [
+        ("Trigger exitFromActor", 3, "exit"),
+        ("Trigger haltNode", 4, "halt"),
+    ] {
+        let node = format!("bt3634_{tag}_{}", std::process::id());
+        let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &node, &cookie);
+        // `ping` answers before the project's classes are activated, so wait
+        // until an rpc can resolve them (spawning an idle actor is harmless).
+        let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let probe = launcher_command(&output_dir, name)
+                .args(["rpc", "Quitter spawn"])
+                .env("RELEASE_NODE", &node)
+                .env("RELEASE_COOKIE", &cookie)
+                .output()
+                .expect("spawn bin/<name> rpc");
+            if probe.status.success() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < ready_deadline,
+                "project classes never became available: stderr={}",
+                String::from_utf8_lossy(&probe.stderr)
+            );
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        // The rpc client sees the node go away mid-call; only the foreground
+        // node's own exit status is the contract here.
+        let rpc = launcher_command(&output_dir, name)
+            .args(["rpc", entry])
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .expect("spawn bin/<name> rpc");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut status = None;
+        while std::time::Instant::now() < deadline {
+            if let Ok(Some(st)) = foreground.0.try_wait() {
+                status = Some(st);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        let status = status.unwrap_or_else(|| {
+            panic!(
+                "`{entry}` did not stop the node; rpc stdout={} stderr={}",
+                String::from_utf8_lossy(&rpc.stdout),
+                String::from_utf8_lossy(&rpc.stderr)
+            )
+        });
+        assert_eq!(
+            status.code(),
+            Some(expected_status),
+            "`{entry}` should end the foreground node with status {expected_status}"
+        );
+    }
+}
+
 /// The launcher script to run on this platform: `bin/<name>` (POSIX `sh`,
 /// directly executable) on Unix, `bin/<name>.cmd` on Windows.
 #[cfg(unix)]

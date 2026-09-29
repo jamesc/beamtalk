@@ -679,33 +679,25 @@ restart stop pid version`; `foreground` here is its `start`, and
 `restart`/`pid`/`install` are dropped as things the process supervisor
 does.)
 
-**ADR 0099's two-tier exit, applied honestly.** ADR 0099 §3 defines
-exactly two behaviours for `Program exit: N`, selected by the
-`node_owning` application env
-(`runtime/apps/beamtalk_stdlib/src/beamtalk_program.erl`): when the node
-is owned by the program, `erlang:halt(N)` from *any* process; otherwise a
-`throw({beamtalk_script_exit, N})`, which 0099 documents as crashing a
-supervised actor that calls it — "the supervisor simply restarts it". There
-is no third behaviour, and an earlier draft's `no_program_context` error
-does not exist anywhere. So the launcher sets `node_owning` per verb and
-the ADR says what follows:
+**ADR 0099's exit contract in a release (amended by BT-3634).** Node
+ownership is a `beamtalk_capability` fact (`node_owning`, ADR 0099 §3
+amendment), not an application env. `eval` and `foreground` both record
+`node_owning = true`: in a release, the release *is* the program. What
+follows:
 
-- `eval` sets `node_owning = true`, as the escript does (`escript.rs:290`):
-  `Program exit: N` halts that throwaway VM with `N`, and the launcher
-  adopts it. This is the data-migration case, and it is exactly 0099's
-  script semantics.
-- `foreground` sets `node_owning = false`. `Program exit:` from an actor in
-  a service is then a *throw in a supervised process*: that actor
-  restarts, the node does not stop. A service that wants to stop the node
-  says so with **`System halt: N`** — 0099's second tier, `erlang:halt/1`,
-  no `terminate/2`, no OTP shutdown — or, for the graceful path an operator
-  actually wants, is stopped from outside with `bin/<name> stop`
-  (`init:stop/0`, which *does* run the supervision tree down). The
-  distinction is worth an operator's attention: `System halt:` is for
-  "this node is wrong, end it now"; `stop` is for "we are done".
-- `rpc` runs inside the foreground node and inherits its `node_owning =
-  false`; a `Program exit:` in an rpc'd entry crashes the dispatching
-  session, not the node, and `rpc` reports it as a non-zero exit.
+- `eval`: `Program exit: N` stops that throwaway VM gracefully
+  (`init:stop(N)`) and the launcher adopts `N`. This is the data-migration
+  case.
+- `foreground`: `Program exit: N` from an actor or service does a graceful
+  `init:stop(N)` from any process, so the node stops with status `N` and the
+  actor does **not** just restart (this replaces the earlier draft, which had
+  the throw crash and restart the actor). `System halt: N` is `erlang:halt/1`,
+  no `terminate/2`, no OTP shutdown: "this node is wrong, end it now".
+  `bin/<name> stop` is "we are done". `init:stop/1` is asynchronous, bounded
+  by the supervisors' shutdown timeouts.
+- `rpc` runs inside the foreground node. A `Program exit:` on the rpc'd
+  entry's own call chain is caught by the session harness and reported to the
+  client as exit status `N`; it ends only that call, not the node.
 
 ```bash
 $ bin/orders rpc "Orders backfillPricing"      # against the live node

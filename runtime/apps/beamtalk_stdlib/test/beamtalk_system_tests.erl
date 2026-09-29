@@ -245,9 +245,26 @@ unique_id_monotonic_test() ->
 %%% ============================================================================
 %%% halt/0, halt:/1, halt/1 — error paths (non-node-owning context)
 %%%
-%%% In the test environment node_owning defaults to false, so all halt calls
-%%% safely raise #beamtalk_error{kind=unsupported} instead of halting the VM.
+%%% With no workspace recorded (the test environment) or a shared workspace,
+%%% no program owns the node, so all halt calls safely raise
+%%% #beamtalk_error{kind=unsupported} instead of halting the VM. A program-owned
+%%% node (run-mode, escript, release) halts, which EUnit cannot exercise.
 %%% ============================================================================
+
+halt_in_shared_workspace_raises_unsupported_test() ->
+    Prev = beamtalk_capability:recorded(),
+    beamtalk_capability:set(#{mode => workspace, include_compiler => true, node_owning => false}),
+    try
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
+            beamtalk_system:'halt:'(0)
+        )
+    after
+        case Prev of
+            none -> beamtalk_capability:clear();
+            {ok, Caps} -> beamtalk_capability:set(Caps)
+        end
+    end.
 
 halt_zero_raises_unsupported_test() ->
     ?assertError(
