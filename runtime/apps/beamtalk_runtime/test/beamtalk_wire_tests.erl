@@ -93,7 +93,27 @@ beamtalk_wire_test_() ->
             {"pack_wire/1 allows a SendableRef field pack/1 rejects",
                 fun test_pack_wire_allows_sendable_ref_field/0},
             {"pack_wire/1 node-qualifies a registered ref inside a SendableRef field",
-                fun test_pack_wire_qualifies_registered_ref_in_sendable_ref_field/0}
+                fun test_pack_wire_qualifies_registered_ref_in_sendable_ref_field/0},
+            {"wire_version_unsupported_error/4 builds the right error shape",
+                fun test_wire_version_unsupported_error/0},
+            {"a plain Erlang tuple passes through encode/decode unchanged",
+                fun test_plain_tuple_encode_decode/0},
+            {"an empty list passes through encode/decode unchanged",
+                fun test_empty_list_encode_decode/0},
+            {"encode returns not_serialisable when recursion depth exceeds the cap",
+                fun test_depth_exceeded_on_encode/0},
+            {"decode returns not_serialisable when recursion depth exceeds the cap",
+                fun test_depth_exceeded_on_decode/0},
+            {"decode returns class_not_found for an unresolvable class ref",
+                fun test_class_ref_not_found_on_decode/0},
+            {"not_serialisable hint names the index path when HandleScoped is in a list",
+                fun test_not_serialisable_hint_has_index_path/0},
+            {"not_serialisable hint names the field path when HandleScoped is in a builtin-collection field",
+                fun test_not_serialisable_hint_has_field_path/0},
+            {"not_serialisable hint names the key path when HandleScoped is a dict value",
+                fun test_not_serialisable_hint_has_key_path/0},
+            {"not_serialisable hint names the nlr_value path when HandleScoped is an NLR Value slot",
+                fun test_not_serialisable_hint_has_nlr_value_path/0}
         ]
     end}.
 
@@ -353,3 +373,104 @@ test_pack_wire_qualifies_registered_ref_in_sendable_ref_field() ->
     {ok, Envelope} = beamtalk_shape_migration:pack_wire(Instance),
     {beamtalk_shape, 'ShapeHazardCart', 1, #{worker := PackedWorker}} = Envelope,
     ?assertEqual({registered, worker1, node()}, PackedWorker#beamtalk_object.pid).
+
+%%====================================================================
+%% wire_version_unsupported_error/4
+%%====================================================================
+
+test_wire_version_unsupported_error() ->
+    Err = beamtalk_wire:wire_version_unsupported_error(
+        'SomeClass', some_selector, 99, #{direction => request}
+    ),
+    ?assertMatch(
+        #beamtalk_error{kind = wire_version_unsupported, class = 'SomeClass'},
+        Err
+    ),
+    ?assertMatch(#beamtalk_error{hint = Hint} when is_binary(Hint), Err).
+
+%%====================================================================
+%% Plain tuple and empty list passthrough
+%%====================================================================
+
+test_plain_tuple_encode_decode() ->
+    T = {a, 42, <<"hello">>},
+    {ok, Encoded} = beamtalk_wire:encode(T),
+    ?assertEqual(T, Encoded),
+    {ok, Decoded} = beamtalk_wire:decode(T),
+    ?assertEqual(T, Decoded).
+
+test_empty_list_encode_decode() ->
+    {ok, Enc} = beamtalk_wire:encode([]),
+    ?assertEqual([], Enc),
+    {ok, Dec} = beamtalk_wire:decode([]),
+    ?assertEqual([], Dec).
+
+%%====================================================================
+%% Depth exceeded (encode and decode)
+%%====================================================================
+
+%% Build a list nested 33 levels deep; encoding it reaches depth 32 (the cap)
+%% while recursing into the innermost level, triggering depth_exceeded_error.
+test_depth_exceeded_on_encode() ->
+    Nested = lists:foldl(fun(_, Acc) -> [Acc] end, [], lists:seq(1, 33)),
+    {error, Reason} = beamtalk_wire:encode(Nested),
+    ?assertMatch(#beamtalk_error{kind = not_serialisable}, Reason).
+
+test_depth_exceeded_on_decode() ->
+    Nested = lists:foldl(fun(_, Acc) -> [Acc] end, [], lists:seq(1, 33)),
+    {error, Reason} = beamtalk_wire:decode(Nested),
+    ?assertMatch(#beamtalk_error{kind = not_serialisable}, Reason).
+
+%%====================================================================
+%% class_ref_not_found on decode
+%%====================================================================
+
+test_class_ref_not_found_on_decode() ->
+    {error, Reason} = beamtalk_wire:decode({'$beamtalk_class_ref', 'BTWireTestNoSuchClass9999'}),
+    ?assertMatch(
+        #beamtalk_error{kind = class_not_found, class = 'BTWireTestNoSuchClass9999'},
+        Reason
+    ).
+
+%%====================================================================
+%% format_segment/1 — path rendering in not_serialisable hints
+%%
+%% Each test plants a HandleScoped instance at a specific structural
+%% position so the walk accumulates a known path step, then asserts
+%% the rendered hint contains the expected segment text.
+%%====================================================================
+
+test_not_serialisable_hint_has_index_path() ->
+    %% HandleScoped at list[0] → path [{index, 0}] → hint contains "[0]".
+    Item = #{'$beamtalk_class' => 'ShapeHandleBox'},
+    {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode([Item]),
+    ?assert(is_binary(Hint)),
+    ?assert(binary:match(Hint, <<"[0]">>) =/= nomatch).
+
+test_not_serialisable_hint_has_field_path() ->
+    %% HandleScoped as the value of a non-internal field in a builtin
+    %% collection (Array) → path [{field, data}] → hint contains ".data".
+    Array = #{
+        '$beamtalk_class' => 'Array',
+        data => #{'$beamtalk_class' => 'ShapeHandleBox'}
+    },
+    {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode(Array),
+    ?assert(is_binary(Hint)),
+    ?assert(binary:match(Hint, <<".data">>) =/= nomatch).
+
+test_not_serialisable_hint_has_key_path() ->
+    %% HandleScoped as a value in an untagged map (Dictionary) →
+    %% path [{key, my_key}] → hint contains "{my_key}".
+    Dict = #{my_key => #{'$beamtalk_class' => 'ShapeHandleBox'}},
+    {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode(Dict),
+    ?assert(is_binary(Hint)),
+    ?assert(binary:match(Hint, <<"{my_key}">>) =/= nomatch).
+
+test_not_serialisable_hint_has_nlr_value_path() ->
+    %% HandleScoped as the Value slot of an NLR 3-tuple →
+    %% path [nlr_value] → hint contains ".<nlr value>".
+    Token = make_ref(),
+    Nlr = {'$bt_nlr', Token, #{'$beamtalk_class' => 'ShapeHandleBox'}},
+    {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode(Nlr),
+    ?assert(is_binary(Hint)),
+    ?assert(binary:match(Hint, <<".<nlr value>">>) =/= nomatch).
