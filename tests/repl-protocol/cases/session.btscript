@@ -105,7 +105,7 @@ Workspace globals includesKey: #gTool
 
 // Writing a protected system name through the globals view raises a conflict
 // (same check as Workspace bind:as:).
-Workspace globals at: #Workspace put: nil
+Workspace globals at: #Transcript put: nil
 // => ERROR: is a system name and cannot be shadowed
 
 // ===========================================================================

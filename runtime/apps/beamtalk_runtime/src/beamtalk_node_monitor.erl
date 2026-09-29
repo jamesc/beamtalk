@@ -82,7 +82,7 @@ resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
 -include_lib("kernel/include/logger.hrl").
 
 %% API
-%% `connectedWithSkew/0` is camelCase, matching `workspace_interface.bt`'s
+%% `connectedWithSkew/0` is camelCase, matching `workspace.bt`'s
 %% `Workspace nodes` FFI selector verbatim (the same convention
 %% `beamtalk_workspace_changelog`'s `changeLog/0` documents) — the FFI
 %% dispatches on the selector verbatim, so this entry point must be named to
@@ -148,7 +148,7 @@ count — the one shared implementation the `nodes` op reaches identically
 from the REPL, MCP, and LiveView surfaces (CLAUDE.md "No duplicate
 implementations"; ADR 0126 §8/§10). Returns
 `[#{name := node(), skewCount := non_neg_integer()}]`, sorted by node name —
-the `Workspace nodes` FFI seam (`workspace_interface.bt`).
+the `Workspace nodes` FFI seam (`workspace.bt`).
 """.
 -spec connectedWithSkew() -> [#{name := node(), skewCount := non_neg_integer()}].
 connectedWithSkew() ->

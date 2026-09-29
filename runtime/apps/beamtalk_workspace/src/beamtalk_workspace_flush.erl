@@ -3011,13 +3011,13 @@ conflict_map(File, Reason, Entries, Detail) ->
 
 -spec filter_error(binary()) -> #beamtalk_error{}.
 filter_error(Message) ->
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'flush:'),
     beamtalk_error:with_message(Err1, Message).
 
 -spec source_body_error(binary() | undefined, term()) -> #beamtalk_error{}.
 source_body_error(File, Reason) ->
-    Err0 = beamtalk_error:new(source_body_unreadable, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(source_body_unreadable, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'flush'),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -3030,7 +3030,7 @@ source_body_error(File, Reason) ->
 
 -spec prev_source_error(binary() | undefined, term()) -> #beamtalk_error{}.
 prev_source_error(File, Reason) ->
-    Err0 = beamtalk_error:new(prev_source_unreadable, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(prev_source_unreadable, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'flush'),
     Err2 = beamtalk_error:with_message(
         Err1,
@@ -3043,7 +3043,7 @@ prev_source_error(File, Reason) ->
 
 -spec wrap_io_error({error, term()}, binary()) -> {error, #beamtalk_error{}}.
 wrap_io_error({error, Reason}, File) ->
-    Err0 = beamtalk_error:new(flush_io_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(flush_io_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'flush'),
     Err2 = beamtalk_error:with_message(
         Err1,

@@ -108,20 +108,22 @@ Beamtalk help: Integer selector: #factorial  // show method documentation
 
 ## Access from compiled code
 
-The convenience bindings (`Transcript`, `Workspace`, `Beamtalk`) are injected
-by the workspace and are only available in the REPL and btscript contexts.
+The convenience binding `Transcript` is injected
+by the workspace and is only available in the REPL and btscript contexts.
+`Workspace` and `Beamtalk` are ordinary class-side facades: send to them
+directly anywhere (`Workspace` raises `no_workspace` when no workspace is
+running; `Workspace isAvailable` asks without raising).
 
-In compiled code (inside `.bt` class files), use the explicit class-variable form:
+In compiled code (inside `.bt` class files), use the explicit form for Transcript:
 
 ```beamtalk
 TranscriptStream current show: "Hello from compiled code"
-WorkspaceInterface current classes
-BeamtalkInterface current version
+Workspace classes
+Beamtalk version
 ```
 
-Each singleton class stores its instance in a `current` class variable, set
-during workspace bootstrap. This works everywhere — REPL, btscript, and
-compiled classes.
+`TranscriptStream` stores its instance in a `current` class variable, set
+during workspace bootstrap.
 
 ## Summary
 

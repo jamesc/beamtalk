@@ -16,8 +16,8 @@
 // below where this matters.
 //
 // The test verifies the aliases dispatch through to the underlying
-// `Behaviour>>removeFromSystem` / `WorkspaceInterface>>flushIncludingDestructive`
-// / `WorkspaceInterface>>flush:confirmDestructive:` primitives. Primitive
+// `Behaviour>>removeFromSystem` / `Workspace>>flushIncludingDestructive`
+// / `Workspace>>flush:confirmDestructive:` primitives. Primitive
 // semantics (ChangeLog logging, staged-delete atomicity, tier
 // classification) are covered separately: `remove_from_system.btscript`
 // (BT-3206) and `workspace_flush_destructive.btscript` (BT-3207).

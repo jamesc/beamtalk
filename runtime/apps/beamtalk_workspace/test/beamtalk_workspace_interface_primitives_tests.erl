@@ -6,7 +6,7 @@
 -moduledoc """
 EUnit tests for beamtalk_workspace_interface_primitives module.
 
-Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
+Tests the Phase 2 dispatch/3 interface for Workspace primitives:
 - actors selector
 - actorAt: selector
 - classes selector
@@ -33,7 +33,7 @@ Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
 
 %% Construct a fake Self tuple with the given pid at element 4.
 fake_self(Pid) ->
-    {beamtalk_object, 'WorkspaceInterface', 'bt@stdlib@workspace_interface', Pid}.
+    {beamtalk_object, 'Workspace', 'bt@stdlib@workspace', Pid}.
 
 tmp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
@@ -220,7 +220,7 @@ load_type_error_for_integer_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('Workspace', Err#beamtalk_error.class),
             ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Integer">>))
     end.
 
@@ -233,7 +233,7 @@ load_file_not_found_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(file_not_found, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
+            ?assertEqual('Workspace', Err#beamtalk_error.class)
     end.
 
 %%====================================================================
@@ -296,24 +296,13 @@ bind_and_unbind_test_() ->
                     catch
                         error:#{error := Err} ->
                             ?assertEqual(name_not_found, Err#beamtalk_error.kind),
-                            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
+                            ?assertEqual('Workspace', Err#beamtalk_error.class)
                     end
                 end},
                 {"bind:as: raises name_conflict for protected name Transcript", fun() ->
                     try
                         beamtalk_workspace_interface_primitives:dispatch(
                             'bind:as:', [42, 'Transcript'], Self
-                        ),
-                        ?assert(false)
-                    catch
-                        error:#{error := Err} ->
-                            ?assertEqual(name_conflict, Err#beamtalk_error.kind)
-                    end
-                end},
-                {"bind:as: raises name_conflict for protected name Workspace", fun() ->
-                    try
-                        beamtalk_workspace_interface_primitives:dispatch(
-                            'bind:as:', [42, 'Workspace'], Self
                         ),
                         ?assert(false)
                     catch
@@ -348,7 +337,7 @@ unknown_selector_raises_does_not_understand_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(does_not_understand, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('Workspace', Err#beamtalk_error.class),
             ?assertEqual(unknownSelector, Err#beamtalk_error.selector)
     end.
 
@@ -409,7 +398,7 @@ get_session_bindings_returns_empty_when_no_workspace_registered_test() ->
     Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
     ?assertEqual(#{}, Result).
 
-get_session_bindings_includes_workspace_singleton_test() ->
+get_session_bindings_excludes_workspace_facade_test() ->
     %% Register beamtalk_workspace_meta as the workspace-up sentinel
     (try
         unregister(beamtalk_workspace_meta)
@@ -420,8 +409,8 @@ get_session_bindings_includes_workspace_singleton_test() ->
     try
         Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
         ?assert(is_map(Result)),
-        %% Workspace singleton is always included
-        ?assert(maps:is_key('Workspace', Result))
+        %% `Workspace` is a class-side facade (ADR 0129), not an injected binding
+        ?assertNot(maps:is_key('Workspace', Result))
     after
         (try
             unregister(beamtalk_workspace_meta)
@@ -466,7 +455,7 @@ start_supervisor_type_error_for_non_class_object_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('Workspace', Err#beamtalk_error.class),
             ?assertEqual('startSupervisor:', Err#beamtalk_error.selector)
     end.
 
@@ -478,7 +467,7 @@ stop_supervisor_type_error_for_non_class_object_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('Workspace', Err#beamtalk_error.class),
             ?assertEqual('stopSupervisor:', Err#beamtalk_error.selector)
     end.
 
@@ -534,7 +523,7 @@ sync_dispatch_raises_when_no_manifest_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(file_not_found, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
+            ?assertEqual('Workspace', Err#beamtalk_error.class)
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
@@ -552,7 +541,7 @@ sync_direct_raises_when_no_manifest_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(file_not_found, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class)
+            ?assertEqual('Workspace', Err#beamtalk_error.class)
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
@@ -1031,7 +1020,7 @@ dispatch_new_class_type_error_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('Workspace', Err#beamtalk_error.class),
             ?assertEqual('newClass:at:', Err#beamtalk_error.selector)
     end.
 

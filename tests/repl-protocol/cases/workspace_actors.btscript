@@ -19,9 +19,13 @@
 // WORKSPACE BINDING — CLASS INTROSPECTION
 // ===========================================================================
 
-// Workspace class returns WorkspaceInterface
+// `Workspace` is a class-side facade (ADR 0129): its class is the metaclass
 Workspace class
-// => WorkspaceInterface
+// => Workspace class
+
+// A workspace is running under the REPL, so `isAvailable` is true (ADR 0129)
+Workspace isAvailable
+// => true
 
 // Workspace respondsTo: #actors returns true
 Workspace respondsTo: #actors

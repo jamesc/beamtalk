@@ -111,7 +111,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% `$beamtalk_class`-tagged map and `dirtyMethods/0` returns the per-class set
 %% of dirty selectors. The FFI dispatches on the Beamtalk selector verbatim, so
 %% these entry points are named in camelCase (`changeLog`, `dirtyMethods`) to
-%% match the selectors used in `change_log.bt` / `workspace_interface.bt`. Called
+%% match the selectors used in `change_log.bt` / `workspace.bt`. Called
 %% via `(Erlang beamtalk_workspace_changelog) ...` from the compiled stdlib.
 -export([
     changeLog/0,
@@ -794,7 +794,7 @@ object can apply the active-vs-full filtering in Beamtalk. This is what
 """.
 %% The `'$beamtalk_class' := 'ChangeLog'` tag lets the type checker (via
 %% beamtalk_spec_reader) infer this FFI result as the `ChangeLog` Beamtalk
-%% class rather than a bare `Dictionary`, matching `WorkspaceInterface>>changes`
+%% class rather than a bare `Dictionary`, matching `Workspace>>changes`
 %% declared `-> ChangeLog` return type. Mirrors `beamtalk_ets:t()`.
 -spec changeLog() -> #{'$beamtalk_class' := 'ChangeLog', entries := [map()]}.
 changeLog() ->

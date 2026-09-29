@@ -8,8 +8,8 @@
 -moduledoc """
 Single source of truth for workspace singleton configuration.
 
-Centralises the mapping between binding names (Transcript, Workspace),
-class names (TranscriptStream, WorkspaceInterface),
+Centralises the mapping between binding names (Transcript),
+class names (TranscriptStream),
 and Erlang modules (beamtalk_transcript_stream, etc.).
 
 Singletons are split into two categories:
@@ -70,36 +70,31 @@ Return value singleton definitions (sealed Object subclass:, no process).
 
 Each entry defines a singleton that is a value type (tagged map, no gen_server).
 Bootstrapped by calling `Module:new()` and setting the class variable `current`.
-- binding_name: the REPL convenience name (e.g. 'Workspace')
+- binding_name: the REPL convenience name
 - class_name: the Beamtalk class name
 - module: the compiled Erlang module (provides new/0)
 """.
 -spec value_singletons() -> [value_singleton_config()].
 value_singletons() ->
-    [
-        #{
-            binding_name => 'Workspace',
-            class_name => 'WorkspaceInterface',
-            module => 'bt@stdlib@workspace_interface'
-        }
-    ].
+    %% Empty since ADR 0129: `Beamtalk` and `Workspace` are class-side facades
+    %% (no instance, no `current`, no injected binding).
+    [].
 
 -doc """
-Return the list of all workspace binding names (actor + value singletons).
+Return the list of all workspace binding names (the actor singletons; there
+are no value singletons since ADR 0129).
 Used to filter these from :bindings display.
 """.
 -spec binding_names() -> [atom()].
 binding_names() ->
-    ActorNames = [maps:get(binding_name, S) || S <- singletons()],
-    ValueNames = [maps:get(binding_name, S) || S <- value_singletons()],
-    ActorNames ++ ValueNames.
+    [maps:get(binding_name, S) || S <- singletons()].
 
 -doc """
 Map a singleton class name to its user-facing binding name.
 
 Returns `{ok, BindingName}` if the class is a known singleton,
 `undefined` otherwise. Used by error formatting to show binding names
-(e.g., "Workspace" instead of "WorkspaceInterface") in REPL errors.
+(e.g., "Transcript" instead of "TranscriptStream") in REPL errors.
 """.
 -spec binding_name_for_class(atom()) -> {ok, atom()} | undefined.
 binding_name_for_class(ClassName) ->

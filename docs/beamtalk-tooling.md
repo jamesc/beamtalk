@@ -710,7 +710,7 @@ Integer
 #{#Integer => Integer, #String => String, ...}
 ```
 
-**`Workspace`** (class: `WorkspaceInterface`) — project operations:
+**`Workspace`** (class: `Workspace`) — project operations:
 
 | Method | Description |
 |--------|-------------|

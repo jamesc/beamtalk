@@ -126,7 +126,7 @@
     'UndefinedObject',
     'Uuid',
     'Value',
-    'WorkspaceInterface'
+    'Workspace'
 ]).
 
 -endif.

@@ -4,7 +4,7 @@
 // E2E tests for Workspace bind:as: and unbind: (BT-881).
 //
 // These tests require E2E because bind:as: and unbind: are
-// WorkspaceInterface methods that modify workspace-level state
+// Workspace methods that modify workspace-level state
 // and require REPL session binding injection to verify name resolution.
 
 // ===========================================================================

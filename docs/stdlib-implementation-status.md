@@ -1009,7 +1009,7 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `Timer` | `Object` | `timer.bt` | Timer operations |
 | `Tracing` | `Object` | `tracing.bt` | Actor observability |
 | `Uuid` | `Value` | `uuid.bt` | RFC 9562 UUIDs (v4 random, v7 time-ordered) |
-| `WorkspaceInterface` | `Actor` | `workspace_interface.bt` | Workspace management |
+| `Workspace` | `Actor` | `workspace_interface.bt` | Workspace management |
 
 ---
 

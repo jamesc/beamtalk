@@ -101,7 +101,7 @@ sync_project(Path, Options) ->
             {error,
                 beamtalk_repl_errors:make(
                     file_not_found,
-                    'WorkspaceInterface',
+                    'Workspace',
                     iolist_to_binary(["No beamtalk.toml found in: ", AbsPath]),
                     <<"Provide a directory path containing beamtalk.toml">>
                 )};
@@ -482,7 +482,7 @@ save_native_source(<<>>, _Source) ->
     {error,
         beamtalk_repl_errors:make(
             invalid_argument,
-            'WorkspaceInterface',
+            'Workspace',
             <<"save-native-source requires a module name">>,
             <<"Pass the native module to save.">>
         )};
@@ -490,7 +490,7 @@ save_native_source(_ModuleBin, <<>>) ->
     {error,
         beamtalk_repl_errors:make(
             empty_expression,
-            'WorkspaceInterface',
+            'Workspace',
             <<"save-native-source requires non-empty source">>,
             <<"Enter Erlang source to compile and save.">>
         )};
@@ -518,7 +518,7 @@ The same message whatever the reason — never leak whether a path exists.
 native_not_editable_error(ModuleBin) ->
     beamtalk_repl_errors:make(
         permission_denied,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Native module '">>,
             ModuleBin,
@@ -809,7 +809,7 @@ save_section(<<>>, _NewName, _OldName, _BeforeSelector, _BeforeSide) ->
     {error,
         beamtalk_repl_errors:make(
             invalid_argument,
-            'WorkspaceInterface',
+            'Workspace',
             <<"save-section requires a class name">>,
             <<"Pass the class whose source you want to edit.">>
         )};
@@ -817,7 +817,7 @@ save_section(_ClassBin, <<>>, _OldName, _BeforeSelector, _BeforeSide) ->
     {error,
         beamtalk_repl_errors:make(
             invalid_argument,
-            'WorkspaceInterface',
+            'Workspace',
             <<"save-section requires a non-empty new_name">>,
             <<"Pass the section name to write.">>
         )};
@@ -825,7 +825,7 @@ save_section(_ClassBin, _NewName, <<>>, <<>>, _BeforeSide) ->
     {error,
         beamtalk_repl_errors:make(
             invalid_argument,
-            'WorkspaceInterface',
+            'Workspace',
             <<"save-section requires old_name (rename) or before_selector (insert)">>,
             <<
                 "Pass old_name to rename an existing section, or before_selector "
@@ -842,7 +842,7 @@ save_section(_ClassBin, _NewName, OldName, BeforeSelector, _BeforeSide) when
     {error,
         beamtalk_repl_errors:make(
             invalid_argument,
-            'WorkspaceInterface',
+            'Workspace',
             <<"save-section requires exactly one of old_name or before_selector, not both">>,
             <<"Pass old_name to rename, or before_selector to insert; never both.">>
         )};
@@ -902,7 +902,7 @@ valid_section_name(NewName) ->
 invalid_section_name_error() ->
     beamtalk_repl_errors:make(
         invalid_argument,
-        'WorkspaceInterface',
+        'Workspace',
         <<"save-section requires a single-line, non-blank new_name">>,
         <<
             "Section names can't contain a newline (it would corrupt the "
@@ -914,7 +914,7 @@ invalid_section_name_error() ->
 section_class_not_editable_error(ClassBin) ->
     beamtalk_repl_errors:make(
         permission_denied,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Class '">>, ClassBin, <<"' has no editable in-project .bt source.">>
         ]),
@@ -1065,7 +1065,7 @@ do_insert_section(Path, Source, ClassBin, ClassName, NewName, BeforeSelector, Si
 section_collision_error(ClassBin, BeforeSelector) ->
     beamtalk_repl_errors:make(
         invalid_argument,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Class '">>,
             ClassBin,
@@ -1134,7 +1134,7 @@ finish_section_write(Path, ClassBin, Source, NewSource) ->
 section_not_found_error(ClassBin, OldName) ->
     beamtalk_repl_errors:make(
         invalid_argument,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Class '">>, ClassBin, <<"' has no section named '">>, OldName, <<"'.">>
         ]),
@@ -1145,7 +1145,7 @@ section_not_found_error(ClassBin, OldName) ->
 section_ambiguous_error(ClassBin, OldName) ->
     beamtalk_repl_errors:make(
         invalid_argument,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Class '">>,
             ClassBin,
@@ -1160,7 +1160,7 @@ section_ambiguous_error(ClassBin, OldName) ->
 section_conflict_error(ClassBin) ->
     beamtalk_repl_errors:make(
         external_edit,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Class '">>,
             ClassBin,
@@ -1173,7 +1173,7 @@ section_conflict_error(ClassBin) ->
 section_locate_error(ClassBin, Reason, Message) ->
     beamtalk_repl_errors:make(
         invalid_argument,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Could not locate the section target in '">>,
             ClassBin,
@@ -1189,7 +1189,7 @@ section_locate_error(ClassBin, Reason, Message) ->
 section_io_error(ClassBin, Verb, Reason) ->
     beamtalk_repl_errors:make(
         io_error,
-        'WorkspaceInterface',
+        'Workspace',
         iolist_to_binary([
             <<"Error ">>,
             Verb,
@@ -2638,7 +2638,7 @@ fail_stale_dep_attach(StaleDeps) ->
     {error,
         beamtalk_repl_errors:make(
             stale_dependency,
-            'WorkspaceInterface',
+            'Workspace',
             iolist_to_binary([
                 "Dependency artifact(s) [",
                 Names,

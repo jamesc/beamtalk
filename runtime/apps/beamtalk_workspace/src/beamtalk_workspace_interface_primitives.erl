@@ -6,9 +6,9 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Primitive implementations for the WorkspaceInterface sealed Object.
+Primitive implementations for the Workspace sealed Object.
 
-Implements methods for the WorkspaceInterface class. WorkspaceInterface is
+Implements methods for the Workspace class. Workspace is
 a `sealed Object subclass:` (value type, no gen_server process). Methods
 are called via Erlang FFI from the compiled Beamtalk module.
 
@@ -16,7 +16,7 @@ are called via Erlang FFI from the compiled Beamtalk module.
 
 User-registered bindings (`bind:as:` / `unbind:`) are stored in a public
 named ETS table `beamtalk_wi_user_bindings` keyed by `Name` (atom).
-Since WorkspaceInterface is a singleton (one per workspace), no per-process
+Since Workspace is a singleton (one per workspace), no per-process
 keying is needed. The ETS table is normally created during workspace startup
 via `create_bindings_table/0` (called by `beamtalk_workspace_bootstrap`),
 which ensures the long-lived bootstrap process owns it. A lazy fallback via
@@ -67,7 +67,7 @@ into REPL session state. Workspace readiness is detected via
 %% Called by beamtalk_workspace_bootstrap to create the ETS table under a
 %% long-lived process (prevents table from being deleted when eval workers exit)
 -export([create_bindings_table/0]).
-%% Direct exports for Erlang FFI calls from sealed Object WorkspaceInterface
+%% Direct exports for Erlang FFI calls from sealed Object Workspace
 -export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
 
 -export([currentSession/0, sessions/0]).
@@ -107,7 +107,7 @@ into REPL session state. Workspace readiness is detected via
 %%% ============================================================================
 
 -doc """
-Dispatch a primitive method call for WorkspaceInterface.
+Dispatch a primitive method call for Workspace.
 
 Retained for backward compatibility. The compiled sealed Object module
 uses Erlang FFI calls to the direct exports instead of this dispatch/3.
@@ -160,7 +160,7 @@ dispatch(autoflush, [], _Self) ->
 dispatch('autoflush:', [Value], _Self) ->
     setAutoflush(Value);
 dispatch(Selector, _Args, _Self) ->
-    Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(does_not_understand, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
     beamtalk_error:raise(
         beamtalk_error:with_hint(
@@ -247,7 +247,7 @@ validate_new_class_args(_Source, Path) ->
 -spec new_class_arg_type_error(binary(), term()) -> #beamtalk_error{}.
 new_class_arg_type_error(ArgName, Value) ->
     TypeName = value_type_name(Value),
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
     beamtalk_error:with_message(
         Err1,
@@ -307,7 +307,7 @@ moveClass(ClassArg, NewPath) ->
 -spec move_class_arg_type_error(binary(), term()) -> #beamtalk_error{}.
 move_class_arg_type_error(Expected, Value) ->
     TypeName = value_type_name(Value),
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'moveClass:to:'),
     beamtalk_error:with_message(
         Err1,
@@ -1258,7 +1258,7 @@ setAutoflush(Value) when is_boolean(Value) ->
     ok = beamtalk_workspace_meta:set_setting(autoflush, Value),
     Value;
 setAutoflush(Other) ->
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'autoflush:'),
     Msg = iolist_to_binary(
         io_lib:format("autoflush: expects a Boolean, got: ~p", [Other])
@@ -1308,7 +1308,7 @@ unbind(Name) ->
         AtomName ->
             case ets:lookup(?WI_BINDINGS_TABLE, AtomName) of
                 [] ->
-                    Err0 = beamtalk_error:new(name_not_found, 'WorkspaceInterface'),
+                    Err0 = beamtalk_error:new(name_not_found, 'Workspace'),
                     Err1 = beamtalk_error:with_selector(Err0, 'unbind:'),
                     beamtalk_error:raise(
                         beamtalk_error:with_message(
@@ -1472,18 +1472,18 @@ workspace_child_handle(ChildId = {user_supervisor, ClassName}) ->
 % elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_start_supervisor_type_error/1}).
 raise_start_supervisor_type_error(Message) ->
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
 
 % elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_start_supervisor_error/1}).
 raise_start_supervisor_error(Message) when is_binary(Message) ->
-    Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(runtime_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message));
 raise_start_supervisor_error(Reason) ->
-    Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(runtime_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'startSupervisor:'),
     beamtalk_error:raise(
         beamtalk_error:with_message(
@@ -1542,7 +1542,7 @@ do_stop_supervisor(ClassName) ->
                     nil;
                 _ ->
                     NameBin = atom_to_binary(ClassName, utf8),
-                    Err0 = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                    Err0 = beamtalk_error:new(runtime_error, 'Workspace'),
                     Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
                     beamtalk_error:raise(
                         beamtalk_error:with_message(
@@ -1556,7 +1556,7 @@ do_stop_supervisor(ClassName) ->
 % elp:fixme W0048 intentional suppression for dynamic dispatch
 -dialyzer({no_return, raise_stop_supervisor_type_error/1}).
 raise_stop_supervisor_type_error(Message) ->
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'stopSupervisor:'),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Message)).
 
@@ -1998,7 +1998,7 @@ handle_load(Path) when is_list(Path) ->
                 [Path, NativeErrors],
                 #{domain => [beamtalk, workspace]}
             ),
-            Err0 = beamtalk_error:new(native_compile_failed, 'WorkspaceInterface'),
+            Err0 = beamtalk_error:new(native_compile_failed, 'Workspace'),
             Err1 = beamtalk_error:with_selector(Err0, 'load:'),
             Err2 = beamtalk_error:with_message(
                 Err1,
@@ -2012,7 +2012,7 @@ handle_load(Path) when is_list(Path) ->
     end;
 handle_load(Other) ->
     TypeName = value_type_name(Other),
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'load:'),
     {error,
         beamtalk_error:with_message(
@@ -2062,7 +2062,7 @@ handle_load_after_native(Path) ->
             end,
             loaded_class_objects(ClassNames);
         {error, {file_not_found, _}} ->
-            Err0 = beamtalk_error:new(file_not_found, 'WorkspaceInterface'),
+            Err0 = beamtalk_error:new(file_not_found, 'Workspace'),
             Err1 = beamtalk_error:with_selector(Err0, 'load:'),
             {error,
                 beamtalk_error:with_message(
@@ -2104,21 +2104,14 @@ handle_session_bindings(UserBindings) ->
             nil -> Base0;
             TranscriptObj -> Base0#{'Transcript' => TranscriptObj}
         end,
-    %% Resolve Workspace from singleton state, same as Transcript.
-    %% Falls back to a plain tagged-map if the class var hasn't been wired yet.
-    WorkspaceObj =
-        case resolve_singleton('WorkspaceInterface') of
-            nil -> #{'$beamtalk_class' => 'WorkspaceInterface'};
-            Obj -> Obj
-        end,
-    Base1#{'Workspace' => WorkspaceObj}.
+    Base1.
 
 -doc "Convert a name argument to an atom.".
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.
 to_atom_name(Name) when is_atom(Name) -> Name;
 to_atom_name(Other) ->
     TypeName = value_type_name(Other),
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     {error,
         beamtalk_error:with_message(
             Err0,
@@ -2130,7 +2123,7 @@ to_atom_name(Other) ->
 check_bind_conflicts(AtomName) ->
     case is_protected_name(AtomName) of
         true ->
-            Err0 = beamtalk_error:new(name_conflict, 'WorkspaceInterface'),
+            Err0 = beamtalk_error:new(name_conflict, 'Workspace'),
             Err1 = beamtalk_error:with_selector(Err0, 'bind:as:'),
             {error,
                 beamtalk_error:with_message(
@@ -2146,7 +2139,6 @@ check_bind_conflicts(AtomName) ->
 
 -spec is_protected_name(atom()) -> boolean().
 is_protected_name('Transcript') -> true;
-is_protected_name('Workspace') -> true;
 is_protected_name(_) -> false.
 
 -doc "Warn if name is an existing loaded class.".

@@ -91,18 +91,18 @@ is_internal_key_normal_name_test() ->
 %%====================================================================
 %%
 %% Regression guard for the recurring "Unresolved class `Workspace`" bug:
-%% after ADR 0081 Phase 1 the workspace singletons (Transcript/
-%% Workspace) are resolved lazily and are no longer in the eval bindings map,
+%% after ADR 0081 Phase 1 the workspace singletons (Transcript) are resolved lazily and are no longer in the eval bindings map,
 %% so known_vars/1 must add them back from beamtalk_workspace_config — otherwise
 %% the structural validator flags `Workspace classes` as an unresolved class.
 
 %% The workspace singletons are always known vars, even with no bindings.
 known_vars_includes_singletons_test() ->
     KnownVars = beamtalk_repl_compiler:known_vars(#{}),
-    ?assert(lists:member(<<"Workspace">>, KnownVars)),
     ?assert(lists:member(<<"Transcript">>, KnownVars)),
-    %% `Beamtalk` is a real class now (ADR 0129), not an injected binding.
-    ?assertNot(lists:member(<<"Beamtalk">>, KnownVars)).
+    %% `Beamtalk` and `Workspace` are real classes now (ADR 0129), not
+    %% injected bindings.
+    ?assertNot(lists:member(<<"Beamtalk">>, KnownVars)),
+    ?assertNot(lists:member(<<"Workspace">>, KnownVars)).
 
 %% The singleton list is derived from the workspace config single source of
 %% truth, not hardcoded in the compiler — assert parity so the two can't drift.

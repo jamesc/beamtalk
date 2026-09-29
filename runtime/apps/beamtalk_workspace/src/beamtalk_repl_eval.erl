@@ -1281,7 +1281,7 @@ remove_class(ClassNameBin) ->
 
 -spec remove_class_unknown_error(binary()) -> #beamtalk_error{}.
 remove_class_unknown_error(ClassNameBin) ->
-    Err0 = beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(class_not_found, 'Workspace'),
     beamtalk_error:with_message(
         Err0,
         <<"Cannot remove class '", ClassNameBin/binary, "': no such class is loaded">>

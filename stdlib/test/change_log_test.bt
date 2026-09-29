@@ -10,7 +10,7 @@
 // ChangeEntry value objects directly (via `new:`) to cover the collection
 // protocol and the active-vs-full (orphan / prior-epoch) filtering. The live
 // end-to-end path (`Workspace changes` returning a populated ChangeLog) is
-// covered by the gen_server's EUnit tests and the WorkspaceInterface facade
+// covered by the gen_server's EUnit tests and the Workspace facade
 // selector checks below.
 
 TestCase subclass: ChangeLogTest
@@ -370,9 +370,9 @@ TestCase subclass: ChangeLogTest
   testMixedLogPrintStringCountsActive =>
     self assert: self mixedLog printString equals: "ChangeLog with 2 entries"
 
-  // --- WorkspaceInterface facade: `changes` selector exists ---
+  // --- Workspace facade: `changes` selector exists ---
   testWorkspaceIncludesSelectorChanges =>
-    self assert: (WorkspaceInterface includesSelector: #changes)
+    self assert: (Workspace class includesSelector: #changes)
 
   // --- ADR 0082 Phase 4 (BT-2290) ChangeLog operations exist ---
   testChangeLogIncludesSelectorRevert =>
@@ -391,8 +391,8 @@ TestCase subclass: ChangeLogTest
   // covered end-to-end in the beamtalk_workspace_flush_tests EUnit suite and
   // tests/repl-protocol/cases/workspace_flush_destructive.btscript. BUnit
   // only verifies the new selectors are present on the facade
-  // (WorkspaceInterface's own flushIncludingDestructive / flush:confirmDestructive:
-  // selectors are checked in workspace_interface_test.bt).
+  // (Workspace's own flushIncludingDestructive / flush:confirmDestructive:
+  // selectors are checked in workspace_test.bt).
   testChangeLogIncludesSelectorFlushKindsConfirmDestructive =>
     self assert: (ChangeLog includesSelector: #flushKinds:confirmDestructive:)
 
@@ -407,10 +407,10 @@ TestCase subclass: ChangeLogTest
 
   // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---
   testWorkspaceIncludesSelectorAutoflush =>
-    self assert: (WorkspaceInterface includesSelector: #autoflush)
+    self assert: (Workspace class includesSelector: #autoflush)
 
   testWorkspaceIncludesSelectorAutoflushSetter =>
-    self assert: (WorkspaceInterface includesSelector: #autoflush:)
+    self assert: (Workspace class includesSelector: #autoflush:)
 
   // --- ADR 0127 §9 (BT-3594): `uses: Enumerable(ChangeEntry)` ---
   //

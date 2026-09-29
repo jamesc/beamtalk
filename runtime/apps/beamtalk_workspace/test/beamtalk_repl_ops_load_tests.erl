@@ -1904,7 +1904,7 @@ save_section_write_rejects_stale_source_test() ->
             Path, <<"BtSectionConflictClass">>, OriginalSource, NewSource
         ),
         ?assertMatch(
-            {error, {beamtalk_error, external_edit, 'WorkspaceInterface', _, _, _, _}}, Result
+            {error, {beamtalk_error, external_edit, 'Workspace', _, _, _, _}}, Result
         ),
         %% Nothing was written: disk still holds the concurrent write, not
         %% this op's `NewSource` (which would have silently reverted it) and

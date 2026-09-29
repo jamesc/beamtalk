@@ -1,15 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-488, ADR 0019 Phase 1: Tests that singleton classes (TranscriptStream,
-// WorkspaceInterface) expose a current accessor that returns nil before
-// initialization. WorkspaceInterface.current is always set by bootstrap.
+// BT-488, ADR 0019 Phase 1: Tests that the TranscriptStream singleton exposes
+// a current accessor that returns nil before initialization. (`Workspace` and
+// `Beamtalk` are class-side facades with no `current` — ADR 0129.)
 
 TestCase subclass: ClassVariablesSingletonTest
 
   testSingletonCurrentAccessors =>
     // TranscriptStream has current accessor
     self assert: TranscriptStream current equals: nil
-    // WorkspaceInterface.current is set by bootstrap; nil in BUnit context (BT-1873)
-    // Typed as -> WorkspaceInterface for LSP completions; nil only before bootstrap.
-    self assert: WorkspaceInterface current equals: nil

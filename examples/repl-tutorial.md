@@ -367,7 +367,6 @@ Both forms work in the REPL. In loaded classes (`.bt` files), use the explicit f
 | Convenience Binding | Explicit Form | Description |
 |---------------------|---------------|-------------|
 | `Transcript` | `TranscriptStream current` | Output stream for debugging |
-| `Workspace` | `WorkspaceInterface current` | Actor introspection |
 
 ## Exiting the REPL
 
