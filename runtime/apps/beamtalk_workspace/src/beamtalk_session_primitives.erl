@@ -63,7 +63,7 @@ that would block to timeout against a dead PID.
 %% Session operations (instance-side, take a Session value)
 -export([bindings/1, resolve/2, clear/1, kind/1, info/1, printString/1]).
 %% Workspace-globals view (not a Session method)
--export([globalsView/0]).
+-export([bindingsView/0]).
 %% BindingsView read/write primitives
 -export([
     at/2,
@@ -274,8 +274,8 @@ Reads resolve live against the singleton registry + `bind:as:` ETS (via
 `beamtalk_workspace_interface_primitives:get_session_bindings/0`); writes route
 through `bind/2` / `unbind/1` (synchronous, protected-name conflict checks).
 """.
--spec globalsView() -> bindings_view().
-globalsView() ->
+-spec bindingsView() -> bindings_view().
+bindingsView() ->
     #{'$beamtalk_class' => 'BindingsView', scope => workspace}.
 
 %%% ============================================================================
