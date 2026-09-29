@@ -9,7 +9,7 @@
 Logging configuration API for the Beamtalk runtime.
 
 Provides functions to query and control OTP logger settings from
-Beamtalk code. `Beamtalk` delegates to this module for
+Beamtalk code. `Logger` delegates to this module for
 log-level management, per-subsystem debug toggling, and logger
 introspection.
 
@@ -142,7 +142,7 @@ logLevel(Level) when is_atom(Level) ->
             nil;
         false ->
             beamtalk_error:with_message(
-                beamtalk_error:new(type_error, 'Beamtalk', logLevel),
+                beamtalk_error:new(type_error, 'Logger', logLevel),
                 iolist_to_binary(
                     io_lib:format(
                         "Invalid log level: ~p. Valid levels: ~p",
@@ -153,7 +153,7 @@ logLevel(Level) when is_atom(Level) ->
     end;
 logLevel(Level) ->
     beamtalk_error:with_message(
-        beamtalk_error:new(type_error, 'Beamtalk', logLevel),
+        beamtalk_error:new(type_error, 'Logger', logLevel),
         iolist_to_binary(
             io_lib:format(
                 "Log level must be an atom, got: ~p",
@@ -199,7 +199,7 @@ logFormat(json) ->
     apply_format(Formatter);
 logFormat(Format) when is_atom(Format) ->
     beamtalk_error:with_message(
-        beamtalk_error:new(type_error, 'Beamtalk', logFormat),
+        beamtalk_error:new(type_error, 'Logger', logFormat),
         iolist_to_binary(
             io_lib:format(
                 "Invalid log format: ~p. Valid formats: ~p",
@@ -209,7 +209,7 @@ logFormat(Format) when is_atom(Format) ->
     );
 logFormat(Format) ->
     beamtalk_error:with_message(
-        beamtalk_error:new(type_error, 'Beamtalk', logFormat),
+        beamtalk_error:new(type_error, 'Logger', logFormat),
         iolist_to_binary(
             io_lib:format(
                 "Log format must be an atom, got: ~p",
@@ -255,7 +255,7 @@ enableDebug(Target) when is_atom(Target) ->
                     nil;
                 {error, Reason} ->
                     beamtalk_error:with_message(
-                        beamtalk_error:new(runtime_error, 'Beamtalk', enableDebug),
+                        beamtalk_error:new(runtime_error, 'Logger', enableDebug),
                         iolist_to_binary(
                             io_lib:format(
                                 "Failed to write MCP debug signal file: ~p",
@@ -291,7 +291,7 @@ enableDebug(Target) when is_atom(Target) ->
             nil;
         unknown ->
             beamtalk_error:with_message(
-                beamtalk_error:new(type_error, 'Beamtalk', enableDebug),
+                beamtalk_error:new(type_error, 'Logger', enableDebug),
                 iolist_to_binary(
                     io_lib:format(
                         "Unknown debug target: ~p. Available: ~p",
@@ -308,7 +308,7 @@ enableDebug(Target) ->
             enable_actor_debug(Pid, ClassName);
         unknown ->
             beamtalk_error:with_message(
-                beamtalk_error:new(type_error, 'Beamtalk', enableDebug),
+                beamtalk_error:new(type_error, 'Logger', enableDebug),
                 iolist_to_binary(
                     io_lib:format(
                         "enableDebug: expects a symbol, class, or actor, got: ~p",
@@ -348,7 +348,7 @@ disableDebug(Target) when is_atom(Target) ->
             end;
         unknown ->
             beamtalk_error:with_message(
-                beamtalk_error:new(type_error, 'Beamtalk', disableDebug),
+                beamtalk_error:new(type_error, 'Logger', disableDebug),
                 iolist_to_binary(
                     io_lib:format(
                         "Unknown debug target: ~p. Available: ~p",
@@ -365,7 +365,7 @@ disableDebug(Target) ->
             disable_actor_debug(Pid);
         unknown ->
             beamtalk_error:with_message(
-                beamtalk_error:new(type_error, 'Beamtalk', disableDebug),
+                beamtalk_error:new(type_error, 'Logger', disableDebug),
                 iolist_to_binary(
                     io_lib:format(
                         "disableDebug: expects a symbol, class, or actor, got: ~p",

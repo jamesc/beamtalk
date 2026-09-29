@@ -305,8 +305,8 @@ shapes:
   - `Workspace` and `Transcript` are `native:` over their primary backing
     module and use `self delegate`.
   - `Beamtalk` is `native: beamtalk_interface` for its reflection
-    selectors. Its logging selectors (`beamtalk_logging_config`) and
-    release selectors (`beamtalk_release`) use inline `(Erlang …)` FFI.
+    selectors. Its release selectors (`beamtalk_release`) use inline
+    `(Erlang …)` FFI. Logging control lives on `Logger` (§3), not here.
   - `beamtalk_interface.erl` also backs `SystemNavigation`, so the export
     renames for the delegate convention are limited to the functions
     `Beamtalk` uses.
@@ -324,7 +324,7 @@ The logging-control selectors (`logLevel`, `logLevel:`, `logFormat`,
 `logFormat:`, `debugTargets`, `enableDebug:`, `disableDebug:`,
 `activeDebugTargets`, `disableAllDebug`, `loggerInfo`) do **not** stay on
 `Beamtalk`. They moved to class-side `Logger` with unchanged selectors and no
-shim (BT-3653, §9), and the `LogLevel` and `LogFormat` type aliases moved with
+shim (BT-3653), and the `LogLevel` and `LogFormat` type aliases moved with
 them. ADR 0064 Alternative E rejected a separate `LogConfig` *singleton*; a
 class-side `Logger` is a sealed, stateless class-side facade (§2), not a
 singleton, so that rejection does not apply. None of these methods needs a
@@ -631,7 +631,7 @@ follows.
   - The actor registry moves into `beamtalk_runtime` to support this.
   - `Workspace` keeps development-environment operations, including
     `startSupervisor:`/`stopSupervisor:`.
-  - Whether logging control moves to `Logger` is decided there too.
+  - Logging control moved to `Logger` (BT-3653, §3).
 
 **Context-bound by design, and already conforming:**
 
