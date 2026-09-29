@@ -83,7 +83,7 @@ The standard library APIs you'll reach for most often: file handling, text proce
 
 ### Part 6 — The Environment
 
-The workspace globals you'll use in every REPL session.
+The workspace facades and bindings you'll use in every REPL session.
 
 | # | Chapter | What you'll learn |
 |---|---------|-------------------|
