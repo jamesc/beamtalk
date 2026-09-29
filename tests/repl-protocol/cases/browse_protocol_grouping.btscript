@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3654 / ADR 0127 §12: the System Browser files a method flattened from a
+// `uses:`d protocol under that protocol ("Comparable"), not under a selector-name
+// bucket. `DateTime` uses `Comparable`, so `between:and:` must group there.
+//
+// Drives the `browse-protocols` op term handler directly (the surface the VS Code
+// and LiveView browse panes consume) — the op reads the live xref index, which
+// only a workspace with the stdlib loaded provides.
+
+_r := Erlang beamtalk_repl_ops_browse handle_term: "browse-protocols" params: #{"class" => "DateTime", "side" => "instance"} msg: nil session: nil
+// => _
+
+_value := Erlang erlang element: 2 with: _r
+// => _
+
+_protocols := _value at: "protocols"
+// => _
+
+_names := _protocols collect: [:p | p at: "name"]
+// => _
+
+_names includes: "Comparable"
+// => true
+
+_comparable := _protocols detect: [:p | (p at: "name") =:= "Comparable"]
+// => _
+
+_selectors := (_comparable at: "selectors") collect: [:s | s at: "selector"]
+// => _
+
+_selectors includes: "between:and:"
+// => true

@@ -1262,6 +1262,13 @@ browse_xref() ->
     [
         method_row('increment', 68, indexed, class_body),
         method_row('value', 80, indexed, class_body),
+        %% ADR 0127 §12: flattened from a `uses: Comparable` provision — filed
+        %% under the protocol, not by name. `max:` stands in for an
+        %% `excluding:`-ed selector (never flattened, so no xref row at all)
+        %% and `min:` for a class-body override of a provided selector.
+        protocol_method_row('between:and:', 200, 'Comparable'),
+        protocol_method_row('clampFrom:to:', 202, 'Comparable'),
+        method_row('min:', 204, indexed, class_body),
         %% Name-heuristic buckets (no declared category, not extension):
         method_row('isEmpty', 90, indexed, class_body),
         method_row('asString', 92, indexed, class_body),
@@ -1320,6 +1327,9 @@ method_row(Selector, Line, SourceStatus, Provenance) ->
 %% class-side variant of `method_row/4` for synthetic constructors.
 class_method_row(Selector, Line, SourceStatus, Provenance) ->
     method_xref_entry(true, Selector, Line, SourceStatus, Provenance).
+
+protocol_method_row(Selector, Line, Origin) ->
+    (method_xref_entry(false, Selector, Line, indexed, protocol))#{origin => Origin}.
 
 method_xref_entry(ClassSide, Selector, Line, SourceStatus, Provenance) ->
     #{
@@ -1602,6 +1612,30 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"new:">>)),
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn">>)),
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn:">>))
+        end},
+        {"browse-protocols groups protocol-provided methods under their protocol", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Class, <<"side">> => <<"instance">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            Protocols = maps:get(<<"protocols">>, Value),
+            %% Trait-provided methods land under the protocol name (no
+            %% per-method category is declared, so the name alone).
+            ?assertEqual(<<"Comparable">>, protocol_of(Protocols, <<"between:and:">>)),
+            ?assertEqual(<<"Comparable">>, protocol_of(Protocols, <<"clampFrom:to:">>)),
+            %% A class-body override of a provided selector is filed normally
+            %% (name heuristic), not under the protocol.
+            ?assertNotEqual(<<"Comparable">>, protocol_of(Protocols, <<"min:">>)),
+            %% An `excluding:`-ed selector has no flattened row, so nothing but
+            %% the provided selectors appears under the protocol.
+            [Bucket] = [P || P <- Protocols, maps:get(<<"name">>, P) =:= <<"Comparable">>],
+            Names = [maps:get(<<"selector">>, S) || S <- maps:get(<<"selectors">>, Bucket)],
+            ?assertEqual([<<"between:and:">>, <<"clampFrom:to:">>], lists:sort(Names)),
+            ?assertNot(lists:member(<<"max:">>, Names))
         end},
         {"browse-protocols buckets a fabricated class-side synthetic row as instance creation",
             fun() ->
