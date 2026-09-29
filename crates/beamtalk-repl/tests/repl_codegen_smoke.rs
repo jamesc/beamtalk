@@ -1047,10 +1047,14 @@ fn test_class_method_call_generation() {
     let code2 = generate_repl_expression(&expr2, "repl_eval2")
         .expect("codegen should succeed for non-binding class");
 
-    // ADR 0019: In REPL, all class references check bindings then class_send
+    // ADR 0129 §10: REPL class-side sends go through the class registry only.
     assert!(
-        code2.contains("maps':'find") && code2.contains("class_send"),
-        "Non-binding class should check bindings then class_send. Got:\n{code2}"
+        code2.contains("whereis_class") && code2.contains("class_send"),
+        "Class send should use the class registry then class_send. Got:\n{code2}"
+    );
+    assert!(
+        !code2.contains("maps':'find"),
+        "Class send should not consult session bindings. Got:\n{code2}"
     );
     assert!(
         !code2.contains("persistent_term"),
