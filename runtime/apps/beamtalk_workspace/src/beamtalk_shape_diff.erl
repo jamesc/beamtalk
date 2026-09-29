@@ -278,7 +278,7 @@ suspended_finding(ClassNameBin, ToVersion, #{migrated := Migrated, suspended := 
     Message = unicode:characters_to_binary(
         io_lib:format(
             "~p instance(s) of ~s suspended: migration failed — fix the hook and reload "
-            "again, or Workspace actorAt: kill",
+            "again, or stop them via Node current actors",
             [Count, ClassNameBin]
         )
     ),

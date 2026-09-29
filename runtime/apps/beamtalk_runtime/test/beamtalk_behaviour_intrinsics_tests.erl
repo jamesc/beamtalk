@@ -2504,21 +2504,21 @@ stop_class_actors_with_registry_test_() ->
                 %% Stub registry: answers list_actors with one matching actor and
                 %% {kill, Pid} by stopping it.
                 Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
-                register(beamtalk_actor_registry, Registry),
-                try
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
-                    ),
-                    %% The class is gone from the registry.
-                    ?assertEqual(
-                        undefined, beamtalk_class_registry:whereis_class(ClassName)
-                    )
-                after
-                    catch unregister(beamtalk_actor_registry),
-                    catch exit(Registry, kill),
-                    catch exit(ActorPid, kill)
-                end
+                beamtalk_test_actor_registry:with_registered(Registry, fun() ->
+                    try
+                        ?assertEqual(
+                            nil,
+                            beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                        ),
+                        %% The class is gone from the registry.
+                        ?assertEqual(
+                            undefined, beamtalk_class_registry:whereis_class(ClassName)
+                        )
+                    after
+                        catch exit(Registry, kill),
+                        catch exit(ActorPid, kill)
+                    end
+                end)
             end)
         ]
     end}.
@@ -2571,19 +2571,19 @@ classremovefromsystembyname_with_class_spawned_actor_test_() ->
                 ?assert(is_process_alive(ActorPid)),
 
                 Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
-                register(beamtalk_actor_registry, Registry),
-                try
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
-                    ),
-                    ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
-                    ?assertNot(is_process_alive(ActorPid))
-                after
-                    catch unregister(beamtalk_actor_registry),
-                    catch exit(Registry, kill),
-                    catch exit(ActorPid, kill)
-                end
+                beamtalk_test_actor_registry:with_registered(Registry, fun() ->
+                    try
+                        ?assertEqual(
+                            nil,
+                            beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                        ),
+                        ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
+                        ?assertNot(is_process_alive(ActorPid))
+                    after
+                        catch exit(Registry, kill),
+                        catch exit(ActorPid, kill)
+                    end
+                end)
             end)
         ]
     end}.

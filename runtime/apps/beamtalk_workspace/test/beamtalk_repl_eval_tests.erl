@@ -390,14 +390,14 @@ should_purge_module_undefined_registry_test() ->
 
 should_purge_module_no_actors_test() ->
     %% Start a registry with no actors — module should be purged
-    {ok, Registry} = beamtalk_repl_actors:start_link(registered),
+    {ok, Registry} = gen_server:start_link(beamtalk_repl_actors, [], []),
     Result = beamtalk_repl_eval:should_purge_module(beamtalk_repl_eval_999, Registry),
     gen_server:stop(Registry),
     ?assertEqual(true, Result).
 
 should_purge_module_with_actor_test() ->
     %% Start a registry, register an actor — module should NOT be purged
-    {ok, Registry} = beamtalk_repl_actors:start_link(registered),
+    {ok, Registry} = gen_server:start_link(beamtalk_repl_actors, [], []),
     %% Create a dummy process to act as the actor
     ActorPid = spawn(fun() ->
         receive
@@ -413,7 +413,7 @@ should_purge_module_with_actor_test() ->
 
 should_purge_module_different_module_test() ->
     %% Actor registered for different module — our module should be purged
-    {ok, Registry} = beamtalk_repl_actors:start_link(registered),
+    {ok, Registry} = gen_server:start_link(beamtalk_repl_actors, [], []),
     ActorPid = spawn(fun() ->
         receive
             stop -> ok

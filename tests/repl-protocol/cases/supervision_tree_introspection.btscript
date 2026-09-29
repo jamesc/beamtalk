@@ -3,7 +3,7 @@
 
 // E2E tests for the supervision-tree introspection API (ADR 0092, BT-2433).
 //
-// These require E2E because Workspace processes / ProcessNavigation walk the
+// These require E2E because Node current processes / ProcessNavigation walk the
 // live OTP supervision tree in the running REPL. BUnit runs in compiled code
 // without OTP process registration and cannot drive supervise → snapshot →
 // inspect across REPL turns with workspace variable persistence.
@@ -24,7 +24,7 @@ app := (E2EAppSupervisor supervise) unwrap
 // WORKSPACE PROCESSES — returns a navigable SupervisionTree
 // ===========================================================================
 
-tree := Workspace processes
+tree := Node current processes unwrap
 // => _
 
 tree class
@@ -96,21 +96,21 @@ counters first status isNil
 // => false
 
 // ===========================================================================
-// PROCESSNAVIGATION — default mirrors Workspace processes; system is a superset
+// PROCESSNAVIGATION — default mirrors Node current processes; system is a superset
 // ===========================================================================
 
 ProcessNavigation default tree class
 // => SupervisionTree
 
 // The privileged system scope includes the runtime internals default filters out.
-ProcessNavigation system tree size >= Workspace processes size
+ProcessNavigation system tree size >= Node current processes unwrap size
 // => true
 
 // ===========================================================================
 // SERIALISABLE FORM — the cross-surface wire shape (BT-2431)
 // ===========================================================================
 
-(Workspace processes asDictionaries) isEmpty
+(Node current processes unwrap asDictionaries) isEmpty
 // => false
 
 // ===========================================================================

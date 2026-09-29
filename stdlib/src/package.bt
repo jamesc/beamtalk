@@ -127,6 +127,20 @@ sealed typed Value subclass: Package native: beamtalk_package
   /// The package source description.
   source -> String => self.source
 
+  /// The `[application] supervisor` class this package declares, or `nil`.
+  ///
+  /// Read from the `{supervisor, 'ClassName'}` entry `beamtalk build` writes
+  /// into the package's `.app` env (every package with an `[application]`
+  /// section, path dependencies included). A manifest fact: it is the class,
+  /// not the running process; for that use `Program rootSupervisor`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Package named: "stdlib") supervisorClass
+  /// // => nil
+  /// ```
+  supervisorClass -> Class | Nil => self delegate
+
   /// Human-readable representation.
   ///
   /// ## Examples

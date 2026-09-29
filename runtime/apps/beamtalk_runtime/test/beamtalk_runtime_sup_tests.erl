@@ -34,11 +34,11 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Should have exactly 13 children: xref, class_sup, class_monitor,
-    %% bootstrap, announcements, stdlib, object_instances, subprocess_sup,
+    %% Should have exactly 14 children: xref, class_sup, class_monitor,
+    %% bootstrap, announcements, stdlib, object_instances, actor_registry, subprocess_sup,
     %% reactive_subprocess_sup, trace_store, object_watch, file_handle_registry,
     %% node_monitor
-    ?assertEqual(13, length(ChildSpecs)).
+    ?assertEqual(14, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
@@ -53,6 +53,7 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_announcements, Ids)),
     ?assert(lists:member(beamtalk_stdlib, Ids)),
     ?assert(lists:member(beamtalk_object_instances, Ids)),
+    ?assert(lists:member(beamtalk_actor_registry, Ids)),
     ?assert(lists:member(beamtalk_subprocess_sup, Ids)),
     ?assert(lists:member(beamtalk_reactive_subprocess_sup, Ids)),
     ?assert(lists:member(beamtalk_trace_store, Ids)),
@@ -78,6 +79,7 @@ children_are_workers_test() ->
             worker,
             worker,
             worker,
+            worker,
             supervisor,
             supervisor,
             worker,
@@ -94,7 +96,7 @@ children_are_permanent_test() ->
     %% All children should have permanent restart
     RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
-        lists:duplicate(13, permanent),
+        lists:duplicate(14, permanent),
         RestartTypes
     ).
 
@@ -119,6 +121,7 @@ children_ordered_correctly_test() ->
             beamtalk_announcements,
             beamtalk_stdlib,
             beamtalk_object_instances,
+            beamtalk_actor_registry,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,
             beamtalk_trace_store,
@@ -211,7 +214,7 @@ reactive_subprocess_sup_child_spec_test() ->
 init_returns_proper_format_test() ->
     Result = beamtalk_runtime_sup:init([]),
     ?assertMatch(
-        {ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _, _, _, _, _, _]}}, Result
+        {ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _, _, _, _, _, _, _]}}, Result
     ).
 
 %%% Behavioral tests
@@ -251,6 +254,7 @@ all_children_alive_test() ->
             beamtalk_announcements,
             beamtalk_stdlib,
             beamtalk_object_instances,
+            beamtalk_actor_registry,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,
             beamtalk_trace_store,

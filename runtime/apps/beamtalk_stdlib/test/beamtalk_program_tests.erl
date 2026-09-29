@@ -118,3 +118,35 @@ exit_non_integer_raises_type_error_test_() ->
             beamtalk_program:'exit:'(<<"two">>)
         )
     ]).
+
+%%====================================================================
+%% rootSupervisor (moved from Workspace, BT-3633)
+%%====================================================================
+
+root_supervisor_returns_nil_when_not_registered_test() ->
+    %% rootSupervisor/0 returns nil when no root supervisor has been registered.
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
+    ?assertEqual(nil, beamtalk_program:rootSupervisor()).
+
+root_supervisor_returns_registered_value_test() ->
+    %% rootSupervisor/0 returns the tuple registered via beamtalk_supervisor:register_root/1.
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
+    SupTuple = {beamtalk_supervisor, 'AppSup', 'bt@my_app@app_sup', self()},
+    beamtalk_supervisor:register_root(SupTuple),
+    try
+        ?assertEqual(SupTuple, beamtalk_program:rootSupervisor())
+    after
+        (try
+            ets:delete(beamtalk_root_supervisor)
+        catch
+            _:_ -> ok
+        end)
+    end.

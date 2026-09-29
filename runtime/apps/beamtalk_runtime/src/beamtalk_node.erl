@@ -51,8 +51,17 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
     isCurrent/1,
     ping/1,
     printString/1,
-    shapeManifest/1
+    shapeManifest/1,
+    actors/1,
+    actorAt/2,
+    supervisors/1,
+    shapeSkew/1
 ]).
+
+%% Executed on the *target* node by the erpc-backed introspection queries
+%% (`actors/1`, `actorAt/2`, `supervisors/1`). Exported so `erpc:call/5` can
+%% reach them; not part of the Beamtalk surface.
+-export([local_actors/0, local_actor_at/1, local_supervisors/0]).
 
 %% Runtime helpers (Pid>>node, beamtalk_node_monitor, §9 policy)
 -export([
@@ -217,9 +226,158 @@ shapeManifest(#{'$beamtalk_class' := 'Node', name := Name}) ->
         end,
     beamtalk_result:from_tagged_tuple(Result).
 
+-doc """
+Every live actor on this node (`Node current actors`) or on a peer via `erpc`
+(ADR 0126 §5.1: the returned object references cross the wire as pids), as
+`Result ok: List(Actor)`. Reads the runtime-owned `beamtalk_actor_registry`.
+Distinct from `Actor allRegisteredOn:`, which lists only *name-registered*
+actors. Failures answer `Result error:` (`node_down`, `timeout`,
+`insecure_distribution`, `remote_code_mismatch`), never a raise.
+""".
+-spec actors(t()) -> beamtalk_result:t().
+actors(Self) ->
+    introspect(Self, actors, local_actors, []).
+
+-doc "`Node>>actorAt:` — the live actor with pid string `PidString`, or `Result ok: nil`.".
+-spec actorAt(t(), term()) -> beamtalk_result:t().
+actorAt(Self, PidString) ->
+    introspect(Self, 'actorAt:', local_actor_at, [PidString]).
+
+-doc """
+Supervisors visible on the node: the registered root application supervisor (if
+any) plus those attached to a running workspace via `Workspace startSupervisor:`.
+""".
+-spec supervisors(t()) -> beamtalk_result:t().
+supervisors(Self) ->
+    introspect(Self, supervisors, local_supervisors, []).
+
+-doc """
+The number of classes currently shape-skewed between this VM and `Self`
+(ADR 0126 §8), from `beamtalk_node_monitor`'s tally. `Result ok: 0` for the
+current node; `Result error:` with `kind = node_down` for a peer this VM is not
+connected to.
+""".
+-spec shapeSkew(t()) -> beamtalk_result:t().
+shapeSkew(#{'$beamtalk_class' := 'Node', name := Name}) ->
+    Result =
+        case Name =:= node() of
+            true ->
+                {ok, 0};
+            false ->
+                case lists:member(Name, nodes()) of
+                    true -> {ok, beamtalk_node_monitor:skew_count(Name)};
+                    false -> {error, introspection_error(node_down, shapeSkew, Name, <<>>)}
+                end
+        end,
+    beamtalk_result:from_tagged_tuple(Result).
+
+%%% ============================================================================
+%%% Introspection targets (run on the queried node)
+%%% ============================================================================
+
+-doc "Target of `actors/1`: every live actor on *this* node.".
+-spec local_actors() -> [tuple()].
+local_actors() ->
+    beamtalk_repl_actors:list_objects().
+
+-doc "Target of `actorAt/2`.".
+-spec local_actor_at(term()) -> tuple() | nil.
+local_actor_at(PidString) ->
+    beamtalk_repl_actors:object_at(PidString).
+
+-doc "Target of `supervisors/1`: root application supervisor plus workspace-attached ones.".
+-spec local_supervisors() -> [tuple()].
+local_supervisors() ->
+    Root =
+        case beamtalk_supervisor:get_root() of
+            nil -> [];
+            RootSup -> [RootSup]
+        end,
+    Attached =
+        case erlang:whereis(beamtalk_workspace_sup) of
+            undefined ->
+                [];
+            _ ->
+                lists:filtermap(
+                    fun
+                        ({{user_supervisor, ClassName}, Pid, supervisor, [Module]}) when
+                            is_pid(Pid)
+                        ->
+                            {true, {beamtalk_supervisor, ClassName, Module, Pid}};
+                        (_) ->
+                            false
+                    end,
+                    supervisor:which_children(beamtalk_workspace_sup)
+                )
+        end,
+    Root ++ Attached.
+
 %%% ============================================================================
 %%% Runtime helpers
 %%% ============================================================================
+
+-doc """
+Run `?MODULE:Fun(Args)` on `Self`'s node and answer a `Result`. The current node
+is a direct local call (as in `shapeManifest/1`); a peer is reached via
+`erpc:call/5` after the §9 host policy. `erpc` failures map to `node_down`,
+`timeout`, or — when the peer lacks the target function (mismatched runtime
+versions) — `remote_code_mismatch` (ADR 0126 §7); nothing is raised.
+""".
+-spec introspect(t(), atom(), atom(), list()) -> beamtalk_result:t().
+introspect(#{'$beamtalk_class' := 'Node', name := Name}, Selector, Fun, Args) ->
+    Result =
+        case Name =:= node() of
+            true ->
+                {ok, erlang:apply(?MODULE, Fun, Args)};
+            false ->
+                case connect_policy(Name, tls_distribution()) of
+                    {error, #beamtalk_error{} = Refused} ->
+                        {error, Refused#beamtalk_error{class = 'Node', selector = Selector}};
+                    ok ->
+                        remote_introspect(Name, Selector, Fun, Args)
+                end
+        end,
+    beamtalk_result:from_tagged_tuple(Result).
+
+-spec remote_introspect(node(), atom(), atom(), list()) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+remote_introspect(Name, Selector, Fun, Args) ->
+    try erpc:call(Name, ?MODULE, Fun, Args, ?BT_REMOTE_CALL_TIMEOUT) of
+        Value -> {ok, Value}
+    catch
+        error:{erpc, noconnection} ->
+            {error, introspection_error(node_down, Selector, Name, <<>>)};
+        error:{erpc, timeout} ->
+            {error, introspection_error(timeout, Selector, Name, <<>>)};
+        error:{exception, undef, _Stack} ->
+            {error,
+                introspection_error(
+                    remote_code_mismatch,
+                    Selector,
+                    Name,
+                    <<"the peer runs a different beamtalk_runtime version">>
+                )};
+        error:{erpc, Reason} ->
+            {error, introspection_error(runtime_error, Selector, Name, format_reason(Reason))};
+        error:{exception, Reason, _Stack} ->
+            {error, introspection_error(runtime_error, Selector, Name, format_reason(Reason))};
+        exit:{exception, Reason} ->
+            {error, introspection_error(runtime_error, Selector, Name, format_reason(Reason))}
+    end.
+
+-spec format_reason(term()) -> binary().
+format_reason(Reason) ->
+    iolist_to_binary(io_lib:format("remote query failed: ~tp", [Reason])).
+
+-spec introspection_error(atom(), atom(), node(), binary()) -> #beamtalk_error{}.
+introspection_error(Kind, Selector, Name, Hint) ->
+    Error0 = beamtalk_error:new(Kind, 'Node', Selector),
+    Error1 =
+        case Hint of
+            <<>> -> Error0;
+            _ -> beamtalk_error:with_hint(Error0, Hint)
+        end,
+    beamtalk_error:with_details(Error1, #{node => Name}).
 
 -doc "Build a `Node` value for a node atom (no validation — the atom came from the VM).".
 -spec from_atom(node()) -> t().

@@ -17,7 +17,7 @@
 ///
 /// Scopes:
 /// - `ProcessNavigation default` — the workspace application tree, with runtime
-///   plumbing filtered out. An ADR-0091 Read op, scoped like `Workspace actors`.
+///   plumbing filtered out. An ADR-0091 Read op, scoped like `Node current actors`.
 /// - `ProcessNavigation system` — *everything*, including runtime internals and
 ///   foreign processes. Privileged (ADR 0091): a lateral-movement aid, gated to
 ///   an `eval`-holding role.

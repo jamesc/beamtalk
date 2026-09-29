@@ -255,6 +255,10 @@ Object subclass: Actor
   /// Intended for tooling and REPL discovery; production code should use
   /// `Actor named:` to address known names directly.
   ///
+  /// This lists only **name-registered** actors. To list *every* live actor
+  /// (named or not) use `Node current actors`; every registered actor is also
+  /// in that set.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Actor allRegistered  // => #(an Actor(Counter), an Actor(Logger))
@@ -401,6 +405,9 @@ Object subclass: Actor
   /// instead of this node's. Unlike the local, network-free
   /// `allRegistered`, this answers a `Result` — reaching another node is an
   /// expected-failure operation (ADR 0060).
+  ///
+  /// Like `allRegistered`, this lists only **name-registered** actors. To list
+  /// *every* live actor on `node` (named or not) use `node actors`.
   ///
   /// ## Examples
   /// ```beamtalk

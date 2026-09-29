@@ -289,19 +289,22 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Connected visible cluster nodes with shape-skew counts (ADR 0126 §8/§10,
-  BT-3605). The one shared implementation (`WorkspaceInterface>>nodes`,
-  backed by `beamtalk_node_monitor:connectedWithSkew/0`) reached through the
+  BT-3605). Built from `Node connected` and `Node>>shapeSkew` (backed by
+  `beamtalk_node_monitor:skew_count/1`, BT-3633), reached through the
   same eval seam as `supervision_tree/2` above, so the structured node/skew
   data is identical to the REPL and MCP surfaces. Returns `{:ok, rows}` (a
   list of `%{"name" => ..., "skewCount" => ...}` maps) or `{:error, reason}`.
 
-  Deliberately distinct from `actors/1` (not defined here — `Workspace
+  Deliberately distinct from `actors/1` (not defined here — `Node current
   actors` stays local-node-only by design, see
   docs/development/surface-parity.md).
   """
   @spec nodes(pid()) :: {:ok, term()} | {:error, term()}
   def nodes(session_pid) when is_pid(session_pid) do
-    case eval(session_pid, "Workspace nodes") do
+    case eval(
+           session_pid,
+           "Node connected collect: [:n | \#{#name => n name, #skewCount => (n shapeSkew ifOk: [:c | c] ifError: [:e | 0])}]"
+         ) do
       {:ok, value, _output, _warnings} -> {:ok, value}
       {:error, reason, _output, _warnings} -> {:error, reason}
     end

@@ -150,3 +150,52 @@ TestCase subclass: NodeTest
     result := Node current shapeManifest
     self assert: result isOk
     self assert: result unwrap class equals: Dictionary
+
+  // ===== Node introspection (ADR 0129 amendment, BT-3633) =====
+  // The actor registry is owned by beamtalk_runtime, so these hold under
+  // `beamtalk test` where no workspace runs. Peer/erpc behaviour is covered
+  // by tests/repl-protocol/cases/distribution.btscript.
+  testCurrentActorsIsOkList =>
+    result := Node current actors
+    self assert: result isOk
+    self assert: (result unwrap isKindOf: List)
+
+  testCurrentActorsIncludesSpawnedActor =>
+    c := Counter spawn
+    self assert: (Node current actors unwrap includes: c)
+    self assert: (Node current actorsOf: Counter) unwrap isEmpty not
+    c stop
+
+  testActorsOfFiltersByClass =>
+    c := Counter spawn
+    all := Node current actors unwrap
+    counters := (Node current actorsOf: Counter) unwrap
+    self assert: (counters allSatisfy: [:a |
+      a class includesBehaviour: Counter
+    ])
+    self assert: counters size <= all size
+    c stop
+
+  testActorAtInvalidPidIsNil =>
+    self assert: (Node current actorAt: "invalid") unwrap isNil
+
+  testStoppedActorLeavesActors =>
+    c := Counter spawn
+    c stop
+    self deny: (Node current actors unwrap includes: c)
+
+  testCurrentProcessesIsOkTree =>
+    result := Node current processes
+    self assert: result isOk
+    self assert: (result unwrap isKindOf: SupervisionTree)
+
+  testCurrentSupervisorsIsOkList => self assert: Node current supervisors isOk
+
+  testCurrentShapeSkewIsZero =>
+    self assert: Node current shapeSkew unwrap equals: 0
+
+  testDownPeerAnswersErrorNotRaise =>
+    ghost := (Node named: #'ghost@localhost') unwrap
+    self assert: ghost actors isError
+    self assert: ghost actors error kind equals: #node_down
+    self assert: ghost shapeSkew isError

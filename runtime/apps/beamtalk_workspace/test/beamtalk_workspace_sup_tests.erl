@@ -56,10 +56,10 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 13 children: workspace_meta, workspace_changelog,
+    %% Should have 14 children: workspace_capability_guard, workspace_meta, workspace_changelog,
     %% workspace_signature_store, workspace_shape_store,
     %% workspace_shape_recheck_worker, workspace_findings_store,
-    %% transcript_stream, actor_registry, workspace_bootstrap, repl_server,
+    %% transcript_stream, workspace_bootstrap, repl_server,
     %% idle_monitor, actor_sup, session_sup.
     %% Workspace is a class-side facade (no gen_server).
     %% the class_events / bindings_events / flush_events pub/sub
@@ -71,7 +71,8 @@ children_count_test() ->
     %% workspace_shape_recheck_worker added.
     %% ADR 0108 hot-reload re-check trigger: beamtalk_alias_xref added.
     %% ADR 0129: beamtalk_workspace_capability_guard added (first child).
-    ?assertEqual(15, length(ChildSpecs)).
+    %% BT-3633: the actor registry is owned by beamtalk_runtime_sup.
+    ?assertEqual(14, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -91,7 +92,8 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assertNot(lists:member('bt@stdlib@beamtalk', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace', Ids)),
-    ?assert(lists:member(beamtalk_actor_registry, Ids)),
+    %% The actor registry is owned by beamtalk_runtime_sup (BT-3633).
+    ?assertNot(lists:member(beamtalk_actor_registry, Ids)),
     %% class_events / bindings_events / flush_events retired.
     ?assertNot(lists:member(beamtalk_class_events, Ids)),
     ?assertNot(lists:member(beamtalk_bindings_events, Ids)),
@@ -118,17 +120,9 @@ workspace_meta_spec_test() ->
     ?assertEqual(start_link, Fun),
     ?assert(maps:is_key(workspace_id, Config)).
 
-actor_registry_spec_test() ->
+actor_registry_not_a_workspace_child_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-
-    %% Find actor_registry child spec
-    [RegistrySpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_actor_registry],
-    ?assertEqual(worker, maps:get(type, RegistrySpec)),
-    ?assertEqual(permanent, maps:get(restart, RegistrySpec)),
-    ?assertEqual(
-        {beamtalk_repl_actors, start_link, [registered]},
-        maps:get(start, RegistrySpec)
-    ).
+    ?assertEqual([], [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_actor_registry]).
 
 repl_server_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -232,10 +226,8 @@ bootstrap_after_singletons_before_repl_test() ->
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
-    ActorRegistryIdx = index_of(beamtalk_actor_registry, Ids),
     ReplServerIdx = index_of(beamtalk_repl_server, Ids),
-    %% Bootstrap must come after actor registry (and all actor singletons) but before REPL
-    ?assert(BootstrapIdx > ActorRegistryIdx),
+    ?assert(BootstrapIdx > 0),
     ?assert(BootstrapIdx < ReplServerIdx).
 
 session_sup_before_repl_server_test() ->
@@ -321,7 +313,6 @@ all_children_alive_test() ->
             %% ADR 0108 hot-reload re-check trigger.
             beamtalk_alias_xref,
             beamtalk_transcript_stream,
-            beamtalk_actor_registry,
             beamtalk_workspace_bootstrap,
             beamtalk_repl_server,
             beamtalk_idle_monitor,
@@ -415,17 +406,6 @@ workspace_environment_spec_test() ->
     %% Workspace is a class-side facade — must NOT appear as a supervisor child.
     Specs = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@workspace'],
     ?assertEqual([], Specs).
-
-%%% Registry interleaving test
-
-registry_before_bootstrap_test() ->
-    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
-
-    Ids = [maps:get(id, S) || S <- ChildSpecs],
-    RegistryIdx = index_of(beamtalk_actor_registry, Ids),
-    BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
-    %% Registry must come before bootstrap (bootstrap depends on registry)
-    ?assert(RegistryIdx < BootstrapIdx).
 
 %%% File logger tests
 
@@ -527,11 +507,11 @@ workspace_meta_config_test() ->
 %%% exact child-id list is asserted below, so a child added to (or dropped
 %%% from) a mode shows up here.
 
-%% Ids common to every mode, in start order: meta, changelog, the actor
-%% registry, bootstrap, actor_sup.
+%% Ids common to every mode, in start order: meta, changelog, bootstrap,
+%% actor_sup.
 base_child_ids() ->
     [beamtalk_workspace_capability_guard, beamtalk_workspace_meta, beamtalk_workspace_changelog] ++
-        [beamtalk_actor_registry, beamtalk_workspace_bootstrap, beamtalk_actor_sup].
+        [beamtalk_workspace_bootstrap, beamtalk_actor_sup].
 
 live_development_child_ids() ->
     [
@@ -861,8 +841,7 @@ run_mode_required_children_present_test() ->
     Ids = child_ids(run_mode_config()),
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
     ?assert(lists:member(beamtalk_workspace_bootstrap, Ids)),
-    ?assert(lists:member(beamtalk_actor_sup, Ids)),
-    ?assert(lists:member(beamtalk_actor_registry, Ids)).
+    ?assert(lists:member(beamtalk_actor_sup, Ids)).
 
 %%% Mode passed to workspace_meta
 

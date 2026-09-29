@@ -26,19 +26,6 @@ Covers:
 make_msg(Op, Id, Session) ->
     {protocol_msg, Op, Id, Session, #{}}.
 
-stop_registry_if_running() ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            ok;
-        Old ->
-            Ref = erlang:monitor(process, Old),
-            catch gen_server:stop(Old),
-            receive
-                {'DOWN', Ref, process, Old, _} -> ok
-            after 1000 -> ok
-            end
-    end.
-
 %%====================================================================
 %% handle/4 — invalid / unknown pid paths
 %%====================================================================
@@ -87,30 +74,27 @@ describe_ops_returns_pid_stats_descriptor_test() ->
 %%====================================================================
 
 handle_term_pid_stats_live_actor_returns_value_map_test() ->
-    stop_registry_if_running(),
-    {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
-    ),
-    {ok, ActorPid} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-    PidBin = list_to_binary(pid_to_list(ActorPid)),
-    Msg = make_msg(<<"pid-stats">>, <<"s-live">>, undefined),
-    try
-        Result = beamtalk_repl_ops_watch:handle_term(
-            <<"pid-stats">>, #{<<"actor">> => PidBin}, Msg, self()
-        ),
-        ?assertMatch({value, M} when is_map(M), Result),
-        {value, Stats} = Result,
-        ?assertEqual(true, maps:get(<<"alive">>, Stats)),
-        ?assertEqual(PidBin, maps:get(<<"pid">>, Stats)),
-        ?assert(is_integer(maps:get(<<"queue_depth">>, Stats))),
-        ?assert(is_integer(maps:get(<<"memory_bytes">>, Stats))),
-        ?assert(is_integer(maps:get(<<"reductions">>, Stats))),
-        ?assert(maps:is_key(<<"status">>, Stats))
-    after
-        catch gen_server:stop(ActorPid),
-        catch gen_server:stop(RegistryPid)
-    end.
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+        PidBin = list_to_binary(pid_to_list(ActorPid)),
+        Msg = make_msg(<<"pid-stats">>, <<"s-live">>, undefined),
+        try
+            Result = beamtalk_repl_ops_watch:handle_term(
+                <<"pid-stats">>, #{<<"actor">> => PidBin}, Msg, self()
+            ),
+            ?assertMatch({value, M} when is_map(M), Result),
+            {value, Stats} = Result,
+            ?assertEqual(true, maps:get(<<"alive">>, Stats)),
+            ?assertEqual(PidBin, maps:get(<<"pid">>, Stats)),
+            ?assert(is_integer(maps:get(<<"queue_depth">>, Stats))),
+            ?assert(is_integer(maps:get(<<"memory_bytes">>, Stats))),
+            ?assert(is_integer(maps:get(<<"reductions">>, Stats))),
+            ?assert(maps:is_key(<<"status">>, Stats))
+        after
+            catch gen_server:stop(ActorPid)
+        end
+    end).
 
 %%====================================================================
 %% pid_stats/1 — dead pid returns dead-stats map (dead_stats/1 body)

@@ -217,7 +217,7 @@ supervisor = "AppSupervisor"
 ```
 
 This lets `beamtalk run` start the entire tree as a proper OTP application
-rather than running an imperative script.  `Workspace supervisor` returns the
+rather than running an imperative script.  `Program rootSupervisor` returns the
 live root supervisor instance.
 
 ## Key Takeaways

@@ -58,8 +58,8 @@ Workspace testClasses   // list TestCase subclasses
 ### Working with actors
 
 ```beamtalk
-Workspace actors              // list all live actors
-Workspace actorsOf: Counter   // find actors of a specific class
+Node current actors unwrap              // list all live actors
+(Node current actorsOf: Counter) unwrap   // find actors of a specific class
 ```
 
 ### Loading files
@@ -138,8 +138,8 @@ Transcript clear            → nil (empties buffer; no_workspace outside the RE
 ```text
 Workspace classes            → List of loaded classes
 Workspace testClasses        → List of TestCase subclasses
-Workspace actors             → List of live actors
-Workspace actorsOf: aClass   → List of actors of that class
+Node current actors             → Result(List of live actors)
+Node current actorsOf: aClass   → Result(List of actors of that class)
 Workspace load: path         → compile and load a .bt file
 Workspace test               → run all test classes
 Workspace test: testClass    → run a specific test class
