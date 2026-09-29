@@ -835,33 +835,11 @@ fn merge_dependency_infos(
 pub(crate) fn diagnostic_summary_to_json(
     summary: &beamtalk_core::source_analysis::DiagnosticSummary,
 ) -> serde_json::Value {
-    use beamtalk_core::source_analysis::category_name;
-
-    let totals = summary.totals_by_severity();
-    let mut by_category = serde_json::Map::new();
-    for (cat, counts) in &summary.by_category {
-        by_category.insert(
-            category_name(*cat).to_string(),
-            serde_json::json!({
-                "error": counts.error,
-                "warning": counts.warning,
-                "lint": counts.lint,
-                "hint": counts.hint,
-                "total": counts.total(),
-            }),
-        );
-    }
-
     serde_json::json!({
         "type": "summary",
         "files_checked": summary.files_checked,
-        "totals_by_severity": {
-            "error": totals.error,
-            "warning": totals.warning,
-            "lint": totals.lint,
-            "hint": totals.hint,
-        },
-        "totals_by_category": by_category,
+        "totals_by_severity": summary.severity_totals_json(),
+        "totals_by_category": summary.categories_to_json_map(),
         "total": summary.total(),
     })
 }
