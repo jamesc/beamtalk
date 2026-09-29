@@ -12,7 +12,7 @@ This module provides a high-level API for querying workspace state.
 It delegates to beamtalk_workspace_meta for workspace metadata.
 """.
 
--export([status/0, resolve_name/2, resolve_class_reference/2, resolve_singleton_instance/1]).
+-export([status/0, resolve_name/2, resolve_class_reference/2]).
 -export([raise_undefined_variable/1]).
 
 -doc """
@@ -45,24 +45,12 @@ Resolve a capitalised class reference not found in the session locals (ADR 0081)
 
 The REPL compiler emits this for a `ClassReference` after a locals miss.
 Delegates to `beamtalk_workspace_interface_primitives:resolve_class_reference/2`,
-which reuses resolve_name/2's singleton + class tiers but raises class_not_found
+which reuses resolve_name/2's class tier but raises class_not_found
 (not undefined_variable) for a genuinely unknown class.
 """.
 -spec resolve_class_reference(map(), atom()) -> term().
 resolve_class_reference(Locals, Name) ->
     beamtalk_workspace_interface_primitives:resolve_class_reference(Locals, Name).
-
--doc """
-Resolve a singleton binding name to its live instance, or `error` (ADR 0081).
-
-The REPL compiler emits this on the miss branch of a binding-aware
-class-send so a message to a singleton receiver (`Workspace bind:as:`) reaches
-the live instance. Delegates to
-`beamtalk_workspace_interface_primitives:resolve_singleton_instance/1`.
-""".
--spec resolve_singleton_instance(atom()) -> {ok, term()} | error.
-resolve_singleton_instance(Name) ->
-    beamtalk_workspace_interface_primitives:resolve_singleton_instance(Name).
 
 -doc """
 Return a summary of the current workspace state.

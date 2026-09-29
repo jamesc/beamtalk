@@ -485,7 +485,7 @@ console_child_specs(#{tcp_port := TcpPort, workspace_id := WorkspaceId, bind_add
     %% (ADR 0129 §5), so it starts only alongside the REPL server, never in
     %% `run` mode. It keeps its registered name; `Transcript` output routes to
     %% it only while it is registered and is a `TranscriptStream`.
-    [singleton_to_child_spec(S) || S <- beamtalk_workspace_config:singletons()] ++
+    [transcript_child_spec()] ++
         [
             %% Session supervisor (one child per REPL connection).
             %%
@@ -579,15 +579,20 @@ actor_registry_child_specs() ->
         }
     ].
 
--doc "Convert a singleton config to a supervisor child spec.".
-singleton_to_child_spec(#{registered_name := RegName, module := Module, start_args := Args}) ->
+-doc """
+Child spec for the REPL-only `'Transcript'` process: a
+`beamtalk_transcript_stream` registered as `'Transcript'` with a 1000-entry
+buffer.
+""".
+-spec transcript_child_spec() -> supervisor:child_spec().
+transcript_child_spec() ->
     #{
-        id => Module,
-        start => {Module, start_link, [{local, RegName} | Args]},
+        id => beamtalk_transcript_stream,
+        start => {beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]},
         restart => permanent,
         shutdown => 5000,
         type => worker,
-        modules => [Module]
+        modules => [beamtalk_transcript_stream]
     }.
 
 %%% File Logging

@@ -542,11 +542,10 @@ live_development_child_ids() ->
         beamtalk_workspace_findings_store
     ].
 
-%% The `'Transcript'` stream (beamtalk_workspace_config:singletons/0) starts
+%% The `'Transcript'` stream (beamtalk_transcript_stream) starts
 %% alongside the REPL server only (ADR 0129 §5), never in `run` mode.
 console_child_ids() ->
-    [maps:get(module, S) || S <- beamtalk_workspace_config:singletons()] ++
-        [beamtalk_session_sup, beamtalk_repl_server].
+    [beamtalk_transcript_stream, beamtalk_session_sup, beamtalk_repl_server].
 
 child_ids(Config) ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
