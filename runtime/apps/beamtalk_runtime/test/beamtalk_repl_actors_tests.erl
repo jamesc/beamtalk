@@ -188,7 +188,13 @@ registry_termination_leaves_actors_alive_test() ->
     ?assert(is_process_alive(Actor1)),
     ?assert(is_process_alive(Actor2)),
     ?assert(is_process_alive(Actor3)),
-    lists:foreach(fun(P) -> unlink(P), exit(P, kill) end, [Actor1, Actor2, Actor3]),
+    lists:foreach(
+        fun(P) ->
+            unlink(P),
+            exit(P, kill)
+        end,
+        [Actor1, Actor2, Actor3]
+    ),
 
     process_flag(trap_exit, OldTrapExit).
 
@@ -380,7 +386,9 @@ unknown_info_is_ignored_test() ->
 %%% ===========================================================================
 
 track_spawned_registers_actor_with_resolved_class_test() ->
-    {ok, RegistryPid} = gen_server:start_link({local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
     {ok, ActorPid} = test_counter:start_link(0),
     try
         ok = beamtalk_repl_actors:track_spawned(ActorPid, 'Counter'),
@@ -393,7 +401,9 @@ track_spawned_registers_actor_with_resolved_class_test() ->
     end.
 
 track_spawned_is_idempotent_with_explicit_register_test() ->
-    {ok, RegistryPid} = gen_server:start_link({local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
     {ok, ActorPid} = test_counter:start_link(0),
     try
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -409,7 +419,9 @@ track_spawned_without_registry_is_noop_test() ->
     ?assertEqual(ok, beamtalk_repl_actors:track_spawned(self(), 'Counter')).
 
 list_objects_and_object_at_wrap_live_actors_test() ->
-    {ok, RegistryPid} = gen_server:start_link({local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
     {ok, ActorPid} = test_counter:start_link(0),
     try
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),

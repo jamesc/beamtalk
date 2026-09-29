@@ -260,34 +260,34 @@ init(Config) ->
             %% stream is a REPL-server child (see console_child_specs/1) and
             %% `Workspace` is a class-side facade with no process.
 
-                %% The bespoke class-loaded / bindings-changed /
-                %% flush-completion pub/sub gen_servers were retired. Those
-                %% workspace push streams now ride the SystemAnnouncer bus
-                %% (`beamtalk_announcements`, started under `beamtalk_runtime_sup`)
-                %% and are subscribed through `beamtalk_repl_subscriptions`.
+            %% The bespoke class-loaded / bindings-changed /
+            %% flush-completion pub/sub gen_servers were retired. Those
+            %% workspace push streams now ride the SystemAnnouncer bus
+            %% (`beamtalk_announcements`, started under `beamtalk_runtime_sup`)
+            %% and are subscribed through `beamtalk_repl_subscriptions`.
 
-                %% Bootstrap worker — activates compiled project modules.
-                %% Must start before REPL server accepts connections.
-                #{
-                    id => beamtalk_workspace_bootstrap,
-                    start => {beamtalk_workspace_bootstrap, start_link, [ProjectPath]},
-                    restart => permanent,
-                    shutdown => 5000,
-                    type => worker,
-                    modules => [beamtalk_workspace_bootstrap]
-                },
+            %% Bootstrap worker — activates compiled project modules.
+            %% Must start before REPL server accepts connections.
+            #{
+                id => beamtalk_workspace_bootstrap,
+                start => {beamtalk_workspace_bootstrap, start_link, [ProjectPath]},
+                restart => permanent,
+                shutdown => 5000,
+                type => worker,
+                modules => [beamtalk_workspace_bootstrap]
+            },
 
-                %% Actor supervisor (shared across all sessions)
-                #{
-                    id => beamtalk_actor_sup,
-                    start => {beamtalk_actor_sup, start_link, []},
-                    restart => permanent,
-                    % Give actors time to shut down gracefully
-                    shutdown => infinity,
-                    type => supervisor,
-                    modules => [beamtalk_actor_sup]
-                }
-            ] ++
+            %% Actor supervisor (shared across all sessions)
+            #{
+                id => beamtalk_actor_sup,
+                start => {beamtalk_actor_sup, start_link, []},
+                restart => permanent,
+                % Give actors time to shut down gracefully
+                shutdown => infinity,
+                type => supervisor,
+                modules => [beamtalk_actor_sup]
+            }
+        ] ++
             repl_child_specs(Mode, #{
                 console => Console,
                 tcp_port => TcpPort,

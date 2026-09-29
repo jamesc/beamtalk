@@ -370,7 +370,17 @@ mod tests {
         ];
         let classes = vec![];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[], &[], None);
+        let result = format_app_file(
+            &manifest,
+            &modules,
+            &classes,
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+        );
 
         assert!(result.contains("{application, my_app, ["));
         assert!(result.contains("{description, \"A test app\"}"));
@@ -407,7 +417,17 @@ mod tests {
             type_params: vec![],
         }];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[], &[], None);
+        let result = format_app_file(
+            &manifest,
+            &modules,
+            &classes,
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+        );
 
         assert!(
             result.contains("name => 'Counter'"),
@@ -541,7 +561,17 @@ mod tests {
     #[test]
     fn test_format_app_file_records_supervisor_in_env() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let with = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], Some("AppSup"));
+        let with = format_app_file(
+            &manifest,
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            Some("AppSup"),
+        );
         assert!(with.contains("{supervisor, 'AppSup'}"), "got: {with}");
         let without = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
         assert!(!without.contains("{supervisor,"));
