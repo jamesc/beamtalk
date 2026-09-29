@@ -70,7 +70,8 @@ children_count_test() ->
     %% ADR 0105 Phase 2: workspace_shape_store and
     %% workspace_shape_recheck_worker added.
     %% ADR 0108 hot-reload re-check trigger: beamtalk_alias_xref added.
-    ?assertEqual(14, length(ChildSpecs)).
+    %% ADR 0129: beamtalk_workspace_capability_guard added (first child).
+    ?assertEqual(15, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -306,6 +307,8 @@ all_children_alive_test() ->
         %% class_events / bindings_events / flush_events retired (those
         %% push streams now ride the SystemAnnouncer bus).
         ExpectedIds = [
+            %% ADR 0129: clears node capabilities on shutdown.
+            beamtalk_workspace_capability_guard,
             beamtalk_workspace_meta,
             beamtalk_workspace_changelog,
             %% ADR 0105 Phase 1.

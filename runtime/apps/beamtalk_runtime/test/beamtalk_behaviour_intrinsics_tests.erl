@@ -36,6 +36,17 @@ setup() ->
     beamtalk_class_registry:ensure_hierarchy_table(),
     [].
 
+%% Like setup/0, but records workspace capabilities so the Behaviour
+%% workspace guards (beamtalk_capability:require_workspace/1) pass.
+setup_workspace() ->
+    Result = setup(),
+    ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
+    Result.
+
+teardown_workspace(ClassNames) ->
+    ok = beamtalk_capability:clear(),
+    teardown(ClassNames).
+
 teardown(ClassNames) ->
     lists:foreach(
         fun(ClassName) ->
@@ -2225,7 +2236,7 @@ bt1982_metaclass_all_methods_returns_list_test_() ->
 %% (binary). compile:source: form (durable) names compile:source: in the
 %% message — covers the durable intent_selector/1 clause.
 compile_source_non_binary_raises_type_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BTCompileSrcBadType', #{}, #{}),
@@ -2255,7 +2266,7 @@ compile_source_non_binary_raises_type_error_test_() ->
 %% type_error — covers the ephemeral intent_selector/1 clause and the
 %% classTryCompileSource/3 entry point.
 try_compile_source_non_binary_raises_type_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BTTryCompileSrcBadType', #{}, #{}),
@@ -2285,7 +2296,7 @@ try_compile_source_non_binary_raises_type_error_test_() ->
 %% the erlang:apply into beamtalk_repl_eval:compile_method/6, and the
 %% {error, Reason} -> compile_failed branch.
 compile_source_invalid_body_raises_compile_failed_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BTCompileSrcInvalid', #{}, #{}),
@@ -2315,7 +2326,7 @@ compile_source_invalid_body_raises_compile_failed_test_() ->
 %% then drive a (failing) compile. The compile still fails (invalid body) but
 %% the agent author-context branch is exercised on the way.
 compile_source_agent_author_context_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BTCompileSrcAgent', #{}, #{}),
@@ -2960,10 +2971,8 @@ class_remove_selector_class_side_extension_test_() ->
         ]
     end}.
 
-%% Local-method removal without a workspace hits the error:undef catch in
-%% remove_local_method/3 (lines 907-908), producing a runtime_error.  This
-%% path is documented in the source as the expected behaviour when the workspace
-%% app is not running.
+%% Local-method removal on a node with no recorded workspace capabilities is
+%% refused by beamtalk_capability:require_workspace/1 with a no_workspace error.
 class_remove_selector_local_method_no_workspace_raises_runtime_error_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -2975,7 +2984,7 @@ class_remove_selector_local_method_no_workspace_raises_runtime_error_test_() ->
                 ),
                 try
                     ?assertError(
-                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_workspace}},
                         beamtalk_behaviour_intrinsics:classRemoveSelector(
                             ClassObj, 'localTestMethod3186'
                         )
@@ -3068,7 +3077,7 @@ class_remove_selector_non_protocol_provided_still_removable_test_() ->
                 %% answer `nil`, not crash, and the refusal must not fire.
                 try
                     ?assertError(
-                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_workspace}},
                         beamtalk_behaviour_intrinsics:classRemoveSelector(
                             ClassObj, 'ordinaryMethod3592'
                         )
