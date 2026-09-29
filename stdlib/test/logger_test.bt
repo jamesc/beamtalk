@@ -6,6 +6,9 @@
 
 TestCase subclass: LoggerTest
 
+  // The tests mutate the node-wide log level, so they must not run concurrently.
+  class serial -> Boolean => true
+
   testInfoReturnsNil =>
     // info: returns nil
     self assert: (Logger info: "test info message") equals: nil
@@ -56,12 +59,19 @@ TestCase subclass: LoggerTest
       self assert: Logger logLevel equals: #notice
     ]
       ensure: [
-        // Restore the level BUnit started with (test sys.config uses #error),
-        // even if the assertion above fails. Not asserted: the `#error` atom
-        // is coerced to a Result on return.
-        Logger logLevel: #error
+        // Restore the level BUnit started with, even if the assertion above fails.
+        Logger logLevel: saved
       ]
     self assert: (saved isKindOf: Symbol)
+
+  testLogLevelErrorIsSymbol =>
+    saved := Logger logLevel
+    [
+      Logger logLevel: #error
+      self assert: Logger logLevel equals: #error
+      Logger logLevel: Logger logLevel
+      self assert: Logger logLevel equals: #error
+    ] ensure: [Logger logLevel: saved]
 
   testLogFormatIsTextOrJson =>
     fmt := Logger logFormat

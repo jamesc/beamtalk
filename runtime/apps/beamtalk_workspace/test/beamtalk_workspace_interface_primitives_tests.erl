@@ -310,6 +310,21 @@ bind_and_unbind_test_() ->
                             ?assertEqual(name_conflict, Err#beamtalk_error.kind)
                     end
                 end},
+                {"bind:as: tolerates a class dying mid-call (BT-3658)", fun() ->
+                    Name = 'BT3658DyingBindName',
+                    Dying = spawn(fun() ->
+                        receive
+                            {'$gen_call', _From, _Req} -> exit(shutdown)
+                        end
+                    end),
+                    true = register(beamtalk_class_registry:registry_name(Name), Dying),
+                    ?assertEqual(
+                        nil,
+                        beamtalk_workspace_interface_primitives:dispatch(
+                            'bind:as:', [42, Name], Self
+                        )
+                    )
+                end},
                 {"bind:as: raises type_error for non-atom name", fun() ->
                     try
                         beamtalk_workspace_interface_primitives:dispatch(

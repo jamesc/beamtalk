@@ -58,7 +58,7 @@ Debug targets are tracked in an ETS table so that
 -define(TRANSCRIPT_DOMAIN, [beamtalk, user, transcript]).
 
 -define(VALID_LEVELS, [
-    emergency, alert, critical, error, warning, notice, info, debug
+    emergency, alert, critical, error, warning, notice, info, debug, all, none
 ]).
 
 -define(VALID_FORMATS, [text, json]).

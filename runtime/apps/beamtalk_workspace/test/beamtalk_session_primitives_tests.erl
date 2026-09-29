@@ -449,7 +449,7 @@ resolve_for_finds_local_test_() ->
 %% bindingsView/0 — workspace scope read + write-through
 %%====================================================================
 
-globals_view_write_through_test_() ->
+bindings_view_write_through_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin

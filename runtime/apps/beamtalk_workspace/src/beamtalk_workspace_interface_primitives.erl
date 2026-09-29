@@ -2094,7 +2094,15 @@ user-defined classes remain bindable (with a reload warning).
 is_stdlib_class_name(Name) ->
     case beamtalk_class_registry:whereis_class(Name) of
         Pid when is_pid(Pid) ->
-            beamtalk_class_registry:is_stdlib_module(beamtalk_object_class:module_name_safe(Pid));
+            %% The class may die between `whereis_class/1` and the call (hot
+            %% reload, `removeFromSystem`): treat that as "no longer a class".
+            try
+                beamtalk_class_registry:is_stdlib_module(
+                    beamtalk_object_class:module_name_safe(Pid)
+                )
+            catch
+                exit:_ -> false
+            end;
         undefined ->
             false
     end.
