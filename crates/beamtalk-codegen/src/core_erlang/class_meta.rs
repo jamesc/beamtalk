@@ -43,6 +43,12 @@ pub(crate) struct MetaProvenance<'a> {
     pub beamtalk_version: Option<&'a str>,
     /// The producing compound OTP version (`<release>-<erts>`).
     pub otp_release: Option<&'a str>,
+    /// ADR 0129 Phase 0b: this class's direct-call-eligible class methods as
+    /// `(raw selector, safe function name)` pairs, computed once by
+    /// `compute_direct_call_eligible` (the single source for the rule). Emitted
+    /// as `'direct_class_methods'` so the runtime never re-derives eligibility.
+    /// Empty for classes with none (and for native facades).
+    pub direct_class_methods: &'a [(String, String)],
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -382,6 +388,7 @@ impl CoreErlangGenerator {
             shape_migrations_doc,
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
+            Self::meta_direct_class_methods_entry(provenance.direct_class_methods),
             extra_entries,
             "\n    }~",
         ]
@@ -413,6 +420,25 @@ impl CoreErlangGenerator {
         parts.push(Document::Str("}~"));
 
         docvec![",\n      'shape_migrations' => ", Document::Vec(parts)]
+    }
+
+    /// ADR 0129 Phase 0b: `'direct_class_methods' => ~{Selector => SafeFn}~`,
+    /// including its leading separator. Always emitted (`~{}~` when empty) so
+    /// the runtime can distinguish "no direct methods" from an older module.
+    fn meta_direct_class_methods_entry(entries: &[(String, String)]) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{")];
+        for (i, (selector, safe_fn)) in entries.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec![
+                leaf::atom(selector.clone()),
+                " => ",
+                leaf::atom(safe_fn.clone()),
+            ]);
+        }
+        parts.push(Document::Str("}~"));
+        docvec![",\n      'direct_class_methods' => ", Document::Vec(parts)]
     }
 
     /// ADR 0098 Phase 3: emit the `beamtalk_version` / `otp_release` provenance

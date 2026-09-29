@@ -125,7 +125,8 @@ let _BinLeft1 = Self in let _BinRight2 = 2 in case call 'erlang':'is_number'(_Bi
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -160,7 +161,8 @@ let _BinLeft1 = Self in let _BinRight2 = 2 in case call 'erlang':'is_number'(_Bi
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
 
 end

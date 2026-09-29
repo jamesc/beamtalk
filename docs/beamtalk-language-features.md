@@ -2951,7 +2951,7 @@ MyClass performLocally: #add:to: withArguments: #(3, 7)
 
 ### Passing Blocks Through Class Methods
 
-Because a class method runs in the class object's gen_server process, a block passed *into* one runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
+Unless the method is direct-called (see below), a class method runs in the class object's gen_server process, so a block passed *into* one runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
 
 ```beamtalk
 Value subclass: Driver
@@ -2964,6 +2964,8 @@ Arguments and return values cross that boundary as copies, so blocks that comput
 
 - **Process-local side effects.** A block that writes to the process dictionary (`Erlang erlang put:value:`), reads `self()`, or otherwise depends on running in a particular process affects the *class* process. The caller sees none of it.
 - **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form.
+
+**When there is no hop (ADR 0129 Phase 0b).** The process hop applies only to classes with class state (`classState:`), or to methods that are not `class sealed`. A `class sealed` method of a sealed class with no `classState:` is called directly, in the caller's process, however it is reached: statically, through a variable, `perform:`, `Beamtalk classNamed:`, or a class passed as an argument. For those methods a block runs where it was written, `self()` and the process dictionary are the caller's, there is no `class_send` timeout, and messaging the same class from inside does not raise `dispatch_error`. Eligibility is computed once by the compiler and emitted as `direct_class_methods` in `__beamtalk_meta/0`; `new`/`new:` and the supervisor `startLink` family are never direct.
 
 Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop, and a class variable mutated *before* the block escaped survives the unwind along with it (ADR 0110). A genuine error after the mutation still reverts it, exactly as before.
 

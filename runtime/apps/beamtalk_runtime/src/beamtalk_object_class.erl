@@ -751,6 +751,7 @@ init({ClassName, ClassInfo}) ->
     %% instantiation intrinsics can look it up by class name too, without a
     %% gen_server hop.
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
+    sync_direct_class_methods(ClassName, Meta),
 
     %% Clear any runtime class-method funs left behind by a *hard*
     %% crash of the previous incarnation of this class process — a hard crash
@@ -1137,6 +1138,9 @@ handle_call(
                 NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
             ),
             seed_runtime_class_methods(NewName, ClassMethods),
+            beamtalk_class_metadata:put_direct_class_methods(
+                NewName, beamtalk_class_metadata:lookup_direct_class_methods(OldName)
+            ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
             beamtalk_class_metadata:delete(OldName),
@@ -2151,6 +2155,23 @@ sync_identity(ClassName, Module, Superclass, IsAbstract, Selectors, Mode) ->
     end.
 
 -doc """
+Publish the compiled `direct_class_methods` eligibility set (ADR 0129 Phase 0b).
+
+Copies `direct_class_methods` from `Meta` into the unified metadata row, where
+`beamtalk_class_dispatch:class_send/3` reads it without a gen_server hop. Meta
+without the key (dynamic classes, older modules) clears the set, so a reload
+that makes a class ineligible takes effect immediately.
+""".
+-spec sync_direct_class_methods(class_name(), map()) -> ok.
+sync_direct_class_methods(ClassName, Meta) ->
+    Direct =
+        case maps:get(direct_class_methods, Meta, #{}) of
+            M when is_map(M) -> M;
+            _ -> #{}
+        end,
+    beamtalk_class_metadata:put_direct_class_methods(ClassName, Direct).
+
+-doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
 
 ADR 0084: picks out the entries that carry a `block` (runtime/builder
@@ -2355,6 +2376,10 @@ apply_class_info(State, ClassInfo) ->
     %% none). Mirrors sync_identity/6 immediately above.
     beamtalk_class_registry:record_backing_module_entry(State#class_state.name, Meta, self()),
     seed_runtime_class_methods(State#class_state.name, NewClassMethods),
+    %% ADR 0129 Phase 0b: refresh the direct-dispatch eligibility set from the
+    %% fresh meta — a reload can add or drop eligible selectors (or make the
+    %% class ineligible entirely, e.g. by adding `classState:`).
+    sync_direct_class_methods(State#class_state.name, Meta),
 
     State#class_state{
         module = NewModule,

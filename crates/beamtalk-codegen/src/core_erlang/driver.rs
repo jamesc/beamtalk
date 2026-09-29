@@ -277,8 +277,7 @@ pub fn generate_module_with_warnings(
     // For sealed classes with no class variables, their class methods can be called
     // directly (bypassing gen_server dispatch). This is safe because the methods
     // are pure functions that don't mutate class state.
-    generator.direct_call_eligible =
-        CoreErlangGenerator::compute_direct_call_eligible(&hierarchy, &generator);
+    generator.set_direct_call_eligible(&hierarchy, module);
 
     // Stash the hierarchy for use by actor callback generation
     // (auto-chained initialize dispatch in handle_continue and inherited
@@ -310,6 +309,42 @@ pub fn generate(module: &Module) -> Result<String> {
 }
 
 impl CoreErlangGenerator {
+    /// Computes `direct_call_eligible` and, from it, the compiled class's own
+    /// `own_direct_class_methods` (ADR 0129 Phase 0b) so the runtime's dynamic
+    /// `class_send/3` shares the rule via `__beamtalk_meta/0`.
+    fn set_direct_call_eligible(
+        &mut self,
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+        module: &Module,
+    ) {
+        self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
+        if let Some(class) = module.classes.first() {
+            self.own_direct_class_methods = self.own_direct_class_methods_for(&class.name.name);
+        }
+    }
+
+    /// A class's direct-call-eligible class methods as sorted
+    /// `(raw selector, safe function name)` pairs, read from the already
+    /// computed `direct_call_eligible` (ADR 0129 Phase 0b) — the value baked
+    /// into `__beamtalk_meta/0` as `direct_class_methods`.
+    fn own_direct_class_methods_for(&self, class_name: &str) -> Vec<(String, String)> {
+        let Some(info) = self.direct_call_eligible.get(class_name) else {
+            return Vec::new();
+        };
+        let mut own: Vec<(String, String)> = info
+            .selectors
+            .iter()
+            .map(|sel| {
+                (
+                    sel.clone(),
+                    super::selector_mangler::safe_class_method_fn_name(sel),
+                )
+            })
+            .collect();
+        own.sort();
+        own
+    }
+
     /// Determines if a class is an actor (process-based) or value type (plain term).
     /// Computes the set of sealed classes whose class methods are eligible
     /// for direct calls (bypassing `gen_server` dispatch).

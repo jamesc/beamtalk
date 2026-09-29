@@ -19,6 +19,7 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
 
 -export([
     class_testSuccess/2,
+    class_testSelf/2,
     class_testClassVar/2,
     'class_testWith:'/3,
     class_testInternalUndef/2,
@@ -39,6 +40,10 @@ Zero-argument class method that returns a plain value.
 Exercises the `Result -> {reply, {ok, Result}, ClassVars}` path in
 invoke_class_method.
 """.
+-spec class_testSelf(term(), map()) -> pid().
+class_testSelf(_ClassSelf, _ClassVars) ->
+    self().
+
 -spec class_testSuccess(term(), map()) -> term().
 class_testSuccess(_ClassSelf, _ClassVars) ->
     test_success_result.

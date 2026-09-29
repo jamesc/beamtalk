@@ -275,6 +275,10 @@ pub struct CoreErlangGenerator {
     /// hierarchy in `generate_module_with_warnings`.
     pub(in crate::core_erlang) direct_call_eligible:
         std::collections::HashMap<String, DirectCallClassInfo>,
+    /// ADR 0129 Phase 0b: the class being compiled's own direct-call-eligible
+    /// class methods as sorted `(raw selector, safe fn name)` pairs — a view of
+    /// `direct_call_eligible`, baked into `__beamtalk_meta/0`.
+    pub(in crate::core_erlang) own_direct_class_methods: Vec<(String, String)>,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
     /// Class/actor-specific codegen state. `Some` when compiling a class.
@@ -375,6 +379,7 @@ impl CoreErlangGenerator {
             current_method_selector: None,
             is_server_subclass: false,
             direct_call_eligible: std::collections::HashMap::new(),
+            own_direct_class_methods: Vec::new(),
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),

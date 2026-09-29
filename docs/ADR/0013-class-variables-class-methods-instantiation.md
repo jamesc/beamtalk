@@ -213,6 +213,8 @@ cls methods                           // → gen_server:call(ClassPid, methods)
 
 **Future optimization**: The dynamic path can be made ~10x faster for methods that don't access class variables. The `#beamtalk_object{}` record already carries the module name — extract it and use `apply(Module, Selector, Args)` (~0.5μs) instead of routing through the class gen_server (~5-10μs). The gen_server path is only needed when the method accesses class variable state. This is a codegen optimization pass that requires no language-level changes.
 
+**Implemented by ADR 0129 (Phase 0b, BT-3639).** `beamtalk_class_dispatch:class_send/3` now calls the module function directly, in the caller, for `class sealed` methods of sealed classes with no `classState:`. Eligibility is computed once in Rust (`compute_direct_call_eligible`), emitted as `direct_class_methods` in `__beamtalk_meta/0`, and cached per class in the runtime metadata row (refreshed on hot reload). Everything else still takes the gen_server path described above.
+
 ### 5. `super` in Class-Side Methods
 
 Class-side `super` walks the **class-side** inheritance chain, not the instance-side chain:

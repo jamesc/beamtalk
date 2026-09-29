@@ -100,6 +100,10 @@ a table deleted between an existence check and the op (teardown/shutdown).
     has_runtime_class_methods/1,
     set_runtime_class_methods/2,
     reset_runtime_class_methods/1,
+    %% ADR 0129 Phase 0b: direct-dispatch eligibility set for dynamic class-side sends.
+    put_direct_class_methods/2,
+    lookup_direct_class_methods/1,
+    lookup_direct_class_method/2,
     %% ADR 0125 §2.2/§3.4, BT-3574: the `field_types`/`field_kinds` ->
     %% `beamtalk_shape_diff:shape()`-shaped normalisation shared by the live
     %% (`beamtalk_workspace_shape_store`) and build-time
@@ -155,7 +159,13 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% not a boolean default — see `lookup_is_abstract/1`) rather than `false`,
     %% because a class-existence guard must not silently default toward
     %% *permitting* instantiation on a lookup miss.
-    is_abstract :: boolean() | undefined
+    is_abstract :: boolean() | undefined,
+    %% ADR 0129 Phase 0b: `direct_class_methods` from the compiled module's
+    %% `__beamtalk_meta/0` — selector => safe class-method function name, for
+    %% the class methods `compute_direct_call_eligible` (Rust) deemed callable
+    %% without the class gen_server. Empty for dynamic classes, classes with
+    %% class state, and modules compiled before the key existed.
+    direct_class_methods = #{} :: #{selector() => atom()}
 }).
 
 %%====================================================================
@@ -657,6 +667,53 @@ put_class_method_fun(Name, Selector, Info) ->
             new(),
             ets:insert(?FUN_TABLE, {Key, Info}),
             ok
+    end.
+
+-doc """
+Store a class's direct-dispatch eligibility set (ADR 0129 Phase 0b).
+
+`Map` is the `direct_class_methods` value from the class's `__beamtalk_meta/0`
+(`#{Selector => SafeFn}`); pass `#{}` to clear it. Updates the existing row in
+place; a no-op when no row exists (the class registers its row first, so this
+only happens on a class that is being torn down).
+""".
+-spec put_direct_class_methods(class_name(), #{selector() => atom()}) -> ok.
+put_direct_class_methods(Name, Map) when is_map(Map) ->
+    new(),
+    try
+        ets:update_element(?TABLE, Name, {#class_metadata.direct_class_methods, Map}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc "Read a class's whole direct-dispatch eligibility set (`#{}` when none or unknown).".
+-spec lookup_direct_class_methods(class_name()) -> #{selector() => atom()}.
+lookup_direct_class_methods(Name) ->
+    case field(Name, #class_metadata.direct_class_methods) of
+        Map when is_map(Map) -> Map;
+        _ -> #{}
+    end.
+
+-doc """
+Resolve a selector to a direct-callable `{Module, SafeFn}` for a class (ADR 0129
+Phase 0b), or `error` when the send must go through the class gen_server.
+
+A class with runtime-installed class-method funs (ADR 0084) is never direct:
+those funs can shadow a compiled method, and only the gen_server path consults
+them.
+""".
+-spec lookup_direct_class_method(class_name(), selector()) -> {ok, module(), atom()} | error.
+lookup_direct_class_method(Name, Selector) ->
+    case row(Name) of
+        {ok, #class_metadata{
+            module = Module,
+            has_runtime_class_methods = false,
+            direct_class_methods = #{Selector := SafeFn}
+        }} when Module =/= undefined ->
+            {ok, Module, SafeFn};
+        _ ->
+            error
     end.
 
 -doc """

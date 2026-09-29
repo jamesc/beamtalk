@@ -455,22 +455,17 @@ TestCase subclass: FileHandleIoTest
     escaped := (Erlang erlang) get: #btHandleCloseProbe
     self deny: escaped isOpen
 
-  // The dynamic path is deliberately *not* intercepted (ADR 0109, "Not in
-  // scope"): `perform:` reaches `open:do:` through the class gen_server, so the
-  // block still runs there and a nested *dynamic* `File` send still fails.
-  // Part 1's `class_send` self-call guard is what turns that into a structured
-  // dispatch_error rather than an opaque `calling_self` exit. Pinned here so
-  // the gap between the two paths stays a decision rather than a surprise.
-  testPerformOpenDoStillRunsInTheClassProcess =>
+  // BT-3639 / ADR 0129 Phase 0b: `File` is sealed and stateless, so `perform:`
+  // reaches `open:do:` through the direct-call path in the caller's process —
+  // not the class gen_server. A nested *dynamic* `File` send therefore no
+  // longer re-enters the class process and no longer raises `dispatch_error`.
+  testPerformOpenDoRunsInCallersProcessAndAllowsNestedDynamicSend =>
     File writeAll: "target/bt-test-tmp/handle_perform.txt" contents: "x"
     nested := [:h |
       File perform: #exists: withArguments: #("target/bt-test-tmp/handle_perform.txt")
     ]
-    self
-      should: [
-        File perform: #open:do: withArguments: #("target/bt-test-tmp/handle_perform.txt", nested)
-      ]
-      raise: #dispatch_error
+    result := File perform: #open:do: withArguments: #("target/bt-test-tmp/handle_perform.txt", nested)
+    self assert: result unwrap
 
   // BT-3635: File is sealed, so a nested *static* `File` send is a direct call
   // that never re-enters the class gen_server — it works even inside a block

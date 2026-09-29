@@ -391,7 +391,8 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'greeting' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
     }~
 
 'register_class'/0 = fun () ->
@@ -430,7 +431,8 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'greeting' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'
         }~
