@@ -2916,8 +2916,14 @@ impl Parser {
             // semantic-analysis concern (`trait_expansion::check_after_
             // hierarchy`, BT-3589) — they parse as ordinary expressions and
             // can't be rejected here.
-            if is_state_like_declaration_keyword(self.current_kind()) {
-                let decl_span = if is_class_state_keyword(self.current_kind()) {
+            // An optional `late` prefix is looked through (both parse fns
+            // consume it themselves), so `late state:` doesn't leak a phantom
+            // `late` required selector.
+            if is_state_like_declaration_keyword(self.current_kind()) || self.is_at_late_modifier()
+            {
+                let decl_span = if is_class_state_keyword(self.current_kind())
+                    || self.is_at_late_class_state_keyword()
+                {
                     self.parse_classvar_declaration().map(|d| d.span)
                 } else {
                     self.parse_state_declaration().map(|d| d.span)
