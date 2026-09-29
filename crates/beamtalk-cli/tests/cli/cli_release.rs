@@ -903,10 +903,8 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // example, verbatim (BT-3576, BT-3612): a parity-neutral reflective
     // send, always available (no compiler needed), naming the release, its
     // version and the toolchain OTP release. `Beamtalk` is a workspace
-    // singleton *instance* of `BeamtalkInterface`, not a registered class;
-    // run-entry resolves it singleton-first
-    // (`beamtalk_repl_eval:resolve_entry/2`), so it must answer the same
-    // Dictionary as the class-side `BeamtalkInterface releaseInfo`.
+    // sealed stateless class whose API is entirely class-side (ADR 0129),
+    // so run-entry dispatches it like any other class.
     let rpc_release_info = |receiver: &str| {
         let entry = format!("{receiver} releaseInfo");
         let out = launcher_command(&output_dir, name)
@@ -934,13 +932,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         }
         stdout
     };
-    let via_global = rpc_release_info("Beamtalk");
-    let via_class = rpc_release_info("BeamtalkInterface");
-    assert_eq!(
-        via_global, via_class,
-        "`rpc \"Beamtalk releaseInfo\"` and `rpc \"BeamtalkInterface releaseInfo\"` \
-         must answer the same Dictionary"
-    );
+    rpc_release_info("Beamtalk");
 
     // `eval "Beamtalk releaseInfo"` — the same singleton resolution in
     // `eval`'s separate throwaway VM (BT-3612); `eval` prints nothing on

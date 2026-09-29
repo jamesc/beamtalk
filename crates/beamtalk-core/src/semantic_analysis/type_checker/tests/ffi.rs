@@ -1012,7 +1012,7 @@ fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
     // An FFI param declared `Symbol` (e.g. Erlang spec
     // `atom()`) must accept a call-site union of singleton symbols like
     // `#emergency | #alert | ...` (typed:: annotations on Beamtalk-side
-    // wrapper methods, e.g. BeamtalkInterface>>logLevel:). Singletons are
+    // wrapper methods, e.g. Beamtalk class>>logLevel:). Singletons are
     // subtypes of Symbol (mirrors `is_type_compatible`'s `#foo` handling),
     // so this must NOT warn.
     let sig = single_param_sig(InferredType::known("Symbol"));

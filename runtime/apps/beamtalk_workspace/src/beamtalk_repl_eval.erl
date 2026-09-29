@@ -391,12 +391,11 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
 %%
 %% The receiver name resolves through the same singleton-then-class order the
 %% REPL uses for a capitalised receiver (`beamtalk_workspace:
-%% resolve_class_reference/2`): a workspace singleton binding name (`Beamtalk`,
+%% resolve_class_reference/2`): a workspace singleton binding name (
 %% `Workspace`, `Transcript` — the set `beamtalk_workspace_config` declares)
 %% resolves to its live *instance* via `beamtalk_workspace:
-%% resolve_singleton_instance/1`, so `run-entry Beamtalk releaseInfo` answers
-%% exactly what `eval "Beamtalk releaseInfo"` does (ADR 0125 §1.1, BT-3612);
-%% any other name must be a registered class, dispatched class-side.
+%% resolve_singleton_instance/1`, so `run-entry Workspace ...` reaches the live instance;
+%% any other name (including `Beamtalk`, ADR 0129) must be a registered class, dispatched class-side.
 -type entry_receiver() :: {class, pid()} | {instance, term()}.
 -spec resolve_entry(binary(), binary()) ->
     {ok, entry_receiver(), atom()} | {error, #beamtalk_error{}}.

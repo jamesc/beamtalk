@@ -360,3 +360,33 @@ fn with_analysis_refreshes_stale_return_type_when_hand_off_invalidated() {
          generated spec; got:\n{code}"
     );
 }
+
+/// BT-3640 (ADR 0129 Phase 1): `Beamtalk` is a sealed, stateless class whose
+/// API is entirely `class sealed`, so a batch-compiled `Beamtalk classNamed:
+/// #Integer` must emit a direct call into `bt@stdlib@beamtalk` rather than a
+/// `class_send` through the class `gen_server`.
+#[test]
+fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
+    let mut module =
+        parse_fixture("Object subclass: Foo\n  find => Beamtalk classNamed: #Integer.\n");
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+        &analysis.external_protocols,
+    );
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("foo").with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'bt@stdlib@beamtalk':"),
+        "expected a direct call into bt@stdlib@beamtalk; got:\n{code}"
+    );
+    assert!(
+        !code.contains("'class_send'"),
+        "Beamtalk classNamed: must not go through class_send; got:\n{code}"
+    );
+}

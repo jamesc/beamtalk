@@ -37,7 +37,7 @@
 :help Erlang gen_server from
 // => gen_server:from_
 
-// === BT-1903: BeamtalkInterface erlangHelp: API ===
+// === BT-1903: Beamtalk erlangHelp: API ===
 
 // Beamtalk erlangHelp: with a known module — should return module docs
 Beamtalk erlangHelp: "lists"

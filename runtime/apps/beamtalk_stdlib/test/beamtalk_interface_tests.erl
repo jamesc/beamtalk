@@ -178,7 +178,7 @@ find_references_to_in_returns_list_test() ->
 
 find_senders_in_rejects_bad_args_test() ->
     ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'BeamtalkInterface'}},
+        #{error := #beamtalk_error{kind = type_error, class = 'Beamtalk'}},
         beamtalk_interface:findSendersIn(not_a_binary, ifTrue)
     ).
 
@@ -194,7 +194,7 @@ all_sends_in_rejects_bad_args_test() ->
 
 find_references_to_in_rejects_bad_args_test() ->
     ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'BeamtalkInterface'}},
+        #{error := #beamtalk_error{kind = type_error, class = 'Beamtalk'}},
         beamtalk_interface:findReferencesToIn(123, 'Integer')
     ).
 
@@ -263,7 +263,7 @@ dispatch_version_returns_binary_test() ->
 
 dispatch_unknown_selector_raises_dnu_test() ->
     ?assertError(
-        #{error := #beamtalk_error{kind = does_not_understand, class = 'BeamtalkInterface'}},
+        #{error := #beamtalk_error{kind = does_not_understand, class = 'Beamtalk'}},
         beamtalk_interface:dispatch(noSuchSelectorXyz, [], fake_self())
     ).
 
@@ -272,14 +272,14 @@ dispatch_unknown_selector_raises_dnu_test() ->
 %%%
 %%% Load the full stdlib so the class registry is populated with real classes
 %%% (Integer, Object, etc.) and exercise allClasses/0, classNamed/1, findClass/1,
-%%% globals/0, help/1, help/2, erlangHelp/1, erlangHelp/2 — including the
+%%% help/1, help/2, erlangHelp/1, erlangHelp/2 — including the
 %%% format_class_help / format_method_help / collect_flattened_methods /
 %%% find_defining_class hierarchy-walking helpers and the not-found error paths.
 %%% ============================================================================
 
-%% A fake Self value — BeamtalkInterface primitives ignore Self entirely.
+%% A fake Self value — Beamtalk primitives ignore Self entirely.
 fake_self() ->
-    {beamtalk_object, 'BeamtalkInterface class', 'bt@stdlib@beamtalk_interface', self()}.
+    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', self()}.
 
 live_setup() ->
     %% Boot through the shared beamtalk_test_boot helper rather than
@@ -302,12 +302,6 @@ live_registry_test_() ->
                     fun(C) -> ?assertMatch({beamtalk_object, _, _, _}, C) end,
                     Classes
                 )
-            end},
-            {"globals returns a map keyed by class name", fun() ->
-                G = beamtalk_interface:globals(),
-                ?assert(is_map(G)),
-                ?assert(maps:is_key('Integer', G)),
-                ?assertMatch({beamtalk_object, _, _, _}, maps:get('Integer', G))
             end},
             {"classNamed by atom returns a class object", fun() ->
                 ?assertMatch(
@@ -460,9 +454,6 @@ live_registry_test_() ->
                     {beamtalk_object, 'Integer class', _, _},
                     beamtalk_interface:dispatch('classNamed:', ['Integer'], fake_self())
                 )
-            end},
-            {"dispatch globals routes to handle_globals", fun() ->
-                ?assert(is_map(beamtalk_interface:dispatch(globals, [], fake_self())))
             end},
             {"dispatch erlangHelp:selector: routes through", fun() ->
                 R = beamtalk_interface:dispatch(

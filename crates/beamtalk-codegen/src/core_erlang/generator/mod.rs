@@ -479,7 +479,7 @@ impl CoreErlangGenerator {
         // gen_server, e.g. `beamtalk_subprocess`). The actor module is responsible
         // for exporting `dispatch/3` to handle class-side @primitive methods.
         // If `to_module_name` already emits a `beamtalk_` prefix (e.g.
-        // `BeamtalkInterface` → `beamtalk_interface`), use it as-is.
+        // `BeamtalkRuntime` → `beamtalk_runtime`), use it as-is.
         let snake_name = to_module_name(&self.class_name());
         let actor_module_name = if snake_name.starts_with("beamtalk_") {
             snake_name

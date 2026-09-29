@@ -26,7 +26,7 @@
     'AtomicCounter',
     'BEAMError',
     'Bag',
-    'BeamtalkInterface',
+    'Beamtalk',
     'Behaviour',
     'Binary',
     'BindingChanged',

@@ -22,7 +22,7 @@
 // => == Integer >> isPositive ==_(inherited from Number)_
 
 // :help with an unknown class — should show helpful error
-// BT-2091: error message comes from Beamtalk help: (BeamtalkInterface).
+// BT-2091: error message comes from Beamtalk help: (Beamtalk).
 :help FakeClassName
 // => ERROR: Class 'FakeClassName' not found
 
