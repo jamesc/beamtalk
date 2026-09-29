@@ -1171,14 +1171,15 @@ extension_ets_class(ClassName, class) -> beamtalk_class_registry:class_object_ta
 %% since `removeSelector:` installs unconditionally. Routed via
 %% `erlang:apply/3` to avoid a compile-time dependency from `beamtalk_runtime`
 %% to `beamtalk_workspace` — the same indirection `do_compile_source/4` uses.
-%% Raises a structured `runtime_error` if the removal itself fails (recompile
-%% error, or no running workspace to route it through). Best-effort logs a
+%% Raises `no_workspace` when no workspace is running on this node, and a
+%% structured `runtime_error` if the removal itself fails (recompile error). Best-effort logs a
 %% `"remove-method"` ChangeLog entry after a successful removal (ADR 0112
 %% Phase 3) — see log_local_removal/3.
 -spec remove_local_method(atom(), atom(), instance | class) -> ok.
 remove_local_method(ClassName, Selector, Side) ->
+    ok = beamtalk_capability:require_workspace('removeSelector:', ClassName),
     ClassNameBin = atom_to_binary(ClassName, utf8),
-    try
+    case
         erlang:apply(beamtalk_repl_eval, remove_method, [
             ClassNameBin, Selector, Side, allow_stdlib
         ])
@@ -1192,18 +1193,6 @@ remove_local_method(ClassName, Selector, Side) ->
                 io_lib:format("Could not remove method: ~p", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
-    catch
-        error:undef ->
-            Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
-            beamtalk_error:raise(
-                beamtalk_error:with_message(
-                    Error0,
-                    <<
-                        "Workspace not available; removeSelector: requires a "
-                        "running workspace"
-                    >>
-                )
-            )
     end.
 
 %% Best-effort ChangeLog append after a successful local-method removal (ADR
@@ -1805,12 +1794,9 @@ class_source_file_for(ClassNameBin) ->
     {ok, map()} | {error, term()}.
 rewrite_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}) ->
     {ok, #{definition => undefined, sites => []}};
-rewrite_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) ->
-    try
-        erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites])
-    catch
-        error:undef -> {error, workspace_unavailable}
-    end.
+rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification) ->
+    ok = beamtalk_capability:require_workspace('renameTo:', OldName),
+    erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites]).
 
 %% `rewrite_class_sites/4`'s own non-mutating validation half — same shape
 %% and same trivial-success shortcut for a freestanding dynamic class with
@@ -1823,12 +1809,9 @@ rewrite_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) -
     ok | {error, term()}.
 validate_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}) ->
     ok;
-validate_class_sites(_OldName, DefinitionSite, ReferenceSites, _Classification) ->
-    try
-        erlang:apply(beamtalk_repl_eval, validate_sites, [DefinitionSite, ReferenceSites])
-    catch
-        error:undef -> {error, workspace_unavailable}
-    end.
+validate_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification) ->
+    ok = beamtalk_capability:require_workspace('renameTo:', OldName),
+    erlang:apply(beamtalk_repl_eval, validate_sites, [DefinitionSite, ReferenceSites]).
 
 -doc """
 Move the class registry identity from `OldName` to `NewName` after a
@@ -2034,6 +2017,9 @@ classReload(Self) ->
             ]),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg));
         SourcePath ->
+            %% Checked after the source-file lookup so a class with no source
+            %% file keeps reporting `no_source_file` on a bare runtime.
+            ok = beamtalk_capability:require_workspace(reload, ClassName),
             SourcePathStr = binary_to_list(SourcePath),
             %% Demand-driven native .erl compilation before reload.
             %% Uses dynamic dispatch to avoid compile-time dep on beamtalk_workspace.
@@ -2049,7 +2035,7 @@ classReload(Self) ->
             catch
                 error:undef -> ok
             end,
-            try erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr, ClassName]) of
+            case erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr, ClassName]) of
                 {ok, _Classes} ->
                     Self;
                 {error, {class_not_found, _, Path, Defined}} ->
@@ -2081,15 +2067,6 @@ classReload(Self) ->
                         io_lib:format("Reload failed: ~p", [Reason])
                     ),
                     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
-            catch
-                error:undef ->
-                    Error0 = beamtalk_error:new(runtime_error, ClassName),
-                    beamtalk_error:raise(
-                        beamtalk_error:with_message(
-                            Error0,
-                            <<"Workspace not available; reload requires a running workspace">>
-                        )
-                    )
             end
     end.
 
@@ -2164,11 +2141,12 @@ compile_source_op(ephemeral) -> 'tryCompile:source:'.
 do_compile_source(Self, Selector, Source, Intent) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    ok = beamtalk_capability:require_workspace(compile_source_op(Intent), ClassName),
     ok = require_method_capability(compile_source_op(Intent), ClassName, Selector),
     ClassNameBin = atom_to_binary(ClassName, utf8),
     SourceBin = ensure_source_binary(Selector, Source, Intent, ClassName),
     {Author, AuthorKind} = current_author_context(),
-    try
+    case
         erlang:apply(beamtalk_repl_eval, compile_method, [
             ClassNameBin, Selector, SourceBin, Intent, Author, AuthorKind
         ])
@@ -2181,18 +2159,6 @@ do_compile_source(Self, Selector, Source, Intent) ->
                 io_lib:format("Could not compile method: ~p", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
-    catch
-        error:undef ->
-            Error0 = beamtalk_error:new(runtime_error, ClassName),
-            beamtalk_error:raise(
-                beamtalk_error:with_message(
-                    Error0,
-                    <<
-                        "Workspace not available; live method editing requires a "
-                        "running workspace"
-                    >>
-                )
-            )
     end.
 
 -doc """
@@ -2220,13 +2186,14 @@ same underlying shape).
 classPrecheckCompileSource(Self, Selector, Source) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
+    ok = beamtalk_capability:require_workspace('precheckCompile:source:', ClassName),
     ok = require_method_capability('precheckCompile:source:', ClassName, Selector),
     ClassNameBin = atom_to_binary(ClassName, utf8),
     SourceBin = ensure_precheck_source_binary(Source, ClassName),
-    try
-        %% instance-side only: like classCompileSource/3, the class-side
-        %% patch path (`Class class >> sel') does not route through this
-        %% primitive — see beamtalk_repl_loader's patch_side/1 callers.
+    %% instance-side only: like classCompileSource/3, the class-side
+    %% patch path (`Class class >> sel') does not route through this
+    %% primitive — see beamtalk_repl_loader's patch_side/1 callers.
+    case
         erlang:apply(beamtalk_repl_eval, precheck_method, [
             ClassNameBin, Selector, SourceBin, instance
         ])
@@ -2239,18 +2206,6 @@ classPrecheckCompileSource(Self, Selector, Source) ->
                 io_lib:format("Could not precheck method: ~p", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
-    catch
-        error:undef ->
-            Error0 = beamtalk_error:new(runtime_error, ClassName),
-            beamtalk_error:raise(
-                beamtalk_error:with_message(
-                    Error0,
-                    <<
-                        "Workspace not available; pre-save precheck requires a "
-                        "running workspace"
-                    >>
-                )
-            )
     end.
 
 %% Validate the `Source' argument for `precheckCompile:source:' is a String

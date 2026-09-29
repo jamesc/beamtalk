@@ -14275,6 +14275,29 @@
       "explanation": "BT-2189: Tests for Behaviour hierarchy queries (subclasses, allSubclasses, superclassChain). subclasses/allSubclasses also have coverage in class_hierarchy_query_test.bt; this file focuses on superclassChain and edge cases relevant to System Browser-style navigation."
     },
     {
+      "id": "stdlib-test-behaviour-no-workspace-test",
+      "title": "BehaviourNoWorkspaceTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "BehaviourNoWorkspaceTest",
+        "TestCase",
+        "behaviour_no_workspace_test",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision",
+        "testCompileSourceRaisesNoWorkspace",
+        "testPrecheckCompileSourceRaisesNoWorkspace",
+        "testTryCompileSourceRaisesNoWorkspace"
+      ],
+      "source": "// BUnit tests for the Behaviour workspace guards (BT-3638 / ADR 0129 §4).\n//\n// Under `beamtalk test` no workspace supervisor has recorded capabilities on\n// the node, so the live-patch operations on Behaviour raise `#no_workspace`\n// via `beamtalk_capability:require_workspace/1`. Previously they reached the\n// (loaded but not running) workspace code and failed with\n// `compile_failed {noproc, ...}`.\n//\n// These tests assume the BUnit harness runs without a workspace\n// (`workspace_mode: false`). The refusal is raised before anything is compiled\n// or installed, so no class is modified.\n\nTestCase subclass: BehaviourNoWorkspaceTest\n\n  testCompileSourceRaisesNoWorkspace =>\n    self should: [\n      Object compile: #btNoWorkspaceProbe source: \"btNoWorkspaceProbe => 1\"\n    ] raise: #no_workspace\n\n  testTryCompileSourceRaisesNoWorkspace =>\n    self should: [\n      Object tryCompile: #btNoWorkspaceProbe source: \"btNoWorkspaceProbe => 1\"\n    ] raise: #no_workspace\n\n  testPrecheckCompileSourceRaisesNoWorkspace =>\n    self should: [\n      Object precheckCompile: #btNoWorkspaceProbe source: \"btNoWorkspaceProbe => 1\"\n    ] raise: #no_workspace",
+      "explanation": "BUnit tests for the Behaviour workspace guards (BT-3638 / ADR 0129 §4).  Under `beamtalk test` no workspace supervisor has recorded capabilities on the node, so the live-patch operations on Behaviour raise `#no_workspace` via `beamtalk_capability:require_workspace/1`. Previously they reached the (loaded but not running) workspace code and failed with `compile_failed {noproc, ...}`.  These tests assume the BUnit harness runs without a workspace (`workspace_mode: false`). The refusal is raised before anything is compiled or installed, so no class is modified."
+    },
+    {
       "id": "stdlib-test-binary-encoding-test",
       "title": "BinaryEncodingTest",
       "category": "stdlib-tests",

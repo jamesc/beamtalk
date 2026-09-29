@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Behaviour workspace guards (BT-3638 / ADR 0129 §4).
+//
+// Under `beamtalk test` no workspace supervisor has recorded capabilities on
+// the node, so the live-patch operations on Behaviour raise `#no_workspace`
+// via `beamtalk_capability:require_workspace/1`. Previously they reached the
+// (loaded but not running) workspace code and failed with
+// `compile_failed {noproc, ...}`.
+//
+// These tests assume the BUnit harness runs without a workspace
+// (`workspace_mode: false`). The refusal is raised before anything is compiled
+// or installed, so no class is modified.
+
+TestCase subclass: BehaviourNoWorkspaceTest
+
+  testCompileSourceRaisesNoWorkspace =>
+    self should: [
+      Object compile: #btNoWorkspaceProbe source: "btNoWorkspaceProbe => 1"
+    ] raise: #no_workspace
+
+  testTryCompileSourceRaisesNoWorkspace =>
+    self should: [
+      Object tryCompile: #btNoWorkspaceProbe source: "btNoWorkspaceProbe => 1"
+    ] raise: #no_workspace
+
+  testPrecheckCompileSourceRaisesNoWorkspace =>
+    self should: [
+      Object precheckCompile: #btNoWorkspaceProbe source: "btNoWorkspaceProbe => 1"
+    ] raise: #no_workspace

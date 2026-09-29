@@ -528,7 +528,7 @@ workspace_meta_config_test() ->
 %% singletons (beamtalk_workspace_config:singletons/0), the actor registry,
 %% bootstrap, actor_sup.
 base_child_ids() ->
-    [beamtalk_workspace_meta, beamtalk_workspace_changelog] ++
+    [beamtalk_workspace_capability_guard, beamtalk_workspace_meta, beamtalk_workspace_changelog] ++
         [maps:get(module, S) || S <- beamtalk_workspace_config:singletons()] ++
         [beamtalk_actor_registry, beamtalk_workspace_bootstrap, beamtalk_actor_sup].
 
@@ -650,7 +650,35 @@ release_mode_records_capabilities_test() ->
 workspace_mode_records_capabilities_test() ->
     with_capabilities_restored(fun() ->
         _ = child_ids(test_config()),
-        ?assertMatch(#{mode := workspace}, beamtalk_capability:current())
+        ?assertEqual(
+            #{mode => workspace, include_compiler => true}, beamtalk_capability:current()
+        )
+    end).
+
+%% ADR 0129 §4: `include_compiler` is recorded in run mode too, derived from
+%% `start_compiler`.
+run_mode_records_compiler_availability_test() ->
+    with_capabilities_restored(fun() ->
+        _ = child_ids(run_mode_config()),
+        ?assertEqual(
+            {ok, #{mode => run, include_compiler => true}}, beamtalk_capability:recorded()
+        ),
+        _ = child_ids((run_mode_config())#{start_compiler => false}),
+        ?assertEqual(
+            {ok, #{mode => run, include_compiler => false}}, beamtalk_capability:recorded()
+        ),
+        ?assertNot(beamtalk_capability:available('load:'))
+    end).
+
+%% ADR 0129 §4: the capability guard (first child) clears the capabilities
+%% when the supervisor shuts down.
+capability_guard_clears_on_shutdown_test() ->
+    with_capabilities_restored(fun() ->
+        Caps = #{mode => run, include_compiler => false},
+        {ok, Guard} = beamtalk_workspace_capability_guard:start_link(Caps),
+        ?assertEqual({ok, Caps}, beamtalk_capability:recorded()),
+        ok = gen_server:stop(Guard),
+        ?assertEqual(none, beamtalk_capability:recorded())
     end).
 
 %% ADR 0125 §1.5: a release built with `include-compiler` must log a
