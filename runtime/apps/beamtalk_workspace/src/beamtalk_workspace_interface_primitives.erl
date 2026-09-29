@@ -55,13 +55,9 @@ into REPL session state. Workspace readiness is detected via
 %% for bare-name resolution (REPL codegen fallthrough) and Session resolve:.
 -export([resolve_name/2]).
 %% Capitalised class-reference resolution (REPL codegen). Shares the
-%% singleton + class-registry tiers with resolve_name/2 but keeps the
-%% class_not_found terminal so the "Class 'X' not found" error is preserved.
+%% class-registry tier with resolve_name/2 but keeps the class_not_found
+%% terminal so the "Class 'X' not found" error is preserved.
 -export([resolve_class_reference/2]).
-%% Singleton-instance lookup for the binding-aware class-send fallback
-%% (a message sent to a singleton receiver, e.g. `Workspace bind:as:`). Returns
-%% the live instance so dispatch goes to it rather than a non-existent class.
--export([resolve_singleton_instance/1]).
 %% Called by beamtalk_workspace_bootstrap to create the ETS table under a
 %% long-lived process (prevents table from being deleted when eval workers exit)
 -export([create_bindings_table/0]).
@@ -1733,20 +1729,6 @@ resolve_class_reference(_Locals, Name) when is_atom(Name) ->
             raise_class_not_found(Name)
     end.
 
--doc """
-Resolve a singleton binding name to its live instance, or `error`.
-
-ADR 0081 Phase 1: used by the REPL codegen's binding-aware class-send
-fallback. Since ADR 0129 there are no singleton bindings (`Beamtalk`,
-`Workspace` and `Transcript` are class-side facades), so this always returns
-`error` and real class names fall through to class-method dispatch. The
-codegen call site and this function are removed with the compiler-side
-injected-binding machinery (ADR 0129 Phase 4).
-""".
--spec resolve_singleton_instance(atom()) -> {ok, term()} | error.
-resolve_singleton_instance(Name) when is_atom(Name) ->
-    error.
-
 -spec raise_class_not_found(atom()) -> no_return().
 raise_class_not_found(Name) ->
     Err0 = beamtalk_error:new(class_not_found, Name),
@@ -1957,7 +1939,7 @@ to_atom_name(Other) ->
 -doc "Check if a name conflicts with Beamtalk system globals.".
 -spec check_bind_conflicts(atom()) -> ok | {error, #beamtalk_error{}}.
 check_bind_conflicts(AtomName) ->
-    case is_protected_name(AtomName) of
+    case is_stdlib_class_name(AtomName) of
         true ->
             Err0 = beamtalk_error:new(name_conflict, 'Workspace'),
             Err1 = beamtalk_error:with_selector(Err0, 'bind:as:'),
@@ -1972,12 +1954,6 @@ check_bind_conflicts(AtomName) ->
         false ->
             ok
     end.
-
--spec is_protected_name(atom()) -> boolean().
-is_protected_name('Transcript') ->
-    true;
-is_protected_name(Name) ->
-    is_stdlib_class_name(Name).
 
 -doc """
 Whether `Name` is a live stdlib class (ADR 0129 §7): `bind:as:` must not
