@@ -1594,6 +1594,11 @@ impl CoreErlangGenerator {
         };
 
         frame.set_current_nlr_token(None);
+        // Resolve the method-level line + file while `frame` still has a
+        // flattened provision's protocol source swapped in (ADR 0127 §3);
+        // after the drop below, `self` maps through this module's own source.
+        let line_annotation = frame.span_to_line(method.span);
+        let annotation_path = frame.source_path.clone();
         // `frame` has a `Drop` impl, so it borrows `self` until this explicit
         // drop (or the end of the function) rather than its last use under
         // NLL — drop it now so `self` is free again below, and so the scope
@@ -1606,7 +1611,6 @@ impl CoreErlangGenerator {
         // Annotate the `fun` expression (not just the body) with source line.
         // Annotating only the body would create invalid double-annotation when the body
         // is itself a single annotated MessageSend expression: `( ( e -| [...] ) -| [...] )`.
-        let line_annotation = self.span_to_line(method.span);
 
         // Wrap the method body in try/catch to catch non-local
         // returns thrown by ^ inside block closures.
@@ -1626,7 +1630,7 @@ impl CoreErlangGenerator {
             docvec!["fun (", params_doc, ") ->\n", body_doc,]
         };
         let fun_doc = if let Some(line_num) = line_annotation {
-            self.annotate_with_line(fun_doc, line_num)
+            Self::annotate_with_line_in(annotation_path.as_deref(), fun_doc, line_num)
         } else {
             fun_doc
         };

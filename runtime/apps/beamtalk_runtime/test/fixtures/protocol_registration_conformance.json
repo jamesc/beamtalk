@@ -1,0 +1,25 @@
+{
+  "why": "ADR 0127 §10 'Protocol module': the codegen-emitted beamtalk_protocol_registry:register_protocol/1 map for a protocol with provisions (Rust: beamtalk-codegen class_registry.rs generate_protocol_registrations) and the runtime registry that consumes it (Erlang: beamtalk_protocol_registry) are two independent implementations of one shape. Rust asserts the compiled registration carries every key below; Erlang asserts the registry keeps every key it is handed and derives provided_methods/1 from the provided rows.",
+  "protocol": "Bt3625Greetable",
+  "source": "/// Something that greets.\nProtocol define: Bt3625Greetable\n  greeting -> String\n\n  /// Says hello.\n  greet -> String => self greeting\n",
+  "registration_keys": [
+    "name",
+    "module",
+    "required_methods",
+    "required_class_methods",
+    "provided_methods",
+    "type_params",
+    "extending",
+    "doc"
+  ],
+  "provided_method_keys": [
+    "selector",
+    "arity",
+    "param_types",
+    "return_type",
+    "source",
+    "doc"
+  ],
+  "provided_selectors": ["greet"],
+  "source_function": "__beamtalk_protocol_source"
+}

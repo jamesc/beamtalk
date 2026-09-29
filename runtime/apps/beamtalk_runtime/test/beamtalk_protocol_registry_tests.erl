@@ -1093,3 +1093,58 @@ class_start_without_uses_key_registers_empty_test() ->
     {ok, Pid} = start_class_with_ping('BT3592ClassInfoNoUses'),
     ?assertEqual([], beamtalk_protocol_registry:used_protocols('BT3592ClassInfoNoUses')),
     stop_class_process(Pid).
+
+%%% ============================================================================
+%%% Registration-shape conformance (ADR 0127 §10, BT-3625)
+%%% ============================================================================
+
+%% `protocol_registration_conformance.json` pins the map shape the compiler
+%% emits for a protocol with provisions. The Rust half
+%% (`core_erlang::tests::protocol_registration_conformance`) compiles the
+%% fixture's real `.bt` source and asserts every listed key appears in the
+%% generated `register_protocol/1` call; this half asserts the runtime
+%% registry keeps every key it is handed (so a consumer such as browse can
+%% read a provided method's `source`/`doc`) and derives `provided_methods/1`
+%% from the provided rows.
+protocol_registration_shape_conformance_test() ->
+    setup(),
+    Corpus = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "protocol_registration_conformance.json"
+    ]),
+    Name = binary_to_atom(maps:get(<<"protocol">>, Corpus), utf8),
+    RegKeys = [binary_to_atom(K, utf8) || K <- maps:get(<<"registration_keys">>, Corpus)],
+    RowKeys = [binary_to_atom(K, utf8) || K <- maps:get(<<"provided_method_keys">>, Corpus)],
+    Selectors = [binary_to_atom(S, utf8) || S <- maps:get(<<"provided_selectors">>, Corpus)],
+    Row = fun(Selector) ->
+        maps:from_list([{K, row_value(K, Selector)} || K <- RowKeys])
+    end,
+    Info = maps:from_list([{K, reg_value(K, Name, Row, Selectors)} || K <- RegKeys]),
+    ok = beamtalk_protocol_registry:register_protocol(Info),
+    Stored = beamtalk_protocol_registry:protocol_info(Name),
+    lists:foreach(fun(K) -> ?assert(maps:is_key(K, Stored), K) end, RegKeys),
+    [Stored1 | _] = maps:get(provided_methods, Stored),
+    lists:foreach(fun(K) -> ?assert(maps:is_key(K, Stored1), K) end, RowKeys),
+    ?assertEqual(
+        lists:sort(Selectors), lists:sort(beamtalk_protocol_registry:provided_methods(Name))
+    ).
+
+row_value(selector, Selector) -> Selector;
+row_value(arity, _) -> 0;
+row_value(param_types, _) -> [];
+row_value(return_type, _) -> {type, 0, any, []};
+row_value(source, _) -> <<"greet -> String => self greeting">>;
+row_value(doc, _) -> <<"Says hello.">>.
+
+reg_value(name, Name, _, _) -> Name;
+reg_value(module, _, _, _) -> 'bt@bt3625_greetable';
+reg_value(required_methods, _, _, _) -> [];
+reg_value(required_class_methods, _, _, _) -> [];
+reg_value(provided_methods, _, Row, Selectors) -> [Row(S) || S <- Selectors];
+reg_value(type_params, _, _, _) -> [];
+reg_value(extending, _, _, _) -> undefined;
+reg_value(doc, _, _, _) -> none.

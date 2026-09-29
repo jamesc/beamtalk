@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3625: hand-written control for trait_labelled_base.bt — the same
+// `announce`/`label` shape, but `announce` is written in the class body.
+
+Actor subclass: TraitPlainBase
+  label -> String => "base"
+
+  announce -> String => "announce: " ++ self label

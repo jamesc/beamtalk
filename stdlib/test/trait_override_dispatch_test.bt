@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3625 (ADR 0127 Phase 0 pin, §6): what an inherited actor method's
+// self-send reaches when a further subclass overrides the selector.
+//
+// `announce` is a trait provision flattened into `TraitLabelledBase` (the
+// trait lives in its own file — fixtures/trait_labelled.bt — so this is a
+// legal cross-file `uses:`). It self-sends the required `label`.
+// `TraitLabelledOverride` (a further subclass) overrides `label`.
+//
+// `TraitPlainBase`/`TraitPlainOverride` are the hand-written control: the
+// identical shape with `announce` written in the class body instead of
+// flattened in. Flattening means "exactly the class with the provisions
+// written into its body" (ADR 0127 §3), so the trait and hand-written
+// variants must behave identically — whatever an inherited actor method's
+// self-send reaches for the hand-written class, it reaches for the flattened
+// one, no more and no less.
+
+TestCase subclass: TraitOverrideDispatchTest
+  field: base = nil
+  field: sub = nil
+  field: plainBase = nil
+  field: plainSub = nil
+
+  setUp =>
+    (((self withBase: TraitLabelledBase spawn) withSub: TraitLabelledOverride spawn)
+      withPlainBase: TraitPlainBase spawn) withPlainSub: TraitPlainOverride spawn
+
+  tearDown =>
+    self.base isNil ifFalse: [self.base stop]
+    self.sub isNil ifFalse: [self.sub stop]
+    self.plainBase isNil ifFalse: [self.plainBase stop]
+    self.plainSub isNil ifFalse: [self.plainSub stop]
+
+  testFlattenedProvisionUsesTheUsersOwnRequiredMethod =>
+    self assert: self.base announce equals: "announce: base"
+
+  testHandWrittenControlUsesItsOwnRequiredMethod =>
+    self assert: self.plainBase announce equals: "announce: base"
+
+  testFlattenedProvisionBehavesLikeTheHandWrittenControlForASubclassOverride =>
+    self assert: self.sub announce equals: self.plainSub announce

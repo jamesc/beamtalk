@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3625: an Actor that `uses:` a trait declared in a *different* file
+// (`trait_labelled.bt`). `announce` is flattened into this class.
+
+Actor subclass: TraitLabelledBase
+  uses: TraitLabelled
+
+  label -> String => "base"

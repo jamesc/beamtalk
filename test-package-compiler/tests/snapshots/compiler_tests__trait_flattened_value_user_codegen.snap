@@ -4,7 +4,7 @@ expression: core_erlang
 ---
 module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
-     'beamtalk_class' = [{'Report', 'Value'}],
+     'beamtalk_class' = [{'Report', 'Value'}], 'file' = [{"main.bt", 1}], 'beamtalk_source' = ["main.bt"],
      'spec' =
         [{{'title', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}]}, {'type', 0, 'binary', []}]}]}],
      'spec' =
@@ -19,11 +19,11 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
     call 'maps':'merge'(DefaultState, InitArgs)
 
 
-'title'/1 = fun (Self) ->
-#{#<82>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#
+'title'/1 = ( fun (Self) ->
+#{#<82>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}# -| [17, {'file', "main.bt"}] )
 
-'describe'/1 = fun (Self) ->
-#{#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#
+'describe'/1 = ( fun (Self) ->
+#{#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}# -| [9, {'file', "describable.bt"}] )
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of
@@ -142,9 +142,7 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
 
         in _Reg0
 
-    of _ClassRegResult ->
-let <_ProtoReg_Describable> = call 'beamtalk_protocol_registry':'register_protocol'(~{'name' => 'Describable', 'module' => 'trait_flattened_value_user', 'required_methods' => [], 'required_class_methods' => [], 'provided_methods' => [~{'selector' => 'describe', 'arity' => 0, 'param_types' => [], 'return_type' => {'type', 0, 'binary', []}}~], 'type_params' => [], 'extending' => 'undefined', 'doc' => 'none'}~) in
-        _ClassRegResult
+    of _ClassRegResult -> _ClassRegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 

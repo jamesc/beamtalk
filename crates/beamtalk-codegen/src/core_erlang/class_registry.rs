@@ -727,7 +727,8 @@ impl CoreErlangGenerator {
             // near-duplicates that could drift apart.
             let build_method_map_entry = |selector: &MessageSelector,
                                           parameters: &[ParameterDefinition],
-                                          return_type: &Option<TypeAnnotation>|
+                                          return_type: &Option<TypeAnnotation>,
+                                          extra: Document<'static>|
              -> Document<'static> {
                 let selector_name = selector.name().to_string();
                 let arity = selector.arity();
@@ -772,6 +773,7 @@ impl CoreErlangGenerator {
                     param_types_doc,
                     ", 'return_type' => ",
                     return_type_doc,
+                    extra,
                     "}~"
                 ]
             };
@@ -780,7 +782,12 @@ impl CoreErlangGenerator {
                 let items: Vec<Document<'static>> = sigs
                     .iter()
                     .map(|sig| {
-                        build_method_map_entry(&sig.selector, &sig.parameters, &sig.return_type)
+                        build_method_map_entry(
+                            &sig.selector,
+                            &sig.parameters,
+                            &sig.return_type,
+                            Document::Nil,
+                        )
                     })
                     .collect();
 
@@ -821,7 +828,31 @@ impl CoreErlangGenerator {
                 let items: Vec<Document<'static>> = protocol
                     .provided_methods
                     .iter()
-                    .map(|m| build_method_map_entry(&m.selector, &m.parameters, &m.return_type))
+                    .map(|m| {
+                        // A provided method's registry row also carries its
+                        // own source (`unparse_method`, the same canonical
+                        // text `methodSource` uses) and `///` doc, so tooling
+                        // can show a trait's real code from the registry
+                        // alone, without a compiled class (ADR 0127 §10,
+                        // "Protocol module"). Categories: methods carry none
+                        // in the AST yet, so there is nothing to record.
+                        let doc_field = m
+                            .doc_comment
+                            .as_ref()
+                            .map_or(Document::Str(", 'doc' => 'none'"), |d| {
+                                docvec![", 'doc' => ", leaf::binary_lit(d)]
+                            });
+                        build_method_map_entry(
+                            &m.selector,
+                            &m.parameters,
+                            &m.return_type,
+                            docvec![
+                                ", 'source' => ",
+                                leaf::binary_lit(beamtalk_core::unparse::unparse_method(m)),
+                                doc_field,
+                            ],
+                        )
+                    })
                     .collect();
                 let mut list_parts: Vec<Document<'static>> = vec![Document::Str("[")];
                 for (i, m) in items.into_iter().enumerate() {

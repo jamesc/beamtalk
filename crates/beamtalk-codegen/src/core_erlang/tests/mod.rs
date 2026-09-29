@@ -177,6 +177,7 @@ mod gen_server;
 mod late_reconcile_conformance;
 mod nlr;
 mod primitives;
+mod protocol_registration_conformance;
 mod recv_type;
 mod supervisor;
 mod trait_flattening;

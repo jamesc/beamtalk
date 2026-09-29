@@ -119,82 +119,142 @@ fn self_sufficient_codegen_threads_state_correctly_inside_a_flattened_provision_
     );
 }
 
-/// The canonical CLI build pipeline: `analyse_full` →
-/// `lower_module_for_codegen` → `generate_module(..).with_analysis(..)`.
-/// This is the path `beam_compiler.rs` actually drives, and the one
-/// BT-3590's module doc names as the gap ("the caller's own `Module`
-/// … is never mutated").
-///
-/// **Single-file fixture, not a real package layout.** ADR 0127 §Constraints
-/// ("One top-level definition per file") and its own body text ("It stays
-/// one protocol per file … compiles to one module by the ADR 0119 rule")
-/// both say a protocol and its user always live in *separate* `.bt` files
-/// in real usage — `module_validator::validate_single_definition` enforces
-/// exactly that, unconditionally, inside `analyse_full` itself. But
-/// `trait_expansion::expand_module` (BT-3588) only ever resolves a `uses:`
-/// against `module.protocols` — i.e. only a *same-file* protocol —
-/// deliberately, until BT-3591 ("build-graph track protocol-user edges in
-/// every compile path", explicitly Out of Scope for BT-3590) carries a
-/// cross-file protocol's AST to its users. So there is no fixture shape
-/// that is simultaneously (a) ADR-0127-legal (protocol and user in
-/// different files) and (b) actually flattened by today's same-module-only
-/// `expand_module`. This test deliberately puts both in one module purely
-/// to exercise the `analyse_full` → `lower_module_for_codegen` →
-/// `generate_module` hand-off wiring this issue closes, and filters out
-/// the one expected "class and a protocol cannot be in the same file"
-/// diagnostic that fixture shape necessarily trips — see this repo's
-/// BT-3590 completion notes for the cross-file follow-up this implies.
-#[test]
-fn handed_off_analysis_pipeline_emits_a_flattened_provision() {
-    let src = concat!(
-        "Protocol define: Describable\n",
-        "  describe -> String => \"a describable thing\"\n\n",
-        "Value subclass: Report\n",
-        "  uses: Describable\n",
+/// Parses a protocol file and returns its provision-bearing protocol.
+fn parse_protocol_file(src: &str) -> beamtalk_core::ast::ProtocolDefinition {
+    parse_fixture(src)
+        .protocols
+        .into_iter()
+        .find(|p| !p.provided_methods.is_empty())
+        .expect("fixture must declare a provision-bearing protocol")
+}
+
+const DESCRIBABLE_FILE: &str = concat!(
+    "// header comment so the provision is not on line 1\n",
+    "// second header line\n\n",
+    "Protocol define: Describable\n",
+    "  describe -> String => \"a describable thing\"\n",
+);
+
+const REPORT_FILE: &str = concat!("Value subclass: Report\n", "  uses: Describable\n");
+
+/// Runs the CLI build pipeline for `user_src` against one cross-file
+/// protocol: `analyse_full` (protocol carried as `pre_loaded_protocol_defs`)
+/// → `lower_module_for_codegen` → `generate_module(..).with_analysis(..)`.
+fn generate_cross_file(
+    user_src: &str,
+    protocol_src: &str,
+    protocol_path: &str,
+    with_protocol_source: bool,
+) -> String {
+    let protocol = parse_protocol_file(protocol_src);
+    let mut module = parse_fixture(user_src);
+    let analysis = analyse_full(
+        &module,
+        AnalysisContext::default().with_pre_loaded_protocol_defs(vec![protocol.clone()]),
     );
-    let mut module = parse_fixture(src);
-    let analysis = analyse_full(&module, AnalysisContext::default());
-    let unexpected: Vec<_> = analysis
+    let errors: Vec<_> = analysis
         .diagnostics
         .iter()
-        .filter(|d| !d.message.contains("cannot be in the same file"))
+        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
         .collect();
     assert!(
-        unexpected.is_empty(),
-        "unexpected analysis diagnostics: {unexpected:?}"
+        errors.is_empty(),
+        "a cross-file `uses:` is legal — no analysis errors expected: {errors:?}"
     );
-
     lower_module_for_codegen(
         &mut module,
         &analysis.class_hierarchy,
         &analysis.method_return_types,
         &analysis.external_protocols,
     );
-    // The driver's own module must already carry the flattened method
-    // before codegen ever runs — this is the AST-level half of the fix.
-    let report = module
-        .classes
-        .iter()
-        .find(|c| c.name.name == "Report")
-        .expect("Report class present");
+    let mut options = CodegenOptions::new("report")
+        .with_source(user_src)
+        .with_source_path_opt(Some("report.bt"))
+        .with_analysis(analysis);
+    if with_protocol_source {
+        options = options.with_protocol_sources(
+            [(
+                protocol.name.name.clone(),
+                beamtalk_core::semantic_analysis::ProtocolSource {
+                    path: Some(protocol_path.into()),
+                    text: protocol_src.into(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+    }
+    generate_module(&module, options).expect("codegen should succeed")
+}
+
+/// The canonical CLI build pipeline over a *legal* cross-file layout (ADR
+/// 0127: protocol and user in separate files): `analyse_full` →
+/// `lower_module_for_codegen` → `generate_module(..).with_analysis(..)`.
+/// The user's own module must carry the flattened method before codegen
+/// runs, and codegen must emit it.
+#[test]
+fn handed_off_analysis_pipeline_emits_a_flattened_cross_file_provision() {
+    let protocol = parse_protocol_file(DESCRIBABLE_FILE);
+    let mut module = parse_fixture(REPORT_FILE);
+    let analysis = analyse_full(
+        &module,
+        AnalysisContext::default().with_pre_loaded_protocol_defs(vec![protocol]),
+    );
     assert!(
-        report
+        analysis.diagnostics.is_empty(),
+        "unexpected analysis diagnostics: {:?}",
+        analysis.diagnostics
+    );
+    lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+        &analysis.external_protocols,
+    );
+    assert!(
+        module.classes[0]
             .methods
             .iter()
             .any(|m| m.selector.name() == "describe"),
         "expected lower_module_for_codegen to splice the flattened `describe` \
          provision into the driver's own module"
     );
-
-    let code = crate::core_erlang::generate_module(
+    let code = generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("report").with_analysis(analysis),
+        CodegenOptions::new("report").with_analysis(analysis),
     )
     .expect("codegen should succeed");
     assert!(
         code.contains("describe"),
         "expected the flattened `describe` provision in the generated code, got:\n{code}"
     );
+}
+
+/// ADR 0127 §3 "Source locations": a flattened method's BEAM line
+/// annotation must name the *protocol's* file and a line of *that* file.
+/// `describe` is on line 5 of `describable.bt`; `report.bt` has only two
+/// lines, so a line mapped through the user's source could never say 5.
+#[test]
+fn flattened_provision_line_annotation_points_into_the_protocol_file() {
+    let code = generate_cross_file(REPORT_FILE, DESCRIBABLE_FILE, "pkg/describable.bt", true);
+    assert!(
+        code.contains("{'file', \"pkg/describable.bt\"}") && code.contains("[5,"),
+        "expected the flattened `describe` to be annotated with \
+         describable.bt line 5, got:\n{code}"
+    );
+}
+
+/// Counterpart: without the protocol's source (a dependency checkout the
+/// build did not carry, say) codegen falls back to the pre-BT-3625
+/// behaviour rather than failing — no protocol path appears.
+#[test]
+fn flattened_provision_without_protocol_source_still_compiles() {
+    let code = generate_cross_file(REPORT_FILE, DESCRIBABLE_FILE, "pkg/describable.bt", false);
+    assert!(
+        !code.contains("pkg/describable.bt"),
+        "no protocol path expected when no protocol source was supplied, got:\n{code}"
+    );
+    assert!(code.contains("describe"));
 }
 
 /// Phase 0 pin (Linear AC): a subclass override of a flattened provision

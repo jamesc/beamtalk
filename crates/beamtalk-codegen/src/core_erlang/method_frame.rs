@@ -60,6 +60,10 @@ pub(in crate::core_erlang) struct MethodFrame<'a> {
     generator: &'a mut CoreErlangGenerator,
     prev_selector: Option<String>,
     boundary: MethodBoundary,
+    /// `(source_text, source_path)` in effect before `enter` swapped in a
+    /// flattened provision's protocol source (ADR 0127 §3); `None` when the
+    /// method is the class's own and nothing was swapped.
+    prev_source: Option<(Option<String>, Option<String>)>,
 }
 
 impl<'a> MethodFrame<'a> {
@@ -112,11 +116,28 @@ impl<'a> MethodFrame<'a> {
             })
             .collect();
 
+        // A `uses:`-flattened method's spans are offsets into its protocol's
+        // file, so for the duration of the frame map lines (and stamp the
+        // `file` of line annotations) through that protocol's source.
+        let prev_source = generator
+            .flattened_method_source(selector_name, boundary == MethodBoundary::ClassMethod)
+            .map(|protocol_source| {
+                let prev_path = generator.source_path.clone();
+                let prev_text = generator
+                    .source_text
+                    .replace(protocol_source.text.to_string());
+                if let Some(path) = protocol_source.path {
+                    generator.source_path = Some(path.to_string());
+                }
+                (prev_text, prev_path)
+            });
+
         (
             Self {
                 generator,
                 prev_selector,
                 boundary,
+                prev_source,
             },
             param_vars,
         )
@@ -150,5 +171,9 @@ impl Drop for MethodFrame<'_> {
             self.generator.set_in_class_method(false);
         }
         self.generator.current_method_selector = self.prev_selector.take();
+        if let Some((text, path)) = self.prev_source.take() {
+            self.generator.source_text = text;
+            self.generator.source_path = path;
+        }
     }
 }

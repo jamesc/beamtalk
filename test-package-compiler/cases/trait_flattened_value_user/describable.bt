@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// The provision below sits at a line number no line of `main.bt` shares, so a
+// line annotation that still says `main.bt` (or a `main.bt` line) is wrong.
+
+/// Something that can describe itself.
+Protocol define: Describable
+  describe -> String => "a describable thing"

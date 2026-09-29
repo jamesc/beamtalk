@@ -9,16 +9,16 @@ Module {
             name: Identifier {
                 name: "Greeter",
                 span: Span {
-                    start: 720,
-                    end: 727,
+                    start: 464,
+                    end: 471,
                 },
             },
             superclass: Some(
                 Identifier {
                     name: "Actor",
                     span: Span {
-                        start: 704,
-                        end: 709,
+                        start: 448,
+                        end: 453,
                     },
                 },
             ),
@@ -34,8 +34,8 @@ Module {
                     name: Identifier {
                         name: "greetingCount",
                         span: Span {
-                            start: 755,
-                            end: 768,
+                            start: 499,
+                            end: 512,
                         },
                     },
                     type_annotation: None,
@@ -45,8 +45,8 @@ Module {
                                 0,
                             ),
                             Span {
-                                start: 771,
-                                end: 772,
+                                start: 515,
+                                end: 516,
                             },
                         ),
                     ),
@@ -61,8 +61,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 748,
-                        end: 772,
+                        start: 492,
+                        end: 516,
                     },
                 },
             ],
@@ -85,8 +85,8 @@ Module {
                                     "hi",
                                 ),
                                 Span {
-                                    start: 798,
-                                    end: 802,
+                                    start: 542,
+                                    end: 546,
                                 },
                             ),
                             preceding_blank_line: false,
@@ -97,8 +97,8 @@ Module {
                             Identifier {
                                 name: "String",
                                 span: Span {
-                                    start: 788,
-                                    end: 794,
+                                    start: 532,
+                                    end: 538,
                                 },
                             },
                         ),
@@ -116,8 +116,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 776,
-                        end: 802,
+                        start: 520,
+                        end: 546,
                     },
                 },
                 MethodDefinition {
@@ -139,21 +139,21 @@ Module {
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 814,
-                                                end: 818,
+                                                start: 558,
+                                                end: 562,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "greetingCount",
                                         span: Span {
-                                            start: 819,
-                                            end: 832,
+                                            start: 563,
+                                            end: 576,
                                         },
                                     },
                                     span: Span {
-                                        start: 814,
-                                        end: 832,
+                                        start: 558,
+                                        end: 576,
                                     },
                                 },
                                 value: MessageSend {
@@ -162,21 +162,21 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 836,
-                                                    end: 840,
+                                                    start: 580,
+                                                    end: 584,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "greetingCount",
                                             span: Span {
-                                                start: 841,
-                                                end: 854,
+                                                start: 585,
+                                                end: 598,
                                             },
                                         },
                                         span: Span {
-                                            start: 836,
-                                            end: 854,
+                                            start: 580,
+                                            end: 598,
                                         },
                                     },
                                     selector: Binary(
@@ -188,21 +188,21 @@ Module {
                                                 1,
                                             ),
                                             Span {
-                                                start: 857,
-                                                end: 858,
+                                                start: 601,
+                                                end: 602,
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 836,
-                                        end: 858,
+                                        start: 580,
+                                        end: 602,
                                     },
                                 },
                                 type_annotation: None,
                                 span: Span {
-                                    start: 814,
-                                    end: 858,
+                                    start: 558,
+                                    end: 602,
                                 },
                             },
                             preceding_blank_line: false,
@@ -222,18 +222,82 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 806,
-                        end: 858,
+                        start: 550,
+                        end: 602,
                     },
                 },
             ],
             class_methods: [],
             class_variables: [],
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 448,
+                            end: 453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 448,
+                            end: 453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3625 (ADR 0127 §3/§10): an Actor class's `uses:` provision must reach",
+                        span: Span {
+                            start: 448,
+                            end: 453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "compiled Core Erlang output through the existing gen_server generator",
+                        span: Span {
+                            start: 448,
+                            end: 453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "unchanged, including a provision that self-sends another of the class's",
+                        span: Span {
+                            start: 448,
+                            end: 453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "own (non-provided) methods across the actor state boundary — and its BEAM",
+                        span: Span {
+                            start: 448,
+                            end: 453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "line annotations must point into the protocol file (`greetable.bt`).",
+                        span: Span {
+                            start: 448,
+                            end: 453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
                 trailing: None,
-                leading_blank_line: true,
-                blank_line_after_comments: false,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
             },
             doc_comment: None,
             backing_module: None,
@@ -246,8 +310,8 @@ Module {
                     protocol: Identifier {
                         name: "Greetable",
                         span: Span {
-                            start: 736,
-                            end: 745,
+                            start: 480,
+                            end: 489,
                         },
                     },
                     package: None,
@@ -255,216 +319,25 @@ Module {
                     excluding: [],
                     overriding: [],
                     span: Span {
-                        start: 730,
-                        end: 745,
+                        start: 474,
+                        end: 489,
                     },
                 },
             ],
             span: Span {
-                start: 704,
-                end: 858,
+                start: 448,
+                end: 602,
             },
         },
     ],
     method_definitions: [],
-    protocols: [
-        ProtocolDefinition {
-            name: Identifier {
-                name: "Greetable",
-                span: Span {
-                    start: 658,
-                    end: 667,
-                },
-            },
-            type_params: [],
-            extending: None,
-            method_signatures: [],
-            class_method_signatures: [],
-            provided_methods: [
-                MethodDefinition {
-                    selector: Unary(
-                        "greet",
-                    ),
-                    parameters: [],
-                    body: [
-                        ExpressionStatement {
-                            comments: CommentAttachment {
-                                leading: [],
-                                trailing: None,
-                                leading_blank_line: false,
-                                blank_line_after_comments: false,
-                            },
-                            expression: MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "self",
-                                        span: Span {
-                                            start: 689,
-                                            end: 693,
-                                        },
-                                    },
-                                ),
-                                selector: Unary(
-                                    "greeting",
-                                ),
-                                arguments: [],
-                                is_cast: false,
-                                span: Span {
-                                    start: 689,
-                                    end: 702,
-                                },
-                            },
-                            preceding_blank_line: false,
-                        },
-                    ],
-                    return_type: Some(
-                        Simple(
-                            Identifier {
-                                name: "String",
-                                span: Span {
-                                    start: 679,
-                                    end: 685,
-                                },
-                            },
-                        ),
-                    ),
-                    is_sealed: false,
-                    is_internal: false,
-                    is_class_method: false,
-                    kind: Primary,
-                    expect: None,
-                    comments: CommentAttachment {
-                        leading: [],
-                        trailing: None,
-                        leading_blank_line: false,
-                        blank_line_after_comments: false,
-                    },
-                    doc_comment: None,
-                    span: Span {
-                        start: 670,
-                        end: 702,
-                    },
-                },
-            ],
-            comments: CommentAttachment {
-                leading: [
-                    Comment {
-                        content: "Copyright 2026 James Casey",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "SPDX-License-Identifier: Apache-2.0",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "BT-3590 (ADR 0127 §3/§10): an Actor class's `uses:` provision must reach",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: true,
-                    },
-                    Comment {
-                        content: "compiled Core Erlang output through the existing gen_server generator",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "unchanged, including a provision that self-sends another of the class's",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "own (non-provided) methods across the actor state boundary.",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "See `trait_flattened_value_user/main.bt`'s header comment for why this",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "single-file fixture (protocol + class together) is not itself a",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "legal package layout, and why its `_semantic` snapshot's \"class and a",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "protocol cannot be in the same file\" diagnostic is expected.",
-                        span: Span {
-                            start: 641,
-                            end: 649,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                ],
-                trailing: None,
-                leading_blank_line: false,
-                blank_line_after_comments: true,
-            },
-            doc_comment: None,
-            span: Span {
-                start: 641,
-                end: 702,
-            },
-        },
-    ],
+    protocols: [],
     type_aliases: [],
     native_declarations: [],
     expressions: [],
     span: Span {
-        start: 641,
-        end: 858,
+        start: 448,
+        end: 602,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

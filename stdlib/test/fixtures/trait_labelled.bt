@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3625 (ADR 0127 Phase 0 pin): a trait declared in its own file, as ADR 0127
+// requires. `announce` self-sends the *required* `label`; users supply `label`.
+
+Protocol define: TraitLabelled
+  label -> String
+
+  announce -> String => "announce: " ++ self label

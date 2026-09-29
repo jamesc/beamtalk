@@ -153,6 +153,11 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) block_depth: usize,
     /// Original source text for extracting method source.
     pub(in crate::core_erlang) source_text: Option<String>,
+    /// Source identity of each provision-bearing protocol (ADR 0127 §3);
+    /// `MethodFrame::enter` swaps `source_text`/`source_path` to a flattened
+    /// method's protocol's for the method's body.
+    pub(in crate::core_erlang) protocol_sources:
+        beamtalk_core::semantic_analysis::ProtocolSourceMap,
     /// Primitive binding table from compiled stdlib (ADR 0007).
     /// Used by `generate_primitive()` for method body compilation via static methods.
     #[allow(dead_code)] // stored for future call-site optimization with static typing
@@ -361,6 +366,7 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             source_text: None,
+            protocol_sources: std::collections::HashMap::new(),
             primitive_bindings: PrimitiveBindingTable::new(),
             current_method_params: Vec::new(),
             current_method_param_types: std::collections::HashMap::new(),

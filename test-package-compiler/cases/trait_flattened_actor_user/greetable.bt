@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Provisions sit well below the top of the file so their line numbers cannot
+// be mistaken for `main.bt` lines.
+
+/// Something that can greet.
+Protocol define: Greetable
+  greet -> String => self greeting
+
+  greetingWidth -> Integer => self greeting size + 1

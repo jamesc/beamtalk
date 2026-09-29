@@ -598,6 +598,35 @@ impl CoreErlangGenerator {
         );
     }
 
+    /// The protocol source a `uses:`-flattened method must be mapped through
+    /// (ADR 0127 §3, "Source locations"), or `None` when `selector` on the
+    /// current class is not a flattened provision (or its protocol's source
+    /// was not supplied via `CodegenOptions::with_protocol_sources`).
+    ///
+    /// Provenance comes from `MethodInfo::origin`, stamped by
+    /// `trait_expansion::apply_origins`. Provisions are instance-side only
+    /// in v1, so `class_side` methods never match.
+    pub(in crate::core_erlang) fn flattened_method_source(
+        &self,
+        selector: &str,
+        class_side: bool,
+    ) -> Option<beamtalk_core::semantic_analysis::ProtocolSource> {
+        if class_side || self.protocol_sources.is_empty() {
+            return None;
+        }
+        let class_name = self.class_identity()?.class_name();
+        let origin = self
+            .class_hierarchy
+            .as_ref()?
+            .get_class(class_name)?
+            .methods
+            .iter()
+            .find(|m| m.selector.as_str() == selector)?
+            .origin
+            .as_ref()?;
+        self.protocol_sources.get(origin).cloned()
+    }
+
     /// Converts a byte-offset `Span` to a 1-based line number.
     ///
     /// Uses `self.source_text` to count newlines before the span's start offset.
@@ -636,7 +665,19 @@ impl CoreErlangGenerator {
         doc: Document<'static>,
         line_num: u32,
     ) -> Document<'static> {
-        match &self.source_path {
+        Self::annotate_with_line_in(self.source_path.as_deref(), doc, line_num)
+    }
+
+    /// [`Self::annotate_with_line`] against an explicit `source_path` — for a
+    /// caller that captured the path while a flattened method's protocol
+    /// source was still in scope (see `MethodFrame`) but annotates after the
+    /// frame is gone.
+    pub(in crate::core_erlang) fn annotate_with_line_in(
+        source_path: Option<&str>,
+        doc: Document<'static>,
+        line_num: u32,
+    ) -> Document<'static> {
+        match source_path {
             Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path, line_num)),
             None => {
                 // No source path — use bare line number annotation
