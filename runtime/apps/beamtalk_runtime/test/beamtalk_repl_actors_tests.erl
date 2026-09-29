@@ -161,7 +161,7 @@ kill_nonexistent_actor_returns_error_test() ->
 %%% Registry Termination Tests
 %%% ===========================================================================
 
-registry_termination_kills_all_actors_test() ->
+registry_termination_leaves_actors_alive_test() ->
     OldTrapExit = process_flag(trap_exit, true),
 
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
@@ -182,13 +182,19 @@ registry_termination_kills_all_actors_test() ->
     %% Stop registry
     gen_server:stop(RegistryPid),
 
-    %% Give time for shutdown signals
     timer:sleep(100),
 
-    %% All actors should be dead
-    ?assertNot(is_process_alive(Actor1)),
-    ?assertNot(is_process_alive(Actor2)),
-    ?assertNot(is_process_alive(Actor3)),
+    %% Actors are owned by their supervisors, not by the registry
+    ?assert(is_process_alive(Actor1)),
+    ?assert(is_process_alive(Actor2)),
+    ?assert(is_process_alive(Actor3)),
+    lists:foreach(
+        fun(P) ->
+            unlink(P),
+            exit(P, kill)
+        end,
+        [Actor1, Actor2, Actor3]
+    ),
 
     process_flag(trap_exit, OldTrapExit).
 
@@ -376,41 +382,66 @@ unknown_info_is_ignored_test() ->
     gen_server:stop(RegistryPid).
 
 %%% ===========================================================================
-%%% Workspace App Callback Env Tests
+%%% Node-wide tracking (BT-3633)
 %%% ===========================================================================
 
-workspace_app_start_sets_callback_env_test() ->
-    %% Ensure env is clean
-    application:unset_env(beamtalk_runtime, actor_spawn_callback),
-    ?assertEqual(undefined, application:get_env(beamtalk_runtime, actor_spawn_callback)),
+track_spawned_registers_actor_with_resolved_class_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        try
+            ok = beamtalk_repl_actors:track_spawned(ActorPid, 'Counter'),
+            %% cast is async; a following call is ordered after it
+            {ok, Metadata} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
+            ?assertEqual('Counter', maps:get(class, Metadata))
+        after
+            gen_server:stop(ActorPid)
+        end
+    end).
 
-    %% Call actual start/2 — supervisor has no static children, safe to start
-    {ok, SupPid} = beamtalk_workspace_app:start(normal, []),
-    try
-        ?assertEqual(
-            {ok, beamtalk_repl_actors},
-            application:get_env(beamtalk_runtime, actor_spawn_callback)
-        )
-    after
-        OldTrapExit2 = process_flag(trap_exit, true),
-        exit(SupPid, shutdown),
-        receive
-            {'EXIT', SupPid, _} -> ok
-        after 1000 -> ok
-        end,
-        process_flag(trap_exit, OldTrapExit2),
-        application:unset_env(beamtalk_runtime, actor_spawn_callback)
-    end.
+track_spawned_is_idempotent_with_explicit_register_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        try
+            ok = beamtalk_repl_actors:register_actor(
+                RegistryPid, ActorPid, 'Counter', test_counter
+            ),
+            ok = beamtalk_repl_actors:track_spawned(ActorPid, 'Counter'),
+            ?assertEqual(1, length(beamtalk_repl_actors:list_actors(RegistryPid)))
+        after
+            gen_server:stop(ActorPid)
+        end
+    end).
 
-workspace_app_stop_unsets_callback_env_test() ->
-    %% Set the env first (simulating what start/2 does)
-    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
-    ?assertEqual(
-        {ok, beamtalk_repl_actors},
-        application:get_env(beamtalk_runtime, actor_spawn_callback)
-    ),
+track_spawned_without_registry_is_noop_test() ->
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual(undefined, whereis(beamtalk_actor_registry)),
+        ?assertEqual(ok, beamtalk_repl_actors:track_spawned(self(), 'Counter'))
+    end).
 
-    %% Call actual stop/1 function
-    ok = beamtalk_workspace_app:stop(undefined),
+list_objects_and_object_at_wrap_live_actors_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        try
+            ok = beamtalk_repl_actors:register_actor(
+                RegistryPid, ActorPid, 'Counter', test_counter
+            ),
+            ?assertMatch(
+                [{beamtalk_object, 'Counter', _, ActorPid}],
+                beamtalk_repl_actors:list_objects()
+            ),
+            PidStr = pid_to_list(ActorPid),
+            ?assertMatch(
+                {beamtalk_object, 'Counter', _, ActorPid},
+                beamtalk_repl_actors:object_at(PidStr)
+            ),
+            ?assertEqual(nil, beamtalk_repl_actors:object_at("invalid")),
+            ?assertEqual(nil, beamtalk_repl_actors:object_at(not_a_string))
+        after
+            gen_server:stop(ActorPid)
+        end
+    end).
 
-    ?assertEqual(undefined, application:get_env(beamtalk_runtime, actor_spawn_callback)).
+list_objects_without_registry_is_empty_test() ->
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual([], beamtalk_repl_actors:list_objects())
+    end).

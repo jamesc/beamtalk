@@ -1100,7 +1100,6 @@ fn stdlib_compiler_options(warnings_as_errors: bool) -> beamtalk_core::CompilerO
     beamtalk_core::CompilerOptions {
         stdlib_mode: true,
         allow_primitives: false,
-        workspace_mode: false,
         warnings_as_errors,
         current_package: Some("stdlib".into()),
         ..Default::default()

@@ -28,8 +28,7 @@ use ecow::EcoString;
 ///
 /// # let module = Module::new(Vec::new(), Span::new(0, 0));
 /// let code = generate_module(&module, CodegenOptions::new("counter")
-///     .with_source("value := 0")
-///     .with_workspace_mode(true))?;
+///     .with_source("value := 0"))?;
 /// # Ok::<(), beamtalk_codegen::core_erlang::CodeGenError>(())
 /// ```
 #[derive(Debug, Clone)]
@@ -40,8 +39,6 @@ pub struct CodegenOptions {
     pub(in crate::core_erlang) source_text: Option<String>,
     /// Primitive binding table from compiled stdlib (ADR 0007).
     pub(in crate::core_erlang) bindings: Option<PrimitiveBindingTable>,
-    /// Whether workspace bindings are available (REPL/workspace context).
-    pub(in crate::core_erlang) workspace_mode: bool,
     /// Class name → compiled module name index for resolving cross-file class
     /// references in package mode.
     ///
@@ -120,7 +117,6 @@ impl CodegenOptions {
             module_name: EcoString::from(module_name),
             source_text: None,
             bindings: None,
-            workspace_mode: false,
             class_module_index: std::collections::HashMap::new(),
             class_superclass_index: std::collections::HashMap::new(),
             source_path: None,
@@ -165,13 +161,6 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_bindings(mut self, bindings: PrimitiveBindingTable) -> Self {
         self.bindings = Some(bindings);
-        self
-    }
-
-    /// Enables or disables workspace mode (ADR 0010 / ADR 0019).
-    #[must_use]
-    pub fn with_workspace_mode(mut self, enabled: bool) -> Self {
-        self.workspace_mode = enabled;
         self
     }
 

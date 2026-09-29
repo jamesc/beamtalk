@@ -168,9 +168,7 @@ fn family_detector_agrees_with_old_loop_detectors_over_the_corpus() {
         let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
         let is_stdlib_src = rel.starts_with("stdlib/src/");
         let module_name = format!("bt@family_diff@{i}");
-        let options = CodegenOptions::new(&module_name)
-            .with_workspace_mode(true)
-            .with_stdlib_mode(is_stdlib_src);
+        let options = CodegenOptions::new(&module_name).with_stdlib_mode(is_stdlib_src);
         // Ignore the Result — a corpus fixture that intentionally fails to
         // compile (a rejection test) still runs `ThreadingPlan::new_impl`
         // for every construct generated before the failure, and that partial

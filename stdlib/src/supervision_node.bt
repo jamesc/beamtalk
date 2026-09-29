@@ -7,7 +7,7 @@
 /// A `SupervisionNode` is a frozen, point-in-time view of a single process: its
 /// pid, registered name, kind, Beamtalk class (if any), and live child count.
 /// Nodes are minted by the runtime shim (`beamtalk_process_navigation`) when you
-/// take a snapshot via `Workspace processes`, and never mutate — to observe
+/// take a snapshot via `Node current processes`, and never mutate — to observe
 /// change, take a new snapshot.
 ///
 /// The `kind` field is load-bearing: it tells a renderer whether to draw a
@@ -23,7 +23,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// node := Workspace processes root
+/// node := Node current processes unwrap root
 /// node kind            // => #beamtalkActor
 /// node pid             // => a Pid
 /// node behaviourClass  // => Counter   (the Beamtalk class, or nil for foreign)
@@ -44,7 +44,7 @@ typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   /// The number of live children (supervisors only; `0` for workers).
   field: childCount :: Integer = 0
   /// The node this snapshot node was captured on (ADR 0126 §8). Always the
-  /// local node for a `Workspace processes` / `ProcessNavigation default`
+  /// local node for a `Node current processes` / `ProcessNavigation default`
   /// snapshot; for a remote snapshot (`ProcessNavigation on:`) this is the
   /// target node, not the caller's — the walk runs *on* that node via
   /// `erpc`, so every node it produces is naturally stamped with its own

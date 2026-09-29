@@ -75,7 +75,6 @@ pub fn generate_module_with_warnings(
     };
     generator.source_text = options.source_text;
     generator.protocol_sources = options.protocol_sources;
-    generator.set_workspace_mode(options.workspace_mode);
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.set_class_module_index(options.class_module_index);
     generator.source_path = options.source_path;

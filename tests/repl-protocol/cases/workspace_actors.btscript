@@ -27,16 +27,16 @@ Workspace class
 Workspace isAvailable
 // => true
 
-// Workspace respondsTo: #actors returns true
-Workspace respondsTo: #actors
+// Node current respondsTo: #actors returns true
+Node current respondsTo: #actors
 // => true
 
-// Workspace respondsTo: #actorAt: returns true
-Workspace respondsTo: #actorAt:
+// Node current respondsTo: #actorAt: returns true
+Node current respondsTo: #actorAt:
 // => true
 
-// Workspace respondsTo: #actorsOf: returns true
-Workspace respondsTo: #actorsOf:
+// Node current respondsTo: #actorsOf: returns true
+Node current respondsTo: #actorsOf:
 // => true
 
 // Workspace respondsTo: unknown method returns false
@@ -47,9 +47,9 @@ Workspace respondsTo: #nonExistentMethod
 // WORKSPACE ACTORS — RETURNS A LIST
 // ===========================================================================
 
-// Workspace actors returns a list (may contain actors from prior tests)
+// Node current actors returns a Result of a list (may contain actors from prior tests)
 // Actor list depends on prior test state, keep wildcard
-allActors := Workspace actors
+allActors := Node current actors unwrap
 // => _
 
 // ===========================================================================
@@ -64,8 +64,8 @@ beforeCount := allActors size
 c := Counter spawn
 // => Actor(Counter, _)
 
-// Workspace actors now has more actors (depends on prior tests, keep wildcard)
-actors := Workspace actors
+// Node current actors now has more actors (depends on prior tests, keep wildcard)
+actors := Node current actors unwrap
 // => _
 
 actors size > beforeCount
@@ -76,7 +76,7 @@ actors size > beforeCount
 // ===========================================================================
 
 // Record counter count before spawning second (depends on prior tests, keep wildcard)
-countersBefore := Workspace actorsOf: Counter
+countersBefore := (Node current actorsOf: Counter) unwrap
 // => _
 
 countersBeforeSize := countersBefore size
@@ -87,7 +87,7 @@ c2 := Counter spawn
 // => Actor(Counter, _)
 
 // actorsOf: Counter now returns one more (depends on prior tests, keep wildcard)
-countersAfter := Workspace actorsOf: Counter
+countersAfter := (Node current actorsOf: Counter) unwrap
 // => _
 
 countersAfter size > countersBeforeSize
@@ -105,7 +105,7 @@ c getValue
 // => 1
 
 // Verify actorsOf: returns functional references too (depends on prior tests, keep wildcard)
-counterRefs := Workspace actorsOf: Counter
+counterRefs := (Node current actorsOf: Counter) unwrap
 // => _
 
 // Get last element and send it a message
@@ -121,7 +121,7 @@ lastCounter getValue
 // ===========================================================================
 
 // actorAt: with invalid pid returns nil
-Workspace actorAt: "invalid"
+(Node current actorAt: "invalid") unwrap
 // => nil
 
 // ===========================================================================
@@ -131,7 +131,7 @@ Workspace actorAt: "invalid"
 // actorAt: returns an actor object that responds to messages when found
 // (The actor objects returned by actors are already fully functional — tested above)
 // Verify actors list contains functional actor objects via actorsOf:
-freshActors := Workspace actorsOf: Counter
+freshActors := (Node current actorsOf: Counter) unwrap
 // => _
 
 freshActors size > 0
@@ -204,7 +204,7 @@ kc isAlive
 // => false
 
 // ===========================================================================
-// ACTOR LIFECYCLE — Workspace actors first stop
+// ACTOR LIFECYCLE — Node current actors first stop
 // ===========================================================================
 
 // Spawn fresh actors and verify stop works on actor returned from Workspace

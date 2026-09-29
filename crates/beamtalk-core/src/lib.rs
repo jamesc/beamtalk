@@ -91,11 +91,6 @@ pub struct CompilerOptions {
     /// Emits a warning instead of an error.
     pub allow_primitives: bool,
 
-    /// ADR 0010 / ADR 0019: Whether workspace bindings are available.
-    /// When true, class references resolve through session bindings or class
-    /// registry. When false (batch compile), they go directly to the registry.
-    pub workspace_mode: bool,
-
     /// When true, suppress warning diagnostics during compilation.
     /// Useful for test fixtures that intentionally trigger warnings.
     pub suppress_warnings: bool,

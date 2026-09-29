@@ -78,7 +78,7 @@ pub enum CodeGenContext {
 ///
 /// Fields are organized into context-specific groups to reduce the cognitive
 /// load of the god object:
-/// - [`ReplContext`] — REPL-specific state (`is_repl_mode`, `workspace_mode`, etc.)
+/// - [`ReplContext`] — REPL-specific state (`is_repl_mode`, etc.)
 /// - [`ClassContext`] — Class/actor-specific state (`class_identity`, `class_var_*`, etc.)
 /// - [`ValueTypeContext`] — Value-type-specific state (`self_version`, `current_nlr_token`)
 ///

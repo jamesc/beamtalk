@@ -30,13 +30,11 @@ use ecow::EcoString;
 /// Walks all expressions looking for `ClassReference` nodes whose name is
 /// not found in the `ClassHierarchy` or `ProtocolRegistry`. Skips built-in
 /// names (`Erlang`, `Self`, `Nil`, `True`, `False`), type parameters of
-/// the enclosing class, protocol names, and REPL workspace bindings passed
-/// via `known_vars`.
+/// the enclosing class, and protocol names.
 pub(crate) fn check_unresolved_classes(
     module: &Module,
     hierarchy: &ClassHierarchy,
     protocol_registry: &ProtocolRegistry,
-    known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let empty_params: Vec<&str> = Vec::new();
@@ -47,7 +45,6 @@ pub(crate) fn check_unresolved_classes(
         hierarchy,
         protocol_registry,
         &empty_params,
-        known_vars,
         diagnostics,
     );
 
@@ -64,7 +61,6 @@ pub(crate) fn check_unresolved_classes(
                 hierarchy,
                 protocol_registry,
                 &class_type_params,
-                known_vars,
                 diagnostics,
             );
         }
@@ -77,7 +73,6 @@ pub(crate) fn check_unresolved_classes(
             hierarchy,
             protocol_registry,
             &empty_params,
-            known_vars,
             diagnostics,
         );
     }
@@ -89,7 +84,6 @@ fn walk_stmts(
     hierarchy: &ClassHierarchy,
     protocol_registry: &ProtocolRegistry,
     type_param_names: &[&str],
-    known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for stmt in stmts {
@@ -99,7 +93,6 @@ fn walk_stmts(
                 hierarchy,
                 protocol_registry,
                 type_param_names,
-                known_vars,
                 diagnostics,
             );
         });
@@ -118,19 +111,15 @@ fn visit_unresolved_class(
     hierarchy: &ClassHierarchy,
     protocol_registry: &ProtocolRegistry,
     type_param_names: &[&str],
-    known_vars: &[&str],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Expression::ClassReference { name, span, .. } = expr {
         let class_name = name.name.as_str();
 
-        // Skip builtins, type parameters, known REPL bindings, classes, and protocols.
-        // Known vars covers REPL workspace bindings like `Workspace` and `Transcript`
-        // which are capitalized variables, not class references.
+        // Skip builtins, type parameters, classes, and protocols.
         // Protocols are first-class objects and valid class references.
         if BUILTIN_CLASS_NAMES.contains(&class_name)
             || type_param_names.contains(&class_name)
-            || known_vars.contains(&class_name)
             || hierarchy.has_class(class_name)
             || protocol_registry.has_protocol(class_name)
         {
@@ -373,36 +362,6 @@ fn closest_alias_name(target: &str, alias_registry: &AliasRegistry) -> Option<Ec
         }
     }
     best.map(|(name, _)| name)
-}
-
-// ── Workspace binding shadows class ─────────────────────────────────────────
-
-/// Warn when a workspace binding (REPL variable) shadows a class name.
-///
-/// In the REPL, workspace bindings like `Workspace` and `Transcript` are
-/// injected as known variables. If a class with the same name also exists in
-/// the hierarchy, the binding silently shadows the class, which can confuse
-/// users. This check emits a warning for each such collision.
-pub(crate) fn check_workspace_shadows(
-    hierarchy: &ClassHierarchy,
-    known_vars: &[&str],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for &var_name in known_vars {
-        if hierarchy.has_class(var_name) {
-            diagnostics.push(
-                Diagnostic::warning(
-                    format!("Workspace binding `{var_name}` shadows class `{var_name}`"),
-                    crate::source_analysis::Span::new(0, 0),
-                )
-                .with_hint(format!(
-                    "The REPL workspace binding `{var_name}` hides the class with the same name. \
-                     References to `{var_name}` will resolve to the binding, not the class.",
-                ))
-                .with_category(DiagnosticCategory::ShadowedClass),
-            );
-        }
-    }
 }
 
 // ── Unresolved FFI modules ───────────────────────────────────────────────────
@@ -819,13 +778,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(
-            &module,
-            &hierarchy,
-            &ProtocolRegistry::new(),
-            &[],
-            &mut diags,
-        );
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Unresolved class `NonExistent`"));
@@ -845,13 +798,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(
-            &module,
-            &hierarchy,
-            &ProtocolRegistry::new(),
-            &[],
-            &mut diags,
-        );
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
 
         assert!(diags.is_empty(), "Builtins should not trigger warnings");
     }
@@ -864,40 +811,11 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(
-            &module,
-            &hierarchy,
-            &ProtocolRegistry::new(),
-            &[],
-            &mut diags,
-        );
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
 
         assert!(
             diags.is_empty(),
             "Known classes should not trigger warnings"
-        );
-    }
-
-    #[test]
-    fn test_unresolved_class_skips_known_vars() {
-        // REPL workspace bindings like Workspace and Transcript are capitalized
-        // variables, not class references — they should not trigger warnings.
-        let module = empty_module_with_exprs(vec![class_ref("Workspace"), class_ref("Transcript")]);
-        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
-        let mut diags = Vec::new();
-
-        check_unresolved_classes(
-            &module,
-            &hierarchy,
-            &ProtocolRegistry::new(),
-            &["Workspace", "Transcript"],
-            &mut diags,
-        );
-
-        assert!(
-            diags.is_empty(),
-            "Known REPL variables should not trigger unresolved class warnings"
         );
     }
 
@@ -922,7 +840,7 @@ mod tests {
         });
         let mut diags = Vec::new();
 
-        check_unresolved_classes(&module, &hierarchy, &registry, &[], &mut diags);
+        check_unresolved_classes(&module, &hierarchy, &registry, &mut diags);
 
         assert!(
             diags.is_empty(),
@@ -1352,13 +1270,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(
-            &module,
-            &hierarchy,
-            &ProtocolRegistry::new(),
-            &[],
-            &mut diags,
-        );
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
 
         assert!(
             diags.is_empty(),
@@ -1388,13 +1300,7 @@ mod tests {
         let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
-        check_unresolved_classes(
-            &module,
-            &hierarchy,
-            &ProtocolRegistry::new(),
-            &[],
-            &mut diags,
-        );
+        check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
 
         assert_eq!(
             diags.len(),
@@ -1444,57 +1350,6 @@ mod tests {
         assert!(is_known_erlang_module("beamtalk_extensions"));
         assert!(is_known_erlang_module("beamtalk_runtime"));
         assert!(!is_known_erlang_module("my_custom_module"));
-    }
-
-    // ── Workspace shadow tests ─────────────────────────────────────────────
-
-    #[test]
-    fn test_workspace_shadow_warns_when_binding_matches_class() {
-        // "Object" is a built-in class in the hierarchy, so a workspace binding
-        // named "Object" should trigger a shadowing warning.
-        let module = empty_module_with_exprs(vec![]);
-        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
-        let mut diags = Vec::new();
-
-        check_workspace_shadows(&hierarchy, &["Object"], &mut diags);
-
-        assert_eq!(diags.len(), 1);
-        assert!(
-            diags[0]
-                .message
-                .contains("Workspace binding `Object` shadows class `Object`")
-        );
-        assert_eq!(diags[0].category, Some(DiagnosticCategory::ShadowedClass));
-    }
-
-    #[test]
-    fn test_workspace_shadow_no_warning_for_non_class() {
-        // "myVar" is not a class, so no shadow warning.
-        let module = empty_module_with_exprs(vec![]);
-        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
-        let mut diags = Vec::new();
-
-        check_workspace_shadows(&hierarchy, &["myVar"], &mut diags);
-
-        assert!(
-            diags.is_empty(),
-            "Non-class bindings should not trigger shadow warnings"
-        );
-    }
-
-    #[test]
-    fn test_workspace_shadow_multiple_collisions() {
-        // Both "Object" and "Integer" are built-in classes.
-        let module = empty_module_with_exprs(vec![]);
-        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
-        let mut diags = Vec::new();
-
-        check_workspace_shadows(&hierarchy, &["Object", "Integer", "notAClass"], &mut diags);
-
-        assert_eq!(diags.len(), 2, "Should warn for Object and Integer only");
     }
 
     // ── Native declaration location tests ────────────────────────────────────

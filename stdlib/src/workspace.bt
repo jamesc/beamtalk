@@ -15,9 +15,8 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// Workspace actors
-/// Workspace actorAt: "<0.132.0>"
-/// Workspace actorsOf: Counter
+/// Workspace classes
+/// Workspace load: "src/counter.bt"
 /// Workspace isAvailable
 /// ```
 sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
@@ -29,77 +28,6 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace isAvailable   // => true (in a workspace)
   /// ```
   class sealed isAvailable -> Boolean => self delegate
-
-  // === Actors and processes ===
-
-  /// Return a list of all live actors as object references.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace actors
-  /// ```
-  class sealed actors -> List(Actor) => self delegate
-
-  /// Return a navigable snapshot of the live supervision tree (ADR 0092).
-  ///
-  /// The dynamic counterpart of `Workspace actors`: a `SupervisionTree` over the
-  /// workspace application tree with runtime plumbing filtered out (the
-  /// `default` scope, `== ProcessNavigation default tree`). Walk it (`do:`,
-  /// `select:`, `findClass:`), reach the head (`root`), or take the flat record
-  /// list (`nodes`). The snapshot is best-effort point-in-time — re-call to
-  /// refresh.
-  ///
-  /// The `default`-scope reach is an ADR-0091 Read op, scoped exactly like
-  /// `actors`. For the privileged whole-node view use `ProcessNavigation system
-  /// tree`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace processes root                  // => the snapshot root SupervisionNode
-  /// Workspace processes do: [:n | Transcript showLine: n printString]
-  /// Workspace processes findClass: Counter    // => List(SupervisionNode)
-  /// Workspace processes nodes                 // => the flat List(SupervisionNode)
-  /// ```
-  class sealed processes -> SupervisionTree =>
-    (ProcessNavigation nodes: (Erlang beamtalk_workspace_facade) processes) tree
-
-  /// Return every visible connected node with its name and current
-  /// shape-skew count (ADR 0126 §8/§10, Phase 7).
-  ///
-  /// The cross-surface `nodes` op: one implementation, reached identically
-  /// via `eval`/`evaluate` on the REPL, MCP, and LiveView surfaces (like
-  /// `Workspace processes` above), backed by `beamtalk_node_monitor`'s
-  /// queryable skew tally (BT-3602's `NodeShapeSkew` announcement, kept
-  /// alongside as a live snapshot rather than only fired-and-forgotten).
-  /// Hidden (tooling) nodes are excluded, matching `Node connected`. Unlike
-  /// `Workspace actors` (deliberately local-node-only), this is
-  /// cluster-scoped by design — see `docs/development/surface-parity.md`.
-  ///
-  /// Each row is a Dictionary `#{#name => nodeAtom, #skewCount => Integer}`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace nodes                          // => #()
-  /// (Workspace nodes) isEmpty                // => true
-  /// ```
-  class sealed nodes -> List(Dictionary) => self delegate
-
-  /// Look up a specific actor by pid string.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace actorAt: "<0.132.0>"
-  /// ```
-  class sealed actorAt: pidString :: String -> Actor | Nil => self delegate
-
-  /// Return all actors of a given class.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace actorsOf: Counter
-  /// ```
-  class sealed actorsOf: aClass :: Class -> List(Actor) =>
-    self actors select: [:a | a class includesBehaviour: aClass]
 
   // === Classes and bindings ===
 
@@ -432,19 +360,6 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
 
   // === Supervision ===
 
-  /// Return the OTP application root supervisor, or nil if not configured.
-  ///
-  /// Returns the `Supervisor` instance registered when a package with
-  /// `[application] supervisor = "ClassName"` starts. Returns nil if the
-  /// application has not been started with an OTP supervisor root.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace supervisor                  // => Supervisor(AppSup, 0.200.0)
-  /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
-  /// ```
-  class sealed supervisor -> Supervisor | Nil => self delegate
-
   /// Start and attach a supervisor to the workspace supervision tree.
   ///
   /// The class must be a Supervisor or DynamicSupervisor subclass.
@@ -469,19 +384,6 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   /// Workspace stopSupervisor: MySup       // => nil
   /// ```
   class sealed stopSupervisor: aClass :: Class -> Nil => self delegate
-
-  /// List all supervisors visible from the workspace.
-  ///
-  /// Returns the root application supervisor (if registered) and all
-  /// supervisors attached via `startSupervisor:`. The root supervisor
-  /// is not part of the workspace supervision tree but is included
-  /// for discoverability.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Workspace supervisors                 // => #(Supervisor(MySup, 0.200.0))
-  /// ```
-  class sealed supervisors -> List(Supervisor) => self delegate
 
   // === Settings ===
 

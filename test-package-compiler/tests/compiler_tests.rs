@@ -149,7 +149,7 @@ fn generate_core_erlang(case_name: &str) -> (String, String) {
 
     // Generate Core Erlang with a module name derived from the test case
     let module_name = case_name.replace('-', "_");
-    let options = CodegenOptions::new(&module_name).with_workspace_mode(true);
+    let options = CodegenOptions::new(&module_name);
 
     let siblings = read_sibling_sources(case_name);
     if siblings.is_empty() {
@@ -323,20 +323,14 @@ fn test_workspace_binding_compiles_as_normal_class() {
     let (module, _) = parse(tokens);
 
     // Both batch and workspace mode should succeed — no special treatment
-    let batch_result = generate_module(
-        &module,
-        CodegenOptions::new("test_batch").with_workspace_mode(false),
-    );
+    let batch_result = generate_module(&module, CodegenOptions::new("test_batch"));
     assert!(
         batch_result.is_ok(),
         "Transcript should compile in batch mode: {:?}",
         batch_result.err()
     );
 
-    let ws_result = generate_module(
-        &module,
-        CodegenOptions::new("test_ws").with_workspace_mode(true),
-    );
+    let ws_result = generate_module(&module, CodegenOptions::new("test_ws"));
     assert!(
         ws_result.is_ok(),
         "Transcript should compile in workspace mode: {:?}",

@@ -23,8 +23,7 @@ fn bt3382_self_dispatch_receiver_of_conditional_threads_state_and_compiles_throu
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3382_self_dispatch_receiver_of_conditional")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3382_self_dispatch_receiver_of_conditional"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -47,8 +46,7 @@ fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_t
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3392_self_dispatch_nested_in_binary_op_operand")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3392_self_dispatch_nested_in_binary_op_operand"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -84,7 +82,7 @@ fn bt3433_pure_block_arg_state_mutation_does_not_leak_state_version_and_compiles
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3433_pure_block_arg_state_mutation").with_workspace_mode(true),
+        CodegenOptions::new("bt3433_pure_block_arg_state_mutation"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc("bt3433_pure_block_arg_state_mutation", &code);
@@ -105,7 +103,7 @@ fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3392_binary_op_hoist_order_safety").with_workspace_mode(true),
+        CodegenOptions::new("bt3392_binary_op_hoist_order_safety"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc("bt3392_binary_op_hoist_order_safety", &code);
@@ -132,7 +130,7 @@ fn adr0118_order_unsafe_self_send_in_binary_op_now_threads_with_no_warning() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("adr0118_order_unsafe_self_send_now_threads").with_workspace_mode(true),
+        CodegenOptions::new("adr0118_order_unsafe_self_send_now_threads"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc(
@@ -171,8 +169,7 @@ fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_com
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3396_self_dispatch_nested_in_conditional_receiver_and")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3396_self_dispatch_nested_in_conditional_receiver_and"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -203,7 +200,7 @@ fn bt3396_self_dispatch_as_keyword_argument_in_method_body_threads_state_and_com
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3396_self_dispatch_as_keyword_argument").with_workspace_mode(true),
+        CodegenOptions::new("bt3396_self_dispatch_as_keyword_argument"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -239,8 +236,7 @@ fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_c
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3396_self_dispatch_in_field_assignment_rhs")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3396_self_dispatch_in_field_assignment_rhs"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     let read_at = code.find("let _Tmp").unwrap_or_else(|| {
@@ -291,7 +287,7 @@ fn bt3396_self_dispatch_after_order_unsafe_operand_is_sequenced_behind_a_temp() 
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("bt3396_order_unsafe_operand_sequenced").with_workspace_mode(true),
+        CodegenOptions::new("bt3396_order_unsafe_operand_sequenced"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     let code = &generated.code;
@@ -341,7 +337,7 @@ fn bt3415_binary_operand_self_send_after_raising_operand_is_sequenced_in_method_
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("bt3415_binary_operand_sequenced").with_workspace_mode(true),
+        CodegenOptions::new("bt3415_binary_operand_sequenced"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     let code = &generated.code;
@@ -393,7 +389,7 @@ fn bt3415_ffi_receiver_is_not_sequenced_but_its_self_send_argument_is() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3415_ffi_receiver_not_sequenced").with_workspace_mode(true),
+        CodegenOptions::new("bt3415_ffi_receiver_not_sequenced"),
     )
     .unwrap_or_else(|e| panic!("an FFI send with a self-send argument must compile. Got: {e:?}"));
     assert_eq!(
@@ -436,7 +432,7 @@ fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3415_early_return_post_prelude_state").with_workspace_mode(true),
+        CodegenOptions::new("bt3415_early_return_post_prelude_state"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -458,7 +454,7 @@ fn bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3415_early_return_prelude_state").with_workspace_mode(true),
+        CodegenOptions::new("bt3415_early_return_prelude_state"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -487,7 +483,7 @@ fn bt3416_thread_ahead_no_longer_warns_once_the_interpolation_segment_threads() 
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("bt3416_thread_ahead_no_longer_warns").with_workspace_mode(true),
+        CodegenOptions::new("bt3416_thread_ahead_no_longer_warns"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -532,8 +528,7 @@ fn bt3416_self_send_nested_in_a_cast_sends_receiver_still_threads() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3416_cast_send_receiver_self_send_threads")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3416_cast_send_receiver_self_send_threads"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -563,7 +558,7 @@ fn bt3418_field_assign_rhs_in_loop_body_threads_nested_self_send() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3418_field_assign_rhs_in_loop_body").with_workspace_mode(true),
+        CodegenOptions::new("bt3418_field_assign_rhs_in_loop_body"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -587,7 +582,7 @@ fn bt3418_local_assign_rhs_in_loop_body_threads_nested_self_send_with_no_warning
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let generated = generate_module_with_warnings(
         &module,
-        CodegenOptions::new("bt3418_local_assign_rhs_in_loop_body").with_workspace_mode(true),
+        CodegenOptions::new("bt3418_local_assign_rhs_in_loop_body"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -653,7 +648,7 @@ fn bt3415_self_send_argument_of_self_send_sequences_args_before_dispatch() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3415_self_send_arg_sequenced").with_workspace_mode(true),
+        CodegenOptions::new("bt3415_self_send_arg_sequenced"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     let bump_at = code
@@ -700,8 +695,7 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3416_later_interpolation_segment_threaded")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3416_later_interpolation_segment_threaded"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -725,7 +719,7 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3396_first_interpolation_segment_hoisted").with_workspace_mode(true),
+        CodegenOptions::new("bt3396_first_interpolation_segment_hoisted"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -767,8 +761,7 @@ fn bt3414_self_send_in_and_receiver_inside_while_true_condition_now_compiles_and
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3414_and_receiver_self_send_in_while_condition")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3414_and_receiver_self_send_in_while_condition"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc("bt3414_and_receiver_self_send_in_while_condition", &code);
@@ -785,8 +778,7 @@ fn bt3414_self_send_as_and_receiver_alone_inside_while_true_condition_now_compil
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt3414_bare_and_receiver_self_send_in_while_condition")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt3414_bare_and_receiver_self_send_in_while_condition"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc(
@@ -984,6 +976,6 @@ fn bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let _ = generate_module(
         &module,
-        CodegenOptions::new("bt3414_bare_and_in_if_true_inside_do_body").with_workspace_mode(true),
+        CodegenOptions::new("bt3414_bare_and_in_if_true_inside_do_body"),
     );
 }

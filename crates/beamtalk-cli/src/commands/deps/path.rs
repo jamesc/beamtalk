@@ -620,6 +620,10 @@ fn generate_dependency_app_file(
         &dep_bt_dep_names,
         &dep_hex_dep_names,
         &alias_metadata,
+        full_manifest
+            .as_ref()
+            .and_then(|m| m.application.as_ref())
+            .map(|a| a.supervisor.as_str()),
     )?;
 
     // Generate per-package corpus files for MCP discovery.

@@ -55,6 +55,22 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// ```
   class sealed package -> Package => self delegate
 
+  /// The running application's root supervisor, or `nil`.
+  ///
+  /// The `Supervisor` registered by the generated `beamtalk_<pkg>_app` callback
+  /// when a package with `[application] supervisor = "ClassName"` starts. It is
+  /// held in a table owned by `beamtalk_runtime`, so the answer is the same in
+  /// the REPL, `beamtalk run`, services and releases, with or without a
+  /// workspace. `nil` when no `[application]` has started, which is a normal
+  /// state for a library. For the *declared* class use
+  /// `Program package supervisorClass`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program rootSupervisor                // => nil
+  /// ```
+  class sealed rootSupervisor -> Supervisor | Nil => self delegate
+
   // === Exiting ===
 
   /// End this program with status 0 — the job-level, safe exit. Does not return.

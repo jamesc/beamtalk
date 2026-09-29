@@ -1070,7 +1070,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             module,
             &result.class_hierarchy,
             &result.protocol_registry,
-            known_vars,
             &mut result.diagnostics,
         );
     }
@@ -1099,14 +1098,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         module,
         &result.class_hierarchy,
         has_cross_file_classes,
-        &mut result.diagnostics,
-    );
-    // Warn when a workspace binding shadows a class name.
-    // This check works against the full class hierarchy (including locally
-    // defined classes), so it does not require cross-file metadata.
-    validators::check_workspace_shadows(
-        &result.class_hierarchy,
-        known_vars,
         &mut result.diagnostics,
     );
     // Warn on Erlang FFI calls to unknown modules.

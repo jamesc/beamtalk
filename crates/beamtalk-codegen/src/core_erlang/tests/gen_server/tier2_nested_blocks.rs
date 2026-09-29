@@ -31,7 +31,7 @@ fn test_nested_foldl_self_send_in_inner_do_is_compile_error() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@nestedfoldclassvarmutation").with_workspace_mode(true),
+        CodegenOptions::new("bt@nestedfoldclassvarmutation"),
     );
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
@@ -61,7 +61,7 @@ fn test_nested_foldl_self_send_in_inner_do_is_compile_error_actor_class_method()
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@nestedfoldclassvarmutationactor").with_workspace_mode(true),
+        CodegenOptions::new("bt@nestedfoldclassvarmutationactor"),
     );
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
@@ -100,7 +100,7 @@ fn test_nested_foldl_class_reference_send_buried_in_conditional_is_compile_error
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@nestedfoldclassrefcondmutation").with_workspace_mode(true),
+        CodegenOptions::new("bt@nestedfoldclassrefcondmutation"),
     );
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
@@ -137,10 +137,7 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     let src = "Object subclass: NestedCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class run: n =>\n    j := 0\n    [j < n] whileTrue: [\n      i := 0\n      [i < n] whileTrue: [\n        (i >= 0) ifTrue: [self bump]\n        i := i + 1\n      ]\n      j := j + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@nestedcondselfsend").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@nestedcondselfsend"));
     result.unwrap_or_else(|e| {
         panic!(
             "A self-send buried inside a conditional (not a bare top-level statement) \
@@ -164,10 +161,7 @@ fn test_nested_foldl_self_send_buried_in_conditional_is_compile_error() {
     let src = "Value subclass: NestedFoldCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class nestedDo: aList =>\n    outerSeen := 0\n    aList\n      do: [:x |\n        total := 0\n        aList\n          do: [:y |\n            (y >= 0) ifTrue: [self bump]\n            total := total + 1\n          ]\n        outerSeen := outerSeen + 1\n      ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@nestedfoldcondselfsend").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@nestedfoldcondselfsend"));
     assert!(
         matches!(
             result,
@@ -197,7 +191,7 @@ fn test_nested_detect_self_send_in_inner_detect_is_compile_error() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@nesteddetectclassvarmutation").with_workspace_mode(true),
+        CodegenOptions::new("bt@nesteddetectclassvarmutation"),
     );
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
@@ -225,10 +219,7 @@ fn test_mixed_letrec_nested_in_foldl_is_compile_error() {
     let src = "Object subclass: MixedLetrecFoldCounter\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class mixedBumpUpTo: n =>\n    seen := 0\n    #(1) do: [:x |\n      i := 0\n      [i < n] whileTrue: [\n        self.runs := self.runs + 1\n        i := i + 1\n      ]\n      seen := seen + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@mixedletrecfoldcounter").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@mixedletrecfoldcounter"));
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
             assert_eq!(mutation, "class variable 'runs'");
@@ -254,10 +245,7 @@ fn test_mixed_foldl_nested_in_letrec_is_compile_error() {
     let src = "Value subclass: MixedFoldLetrecCounter\n  classState: runs = 0\n\n  class mixedBumpAll: aList =>\n    outerSeen := 0\n    [outerSeen < 2] whileTrue: [\n      aList do: [:x |\n        self.runs := self.runs + 1\n      ]\n      outerSeen := outerSeen + 1\n    ]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@mixedfoldletreccounter").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@mixedfoldletreccounter"));
     match result {
         Err(CodeGenError::ClassVarMutationLostAcrossNestedLoop { mutation, .. }) => {
             assert_eq!(mutation, "class variable 'runs'");

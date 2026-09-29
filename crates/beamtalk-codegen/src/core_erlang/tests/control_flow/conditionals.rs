@@ -16,11 +16,8 @@ fn test_if_true_with_field_mutation_generates_inline_case() {
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  increment: flag =>\n    flag ifTrue: [self.count := self.count + 1].\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("ctr_if_true").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code = generate_module(&module, CodegenOptions::new("ctr_if_true"))
+        .expect("codegen should succeed");
 
     eprintln!("Generated code for ifTrue: with field mutation:\n{code}");
 
@@ -62,11 +59,8 @@ fn test_if_false_with_field_mutation_generates_inline_case() {
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  decrement: flag =>\n    flag ifFalse: [self.count := self.count - 1].\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("ctr_if_false").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code = generate_module(&module, CodegenOptions::new("ctr_if_false"))
+        .expect("codegen should succeed");
 
     eprintln!("Generated code for ifFalse: with field mutation:\n{code}");
 
@@ -91,11 +85,8 @@ fn test_if_true_if_false_with_field_mutation_generates_inline_case() {
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  toggle: flag =>\n    flag ifTrue: [self.count := self.count + 10]\n         ifFalse: [self.count := self.count - 1].\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("ctr_if_true_if_false").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code = generate_module(&module, CodegenOptions::new("ctr_if_true_if_false"))
+        .expect("codegen should succeed");
 
     eprintln!("Generated code for ifTrue:ifFalse: with field mutations:\n{code}");
 
@@ -127,11 +118,8 @@ fn test_if_true_without_mutation_uses_runtime_dispatch() {
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  check: flag =>\n    flag ifTrue: [42]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("ctr_no_mutation").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code = generate_module(&module, CodegenOptions::new("ctr_no_mutation"))
+        .expect("codegen should succeed");
 
     eprintln!("Generated code for ifTrue: without mutation:\n{code}");
 
@@ -150,11 +138,8 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  nested: a and: b =>\n    a ifTrue: [\n      b ifTrue: [self.count := self.count + 100]\n    ].\n    self.count\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("ctr_nested").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code = generate_module(&module, CodegenOptions::new("ctr_nested"))
+        .expect("codegen should succeed");
 
     eprintln!("Generated code for nested ifTrue: with field mutation:\n{code}");
 
@@ -191,11 +176,8 @@ fn test_return_wrapped_field_write_in_if_true_threads_state() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@returnwrappedfieldwrite").with_workspace_mode(true),
-    )
-    .expect("a `^`-wrapped actor field write inside an ifTrue: branch must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@returnwrappedfieldwrite"))
+        .expect("a `^`-wrapped actor field write inside an ifTrue: branch must compile");
     assert!(
         code.contains("maps':'put'('total'"),
         "the field write must still update 'total' via maps:put. Got:\n{code}"
@@ -228,7 +210,7 @@ fn test_destructure_wrapped_field_write_in_if_true_threads_state() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt@destructurewrappedfieldwrite").with_workspace_mode(true),
+        CodegenOptions::new("bt@destructurewrappedfieldwrite"),
     )
     .expect("a destructure-wrapped actor field write inside an ifTrue: branch must compile");
     assert!(
@@ -256,7 +238,7 @@ fn test_local_assign_field_write_at_flat_top_level_threads_state() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt@toplevellocalassignfieldwrite").with_workspace_mode(true),
+        CodegenOptions::new("bt@toplevellocalassignfieldwrite"),
     )
     .expect("a local-assign-wrapped actor field write as a flat top-level statement must compile");
     assert!(
@@ -291,11 +273,8 @@ fn test_pure_class_method_self_send_mints_no_class_vars_rebind() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@statelessfacade").with_workspace_mode(true),
-    )
-    .expect("pure class-method self-sends in a conditional arm and a fold must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@statelessfacade"))
+        .expect("pure class-method self-sends in a conditional arm and a fold must compile");
     assert!(
         !code.contains("ClassVars1"),
         "a pure self-send must not mint a ClassVars rebind. Got:\n{code}"

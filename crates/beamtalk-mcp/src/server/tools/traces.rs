@@ -20,6 +20,10 @@ use crate::server::{
     BeamtalkMcp, MCP_OUTPUT_MODE, ToolTimer, check_response, error_result, pretty_json,
 };
 
+/// Beamtalk expression behind the `nodes` tool: one `#{#name, #skewCount}` row
+/// per visible connected node.
+const NODES_EXPR: &str = "Node connected collect: [:n | #{#name => n name, #skewCount => (n shapeSkew ifOk: [:c | c] ifError: [:e | 0])}]";
+
 #[tool_router(router = traces_tool_router, vis = "pub(crate)")]
 impl BeamtalkMcp {
     /// List all running actors in the workspace.
@@ -95,13 +99,13 @@ impl BeamtalkMcp {
         let mut timer = ToolTimer::new("nodes");
         tracing::debug!(tool = "nodes", "tool invoked");
         // Surfaced through the same term-returning eval seam every surface
-        // shares (so the structured node/skew data is identical across
-        // surfaces) — the one shared implementation lives in
-        // `Workspace>>nodes` (`stdlib/src/workspace.bt`),
-        // backed by `beamtalk_node_monitor:connectedWithSkew/0`.
+        // shares. The per-node facts live on `Node` (`stdlib/src/node.bt`):
+        // `Node connected` lists the peers and `Node>>shapeSkew` is backed by
+        // `beamtalk_node_monitor:skew_count/1` (ADR 0129 amendment, BT-3633).
+        // A peer that drops between the two calls counts as 0 skew.
         let response = self
             .client
-            .evaluate_with_options("Workspace nodes", false)
+            .evaluate_with_options(NODES_EXPR, false)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 

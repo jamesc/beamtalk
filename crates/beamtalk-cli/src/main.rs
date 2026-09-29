@@ -620,7 +620,6 @@ fn dispatch_command(command: Command) -> Result<()> {
             let options = beamtalk_core::CompilerOptions {
                 stdlib_mode,
                 allow_primitives,
-                workspace_mode: false,
                 suppress_warnings: no_warnings,
                 ..Default::default()
             };
@@ -652,7 +651,6 @@ fn dispatch_command(command: Command) -> Result<()> {
             upgrade_from,
         } => {
             let options = beamtalk_core::CompilerOptions {
-                workspace_mode: false,
                 ..Default::default()
             };
             let project_root = camino::Utf8PathBuf::from(&path);

@@ -85,7 +85,8 @@ pub struct AliasMetadata {
 /// - `{registered, []}`
 /// - `{applications, [kernel, stdlib, ...bt_deps..., ...hex_deps..., beamtalk_runtime, beamtalk_workspace]}`
 /// - `{mod, {beamtalk_{appname}_app, []}}` when `app_callback_module` is `Some`
-/// - `{env, [{classes, [...]}]}` class→module mapping
+/// - `{env, [{classes, [...]}]}` class→module mapping, plus `{supervisor, 'X'}`
+///   when `supervisor_class` is `Some` (the `[application] supervisor` class)
 #[allow(clippy::too_many_arguments)]
 pub fn generate_app_file(
     build_dir: &Utf8Path,
@@ -97,6 +98,7 @@ pub fn generate_app_file(
     bt_dep_names: &[String],
     hex_dep_names: &[String],
     alias_metadata: &[AliasMetadata],
+    supervisor_class: Option<&str>,
 ) -> Result<()> {
     let app_content = format_app_file(
         manifest,
@@ -107,6 +109,7 @@ pub fn generate_app_file(
         bt_dep_names,
         hex_dep_names,
         alias_metadata,
+        supervisor_class,
     );
     let app_path = build_dir.join(format!("{}.app", manifest.name));
 
@@ -128,6 +131,7 @@ fn format_app_file(
     bt_dep_names: &[String],
     hex_dep_names: &[String],
     alias_metadata: &[AliasMetadata],
+    supervisor_class: Option<&str>,
 ) -> String {
     let description = escape_erlang_string(
         manifest
@@ -142,6 +146,7 @@ fn format_app_file(
     let native_modules_entry = format_native_modules_entry(native_module_names);
     let type_aliases_entry = format_type_aliases_entry(alias_metadata);
     let applications_list = format_applications_list(bt_dep_names, hex_dep_names);
+    let supervisor_entry = format_supervisor_entry(supervisor_class);
 
     let mod_entry = match app_callback_module {
         Some(cb_module) => format!("\n    {{mod, {{{cb_module}, []}}}},"),
@@ -156,7 +161,7 @@ fn format_app_file(
     {{registered, []}},
     {{applications, [{applications}]}},{mod_entry}
     {{env, [
-        {{classes, [{classes}]}}{native_modules}{type_aliases}
+        {{classes, [{classes}]}}{native_modules}{type_aliases}{supervisor}
     ]}}
 ]}}.
 "#,
@@ -169,7 +174,20 @@ fn format_app_file(
         mod_entry = mod_entry,
         native_modules = native_modules_entry,
         type_aliases = type_aliases_entry,
+        supervisor = supervisor_entry,
     )
+}
+
+/// Format the `{supervisor, 'X'}` entry for the `.app` `env` section (BT-3633).
+///
+/// Records the `[application] supervisor` class name for every package that
+/// declares one, including path dependencies (which get no `{mod, ...}`
+/// callback), so `(Package named: "my_app") supervisorClass` can read it back
+/// through `application:get_env/2`.
+fn format_supervisor_entry(supervisor_class: Option<&str>) -> String {
+    supervisor_class.map_or_else(String::new, |class_name| {
+        format!(",\n        {{supervisor, '{class_name}'}}")
+    })
 }
 
 /// Format the module list for the `.app` file.
@@ -352,7 +370,17 @@ mod tests {
         ];
         let classes = vec![];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[], &[]);
+        let result = format_app_file(
+            &manifest,
+            &modules,
+            &classes,
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+        );
 
         assert!(result.contains("{application, my_app, ["));
         assert!(result.contains("{description, \"A test app\"}"));
@@ -371,7 +399,7 @@ mod tests {
     #[test]
     fn test_format_app_file_default_description() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
 
         assert!(result.contains("{description, \"A beamtalk package\"}"));
     }
@@ -389,7 +417,17 @@ mod tests {
             type_params: vec![],
         }];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[], &[]);
+        let result = format_app_file(
+            &manifest,
+            &modules,
+            &classes,
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+        );
 
         assert!(
             result.contains("name => 'Counter'"),
@@ -441,6 +479,7 @@ mod tests {
             &[],
             &[],
             &[],
+            None,
         )
         .unwrap();
 
@@ -498,7 +537,7 @@ mod tests {
     #[test]
     fn test_format_app_file_escapes_description() {
         let manifest = test_manifest("my_app", "0.1.0", Some(r#"A "quoted" app"#));
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
         assert!(result.contains(r#"{description, "A \"quoted\" app"}"#));
     }
 
@@ -514,14 +553,34 @@ mod tests {
             &[],
             &[],
             &[],
+            None,
         );
         assert!(result.contains("{mod, {beamtalk_my_app_app, []}}"));
     }
 
     #[test]
+    fn test_format_app_file_records_supervisor_in_env() {
+        let manifest = test_manifest("my_app", "0.1.0", None);
+        let with = format_app_file(
+            &manifest,
+            &[],
+            &[],
+            None,
+            &[],
+            &[],
+            &[],
+            &[],
+            Some("AppSup"),
+        );
+        assert!(with.contains("{supervisor, 'AppSup'}"), "got: {with}");
+        let without = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
+        assert!(!without.contains("{supervisor,"));
+    }
+
+    #[test]
     fn test_format_app_file_without_mod_entry() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
         assert!(!result.contains("{mod,"));
     }
 
@@ -544,6 +603,7 @@ mod tests {
             &[],
             &[],
             &[],
+            None,
         )
         .unwrap();
 
@@ -595,6 +655,7 @@ mod tests {
             &[],
             &[],
             &[],
+            None,
         );
 
         assert!(
@@ -610,7 +671,7 @@ mod tests {
     #[test]
     fn test_format_app_file_without_native_modules_unchanged() {
         let manifest = test_manifest("my_app", "0.1.0", Some("No native"));
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
 
         assert!(
             !result.contains("native_modules"),
@@ -663,7 +724,7 @@ mod tests {
         let manifest = test_manifest("http", "0.1.0", Some("HTTP package"));
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
 
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &hex_deps, &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &hex_deps, &[], None);
 
         assert!(
             result.contains("{applications, [kernel, stdlib, cowboy, gun, beamtalk_runtime, beamtalk_workspace]}"),
@@ -686,6 +747,7 @@ mod tests {
             &[],
             &hex_deps,
             &[],
+            None,
         );
 
         assert!(
@@ -808,7 +870,7 @@ mod tests {
             source_file: "src/json.bt".to_string(),
             internal: false,
         }];
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &aliases);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &aliases, None);
         assert!(
             result.contains("{type_aliases, ["),
             "Should contain type_aliases entry. Got: {result}"
@@ -819,7 +881,7 @@ mod tests {
     #[test]
     fn test_format_app_file_without_type_aliases_unchanged() {
         let manifest = test_manifest("my_app", "0.1.0", Some("No aliases"));
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[], None);
         assert!(
             !result.contains("type_aliases"),
             "Should not contain type_aliases when empty. Got: {result}"

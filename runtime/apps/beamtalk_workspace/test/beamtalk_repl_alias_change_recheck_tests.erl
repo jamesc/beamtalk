@@ -408,8 +408,7 @@ compile_method_patch_registers_alias_dependency_test_() ->
                         >>,
                     Options = #{
                         class_name => <<"AliasChangeMethodPatchUser">>,
-                        is_class_method => false,
-                        workspace_mode => true
+                        is_class_method => false
                     },
                     Result = beamtalk_repl_compiler:compile_method_reload(
                         ClassSource, MethodSource, Options
@@ -476,8 +475,7 @@ compile_method_patch_preserves_file_local_alias_dependency_test_() ->
                     MethodSource = <<"hello => 43\n">>,
                     Options = #{
                         class_name => <<"AliasChangeMethodPatchFileLocalUser">>,
-                        is_class_method => false,
-                        workspace_mode => true
+                        is_class_method => false
                     },
                     Result = beamtalk_repl_compiler:compile_method_reload(
                         ClassSource, MethodSource, Options

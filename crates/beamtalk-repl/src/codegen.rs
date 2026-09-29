@@ -227,10 +227,10 @@ fn generate_repl_expressions_traced_impl(
     Ok(doc.to_pretty_string())
 }
 
-/// Generates Core Erlang for a test expression (no workspace bindings).
+/// Generates Core Erlang for a test expression.
 ///
-/// Like [`generate_repl_expression`] but with `workspace_mode = false`,
-/// suitable for compiled tests that don't need REPL/workspace context.
+/// Equivalent to [`generate_repl_expression`] for a bare generator, kept as the
+/// entry point for compiled tests.
 /// Used by `beamtalk test-stdlib` (ADR 0014 Phase 1).
 ///
 /// # Errors
@@ -270,17 +270,13 @@ impl<'a> ReplAssembler<'a> {
     ) -> Result<Document<'static>> {
         let previous_is_repl_mode = self.generator.is_repl_mode();
         let previous_context = self.generator.context;
-        let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
-        // ADR 0010: REPL runs in workspace context
-        self.generator.set_workspace_mode(true);
 
         // Restore generator state unconditionally, then propagate error.
         let result = self.generate_eval_module_body(expression);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
-        self.generator.set_workspace_mode(previous_workspace_mode);
         self.generator.context = previous_context;
         result
     }
@@ -297,10 +293,8 @@ impl<'a> ReplAssembler<'a> {
     ) -> Result<Document<'static>> {
         let previous_is_repl_mode = self.generator.is_repl_mode();
         let previous_context = self.generator.context;
-        let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
-        self.generator.set_workspace_mode(true);
 
         // Restore generator state unconditionally, then propagate error.
         let result = if expressions.len() == 1 {
@@ -310,7 +304,6 @@ impl<'a> ReplAssembler<'a> {
         };
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
-        self.generator.set_workspace_mode(previous_workspace_mode);
         self.generator.context = previous_context;
         result
     }
@@ -577,42 +570,27 @@ impl<'a> ReplAssembler<'a> {
 
         let previous_is_repl_mode = self.generator.is_repl_mode();
         let previous_context = self.generator.context;
-        let previous_workspace_mode = self.generator.workspace_mode();
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
-        self.generator.set_workspace_mode(true);
 
         // Restore generator state unconditionally, then propagate error.
         let result = self.generate_repl_multi_module_body(expressions);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
-        self.generator.set_workspace_mode(previous_workspace_mode);
         self.generator.context = previous_context;
         result
     }
 
-    /// Generates a test evaluation module (no workspace bindings).
+    /// Generates a test evaluation module.
     ///
-    /// Like [`generate_repl_module`] but with `workspace_mode = false`.
-    /// Used by `beamtalk test-stdlib` for compiled expression tests (ADR 0014).
+    /// Class references and class-side sends resolve identically in tests and
+    /// the REPL (ADR 0129 §10), so this is the same module shape as
+    /// [`Self::generate_repl_module`]. Used by `beamtalk test-stdlib` (ADR 0014).
     pub(crate) fn generate_test_module(
         &mut self,
         expression: &Expression,
     ) -> Result<Document<'static>> {
-        let previous_is_repl_mode = self.generator.is_repl_mode();
-        let previous_context = self.generator.context;
-        let previous_workspace_mode = self.generator.workspace_mode();
-        self.generator.context = CodeGenContext::Repl;
-        self.generator.set_is_repl_mode(true);
-        self.generator.set_workspace_mode(false);
-
-        // Restore generator state unconditionally, then propagate error.
-        let result = self.generate_eval_module_body(expression);
-
-        self.generator.set_is_repl_mode(previous_is_repl_mode);
-        self.generator.set_workspace_mode(previous_workspace_mode);
-        self.generator.context = previous_context;
-        result
+        self.generate_repl_module(expression)
     }
 
     /// Common eval module body shared by REPL and test codegen.
@@ -1223,9 +1201,7 @@ mod tests {
 
     #[test]
     fn test_expression_no_workspace_bindings_in_return() {
-        // Test mode should still return {Result, State} tuple — the difference
-        // is workspace_mode=false which affects how identifier lookups work
-        // (no maps:get from State for unknown vars).
+        // Test mode still returns a {Result, State} tuple.
         let result = generate_test_expression(&int_expr(42), "test_mod_2").unwrap();
         assert!(
             result.contains("{Result, State}"),

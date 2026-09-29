@@ -44,8 +44,10 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
     find_app_for_package/1,
     root_package/0,
     root_package_name/0,
+    supervisorClass/1,
     set_root_package/1,
     set_ambiguous_root_package/0,
+    refresh_app_classes/1,
     %% Beamtalk FFI shim: `Package packageNameFor: #ClassName`
     packageNameFor/1
 ]).
@@ -74,6 +76,35 @@ all() ->
         end,
         Apps
     ).
+
+-doc """
+The package's declared `[application]` supervisor class (`Package supervisorClass`),
+read from the `{supervisor, 'X'}` entry `beamtalk build` writes into the `.app`
+env for every package with an `[application]` section (path deps included).
+Answers the class object, or `nil` when the package declares none or the class
+is not loaded. A manifest fact, distinct from `Program rootSupervisor` (the live
+supervisor process).
+""".
+-spec supervisorClass(map()) -> term().
+supervisorClass(#{'$beamtalk_class' := 'Package', name := PkgName}) ->
+    case find_app_for_package(PkgName) of
+        {ok, AppName} ->
+            case application:get_env(AppName, supervisor) of
+                {ok, ClassName} when is_atom(ClassName) ->
+                    case beamtalk_class_registry:whereis_class(ClassName) of
+                        undefined ->
+                            nil;
+                        ClassPid ->
+                            Module = beamtalk_object_class:module_name_safe(ClassPid),
+                            {beamtalk_object, beamtalk_class_registry:class_object_tag(ClassName),
+                                Module, ClassPid}
+                    end;
+                _ ->
+                    nil
+            end;
+        error ->
+            nil
+    end.
 
 -doc """
 Returns a package info map for the given package name.
@@ -256,6 +287,80 @@ package_name_for_app(AppName) ->
                 _ ->
                     undefined
             end
+    end.
+
+-doc """
+Bring the loaded `.app`'s `classes` env up to date with the live class registry
+(BT-3662).
+
+`beamtalk build` is the only thing that writes a package's `.app` file, so a
+class added in the REPL (or through workspace `sync`) is otherwise invisible to
+`Package classes` until the next build. This adds one entry, in the same shape
+`beamtalk build` writes (ADR 0070 Phase 4), for every live class whose
+`bt@<package>@<class>` module belongs to `PkgName` and is not already listed.
+Existing entries are never touched, so the build-time metadata (kind, type
+parameters) stays authoritative. Only the in-memory application environment
+changes; the `.app` file on disk is rewritten by the next `beamtalk build`.
+
+Returns the names of the classes added. A package whose `.app` is not loaded
+yields `[]`. Concurrent refreshes of one package can race on the env write;
+the loss is transient and the next sync re-adds whatever was dropped.
+""".
+-spec refresh_app_classes(binary()) -> [atom()].
+refresh_app_classes(PkgName) when is_binary(PkgName) ->
+    %% `PkgName` can come straight from a `load-project` request, so it must
+    %% never mint an atom (the atom table is node-wide and never collected).
+    %% A package with live classes already has its atom, so an unknown name has
+    %% nothing to refresh.
+    try binary_to_existing_atom(PkgName, utf8) of
+        AppAtom -> refresh_app_classes(PkgName, AppAtom)
+    catch
+        error:badarg -> []
+    end.
+
+-spec refresh_app_classes(binary(), atom()) -> [atom()].
+refresh_app_classes(PkgName, AppAtom) ->
+    %% A library with no classes yet has an empty `classes` env, which
+    %% `find_app_for_package/1` does not recognise as a Beamtalk package, so
+    %% resolve the app by its name (app name == package name) first.
+    AppName =
+        case lists:keymember(AppAtom, 1, application:loaded_applications()) of
+            true ->
+                {ok, AppAtom};
+            false ->
+                find_app_for_package(PkgName)
+        end,
+    case AppName of
+        {ok, App} ->
+            Existing =
+                case application:get_env(App, classes) of
+                    {ok, L} when is_list(L) -> L;
+                    _ -> []
+                end,
+            Known = [class_entry_name(E) || E <- Existing],
+            Added = [
+                #{
+                    name => Name,
+                    module => Mod,
+                    parent => beamtalk_object_class:superclass_safe(Pid),
+                    package => AppAtom,
+                    kind => object,
+                    type_params => []
+                }
+             || {Name, Mod, Pid} <- beamtalk_class_registry:live_class_entries(),
+                is_atom(Mod),
+                beamtalk_class_registry:extract_package_from_module(Mod) =:= AppAtom,
+                not lists:member(Name, Known)
+            ],
+            case Added of
+                [] ->
+                    [];
+                _ ->
+                    application:set_env(App, classes, Existing ++ Added, [{persistent, true}]),
+                    [maps:get(name, E) || E <- Added]
+            end;
+        error ->
+            []
     end.
 
 -doc """

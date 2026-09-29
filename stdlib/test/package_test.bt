@@ -67,3 +67,7 @@ TestCase subclass: PackageTest
     pkg := Integer class package
     self assert: (pkg class =:= Package)
     self assert: pkg name equals: "stdlib"
+
+  testSupervisorClassNilWithoutApplication =>
+    // BT-3633: stdlib declares no [application] supervisor.
+    self assert: (Package named: "stdlib") supervisorClass isNil
