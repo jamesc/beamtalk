@@ -361,7 +361,7 @@ mod tests {
         )]
         .into_iter()
         .collect();
-        let span_start = protocol_text.find("bogus").unwrap() as u32;
+        let span_start = u32::try_from(protocol_text.find("bogus").unwrap()).unwrap();
         let per_user = |user: &str| {
             CoreDiagnostic::error(
                 "Integer does not understand bogus",

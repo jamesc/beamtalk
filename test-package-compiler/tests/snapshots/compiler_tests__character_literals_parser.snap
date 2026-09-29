@@ -219,4 +219,4 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 271, end: 272 }, hint: Some("'=' is not an operator in Beamtalk; use '=:=' for value equality or '==' for reference equality"), category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 271, end: 272 }, hint: Some("'=' is not an operator in Beamtalk; use '=:=' for value equality or '==' for reference equality"), category: None, notes: [], provision: None }

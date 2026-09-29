@@ -202,6 +202,7 @@ pub fn apply_origins(hierarchy: &mut ClassHierarchy, origins: &OriginMap) {
 /// (stdlib, generics) are untouched.
 ///
 /// [`ProtocolSource::package`]: crate::semantic_analysis::ProtocolSource::package
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
 pub fn resolve_provision_names(
     protocols: &mut HashMap<EcoString, ProtocolDefinition>,
     sources: &ProtocolSourceMap,

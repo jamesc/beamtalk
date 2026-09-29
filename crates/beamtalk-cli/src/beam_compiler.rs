@@ -760,14 +760,13 @@ impl ProvisionSink {
             .iter()
             .filter(|d| d.provision.is_some())
             .cloned();
-        match &self.collected {
-            Some(collected) => collected
+        if let Some(collected) = &self.collected {
+            collected
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .extend(tagged),
-            None => {
-                crate::diagnostic::print_provision_diagnostics(tagged, protocol_sources, options)
-            }
+                .extend(tagged);
+        } else {
+            crate::diagnostic::print_provision_diagnostics(tagged, protocol_sources, options);
         }
     }
 
