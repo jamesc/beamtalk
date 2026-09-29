@@ -1065,7 +1065,14 @@ class_objects_resolve_registered_classes_test() ->
         extending => undefined
     }),
     Objs = beamtalk_protocol_registry:conforming_class_objects('BT3627Conform'),
-    ?assertMatch([#beamtalk_object{class = 'BT3627UserClass class'}], Objs),
+    %% Other loaded classes (e.g. stdlib) may also define bt3627Ping-shaped
+    %% surfaces, so assert membership rather than an exact list.
+    ?assert(
+        lists:any(
+            fun(O) -> is_record(O, beamtalk_object) andalso O#beamtalk_object.pid =:= Pid end,
+            Objs
+        )
+    ),
     ?assert(lists:all(fun(O) -> is_record(O, beamtalk_object) end, Objs)),
     ?assertEqual(
         length(beamtalk_protocol_registry:conforming_classes('BT3627Conform')),

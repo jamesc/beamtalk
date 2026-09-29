@@ -36,7 +36,6 @@ Return the required method selectors for this protocol.
 
 Called when a protocol class object receives `requiredMethods` as a class
 method. Extracts the protocol name from ClassSelf and queries the registry.
-Returns `Behaviour` class objects (not raw name atoms).
 """.
 -spec class_requiredMethods(#beamtalk_object{}, map()) -> [atom()].
 class_requiredMethods(ClassSelf, _ClassVars) ->
