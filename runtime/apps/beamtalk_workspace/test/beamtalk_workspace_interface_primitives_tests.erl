@@ -879,10 +879,10 @@ autoflush_default_is_false_test() ->
 %%====================================================================
 %% resolve_name/2 Tests (ADR 0081 Phase 1)
 %%
-%% Resolution order: locals -> bind:as: ETS -> singleton registry ->
-%% class registry -> undefined_variable. Tiers 1, 2, 5 and ordering are
-%% deterministic in EUnit; tiers 3/4 need a live workspace and are exercised
-%% by the repl-protocol parity tests.
+%% Resolution order: locals -> bind:as: ETS -> class registry ->
+%% undefined_variable. Tiers 1, 2, 4 and ordering are deterministic in EUnit;
+%% tier 3 needs a live workspace and is exercised by the repl-protocol parity
+%% tests.
 %%====================================================================
 
 %% Tier 1: a name present in the locals map resolves to its local value.

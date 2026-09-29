@@ -29,6 +29,9 @@ Debug targets are tracked in an ETS table so that
 
 -export([
     set_domain/1,
+    transcript_domain/0,
+    install_transcript_handler/0,
+    flush_transcript/0,
     logLevel/0,
     logLevel/1,
     logFormat/0,
@@ -48,6 +51,11 @@ Debug targets are tracked in an ETS table so that
 -export([mcp_signal_path/0]).
 
 -define(DEBUG_TABLE, beamtalk_debug_targets).
+
+%% ADR 0129 §5: the `Transcript` Logger route.
+-define(TRANSCRIPT_HANDLER, beamtalk_transcript_log).
+-define(TRANSCRIPT_DEFAULT_FILTER, beamtalk_transcript_domain).
+-define(TRANSCRIPT_DOMAIN, [beamtalk, user, transcript]).
 
 -define(VALID_LEVELS, [
     emergency, alert, critical, error, warning, notice, info, debug
@@ -98,6 +106,64 @@ process inherits the domain without repeating the map literal.
 -spec set_domain(atom()) -> ok.
 set_domain(SubDomain) ->
     logger:set_process_metadata(#{domain => [beamtalk, SubDomain]}).
+
+-doc """
+The Logger domain of `Transcript show:` events outside an interactive
+workspace (ADR 0129 §5): `[beamtalk, user, transcript]`.
+""".
+-spec transcript_domain() -> [atom()].
+transcript_domain() ->
+    ?TRANSCRIPT_DOMAIN.
+
+-doc """
+Install the `beamtalk_transcript_log` handler and the default-handler filter
+that keeps transcript events off the default handler (ADR 0129 §5).
+
+The handler is a `logger_std_h` on `standard_io` with template
+`[msg, "\\n"]` that accepts only the transcript domain, so the output is plain
+text, one line per event, with no report header. The default handler stops
+that domain so nothing prints twice. Idempotent.
+""".
+-spec install_transcript_handler() -> ok.
+install_transcript_handler() ->
+    HandlerConfig = #{
+        config => #{type => standard_io},
+        filter_default => stop,
+        filters => [
+            {?TRANSCRIPT_DEFAULT_FILTER, {
+                fun logger_filters:domain/2, {log, sub, ?TRANSCRIPT_DOMAIN}
+            }}
+        ],
+        formatter => {logger_formatter, #{template => [msg, "\n"]}}
+    },
+    case logger:add_handler(?TRANSCRIPT_HANDLER, logger_std_h, HandlerConfig) of
+        ok ->
+            ok;
+        {error, {already_exist, _}} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Failed to add transcript log handler",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            )
+    end,
+    %% The default handler may be absent (e.g. a release with custom logging);
+    %% then there is nothing to filter.
+    _ = logger:add_handler_filter(
+        default,
+        ?TRANSCRIPT_DEFAULT_FILTER,
+        {fun logger_filters:domain/2, {stop, sub, ?TRANSCRIPT_DOMAIN}}
+    ),
+    ok.
+
+-doc """
+Synchronously flush the transcript handler so no output is lost when the node
+halts (ADR 0129 §5). Best-effort: a missing or busy handler is ignored.
+""".
+-spec flush_transcript() -> ok.
+flush_transcript() ->
+    _ = (catch logger_std_h:filesync(?TRANSCRIPT_HANDLER)),
+    ok.
 
 -doc "Return the current OTP primary log level as an atom.".
 %% Narrow return: the primary log level is one of the eight standard

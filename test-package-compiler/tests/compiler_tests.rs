@@ -244,10 +244,12 @@ fn test_workspace_binding_compiles_as_normal_class() {
         ws_result.err()
     );
 
+    // `Transcript` is a sealed, stateless class-side facade (ADR 0129), so the
+    // send is direct-called rather than routed through `class_send`.
     let batch_code = batch_result.unwrap();
     assert!(
-        batch_code.contains("class_send"),
-        "Batch mode should use class_send for Transcript, got:\n{batch_code}"
+        batch_code.contains("Transcript"),
+        "Batch mode should reference the Transcript class, got:\n{batch_code}"
     );
     assert!(
         !batch_code.contains("persistent_term"),
@@ -258,8 +260,8 @@ fn test_workspace_binding_compiles_as_normal_class() {
     // no persistent_term fallback (removed in BT-491).
     let ws_code = ws_result.unwrap();
     assert!(
-        ws_code.contains("class_send"),
-        "Actor methods in workspace mode should use class_send for Transcript, got:\n{ws_code}"
+        ws_code.contains("Transcript"),
+        "Workspace mode should reference the Transcript class, got:\n{ws_code}"
     );
     assert!(
         !ws_code.contains("persistent_term"),

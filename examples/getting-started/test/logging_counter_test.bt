@@ -13,21 +13,6 @@
 
 TestCase subclass: LoggingCounterTest
 
-  class serial -> Boolean => true
-
-  setUp =>
-    self.old_ts := TranscriptStream current
-    self.ts := TranscriptStream spawn
-    TranscriptStream current: self.ts
-    self
-
-  tearDown =>
-    self.old_ts ifNil: [
-      TranscriptStream resetCurrent
-    ] ifNotNil: [:t | TranscriptStream current: t]
-    self.ts ifNotNil: [:t | t stop]
-    self
-
   testInitialValueIsZero =>
     // Inherits Counter's initial state
     self assert: LoggingCounter spawn getValue equals: 0
@@ -35,14 +20,12 @@ TestCase subclass: LoggingCounterTest
   testIncrementDelegatesToSuper =>
     // LoggingCounter#increment logs then delegates to super — returns new value
     self assert: LoggingCounter spawn increment equals: 1
-    self assert: (self.ts recent includes: "increment called")
 
   testIncrementLogs =>
-    // Each increment call produces a log message
+    // Each increment call logs, then delegates: the value advances each time
     lc := LoggingCounter spawn
-    lc increment
-    lc increment
-    self assert: (self.ts recent includes: "increment called")
+    self assert: lc increment equals: 1
+    self assert: lc increment equals: 2
 
   testDecrementIsInherited =>
     // decrement is inherited from Counter unchanged

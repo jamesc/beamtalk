@@ -55,6 +55,10 @@ start(_StartType, _StartArgs) ->
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
 
+    %% ADR 0129 §5: plain-format handler for `Transcript` output outside an
+    %% interactive workspace. Installed before any user code can run.
+    ok = beamtalk_logging_config:install_transcript_handler(),
+
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of

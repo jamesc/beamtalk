@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Transcript — the REPL's shared log, and a day-0 convenience elsewhere (ADR 0129 §5).
+///
+/// `Transcript` is a sealed, stateless class whose API is entirely class-side.
+/// It has no instance, no stream protocol and no capture API.
+///
+/// Programs should use `Logger` (ADR 0064), or `Console` for plain
+/// stdout/stderr. `Transcript` exists for newcomers and REPL use:
+///
+/// | Selector | In an interactive workspace | Elsewhere |
+/// |---|---|---|
+/// | `show:` | Appends the value's text to the workspace's `TranscriptStream` | One Logger `notice` event, domain `[beamtalk, user, transcript]` |
+/// | `cr` | Appends a newline | No-op |
+/// | `showCr:` | `show:` then `cr` | One Logger event |
+/// | `recent` | The buffered lines | Raises `no_workspace` |
+/// | `clear` | Empties the buffer | Raises `no_workspace` |
+///
+/// The Logger route prints plain text, one line per event, under `beamtalk run`,
+/// `beamtalk test` and in releases. Two consecutive `show:` sends are two
+/// events, not one line. Ordering relative to `Console`, which writes
+/// synchronously, is not guaranteed. Capturing, silencing or redirecting the
+/// output is ordinary Logger configuration on the transcript domain.
+///
+/// ## Examples
+/// ```beamtalk
+/// Transcript showCr: "Hello"
+/// Transcript show: "a"; cr; show: "b"
+/// Transcript recent
+/// ```
+sealed typed Object subclass: Transcript native: beamtalk_transcript_facade
+
+  /// Write a value: a String as-is, anything else as its printString.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript show: "hello"
+  /// Transcript show: 42
+  /// ```
+  class sealed show: value :: Object -> Nil => self delegate
+
+  /// Write a newline. A no-op outside an interactive workspace.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript cr
+  /// ```
+  class sealed cr -> Nil => self delegate
+
+  /// Write a value followed by a newline.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript showCr: "hello"
+  /// ```
+  class sealed showCr: value :: Object -> Nil => self delegate
+
+  /// Return the recent transcript lines. Raises `no_workspace` when there is
+  /// no interactive workspace's transcript.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript recent
+  /// ```
+  class sealed recent -> List(String) => self delegate
+
+  /// Empty the transcript buffer. Raises `no_workspace` when there is no
+  /// interactive workspace's transcript.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript clear
+  /// ```
+  class sealed clear -> Nil => self delegate

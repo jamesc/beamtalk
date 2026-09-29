@@ -44,9 +44,9 @@ Workspace respondsTo: #test:
 wsGlobals := Workspace bindings
 // => _
 
-// globals includes the Transcript singleton, not the Workspace facade (ADR 0129)
+// globals includes neither Transcript nor the Workspace facade (ADR 0129)
 wsGlobals includesKey: #Transcript
-// => true
+// => false
 
 wsGlobals includesKey: #Workspace
 // => false

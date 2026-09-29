@@ -90,28 +90,14 @@ is_internal_key_normal_name_test() ->
 %% known_vars/1
 %%====================================================================
 %%
-%% Regression guard for the recurring "Unresolved class `Workspace`" bug:
-%% after ADR 0081 Phase 1 the workspace singletons (Transcript) are resolved lazily and are no longer in the eval bindings map,
-%% so known_vars/1 must add them back from beamtalk_workspace_config — otherwise
-%% the structural validator flags `Workspace classes` as an unresolved class.
+%% Since ADR 0129 no workspace singleton is injected as a binding, so there
+%% are no implicit known vars: `Transcript`, `Workspace` and `Beamtalk` are
+%% real classes the compiler already knows.
 
-%% The workspace singletons are always known vars, even with no bindings.
-known_vars_includes_singletons_test() ->
-    KnownVars = beamtalk_repl_compiler:known_vars(#{}),
-    ?assert(lists:member(<<"Transcript">>, KnownVars)),
-    %% `Beamtalk` and `Workspace` are real classes now (ADR 0129), not
-    %% injected bindings.
-    ?assertNot(lists:member(<<"Beamtalk">>, KnownVars)),
-    ?assertNot(lists:member(<<"Workspace">>, KnownVars)).
-
-%% The singleton list is derived from the workspace config single source of
-%% truth, not hardcoded in the compiler — assert parity so the two can't drift.
-known_vars_singletons_match_config_test() ->
-    KnownVars = beamtalk_repl_compiler:known_vars(#{}),
-    ConfigNames = [atom_to_binary(N, utf8) || N <- beamtalk_workspace_config:binding_names()],
-    %% Bidirectional parity: with no user bindings, known_vars/1 returns exactly
-    %% the (sorted, deduped) config singletons — extra names would also fail.
-    ?assertEqual(lists:usort(ConfigNames), KnownVars).
+%% No name is a known var without a binding: `Transcript`, `Beamtalk` and
+%% `Workspace` are real classes now (ADR 0129), not injected bindings.
+known_vars_empty_without_bindings_test() ->
+    ?assertEqual([], beamtalk_repl_compiler:known_vars(#{})).
 
 %% User variable bindings (session locals + bind:as: globals) are included.
 known_vars_includes_user_bindings_test() ->
