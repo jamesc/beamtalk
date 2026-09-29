@@ -257,3 +257,49 @@ fn protocol_registration_bakes_provided_methods_key() {
          'provided_methods' registration key, got:\n{code}"
     );
 }
+
+/// BT-3626: on the self-sufficient path, `expand_module`'s diagnostics must
+/// be surfaced as warnings, not discarded — no `analyse_full` ran to report
+/// an unknown `uses:` protocol.
+#[test]
+fn self_sufficient_codegen_surfaces_expand_module_diagnostics() {
+    let src = concat!("Value subclass: Report\n", "  uses: NoSuchProtocol\n");
+    let module = parse_fixture(src);
+    let generated =
+        crate::core_erlang::generate_module_with_warnings(&module, CodegenOptions::new("report"))
+            .expect("codegen should still succeed");
+    assert!(
+        generated
+            .warnings
+            .iter()
+            .any(|d| d.message.contains("NoSuchProtocol")),
+        "expected an unknown-protocol diagnostic in warnings, got: {:?}",
+        generated.warnings
+    );
+}
+
+/// BT-3626: a flattened provision with no return-type annotation must get an
+/// inferred return type and a `provenance => protocol` origin on the
+/// self-sufficient path, like on the driver-handoff path.
+#[test]
+fn self_sufficient_codegen_infers_return_type_and_origin_for_flattened_provision() {
+    let src = concat!(
+        "Protocol define: Answerable\n",
+        "  answer => 42\n\n",
+        "Value subclass: Oracle\n",
+        "  uses: Answerable\n",
+    );
+    let module = parse_fixture(src);
+    let code =
+        generate_module(&module, CodegenOptions::new("oracle")).expect("codegen should succeed");
+    assert!(
+        code.contains("'provenance' => 'protocol'"),
+        "expected the flattened provision's origin to be stamped, got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "'answer' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'"
+        ),
+        "expected an inferred return type for `answer`, got:\n{code}"
+    );
+}
