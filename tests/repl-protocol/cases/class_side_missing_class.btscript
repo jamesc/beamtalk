@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3644 (ADR 0129 §10): a class-side send to a missing class raises
+// `class_not_found` when the class body is loaded into the REPL, exactly as it
+// does when batch-compiled (see stdlib/test/class_side_missing_class_test.bt).
+// Previously REPL-loaded method bodies silently evaluated it to `nil`.
+
+Object subclass: BT3644Sender
+  send => BT3644NoSuchClass someMessage
+  sendWith => BT3644NoSuchClass with: 1 and: 2
+// => BT3644Sender
+
+BT3644Sender new send
+// => ERROR: Class 'BT3644NoSuchClass' not found
+
+BT3644Sender new sendWith
+// => ERROR: Class 'BT3644NoSuchClass' not found
+
+// Top-level expression: same error.
+BT3644NoSuchClass someMessage
+// => ERROR: Class 'BT3644NoSuchClass' not found

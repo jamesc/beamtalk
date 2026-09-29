@@ -212,7 +212,7 @@ compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
 
 -doc """
 Compile a file/class definition.
-Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean(),
+Options: #{path => binary(), stdlib_mode => boolean(),
 protocol_sources => #{binary() => binary()}} — the last is an explicit,
 opt-in map of protocol name to raw `.bt` source (ADR 0127 §10a / BT-3593),
 used by `beamtalk_repl_loader`'s protocol-reload fan-out to carry a
@@ -237,7 +237,7 @@ method body (comments and all — no `Class >>` prefix). The method is parsed
 standalone and merged into the class, so the stored source round-trips exactly.
 
 Options: `#{is_class_method => boolean(), stdlib_mode => boolean(),
-workspace_mode => boolean(), module_name => binary(), source_path => binary(),
+module_name => binary(), source_path => binary(),
 class_superclass_index => map(), class_module_index => map()}`.
 
 Returns `{ok, #{core_erlang, module_name, classes, selector, is_class_method,
@@ -1449,7 +1449,6 @@ send_port_request(Port, Request, Timeout) ->
 %% Send a compile (file) request via the port.
 do_compile(Port, Source, Options) ->
     StdlibMode = maps:get(stdlib_mode, Options, false),
-    WorkspaceMode = maps:get(workspace_mode, Options, true),
     %% Optional module_name override for package-qualified naming
     ModuleName = maps:get(module_name, Options, undefined),
     %% Optional source file path for beamtalk_source attribute
@@ -1461,8 +1460,7 @@ do_compile(Port, Source, Options) ->
     Request0 = #{
         command => compile,
         source => Source,
-        stdlib_mode => StdlibMode,
-        workspace_mode => WorkspaceMode
+        stdlib_mode => StdlibMode
     },
     Request1 =
         case ModuleName of
@@ -1549,7 +1547,6 @@ do_compile(Port, Source, Options) ->
 %% the response also yields the recovered selector + canonical method source.
 do_compile_method(Port, ClassSource, MethodSource, Options) ->
     StdlibMode = maps:get(stdlib_mode, Options, false),
-    WorkspaceMode = maps:get(workspace_mode, Options, true),
     IsClassMethod = maps:get(is_class_method, Options, false),
     ClassName = maps:get(class_name, Options, undefined),
     ModuleName = maps:get(module_name, Options, undefined),
@@ -1561,8 +1558,7 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
         class_source => ClassSource,
         method_source => MethodSource,
         is_class_method => IsClassMethod,
-        stdlib_mode => StdlibMode,
-        workspace_mode => WorkspaceMode
+        stdlib_mode => StdlibMode
     },
     Request0 =
         case ClassName of

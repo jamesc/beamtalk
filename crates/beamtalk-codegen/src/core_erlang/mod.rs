@@ -453,90 +453,20 @@ impl CoreErlangGenerator {
             None => class_name.to_string(),
         };
 
-        // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
-        // Actor methods compiled in workspace mode should NOT check REPL bindings.
-        //
-        // ADR 0081 Phase 1: for an unqualified class reference, check the
-        // session locals map first so a session local of the same name takes
-        // precedence. (A capitalised name parses as a ClassReference, not an
-        // assignment target, so it cannot itself be rebound via `:=`; the locals
-        // check is for symmetry with resolve_name/2 and is essentially always a
-        // miss.) On a miss, delegate to the shared runtime resolver, which consults
-        // the live singleton + class registries — the singletons
-        // (Transcript/Beamtalk/Workspace) are no longer eagerly injected into
-        // State, so this lazy lookup replaces the old inline class-registry branch.
-        // The resolver raises the same class_not_found error for a genuinely
-        // unknown class, preserving REPL output. Package-qualified references
-        // (`json@Parser`) keep the inline path below because the resolver does not
-        // carry the package-qualified display name.
-        if self.workspace_mode() && self.context == CodeGenContext::Repl && package.is_none() {
-            let state_var = self.current_state_var();
-            let resolved_var = self.fresh_var("ResolvedClass");
+        // Registry-only lookup: class references resolve identically in the REPL,
+        // `beamtalk run`, `beamtalk test` and batch builds (ADR 0129 §10).
+        let class_pid_var = self.fresh_var("ClassPid");
+        let class_mod_var = self.fresh_var("ClassModName");
+        let error_doc = self.class_not_found_error_doc(class_name);
 
-            Ok(docvec![
-                "case call 'maps':'find'(",
-                leaf::atom(class_name.to_string()),
-                ", ",
-                leaf::var(state_var.clone()),
-                ") of ",
-                "<{'ok', ",
-                leaf::var(resolved_var.clone()),
-                "}> when 'true' -> ",
-                leaf::var(resolved_var),
-                " <'error'> when 'true' -> call 'beamtalk_workspace':'resolve_class_reference'(",
-                leaf::var(state_var),
-                ", ",
-                leaf::atom(class_name.to_string()),
-                ") ",
-                "end",
-            ])
-        } else if self.workspace_mode() && self.context == CodeGenContext::Repl {
-            // Package-qualified REPL class reference: keep the original
-            // locals-then-registry path with the package-qualified display name.
-            let class_pid_var = self.fresh_var("ClassPid");
-            let class_mod_var = self.fresh_var("ClassModName");
-            let state_var = self.current_state_var();
-            let error_doc = self.class_not_found_error_doc(class_name);
-
-            Ok(docvec![
-                "case call 'maps':'find'(",
-                leaf::atom(class_name.to_string()),
-                ", ",
-                leaf::var(state_var),
-                ") of ",
-                "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
-                "<'error'> when 'true' -> ",
-                "case call 'beamtalk_class_registry':'whereis_class'(",
-                leaf::atom(class_name.to_string()),
-                ") of ",
-                error_doc,
-                Self::class_object_from_registry_clause(
-                    &class_pid_var,
-                    &class_mod_var,
-                    &display_name
-                ),
-                "end end",
-            ])
-        } else {
-            // Actor/ValueType methods in workspace mode and batch mode both use
-            // registry-only lookup. ADR 0019 Phase 4: No persistent_term fallback.
-            let class_pid_var = self.fresh_var("ClassPid");
-            let class_mod_var = self.fresh_var("ClassModName");
-            let error_doc = self.class_not_found_error_doc(class_name);
-
-            Ok(docvec![
-                "case call 'beamtalk_class_registry':'whereis_class'(",
-                leaf::atom(class_name.to_string()),
-                ") of ",
-                error_doc,
-                Self::class_object_from_registry_clause(
-                    &class_pid_var,
-                    &class_mod_var,
-                    &display_name
-                ),
-                "end",
-            ])
-        }
+        Ok(docvec![
+            "case call 'beamtalk_class_registry':'whereis_class'(",
+            leaf::atom(class_name.to_string()),
+            ") of ",
+            error_doc,
+            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, &display_name),
+            "end",
+        ])
     }
 
     /// Builds the `<ClassPid> when 'true' -> let ClassModName =

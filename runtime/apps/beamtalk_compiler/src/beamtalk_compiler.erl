@@ -112,7 +112,6 @@ Compile a file/class definition.
 `Source' is the file source code as a binary.
 `Options' is a map with optional keys:
   - `stdlib_mode' (boolean, default false) — enable `@primitive' pragmas
-  - `workspace_mode' (boolean, default true) — REPL workspace context
 
 Returns `{ok, #{core_erlang, module_name, classes, warnings}}',
 `{ok, protocol_definition, #{core_erlang, module_name, protocols, warnings}}',

@@ -490,11 +490,8 @@ fn test_actor_field_write_in_match_arm_threads_state() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@actormatcharmselfwrite").with_workspace_mode(true),
-    )
-    .expect("an actor field write in a match: arm must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@actormatcharmselfwrite"))
+        .expect("an actor field write in a match: arm must compile");
     assert!(
         code.contains("let StateAcc = "),
         "each arm must be lowered as a threaded branch seeded from the pre-match state. \
@@ -525,10 +522,7 @@ fn test_value_type_field_write_in_match_arm_is_compile_error() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtmatcharmselfwrite").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@vtmatcharmselfwrite"));
     match result {
         Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
             assert_eq!(field, "total");
@@ -560,10 +554,7 @@ fn test_value_type_class_method_class_var_write_in_match_arm_is_compile_error() 
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@classvarmatcharmwrite").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@classvarmatcharmwrite"));
     match result {
         Err(CodeGenError::ClassVarAssignmentInThreadedBody { field, .. }) => {
             assert_eq!(field, "total");
@@ -599,7 +590,7 @@ fn test_actor_class_method_class_var_write_in_match_arm_is_compile_error() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@actorclassvarmatcharmwrite").with_workspace_mode(true),
+        CodegenOptions::new("bt@actorclassvarmatcharmwrite"),
     );
     match result {
         Err(CodeGenError::ClassVarAssignmentInThreadedBody { field, .. }) => {
@@ -634,11 +625,8 @@ fn test_actor_field_write_in_match_chain_arm_threads_state() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@actormatchchainselfwrite").with_workspace_mode(true),
-    )
-    .expect("an actor field write in a chain-lowered match: arm must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@actormatchchainselfwrite"))
+        .expect("an actor field write in a chain-lowered match: arm must compile");
     assert!(
         code.contains("let StateAcc = "),
         "each chain arm must be lowered as a threaded branch seeded from the pre-match state. \
@@ -670,7 +658,7 @@ fn test_actor_parenthesized_field_write_in_match_arm_threads_state() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt@actorparenmatcharmselfwrite").with_workspace_mode(true),
+        CodegenOptions::new("bt@actorparenmatcharmselfwrite"),
     )
     .expect("a parenthesized actor field write in a match: arm must compile");
     assert!(
@@ -697,10 +685,7 @@ fn test_value_type_parenthesized_field_write_in_match_arm_is_compile_error() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtparenmatcharmselfwrite").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@vtparenmatcharmselfwrite"));
     match result {
         Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
             assert_eq!(field, "total");
@@ -742,8 +727,7 @@ fn test_actor_field_write_wrapped_in_local_assign_in_match_arm_threads_state() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code = generate_module(
         &module,
-        CodegenOptions::new("bt@actorlocalassignwrappedfieldwriteinmatcharm")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt@actorlocalassignwrappedfieldwriteinmatcharm"),
     )
     .expect("a local-assign-wrapped actor field write in a match: arm must compile");
     assert!(
@@ -779,8 +763,7 @@ fn test_value_type_field_write_wrapped_in_local_assign_in_match_arm_is_compile_e
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@vtlocalassignwrappedfieldwriteinmatcharm")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt@vtlocalassignwrappedfieldwriteinmatcharm"),
     );
     match result {
         Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
@@ -817,7 +800,7 @@ fn test_value_type_field_write_in_match_arm_value_block_is_compile_error() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@vtmatcharmvalueblockselfwrite").with_workspace_mode(true),
+        CodegenOptions::new("bt@vtmatcharmvalueblockselfwrite"),
     );
     match result {
         Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {
@@ -853,8 +836,7 @@ fn test_value_type_field_write_in_match_arm_value_block_local_assign_wrapped_is_
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@vtmatcharmvalueblocklocalassignselfwrite")
-            .with_workspace_mode(true),
+        CodegenOptions::new("bt@vtmatcharmvalueblocklocalassignselfwrite"),
     );
     match result {
         Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm { field, .. }) => {

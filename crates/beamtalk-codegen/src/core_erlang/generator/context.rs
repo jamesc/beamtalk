@@ -32,11 +32,6 @@ pub(crate) struct ReplContext {
     /// External callers should use `expression_doc_with_repl_mutation_tracking()`
     /// instead of reading this field directly.
     pub repl_loop_mutated: bool,
-    /// ADR 0010 / ADR 0019: Whether workspace bindings are available.
-    /// When true (REPL/workspace context), class references resolve through
-    /// session bindings or class registry. When false (batch compile),
-    /// class references go directly to the class registry.
-    pub workspace_mode: bool,
 }
 
 impl ReplContext {
@@ -45,7 +40,6 @@ impl ReplContext {
         Self {
             is_repl_mode: false,
             repl_loop_mutated: false,
-            workspace_mode: false,
         }
     }
 }

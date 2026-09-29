@@ -658,7 +658,7 @@ mod tests {
         let (module, _) = beamtalk_core::source_analysis::parse(tokens);
         let result = crate::core_erlang::generate_module(
             &module,
-            crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+            crate::core_erlang::CodegenOptions::new("test"),
         );
         assert!(
             matches!(
@@ -683,7 +683,7 @@ mod tests {
         let (module, _) = beamtalk_core::source_analysis::parse(tokens);
         let result = crate::core_erlang::generate_module(
             &module,
-            crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+            crate::core_erlang::CodegenOptions::new("test"),
         );
         assert!(
             matches!(

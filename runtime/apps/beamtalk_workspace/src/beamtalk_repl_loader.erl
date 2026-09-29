@@ -2155,7 +2155,7 @@ recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
     SourceBin = unicode:characters_to_binary(CombinedSource),
     %% Include superclass index so cross-file inheritance resolves correctly.
     SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
-    Options0 = #{stdlib_mode => false, workspace_mode => true},
+    Options0 = #{stdlib_mode => false},
     Options1 =
         case map_size(SuperclassIndex) of
             0 -> Options0;
@@ -2376,7 +2376,6 @@ install_method_with_source(
         %% sel` path still flows through `reload_method_definition`, which carries
         %% the side in its `MethodInfo`.
         is_class_method => IsClassMethod,
-        workspace_mode => true,
         module_name => ModuleNameOverride,
         source_path => source_path_binary(SourcePath),
         class_superclass_index => SuperclassIndex,
@@ -2486,7 +2485,6 @@ precheck_method_with_source(ClassNameBin, SelectorBin, MethodSource, ClassSource
     Options = #{
         class_name => ClassNameBin,
         is_class_method => IsClassMethod,
-        workspace_mode => true,
         module_name => ModuleNameOverride,
         source_path => source_path_binary(SourcePath),
         class_superclass_index => SuperclassIndex,

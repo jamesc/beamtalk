@@ -1418,9 +1418,7 @@ mod tests {
         let (module, _) = beamtalk_core::source_analysis::parse(tokens);
         let result = crate::core_erlang::generate_module_with_warnings(
             &module,
-            crate::core_erlang::CodegenOptions::new("test")
-                .with_workspace_mode(true)
-                .with_codegen_diagnostics(enabled),
+            crate::core_erlang::CodegenOptions::new("test").with_codegen_diagnostics(enabled),
         )
         .expect("codegen should succeed");
         (result.code, result.warnings)

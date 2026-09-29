@@ -370,7 +370,6 @@ fn generate_core_file(
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: false,
         allow_primitives: false,
-        workspace_mode: false,
         warnings_as_errors,
         current_package: current_package.map(str::to_string),
         ..Default::default()
@@ -1565,7 +1564,6 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         let build_options = beamtalk_core::CompilerOptions {
             stdlib_mode: false,
             allow_primitives: false,
-            workspace_mode: false,
             warnings_as_errors: pipeline.warnings_as_errors,
             ..Default::default()
         };
