@@ -882,9 +882,24 @@ to_class_objects(Names) ->
     [
         Obj
      || Name <- Names,
-        Obj <- [beamtalk_class_registry:resolve_class_object(Name)],
+        Obj <- [resolve_class_object_safe(Name)],
         Obj =/= undefined
     ].
+
+-doc """
+`beamtalk_class_registry:resolve_class_object/1` does a `whereis` snapshot then
+a `gen_server:call`; a class process that exits in between (removal or hot
+reload) raises `noproc`. Treat that as "no longer registered", as
+`beamtalk_class_registry:live_class_entries/0` does.
+""".
+-spec resolve_class_object_safe(atom()) -> #beamtalk_object{} | undefined.
+resolve_class_object_safe(Name) ->
+    try
+        beamtalk_class_registry:resolve_class_object(Name)
+    catch
+        exit:{noproc, _} -> undefined;
+        exit:{timeout, _} -> undefined
+    end.
 
 -doc "Collect all required instance methods including from extending protocols.".
 -spec all_required_methods(map()) -> [map()].
