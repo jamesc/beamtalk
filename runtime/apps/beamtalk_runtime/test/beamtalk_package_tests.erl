@@ -455,3 +455,39 @@ set_ambiguous_root_package_test() ->
         ?assertEqual(ambiguous, beamtalk_package:root_package()),
         ?assertEqual(undefined, beamtalk_package:root_package_name())
     end).
+
+%%% ============================================================================
+%%% refresh_app_classes/1 tests (BT-3662)
+%%% ============================================================================
+
+refresh_app_classes_unknown_package_test() ->
+    setup(),
+    ?assertEqual([], beamtalk_package:refresh_app_classes(<<"bt3662_no_such_package">>)).
+
+refresh_app_classes_does_not_mint_atoms_test() ->
+    %% The name comes from a wire request: an unknown package must not create an atom.
+    Name = iolist_to_binary(["bt3662_unminted_", integer_to_list(erlang:unique_integer([positive]))]),
+    ?assertEqual([], beamtalk_package:refresh_app_classes(Name)),
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)).
+
+refresh_app_classes_leaves_existing_entries_test() ->
+    %% A loaded package with a build-time class entry and no live classes of its
+    %% own: the refresh adds nothing and never rewrites the existing entry.
+    setup(),
+    App = bt3662_refresh_app,
+    Entry = #{
+        name => 'Bt3662Built',
+        module => 'bt@bt3662_refresh_app@bt3662_built',
+        parent => 'Object',
+        package => App,
+        kind => object,
+        type_params => []
+    },
+    ok = application:load({application, App, [{vsn, "0.1.0"}, {env, [{classes, [Entry]}]}]}),
+    try
+        ?assertEqual([], beamtalk_package:refresh_app_classes(<<"bt3662_refresh_app">>)),
+        ?assertEqual({ok, [Entry]}, application:get_env(App, classes)),
+        ?assertEqual(['Bt3662Built'], beamtalk_package:classes(<<"bt3662_refresh_app">>))
+    after
+        application:unload(App)
+    end.

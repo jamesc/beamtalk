@@ -518,6 +518,86 @@ impl ProcessManager {
         }
     }
 
+    /// Boot a workspace node for a *library project* (BT-3662): `root_package`
+    /// is recorded exactly as `beamtalk repl` does (`build_eval_cmd`'s
+    /// `root_package` argument), the project's built `_build/dev/ebin` is on the
+    /// code path, and the workspace's project path / cwd is `project_dir`.
+    ///
+    /// The project directory is owned by the caller (a `tempfile::TempDir`), so
+    /// `stop` never removes it.
+    fn start_library_project(project_dir: &std::path::Path, root_package: &str) -> Self {
+        let debug_output = env::var("E2E_DEBUG").is_ok();
+        eprintln!("E2E: Starting library-project BEAM REPL (package {root_package})...");
+        let runtime = runtime_dir();
+        let paths = repl_startup::beam_paths(&runtime);
+        if !paths.runtime_ebin.exists() {
+            let status = Command::new("rebar3")
+                .arg("compile")
+                .current_dir(&runtime)
+                .status()
+                .expect("Failed to run rebar3 compile");
+            assert!(status.success(), "Failed to build runtime");
+        }
+
+        // Isolate `~/.beamtalk/workspaces/<id>/metadata.json`: workspace ids are
+        // small per-VM counters, so a stale file left by another run would
+        // otherwise be loaded over this node's project path. HOME is repointed
+        // inside the VM (not on the `erl` process, whose launcher needs the real
+        // HOME) before the workspace starts.
+        let home_dir = project_dir.join(".bt_e2e_home");
+        fs::create_dir_all(&home_dir).expect("create isolated HOME");
+        let eval_cmd = format!(
+            "os:putenv(\"HOME\", \"{}\"), {}",
+            home_dir.display(),
+            repl_startup::build_eval_cmd(0, None, "info", None, Some(root_package), &[])
+        );
+        let mut pa_args = repl_startup::beam_pa_args(&paths);
+        pa_args.push("-pa".into());
+        pa_args.push(project_dir.join("_build/dev/ebin").into_os_string());
+        pa_args.push("-eval".into());
+        pa_args.push(eval_cmd.into());
+
+        let stderr_cfg = if debug_output {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
+        let mut beam_child = Command::new("erl")
+            .arg("-noshell")
+            .arg("-sname")
+            .arg(format!("bt_e2e_lib_{}@localhost", std::process::id()))
+            .arg("-setcookie")
+            .arg(E2E_COOKIE)
+            .args(&pa_args)
+            .current_dir(project_dir)
+            // The compiler port binary is normally found relative to the cwd;
+            // this node's cwd is the temp project, so point at it explicitly
+            // (as the `beamtalk repl` launcher does).
+            .env(
+                "BEAMTALK_COMPILER_PORT_BIN",
+                std::path::Path::new(env!("CARGO_BIN_EXE_beamtalk"))
+                    .with_file_name("beamtalk-compiler-port"),
+            )
+            .env("BEAMTALK_WORKSPACE", "e2e-library-project")
+            .env("BEAMTALK_NO_FILE_LOG", "1")
+            .env("BEAMTALK_WORKSPACE_PROJECT_PATH", project_dir)
+            .stdout(Stdio::piped())
+            .stderr(stderr_cfg)
+            .spawn()
+            .expect("Failed to start library-project BEAM node");
+
+        let port = read_port_from_beam(&mut beam_child);
+        eprintln!("E2E: library-project REPL ready on port {port}");
+        Self {
+            beam_process: Some(beam_child),
+            cover_enabled: false,
+            port,
+            // Nonexistent sentinel: `stop`'s remove_dir_all is a no-op; the
+            // caller's TempDir owns the real directory.
+            project_dir: project_dir.join(".bt_e2e_no_cleanup"),
+        }
+    }
+
     /// Start a `mode => release, console => true` BEAM node (ADR 0125
     /// §1.5/§1.6, BT-3575's release-console fixture) with an OS-assigned
     /// ephemeral port. Unlike [`Self::start`], starts no project — a
@@ -2038,6 +2118,106 @@ Supervisor subclass: E2EOtpRootSup\n\
     // Clean up: kill the BEAM node
     let _ = beam_child.kill();
     let _ = beam_child.wait();
+}
+
+/// A library project (no `[application]`) booted with `root_package` set
+/// (BT-3662): `Program package` answers the root `Package`, `Package named:
+/// <root>` succeeds, and a class added to the project shows up in `Package
+/// classes` once the workspace syncs (which refreshes the loaded `.app`'s class
+/// list — `beamtalk build` is otherwise its only writer).
+///
+/// The aggregate `e2e_language_tests` session is a bare REPL with no project, so
+/// it can only cover the no-package context (`program_package.btscript`).
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_library_project_program_package_and_sync() {
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let project_dir = tmp_dir.path();
+    let package = "e2e_lib_pkg";
+
+    fs::write(
+        project_dir.join("beamtalk.toml"),
+        format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n"),
+    )
+    .expect("Failed to write manifest");
+    let src_dir = project_dir.join("src");
+    fs::create_dir_all(&src_dir).expect("Failed to create src dir");
+    fs::write(
+        src_dir.join("lib_thing.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: LibThing\n\
+         \x20 answer -> Integer => 42\n",
+    )
+    .expect("Failed to write library source");
+
+    let build_status = Command::new(env!("CARGO_BIN_EXE_beamtalk"))
+        .args(["build", "."])
+        .current_dir(project_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status()
+        .expect("Failed to run beamtalk build");
+    assert!(build_status.success(), "beamtalk build failed for library");
+    assert!(
+        project_dir
+            .join(format!("_build/dev/ebin/{package}.app"))
+            .exists(),
+        "build did not produce the library .app"
+    );
+
+    let manager = ProcessManager::start_library_project(project_dir, package);
+    let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
+
+    // `Program package` answers the root Package; `Package named:` succeeds.
+    assert_eq!(
+        client
+            .eval("Program package name")
+            .expect("Program package"),
+        package
+    );
+    assert_eq!(
+        client
+            .eval(&format!("(Package named: \"{package}\") name"))
+            .expect("Package named:"),
+        package
+    );
+    let classes = client
+        .eval("Program package classes")
+        .expect("Program package classes");
+    assert!(
+        classes.contains("LibThing"),
+        "built class listed: {classes}"
+    );
+    assert!(!classes.contains("LibAdded"), "not yet defined: {classes}");
+
+    // Add a class to the project's src/ and sync (`load-project`): `Package
+    // classes` must list it without a rebuild.
+    fs::write(
+        src_dir.join("lib_added.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: LibAdded\n\
+         \x20 answer -> Integer => 7\n",
+    )
+    .expect("Failed to write added class source");
+    let sync = client
+        .send_op(&RequestBuilder::load_project(
+            &project_dir.to_string_lossy(),
+            false,
+        ))
+        .expect("sync failed");
+    assert!(!sync.is_error(), "sync errored: {sync:?}");
+    let classes = client
+        .eval("Program package classes")
+        .expect("Program package classes after sync");
+    assert!(
+        classes.contains("LibAdded") && classes.contains("LibThing"),
+        "synced class listed alongside built class: {classes}"
+    );
 }
 
 /// Run explicitly with: `cargo test --test repl_protocol -- --ignored` or `just test-repl-protocol`
