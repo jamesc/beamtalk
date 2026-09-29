@@ -415,3 +415,43 @@ types_only_not_used_when_classes_env_nonempty_test() ->
     after
         _ = application:unload(App)
     end.
+
+%%% ============================================================================
+%%% root_package (BT-3651)
+%%% ============================================================================
+
+with_root_env(Value, Fun) ->
+    Old = application:get_env(beamtalk_runtime, root_package),
+    case Value of
+        unset -> application:unset_env(beamtalk_runtime, root_package);
+        _ -> application:set_env(beamtalk_runtime, root_package, Value)
+    end,
+    try
+        Fun()
+    after
+        case Old of
+            {ok, V} -> application:set_env(beamtalk_runtime, root_package, V);
+            undefined -> application:unset_env(beamtalk_runtime, root_package)
+        end
+    end.
+
+root_package_undefined_when_unset_test() ->
+    with_root_env(unset, fun() ->
+        ?assertEqual(undefined, beamtalk_package:root_package()),
+        ?assertEqual(undefined, beamtalk_package:root_package_name())
+    end).
+
+set_root_package_records_name_test() ->
+    with_root_env(unset, fun() ->
+        %% No such .app: the best-effort load must not raise.
+        ?assertEqual(ok, beamtalk_package:set_root_package(<<"bt3651_no_such_app">>)),
+        ?assertEqual({ok, <<"bt3651_no_such_app">>}, beamtalk_package:root_package()),
+        ?assertEqual(<<"bt3651_no_such_app">>, beamtalk_package:root_package_name())
+    end).
+
+set_ambiguous_root_package_test() ->
+    with_root_env(unset, fun() ->
+        ok = beamtalk_package:set_ambiguous_root_package(),
+        ?assertEqual(ambiguous, beamtalk_package:root_package()),
+        ?assertEqual(undefined, beamtalk_package:root_package_name())
+    end).

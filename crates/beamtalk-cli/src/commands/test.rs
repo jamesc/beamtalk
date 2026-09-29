@@ -829,6 +829,17 @@ struct TestPipeline {
 }
 
 impl TestPipeline {
+    /// Erlang fragment recording the program's root package for the test node
+    /// (BT-3651): exactly one package under test is the root; several make
+    /// `Program package` raise `ambiguous_program_package`.
+    fn root_package_fragment(&self) -> String {
+        match self.discovered_packages.as_slice() {
+            [] => String::new(),
+            [(_, pkg)] => beamtalk_cli::repl_startup::root_package_fragment(Some(&pkg.name)),
+            _ => beamtalk_cli::repl_startup::AMBIGUOUS_ROOT_PACKAGE_FRAGMENT.to_string(),
+        }
+    }
+
     /// Resolve the owning package name for a file or directory.
     ///
     /// Walks up to the nearest `beamtalk.toml` and maps its canonical root
@@ -1918,6 +1929,8 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let hex_deps_start_cmd =
         beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
 
+    let root_package_start = pipeline.root_package_fragment();
+
     // BUNIT_COVER: instrument the runtime under Erlang `cover` so the BUnit
     // suite (which drives beamtalk_test_case, beamtalk_test_runner, and the
     // full dispatch/object/class machinery via real .bt TestCase classes)
@@ -1930,6 +1943,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let eval_cmd = format!(
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         {root_package_start}\
          {hex_deps_start_cmd}\
          {load_cmd}\
          Result = beamtalk_test_runner:run_all({jobs}), \
@@ -2127,6 +2141,8 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     let hex_deps_start_cmd =
         beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
 
+    let root_package_start = pipeline.root_package_fragment();
+
     // Build a list of module atoms for EUnit
     let module_list = pipeline
         .native_test_modules
@@ -2143,6 +2159,7 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     // rather than relying on the coarse ok/error return value.
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         {root_package_start}\
          {hex_deps_start_cmd}\
          Mods = [{module_list}], \
          HasFailed = lists:foldl(fun(M, Acc) -> \

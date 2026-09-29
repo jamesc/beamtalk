@@ -120,6 +120,10 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
 /// duplicate key wins under `file:consult/1`'s "last one wins" reading —
 /// same convention as an OTP `sys.config` overlay).
 ///
+/// `beamtalk_runtime`'s `root_package` app env is the program's root package
+/// (BT-3651), written from the Rust-parsed manifest so every release boot
+/// path (`foreground`, `eval`, console) sees it with no launcher-side code.
+///
 /// `workspace_id` is set to `release_name` rather than left at
 /// `beamtalk_workspace_app:env_workspace_config/1`'s fixed `<<"release">>`
 /// fallback: the REPL port file
@@ -130,6 +134,7 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
 /// `~/.beamtalk/workspaces/release/port`, each clobbering the other's —
 /// `beamtalk workspace attach` would then discover whichever booted last,
 /// not necessarily the one asked for.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_sys_config(
     project_root: &Utf8Path,
     release_config_dir: &Utf8Path,
@@ -138,7 +143,9 @@ pub fn generate_sys_config(
     console: bool,
     bind: &str,
     include_compiler: bool,
+    root_package: &str,
 ) -> Result<Utf8PathBuf> {
+    let escaped_root_package = escape_erlang_string(root_package);
     let escaped_bind = escape_erlang_string(bind);
     let escaped_name = escape_erlang_string(release_name);
     let mut content = format!(
@@ -151,6 +158,9 @@ pub fn generate_sys_config(
          \x20   {{auto_cleanup, false}},\n\
          \x20   {{tcp_port, 0}},\n\
          \x20   {{workspace_id, <<\"{escaped_name}\">>}}\n\
+         \x20 ]}},\n\
+         \x20 {{beamtalk_runtime, [\n\
+         \x20   {{root_package, <<\"{escaped_root_package}\">>}}\n\
          \x20 ]}}"
     );
 
@@ -1457,6 +1467,7 @@ mod tests {
             false,
             "127.0.0.1",
             false,
+            "orders",
         )
         .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
@@ -1464,6 +1475,10 @@ mod tests {
         assert!(content.contains("{console, false}"), "{content}");
         assert!(content.contains("{bind, \"127.0.0.1\"}"), "{content}");
         assert!(content.contains("{include_compiler, false}"), "{content}");
+        assert!(
+            content.contains("{beamtalk_runtime, [\n    {root_package, <<\"orders\">>}\n  ]}"),
+            "{content}"
+        );
         assert!(content.trim_end().ends_with('.'), "{content}");
     }
 
@@ -1486,6 +1501,7 @@ mod tests {
             true,
             "127.0.0.1",
             false,
+            "orders",
         )
         .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
@@ -1510,6 +1526,7 @@ mod tests {
             true,
             "127.0.0.1",
             false,
+            "orders",
         )
         .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
@@ -1531,6 +1548,7 @@ mod tests {
             false,
             "127.0.0.1",
             true,
+            "orders",
         )
         .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
@@ -1557,6 +1575,7 @@ mod tests {
             true,
             "0.0.0.0",
             false,
+            "orders",
         )
         .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
@@ -1577,6 +1596,7 @@ mod tests {
             false,
             "127.0.0.1",
             false,
+            "orders",
         );
         assert!(result.is_ok());
     }
@@ -1774,6 +1794,7 @@ mod tests {
             false,
             malicious_bind,
             false,
+            "orders",
         )
         .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();
@@ -1804,6 +1825,7 @@ mod tests {
             false,
             "127.0.0.1",
             false,
+            "orders",
         )
         .unwrap();
         let content = fs::read_to_string(path.as_std_path()).unwrap();

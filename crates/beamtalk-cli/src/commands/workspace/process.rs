@@ -177,6 +177,8 @@ fn prepare_workspace_paths(
         None => String::new(),
     };
 
+    let root_package_start = beamtalk_cli::repl_startup::root_package_fragment(config.root_package);
+
     let eval_cmd = build_workspace_eval_cmd(
         &pid_file_path_str,
         &startup_log_path_str,
@@ -187,6 +189,7 @@ fn prepare_workspace_paths(
         config.auto_cleanup,
         idle_timeout,
         config.log_level,
+        &root_package_start,
         &hex_deps_start,
         &otp_app_start,
     );
@@ -650,6 +653,7 @@ fn build_workspace_eval_cmd(
     auto_cleanup: bool,
     idle_timeout: u64,
     log_level: &str,
+    root_package_start: &str,
     hex_deps_start: &str,
     otp_app_start: &str,
 ) -> String {
@@ -660,6 +664,7 @@ fn build_workspace_eval_cmd(
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
+         {root_package_start}\
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
          #{{mode => workspace, \
@@ -770,6 +775,7 @@ mod tests {
             "info",
             "",
             "",
+            "",
         );
 
         assert!(cmd.contains("os:getpid()"));
@@ -801,6 +807,7 @@ mod tests {
             false,
             3600,
             "warning",
+            "beamtalk_package:set_root_package(<<\"my_pkg\">>), ",
             "{ok, _} = application:ensure_all_started(some_hex_dep), ",
             "{ok, _} = application:ensure_all_started(my_otp_app), ",
         );
@@ -808,12 +815,18 @@ mod tests {
         assert!(cmd.contains("auto_cleanup => false"));
         assert!(cmd.contains("some_hex_dep"));
         assert!(cmd.contains("my_otp_app"));
+        let root_pos = cmd.find("set_root_package").unwrap();
+        let sup_pos = cmd.find("beamtalk_workspace_sup:start_link").unwrap();
+        assert!(
+            root_pos < sup_pos,
+            "root package must be recorded before the workspace starts"
+        );
     }
 
     #[test]
     fn build_workspace_eval_cmd_omits_optional_fragments_when_empty() {
         let cmd = build_workspace_eval_cmd(
-            "/ws/pid", "/ws/log", "ws3", "/proj", 1234, "x", true, 100, "debug", "", "",
+            "/ws/pid", "/ws/log", "ws3", "/proj", 1234, "x", true, 100, "debug", "", "", "",
         );
         assert!(!cmd.contains("ensure_all_started(some_hex_dep)"));
         assert!(!cmd.contains("ensure_all_started(my_otp_app)"));
@@ -868,6 +881,7 @@ mod tests {
             max_idle_seconds: None,
             log_level: "info",
             otp_app_name: None,
+            root_package: None,
             hex_dep_names: &[],
         }
     }

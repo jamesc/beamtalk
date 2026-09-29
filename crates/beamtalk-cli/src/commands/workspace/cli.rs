@@ -341,6 +341,15 @@ fn run_create_background(
     let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
     let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
+    // BT-3651: record the project's root package from the Rust-parsed manifest.
+    let root_package: Option<String> = camino::Utf8Path::from_path(&project_root)
+        .and_then(|root| {
+            crate::commands::manifest::find_manifest(root)
+                .ok()
+                .flatten()
+        })
+        .map(|m| m.name);
+
     let config = super::WorkspaceConfig {
         port,
         bind_addr: Some(bind_addr),
@@ -348,6 +357,7 @@ fn run_create_background(
         max_idle_seconds: idle_timeout,
         log_level: "info",
         otp_app_name: None,
+        root_package: root_package.as_deref(),
         hex_dep_names: &[], // No hex deps for standalone workspace CLI
     };
 

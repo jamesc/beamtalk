@@ -47,12 +47,15 @@ pub fn build_eval_cmd(
     bind_addr: Option<Ipv4Addr>,
     log_level: &str,
     otp_app_name: Option<&str>,
+    root_package: Option<&str>,
     hex_dep_names: &[String],
 ) -> String {
     let hex_deps_start = hex_deps_start_fragment(hex_dep_names);
     let otp_app_start = otp_app_start_fragment(otp_app_name);
+    let root_package_start = root_package_fragment(root_package);
     format!(
-        "{}, \
+        "{root_package_start}\
+         {}, \
          {hex_deps_start}\
          {otp_app_start}\
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
@@ -75,13 +78,16 @@ pub fn build_eval_cmd_with_node(
     bind_addr: Option<Ipv4Addr>,
     log_level: &str,
     otp_app_name: Option<&str>,
+    root_package: Option<&str>,
     hex_dep_names: &[String],
 ) -> String {
     let safe_name = escape_atom_chars(node_name);
     let hex_deps_start = hex_deps_start_fragment(hex_dep_names);
     let otp_app_start = otp_app_start_fragment(otp_app_name);
+    let root_package_start = root_package_fragment(root_package);
     format!(
-        "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
+        "{root_package_start}\
+         application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
          {}, \
          {hex_deps_start}\
          {otp_app_start}\
@@ -109,6 +115,28 @@ pub fn format_bind_addr_erl(bind_addr: Option<Ipv4Addr>) -> String {
         None => "{127,0,0,1}".to_string(),
     }
 }
+
+/// Build the Erlang fragment that records the program's root package
+/// (BT-3651).
+///
+/// `beamtalk_package:set_root_package/1` sets the `beamtalk_runtime`
+/// `root_package` app env and best-effort loads the package's OTP application,
+/// so `Program package` / `Package named:` work. The name comes from the
+/// Rust-parsed manifest; no Erlang code parses `beamtalk.toml`. Every launcher
+/// that boots a node uses this one fragment. `None` yields an empty string.
+pub fn root_package_fragment(root_package: Option<&str>) -> String {
+    match root_package {
+        Some(name) => format!(
+            "beamtalk_package:set_root_package(<<\"{}\">>), ",
+            beamtalk_codegen::core_erlang::escape_erlang_string(name)
+        ),
+        None => String::new(),
+    }
+}
+
+/// Build the Erlang fragment that marks the root package ambiguous
+/// (`beamtalk test` over several packages, BT-3651).
+pub const AMBIGUOUS_ROOT_PACKAGE_FRAGMENT: &str = "beamtalk_package:set_ambiguous_root_package(), ";
 
 /// Build the Erlang fragment that starts hex dep OTP applications.
 ///
@@ -259,7 +287,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_contains_required_steps() {
-        let cmd = build_eval_cmd(9000, None, "info", None, &[]);
+        let cmd = build_eval_cmd(9000, None, "info", None, None, &[]);
         // Must set application env before starting apps
         assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         // Must start the workspace OTP application
@@ -279,15 +307,29 @@ mod tests {
     }
 
     #[test]
+    fn eval_cmd_records_root_package_before_workspace_starts() {
+        let cmd = build_eval_cmd(9000, None, "info", None, Some("my_pkg"), &[]);
+        let root = cmd
+            .find(r#"beamtalk_package:set_root_package(<<"my_pkg">>)"#)
+            .unwrap_or_else(|| panic!("root_package not recorded: {cmd}"));
+        let sup = cmd.find("beamtalk_workspace_sup:start_link").unwrap();
+        assert!(root < sup, "{cmd}");
+        let with_node =
+            build_eval_cmd_with_node(9000, "n", None, "info", None, Some("my_pkg"), &[]);
+        assert!(with_node.contains("set_root_package"), "{with_node}");
+        assert!(!build_eval_cmd(9000, None, "info", None, None, &[]).contains("root_package"));
+    }
+
+    #[test]
     fn eval_cmd_with_node_includes_node_name() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, &[]);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, None, &[]);
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
         assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
     }
 
     #[test]
     fn eval_cmd_with_node_escapes_special_chars() {
-        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, "info", None, &[]);
+        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, "info", None, None, &[]);
         assert!(cmd.contains("node\\'inject"));
         assert!(!cmd.contains("node'inject"));
     }
@@ -361,7 +403,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_with_otp_app_starts_application() {
-        let cmd = build_eval_cmd(9000, None, "info", Some("my_app"), &[]);
+        let cmd = build_eval_cmd(9000, None, "info", Some("my_app"), None, &[]);
         // Must start the OTP application after workspace bootstrap
         assert!(cmd.contains("application:ensure_all_started(my_app)"));
         // OTP app start must come after workspace_sup:start_link
@@ -378,7 +420,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_without_otp_app_has_no_ensure_all_started_extra() {
-        let cmd = build_eval_cmd(9000, None, "info", None, &[]);
+        let cmd = build_eval_cmd(9000, None, "info", None, None, &[]);
         // Should only have ensure_all_started for beamtalk_workspace, not any other
         let count = cmd.matches("ensure_all_started").count();
         assert_eq!(count, 1, "Only beamtalk_workspace should be started");
@@ -386,7 +428,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_with_node_and_otp_app() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", Some("my_app"), &[]);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", Some("my_app"), None, &[]);
         assert!(cmd.contains("application:ensure_all_started(my_app)"));
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
     }
@@ -394,7 +436,7 @@ mod tests {
     #[test]
     fn eval_cmd_with_hex_deps_starts_them_before_workspace() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
-        let cmd = build_eval_cmd(9000, None, "info", None, &hex_deps);
+        let cmd = build_eval_cmd(9000, None, "info", None, None, &hex_deps);
         assert!(
             cmd.contains("ensure_all_started(cowboy)"),
             "Should start cowboy: {cmd}"
@@ -415,7 +457,7 @@ mod tests {
     #[test]
     fn eval_cmd_with_node_and_hex_deps() {
         let hex_deps = vec!["hackney".to_string()];
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, &hex_deps);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, None, &hex_deps);
         assert!(
             cmd.contains("ensure_all_started(hackney)"),
             "Should start hackney: {cmd}"

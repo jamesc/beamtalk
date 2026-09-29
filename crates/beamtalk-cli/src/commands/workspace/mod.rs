@@ -90,6 +90,9 @@ pub struct WorkspaceConfig<'a> {
     pub log_level: &'a str,
     /// OTP application to start after workspace bootstrap (e.g. project app).
     pub otp_app_name: Option<&'a str>,
+    /// The program's root package (from the Rust-parsed manifest), recorded as
+    /// the `root_package` runtime fact before the workspace starts (BT-3651).
+    pub root_package: Option<&'a str>,
     /// Hex dependency names whose OTP apps should be started before the project app.
     pub hex_dep_names: &'a [String],
 }
@@ -1073,6 +1076,7 @@ mod tests {
             max_idle_seconds: Some(60),
             log_level: "info",
             otp_app_name: None,
+            root_package: None,
             hex_dep_names: &[],
         }
     }
@@ -1470,6 +1474,7 @@ mod tests {
                         max_idle_seconds: Some(60),
                         log_level: "info",
                         otp_app_name: None,
+                        root_package: None,
                         hex_dep_names: &[],
                     };
                     barrier.wait();

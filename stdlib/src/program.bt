@@ -39,6 +39,22 @@ sealed typed Object subclass: Program native: beamtalk_program
   /// ```
   class sealed commandName -> String => self delegate
 
+  /// The program's root `Package` — the package whose manifest this program
+  /// was launched from. The same answer under the REPL, `beamtalk run` (script
+  /// and service), releases and escripts; never `nil`.
+  ///
+  /// Raises `#no_program_package` when there is no project (bare
+  /// `beamtalk repl`), `#ambiguous_program_package` when `beamtalk test` runs
+  /// several packages at once, and `#package_not_loaded` when the project's
+  /// `.app` is not on the code path (run `beamtalk build`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program package name
+  /// // => "my_app"
+  /// ```
+  class sealed package -> Package => self delegate
+
   // === Exiting ===
 
   /// End this program with status 0 — the job-level, safe exit. Does not return.

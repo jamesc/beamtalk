@@ -38,6 +38,14 @@ TestCase subclass: ProgramTest
     // (BT-3634). Code that calls Program exit: is testable this way.
     self should: [Program exit: 3] raise: #program_exit
 
+  testPackageIsRootPackageNeverNil =>
+    // BT-3651: `beamtalk test` records the root package only when exactly one
+    // package is under test. Either way the answer is never nil — a Package, or
+    // a structured error (#ambiguous_program_package / #package_not_loaded).
+    result := [Program package] on: Error do: [:e | e kind]
+    self deny: result isNil
+    self assert: ((result isKindOf: Package) or: [result isKindOf: Symbol])
+
   testExitZeroUnderTestRaisesProgramExit =>
     self should: [Program exit] raise: #program_exit
 
