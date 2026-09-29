@@ -2247,8 +2247,12 @@ protocol_for_selector(Selector, Info, protocol, SourceStatus, ClassSide) ->
                     Origin
             end;
         undefined ->
-            %% Malformed row (protocol provenance without an origin): fall back.
-            protocol_from_source(Selector, protocol, SourceStatus, ClassSide)
+            %% Malformed row (protocol provenance without an origin): fall back,
+            %% still honouring the Tier-1 declared category like every other row.
+            case declared_protocol(Info) of
+                Declared when is_binary(Declared) -> Declared;
+                undefined -> protocol_from_source(Selector, protocol, SourceStatus, ClassSide)
+            end
     end;
 protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide) ->
     case declared_protocol(Info) of

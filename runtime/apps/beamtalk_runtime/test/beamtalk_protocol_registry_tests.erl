@@ -1093,3 +1093,20 @@ class_start_without_uses_key_registers_empty_test() ->
     {ok, Pid} = start_class_with_ping('BT3592ClassInfoNoUses'),
     ?assertEqual([], beamtalk_protocol_registry:used_protocols('BT3592ClassInfoNoUses')),
     stop_class_process(Pid).
+
+%%% ============================================================================
+%%% Class process dying mid-call (BT-3658)
+%%% ============================================================================
+
+%% A stand-in class process that answers the first call by exiting with
+%% `shutdown`: the caller's gen_server:call exits with that real reason,
+%% not noproc/timeout.
+to_class_objects_drops_class_dying_mid_call_test() ->
+    Name = 'BT3658DyingClass',
+    Pid = spawn(fun() ->
+        receive
+            {'$gen_call', _From, _Req} -> exit(shutdown)
+        end
+    end),
+    true = register(beamtalk_class_registry:registry_name(Name), Pid),
+    ?assertEqual([], beamtalk_protocol_registry:to_class_objects([Name])).
