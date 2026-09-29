@@ -1,38 +1,34 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for workspace bindings (BT-376 / ADR 0010 Phase 4).
+// E2E tests for the Transcript and Beamtalk class-side facades
+// (BT-376 / ADR 0010 Phase 4, reworked by ADR 0129 / BT-3642).
 //
-// These tests require E2E because workspace bindings (Transcript)
-// are singleton actors registered in the REPL process via persistent_term.
-// They are REPL-specific: BUnit tests run in compiled code without access to
-// workspace binding infrastructure. Cross-turn variable persistence and
-// subscribe/unsubscribe lifecycle are also tested here.
-//
-// Workspace bindings (Transcript) are singleton actors
-// accessed via workspace convenience bindings. The explicit form
-// (e.g., TranscriptStream current) also works via class variables
-// (ADR 0019).
+// These tests require E2E because Transcript's buffer operations (`recent`,
+// `clear`) need the REPL's TranscriptStream, which only exists in an
+// interactive workspace. BUnit tests run under `beamtalk test`, where
+// Transcript falls back to Logger. Cross-turn variable persistence is also
+// tested here.
 
 // ===========================================================================
-// TRANSCRIPT BINDING — BASIC DISPATCH
+// TRANSCRIPT FACADE — BASIC DISPATCH
 // ===========================================================================
 
-// Transcript show: dispatches through workspace binding (async send, returns self)
+// Transcript show: is a class-side send; it returns nil
 Transcript show: "Hello"
-// => Actor(TranscriptStream, _)
+// => nil
 
-// Transcript cr dispatches through workspace binding (async send, returns self)
+// Transcript cr is a class-side send; it returns nil
 Transcript cr
-// => Actor(TranscriptStream, _)
+// => nil
 
 // ===========================================================================
-// TRANSCRIPT BINDING — CLASS INTROSPECTION
+// TRANSCRIPT FACADE — CLASS INTROSPECTION
 // ===========================================================================
 
-// Transcript class returns TranscriptStream (the actual class of the singleton)
+// Transcript is a class; `Transcript class` is its metaclass
 Transcript class
-// => TranscriptStream
+// => Transcript class
 
 // Transcript respondsTo: #show: returns true
 Transcript respondsTo: #show:
@@ -76,12 +72,12 @@ version isEmpty
 // => false
 
 // ===========================================================================
-// TRANSCRIPT BINDING — CASCADE (SEMICOLON CHAINING)
+// TRANSCRIPT FACADE — CASCADE (SEMICOLON CHAINING)
 // ===========================================================================
 
-// Cascade on workspace binding: all messages dispatched to same actor
+// Cascade on the facade: all messages go to Transcript
 Transcript show: "Hello"; cr; show: "World"
-// => Actor(TranscriptStream, _)
+// => nil
 
 // ===========================================================================
 // BEAMTALK BINDING — CLASS NAMED
@@ -92,16 +88,16 @@ intClass := Beamtalk classNamed: #Integer
 // => Integer
 
 // ===========================================================================
-// TRANSCRIPT BINDING — BUFFER OPERATIONS
+// TRANSCRIPT FACADE — BUFFER OPERATIONS
 // ===========================================================================
 
 // Clear transcript buffer first
 Transcript clear
-// => Actor(TranscriptStream, _)
+// => nil
 
 // Write something to transcript
 Transcript show: "TestOutput"
-// => Actor(TranscriptStream, _)
+// => nil
 
 // Recent returns buffer contents (list of recent output)
 recent := Transcript recent
@@ -113,7 +109,7 @@ recent isEmpty
 
 // Clear empties the buffer
 Transcript clear
-// => Actor(TranscriptStream, _)
+// => nil
 
 // Buffer should be empty after clear
 recentAfterClear := Transcript recent
@@ -121,23 +117,3 @@ recentAfterClear := Transcript recent
 
 recentAfterClear isEmpty
 // => true
-
-// ===========================================================================
-// TRANSCRIPT BINDING — SUBSCRIBE / UNSUBSCRIBE
-// ===========================================================================
-
-// Transcript subscribe dispatches as unary method (BT-530)
-Transcript subscribe
-// => Actor(TranscriptStream, _)
-
-// Transcript unsubscribe dispatches as unary method (BT-530)
-Transcript unsubscribe
-// => Actor(TranscriptStream, _)
-
-// ===========================================================================
-// EXPLICIT FORM — SINGLETON CLASS VARIABLE ACCESS (ADR 0019 Phase 4)
-// ===========================================================================
-
-// TranscriptStream current returns the same singleton as Transcript binding
-TranscriptStream current show: "hello from explicit form"
-// => Actor(TranscriptStream, _)

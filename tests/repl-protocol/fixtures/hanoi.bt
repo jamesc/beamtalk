@@ -14,8 +14,7 @@ Value subclass: Hanoi
           from: source
           to: auxiliary
           via: target
-        TranscriptStream current show: "Move disk from " ++ source ++ " to " ++ target
-        TranscriptStream current cr
+        Transcript showCr: "Move disk from " ++ source ++ " to " ++ target
         self
           solve: n - 1
           from: auxiliary

@@ -278,35 +278,25 @@ This is the set of names the structural validator must treat as already
 defined so it does not flag them as unresolved classes / undefined variables.
 It must mirror what the runtime name resolver
 (`beamtalk_workspace_interface_primitives:resolve_name/2') can resolve as a
-free identifier:
+free identifier: user variable bindings — session locals plus `bind:as:'
+globals, both already present as atom keys in `Bindings' (internal
+`__'-prefixed keys excluded).
 
-- user variable bindings — session locals plus `bind:as:' globals, both already
-  present as atom keys in `Bindings' (internal `__'-prefixed keys excluded);
-- workspace singleton binding names (`Transcript'/`Workspace'),
-  derived from `beamtalk_workspace_config:binding_names/0' — the same single
-  source of truth the resolver's singleton tier uses.
-
-ADR 0081 Phase 1 stopped eagerly injecting the singletons into the session
-bindings map (they are now resolved lazily), so they are no longer in
-`Bindings' and must be added back here — otherwise `Workspace classes' at the
-REPL reports a spurious `Unresolved class Workspace` warning.
+There are no workspace singleton binding names since ADR 0129: `Transcript',
+`Workspace' and `Beamtalk' are class-side facade classes, which the compiler
+already knows via the class hierarchy.
 
 Class names (`Counter', `Integer', …) are not added here; the compiler already
 knows them via the class hierarchy.
 """.
 -spec known_vars(map()) -> [binary()].
 known_vars(Bindings) ->
-    UserVars = [
+    lists:usort([
         atom_to_binary(K, utf8)
      || K <- maps:keys(Bindings),
         is_atom(K),
         not is_internal_key(K)
-    ],
-    SingletonVars = [
-        atom_to_binary(Name, utf8)
-     || Name <- beamtalk_workspace_config:binding_names()
-    ],
-    lists:usort(UserVars ++ SingletonVars).
+    ]).
 
 -doc "Check if a binding key is internal (not a user variable).".
 -spec is_internal_key(atom()) -> boolean().

@@ -209,7 +209,7 @@ Object subclass: {main_name}
     self new run
 
   run =>
-    TranscriptStream current show: "Hello from {name}!"; cr.
+    Console printLine: "Hello from {name}!".
     self
 "#
     );
@@ -536,7 +536,7 @@ mod tests {
 
         let content = fs::read_to_string(main_path).unwrap();
         assert!(content.contains("Object subclass: Main"));
-        assert!(content.contains("TranscriptStream current show:"));
+        assert!(content.contains("Console printLine:"));
     }
 
     #[test]

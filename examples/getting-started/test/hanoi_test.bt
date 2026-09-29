@@ -3,8 +3,8 @@
 
 // BUnit tests for the Hanoi value type
 //
-// Note: solve:from:to:via: prints move instructions to Transcript
-// These tests verify correctness of the algorithm, not Transcript output
+// Note: solve:from:to:via: prints move instructions via showCr:
+// These tests verify correctness of the algorithm, not the printed output
 // The number of moves for n disks is always 2^n - 1
 //
 // Run in the REPL:
@@ -13,21 +13,6 @@
 //   > HanoiTest runAll
 
 TestCase subclass: HanoiTest
-
-  class serial -> Boolean => true
-
-  setUp =>
-    self.old_ts := TranscriptStream current
-    self.ts := TranscriptStream spawn
-    TranscriptStream current: self.ts
-    self
-
-  tearDown =>
-    self.old_ts ifNil: [
-      TranscriptStream resetCurrent
-    ] ifNotNil: [:t | TranscriptStream current: t]
-    self.ts ifNotNil: [:t | t stop]
-    self
 
   testZeroDisksReturnsNil =>
     // Base case: no disks to move

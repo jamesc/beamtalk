@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the `Transcript` class-side facade (BT-3642, ADR 0129 §5).
+//
+// Under `beamtalk test` there is no interactive workspace (no REPL server, so
+// no `TranscriptStream`): `show:` / `showCr:` log a plain Logger notice and
+// `cr` is a no-op, so all of them succeed. `recent` and `clear` are
+// workspace-only and raise `no_workspace`. Routing to the REPL stream is
+// covered by tests/repl-protocol/cases/transcript.btscript.
+
+TestCase subclass: TranscriptTest
+
+  testShowSucceeds => self assert: (Transcript show: "hello") equals: nil
+
+  testShowNonStringSucceeds => self assert: (Transcript show: 42) equals: nil
+
+  testCrIsNoOp => self assert: Transcript cr equals: nil
+
+  testShowCrSucceeds => self assert: (Transcript showCr: "hello") equals: nil
+
+  testCascadeSucceeds =>
+    self assert: (Transcript show: "a"; cr; show: "b") equals: nil
+
+  testRecentRaisesNoWorkspace =>
+    self should: [Transcript recent] raise: #no_workspace
+
+  testClearRaisesNoWorkspace =>
+    self should: [Transcript clear] raise: #no_workspace
+
+  testRespondsToFacadeSelectors =>
+    self assert: (Transcript class includesSelector: #show:)
+    self assert: (Transcript class includesSelector: #showCr:)
+    self assert: (Transcript class includesSelector: #cr)
+    self assert: (Transcript class includesSelector: #recent)
+    self assert: (Transcript class includesSelector: #clear)
+
+  testHasNoStreamProtocol =>
+    self deny: (Transcript class includesSelector: #subscribe)
+    self deny: (Transcript class includesSelector: #current)

@@ -878,16 +878,6 @@ get_completions(Prefix) when is_binary(Prefix) ->
     PrefixStr = binary_to_list(Prefix),
     class_name_completions(Prefix) ++
         [
-            atom_to_binary(B, utf8)
-         || B <-
-                try
-                    beamtalk_workspace_config:binding_names()
-                catch
-                    _:_ -> []
-                end,
-            binary:match(atom_to_binary(B, utf8), Prefix) =:= {0, byte_size(Prefix)}
-        ] ++
-        [
             Kw
          || Kw <- builtin_keywords(),
             binary:match(Kw, Prefix) =:= {0, byte_size(Prefix)},

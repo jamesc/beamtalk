@@ -95,6 +95,7 @@ returns.
 -spec stop_node(0..255) -> no_return().
 stop_node(Code) ->
     mark_stop_requested(Code),
+    beamtalk_logging_config:flush_transcript(),
     init:stop(Code),
     receive
     after infinity -> ok
@@ -142,6 +143,7 @@ halt_unless_stopping(Code) ->
             after infinity -> ok
             end;
         none ->
+            flush_loggers(),
             erlang:halt(Code)
     end.
 
