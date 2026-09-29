@@ -2860,3 +2860,206 @@ appendBinary_ensure_dir_failure_test() ->
     after
         file:delete(BlockingFile)
     end.
+
+%%% ============================================================================
+%%% BT-3635: open:mode: ownership is independent of boot context and dispatch
+%%% path. Each case runs `open:mode:` in a spawned process that stands in for
+%%% one dispatch shape — a direct call runs in the caller itself; the class
+%%% gen_server path runs in a long-lived process with the caller mirrored into
+%%% `beamtalk_dispatch_caller_pid` — and checks both the registered owner and
+%%% that the descriptor lives exactly as long as that owner.
+%%% ============================================================================
+
+-doc "Run `Fun` in a fresh process with `Dict` seeded; return `{Pid, Result}`.".
+run_in(Dict, Fun) ->
+    Parent = self(),
+    Ref = make_ref(),
+    Pid = spawn(fun() ->
+        [put(K, V) || {K, V} <- Dict],
+        Parent ! {Ref, Fun()},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {Ref, Result} -> {Pid, Result}
+    after 5000 -> error(timeout)
+    end.
+
+-doc "A process that just waits to be told to stop — a session or caller stand-in.".
+spawn_idle() ->
+    spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end).
+
+open_mode_owner_of(Path) ->
+    [Owner] = [O || {P, _, O} <- beamtalk_file_handle_registry:open_handles(), P =:= Path],
+    Owner.
+
+open_mode_listed(Path) ->
+    lists:any(fun({P, _, _}) -> P =:= Path end, beamtalk_file_handle_registry:open_handles()).
+
+stop_and_wait(Pid) ->
+    Mon = monitor(process, Pid),
+    Pid ! stop,
+    receive
+        {'DOWN', Mon, process, Pid, _} -> ok
+    after 5000 -> error(timeout)
+    end.
+
+wait_dead(Pid) ->
+    Mon = monitor(process, Pid),
+    receive
+        {'DOWN', Mon, process, Pid, _} -> ok
+    after 5000 -> error({still_alive, Pid})
+    end.
+
+%% The registry reclaims asynchronously on 'DOWN'; poll briefly for the entry.
+wait_unlisted(Path) ->
+    wait_unlisted(Path, 100).
+wait_unlisted(Path, 0) ->
+    ?assertNot(open_mode_listed(Path));
+wait_unlisted(Path, N) ->
+    case open_mode_listed(Path) of
+        false ->
+            ok;
+        true ->
+            timer:sleep(10),
+            wait_unlisted(Path, N - 1)
+    end.
+
+with_registry(Fun) ->
+    case whereis(beamtalk_file_handle_registry) of
+        undefined ->
+            {ok, Pid} = beamtalk_file_handle_registry:start_link(),
+            unlink(Pid),
+            try
+                Fun()
+            after
+                exit(Pid, shutdown)
+            end;
+        _ ->
+            Fun()
+    end.
+
+open_mode_path(Tag) ->
+    list_to_binary(
+        "_bt_test_bt3635_" ++ Tag ++ "_" ++
+            integer_to_list(erlang:unique_integer([positive])) ++ ".txt"
+    ).
+
+open_in(Dict, Path) ->
+    run_in(Dict, fun() ->
+        #{'okValue' := #{fd := Fd}} = beamtalk_file:'open:mode:'(Path, write),
+        Fd
+    end).
+
+%% Direct call from a plain process — no session, no dispatch mirroring, and
+%% not a Beamtalk actor. It owns the handle (no longer unowned), and the
+%% descriptor dies with it.
+open_mode_direct_call_plain_process_owns_handle_test() ->
+    with_registry(fun() ->
+        Path = open_mode_path("direct_plain"),
+        try
+            {Caller, Fd} = open_in([], Path),
+            ?assertEqual(Caller, open_mode_owner_of(Path)),
+            ?assert(is_process_alive(Fd)),
+            stop_and_wait(Caller),
+            wait_dead(Fd),
+            wait_unlisted(Path)
+        after
+            file:delete(Path)
+        end
+    end).
+
+%% Class gen_server shape: the running process is long-lived and the caller is
+%% mirrored in. Same owner as the direct call for the same caller, and the
+%% descriptor dies with the caller, not with the (still alive) class process.
+open_mode_dispatched_call_caller_owns_handle_test() ->
+    with_registry(fun() ->
+        Path = open_mode_path("dispatched"),
+        Caller = spawn_idle(),
+        try
+            {ClassProc, Fd} = open_in([{beamtalk_dispatch_caller_pid, Caller}], Path),
+            ?assertEqual(Caller, open_mode_owner_of(Path)),
+            stop_and_wait(Caller),
+            wait_dead(Fd),
+            wait_unlisted(Path),
+            ?assert(is_process_alive(ClassProc)),
+            stop_and_wait(ClassProc)
+        after
+            file:delete(Path)
+        end
+    end).
+
+%% REPL shape under a direct call: `open:mode:` runs in a per-statement eval
+%% worker seeded with the session pid. The session owns the handle, and the
+%% descriptor must outlive the worker — the multi-turn REPL workflow.
+open_mode_direct_call_session_outlives_worker_test() ->
+    with_registry(fun() ->
+        Path = open_mode_path("session_direct"),
+        Session = spawn_idle(),
+        try
+            {Worker, Fd} = open_in([{beamtalk_session_pid, Session}], Path),
+            ?assertEqual(Session, open_mode_owner_of(Path)),
+            stop_and_wait(Worker),
+            ?assert(is_process_alive(Fd)),
+            ?assertEqual(Session, open_mode_owner_of(Path)),
+            stop_and_wait(Session),
+            wait_dead(Fd),
+            wait_unlisted(Path)
+        after
+            file:delete(Path)
+        end
+    end).
+
+%% REPL shape through the class gen_server: session and caller both mirrored.
+%% The session wins, exactly as on the direct path.
+open_mode_dispatched_call_session_wins_test() ->
+    with_registry(fun() ->
+        Path = open_mode_path("session_dispatched"),
+        Session = spawn_idle(),
+        Worker = spawn_idle(),
+        try
+            {ClassProc, Fd} = open_in(
+                [{beamtalk_session_pid, Session}, {beamtalk_dispatch_caller_pid, Worker}], Path
+            ),
+            ?assertEqual(Session, open_mode_owner_of(Path)),
+            stop_and_wait(Worker),
+            stop_and_wait(ClassProc),
+            ?assert(is_process_alive(Fd)),
+            stop_and_wait(Session),
+            wait_dead(Fd),
+            wait_unlisted(Path)
+        after
+            file:delete(Path)
+        end
+    end).
+
+%% An explicit close of a holder-backed handle also ends the holder, so a
+%% long-lived owner (a REPL session) does not accumulate idle holders.
+open_mode_close_releases_holder_test() ->
+    with_registry(fun() ->
+        Path = open_mode_path("holder_close"),
+        Session = spawn_idle(),
+        try
+            {Worker, Handle} = run_in([{beamtalk_session_pid, Session}], fun() ->
+                #{'okValue' := H} = beamtalk_file:'open:mode:'(Path, write),
+                H
+            end),
+            #{fd := Fd} = Handle,
+            %% The holder monitors the descriptor (it is linked only to
+            %% OTP's file_server), so find it via monitored_by.
+            {monitored_by, MonitoredBy} = process_info(Fd, monitored_by),
+            [Holder] = [P || P <- MonitoredBy, is_pid(P)],
+            ?assertNotEqual(Worker, Holder),
+            beamtalk_file_handle:close_handle(Handle),
+            wait_dead(Holder),
+            stop_and_wait(Worker),
+            stop_and_wait(Session)
+        after
+            file:delete(Path)
+        end
+    end).

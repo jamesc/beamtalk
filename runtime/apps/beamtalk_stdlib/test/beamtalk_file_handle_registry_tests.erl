@@ -11,9 +11,9 @@ EUnit tests for `beamtalk_file_handle_registry`.
 Covers the acceptance criteria:
 
 * a handle whose owner dies is closed and removed from the registry;
-* an unowned handle (registered with `Owner = undefined`, mirroring
-  `open:mode:` called from compiled code with neither a session nor a calling
-  actor) is listed but never reclaimed by any death;
+* an unowned handle (registered with `Owner = undefined`, which
+  `open:mode:` itself no longer produces but the registry still accepts
+  defensively) is listed but never reclaimed by any death;
 * `unregister/1` removes a handle immediately, so a closed handle does not
   linger in `open_handles/0` and a later owner `'DOWN'` cannot double-close it;
 * handles sharing an owner share a single monitor, torn down only once the

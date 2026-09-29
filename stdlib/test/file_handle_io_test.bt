@@ -205,9 +205,10 @@ TestCase subclass: FileHandleIoTest
       ]
     self assert: result unwrap isOk
 
-  // Also the regression guard for non-raw descriptors: `File open:mode:` runs
-  // in the File class process, so a raw (opener-locked) descriptor would fail
-  // here with not_on_controlling_process the moment this process touches it.
+  // Also the regression guard for non-raw descriptors: `File open:mode:` may
+  // open in a holder or the File class process, so a raw (opener-locked)
+  // descriptor could fail with not_on_controlling_process when this process
+  // touches it.
   testCallerOwnedHandleRoundTrip =>
     nl := $\n asString
     File delete: "target/bt-test-tmp/handle_owned.log"
@@ -221,33 +222,56 @@ TestCase subclass: FileHandleIoTest
   // === BT-3020: open:mode: registers its handle against a resolved owner ===
 
   // A test method runs in a plain spawned process (beamtalk_test_case's
-  // spawn_test_execution/6) — no REPL session, and not itself a Beamtalk
-  // actor — so open:mode: called directly from here resolves to tier 3:
-  // unowned, listed for diagnostics but reclaimed by nothing but `close`.
-  testOpenModeFromCompiledCodeIsUnowned =>
-    path := "target/bt-test-tmp/handle_unowned.txt"
+  // spawn_test_execution/6) — no REPL session, and not a Beamtalk actor.
+  // BT-3635: that process owns the handle, for a static send (a direct call,
+  // since File is sealed) and a dynamic one (through the File class process)
+  // alike. It used to be left unowned.
+  testOpenModeFromPlainProcessIsCallerOwned =>
+    path := "target/bt-test-tmp/handle_plain_owned.txt"
     File delete: path
     handle := (File open: path mode: #write) unwrap
     entry := File openHandles detect: [:e | (e at: 1) =:= path]
     self assert: (entry at: 2) equals: #write
-    self assert: (entry at: 3) isNil
+    self assert: (entry at: 3) equals: Erlang erlang self
+    handle close
+    self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
+
+  testDynamicOpenModeFromPlainProcessIsCallerOwned =>
+    path := "target/bt-test-tmp/handle_plain_owned_dyn.txt"
+    File delete: path
+    handle := (File perform: #open:mode: withArguments: #(path, #write)) unwrap
+    entry := File openHandles detect: [:e | (e at: 1) =:= path]
+    self assert: (entry at: 3) equals: Erlang erlang self
     handle close
     self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
 
   // Tier 2: an actor that opens a handle from one of its own methods and
-  // never closes it — the exact leak this issue fixes — is reclaimed when
-  // the actor dies, and until then is listed under the actor's own pid.
+  // never closes it is reclaimed when the actor dies, and until then is
+  // listed under the actor's own pid — via a static and a dynamic send.
   testActorOwnedHandleReclaimedOnDeath =>
-    path := "target/bt-test-tmp/handle_actor_owned.txt"
+    self assertActorReclaims: "target/bt-test-tmp/handle_actor_owned.txt" dynamic: false
+
+  testActorOwnedDynamicHandleReclaimedOnDeath =>
+    self assertActorReclaims: "target/bt-test-tmp/handle_actor_owned_dyn.txt" dynamic: true
+
+  assertActorReclaims: path dynamic: dynamic =>
     File delete: path
     actor := FileHandleOwnerActor spawn
-    actor openUnclosed: path
+    dynamic ifTrue: [
+      actor openUnclosedDynamic: path
+    ] ifFalse: [actor openUnclosed: path]
     entry := File openHandles detect: [:e | (e at: 1) =:= path]
     self assert: (entry at: 3) equals: actor pid
     Erlang erlang unlink: actor pid
     actor kill
     50 timesRepeat: [actor isAlive ifTrue: [Timer sleep: 10]]
     self deny: actor isAlive
+    50
+      timesRepeat: [
+        (File openHandles anySatisfy: [:e |
+          (e at: 1) =:= path
+        ]) ifTrue: [Timer sleep: 10]
+      ]
     self deny: (File openHandles anySatisfy: [:e | (e at: 1) =:= path])
 
   // === closed-handle errors ===
@@ -433,15 +457,26 @@ TestCase subclass: FileHandleIoTest
 
   // The dynamic path is deliberately *not* intercepted (ADR 0109, "Not in
   // scope"): `perform:` reaches `open:do:` through the class gen_server, so the
-  // block still runs there and a nested `File` send still fails. Part 1's
-  // `class_send` self-call guard is what turns that into a structured
+  // block still runs there and a nested *dynamic* `File` send still fails.
+  // Part 1's `class_send` self-call guard is what turns that into a structured
   // dispatch_error rather than an opaque `calling_self` exit. Pinned here so
   // the gap between the two paths stays a decision rather than a surprise.
   testPerformOpenDoStillRunsInTheClassProcess =>
     File writeAll: "target/bt-test-tmp/handle_perform.txt" contents: "x"
-    nested := [:h | File exists: "target/bt-test-tmp/handle_perform.txt"]
+    nested := [:h |
+      File perform: #exists: withArguments: #("target/bt-test-tmp/handle_perform.txt")
+    ]
     self
       should: [
         File perform: #open:do: withArguments: #("target/bt-test-tmp/handle_perform.txt", nested)
       ]
       raise: #dispatch_error
+
+  // BT-3635: File is sealed, so a nested *static* `File` send is a direct call
+  // that never re-enters the class gen_server — it works even inside a block
+  // the dynamic path runs in the class process.
+  testPerformOpenDoAllowsNestedStaticFileSend =>
+    File writeAll: "target/bt-test-tmp/handle_perform_static.txt" contents: "x"
+    nested := [:h | File exists: "target/bt-test-tmp/handle_perform_static.txt"]
+    result := File perform: #open:do: withArguments: #("target/bt-test-tmp/handle_perform_static.txt", nested)
+    self assert: result unwrap

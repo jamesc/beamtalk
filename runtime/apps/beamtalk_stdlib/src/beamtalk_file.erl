@@ -74,6 +74,8 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
 
 -type file_handle() :: beamtalk_file_handle:t().
 -export_type([file_handle/0]).
+%% How `do_open/4` performs the underlying `file:open/2` (see `open_for_owner/3`).
+-type open_fun() :: fun((string(), [file:mode()]) -> {ok, pid()} | {error, term()}).
 
 %% FFI shims for (Erlang beamtalk_file) dispatch
 -export([
@@ -434,18 +436,23 @@ Write-capable modes auto-create parent directories, matching
 
 The caller is responsible for `close`, but is not the sole backstop:
 the handle is registered against a resolved *owner* — the REPL/workspace
-session if there is one, else the calling Beamtalk actor, else unowned — and
-`beamtalk_file_handle_registry` closes an owned handle when its owner dies.
-`File openHandles` lists every outstanding handle for diagnostics regardless
-of tier. Prefer `open:mode:do:` whenever a block scope will do.
+session if there is one, else the calling process — and
+`beamtalk_file_handle_registry` closes it when that owner dies. The descriptor
+itself lives exactly as long as the owner too (see `open_for_owner/3`), so the
+handle's lifetime is the same whether this runs as a direct call in the
+caller's process or through the File class gen_server. `File openHandles`
+lists every outstanding handle for diagnostics. Prefer `open:mode:do:`
+whenever a block scope will do.
 
 Returns a Result ok map holding the handle, or a Result error map.
 """.
 -spec 'open:mode:'(binary(), atom()) -> beamtalk_result:t().
 'open:mode:'(Path, Mode) when is_binary(Path), is_atom(Mode) ->
-    case do_open(Path, Mode, 'open:mode:') of
+    Owner = resolve_owner(),
+    Open = fun(PathStr, Options) -> open_for_owner(PathStr, Options, Owner) end,
+    case do_open(Path, Mode, 'open:mode:', Open) of
         {ok, Handle} ->
-            beamtalk_file_handle_registry:register(Handle, resolve_owner()),
+            beamtalk_file_handle_registry:register(Handle, Owner),
             beamtalk_result:from_tagged_tuple({ok, Handle});
         {error, Error} ->
             beamtalk_result:from_tagged_tuple({error, Error})
@@ -458,50 +465,48 @@ Returns a Result ok map holding the handle, or a Result error map.
 -doc """
 Resolve the owner `open:mode:` registers its handle against.
 
-`open:mode:` is not call-site lowered (see `mode_options/1`), so this runs
-inside the File class gen_server, where `self()` is the class process rather
-than the caller. Two process-dictionary keys mirrored into *this* process for
-the duration of the call stand in for "who is calling":
+One rule, whatever the boot context (REPL, `beamtalk run`, `beamtalk test`, a
+release) and whatever the dispatch path (a direct call in the caller's
+process, or a send through the File class gen_server):
 
-1. `beamtalk_session_pid` — the long-lived REPL/workspace session shell pid,
-   explicitly carried by `class_send_dispatch/3` (ADR 0081) so
-   `Session current` works the same way from inside a class method. A pid here
-   outlives the short-lived eval worker that made this particular call, so it
-   survives across REPL turns — the property the rejected call-site-lowering
-   plan (see `mode_options/1`) could not deliver.
-2. The immediate caller's pid, via `beamtalk_object_class:dispatch_caller_pid/0`
-   — mirrored by `beamtalk_object_class:dispatch_class_method/5` from the
-   `From` every `handle_call` already carries (no wire-protocol change). Used
-   only when there is no session: if that pid is itself a Beamtalk actor
-   (`beamtalk_actor:is_beamtalk_actor/1`), the actor owns the handle.
+1. `beamtalk_session_pid`, if set — the long-lived REPL/workspace session
+   shell pid. It is `put/2` into each REPL eval worker's own process
+   dictionary at spawn (`beamtalk_repl_shell:seed_session_context/3`) and
+   mirrored into a class gen_server for the duration of a class-method call
+   (`class_send_dispatch/3`, ADR 0081), so `get/1` answers correctly on either
+   path. It outlives the per-statement eval worker, which is what lets a handle
+   survive across REPL turns.
+2. Otherwise the caller. On the gen_server path that is
+   `beamtalk_object_class:dispatch_caller_pid/0`, mirrored by
+   `dispatch_class_method/5` from the `From` of the `handle_call`. On a direct
+   call that key is unset — and `self()` *is* the caller, since a direct call is
+   a plain function call in the calling process. Any process can own a handle:
+   an actor, a supervisor worker, or the plain process a `beamtalk test` method
+   or `beamtalk run` script executes in. The registry monitors pids
+   generically; nothing about reclamation is actor-specific.
 
-Otherwise the handle is unowned (tier 3): registered for `openHandles`
-diagnostics, reclaimed only by an explicit `close` or node shutdown.
+So this always returns a pid. `beamtalk_file_handle_registry:owner()` keeps
+`undefined` in its type for defensiveness only.
 
-Tier 2 is *not* transitive the way tier 1 is: the session pid is re-emitted by
-`local_session_context/0` on every nested class-method call, so an actor
-calling `Logger openFor: path` (say) which itself calls `File open:mode:`
-still resolves the session correctly if one exists. But
-`beamtalk_dispatch_caller_pid` is only ever the *immediate* caller — in that
-same nested-call shape with no session, `open:mode:` sees `Logger`'s class
-gen_server pid (not a Beamtalk actor), not the originating actor, and the
-handle falls through to unowned. A future reader tempted to make tier 2
-transitive too should know this is a known, accepted gap, not an oversight.
+Tier 2 reaches back one gen_server hop at most. A static `File open:mode:`
+is a direct call, so it runs in whatever process issued it and reads *that*
+process's mirrored caller. Say an actor with no session sends to `Logger`,
+which opens a file: if the actor's send reached `Logger` through its class
+gen_server, the File call runs there with the actor mirrored in, and the actor
+owns the handle; if the actor's send was itself a direct call, the File call
+runs in the actor and `self()` is the actor. Only a *dynamic* File send made
+from inside a class gen_server re-enters File's own class process, and then the
+caller is that class process.
 """.
--spec resolve_owner() -> pid() | undefined.
+-spec resolve_owner() -> pid().
 resolve_owner() ->
     case get(beamtalk_session_pid) of
         SessionPid when is_pid(SessionPid) ->
             SessionPid;
         _ ->
             case beamtalk_object_class:dispatch_caller_pid() of
-                CallerPid when is_pid(CallerPid) ->
-                    case beamtalk_actor:is_beamtalk_actor(CallerPid) of
-                        true -> CallerPid;
-                        false -> undefined
-                    end;
-                undefined ->
-                    undefined
+                CallerPid when is_pid(CallerPid) -> CallerPid;
+                undefined -> self()
             end
     end.
 
@@ -509,7 +514,8 @@ resolve_owner() ->
 List every outstanding `open:mode:` handle for diagnostics.
 
 Returns an Array of 3-element Arrays `#(path mode owner)`. `owner` is the
-session/actor pid for tiers 1-2, `nil` for an unowned (tier 3) handle. Handles
+session or caller pid (see `resolve_owner/0`); `nil` only for a handle
+registered without an owner, which `open:mode:` no longer does. Handles
 from `open:do:` / `open:mode:do:` never appear — they are block-scoped and
 always closed before the call returns, so there is nothing to enumerate.
 """.
@@ -541,8 +547,9 @@ no time limit.
 
 The exception is reaching this function through dynamic dispatch (`perform:`),
 which still goes via the class gen_server and so runs the block there. In that
-case the pre-ADR-0109 constraints apply: the block cannot message `File` (that
-deadlocks), it serialises every other `File` call in the node behind it, and it
+case the pre-ADR-0109 constraints apply: the block cannot message `File`
+dynamically (that raises `dispatch_error`; a static send is a direct call, since
+`File` is sealed, and is fine), it serialises every other `File` call in the node behind it, and it
 must finish inside `beamtalk_class_dispatch`'s 60-second class-call timeout —
 past that the caller gets a timeout while the block keeps running.
 
@@ -553,7 +560,7 @@ file could not be opened.
 'open:mode:do:'(Path, Mode, Block) when
     is_binary(Path), is_atom(Mode), is_function(Block, 1)
 ->
-    case do_open(Path, Mode, 'open:mode:do:') of
+    case do_open(Path, Mode, 'open:mode:do:', fun file:open/2) of
         {ok, Handle} ->
             try
                 beamtalk_result:from_tagged_tuple({ok, Block(Handle)})
@@ -573,7 +580,9 @@ file could not be opened.
     beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Path must be a String">>).
 
 -doc """
-Shared open path for open:mode: and open:mode:do:.
+Shared open path for open:mode: and open:mode:do:. `Open` performs the actual
+`file:open/2` — in the running process for `open:mode:do:`, via
+`open_for_owner/3` for `open:mode:`.
 
 `open:mode:` (unlike the `do:` variants) is deliberately **not** call-site
 lowered to the caller's process, and must stay that way: OTP already
@@ -584,13 +593,14 @@ REPL spawns a fresh worker per evaluated statement (`spawn_monitor` in
 `beamtalk_repl_shell:handle_call({eval, ...})`), so a handle opened on one
 turn would die the instant that turn's statement finished — breaking the
 documented multi-turn `file.bt` workflow (`handle := (File open: … mode: …)
-unwrap` on one line, `handle writeLine: …` on the next). Handles survive turns
-today only because they're opened in the long-lived File class process
-instead. See `resolve_owner/0` for how ownership is resolved without lowering.
+unwrap` on one line, `handle writeLine: …` on the next). `File` is sealed, so a
+static send *does* run `open:mode:` in the caller's process as a direct call;
+`open_for_owner/3` is what ties the descriptor to the resolved owner's
+lifetime rather than the running process's.
 """.
--spec do_open(binary(), atom(), atom()) ->
+-spec do_open(binary(), atom(), atom(), open_fun()) ->
     {ok, beamtalk_file_handle:t()} | {error, beamtalk_error:error()}.
-do_open(Path, Mode, Selector) ->
+do_open(Path, Mode, Selector, Open) ->
     case mode_options(Mode) of
         {ok, Options} ->
             PathStr = unicode:characters_to_list(Path),
@@ -600,12 +610,11 @@ do_open(Path, Mode, Selector) ->
                         ok ->
                             %% Do NOT add `raw` to Options. A raw descriptor may
                             %% only be used by the process that opened it, and
-                            %% `open:mode:` still opens in the File class
-                            %% process — every handle it hands back would fail
-                            %% with not_on_controlling_process. (ADR 0109 moved
-                            %% only the block-scoped selectors to the caller.)
+                            %% `open:mode:` may open in a holder process or the
+                            %% File class process — every handle it hands back
+                            %% would fail with not_on_controlling_process.
                             %% See mode_options/1.
-                            case file:open(PathStr, Options) of
+                            case Open(PathStr, Options) of
                                 {ok, Fd} -> {ok, beamtalk_file_handle:new(Fd, Mode, Path)};
                                 {error, Reason} -> {error, open_error(Selector, Path, Reason)}
                             end;
@@ -631,12 +640,62 @@ do_open(Path, Mode, Selector) ->
     end.
 
 -doc """
+Open a descriptor that lives exactly as long as `Owner`.
+
+A non-`raw` descriptor is a `file_io_server` that monitors the process that
+opened it and closes when that process dies. When `Owner` is the running
+process, opening here gives that for free. Otherwise the running process is
+not the owner — a per-statement REPL eval worker under a session owner, or
+the File class gen_server under a dispatched caller — so a holder process
+opens the descriptor and stays alive until either `Owner` or the descriptor
+goes down. Its exit closes the descriptor if it is still open.
+
+`beamtalk_file_handle_registry` still reclaims the handle on the owner's
+`'DOWN'` and lists it for `openHandles`; the holder only guarantees the
+descriptor never dies *earlier* than its owner, nor outlives it if the
+registry has restarted and lost track of it.
+""".
+-spec open_for_owner(string(), [file:mode()], pid()) -> {ok, pid()} | {error, term()}.
+open_for_owner(PathStr, Options, Owner) when Owner =:= self() ->
+    file:open(PathStr, Options);
+open_for_owner(PathStr, Options, Owner) ->
+    Caller = self(),
+    Ref = make_ref(),
+    {Holder, HolderMon} = spawn_monitor(fun() ->
+        hold_descriptor(Caller, Ref, PathStr, Options, Owner)
+    end),
+    receive
+        {Ref, Result} ->
+            erlang:demonitor(HolderMon, [flush]),
+            Result;
+        {'DOWN', HolderMon, process, Holder, Reason} ->
+            {error, Reason}
+    end.
+
+-doc "Body of the `open_for_owner/3` holder process.".
+-spec hold_descriptor(pid(), reference(), string(), [file:mode()], pid()) -> ok.
+hold_descriptor(Caller, Ref, PathStr, Options, Owner) ->
+    OwnerMon = erlang:monitor(process, Owner),
+    case file:open(PathStr, Options) of
+        {ok, Fd} ->
+            FdMon = erlang:monitor(process, Fd),
+            Caller ! {Ref, {ok, Fd}},
+            receive
+                {'DOWN', OwnerMon, process, _, _} -> ok;
+                {'DOWN', FdMon, process, _, _} -> ok
+            end;
+        {error, _} = Error ->
+            Caller ! {Ref, Error},
+            ok
+    end.
+
+-doc """
 Binary `file:open/2` options for each Beamtalk mode Symbol.
 
 Deliberately **not** `raw`: a raw descriptor may only be used by the process
-that opened it, and `open:mode:` is a class method, so it opens in the File
-class process rather than the caller's. The handle it returns would be dead on
-arrival. (ADR 0109 moved `open:…do:` to the caller, but not `open:mode:`.)
+that opened it, and `open:mode:` may open in a holder process
+(`open_for_owner/3`) or the File class process rather than the caller's. The
+handle it returns would be dead on arrival.
 Non-raw descriptors are BEAM processes, so a handle stays usable wherever it is
 held — the same property that lets `File lines:` streams outlive the open call.
 """.
@@ -651,8 +710,9 @@ mode_options(_) -> error.
 Refuse to open something that exists but is not a regular file.
 
 A FIFO or character device never reports end-of-file, so `readAll` on one loops
-forever — and via `open:mode:`, which still opens in the File class process, a
-wedged read takes every other `File` operation in the node with it. A directory
+forever — and via a dynamic `open:mode:` send, which still opens in the File
+class process, a wedged read takes every other `File` operation in the node
+with it. A directory
 is rejected here too, turning a bare `eisdir` into a message that says what was
 wrong.
 

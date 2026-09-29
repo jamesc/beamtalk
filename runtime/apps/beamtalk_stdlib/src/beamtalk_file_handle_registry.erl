@@ -11,22 +11,25 @@ Handle-registry for `File open:mode:`.
 
 `open:mode:` hands the caller a `FileHandle` it must close itself — see
 `beamtalk_file:'open:mode:'/2`. Without this registry an unclosed handle
-survives the caller's death and stays open for the lifetime of the node,
-because the descriptor is owned by the long-lived `File` class process
-rather than the caller. This server is the reclamation and diagnostics
-substrate this server adds: it tracks every outstanding `open:mode:` handle
+could survive the caller's death, because the descriptor may be opened by a
+process other than the caller (the File class gen_server, or a holder process
+standing in for a REPL session). This server is the reclamation and
+diagnostics substrate: it tracks every outstanding `open:mode:` handle
 against an *owner*, and closes an owner's handles when the owner dies.
 
-## Ownership tiers
+## Ownership
 
-`beamtalk_file:'open:mode:'/2` resolves an owner via a three-tier rule before
-calling `register/2`:
+`beamtalk_file:resolve_owner/0` picks the owner before calling `register/2`,
+by one rule that does not depend on boot context or dispatch path:
 
 1. The REPL/workspace session shell pid (survives across eval-worker turns).
-2. Otherwise, the calling Beamtalk actor's pid.
-3. Otherwise, `undefined` — an unowned handle, registered for diagnostics
-   (`open_handles/0` / `File openHandles`) but reclaimed only by an explicit
-   `close` or node shutdown.
+2. Otherwise, the calling process's pid — any process, actor or not.
+
+Nothing here is actor-specific: any pid is monitored the same way. An
+`undefined` owner — an unowned handle, listed for diagnostics
+(`open_handles/0` / `File openHandles`) but reclaimed only by an explicit
+`close` or node shutdown — remains accepted for defensiveness, but
+`open:mode:` never registers one.
 
 ## Lifecycle
 
@@ -77,6 +80,8 @@ raised error just because bookkeeping failed; see the `catch exit:_` in each.
 
 -define(SERVER, ?MODULE).
 
+%% `undefined` is accepted defensively; `beamtalk_file:'open:mode:'/2` always
+%% passes a pid (see `beamtalk_file:resolve_owner/0`).
 -type owner() :: pid() | undefined.
 %% The handle's own atomics state cell (`beamtalk_file_handle:new/3`) — a
 %% unique identity per handle instance, already used by the handle itself to
@@ -105,8 +110,8 @@ start_link() ->
 -doc """
 Register an outstanding `FileHandle` against its resolved `Owner`.
 
-`Owner` is a pid (session shell or calling actor) or `undefined` (unowned,
-tier 3). Synchronous: the registration is committed before this returns, so a
+`Owner` is a pid (session shell or calling process) or `undefined` (unowned;
+accepted defensively). Synchronous: the registration is committed before this returns, so a
 handle is never briefly "open but unlisted" between `open:mode:` returning and
 a subsequent `File openHandles` call. A no-op returning `ok` when the registry
 is not running, malformed (missing the `state` cell `beamtalk_file_handle:new/3`
@@ -161,8 +166,8 @@ unregister(_Handle) ->
 -doc """
 List every outstanding registered handle as `{Path, Mode, Owner}`.
 
-`Owner` is the session/actor pid for tiers 1-2, `undefined` for an unowned
-(tier 3) handle. Backs `File openHandles`. Returns `[]` when the registry is
+`Owner` is the session or calling-process pid, `undefined` for an unowned
+handle. Backs `File openHandles`. Returns `[]` when the registry is
 not running or fails to reply — a diagnostic read must never raise.
 """.
 -spec open_handles() -> [{binary(), beamtalk_file_handle:mode(), owner()}].

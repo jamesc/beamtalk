@@ -22,7 +22,7 @@
 ///
 /// @see System (for environment variables and OS information)
 /// @see Json (for reading/writing JSON files)
-typed Object subclass: File native: beamtalk_file
+sealed typed Object subclass: File native: beamtalk_file
 
   /// Test if a file exists at the given path (class method).
   ///
@@ -147,12 +147,15 @@ typed Object subclass: File native: beamtalk_file
   /// Write-capable modes create missing parent directories. Returns
   /// `Result ok: handle`, or `Result error: err`.
   ///
-  /// The caller owns the handle and must `close` it, but is not the only
-  /// backstop: it is registered against the REPL session if there is one,
-  /// else the calling actor, else left unowned, and closed automatically
-  /// when that owner dies. `File openHandles` lists every outstanding
-  /// handle for diagnostics. Prefer `open:mode:do:` whenever a block scope
-  /// will do — it needs no owner at all.
+  /// The caller must `close` the handle, but is not the only backstop: it
+  /// is registered against an owner and closed automatically when that
+  /// owner dies. The owner is the REPL session if there is one (so the
+  /// handle survives across REPL statements), else the calling process —
+  /// an actor, or the plain process a test or `beamtalk run` script runs
+  /// in. The rule is the same for static and dynamic sends and in every
+  /// boot context. `File openHandles` lists every outstanding handle for
+  /// diagnostics. Prefer `open:mode:do:` whenever a block scope will do —
+  /// it needs no owner at all.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -316,15 +319,15 @@ typed Object subclass: File native: beamtalk_file
   /// List every outstanding `open:mode:` handle for diagnostics (class method).
   ///
   /// Returns an Array of 3-element Arrays `#(path mode owner)`. `owner` is the
-  /// REPL session or actor pid that opened the handle, or `nil` if it was
-  /// opened from compiled code with neither. Handles from `open:do:` and
+  /// pid of the REPL session or calling process that owns the handle (see
+  /// `open:mode:`). Handles from `open:do:` and
   /// `open:mode:do:` never appear — they are block-scoped and always closed
   /// before the call returns.
   ///
   /// ## Examples
   /// ```beamtalk
   /// h := (File open: "events.log" mode: #append) unwrap.
-  /// File openHandles   // => #(#("events.log" #append <a Pid> or nil))
+  /// File openHandles   // => #(#("events.log" #append <a Pid>))
   /// h close.
   /// ```
   class sealed openHandles -> Array => self delegate
