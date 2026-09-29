@@ -2016,7 +2016,7 @@ module_for_value_tagged_variants_test_() ->
                 'Package',
                 'CompiledMethod',
                 'Beamtalk',
-                'WorkspaceInterface'
+                'Workspace'
             ],
             lists:foreach(
                 fun(Class) ->

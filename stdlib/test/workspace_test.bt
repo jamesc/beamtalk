@@ -1,0 +1,125 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the `Workspace` class-side facade (BT-849 / ADR 0040 Phase 6,
+// ADR 0129 / BT-3641).
+//
+// `Workspace` is a sealed, stateless class-side facade. Under `beamtalk test`
+// (workspace_mode: false) no workspace runs, so every send except
+// `isAvailable` raises `no_workspace`. Selector tests use class-side
+// introspection (`Workspace class includesSelector:`). Live functionality tests
+// are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt
+//
+// Covers: classes, testClasses, globals, load:, test, test:, actors,
+//         actorAt:, actorsOf:, bind:as:, unbind:
+
+TestCase subclass: WorkspaceTest
+
+  testIncludesSelectorClasses =>
+    self assert: (Workspace class includesSelector: #classes)
+
+  testIncludesSelectorTestClasses =>
+    self assert: (Workspace class includesSelector: #testClasses)
+
+  testIncludesSelectorGlobals =>
+    self assert: (Workspace class includesSelector: #globals)
+
+  testIncludesSelectorLoadColon =>
+    self assert: (Workspace class includesSelector: #load:)
+
+  // ADR 0082 Phase 1 (BT-2285): new-class creation facade method. The live
+  // happy path + the four validation errors require a workspace + project tree
+  // and are covered in tests/repl-protocol/cases/workspace_new_class.btscript
+  // and the loader's EUnit tests; BUnit only verifies the selector exists.
+  testIncludesSelectorNewClassAt =>
+    self assert: (Workspace class includesSelector: #newClass:at:)
+
+  // ADR 0114 Phase 2 (BT-3272): pure file-move facade method. Like
+  // `newClass:at:` above, the live success/refusal paths need a project
+  // tree + real class objects and are covered in
+  // beamtalk_repl_loader_move_class_tests (EUnit) — the `Workspace` facade
+  // is not available in this BUnit context (see this file's own header
+  // comment), so BUnit only verifies the selector is present on the facade.
+  testIncludesSelectorMoveClassTo =>
+    self assert: (Workspace class includesSelector: #moveClass:to:)
+
+  // ADR 0082 Phase 2 (BT-2286): flush + flush: selectors. Live splice + atomic
+  // rename + external-edit detection are covered in the
+  // beamtalk_workspace_flush_tests EUnit suite. BUnit only verifies the
+  // selectors are present on the facade.
+  testIncludesSelectorFlush =>
+    self assert: (Workspace class includesSelector: #flush)
+
+  testIncludesSelectorFlushColon =>
+    self assert: (Workspace class includesSelector: #flush:)
+
+  // ADR 0113 Phase 2 (BT-3207): destructive-tier flush selectors. Live
+  // tiering behaviour is covered in beamtalk_workspace_flush_tests (EUnit)
+  // and tests/repl-protocol/cases/workspace_flush_destructive.btscript;
+  // BUnit only verifies the selectors are present on the facade.
+  testIncludesSelectorFlushIncludingDestructive =>
+    self assert: (Workspace class includesSelector: #flushIncludingDestructive)
+
+  testIncludesSelectorFlushConfirmDestructive =>
+    self assert: (Workspace class includesSelector: #flush:confirmDestructive:)
+
+  testIncludesSelectorTest =>
+    self assert: (Workspace class includesSelector: #test)
+
+  testIncludesSelectorTestColon =>
+    self assert: (Workspace class includesSelector: #test:)
+
+  testIncludesSelectorActors =>
+    self assert: (Workspace class includesSelector: #actors)
+
+  testIncludesSelectorActorAt =>
+    self assert: (Workspace class includesSelector: #actorAt:)
+
+  testIncludesSelectorActorsOf =>
+    self assert: (Workspace class includesSelector: #actorsOf:)
+
+  testIncludesSelectorBindAs =>
+    self assert: (Workspace class includesSelector: #bind:as:)
+
+  testIncludesSelectorUnbind =>
+    self assert: (Workspace class includesSelector: #unbind:)
+
+  // ADR 0081 Phases 5 & 7 (BT-2368): session navigation. BUnit only verifies
+  // the selectors exist on the facade. Live behaviour (currentSession value
+  // inside an eval vs nil outside, sessions enumeration, cross-session
+  // reads/writes) is covered by the beamtalk_session_primitives /
+  // beamtalk_workspace_interface_primitives EUnit suites and the e2e btscript.
+  testIncludesSelectorCurrentSession =>
+    self assert: (Workspace class includesSelector: #currentSession)
+
+  testIncludesSelectorSessions =>
+    self assert: (Workspace class includesSelector: #sessions)
+
+  testInheritsFromObject => self assert: (Workspace inheritsFrom: Object)
+
+  testIncludesSelectorIsAvailable =>
+    self assert: (Workspace class includesSelector: #isAvailable)
+
+  // `current`/`resetCurrent` were removed with the singleton (ADR 0129).
+  testCurrentIsGone =>
+    self deny: (Workspace class includesSelector: #current)
+    self deny: (Workspace class includesSelector: #resetCurrent)
+
+  // `isAvailable` never raises, in any context.
+  testIsAvailableIsBoolean =>
+    self assert: (Workspace isAvailable isKindOf: Boolean)
+
+  // Context-explicit refusal: with no workspace on this node (the `beamtalk
+  // test` context) the guard raises the structured `no_workspace` error.
+  // Skipped when a workspace is running.
+  testClassesRaisesNoWorkspaceWhenUnavailable =>
+    Workspace isAvailable ifTrue: [^self skip: "a workspace is running"]
+    self should: [Workspace classes] raise: #no_workspace
+
+  testKeywordSendRaisesNoWorkspaceWhenUnavailable =>
+    Workspace isAvailable ifTrue: [^self skip: "a workspace is running"]
+    self should: [Workspace load: "x.bt"] raise: #no_workspace
+
+  testTestRaisesNoWorkspaceWhenUnavailable =>
+    Workspace isAvailable ifTrue: [^self skip: "a workspace is running"]
+    self should: [Workspace test] raise: #no_workspace

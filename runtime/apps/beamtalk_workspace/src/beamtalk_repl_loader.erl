@@ -4852,7 +4852,7 @@ new_class_author_kind() ->
 
 -spec new_class_error(atom(), binary(), string() | undefined) -> #beamtalk_error{}.
 new_class_error(Kind, Message, TargetPath) ->
-    Err0 = beamtalk_error:new(Kind, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(Kind, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
     Err2 = beamtalk_error:with_message(Err1, Message),
     case TargetPath of
@@ -4862,7 +4862,7 @@ new_class_error(Kind, Message, TargetPath) ->
 
 -spec new_class_type_error(binary()) -> #beamtalk_error{}.
 new_class_type_error(Message) ->
-    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
     beamtalk_error:with_message(Err1, Message).
 

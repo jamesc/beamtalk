@@ -471,7 +471,7 @@ format_rejection_reason(Reason) ->
 Rewrite DNU error class names for singleton instances.
 
 When a singleton instance (e.g., Workspace) gets a DNU, the error uses the
-class name (WorkspaceInterface) which is confusing — the user typed "Workspace".
+class name (Workspace) which is confusing — the user typed "Workspace".
 Replace the class name with the binding name so errors read naturally.
 """.
 -spec maybe_use_singleton_binding_name(beamtalk_error:error()) -> beamtalk_error:error().

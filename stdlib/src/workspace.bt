@@ -1,49 +1,34 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// WorkspaceInterface — Per-workspace actor introspection and binding container.
+/// Workspace — class-side facade over the running workspace (ADR 0129).
 ///
-/// Modeled on Squeak 5.2+'s `Environment` class: a scoped container for
-/// workspace-level bindings and actor introspection. Each workspace has its
-/// own WorkspaceInterface instance.
+/// `Workspace` is a sealed, stateless class whose API is entirely class-side.
+/// It works wherever a workspace runs (`beamtalk run`, `workspace` and
+/// `release` modes) and raises a structured `no_workspace` error everywhere
+/// else (e.g. `beamtalk test`). Use `Workspace isAvailable` to ask without
+/// raising.
 ///
-/// The singleton instance is set during workspace bootstrap (ADR 0019 Phase 2).
-/// The convenience binding `Workspace` is also available after bootstrap.
+/// The `no_workspace` guard (`beamtalk_capability:require_workspace/1`) runs
+/// once per call, at the backing module's delegate entry
+/// (`beamtalk_workspace_facade`).
 ///
 /// ## Examples
 /// ```beamtalk
-/// WorkspaceInterface current actors
-/// WorkspaceInterface current actorAt: "<0.132.0>"
-/// WorkspaceInterface current actorsOf: Counter
+/// Workspace actors
+/// Workspace actorAt: "<0.132.0>"
+/// Workspace actorsOf: Counter
+/// Workspace isAvailable
 /// ```
-sealed typed Object subclass: WorkspaceInterface
-  // Stays inline FFI rather than `native:` (ADR 0101 / BT-2731): like
-  // the former `BeamtalkInterface`, this is a receiver-ignoring singleton facade. Its backing
-  // functions are arity-0/N and operate on workspace/ETS state without
-  // consulting the receiver, so the self-threading `self delegate` form would be
-  // wrong. The methods stay receiver-ignoring instance FFI, wrapped-by-default
-  // since BT-2722.
-  late classState: current :: WorkspaceInterface
+sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
 
-  /// Return the current singleton instance (nil before workspace bootstrap).
+  /// True iff a workspace is running on this node. Never raises.
   ///
-  /// `@expect type`: a class method's `self hasField:` send infers as
-  /// `Dynamic` rather than its declared `Boolean` return type — a
-  /// pre-existing type-checker gap (ADR 0124 B4's `has_clear_class_var_actor.bt`
-  /// fixture hits the same thing), not something this conversion introduces.
-  @expect type
-  class current -> WorkspaceInterface | Nil =>
-    (self hasField: #current) ifTrue: [self.current] ifFalse: [nil]
-
-  /// Clear the current singleton instance (reset to nil).
-  ///
-  /// `@expect type`: a class method's `self clearField:` send infers as
-  /// `Dynamic` rather than its declared `Self` return type — the same
-  /// pre-existing type-checker gap `current`'s `self hasField:` hits above.
-  @expect type
-  class resetCurrent -> Nil =>
-    self clearField: #current
-    nil
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace isAvailable   // => true (in a workspace)
+  /// ```
+  class sealed isAvailable -> Boolean => self delegate
 
   // === Actors and processes ===
 
@@ -53,8 +38,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actors
   /// ```
-  actors -> List(Actor) =>
-    (Erlang beamtalk_workspace_interface_primitives) actors
+  class sealed actors -> List(Actor) => self delegate
 
   /// Return a navigable snapshot of the live supervision tree (ADR 0092).
   ///
@@ -76,7 +60,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace processes findClass: Counter    // => List(SupervisionNode)
   /// Workspace processes nodes                 // => the flat List(SupervisionNode)
   /// ```
-  processes -> SupervisionTree => ProcessNavigation default tree
+  class sealed processes -> SupervisionTree =>
+    (ProcessNavigation nodes: (Erlang beamtalk_workspace_facade) processes) tree
 
   /// Return every visible connected node with its name and current
   /// shape-skew count (ADR 0126 §8/§10, Phase 7).
@@ -97,7 +82,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace nodes                          // => #()
   /// (Workspace nodes) isEmpty                // => true
   /// ```
-  nodes -> List(Dictionary) => (Erlang beamtalk_node_monitor) connectedWithSkew
+  class sealed nodes -> List(Dictionary) => self delegate
 
   /// Look up a specific actor by pid string.
   ///
@@ -105,15 +90,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorAt: "<0.132.0>"
   /// ```
-  ///
-  /// The FFI spec types the result as a generic `tuple() | nil` (the compiler
-  /// can't tell it's a Beamtalk actor proxy from that alone), but
-  /// `handle_actor_at/1` always builds a live actor reference or `nil` —
-  /// suppress the resulting `Tuple | Nil` vs. declared `Actor | Nil`
-  /// return-type mismatch (see `packageName`, BT-2829, for the same pattern).
-  @expect type
-  actorAt: pidString :: String -> Actor | Nil =>
-    (Erlang beamtalk_workspace_interface_primitives) actorAt: pidString
+  class sealed actorAt: pidString :: String -> Actor | Nil => self delegate
 
   /// Return all actors of a given class.
   ///
@@ -121,7 +98,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: aClass :: Class -> List(Actor) =>
+  class sealed actorsOf: aClass :: Class -> List(Actor) =>
     self actors select: [:a | a class includesBehaviour: aClass]
 
   // === Classes and bindings ===
@@ -132,8 +109,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace classes
   /// ```
-  classes -> List(Behaviour) =>
-    (Erlang beamtalk_workspace_interface_primitives) classes
+  class sealed classes -> List(Behaviour) => self delegate
 
   /// Return classes that are TestCase subclasses.
   ///
@@ -141,13 +117,12 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace testClasses
   /// ```
-  testClasses -> List(Behaviour) =>
+  class sealed testClasses -> List(Behaviour) =>
     self classes select: [:c | c inheritsFrom: TestCase]
 
   /// Return a live `BindingsView` over the project namespace (ADR 0081).
   ///
-  /// Reads reflect the current workspace singletons (Transcript, Beamtalk,
-  /// Workspace) and user-registered bindings (`bind:as:`). It is the same
+  /// Reads reflect the current workspace singleton (Transcript) and user-registered bindings (`bind:as:`). It is the same
   /// `BindingsView` type as `Session current bindings`, so both binding layers
   /// share one Dictionary protocol (`at:`, `at:put:`, `removeKey:`,
   /// `includesKey:`, `keys`, `values`, `size`, `do:`).
@@ -160,9 +135,9 @@ sealed typed Object subclass: WorkspaceInterface
   /// ## Examples
   /// ```beamtalk
   /// Workspace globals at: #Transcript     // => the Transcript singleton
-  /// Workspace globals includesKey: #Beamtalk   // => true
+  /// Workspace globals includesKey: #Transcript   // => true
   /// ```
-  globals -> BindingsView => (Erlang beamtalk_session_primitives) globalsView
+  class sealed globals -> BindingsView => self delegate
 
   /// Return the calling session as a `Session`, or `nil` outside a REPL eval
   /// (ADR 0081 Phase 5).
@@ -178,8 +153,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace currentSession                  // => a Session (in REPL) | nil
   /// Workspace currentSession isNil            // => false (in REPL)
   /// ```
-  currentSession -> Session | Nil =>
-    (Erlang beamtalk_workspace_interface_primitives) currentSession
+  class sealed currentSession -> Session | Nil => self delegate
 
   /// Return a `List` of `Session` values, one per live shell (ADR 0081 Phase 7).
   ///
@@ -194,8 +168,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace sessions                        // => #(a Session)
   /// Workspace sessions collect: [:s | s id]   // => #("user-repl-abc-123")
   /// ```
-  sessions -> List(Session) =>
-    (Erlang beamtalk_workspace_interface_primitives) sessions
+  class sealed sessions -> List(Session) => self delegate
 
   // === Sync and change tracking ===
 
@@ -218,7 +191,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace sync           // => #{#summary => "Reloaded 2 of 5 files (3 unchanged)", ...}
   /// (Workspace sync) at: #summary  // => "Reloaded 2 of 5 files (3 unchanged)"
   /// ```
-  sync -> Dictionary => (Erlang beamtalk_workspace_interface_primitives) sync
+  class sealed sync -> Dictionary => self delegate
 
   /// Return the workspace ChangeLog — the navigable view of pending in-memory
   /// changes (ADR 0082).
@@ -233,11 +206,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace changes notEmpty       // => false
   /// Workspace changes dirtyMethods   // => #{}
   /// ```
-  changes -> ChangeLog =>
-    // FFI returns a `ChangeLog`-tagged map (beamtalk_workspace_changelog:changeLog/0);
-    // its `'$beamtalk_class' := 'ChangeLog'` spec lets the type checker infer the
-    // result as ChangeLog, matching the declared return type.
-    (Erlang beamtalk_workspace_changelog) changeLog
+  class sealed changes -> ChangeLog => self delegate
 
   // === Loading and creating classes ===
 
@@ -249,8 +218,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace load: "examples/counter.bt"  // => [Counter]
   /// ```
-  load: path :: String -> List(Behaviour) =>
-    (Erlang beamtalk_workspace_interface_primitives) load: path
+  class sealed load: path :: String -> List(Behaviour) => self delegate
 
   /// Create a brand-new class from a source String at a target path (ADR 0082).
   ///
@@ -271,8 +239,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace newClass: "Object subclass: Greeter" at: "src/greeter.bt"
   /// // => [Greeter]
   /// ```
-  newClass: source :: String at: path :: String -> List(Behaviour) =>
-    (Erlang beamtalk_workspace_interface_primitives) newClass: source at: path
+  class sealed newClass: source :: String at: path :: String -> List(Behaviour) =>
+    self delegate
 
   /// Move a class's `.bt` file to a new path without changing its name
   /// (ADR 0114 Phase 2).
@@ -298,8 +266,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace moveClass: Counter to: "src/models/counter.bt"
   /// // => Counter
   /// ```
-  moveClass: aClass :: Behaviour to: aNewPath :: String -> Behaviour =>
-    (Erlang beamtalk_workspace_interface_primitives) moveClass: aClass to: aNewPath
+  class sealed moveClass: aClass :: Behaviour to: aNewPath :: String -> Behaviour =>
+    self delegate
 
   // === Flushing changes to disk ===
 
@@ -338,7 +306,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace flush          // => _ (flush summary)
   /// ```
-  flush -> Dictionary => (Erlang beamtalk_workspace_interface_primitives) flush
+  class sealed flush -> Dictionary => self delegate
 
   /// Flush the pending Tier 1 ChangeLog entries matching `filter` (ADR 0082
   /// Phase 2).
@@ -359,8 +327,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace flush: #'new-class'        // => _
   /// Workspace flush: #{ #file => "src/counter.bt" }  // => _
   /// ```
-  flush: filter :: Behaviour | Symbol | Dictionary -> Dictionary =>
-    (Erlang beamtalk_workspace_interface_primitives) flush: filter
+  class sealed flush: filter :: Behaviour | Symbol | Dictionary -> Dictionary =>
+    self delegate
 
   /// Flush the pending ChangeLog entries matching `filter`, additionally
   /// applying Tier 2 (`#'remove-class'`) entries within that scope
@@ -376,8 +344,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace flush: Counter confirmDestructive: true   // => _
   /// ```
-  flush: filter :: Behaviour | Symbol | Dictionary confirmDestructive: confirmDestructive :: Boolean -> Dictionary =>
-    (Erlang beamtalk_workspace_interface_primitives) flush: filter confirmDestructive: confirmDestructive
+  class sealed flush: filter :: Behaviour | Symbol | Dictionary confirmDestructive: confirmDestructive :: Boolean -> Dictionary =>
+    self delegate
 
   /// Flush every pending durable+flushable ChangeEntry, Tier 1 *and* Tier 2
   /// (ADR 0113 Phase 2).
@@ -395,8 +363,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace flushIncludingDestructive   // => _
   /// ```
-  flushIncludingDestructive -> Dictionary =>
-    (Erlang beamtalk_workspace_interface_primitives) flushIncludingDestructive
+  class sealed flushIncludingDestructive -> Dictionary => self delegate
 
   // === Rechecking and testing ===
 
@@ -420,8 +387,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace recheckImage          // => _ (checked/stale summary)
   /// ```
-  recheckImage -> Dictionary =>
-    (Erlang beamtalk_workspace_interface_primitives) recheckImage
+  class sealed recheckImage -> Dictionary => self delegate
 
   /// Run all loaded test classes and return a TestResult.
   ///
@@ -429,7 +395,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test
   /// ```
-  test -> TestResult => TestRunner runAll: 0
+  class sealed test -> TestResult =>
+    TestRunner runAll: (Erlang beamtalk_workspace_facade) testScope
 
   /// Run a specific test class and return a TestResult.
   ///
@@ -437,7 +404,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test: CounterTest
   /// ```
-  test: testClass :: Class -> TestResult => TestRunner run: testClass
+  class sealed test: testClass :: Class -> TestResult =>
+    TestRunner run: ((Erlang beamtalk_workspace_facade) testTarget: testClass)
 
   // === Namespace bindings ===
 
@@ -450,8 +418,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  bind: value :: Object as: bindingName :: Symbol -> Nil =>
-    (Erlang beamtalk_workspace_interface_primitives) bind: value as: bindingName
+  class sealed bind: value :: Object as: bindingName :: Symbol -> Nil =>
+    self delegate
 
   /// Remove a registered name from the workspace namespace.
   /// Raises an error if name is not found.
@@ -460,8 +428,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace unbind: #MyTool
   /// ```
-  unbind: bindingName :: Symbol -> Nil =>
-    (Erlang beamtalk_workspace_interface_primitives) unbind: bindingName
+  class sealed unbind: bindingName :: Symbol -> Nil => self delegate
 
   // === Supervision ===
 
@@ -476,14 +443,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace supervisor                  // => Supervisor(AppSup, 0.200.0)
   /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
   /// ```
-  ///
-  /// The FFI spec types the result as a generic `tuple() | nil`, but
-  /// `rootSupervisor/0` always builds a live Supervisor reference or `nil` —
-  /// suppress the resulting `Tuple | Nil` vs. declared `Supervisor | Nil`
-  /// return-type mismatch (see `packageName`, BT-2829, for the same pattern).
-  @expect type
-  supervisor -> Supervisor | Nil =>
-    (Erlang beamtalk_workspace_interface_primitives) rootSupervisor
+  class sealed supervisor -> Supervisor | Nil => self delegate
 
   /// Start and attach a supervisor to the workspace supervision tree.
   ///
@@ -496,8 +456,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)
   /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)  (idempotent)
   /// ```
-  startSupervisor: aClass :: Class -> Supervisor =>
-    (Erlang beamtalk_workspace_interface_primitives) startSupervisor: aClass
+  class sealed startSupervisor: aClass :: Class -> Supervisor => self delegate
 
   /// Stop and remove a supervisor from the workspace.
   ///
@@ -509,8 +468,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace stopSupervisor: MySup       // => nil
   /// ```
-  stopSupervisor: aClass :: Class -> Nil =>
-    (Erlang beamtalk_workspace_interface_primitives) stopSupervisor: aClass
+  class sealed stopSupervisor: aClass :: Class -> Nil => self delegate
 
   /// List all supervisors visible from the workspace.
   ///
@@ -523,8 +481,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace supervisors                 // => #(Supervisor(MySup, 0.200.0))
   /// ```
-  supervisors -> List(Supervisor) =>
-    (Erlang beamtalk_workspace_interface_primitives) supervisors
+  class sealed supervisors -> List(Supervisor) => self delegate
 
   // === Settings ===
 
@@ -544,8 +501,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace autoflush   // => false
   /// ```
-  autoflush -> Boolean =>
-    (Erlang beamtalk_workspace_interface_primitives) autoflush
+  class sealed autoflush -> Boolean => self delegate
 
   /// Set the `autoflush` workspace setting (ADR 0082 Phase 4).
   ///
@@ -558,12 +514,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace autoflush: true    // => true
   /// Workspace autoflush: false   // => false
   /// ```
-  autoflush: enabled :: Boolean -> Boolean =>
-    // FFI returns whatever the Erlang module returns; the validator typed
-    // the call as Dynamic, suppress the warning since the boolean return is
-    // guaranteed by the underlying setAutoflush/1 implementation.
-    @expect type
-    (Erlang beamtalk_workspace_interface_primitives) autoflush: enabled
+  class sealed autoflush: enabled :: Boolean -> Boolean => self delegate
 
   /// Return a Dictionary of direct dependency packages for the current workspace.
   ///
@@ -575,5 +526,4 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace dependencies
   /// // => _
   /// ```
-  dependencies -> Dictionary(String, Package) =>
-    (Erlang beamtalk_workspace_interface_primitives) dependencies
+  class sealed dependencies -> Dictionary(String, Package) => self delegate

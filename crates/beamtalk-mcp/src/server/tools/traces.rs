@@ -97,7 +97,7 @@ impl BeamtalkMcp {
         // Surfaced through the same term-returning eval seam every surface
         // shares (so the structured node/skew data is identical across
         // surfaces) — the one shared implementation lives in
-        // `WorkspaceInterface>>nodes` (`stdlib/src/workspace_interface.bt`),
+        // `Workspace>>nodes` (`stdlib/src/workspace.bt`),
         // backed by `beamtalk_node_monitor:connectedWithSkew/0`.
         let response = self
             .client

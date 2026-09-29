@@ -34,7 +34,7 @@ branches that need a live compiler + a registered class to exercise — the
   - `resolve_name/2` / `resolve_class_reference/2` Tier 3 (singleton) and
     Tier 4 (class registry) — the existing suite only reaches Tier 1 (locals),
     Tier 2 (`bind:as:`), and Tier 5 (undefined); a real class + the
-    `WorkspaceInterface` singleton itself close the remaining tiers.
+    `Workspace` singleton itself close the remaining tiers.
   - `resolve_singleton_instance/1` — the REPL codegen binding-aware
     class-send fallback surface, untested until now.
 
@@ -546,7 +546,7 @@ init(bare_sup) ->
     {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.
 
 fake_self(Pid) ->
-    {beamtalk_object, 'WorkspaceInterface', 'bt@stdlib@workspace_interface', Pid}.
+    {beamtalk_object, 'Workspace', 'bt@stdlib@workspace', Pid}.
 
 wait_for_class(_ClassAtom, 0) ->
     error(class_not_registered);

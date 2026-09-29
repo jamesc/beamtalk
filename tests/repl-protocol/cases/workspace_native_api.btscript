@@ -136,14 +136,14 @@ rc increment
 // ===========================================================================
 
 // Workspace globals is a live BindingsView over the workspace singletons +
-// bind:as: layer (ADR 0081). It includes the singletons Workspace and
-// Transcript, but NOT the class registry (`Beamtalk` is a plain class now,
+// bind:as: layer (ADR 0081). It includes the Transcript singleton, but
+// NOT the class registry (`Beamtalk` and `Workspace` are plain classes now,
 // ADR 0129) — classes live behind `Beamtalk classNamed:`.
 wsGlobals := Workspace globals
 // => _
 
 wsGlobals includesKey: #Workspace
-// => true
+// => false
 
 wsGlobals includesKey: #Beamtalk
 // => false

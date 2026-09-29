@@ -59,23 +59,6 @@ bootstrap_sets_transcript_class_var_test_() ->
         ]
     end}.
 
-%% Test that bootstrap wires WorkspaceInterface value singleton (class variable current)
-%% WorkspaceInterface is a sealed Object subclass: (value type, no gen_server).
-%% Bootstrap calls Module:new() and sets the class variable 'current'.
-bootstrap_sets_workspace_class_var_test_() ->
-    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
-        [
-            ?_test(begin
-                {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-                ClassPid = beamtalk_class_registry:whereis_class('WorkspaceInterface'),
-                ?assertNotEqual(undefined, ClassPid),
-                Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
-                ?assertNotEqual(nil, Current),
-                ?assert(is_map(Current))
-            end)
-        ]
-    end}.
-
 %% Test that bootstrap sets class variables when classes are loaded
 bootstrap_sets_class_variables_test_() ->
     {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->

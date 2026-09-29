@@ -103,7 +103,7 @@ pub(in crate::server) use tower_lsp::lsp_types::{
 /// Both levels of keying are load-bearing, not cosmetic:
 ///
 /// * **Owner**: Beamtalk supports multiple classes defined in one `.bt` file
-///   (e.g. `behaviour.bt`, `workspace_interface.bt`), so two different caller
+///   (e.g. `behaviour.bt`, `workspace.bt`), so two different caller
 ///   classes' reload-induced diagnostics can legitimately share a URI. A
 ///   flat `HashMap<Url, Vec<Diagnostic>>` would have one owner's `put`/clear
 ///   silently clobber a sibling owner's diagnostics in the same file.

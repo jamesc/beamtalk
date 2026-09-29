@@ -4711,7 +4711,7 @@ Beamtalk classNamed: #Counter
 // => "Integer >> +\n..."
 ```
 
-### `Workspace` — Project operations (WorkspaceInterface)
+### `Workspace` — Project operations (Workspace)
 
 Provides file loading, testing, and actor introspection. Scoped to the running
 workspace. Analogous to Pharo's `Smalltalk` project facade.
