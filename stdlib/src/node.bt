@@ -160,7 +160,9 @@ sealed typed Value subclass: Node native: beamtalk_node
   /// Node current actorsOf: Counter               // => Result ok: #()
   /// ```
   actorsOf: aClass :: Class -> Result(List(Actor), Error) =>
-    self actors map: [:all | all select: [:a | a class includesBehaviour: aClass]]
+    self actors map: [:all |
+      all select: [:a | a class includesBehaviour: aClass]
+    ]
 
   /// The live actor whose pid prints as `pidString` (e.g. `"<0.132.0>"`), or
   /// `nil` when the string is not a pid or names no live actor.
