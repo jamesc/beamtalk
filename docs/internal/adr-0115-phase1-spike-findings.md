@@ -150,7 +150,7 @@ offset map would be both fragile and per-line.
 ### 1e. Finding not in the ADR — `Meta{C}` receivers get no rule
 
 13.7 % of stdlib send receivers infer to `InferredType::Meta { class_name }` — a
-class-object receiver (`Counter spawn`, `Transcript showLine:`). ADR 0115's
+class-object receiver (`Counter spawn`, `Transcript showCr:`). ADR 0115's
 write path enumerates `Known` → name, and "`Union`, `Intersection`,
 `Negation`, `Dynamic(_)`, or otherwise unresolved" → `dynamic`. `Meta` lands in
 the second bucket by omission, discarding narrowing on the **entire class-side

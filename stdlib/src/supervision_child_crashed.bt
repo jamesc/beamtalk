@@ -11,7 +11,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: SupervisionChildCrashed do: [:e |
-///   Transcript showLine: e childClass asString
+///   Transcript showCr: e childClass asString
 /// ]
 /// ```
 sealed typed Announcement subclass: SupervisionChildCrashed

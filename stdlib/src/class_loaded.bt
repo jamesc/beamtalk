@@ -11,7 +11,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: ClassLoaded do: [:e |
-///   Transcript showLine: e className asString
+///   Transcript showCr: e className asString
 /// ]
 /// ```
 sealed typed Announcement subclass: ClassLoaded

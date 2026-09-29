@@ -123,7 +123,7 @@ handle_term(<<"complete">>, Params, Msg, SessionPid) ->
                 ),
                 SessionBindings = get_session_bindings(BindingPid),
                 WorkspaceBindings = get_workspace_bindings(),
-                %% Session bindings take priority over workspace globals (e.g. Transcript)
+                %% Session bindings take priority over workspace bindings (`bind:as:` entries)
                 Bindings = maps:merge(WorkspaceBindings, SessionBindings),
                 %% This session's live type alias names (cross-turn carried-over
                 %% + current-turn `type Name = ...` declarations), offered alongside

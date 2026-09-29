@@ -17,7 +17,7 @@
 /// ## Examples
 /// ```beamtalk
 /// sub := SystemAnnouncer current when: ActorSpawned do: [:e |
-///   Transcript showLine: e actorClass name
+///   Transcript showCr: e actorClass name
 /// ]
 /// Counter spawn   // subscription fires: prints "Counter"
 /// sub unsubscribe
