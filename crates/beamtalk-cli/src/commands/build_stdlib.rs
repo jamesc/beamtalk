@@ -1077,6 +1077,7 @@ fn collect_stdlib_protocol_infos(
                 beamtalk_core::semantic_analysis::ProtocolSource {
                     path: Some(file.as_str().into()),
                     text: source.as_str().into(),
+                    package: Some("stdlib".into()),
                 },
             );
             all_defs.push(protocol);

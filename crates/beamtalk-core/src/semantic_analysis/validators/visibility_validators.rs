@@ -199,14 +199,22 @@ pub fn check_provision_visibility(
     };
     for class in &module.classes {
         for method in &class.methods {
-            let Some(protocol_pkg) =
-                foreign_provision_package(class, method, hierarchy, provision_packages, current_pkg)
-            else {
+            let Some(protocol_pkg) = foreign_provision_package(
+                class,
+                method,
+                hierarchy,
+                provision_packages,
+                current_pkg,
+            ) else {
                 continue;
             };
             let Some(protocol) = hierarchy
                 .get_class(&class.name.name)
-                .and_then(|c| c.methods.iter().find(|m| m.selector == method.selector.name()))
+                .and_then(|c| {
+                    c.methods
+                        .iter()
+                        .find(|m| m.selector == method.selector.name())
+                })
                 .and_then(|m| m.origin.clone())
             else {
                 continue;
@@ -1311,7 +1319,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let errors: Vec<_> = diags
             .iter()
@@ -1427,7 +1442,14 @@ mod tests {
         let module = parse_bt("ParserState subclass: MyParser\n  parse => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), None, &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            None,
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.is_empty(),
@@ -1517,7 +1539,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1540,7 +1569,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1563,7 +1599,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1587,7 +1630,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let leaked: Vec<_> = diags
             .iter()
@@ -1614,7 +1664,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let leaked: Vec<_> = diags
             .iter()
@@ -1640,7 +1697,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), None, &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            None,
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.is_empty(),
@@ -1679,7 +1743,14 @@ mod tests {
         );
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &alias_registry, Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &alias_registry,
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1699,7 +1770,14 @@ mod tests {
         );
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &alias_registry, Some("json"), &HashMap::new(), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &alias_registry,
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let leaked: Vec<_> = diags
             .iter()

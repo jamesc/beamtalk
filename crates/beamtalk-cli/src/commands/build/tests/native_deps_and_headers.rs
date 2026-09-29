@@ -34,6 +34,7 @@ fn make_resolved_dep(
         class_infos: Vec::new(),
         protocol_infos: Vec::new(),
         protocol_defs: Vec::new(),
+        protocol_sources: Default::default(),
         alias_infos: Vec::new(),
         is_direct: true,
         via_chain: Vec::new(),

@@ -285,8 +285,14 @@ fn collect_fresh_deps(
         let ebin_path = layout.dep_ebin_dir(&dep.name);
 
         // Rebuild class/protocol/alias indexes from source files (fast — no compilation)
-        let (class_module_index, class_infos, protocol_infos, protocol_defs, alias_infos) =
-            path::build_dep_class_index(&dep.root, &dep.name)?;
+        let (
+            class_module_index,
+            class_infos,
+            protocol_infos,
+            protocol_defs,
+            alias_infos,
+            protocol_sources,
+        ) = path::build_dep_class_index(&dep.root, &dep.name)?;
 
         debug!(
             dep = %dep.name,
@@ -303,6 +309,7 @@ fn collect_fresh_deps(
             class_infos,
             protocol_infos,
             protocol_defs,
+            protocol_sources,
             alias_infos,
             is_direct: dep.is_direct,
             via_chain: dep.via_chain.clone(),
@@ -1311,6 +1318,7 @@ mod tests {
             class_infos: Vec::new(),
             protocol_infos: Vec::new(),
             protocol_defs: Vec::new(),
+            protocol_sources: Default::default(),
             alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
@@ -1345,6 +1353,7 @@ mod tests {
                 class_infos: Vec::new(),
                 protocol_infos: Vec::new(),
                 protocol_defs: Vec::new(),
+                protocol_sources: Default::default(),
                 alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
@@ -1358,6 +1367,7 @@ mod tests {
                 class_infos: Vec::new(),
                 protocol_infos: Vec::new(),
                 protocol_defs: Vec::new(),
+                protocol_sources: Default::default(),
                 alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),

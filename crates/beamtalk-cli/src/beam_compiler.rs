@@ -724,6 +724,75 @@ pub struct CompileContext<'a> {
     /// (content change or `--force`) — a known, narrow limitation of the
     /// replay path, not a bug in this field itself.
     pub diagnostics_overrides: crate::commands::manifest::DiagnosticsTable,
+    /// Where diagnostics that lie in a flattened trait provision's protocol
+    /// file are reported (ADR 0127 §3). Disabled by default (each file
+    /// prints its own immediately); a whole-package build enables it so a
+    /// provision shared by many users is reported once across all of them.
+    pub provision_sink: ProvisionSink,
+}
+
+/// Collects flattened-provision diagnostics across the files of one build so
+/// they can be reported once, against the protocol's file (ADR 0127 §3,
+/// "Source locations"). See [`CompileContext::provision_sink`].
+#[derive(Debug, Default)]
+pub struct ProvisionSink {
+    collected: Option<std::sync::Mutex<Vec<beamtalk_core::source_analysis::Diagnostic>>>,
+}
+
+impl ProvisionSink {
+    /// A sink that accumulates until [`Self::flush`].
+    #[must_use]
+    pub fn collecting() -> Self {
+        Self {
+            collected: Some(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Reports the provision-tagged diagnostics among `diagnostics`: held
+    /// until [`Self::flush`] when collecting, printed now otherwise.
+    pub fn report(
+        &self,
+        diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
+        protocol_sources: &beamtalk_core::semantic_analysis::ProtocolSourceMap,
+        options: &beamtalk_core::CompilerOptions,
+    ) {
+        let tagged = diagnostics
+            .iter()
+            .filter(|d| d.provision.is_some())
+            .cloned();
+        match &self.collected {
+            Some(collected) => collected
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend(tagged),
+            None => {
+                crate::diagnostic::print_provision_diagnostics(tagged, protocol_sources, options)
+            }
+        }
+    }
+
+    /// Takes everything collected so far, leaving the sink empty (always
+    /// empty for a non-collecting sink).
+    pub(crate) fn drain(&self) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+        self.collected.as_ref().map_or_else(Vec::new, |collected| {
+            std::mem::take(
+                &mut *collected
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            )
+        })
+    }
+
+    /// Prints everything collected so far (merged across users) and empties
+    /// the sink. A no-op for a non-collecting sink.
+    pub fn flush(
+        &self,
+        protocol_sources: &beamtalk_core::semantic_analysis::ProtocolSourceMap,
+        options: &beamtalk_core::CompilerOptions,
+    ) {
+        let taken = self.drain();
+        crate::diagnostic::print_provision_diagnostics(taken, protocol_sources, options);
+    }
 }
 
 /// Writes Core Erlang code with primitive bindings.
@@ -887,6 +956,7 @@ pub(crate) fn compile_source_with_bindings(
             cross_file_classes: cross_file_classes.clone(),
             pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
             pre_loaded_protocol_defs: ctx.hierarchy.pre_loaded_protocol_defs.clone(),
+            pre_loaded_protocol_sources: ctx.hierarchy.pre_loaded_protocol_sources.clone(),
             // Cross-file/package type aliases from Pass 1 — see
             // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
             // filters out any name the current module redeclares itself, so no
@@ -970,6 +1040,11 @@ pub(crate) fn compile_source_with_bindings(
             &diagnostics,
             source_path.as_str(),
             &source,
+            options,
+        );
+        ctx.provision_sink.report(
+            &diagnostics,
+            &ctx.hierarchy.pre_loaded_protocol_sources,
             options,
         );
     }

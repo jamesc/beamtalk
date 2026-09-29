@@ -56,6 +56,12 @@ pub struct ResolvedDependency {
     /// dependency's source is unavailable (compiled-only, not fetched) or
     /// defines no provision-bearing protocol.
     pub protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    /// Source identity of each protocol in `protocol_defs` — the dependency
+    /// checkout file it was parsed from and this dependency's package name
+    /// (ADR 0127 §3). Lets a flattened dependency provision map its lines to
+    /// the protocol's own file (not the using file) and resolve its names in
+    /// this package.
+    pub protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
     /// Full type-alias metadata from the dependency's source files,
     /// each stamped with `.package = Some(name)`.
     ///
@@ -278,7 +284,7 @@ fn resolve_single_path_dep(
 
     info!(dep = %name, ebin = %ebin_path, "Resolved path dependency");
 
-    let (_, class_infos, protocol_infos, protocol_defs, alias_infos) =
+    let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
         build_dep_class_index(&dep_root, name).unwrap_or_default();
 
     let stubs_dir = resolve_dep_stubs_dir(&dep_manifest, &dep_root);
@@ -291,6 +297,7 @@ fn resolve_single_path_dep(
         class_infos,
         protocol_infos,
         protocol_defs,
+        protocol_sources,
         alias_infos,
         is_direct: true, // Legacy path — all treated as direct
         via_chain: Vec::new(),
@@ -331,7 +338,7 @@ pub(crate) fn compile_dependency_at(
     let (ebin_path, class_module_index) =
         compile_dependency_with_context(project_root, dep_root, dep_name, options, prior_deps)?;
 
-    let (_, class_infos, protocol_infos, protocol_defs, alias_infos) =
+    let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
         build_dep_class_index(dep_root, dep_name).unwrap_or_default();
 
     let stubs_dir = manifest::parse_manifest_full(&dep_root.join("beamtalk.toml"))
@@ -346,6 +353,7 @@ pub(crate) fn compile_dependency_at(
         class_infos,
         protocol_infos,
         protocol_defs,
+        protocol_sources,
         alias_infos,
         is_direct: false, // Caller sets this based on graph knowledge
         via_chain: Vec::new(),
@@ -481,6 +489,7 @@ fn compile_dependency_with_context(
         // impact — dependency diagnostics are never surfaced to or promoted
         // for the consuming build — but worth revisiting if that changes.
         diagnostics_overrides: crate::commands::manifest::DiagnosticsTable::new(),
+        provision_sink: crate::beam_compiler::ProvisionSink::default(),
     };
 
     let (core_files, module_names) = compile_sources_to_core(
@@ -649,7 +658,7 @@ fn generate_dependency_app_file(
 /// Protocol and alias extraction reuses `build_class_module_index`'s cached,
 /// already-parsed ASTs rather than re-lexing/re-parsing the dependency's
 /// source files a second and third time.
-#[allow(clippy::type_complexity)] // 5-tuple mirrors ResolvedDependency's own fields; a type alias wouldn't clarify
+#[allow(clippy::type_complexity)] // 6-tuple mirrors ResolvedDependency's own fields; a type alias wouldn't clarify
 pub(crate) fn build_dep_class_index(
     dep_root: &Utf8Path,
     dep_name: &str,
@@ -659,6 +668,7 @@ pub(crate) fn build_dep_class_index(
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::ast::ProtocolDefinition>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+    beamtalk_core::semantic_analysis::ProtocolSourceMap,
 )> {
     // `stubs/` is excluded (ADR 0075) — it's type-only and never
     // compiled.
@@ -671,6 +681,7 @@ pub(crate) fn build_dep_class_index(
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
         ));
     }
 
@@ -694,9 +705,27 @@ pub(crate) fn build_dep_class_index(
 
     let mut protocol_infos = Vec::new();
     let mut protocol_defs = Vec::new();
+    let mut protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let mut alias_infos = Vec::new();
     for file in sorted_files {
         let module = &cached_asts[file].module;
+        // Source identity of this dependency's provisions (ADR 0127 §3):
+        // the checkout file their spans are offsets into, and the package
+        // their free names resolve in.
+        for protocol in module
+            .protocols
+            .iter()
+            .filter(|p| !p.provided_methods.is_empty())
+        {
+            protocol_sources.insert(
+                protocol.name.name.clone(),
+                beamtalk_core::semantic_analysis::ProtocolSource {
+                    path: Some(file.as_str().into()),
+                    text: cached_asts[file].source.as_str().into(),
+                    package: Some(dep_name.into()),
+                },
+            );
+        }
         protocol_infos.extend(
             beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
                 module,
@@ -727,6 +756,7 @@ pub(crate) fn build_dep_class_index(
         protocol_infos,
         protocol_defs,
         alias_infos,
+        protocol_sources,
     ))
 }
 
@@ -1145,7 +1175,7 @@ dep_utils = { path = "dep_utils" }"#,
         );
 
         let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
-        let (class_module_index, _class_infos, protocol_infos, _protocol_defs, alias_infos) =
+        let (class_module_index, _class_infos, protocol_infos, _protocol_defs, alias_infos, _) =
             build_dep_class_index(&dep_root, "dep_types").unwrap();
 
         assert!(
@@ -1188,5 +1218,45 @@ dep_utils = { path = "dep_utils" }"#,
             Some("dep_types"),
             "internal alias must still be stamped so add_pre_loaded can filter it"
         );
+    }
+
+    /// ADR 0127 §3 / BT-3663: a dependency's provision-bearing protocol
+    /// carries its own source identity — the checkout file, its text, and
+    /// the dependency's package — so a flattened method maps its lines to
+    /// that file (not the using file) and resolves names in that package.
+    /// A provision-less protocol has none.
+    #[test]
+    fn build_dep_class_index_records_dependency_protocol_sources() {
+        let temp = TempDir::new().unwrap();
+        let dep_dir = temp.path().join("dep_traits");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_traits", "0.1.0", "");
+        let trait_src = "Protocol define: Retryable\n  \
+             attempts -> Integer\n\n  \
+             retry -> Integer => self attempts + 1\n";
+        write_source(&dep_dir, "retryable.bt", trait_src);
+        write_source(
+            &dep_dir,
+            "plain.bt",
+            "Protocol define: Plain\n  name -> String\n",
+        );
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let (_, _, _, protocol_defs, _, protocol_sources) =
+            build_dep_class_index(&dep_root, "dep_traits").unwrap();
+
+        assert_eq!(protocol_defs.len(), 1);
+        assert_eq!(protocol_sources.len(), 1, "{protocol_sources:?}");
+        let source = &protocol_sources["Retryable"];
+        assert!(
+            source
+                .path
+                .as_deref()
+                .is_some_and(|p| p.ends_with("retryable.bt")),
+            "{source:?}"
+        );
+        assert_eq!(source.text.as_str(), trait_src);
+        assert_eq!(source.package.as_deref(), Some("dep_traits"));
+        assert!(!protocol_sources.contains_key("Plain"));
     }
 }

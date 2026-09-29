@@ -106,9 +106,8 @@ fn a_users_own_diagnostic_is_not_tagged() {
         "Object subclass: Alpha\n  uses: Broken\n  name -> String => 3 bogus\n",
         &defs,
     );
-    let (tagged, own): (Vec<_>, Vec<_>) = diagnostics
-        .into_iter()
-        .partition(|d| d.provision.is_some());
+    let (tagged, own): (Vec<_>, Vec<_>) =
+        diagnostics.into_iter().partition(|d| d.provision.is_some());
     assert_eq!(tagged.len(), 1, "{tagged:?}");
     assert!(
         own.iter().any(|d| d.message.contains("bogus")),

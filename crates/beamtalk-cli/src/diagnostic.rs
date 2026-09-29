@@ -118,18 +118,72 @@ pub fn print_diagnostics_text(
     options: &beamtalk_core::CompilerOptions,
 ) {
     for diagnostic in diagnostics {
-        if matches!(diagnostic.severity, Severity::Lint) {
-            continue;
-        }
-        if options.suppress_warnings
-            && !options.warnings_as_errors
-            && matches!(diagnostic.severity, Severity::Warning | Severity::Hint)
-        {
+        // Flattened-provision diagnostics lie in the protocol's file, not
+        // this one — `print_provision_diagnostics` renders them.
+        if diagnostic.provision.is_some() || is_suppressed(diagnostic, options) {
             continue;
         }
         let compile_diag = CompileDiagnostic::from_core_diagnostic(diagnostic, source_path, source);
         eprintln!("{:?}", miette::Report::new(compile_diag));
     }
+}
+
+/// Whether `diagnostic` is hidden from text output: lints (shown only by
+/// `beamtalk lint`) and, under `suppress_warnings`, warnings and hints.
+fn is_suppressed(diagnostic: &CoreDiagnostic, options: &beamtalk_core::CompilerOptions) -> bool {
+    matches!(diagnostic.severity, Severity::Lint)
+        || (options.suppress_warnings
+            && !options.warnings_as_errors
+            && matches!(diagnostic.severity, Severity::Warning | Severity::Hint))
+}
+
+/// Prints the flattened-provision diagnostics among `diagnostics` (ADR 0127
+/// §3, "Source locations") against the *protocol's* file, once each: the
+/// per-user copies are merged first
+/// ([`beamtalk_core::source_analysis::merge_provision_diagnostics`]), so a
+/// provision shared by A and B is reported a single time with a "while
+/// flattening into A, B" note. `protocol_sources` supplies each protocol's
+/// path and text; a protocol without an entry is rendered by name with no
+/// snippet rather than against an unrelated file.
+pub fn print_provision_diagnostics(
+    diagnostics: impl IntoIterator<Item = CoreDiagnostic>,
+    protocol_sources: &beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    options: &beamtalk_core::CompilerOptions,
+) {
+    for compile_diag in render_provision_diagnostics(diagnostics, protocol_sources, options) {
+        eprintln!("{:?}", miette::Report::new(compile_diag));
+    }
+}
+
+/// The reports [`print_provision_diagnostics`] prints, separated out so the
+/// merge-and-attribute step is testable.
+fn render_provision_diagnostics(
+    diagnostics: impl IntoIterator<Item = CoreDiagnostic>,
+    protocol_sources: &beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    options: &beamtalk_core::CompilerOptions,
+) -> Vec<CompileDiagnostic> {
+    let tagged = diagnostics.into_iter().filter(|d| d.provision.is_some());
+    beamtalk_core::source_analysis::merge_provision_diagnostics(tagged)
+        .into_iter()
+        .filter(|d| !is_suppressed(d, options))
+        .filter_map(|diagnostic| {
+            let origin = diagnostic.provision.as_ref()?;
+            let (path, text) = match protocol_sources.get(&origin.protocol) {
+                Some(src) => (
+                    src.path
+                        .as_deref()
+                        .map_or_else(|| format!("<protocol {}>", origin.protocol), str::to_string),
+                    src.text.as_str(),
+                ),
+                None => (format!("<protocol {}>", origin.protocol), ""),
+            };
+            Some(CompileDiagnostic::from_core_diagnostic(
+                &diagnostic,
+                &path,
+                text,
+            ))
+        })
+        .collect()
 }
 
 /// Render a beamtalk-core diagnostic as the single JSON shape every
@@ -290,5 +344,48 @@ mod tests {
         let source = "test := 42";
         let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
         assert_eq!(diag.message, "simple warning");
+    }
+
+    #[test]
+    fn provision_diagnostics_shared_by_two_users_render_once_in_the_protocol_file() {
+        use beamtalk_core::semantic_analysis::{ProtocolSource, ProtocolSourceMap};
+
+        let protocol_text = "Protocol define: Broken\n  probe -> Integer => 3 bogus\n";
+        let sources: ProtocolSourceMap = [(
+            "Broken".into(),
+            ProtocolSource {
+                path: Some("src/broken.bt".into()),
+                text: protocol_text.into(),
+                package: None,
+            },
+        )]
+        .into_iter()
+        .collect();
+        let span_start = protocol_text.find("bogus").unwrap() as u32;
+        let per_user = |user: &str| {
+            CoreDiagnostic::error(
+                "Integer does not understand bogus",
+                Span::new(span_start, span_start + 5),
+            )
+            .with_provision_origin("Broken", user)
+        };
+        let own = CoreDiagnostic::error("user's own", Span::new(0, 1));
+
+        let rendered = render_provision_diagnostics(
+            vec![per_user("Alpha"), own, per_user("Beta")],
+            &sources,
+            &beamtalk_core::CompilerOptions::default(),
+        );
+
+        assert_eq!(rendered.len(), 1, "{rendered:?}");
+        assert_eq!(rendered[0].src.name(), "src/broken.bt");
+        assert_eq!(rendered[0].span.offset(), span_start as usize);
+        assert!(
+            rendered[0]
+                .message
+                .contains("while flattening into Alpha, Beta"),
+            "{}",
+            rendered[0].message
+        );
     }
 }
