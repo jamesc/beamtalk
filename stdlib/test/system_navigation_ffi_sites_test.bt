@@ -25,11 +25,11 @@
 TestCase subclass: SystemNavigationFfiSitesTest
   field: nav = nil
 
-  setUp => self.nav := SystemNavigation default
+  setUp => self.nav := SystemNavigation
 
   // --- selector existence ---
   testIncludesSelectorFfiSitesFor =>
-    self assert: (SystemNavigation includesSelector: #ffiSitesFor:)
+    self assert: (SystemNavigation class includesSelector: #ffiSitesFor:)
 
   // --- composition primitives must be in place ---
   //
@@ -47,10 +47,10 @@ TestCase subclass: SystemNavigationFfiSitesTest
   // The spec parser + per-class / per-method helpers are defined so they can be
   // unit-checked separately.
   testHelpersDefined =>
-    self assert: (SystemNavigation includesSelector: #parseFfiSpec:)
-    self assert: (SystemNavigation includesSelector: #collectFfiSitesFor:function:arity:in:into:)
-    self assert: (SystemNavigation includesSelector: #appendFfiSitesIn:module:function:arity:owner:methodSelector:into:)
-    self assert: (SystemNavigation includesSelector: #collectExtensionFfiSitesFor:function:arity:into:)
+    self assert: (SystemNavigation class includesSelector: #parseFfiSpec:)
+    self assert: (SystemNavigation class includesSelector: #collectFfiSitesFor:function:arity:in:into:)
+    self assert: (SystemNavigation class includesSelector: #appendFfiSitesIn:module:function:arity:owner:methodSelector:into:)
+    self assert: (SystemNavigation class includesSelector: #collectExtensionFfiSitesFor:function:arity:into:)
 
   // --- spec validation (decided by parseFfiSpec:, not the compiler port) ---
   //

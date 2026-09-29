@@ -144,13 +144,16 @@ fn actor_must_spawn_error(class_name: &str, selector: &str, span: Span) -> Diagn
     .with_category(DiagnosticCategory::ActorNew)
 }
 
+/// Hint attached to every Object-kind `new`/`new:` refusal.
+const OBJECT_KIND_NEW_HINT: &str = "Object subclasses are not instantiable. For a stateless service, use class-side methods; for data or a scoped query object, use `Value subclass:`.";
+
 /// Creates a diagnostic for using `new`/`new:` on an Object-kind class.
 fn object_kind_new_error(class_name: &str, selector: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         format!("Object-kind class `{class_name}` cannot be instantiated with `{selector}`"),
         span,
     )
-    .with_hint("Object subclasses are not instantiable. Use `Value subclass:` for data types")
+    .with_hint(OBJECT_KIND_NEW_HINT)
     .with_category(DiagnosticCategory::Type)
 }
 
@@ -292,6 +295,63 @@ pub(crate) fn check_object_new_usage(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_uninstantiable_new);
+    check_object_new_in_class_methods(module, hierarchy, diagnostics);
+}
+
+/// Rejects `self new` / `super new` (and `new:`) inside a class method of an
+/// Object-kind class, whatever the receiver is spelled as (ADR 0129 §6).
+///
+/// [`visit_uninstantiable_new`] only fires when the receiver is written as a
+/// class name, so `class default => self new` slipped past it. Classes that
+/// define their own class-side `new`/`new:` are exempt, as there.
+fn check_object_new_in_class_methods(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        if !hierarchy.has_class(class_name)
+            || !matches!(hierarchy.resolve_class_kind(class_name), ClassKind::Object)
+        {
+            continue;
+        }
+        for method in &class.class_methods {
+            for stmt in &method.body {
+                walk_expression(&stmt.expression, &mut |expr| {
+                    let mut check = |receiver: &Expression, sel: &str, span: Span| {
+                        if matches!(sel, "new" | "new:")
+                            && (matches!(receiver, Expression::Super(_))
+                                || is_self_identifier(receiver))
+                            && !hierarchy.has_own_class_method(class_name, sel)
+                        {
+                            diagnostics.push(object_kind_new_error(class_name, sel, span));
+                        }
+                    };
+                    match expr {
+                        Expression::MessageSend {
+                            receiver,
+                            selector,
+                            span,
+                            ..
+                        } => check(receiver, &selector.name(), *span),
+                        Expression::Cascade {
+                            receiver, messages, ..
+                        } => {
+                            for msg in messages {
+                                check(receiver, &msg.selector.name(), msg.span);
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        }
+    }
+}
+
+fn is_self_identifier(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
 
 /// Why `ClassName new`/`new:` cannot work for a given receiver.

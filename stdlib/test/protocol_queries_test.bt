@@ -125,7 +125,7 @@ TestCase subclass: ProtocolQueriesTest
     // No duplicate implementation (CLAUDE.md): SystemNavigation delegates
     // to Protocol usersOf: rather than re-querying the registry.
     fromProtocol := Protocol usersOf: #Displayable
-    fromNavigation := SystemNavigation default usersOf: #Displayable
+    fromNavigation := SystemNavigation usersOf: #Displayable
     self assert: fromNavigation size equals: fromProtocol size
 
   testIntegerUsedProtocolsIsEmpty =>

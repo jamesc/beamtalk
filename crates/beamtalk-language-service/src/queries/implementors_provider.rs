@@ -14,7 +14,7 @@
 //!
 //! Walks every indexed file's `module.classes` and `module.method_definitions`
 //! and emits one [`Location`] per `MethodDefinition` whose selector matches.
-//! Mirrors `SystemNavigation default implementorsOf:` semantics:
+//! Mirrors `SystemNavigation implementorsOf:` semantics:
 //!
 //! * **Local methods only.** Inherited (un-overridden) methods are *not*
 //!   reported — only classes with their own definition of the selector.

@@ -12,25 +12,31 @@ TestCase subclass: SystemNavigationActorClassesTest
 
   // --- selector existence ---
   testActorClassesSelectorDefined =>
-    self assert: (SystemNavigation includesSelector: #actorClasses)
+    self assert: (SystemNavigation class includesSelector: #actorClasses)
     self assert: (Behaviour includesSelector: #superclassChain)
+
+  // ADR 0129: `SystemNavigation` is a class-side facade, so a dynamic send
+  // through a variable receiver answers exactly what the static send does.
+  testDynamicSendMatchesStaticSend =>
+    nav := SystemNavigation
+    self assert: nav actorClasses equals: SystemNavigation actorClasses
 
   // Actor itself is included — the abstract root (callers can filter it out).
   testIncludesActorRoot =>
-    self assert: ((SystemNavigation default actorClasses) includes: Actor)
+    self assert: ((SystemNavigation actorClasses) includes: Actor)
 
   // Known stdlib actor subclasses are included (ClassBuilder is `Actor
   // subclass: ClassBuilder`).
   testIncludesStdlibActorSubclass =>
-    self assert: ((SystemNavigation default actorClasses) includes: ClassBuilder)
+    self assert: ((SystemNavigation actorClasses) includes: ClassBuilder)
 
   // A user-defined actor (the fixture) is included.
   testIncludesUserActorFixture =>
-    self assert: ((SystemNavigation default actorClasses) includes: SysnavFixtureActor)
+    self assert: ((SystemNavigation actorClasses) includes: SysnavFixtureActor)
 
   // Plain Object descendants are excluded.
   testExcludesObjectDescendants =>
-    actors := SystemNavigation default actorClasses
+    actors := SystemNavigation actorClasses
     self deny: (actors includes: Object)
     self deny: (actors includes: String)
 
@@ -38,7 +44,5 @@ TestCase subclass: SystemNavigationActorClassesTest
   // `name` lives on `Behaviour` (BT-2232), so it reads directly off each
   // registry entry without a dnu suppression.
   testAlphabeticalOrder =>
-    names := (SystemNavigation default actorClasses) collect: [:c |
-      c name asString
-    ]
+    names := (SystemNavigation actorClasses) collect: [:c | c name asString]
     self assert: names equals: names sort

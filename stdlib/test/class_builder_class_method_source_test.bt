@@ -29,7 +29,7 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
       superclass: Object;
       classMethods: #{#shoutClass => [:_self | "hi" uppercase]};
       register
-    nav := SystemNavigation default
+    nav := SystemNavigation
     results := nav
       collectMethodsMatching: (Regex from: "uppercase") unwrap
       in: self.cls class
@@ -45,7 +45,7 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
       superclass: Object;
       classMethods: #{#scaleClassBy: => [:_self :factor | factor * factor]};
       register
-    nav := SystemNavigation default
+    nav := SystemNavigation
     results := nav
       collectMethodsMatching: (Regex from: "factor") unwrap
       in: self.cls class
@@ -70,7 +70,7 @@ TestCase subclass: ClassBuilderClassMethodSourceTest
       classMethods: #{#computedClassSize => blk};
       register
     self assert: (self.cls class includesSelector: #computedClassSize)
-    nav := SystemNavigation default
+    nav := SystemNavigation
     results := nav
       collectMethodsMatching: (Regex from: "size") unwrap
       in: self.cls class

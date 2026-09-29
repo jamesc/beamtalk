@@ -29,7 +29,7 @@ TestCase subclass: SystemNavigationExtensionsTest
   testExtendersOfReturnsDedupedPackages =>
     self registerExt: #sysnavExtAlpha owner: #stdlib
     self registerExt: #sysnavExtBeta owner: #stdlib
-    extenders := SystemNavigation default extendersOf: String
+    extenders := SystemNavigation extendersOf: String
     Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
     Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtBeta)
     self assert: (extenders anySatisfy: [:p | p name == "stdlib"])
@@ -39,7 +39,7 @@ TestCase subclass: SystemNavigationExtensionsTest
   // class OBJECT (so callers can navigate from it).
   testExtensionsByRecords =>
     self registerExt: #sysnavExtAlpha owner: #stdlib
-    records := SystemNavigation default extensionsBy: (Package named: "stdlib")
+    records := SystemNavigation extensionsBy: (Package named: "stdlib")
     Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
     self
       assert: (records anySatisfy: [:r |
@@ -50,8 +50,8 @@ TestCase subclass: SystemNavigationExtensionsTest
   // hits T.
   testRoundTrip =>
     self registerExt: #sysnavExtAlpha owner: #stdlib
-    extenders := SystemNavigation default extendersOf: String
-    records := SystemNavigation default extensionsBy: (Package named: "stdlib")
+    extenders := SystemNavigation extendersOf: String
+    records := SystemNavigation extensionsBy: (Package named: "stdlib")
     Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtAlpha)
     self assert: (extenders anySatisfy: [:p | p name == "stdlib"])
     self assert: (records anySatisfy: [:r | (r at: #class) == String])
@@ -60,14 +60,14 @@ TestCase subclass: SystemNavigationExtensionsTest
   // extension owned by a name that is not a loaded package must not surface.
   testNonPackageOwnerFiltered =>
     self registerExt: #sysnavExtGamma owner: #sysnav_not_a_pkg_xyz
-    extenders := SystemNavigation default extendersOf: String
+    extenders := SystemNavigation extendersOf: String
     Erlang ets delete: #beamtalk_extensions key: #(#String, #sysnavExtGamma)
     self deny: (extenders anySatisfy: [:p | p name == "sysnav_not_a_pkg_xyz"])
 
   // No extensions returns an empty list (not an error): nobody extends the test
   // case class.
   testNoExtensionsEmpty =>
-    self assert: (SystemNavigation default extendersOf: self class) isEmpty
+    self assert: (SystemNavigation extendersOf: self class) isEmpty
 
   // extendersOf: rejects a non-class argument. The call goes through perform:
   // because the `:: Behaviour` parameter makes a direct `extendersOf: #String`
@@ -75,12 +75,12 @@ TestCase subclass: SystemNavigationExtensionsTest
   // dispatch (REPL/eval/perform:).
   testExtendersOfRejectsNonClass =>
     self should: [
-      SystemNavigation default perform: #extendersOf: withArguments: #(#String)
+      SystemNavigation perform: #extendersOf: withArguments: #(#String)
     ] raise: #user_error
 
   // extensionsBy: rejects a non-Package argument (a bare Symbol here, a common
   // mistake of passing the package name instead of the Package object).
   testExtensionsByRejectsNonPackage =>
     self should: [
-      SystemNavigation default perform: #extensionsBy: withArguments: #(#stdlib)
+      SystemNavigation perform: #extensionsBy: withArguments: #(#stdlib)
     ] raise: #user_error

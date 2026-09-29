@@ -179,7 +179,7 @@ Object classBuilder name: #CapstoneDoc; superclass: Object; classDoc: "A documen
 Object classBuilder name: #CapstoneNav; superclass: Object; classMethods: #{ #shoutClass => [:self | "hi" uppercase] }; register
 // => CapstoneNav
 
-nav := SystemNavigation default
+nav := SystemNavigation
 // => SystemNavigation
 
 results := nav collectMethodsMatching: (Regex from: "shoutClass") unwrap in: CapstoneNav class into: List new

@@ -5,43 +5,18 @@
 /// "where is X used").
 ///
 /// Home for System Browser-style navigation queries that previously lived
-/// on `Beamtalk` (BT-2189 / BT-2190). Matches the Pharo/Squeak/Cuis
-/// convention: callers reach an instance via a constructor and dispatch
-/// queries against it.
-///
-/// `SystemNavigation default` returns a navigation rooted at the full
-/// loaded class registry. Future constructors (BT-2201) — e.g.
-/// `SystemNavigation over: aPackage`, `SystemNavigation forClasses: aList`
-/// — will hand back instances scoped to a narrower set, reusing the same
-/// query protocol.
-///
-/// All query logic lives on instance methods. The class side is just a
-/// constructor surface. This is deliberate: routing the iteration through
-/// a class gen_server would self-deadlock when the walk reaches
-/// `SystemNavigation` itself. Instance methods on a sealed Object value
-/// type run as plain Erlang in the calling eval worker.
+/// on `Beamtalk` (BT-2189 / BT-2190). A stateless, single-scope service, so
+/// it is a class-side facade (ADR 0129): every query is a `class sealed`
+/// method and there is no instance to construct. Sealed class-side sends run
+/// in the caller (direct dispatch), for both static and dynamic receivers, so
+/// the walk over every class is never re-entrant.
 ///
 /// ## Examples
 /// ```beamtalk
-/// SystemNavigation default implementorsOf: #asString
-/// SystemNavigation default sendersOf: #+
+/// SystemNavigation implementorsOf: #asString
+/// SystemNavigation sendersOf: #+
 /// ```
 sealed typed Object subclass: SystemNavigation
-
-  // ===== Class Methods — Construction =====
-
-  /// Return a navigation query rooted at the default scope (all loaded
-  /// classes in the workspace's class registry).
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// SystemNavigation default implementorsOf: #asString
-  /// ```
-  class default -> SystemNavigation =>
-    // `new` is implicit on sealed Object subclasses (handled by the runtime's
-    // class instantiation path). ADR 0083 models this in the type checker, so
-    // no `@expect dnu` suppression is needed.
-    self new
 
   // ===== Class Registry Overview =====
 
@@ -51,7 +26,8 @@ sealed typed Object subclass: SystemNavigation
   /// (BT-2201) will override this to filter by package or explicit class
   /// list. Wrapping the FFI in a typed instance method lets downstream
   /// block parameters infer `Class` / `Behaviour` instead of `Dynamic`.
-  allClasses -> List(Behaviour) => (Erlang beamtalk_interface) allClasses
+  class sealed allClasses -> List(Behaviour) =>
+    (Erlang beamtalk_interface) allClasses
 
   /// Return every class that participates in the actor model — i.e. each class
   /// whose `superclassChain` includes `Actor`.
@@ -67,9 +43,9 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default actorClasses  // => [Actor, ClassBuilder, ...]
+  /// SystemNavigation actorClasses  // => [Actor, ClassBuilder, ...]
   /// ```
-  actorClasses -> List(Behaviour) =>
+  class sealed actorClasses -> List(Behaviour) =>
     actorClass := self findClass: #Actor
     actorClass isNil ifTrue: [^List new]
     actors := self allClasses
@@ -105,9 +81,9 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default dnuHandlers  // => [ErlangModule, ProtoObject, ...]
+  /// SystemNavigation dnuHandlers  // => [ErlangModule, ProtoObject, ...]
   /// ```
-  dnuHandlers -> List(Behaviour) =>
+  class sealed dnuHandlers -> List(Behaviour) =>
     handlers := self allClasses select: [:c |
       c includesSelector: #doesNotUnderstand:args:
     ]
@@ -125,9 +101,9 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default usersOf: #Comparable   // => [DateTime, Money, ...]
+  /// SystemNavigation usersOf: #Comparable   // => [DateTime, Money, ...]
   /// ```
-  usersOf: aProtocolName :: Symbol -> List(Behaviour) =>
+  class sealed usersOf: aProtocolName :: Symbol -> List(Behaviour) =>
     Protocol usersOf: aProtocolName
 
   // ===== Package & Extension Ownership Queries =====
@@ -149,10 +125,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default extendersOf: String  // => [(Package named: "my_lib"), ...]
-  /// SystemNavigation default extendersOf: NeverExtended  // => []
+  /// SystemNavigation extendersOf: String  // => [(Package named: "my_lib"), ...]
+  /// SystemNavigation extendersOf: NeverExtended  // => []
   /// ```
-  extendersOf: aClass :: Behaviour -> List(Package) =>
+  class sealed extendersOf: aClass :: Behaviour -> List(Package) =>
     targetName := self requireClassName: aClass selector: "extendersOf:"
     loaded := Package all
     owners := self extensionOwnersOf: targetName
@@ -181,10 +157,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default extensionsBy: (Package named: "my_lib")
+  /// SystemNavigation extensionsBy: (Package named: "my_lib")
   /// // => [#{#class => String, #selector => #asJson}, ...]
   /// ```
-  extensionsBy: aPackage :: Package -> List(Dictionary) =>
+  class sealed extensionsBy: aPackage :: Package -> List(Dictionary) =>
     (aPackage isKindOf: Package)
       ifFalse: [
         self error: "SystemNavigation extensionsBy: requires a Package object, e.g. (Package named: aPackageName)."
@@ -205,7 +181,7 @@ sealed typed Object subclass: SystemNavigation
   /// query for the message. Mirrors the argument guard in `referencesTo:`;
   /// `respondsTo: #subclasses` is the reliable "is a class" test (see that
   /// method for why `isKindOf: Behaviour` is not).
-  requireClassName: aClass :: Behaviour selector: aSelector :: String -> Symbol =>
+  class sealed requireClassName: aClass :: Behaviour selector: aSelector :: String -> Symbol =>
     (aClass isKindOf: Symbol)
       ifTrue: [
         self
@@ -240,9 +216,9 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default classesInPackage: #stdlib  // => [Actor, Array, ...]
+  /// SystemNavigation classesInPackage: #stdlib  // => [Actor, Array, ...]
   /// ```
-  classesInPackage: aPackageName :: Symbol | String -> List(Behaviour) =>
+  class sealed classesInPackage: aPackageName :: Symbol | String -> List(Behaviour) =>
     pkgName := self requirePackage: aPackageName
     names := Package classes: pkgName
     names
@@ -262,9 +238,9 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default subclassesOf: Number in: #stdlib  // => [Float, Integer]
+  /// SystemNavigation subclassesOf: Number in: #stdlib  // => [Float, Integer]
   /// ```
-  subclassesOf: aClass :: Behaviour in: aPackageName :: Symbol | String -> List(Behaviour) =>
+  class sealed subclassesOf: aClass :: Behaviour in: aPackageName :: Symbol | String -> List(Behaviour) =>
     self requireClassName: aClass selector: "subclassesOf:in:"
     pkgName := self requirePackage: aPackageName
     aClass allSubclasses select: [:c |
@@ -277,7 +253,7 @@ sealed typed Object subclass: SystemNavigation
   /// "package doesn't exist" (a typo) from "package has no matching classes" (a
   /// legitimately empty result), and reuses the same error type callers already
   /// get from `Package named:`.
-  requirePackage: aPackageName :: Symbol | String -> String =>
+  class sealed requirePackage: aPackageName :: Symbol | String -> String =>
     pkgName := aPackageName asString
     Package named: pkgName
     pkgName
@@ -318,11 +294,11 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default implementorsOf: #asString    // => [Integer, Float, String, ...]
-  /// SystemNavigation default implementorsOf: #new         // => [..., Counter class, ...]
-  /// SystemNavigation default implementorsOf: #nonExistent // => []
+  /// SystemNavigation implementorsOf: #asString    // => [Integer, Float, String, ...]
+  /// SystemNavigation implementorsOf: #new         // => [..., Counter class, ...]
+  /// SystemNavigation implementorsOf: #nonExistent // => []
   /// ```
-  implementorsOf: aSelector :: Symbol -> List(Behaviour) =>
+  class sealed implementorsOf: aSelector :: Symbol -> List(Behaviour) =>
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "SystemNavigation implementorsOf: requires a Symbol argument"
     ]
@@ -385,10 +361,10 @@ sealed typed Object subclass: SystemNavigation
   /// ## Examples
   /// ```beamtalk
   /// method := Counter >> #increment
-  /// SystemNavigation default messagesSentBy: method
+  /// SystemNavigation messagesSentBy: method
   /// // => [#{#selector => #+, #line => 2}, ...]
   /// ```
-  messagesSentBy: aMethod :: CompiledMethod -> List(Dictionary) =>
+  class sealed messagesSentBy: aMethod :: CompiledMethod -> List(Dictionary) =>
     (aMethod isKindOf: CompiledMethod)
       ifFalse: [
         self error: "SystemNavigation messagesSentBy: requires a CompiledMethod argument (the value of `aClass >> #selector`)."
@@ -454,10 +430,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default sendersOf: #asString  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
-  /// SystemNavigation default sendersOf: #neverCalledXyzzy  // => []
+  /// SystemNavigation sendersOf: #asString  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
+  /// SystemNavigation sendersOf: #neverCalledXyzzy  // => []
   /// ```
-  sendersOf: aSelector :: Symbol -> List(Dictionary) =>
+  class sealed sendersOf: aSelector :: Symbol -> List(Dictionary) =>
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "SystemNavigation sendersOf: requires a Symbol argument"
     ]
@@ -501,7 +477,7 @@ sealed typed Object subclass: SystemNavigation
   /// `resolveExtensionClass:` returns the raw `ownerTag` Symbol; it is
   /// preserved as-is even for class-side hits rather than coerced into
   /// `Symbol class`.
-  senderClassFor: ownerTag :: Symbol classSide: isClassSide :: Boolean -> Object =>
+  class sealed senderClassFor: ownerTag :: Symbol classSide: isClassSide :: Boolean -> Object =>
     cls := self resolveExtensionClass: ownerTag
     (isClassSide and: [
       (cls isKindOf: Symbol) not
@@ -520,7 +496,7 @@ sealed typed Object subclass: SystemNavigation
   /// `sendersOf:` and `referencesTo:` (BT-2302). The explicit
   /// `-> List(Dictionary)` return anchors element-type inference for the
   /// accumulator.
-  indexedSiteRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed indexedSiteRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
     indexedRows
       inject: result
       into: [:acc :row |
@@ -535,7 +511,7 @@ sealed typed Object subclass: SystemNavigation
   /// Backwards-compatible alias for `indexedSiteRecordsFrom:into:`, retained
   /// because the `sendersOf:` migration (BT-2299) named the mapper for senders
   /// before `referencesTo:` (BT-2302) generalised it. Delegates unchanged.
-  indexedSenderRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed indexedSenderRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
     self indexedSiteRecordsFrom: indexedRows into: result
 
   /// Map the indexed `defined_selectors_bt` rows to their `#selector` Symbols,
@@ -544,7 +520,7 @@ sealed typed Object subclass: SystemNavigation
   /// the `selectorsMatching:` fallback accumulator (mirrors
   /// `indexedSiteRecordsFrom:into:`), keeping `acc` strongly typed rather than
   /// `Dynamic` (BT-2302).
-  indexedSelectorsFrom: indexedRows :: List(Dictionary) into: result :: List(Symbol) -> List(Symbol) =>
+  class sealed indexedSelectorsFrom: indexedRows :: List(Dictionary) into: result :: List(Symbol) -> List(Symbol) =>
     indexedRows inject: result into: [:acc :row | acc add: (row at: #selector)]
 
   /// Append senders of `aSelector` found in any instance method of `aScope`
@@ -557,7 +533,7 @@ sealed typed Object subclass: SystemNavigation
   /// Guards the `>>` send with `respondsTo:` so a class for which `>>`
   /// is not yet supported (e.g. metaclass-shaped registry entries) is
   /// silently skipped rather than aborting the whole walk.
-  collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectSendersFor: aSelector :: Symbol in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -581,7 +557,7 @@ sealed typed Object subclass: SystemNavigation
   /// Internal helper for `collectSendersFor:in:into:`. Splits the per-method
   /// FFI call out so the surrounding `inject:into:` body stays a single
   /// expression, which keeps the type-inference behaviour predictable.
-  appendSendersIn: methodSource :: String selector: aSelector :: Symbol class: aClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed appendSendersIn: methodSource :: String selector: aSelector :: Symbol class: aClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
     lines := self sendersIn: methodSource selector: aSelector
     lines
       inject: result
@@ -621,10 +597,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default announcementsSentBy: PriceTracker  // => [PriceChanged, ...]
-  /// SystemNavigation default announcementsSentBy: SilentClass    // => []
+  /// SystemNavigation announcementsSentBy: PriceTracker  // => [PriceChanged, ...]
+  /// SystemNavigation announcementsSentBy: SilentClass    // => []
   /// ```
-  announcementsSentBy: aClass :: Behaviour -> List(Behaviour) =>
+  class sealed announcementsSentBy: aClass :: Behaviour -> List(Behaviour) =>
     distinct := (self announcementSitesSentBy: aClass)
       inject: List new
       into: [:acc :site |
@@ -664,11 +640,11 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default announcementSitesSentBy: PriceTracker
+  /// SystemNavigation announcementSitesSentBy: PriceTracker
   ///   // => [#{#class => PriceTracker, #selector => #notify, #line => 4,
   ///   //      #announcementClass => PriceChanged}, ...]
   /// ```
-  announcementSitesSentBy: aClass :: Behaviour -> List(Dictionary) =>
+  class sealed announcementSitesSentBy: aClass :: Behaviour -> List(Dictionary) =>
     self requireClassName: aClass selector: "announcementSitesSentBy:"
     instanceScan := self collectAnnounceSitesIn: aClass into: List new
     bothScan := self collectAnnounceSitesIn: aClass class into: instanceScan
@@ -684,7 +660,7 @@ sealed typed Object subclass: SystemNavigation
   /// so a scope for which `>>` is not yet supported (e.g. metaclass-shaped
   /// registry entries) is silently skipped, and a `nil` source (a primitive
   /// registered without source text) contributes nothing.
-  collectAnnounceSitesIn: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectAnnounceSitesIn: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -720,7 +696,7 @@ sealed typed Object subclass: SystemNavigation
   /// recorded only when its argument resolves to a class that *is* an
   /// `Announcement` subclass — unresolvable arguments and non-announcement
   /// receivers (a misclassified constructor send) are both skipped.
-  appendAnnounceSitesIn: methodSource :: String class: aClass :: Object methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed appendAnnounceSitesIn: methodSource :: String class: aClass :: Object methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
     sites := self announceSitesIn: methodSource
     sites
       inject: result
@@ -728,7 +704,8 @@ sealed typed Object subclass: SystemNavigation
         line := site at: 1
         announcementName := site at: 2
         cls := self findClass: announcementName
-        (self isAnnouncementClass: cls)
+        isAnnouncement := self isAnnouncementClass: cls
+        isAnnouncement
           ifTrue: [
             acc
               add: #{
@@ -751,7 +728,7 @@ sealed typed Object subclass: SystemNavigation
   /// defensively if `Announcement` is not in the loaded image. Uses
   /// `superclassChain includes:` exactly as `actorClasses` tests membership of
   /// `Actor`.
-  isAnnouncementClass: aClass :: Object -> Boolean =>
+  class sealed isAnnouncementClass: aClass :: Object -> Boolean =>
     aClass isNil ifTrue: [^false]
     (aClass respondsTo: #superclassChain) ifFalse: [^false]
     announcementClass := self findClass: #Announcement
@@ -769,7 +746,7 @@ sealed typed Object subclass: SystemNavigation
   /// both an instance-side tag (`#Foo`) and a metaclass tag (`#'Foo class'`)
   /// are recognised. Extensions registered via `register/4` (no source) are
   /// invisible, as elsewhere.
-  collectExtensionAnnounceSitesFor: aClass :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectExtensionAnnounceSitesFor: aClass :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     // `List add:` is functional (returns a new list), so capture the result
     // rather than mutating in place: the pair is `[aClass name, aClass class
     // name]` — the instance-side and class-side tags a matching extension can
@@ -783,7 +760,8 @@ sealed typed Object subclass: SystemNavigation
         extSelector := entry at: 2
         extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        (self extensionTargets: extClass names: targetNames)
+        targeted := self extensionTargets: extClass names: targetNames
+        targeted
           ifTrue: [
             // `extSource` is bound `:: String` above to re-assert the
             // source-text invariant the seam erases (BT-2254).
@@ -805,7 +783,7 @@ sealed typed Object subclass: SystemNavigation
   /// `#'Foo class'`) uniformly. A `resolveExtensionClass:` result that is a raw
   /// atom (the defensive miss path) does not respond to `name` and answers
   /// `false`.
-  extensionTargets: extClass :: Object names: targetNames :: List(Symbol) -> Boolean =>
+  class sealed extensionTargets: extClass :: Object names: targetNames :: List(Symbol) -> Boolean =>
     (extClass respondsTo: #name) ifFalse: [^false]
     targetNames includes: extClass name
 
@@ -856,10 +834,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default referencesTo: Integer  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
-  /// SystemNavigation default referencesTo: NeverUsedClass  // => []
+  /// SystemNavigation referencesTo: Integer  // => [#{#class => Counter, #selector => ..., #line => 7}, ...]
+  /// SystemNavigation referencesTo: NeverUsedClass  // => []
   /// ```
-  referencesTo: aClass :: Behaviour -> List(Dictionary) =>
+  class sealed referencesTo: aClass :: Behaviour -> List(Dictionary) =>
     (aClass isKindOf: Symbol)
       ifTrue: [
         self error: "SystemNavigation referencesTo: requires a class object, not a Symbol. Pass the class itself (e.g. Counter), not its name as a symbol (e.g. #Counter)."
@@ -933,7 +911,7 @@ sealed typed Object subclass: SystemNavigation
   /// Guards the `>>` send with `respondsTo:` so a class for which `>>`
   /// is not yet supported (e.g. metaclass-shaped registry entries) is
   /// silently skipped rather than aborting the whole walk.
-  collectReferencesFor: targetName :: String in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectReferencesFor: targetName :: String in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -957,7 +935,7 @@ sealed typed Object subclass: SystemNavigation
   /// Internal helper for `collectReferencesFor:in:into:`. Splits the
   /// per-method FFI call out so the surrounding `inject:into:` body stays a
   /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
-  appendReferencesIn: methodSource :: String targetName: targetName :: String owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed appendReferencesIn: methodSource :: String targetName: targetName :: String owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
     lines := self referencesIn: methodSource class: targetName
     lines
       inject: result
@@ -998,11 +976,11 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default fieldReadersOf: #value in: Counter
+  /// SystemNavigation fieldReadersOf: #value in: Counter
   ///   // => [#{#class => Counter, #selector => getValue, #line => 5}, ...]
-  /// SystemNavigation default fieldReadersOf: #neverReadSlot in: Counter  // => []
+  /// SystemNavigation fieldReadersOf: #neverReadSlot in: Counter  // => []
   /// ```
-  fieldReadersOf: aSym :: Symbol in: aClass :: Behaviour -> List(Dictionary) =>
+  class sealed fieldReadersOf: aSym :: Symbol in: aClass :: Behaviour -> List(Dictionary) =>
     self
       collectFieldAccessesOf: aSym
       in: aClass
@@ -1030,11 +1008,11 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default fieldWritersOf: #value in: Counter
+  /// SystemNavigation fieldWritersOf: #value in: Counter
   ///   // => [#{#class => Counter, #selector => increment, #line => 3}, ...]
-  /// SystemNavigation default fieldWritersOf: #neverWrittenSlot in: Counter  // => []
+  /// SystemNavigation fieldWritersOf: #neverWrittenSlot in: Counter  // => []
   /// ```
-  fieldWritersOf: aSym :: Symbol in: aClass :: Behaviour -> List(Dictionary) =>
+  class sealed fieldWritersOf: aSym :: Symbol in: aClass :: Behaviour -> List(Dictionary) =>
     self
       collectFieldAccessesOf: aSym
       in: aClass
@@ -1049,7 +1027,7 @@ sealed typed Object subclass: SystemNavigation
   /// `aClass` — instance-side (`allFieldNames`) or class-side
   /// (`allClassVarNames`, BT-2238), inherited included. An undeclared name
   /// raises a typed error (typo guard); a real-but-untouched slot returns `[]`.
-  collectFieldAccessesOf: aSym :: Symbol in: aClass :: Behaviour readers: wantReaders :: Boolean -> List(Dictionary) =>
+  class sealed collectFieldAccessesOf: aSym :: Symbol in: aClass :: Behaviour readers: wantReaders :: Boolean -> List(Dictionary) =>
     selector := wantReaders ifTrue: [
       "fieldReadersOf:in:"
     ] ifFalse: ["fieldWritersOf:in:"]
@@ -1112,7 +1090,7 @@ sealed typed Object subclass: SystemNavigation
   /// send with `respondsTo:` so a scope for which `>>` is not yet supported
   /// (e.g. metaclass-shaped registry entries) is silently skipped rather than
   /// aborting the whole walk — mirrors `collectSendersFor:in:into:`.
-  collectFieldAccessesFor: aSym :: Symbol in: aScope :: Behaviour readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectFieldAccessesFor: aSym :: Symbol in: aScope :: Behaviour readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -1139,7 +1117,7 @@ sealed typed Object subclass: SystemNavigation
   /// the per-method FFI call out so the surrounding `inject:into:` body stays a
   /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
   /// `wantReaders` picks the reader vs writer FFI entry point.
-  appendFieldAccessesIn: methodSource :: String field: aSym :: Symbol owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed appendFieldAccessesIn: methodSource :: String field: aSym :: Symbol owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
     lines := wantReaders ifTrue: [
       self fieldReadersIn: methodSource field: aSym
     ] ifFalse: [self fieldWritersIn: methodSource field: aSym]
@@ -1184,12 +1162,12 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default ffiSitesFor: "lists:reverse"
+  /// SystemNavigation ffiSitesFor: "lists:reverse"
   ///   // => [#{#class => SystemNavigation, #selector => ..., #line => 7}, ...]
-  /// SystemNavigation default ffiSitesFor: "lists:reverse/1"   // arity-qualified
-  /// SystemNavigation default ffiSitesFor: "lists:noSuchFunctionXyzzy"  // => []
+  /// SystemNavigation ffiSitesFor: "lists:reverse/1"   // arity-qualified
+  /// SystemNavigation ffiSitesFor: "lists:noSuchFunctionXyzzy"  // => []
   /// ```
-  ffiSitesFor: aSpec :: String -> List(Dictionary) =>
+  class sealed ffiSitesFor: aSpec :: String -> List(Dictionary) =>
     (aSpec isKindOf: String)
       ifFalse: [
         self error: "SystemNavigation ffiSitesFor: requires a String argument of the form ""module:function"" or ""module:function/arity"""
@@ -1237,7 +1215,7 @@ sealed typed Object subclass: SystemNavigation
   /// Accepts `"module:function"` and `"module:function/arity"`. Raises a typed
   /// error (kind `#user_error`) for any other shape: a missing/extra `:`, an
   /// empty module or function, more than one `/`, or a non-numeric arity.
-  parseFfiSpec: aSpec :: String -> Dictionary =>
+  class sealed parseFfiSpec: aSpec :: String -> Dictionary =>
     slashParts := aSpec split: "/"
     slashParts size > 2 ifTrue: [^self raiseFfiSpecError: aSpec]
     moduleFunction := slashParts first
@@ -1262,7 +1240,7 @@ sealed typed Object subclass: SystemNavigation
   /// Always raises (kind `#user_error`); `error:` returns `Never`, so this
   /// still type-checks as returning a value when its result is used in an
   /// expression position (e.g. inside `ifTrue:` of `parseFfiSpec:`).
-  raiseFfiSpecError: aSpec :: String -> Object =>
+  class sealed raiseFfiSpecError: aSpec :: String -> Object =>
     self
       error: "SystemNavigation ffiSitesFor: expects a spec of the form ""module:function"" or ""module:function/arity"", got: "
         ++ aSpec
@@ -1276,7 +1254,7 @@ sealed typed Object subclass: SystemNavigation
   /// line numbers. Mirrors `collectSendersFor:in:into:`; the `>>` send is guarded
   /// with `respondsTo:` so a scope for which `>>` is not yet supported (e.g.
   /// metaclass-shaped registry entries) is silently skipped.
-  collectFfiSitesFor: module :: String function: function :: String arity: arity :: Object in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectFfiSitesFor: module :: String function: function :: String arity: arity :: Object in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -1302,7 +1280,7 @@ sealed typed Object subclass: SystemNavigation
   /// Internal helper for `collectFfiSitesFor:function:arity:in:into:`. Splits the
   /// per-method FFI call out so the surrounding `inject:into:` body stays a
   /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
-  appendFfiSitesIn: methodSource :: String module: module :: String function: function :: String arity: arity :: Object owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed appendFfiSitesIn: methodSource :: String module: module :: String function: function :: String arity: arity :: Object owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
     lines := self
       ffiSitesIn: methodSource
       module: module
@@ -1319,7 +1297,7 @@ sealed typed Object subclass: SystemNavigation
   /// extended) result. Mirrors `collectExtensionSendersFor:into:`, swapping the
   /// per-method scan to the FFI-site query and threading the module/function/
   /// arity target.
-  collectExtensionFfiSitesFor: module :: String function: function :: String arity: arity :: Object into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectExtensionFfiSitesFor: module :: String function: function :: String arity: arity :: Object into: result :: List(Dictionary) -> List(Dictionary) =>
     extEntries := self allExtensionsWithSource
     extEntries
       inject: result
@@ -1383,13 +1361,13 @@ sealed typed Object subclass: SystemNavigation
   /// ## Examples
   /// ```beamtalk
   /// pat := (Regex from: "ifTrue:") unwrap
-  /// SystemNavigation default methodsMatching: pat
+  /// SystemNavigation methodsMatching: pat
   ///   // => [#{#class => Counter, #selector => increment}, ...]
-  /// SystemNavigation default methodsMatching:
+  /// SystemNavigation methodsMatching:
   ///   (Regex from: "xyzzyNeverAppearsInAnyMethodBody") unwrap
   ///   // => []
   /// ```
-  methodsMatching: aRegex :: Regex -> List(Dictionary) =>
+  class sealed methodsMatching: aRegex :: Regex -> List(Dictionary) =>
     (aRegex isKindOf: Regex) ifFalse: [
       self error: "SystemNavigation methodsMatching: requires a Regex argument"
     ]
@@ -1420,7 +1398,7 @@ sealed typed Object subclass: SystemNavigation
   /// with no source (nil) — or classes whose method lookup is unsupported
   /// (e.g. metaclass-shaped registry entries; see `sendersOf:`) — are
   /// skipped silently.
-  collectMethodsMatching: aRegex :: Regex in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectMethodsMatching: aRegex :: Regex in: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -1483,14 +1461,14 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default selectorsMatching: "append"
+  /// SystemNavigation selectorsMatching: "append"
   ///   // => [#appendBinary:contents:, ...]
-  /// SystemNavigation default selectorsMatching: "AppEnd"
+  /// SystemNavigation selectorsMatching: "AppEnd"
   ///   // => [#appendBinary:contents:, ...]   (case-insensitive)
-  /// SystemNavigation default selectorsMatching: "noSelectorContainsThisXyzzy"
+  /// SystemNavigation selectorsMatching: "noSelectorContainsThisXyzzy"
   ///   // => []
   /// ```
-  selectorsMatching: aPattern :: String -> List(Symbol) =>
+  class sealed selectorsMatching: aPattern :: String -> List(Symbol) =>
     (aPattern isKindOf: String) ifFalse: [
       self error: "SystemNavigation selectorsMatching: requires a String argument"
     ]
@@ -1540,7 +1518,7 @@ sealed typed Object subclass: SystemNavigation
   /// keeps a registry-shaped value that lacks a name from aborting the walk
   /// — it is silently skipped for extension lookups instead. (Every real
   /// `Behaviour` answers `name`; the guard is purely defensive.)
-  selectorsForClass: aClass :: Behaviour -> List(Symbol) =>
+  class sealed selectorsForClass: aClass :: Behaviour -> List(Symbol) =>
     instance := aClass methods
     classSide := aClass class methods
     instance ++ classSide ++ (self extensionSelectorsForBothSides: aClass)
@@ -1555,7 +1533,7 @@ sealed typed Object subclass: SystemNavigation
   /// The `respondsTo: #name` guard keeps a registry-shaped value that lacks a
   /// name from aborting the walk — it contributes no extension selectors
   /// instead. (Every real `Behaviour` answers `name`; the guard is defensive.)
-  extensionSelectorsForBothSides: aClass :: Behaviour -> List(Symbol) =>
+  class sealed extensionSelectorsForBothSides: aClass :: Behaviour -> List(Symbol) =>
     (aClass respondsTo: #name) ifFalse: [^List new]
     className := aClass name
     instanceExtensions := self extensionSelectorsFor: className
@@ -1576,7 +1554,7 @@ sealed typed Object subclass: SystemNavigation
   /// BT-2254: `Erlang beamtalk_extensions list:` is specced as a list of
   /// `{atom(), atom()}` tuples, so the per-entry `entry at: 1` infers `Symbol`
   /// directly — no `@expect type` suppression needed.
-  extensionSelectorsFor: classTag :: Symbol -> List(Symbol) =>
+  class sealed extensionSelectorsFor: classTag :: Symbol -> List(Symbol) =>
     rawEntries := self extensionEntriesFor: classTag
     rawEntries collect: [:entry | entry at: 1]
 
@@ -1600,7 +1578,7 @@ sealed typed Object subclass: SystemNavigation
   /// is a known instance-side class name (e.g. `#Integer`), or the raw
   /// atom (e.g. `#'String class'`) when no class lookup succeeds (e.g. for
   /// metaclass-tagged class-side extensions).
-  collectExtensionSendersFor: aSelector :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectExtensionSendersFor: aSelector :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
     extEntries := self allExtensionsWithSource
     extEntries
       inject: result
@@ -1625,7 +1603,7 @@ sealed typed Object subclass: SystemNavigation
   /// source (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended)
   /// result. Mirrors `collectExtensionSendersFor:into:`, swapping the
   /// per-method scan to `findReferencesToIn:class:`.
-  collectExtensionReferencesFor: targetName :: String into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectExtensionReferencesFor: targetName :: String into: result :: List(Dictionary) -> List(Dictionary) =>
     extEntries := self allExtensionsWithSource
     extEntries
       inject: result
@@ -1651,7 +1629,7 @@ sealed typed Object subclass: SystemNavigation
   /// (possibly extended) result. Mirrors `collectMethodsMatching:in:into:`
   /// but iterates the extension sources table rather than a class's
   /// instance method dictionary.
-  collectExtensionMethodsMatching: aRegex :: Regex into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectExtensionMethodsMatching: aRegex :: Regex into: result :: List(Dictionary) -> List(Dictionary) =>
     extEntries := self allExtensionsWithSource
     extEntries
       inject: result
@@ -1752,10 +1730,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default unimplementedSelectors
+  /// SystemNavigation unimplementedSelectors
   ///   // => [#{#selector => #printOnStream:, #sites => [#{#class => Foo, #selector => bar, #line => 3}]}]
   /// ```
-  unimplementedSelectors -> List(Dictionary) =>
+  class sealed unimplementedSelectors -> List(Dictionary) =>
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // defined-selector rows / send sites (stale rows already dropped) plus the
     // loaded-but-unindexed classes that still need a source scan.
@@ -1831,7 +1809,7 @@ sealed typed Object subclass: SystemNavigation
   /// sent-set `_bt` reads each compute their own miss partition, so a class
   /// missing from the index can appear in both — the source-scan fallback must
   /// visit it exactly once.
-  unionFallbackClasses: a :: List(Symbol) with: b :: List(Symbol) -> List(Symbol) =>
+  class sealed unionFallbackClasses: a :: List(Symbol) with: b :: List(Symbol) -> List(Symbol) =>
     (a ++ b) unique
 
   /// Add each indexed `defined_selectors_bt` row's `#selector` Symbol to the Set
@@ -1839,7 +1817,7 @@ sealed typed Object subclass: SystemNavigation
   /// return anchors element-type inference for the defined-set accumulator
   /// (mirrors `indexedSelectorsFrom:into:`), keeping `acc` strongly typed rather
   /// than `Dynamic` (BT-2303).
-  definedSetFromIndex: definedRows :: List(Dictionary) into: result :: Set(Symbol) -> Set(Symbol) =>
+  class sealed definedSetFromIndex: definedRows :: List(Dictionary) into: result :: Set(Symbol) -> Set(Symbol) =>
     definedRows inject: result into: [:acc :row | acc add: (row at: #selector)]
 
   /// Build the set of scope keys (`ownerName` for an instance-side scope,
@@ -1856,7 +1834,7 @@ sealed typed Object subclass: SystemNavigation
   /// owner + side keeps the side-specific semantics of the source-scan path:
   /// instance-side DNU suppresses instance-side sends, class-side DNU suppresses
   /// class-side sends.
-  dnuHandlerScopesFrom: definedRows :: List(Dictionary) fallback: fallbackScope :: List(Behaviour) into: result :: Set(String) -> Set(String) =>
+  class sealed dnuHandlerScopesFrom: definedRows :: List(Dictionary) fallback: fallbackScope :: List(Behaviour) into: result :: Set(String) -> Set(String) =>
     fromIndex := definedRows
       inject: result
       into: [:acc :row |
@@ -1881,7 +1859,7 @@ sealed typed Object subclass: SystemNavigation
   /// String for an instance-side scope, suffixed with `" class"` for a
   /// class-side scope. Matches `dnuScopeKeyFor:` so an indexed scope and a
   /// `Behaviour` scope for the same class+side produce the same key.
-  dnuScopeKeyForOwner: ownerTag :: Symbol classSide: isClassSide :: Boolean -> String =>
+  class sealed dnuScopeKeyForOwner: ownerTag :: Symbol classSide: isClassSide :: Boolean -> String =>
     base := ownerTag asString
     isClassSide ifTrue: [base ++ " class"] ifFalse: [base]
 
@@ -1889,7 +1867,8 @@ sealed typed Object subclass: SystemNavigation
   /// carries the `" class"` suffix for a metaclass (so `Counter class name` is
   /// `"Counter class"`). The fallback-scope counterpart of
   /// `dnuScopeKeyForOwner:classSide:`.
-  dnuScopeKeyFor: aScope :: Behaviour -> String => aScope name asString
+  class sealed dnuScopeKeyFor: aScope :: Behaviour -> String =>
+    aScope name asString
 
   /// Group indexed send rows (`beamtalk_xref:all_sends_bt/0`) by their sent
   /// selector into `result` (`selector -> [sites]`), dropping any send that is
@@ -1903,7 +1882,7 @@ sealed typed Object subclass: SystemNavigation
   /// in `excluded`, when `#recv` is `#erlang_ffi`, or when its scope handles DNU
   /// and `#recv` is `#self` / `#super` — the same three exclusions `recordSend:…`
   /// applies on the source-scan path.
-  groupIndexedSends: sendRows :: List(Dictionary) excluding: excluded :: Set(Symbol) dnuScopes: dnuScopes :: Set(String) into: result :: Dictionary -> Dictionary =>
+  class sealed groupIndexedSends: sendRows :: List(Dictionary) excluding: excluded :: Set(Symbol) dnuScopes: dnuScopes :: Set(String) into: result :: Dictionary -> Dictionary =>
     sendRows
       inject: result
       into: [:acc :row |
@@ -1937,7 +1916,7 @@ sealed typed Object subclass: SystemNavigation
   /// (Currently empty: the stdlib comes back clean after the structural
   /// `doesNotUnderstand:` and `perform:` exclusions. Entries are added here
   /// with a comment explaining the runtime mechanism that provides them.)
-  runtimeProvidedSelectors -> List(Symbol) => #()
+  class sealed runtimeProvidedSelectors -> List(Symbol) => #()
 
   /// Append unimplemented-send sites found in any method of `aScope` (a class
   /// or metaclass) to the grouping Dictionary `result`, dropping any send whose
@@ -1950,7 +1929,7 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// Guards the `>>` send with `respondsTo:` so a scope for which `>>` is not
   /// yet supported is skipped rather than aborting the whole walk.
-  collectAllSendsIn: aScope :: Behaviour excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+  class sealed collectAllSendsIn: aScope :: Behaviour excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
     // The DNU override selector is `doesNotUnderstand:args:` (selector + args),
     // matching the stdlib protocol (ProtoObject, Erlang, ErlangModule,
     // TimeoutProxy). A class that defines it can interpret arbitrary selectors.
@@ -1988,7 +1967,7 @@ sealed typed Object subclass: SystemNavigation
   /// - `sentSel` is in `excluded` (already defined, or runtime-provided), or
   /// - the owner defines `doesNotUnderstand:` and the receiver is `#self` /
   ///   `#super` (the coarse DNU heuristic — see `unimplementedSelectors`).
-  appendAllSendsIn: methodSource :: String owner: ownerClass :: Object methodSelector: methodSel :: Symbol handlesDnu: handlesDnu :: Boolean excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+  class sealed appendAllSendsIn: methodSource :: String owner: ownerClass :: Object methodSelector: methodSel :: Symbol handlesDnu: handlesDnu :: Boolean excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
     sends := self allSendsIn: methodSource
     sends
       inject: result
@@ -2014,7 +1993,7 @@ sealed typed Object subclass: SystemNavigation
   /// Internal helper for `appendAllSendsIn:...`. Splitting the per-send
   /// decision out keeps the surrounding `inject:into:` body a single
   /// expression.
-  recordSend: sentSel :: Symbol line: line :: Integer recv: recv :: Symbol owner: ownerClass :: Object methodSelector: methodSel :: Symbol handlesDnu: handlesDnu :: Boolean excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+  class sealed recordSend: sentSel :: Symbol line: line :: Integer recv: recv :: Symbol owner: ownerClass :: Object methodSelector: methodSel :: Symbol handlesDnu: handlesDnu :: Boolean excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
     // Erlang FFI sends (`Erlang module …` / `(Erlang module) selector: …`) are
     // Erlang function calls routed through `ErlangModule`'s `doesNotUnderstand:`,
     // not Beamtalk message sends — neither the module name nor the FFI function
@@ -2046,7 +2025,7 @@ sealed typed Object subclass: SystemNavigation
   /// return as a raw atom (not a queryable scope). Erring toward reporting is
   /// safe — extension bodies are rare and the user can add a documented
   /// exclusion if a real false positive ever appears.
-  collectExtensionAllSendsExcluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
+  class sealed collectExtensionAllSendsExcluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
     extEntries := self allExtensionsWithSource
     extEntries
       inject: result
@@ -2093,7 +2072,7 @@ sealed typed Object subclass: SystemNavigation
   /// Return type is intentionally untyped (Dynamic) — the result is a class
   /// object, a metaclass object, or (defensively) the raw atom, which have
   /// no shared supertype in the declared type system.
-  resolveExtensionClass: classTag :: Symbol -> Object =>
+  class sealed resolveExtensionClass: classTag :: Symbol -> Object =>
     resolved := self findClass: classTag
     resolved isNil ifTrue: [classTag] ifFalse: [resolved]
 
@@ -2192,10 +2171,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SystemNavigation default unusedSelectors
+  /// SystemNavigation unusedSelectors
   ///   // => [#{#class => Foo, #selector => #neverCalledHelper}, ...]
   /// ```
-  unusedSelectors -> List(Dictionary) =>
+  class sealed unusedSelectors -> List(Dictionary) =>
     classList := self allClasses
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // sent selectors (stale rows + Erlang-FFI sends already dropped) plus the
@@ -2242,7 +2221,7 @@ sealed typed Object subclass: SystemNavigation
   /// `-> Set(Symbol)` return anchors element-type inference for the sent-set
   /// accumulator (mirrors `definedSetFromIndex:into:`), keeping `acc` strongly
   /// typed rather than `Dynamic` (BT-2303).
-  sentSetFromIndex: indexedSent :: List(Symbol) into: result :: Set(Symbol) -> Set(Symbol) =>
+  class sealed sentSetFromIndex: indexedSent :: List(Symbol) into: result :: Set(Symbol) -> Set(Symbol) =>
     indexedSent inject: result into: [:acc :sel | acc add: sel]
 
   /// Selectors the runtime / framework invokes WITHOUT a source-visible Beamtalk
@@ -2268,7 +2247,7 @@ sealed typed Object subclass: SystemNavigation
   ///   inspect` opens an `Inspector` cursor, which the REPL/MCP surfaces render.
   /// - `hash` — invoked by hashed collections (Set / Dictionary) when storing
   ///   or comparing elements, not via a source-level send.
-  runtimeCalledSelectors -> List(Symbol) =>
+  class sealed runtimeCalledSelectors -> List(Symbol) =>
     #(#initialize, #terminate:, #doesNotUnderstand:args:, #printString, #displayString, #inspect, #hash)
 
   /// Add every selector *sent* in any method of `aScope` (a class or metaclass)
@@ -2284,7 +2263,7 @@ sealed typed Object subclass: SystemNavigation
   /// supported is skipped rather than aborting the whole walk, and guards a `nil`
   /// `method source` (a sourceless method, e.g. a primitive) so
   /// `addSentSelectorsIn:` always receives a String.
-  collectSentSelectorsIn: aScope :: Behaviour into: result :: Set(Symbol) -> Set(Symbol) =>
+  class sealed collectSentSelectorsIn: aScope :: Behaviour into: result :: Set(Symbol) -> Set(Symbol) =>
     aScope methods
       inject: result
       into: [:acc :methodSel |
@@ -2309,7 +2288,7 @@ sealed typed Object subclass: SystemNavigation
   /// expression. For each send tuple `{selector, line, recv}` from `allSendsIn:`,
   /// the selector is added unless the receiver kind is `#erlang_ffi` (an Erlang
   /// call, not a Beamtalk send — see `unusedSelectors`).
-  addSentSelectorsIn: methodSource :: String into: result :: Set(Symbol) -> Set(Symbol) =>
+  class sealed addSentSelectorsIn: methodSource :: String into: result :: Set(Symbol) -> Set(Symbol) =>
     sends := self allSendsIn: methodSource
     sends
       inject: result
@@ -2328,7 +2307,7 @@ sealed typed Object subclass: SystemNavigation
   /// compiler for EVERY send. Extension bodies count toward marking ordinary
   /// methods as used even though extension methods themselves are not candidates
   /// for the unused report.
-  collectExtensionSentSelectorsInto: result :: Set(Symbol) -> Set(Symbol) =>
+  class sealed collectExtensionSentSelectorsInto: result :: Set(Symbol) -> Set(Symbol) =>
     extEntries := self allExtensionsWithSource
     extEntries
       inject: result
@@ -2356,7 +2335,7 @@ sealed typed Object subclass: SystemNavigation
   /// matters: `TestCase` itself defines `setUp` / `tearDown`, which the runner
   /// invokes reflectively just like on a subclass, so they must be excluded on
   /// the base class too.
-  collectUnusedFor: aScope :: Behaviour owner: owner :: Object sent: sent :: Set(Symbol) excluded: excluded :: Set(Symbol) into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed collectUnusedFor: aScope :: Behaviour owner: owner :: Object sent: sent :: Set(Symbol) excluded: excluded :: Set(Symbol) into: result :: List(Dictionary) -> List(Dictionary) =>
     isTestCase := (aScope respondsTo: #includesBehaviour:) and: [
       aScope includesBehaviour: TestCase
     ]
@@ -2382,7 +2361,7 @@ sealed typed Object subclass: SystemNavigation
   /// single expression. A selector is excluded when it is sent somewhere, is a
   /// runtime-called override, is a TestCase test-runner method, or is a
   /// primitive / intrinsic (see `unusedSelectors`).
-  recordUnused: methodSel :: Symbol scope: aScope :: Behaviour owner: owner :: Object isTestCase: isTestCase :: Boolean sent: sent :: Set(Symbol) excluded: excluded :: Set(Symbol) into: result :: List(Dictionary) -> List(Dictionary) =>
+  class sealed recordUnused: methodSel :: Symbol scope: aScope :: Behaviour owner: owner :: Object isTestCase: isTestCase :: Boolean sent: sent :: Set(Symbol) excluded: excluded :: Set(Symbol) into: result :: List(Dictionary) -> List(Dictionary) =>
     skipForTest := isTestCase and: [self isTestRunnerSelector: methodSel]
     ((sent includes: methodSel)
       or: [
@@ -2397,7 +2376,7 @@ sealed typed Object subclass: SystemNavigation
   /// source send: `setUp`, `tearDown`, or any selector whose name starts with
   /// `test`. Only meaningful for selectors in the TestCase hierarchy — the caller
   /// gates this behind `includesBehaviour: TestCase`.
-  isTestRunnerSelector: aSelector :: Symbol -> Boolean =>
+  class sealed isTestRunnerSelector: aSelector :: Symbol -> Boolean =>
     name := aSelector asString
     (name == "setUp") or: [(name == "tearDown") or: [name startsWith: "test"]]
 
@@ -2410,7 +2389,7 @@ sealed typed Object subclass: SystemNavigation
   /// Guards the `>>` send with `respondsTo:` (a scope without `>>` support is
   /// treated as primitive — its body cannot be inspected so it is conservatively
   /// excluded rather than flagged).
-  isPrimitiveMethod: methodSel :: Symbol in: aScope :: Behaviour -> Boolean =>
+  class sealed isPrimitiveMethod: methodSel :: Symbol in: aScope :: Behaviour -> Boolean =>
     (aScope respondsTo: #'>>') ifFalse: [^true]
     method := aScope >> methodSel
     method isNil ifTrue: [^true]
@@ -2435,59 +2414,60 @@ sealed typed Object subclass: SystemNavigation
   // are wrapped by default at the FFI boundary (ADR 0101 Part 2).
 
   /// Indexed/fallback partition of implementor rows for `aSelector` (ADR 0087).
-  internal xrefImplementorsOf: aSelector :: Symbol -> Dictionary =>
+  class internal sealed xrefImplementorsOf: aSelector :: Symbol -> Dictionary =>
     (Erlang beamtalk_xref) implementors_of_bt: aSelector
 
   /// Indexed/fallback partition of sender call sites for `aSelector` (ADR 0087).
-  internal xrefSendersOf: aSelector :: Symbol -> Dictionary =>
+  class internal sealed xrefSendersOf: aSelector :: Symbol -> Dictionary =>
     (Erlang beamtalk_xref) senders_of_bt: aSelector
 
   /// Indexed/fallback partition of reference sites for `aSymbol` (ADR 0087).
-  internal xrefReferencesTo: aSymbol :: Symbol -> Dictionary =>
+  class internal sealed xrefReferencesTo: aSymbol :: Symbol -> Dictionary =>
     (Erlang beamtalk_xref) references_to_bt: aSymbol
 
   /// Indexed/fallback partition of defined-selector rows (ADR 0087).
-  internal xrefDefinedSelectors -> Dictionary =>
+  class internal sealed xrefDefinedSelectors -> Dictionary =>
     (Erlang beamtalk_xref) defined_selectors_bt
 
   /// Indexed/fallback partition of every send site (ADR 0087).
-  internal xrefAllSends -> Dictionary => (Erlang beamtalk_xref) all_sends_bt
+  class internal sealed xrefAllSends -> Dictionary =>
+    (Erlang beamtalk_xref) all_sends_bt
 
   /// Indexed/fallback partition of the distinct sent-selector set (ADR 0087).
-  internal xrefAllSentSelectors -> Dictionary =>
+  class internal sealed xrefAllSentSelectors -> Dictionary =>
     (Erlang beamtalk_xref) all_sent_selectors_bt
 
   /// Resolve a class-name tag to the class/metaclass object, or `nil`.
-  internal findClass: aName :: Object -> Object =>
+  class internal sealed findClass: aName :: Object -> Object =>
     (Erlang beamtalk_interface) findClass: aName
 
   /// Every message send (with line + receiver tag) in `aSource`.
-  internal allSendsIn: aSource :: String -> List(Tuple) =>
+  class internal sealed allSendsIn: aSource :: String -> List(Tuple) =>
     (Erlang beamtalk_interface) allSendsIn: aSource
 
   /// Line numbers of `aSelector` sends within `aSource`.
-  internal sendersIn: aSource :: String | Binary selector: aSelector :: Symbol -> List(Integer) =>
+  class internal sealed sendersIn: aSource :: String | Binary selector: aSelector :: Symbol -> List(Integer) =>
     (Erlang beamtalk_interface) findSendersIn: aSource selector: aSelector
 
   /// Line numbers of references to class `aName` within `aSource`.
-  internal referencesIn: aSource :: String | Binary class: aName :: String -> List(Integer) =>
+  class internal sealed referencesIn: aSource :: String | Binary class: aName :: String -> List(Integer) =>
     (Erlang beamtalk_interface) findReferencesToIn: aSource class: aName
 
   /// Announcement emission sites (line + resolved class name) in `aSource`.
-  internal announceSitesIn: aSource :: String -> List(Tuple) =>
+  class internal sealed announceSitesIn: aSource :: String -> List(Tuple) =>
     (Erlang beamtalk_interface) announceSitesIn: aSource
 
   /// Line numbers reading field `aSym` within `aSource`.
-  internal fieldReadersIn: aSource :: String field: aSym :: Symbol -> List(Integer) =>
+  class internal sealed fieldReadersIn: aSource :: String field: aSym :: Symbol -> List(Integer) =>
     (Erlang beamtalk_interface) findFieldReadersIn: aSource field: aSym
 
   /// Line numbers writing field `aSym` within `aSource`.
-  internal fieldWritersIn: aSource :: String field: aSym :: Symbol -> List(Integer) =>
+  class internal sealed fieldWritersIn: aSource :: String field: aSym :: Symbol -> List(Integer) =>
     (Erlang beamtalk_interface) findFieldWritersIn: aSource field: aSym
 
   /// Line numbers of FFI call sites matching `aModule`:`aFunction`/`anArity`
   /// within `aSource`.
-  internal ffiSitesIn: aSource :: String | Binary module: aModule :: String function: aFunction :: String arity: anArity :: Object -> List(Integer) =>
+  class internal sealed ffiSitesIn: aSource :: String | Binary module: aModule :: String function: aFunction :: String arity: anArity :: Object -> List(Integer) =>
     (Erlang beamtalk_interface)
       ffiSitesIn: aSource
       module: aModule
@@ -2495,11 +2475,11 @@ sealed typed Object subclass: SystemNavigation
       arity: anArity
 
   /// Package owners (atoms) of extension methods on class `aName`.
-  internal extensionOwnersOf: aName :: Symbol -> List(Symbol) =>
+  class internal sealed extensionOwnersOf: aName :: Symbol -> List(Symbol) =>
     (Erlang beamtalk_extensions) extenders_of: aName
 
   /// `{extendedClass, selector}` pairs contributed by owner `anOwner`.
-  internal extensionPairsBy: anOwner :: Symbol -> List(Tuple) =>
+  class internal sealed extensionPairsBy: anOwner :: Symbol -> List(Tuple) =>
     (Erlang beamtalk_extensions) extensions_by: anOwner
 
   /// Every registered extension `{classTag, selector, source}` entry.
@@ -2513,13 +2493,13 @@ sealed typed Object subclass: SystemNavigation
   /// every consumer re-asserts the invariant by binding the source through a
   /// typed local: `extSource :: String := entry at: 3`. If a non-String third
   /// element ever appears, that typed binding fails loudly rather than silently.
-  internal allExtensionsWithSource -> List(Tuple) =>
+  class internal sealed allExtensionsWithSource -> List(Tuple) =>
     (Erlang beamtalk_extensions) listAllWithSource
 
   /// `{selector, owner}` entries registered against class tag `aTag`.
-  internal extensionEntriesFor: aTag :: Symbol -> List(Tuple) =>
+  class internal sealed extensionEntriesFor: aTag :: Symbol -> List(Tuple) =>
     (Erlang beamtalk_extensions) list: aTag
 
   /// The metaclass display tag (`Foo` -> `Foo class`) for `aName`.
-  internal classObjectTag: aName :: Symbol -> Symbol =>
+  class internal sealed classObjectTag: aName :: Symbol -> Symbol =>
     (Erlang beamtalk_class_registry) class_object_tag: aName

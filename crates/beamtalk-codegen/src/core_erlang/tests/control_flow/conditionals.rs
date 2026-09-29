@@ -265,3 +265,40 @@ fn test_local_assign_field_write_at_flat_top_level_threads_state() {
     );
     assert_compiles_through_erlc("bt@toplevellocalassignfieldwrite", &code);
 }
+
+#[test]
+fn test_pure_class_method_self_send_mints_no_class_vars_rebind() {
+    // ADR 0129 (BT-3632): a callee that provably never writes a class variable
+    // hands back the caller's own `ClassVars`, so a same-class self-send to it
+    // rebinds nothing — in a conditional arm, a fold body, or at the top level.
+    // Such a send used to mint `ClassVarsN` versions that a conditional arm's
+    // own ThreadedIr frame never produced (`NonLinearVersion`/`UnboundVersion`).
+    let src = concat!(
+        "sealed Object subclass: StatelessFacade\n",
+        "  class sealed step: n :: Integer -> Integer => n + 1\n\n",
+        "  class sealed pick: n :: Integer -> Integer =>\n",
+        "    seen := self step: n\n",
+        "    seen > 2\n",
+        "      ifTrue: [self step: n]\n",
+        "      ifFalse: [self step: seen]\n",
+        "\n",
+        "  class sealed fold: n :: Integer -> Integer =>\n",
+        "    #(1 2) inject: n into: [:acc :x |\n",
+        "      acc > 2\n",
+        "        ifTrue: [self step: acc]\n",
+        "        ifFalse: [acc]\n",
+        "    ]\n",
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@statelessfacade").with_workspace_mode(true),
+    )
+    .expect("pure class-method self-sends in a conditional arm and a fold must compile");
+    assert!(
+        !code.contains("ClassVars1"),
+        "a pure self-send must not mint a ClassVars rebind. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@statelessfacade", &code);
+}
