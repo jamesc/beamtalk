@@ -1281,6 +1281,12 @@ impl CoreErlangGenerator {
                 let tv = self.generate_class_method_self_send(selector, arguments)?;
                 return Ok(Some(self.close_threaded_value_doc(tv)));
             }
+            // ADR 0129 §7: only REPL top-level expressions can name a session
+            // binding; everything else resolves the name as a class.
+            if self.context == CodeGenContext::Repl {
+                let doc = self.generate_repl_bound_class_send(&name.name, selector, arguments)?;
+                return Ok(Some(doc));
+            }
             // ADR 0070 Phase 2: Class method calls always go through the class
             // registry using the short class name. The package qualifier doesn't
             // affect dispatch — it's used for module name resolution in spawns and
@@ -2767,6 +2773,93 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&preamble, call_doc, "MethodLookup"))
     }
 
+    /// Generates a class-side send at REPL top level, where the receiver name may
+    /// be a session binding (`Workspace bind:as:`) rather than a class
+    /// (ADR 0129 §7: session locals, then `bind:as:` entries, then the class
+    /// registry).
+    ///
+    /// Only reached for [`CodeGenContext::Repl`]; methods and batch-compiled
+    /// code never consult the session map and go straight through
+    /// [`Self::generate_class_method_call`]. There is no singleton step: the
+    /// system facades are ordinary classes (ADR 0129).
+    ///
+    /// ```erlang
+    /// let Lookup = call 'maps':'find'('Name', State) in
+    /// case Lookup of
+    ///   <{'ok', Bound}> -> call 'beamtalk_message_dispatch':'send'(Bound, Sel, Args)
+    ///   <'error'>       -> %% direct call or class_send, as generate_class_method_call
+    /// end
+    /// ```
+    fn generate_repl_bound_class_send(
+        &mut self,
+        class_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        // The bound-value branch dispatches to an instance, so it uses the raw
+        // selector; the class fallback uses the class-method mangled selector.
+        let raw = selector.name().to_string();
+        let instance_selector = super::selector_mangler::safe_atom_name(&raw);
+        let bound_var = self.fresh_var("BindingVal");
+        let state_var = self.current_state_var();
+        let lookup_var = self.fresh_temp_var("Lookup");
+
+        // Receiver first, then args: bind the session lookup before the arg
+        // preamble, and bind args to temps so each is evaluated exactly once.
+        let (arg_prelude, arg_refs) = self.thread_args_bound(arguments, "BindArg")?;
+        let args_doc = Self::join_docs_with_commas(arg_refs);
+
+        let class_fallback: Document<'static> =
+            if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw) {
+                let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
+                Self::direct_class_method_call_doc(
+                    module_name,
+                    safe_fn,
+                    args_doc.clone(),
+                    arguments.is_empty(),
+                )
+            } else {
+                self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
+            };
+
+        let lookup_binding = docvec![
+            "let ",
+            leaf::var(lookup_var.clone()),
+            " = call 'maps':'find'(",
+            leaf::atom(class_name.to_string()),
+            ", ",
+            leaf::var(state_var),
+            ") in ",
+        ];
+        let case_doc = docvec![
+            "case ",
+            leaf::var(lookup_var),
+            " of ",
+            "<{'ok', ",
+            leaf::var(bound_var.clone()),
+            "}> when 'true' -> ",
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(bound_var),
+            ", ",
+            leaf::atom(instance_selector),
+            ", [",
+            args_doc,
+            "]) ",
+            "<'error'> when 'true' -> ",
+            class_fallback,
+            " end"
+        ];
+
+        // ADR 0118 phase 5b: thread the lookup ahead of the arg prelude, then
+        // close (this returns a bare `Document`).
+        let mut prelude = vec![ThreadedStmt::Statement(
+            lookup_binding,
+            beamtalk_core::source_analysis::Span::default(),
+        )];
+        prelude.extend(arg_prelude);
+        Ok(self.close_prelude(&prelude, case_doc, "BindClassRes"))
+    }
+
     /// Generates a class-level method call.
     ///
     /// For sealed classes with no class variables, generates a direct
@@ -2870,6 +2963,27 @@ impl CoreErlangGenerator {
             comma,
             args_doc,
             ")"
+        ]
+    }
+
+    /// Generates the `gen_server` `class_send` fallback for binding-aware dispatch.
+    ///
+    /// Used when a class method is not eligible for direct call optimization.
+    fn generate_class_send_fallback(
+        &mut self,
+        class_name: &str,
+        raw_selector: &str,
+        args_doc: Document<'static>,
+    ) -> Document<'static> {
+        let class_selector = super::selector_mangler::safe_class_method_selector(raw_selector);
+        let class_pid_var = self.fresh_var("ClassPid");
+        docvec![
+            "let ",
+            leaf::var(class_pid_var.clone()),
+            " = call 'beamtalk_class_registry':'whereis_class'(",
+            leaf::atom(class_name.to_string()),
+            ") in ",
+            Self::class_send_call_doc(&class_pid_var, class_selector, args_doc),
         ]
     }
 

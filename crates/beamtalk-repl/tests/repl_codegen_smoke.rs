@@ -1016,15 +1016,15 @@ fn test_class_method_call_generation() {
 
     let code = generate_repl_expression(&expr, "repl_eval").expect("codegen should succeed");
 
-    // ADR 0129 §10: class-side sends resolve identically in the REPL and in
-    // batch-compiled code — no session-binding lookup, just the class registry.
+    // ADR 0129 §7: REPL sends check session bindings, then the class registry
+    // via class_send. There is no singleton step any more.
     assert!(
-        code.contains("whereis_class") && code.contains("class_send"),
-        "Beamtalk should dispatch via the class registry and class_send. Got:\n{code}"
+        code.contains("maps':'find") && code.contains("class_send"),
+        "Beamtalk should check bindings then class_send. Got:\n{code}"
     );
     assert!(
-        !code.contains("maps':'find") && !code.contains("resolve_singleton_instance"),
-        "Beamtalk send should not consult session bindings. Got:\n{code}"
+        !code.contains("resolve_singleton_instance"),
+        "Beamtalk send should not consult the singleton registry. Got:\n{code}"
     );
     assert!(
         !code.contains("persistent_term"),
@@ -1047,14 +1047,10 @@ fn test_class_method_call_generation() {
     let code2 = generate_repl_expression(&expr2, "repl_eval2")
         .expect("codegen should succeed for non-binding class");
 
-    // ADR 0129 §10: REPL class-side sends go through the class registry only.
+    // ADR 0129 §7: REPL class sends check session bindings, then class_send.
     assert!(
-        code2.contains("whereis_class") && code2.contains("class_send"),
-        "Class send should use the class registry then class_send. Got:\n{code2}"
-    );
-    assert!(
-        !code2.contains("maps':'find"),
-        "Class send should not consult session bindings. Got:\n{code2}"
+        code2.contains("maps':'find") && code2.contains("class_send"),
+        "Class send should check bindings then class_send. Got:\n{code2}"
     );
     assert!(
         !code2.contains("persistent_term"),
@@ -1349,16 +1345,20 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // ADR 0129 §10: a REPL class reference resolves through the class registry
-    // exactly as batch-compiled code does — no session-locals lookup and no
-    // runtime resolver.
+    // ADR 0129 §7: a REPL class reference checks the session map first (a
+    // binding shadows the class), then the class registry inline — no runtime
+    // resolver.
+    assert!(
+        code.contains("call 'maps':'find'('Point', "),
+        "Should check locals map for the class name first. Got:\n{code}"
+    );
     assert!(
         code.contains("call 'beamtalk_class_registry':'whereis_class'('Point')"),
         "Should look the class up in the class registry. Got:\n{code}"
     );
     assert!(
-        !code.contains("maps':'find") && !code.contains("resolve_class_reference"),
-        "Should not consult session bindings or the runtime resolver. Got:\n{code}"
+        !code.contains("resolve_class_reference"),
+        "Should not delegate to the runtime resolver. Got:\n{code}"
     );
     assert!(
         code.contains("'Point class'"),
@@ -1398,6 +1398,10 @@ fn test_standalone_class_reference_validates_undefined_classes() {
 
     // ADR 0129 §10: an undefined class raises class_not_found from the
     // registry lookup itself, identically to batch-compiled code.
+    assert!(
+        code.contains("call 'maps':'find'('NonExistentClass', "),
+        "Should check locals map for the class name first. Got:\n{code}"
+    );
     assert!(
         code.contains("call 'beamtalk_class_registry':'whereis_class'('NonExistentClass')"),
         "Should look the class up in the class registry. Got:\n{code}"

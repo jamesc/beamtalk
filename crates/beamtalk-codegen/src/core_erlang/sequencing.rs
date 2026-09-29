@@ -399,6 +399,46 @@ impl CoreErlangGenerator {
         Ok((prelude, Self::join_docs_with_commas(var_docs)))
     }
 
+    /// ADR 0118 phase 5b: the `ThreadedValue`-based replacement
+    /// for the deleted `bind_args_to_temps` — binds every argument
+    /// expression to a fresh temp var via a prelude, returning `(prelude,
+    /// arg_refs)`.
+    ///
+    /// Use this when an argument list is referenced multiple times in the
+    /// generated code (e.g., both branches of an inline `case ... of`), to
+    /// avoid double-evaluating side-effecting arguments.
+    ///
+    /// Unlike [`Self::thread_args`], this always emits let-bindings in the
+    /// prelude (even in the fast path with no state effects) so the
+    /// returned `arg_refs` are pure variable references with no side
+    /// effects.
+    pub(super) fn thread_args_bound(
+        &mut self,
+        arguments: &[Expression],
+        prefix: &str,
+    ) -> Result<(Vec<ThreadedStmt>, Vec<Document<'static>>)> {
+        let frame = self.current_frame();
+        let mut prelude: Vec<ThreadedStmt> = Vec::new();
+        let mut arg_refs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            let span = arg.unwrap_parens().span();
+            // ADR 0118 phase 5b: see `subexpr_needs_prelude`'s doc
+            // comment — an already-precompiled arg is read back via
+            // `expression_doc`, never re-threaded.
+            let value_doc = if self.precompiled_subexprs_contains(arg) {
+                self.expression_doc(arg)?
+            } else {
+                let tv = self.threaded_expression(arg, frame)?;
+                prelude.extend(tv.prelude);
+                self.threaded_value_doc(&tv.value)
+            };
+            let (binding, var) = self.bind_subexpr_to_temp(prefix, value_doc);
+            prelude.push(ThreadedStmt::Statement(binding, span));
+            arg_refs.push(leaf::var(var));
+        }
+        Ok((prelude, arg_refs))
+    }
+
     /// Joins a list of documents into a comma-separated `Document::Vec`.
     pub(super) fn join_docs_with_commas(docs: Vec<Document<'static>>) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(docs.len() * 2);

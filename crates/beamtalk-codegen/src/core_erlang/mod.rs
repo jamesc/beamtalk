@@ -453,8 +453,37 @@ impl CoreErlangGenerator {
             None => class_name.to_string(),
         };
 
-        // Registry-only lookup: class references resolve identically in the REPL,
-        // `beamtalk run`, `beamtalk test` and batch builds (ADR 0129 §10).
+        // ADR 0129 §7: REPL top-level expressions resolve a name through the
+        // session map (locals and `bind:as:` entries) before the class registry.
+        // Methods and batch-compiled code use the registry only, so a missing
+        // class raises `class_not_found` identically everywhere (§10).
+        if self.context == CodeGenContext::Repl {
+            let class_pid_var = self.fresh_var("ClassPid");
+            let class_mod_var = self.fresh_var("ClassModName");
+            let state_var = self.current_state_var();
+            let error_doc = self.class_not_found_error_doc(class_name);
+
+            return Ok(docvec![
+                "case call 'maps':'find'(",
+                leaf::atom(class_name.to_string()),
+                ", ",
+                leaf::var(state_var),
+                ") of ",
+                "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
+                "<'error'> when 'true' -> ",
+                "case call 'beamtalk_class_registry':'whereis_class'(",
+                leaf::atom(class_name.to_string()),
+                ") of ",
+                error_doc,
+                Self::class_object_from_registry_clause(
+                    &class_pid_var,
+                    &class_mod_var,
+                    &display_name
+                ),
+                "end end",
+            ]);
+        }
+
         let class_pid_var = self.fresh_var("ClassPid");
         let class_mod_var = self.fresh_var("ClassModName");
         let error_doc = self.class_not_found_error_doc(class_name);
