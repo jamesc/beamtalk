@@ -132,6 +132,7 @@ concurrently (e.g. during test teardown).
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([
     init/0,
@@ -142,6 +143,7 @@ concurrently (e.g. during test teardown).
     required_methods/1,
     provided_methods/1,
     conforming_classes/1,
+    conforming_class_objects/1,
     protocol_info/1,
     is_protocol/1,
     all_protocol_names/0,
@@ -149,7 +151,8 @@ concurrently (e.g. during test teardown).
     register_uses/2,
     unregister_uses/1,
     used_protocols/1,
-    users_of/1
+    users_of/1,
+    user_class_objects/1
 ]).
 
 -define(PROTOCOL_TABLE, beamtalk_protocol_registry).
@@ -682,6 +685,17 @@ provided_methods(ProtocolName) ->
     end.
 
 -doc """
+Return the classes conforming to a protocol as `Behaviour` class objects.
+
+Backs `Protocol conformingClasses:` (declared `List(Behaviour)`). Same set and
+order as `conforming_classes/1`; see `to_class_objects/1` for how a class that
+is no longer registered is handled.
+""".
+-spec conforming_class_objects(atom()) -> [#beamtalk_object{}].
+conforming_class_objects(ProtocolName) ->
+    to_class_objects(conforming_classes(ProtocolName)).
+
+-doc """
 Return the list of classes conforming to a protocol.
 
 Checks all registered classes against the protocol. Returns a list of
@@ -844,9 +858,33 @@ users_of(ProtocolName) ->
             lists:usort(Classes)
     end.
 
+-doc """
+Return the classes that `uses:` `ProtocolName` as `Behaviour` class objects.
+
+Backs `Protocol usersOf:` / `SystemNavigation usersOf:` (declared
+`List(Behaviour)`). Same set and order as `users_of/1`.
+""".
+-spec user_class_objects(atom()) -> [#beamtalk_object{}].
+user_class_objects(ProtocolName) ->
+    to_class_objects(users_of(ProtocolName)).
+
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
+
+-doc """
+Resolve class-name atoms to class objects. A name whose class is no longer
+registered (removed between the index read and the lookup) is dropped rather
+than leaking `nil`/an atom into a `List(Behaviour)`.
+""".
+-spec to_class_objects([atom()]) -> [#beamtalk_object{}].
+to_class_objects(Names) ->
+    [
+        Obj
+     || Name <- Names,
+        Obj <- [beamtalk_class_registry:resolve_class_object(Name)],
+        Obj =/= undefined
+    ].
 
 -doc "Collect all required instance methods including from extending protocols.".
 -spec all_required_methods(map()) -> [map()].

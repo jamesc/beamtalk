@@ -36,6 +36,7 @@ Return the required method selectors for this protocol.
 
 Called when a protocol class object receives `requiredMethods` as a class
 method. Extracts the protocol name from ClassSelf and queries the registry.
+Returns `Behaviour` class objects (not raw name atoms).
 """.
 -spec class_requiredMethods(#beamtalk_object{}, map()) -> [atom()].
 class_requiredMethods(ClassSelf, _ClassVars) ->
@@ -47,10 +48,11 @@ Return the classes conforming to this protocol.
 
 Called when a protocol class object receives `conformingClasses` as a class
 method. Extracts the protocol name from ClassSelf and queries the registry.
+Returns `Behaviour` class objects (not raw name atoms).
 """.
--spec class_conformingClasses(#beamtalk_object{}, map()) -> [atom()].
+-spec class_conformingClasses(#beamtalk_object{}, map()) -> [#beamtalk_object{}].
 class_conformingClasses(ClassSelf, _ClassVars) ->
-    beamtalk_protocol_registry:conforming_classes(
+    beamtalk_protocol_registry:conforming_class_objects(
         protocol_name_from_class_self(ClassSelf)
     ).
 
