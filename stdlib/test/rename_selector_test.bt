@@ -37,6 +37,16 @@ TestCase subclass: RenameSelectorTest
       self.cls renameSelector: #bump to: #boost
     ] raise: #runtime_error
 
+  // ADR 0127 §11/§12 (BT-3656): `DateTime` composes `uses: Comparable`, so
+  // `between:and:` is a trait provision flattened into the class by real
+  // codegen (which stamps `provenance => protocol` in the xref row). The
+  // single-class rename refuses it rather than rewriting only one user of a
+  // selector whose site closure spans every user of the trait.
+  testRenameRefusesProtocolProvidedSelector =>
+    self should: [
+      DateTime renameSelector: #between:and: to: #withinLow:high:
+    ] raise: #protocol_provided_selector
+
   // Collision refusal (ADR 0114 § Decision): `NewSelector` already locally
   // defined raises rather than silently overwriting.
   testRenameRefusesCollisionWithExistingSelector =>
