@@ -134,10 +134,10 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace globals at: #Transcript     // => the Transcript singleton
-  /// Workspace globals includesKey: #Transcript   // => true
+  /// Workspace bindings at: #Transcript     // => the Transcript singleton
+  /// Workspace bindings includesKey: #Transcript   // => true
   /// ```
-  class sealed globals -> BindingsView => self delegate
+  class sealed bindings -> BindingsView => self delegate
 
   /// Return the calling session as a `Session`, or `nil` outside a REPL eval
   /// (ADR 0081 Phase 5).

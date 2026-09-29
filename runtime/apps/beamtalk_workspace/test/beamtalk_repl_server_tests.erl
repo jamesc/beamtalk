@@ -702,10 +702,10 @@ tcp_multi_request_same_conn_test(Port) ->
 
 %%% bind:as: / unbind: session refresh tests
 
-%% Test: Workspace bind:as: during eval makes the name appear in `Workspace globals`
+%% Test: Workspace bind:as: during eval makes the name appear in `Workspace bindings`
 %% immediately. Regression test: before the fix, it only appeared after reconnect.
 %% (ADR 0081 Phase 6): bind:as: entries are globals — observed via
-%% `Workspace globals keys` (eval), not the removed `bindings` op.
+%% `Workspace bindings keys` (eval), not the removed `bindings` op.
 tcp_bind_as_updates_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     EvalMsg = iolist_to_binary(
@@ -722,7 +722,7 @@ tcp_bind_as_updates_bindings_test(Port) ->
         json:encode(#{
             <<"op">> => <<"eval">>,
             <<"id">> => <<"bau2">>,
-            <<"code">> => <<"Workspace globals keys">>
+            <<"code">> => <<"Workspace bindings keys">>
         })
     ),
     ws_send(Ws, BindMsg),
@@ -742,9 +742,9 @@ tcp_bind_as_updates_bindings_test(Port) ->
     {ok, _} = ws_recv_response(Ws),
     ws_close(Ws).
 
-%% Test: Workspace unbind: during eval removes the name from `Workspace globals`
+%% Test: Workspace unbind: during eval removes the name from `Workspace bindings`
 %% immediately. Regression test: before the fix, it persisted until reconnect.
-%% (ADR 0081 Phase 6): observed via `Workspace globals keys` (eval).
+%% (ADR 0081 Phase 6): observed via `Workspace bindings keys` (eval).
 tcp_unbind_removes_from_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     BindMsg = iolist_to_binary(
@@ -770,7 +770,7 @@ tcp_unbind_removes_from_bindings_test(Port) ->
         json:encode(#{
             <<"op">> => <<"eval">>,
             <<"id">> => <<"urb3">>,
-            <<"code">> => <<"Workspace globals keys">>
+            <<"code">> => <<"Workspace bindings keys">>
         })
     ),
     ws_send(Ws, QueryMsg),

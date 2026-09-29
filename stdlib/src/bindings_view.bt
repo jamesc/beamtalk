@@ -5,7 +5,7 @@
 /// bindings (ADR 0081).
 ///
 /// Returned by `Session current bindings` (the session-locals layer) and by
-/// `Workspace globals` (the workspace singletons + `bind:as:` layer). Both
+/// `Workspace bindings` (the workspace singletons + `bind:as:` layer). Both
 /// share this one type so the two binding layers expose a single, familiar
 /// Dictionary protocol.
 ///
@@ -33,7 +33,7 @@
 /// view includesKey: #x         // => true
 /// view keys                    // => #(#x)
 /// view removeKey: #x           // => nil
-/// Workspace globals at: #Transcript   // => the Transcript singleton
+/// Workspace bindings at: #Transcript   // => the Transcript singleton
 /// ```
 sealed typed Object subclass: BindingsView native: beamtalk_session_primitives
 

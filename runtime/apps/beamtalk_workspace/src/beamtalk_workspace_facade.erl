@@ -33,7 +33,7 @@ snapshot the `Workspace processes` body wraps.
     nodes/0,
     actorAt/1,
     classes/0,
-    globals/0,
+    bindings/0,
     currentSession/0,
     sessions/0,
     sync/0,
@@ -94,11 +94,11 @@ classes() ->
     ok = beamtalk_capability:require_workspace(classes),
     beamtalk_workspace_interface_primitives:classes().
 
--doc "`Workspace globals`, guarded by `require_workspace/1`.".
--spec globals() -> term().
-globals() ->
-    ok = beamtalk_capability:require_workspace(globals),
-    beamtalk_session_primitives:globalsView().
+-doc "`Workspace bindings`, guarded by `require_workspace/1`.".
+-spec bindings() -> term().
+bindings() ->
+    ok = beamtalk_capability:require_workspace(bindings),
+    beamtalk_session_primitives:bindingsView().
 
 -doc "`Workspace currentSession`, guarded by `require_workspace/1`.".
 -spec currentSession() -> term().
