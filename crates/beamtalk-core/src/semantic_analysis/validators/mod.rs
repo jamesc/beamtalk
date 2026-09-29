@@ -78,6 +78,6 @@ pub(crate) use supervision_validators::{
 };
 pub(crate) use unguarded_late_read_validators::check_unguarded_late_reads_in_lifecycle_hooks;
 pub(crate) use visibility_validators::{
-    check_alias_leaked_visibility, check_class_visibility, check_internal_method_shadow,
+    check_alias_leaked_visibility, check_class_visibility, check_provision_visibility, check_internal_method_shadow,
     check_leaked_method_visibility,
 };

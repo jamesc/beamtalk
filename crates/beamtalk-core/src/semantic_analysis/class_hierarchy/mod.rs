@@ -372,6 +372,21 @@ impl ClassHierarchy {
     pub fn get_class(&self, name: &str) -> Option<&ClassInfo> {
         self.classes.get(name)
     }
+    /// Whether the package-qualified reference `package@name` names a class
+    /// other than the one this hierarchy holds under the bare `name` — the
+    /// hierarchy is keyed by bare name, so when two packages both define
+    /// `name` only one is described here. `false` for an unqualified
+    /// reference, an unknown class, or a class without package information.
+    #[must_use]
+    pub fn qualified_ref_names_other_class(&self, name: &str, package: Option<&str>) -> bool {
+        let Some(package) = package else {
+            return false;
+        };
+        self.classes
+            .get(name)
+            .and_then(|c| c.package.as_deref())
+            .is_some_and(|held| held != package)
+    }
     /// Check if a class exists in the hierarchy.
     #[must_use]
     pub fn has_class(&self, name: &str) -> bool {
