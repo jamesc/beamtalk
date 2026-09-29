@@ -1141,9 +1141,36 @@ impl Parser {
                 self.is_fat_arrow_or_return_type(after_param)
             }
             // Keyword method: `at: index =>` or `at: index put: value =>`
-            Some(TokenKind::Keyword(_)) => self.is_keyword_method_at(offset),
+            Some(TokenKind::Keyword(_)) => {
+                self.is_keyword_method_at(offset) && !self.is_uses_line_before_next_method(offset)
+            }
             _ => false,
         }
+    }
+
+    /// BT-3620: `uses: Proto` followed on the next line by a keyword method
+    /// (`foo: x =>`) is lexically indistinguishable from the two-part keyword
+    /// method header `uses: Proto foo: x =>`. A `uses:`-led header is treated
+    /// as a `uses:` line (not a method) when the next keyword part starts on
+    /// a new line — a multi-part method literally named `uses:…` keeps all
+    /// its selector parts on one line.
+    fn is_uses_line_before_next_method(&self, offset: usize) -> bool {
+        if !self.peek_at(offset).is_some_and(is_uses_keyword) {
+            return false;
+        }
+        let mut o = offset + 1;
+        while let Some(kind) = self.peek_at(o) {
+            match kind {
+                TokenKind::FatArrow => return false,
+                TokenKind::Keyword(_) => {
+                    return self
+                        .peek_token_at(o)
+                        .is_some_and(crate::source_analysis::Token::has_leading_newline);
+                }
+                _ => o += 1,
+            }
+        }
+        false
     }
 
     /// Advances past a `:: Type (| Type)*` annotation in lookahead context.
