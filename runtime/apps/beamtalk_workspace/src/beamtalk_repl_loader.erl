@@ -4747,7 +4747,7 @@ protocol_class_side_provision_error(ProtocolBin, SelectorBin) ->
         ])
     ),
     beamtalk_error:with_hint(
-        Err1, <<"Class-side provisions are not supported yet (ADR 0127 §13).">>
+        Err1, <<"Class-side provisions are not supported yet (ADR 0127 section 13).">>
     ).
 
 %% Structured refusal for a live patch/removal against a stdlib protocol —
