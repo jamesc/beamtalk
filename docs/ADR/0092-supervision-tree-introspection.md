@@ -488,7 +488,7 @@ notification system that did not yet exist when this ADR was written.
 bt> Workspace processes root
 #SupervisionNode<#beamtalkSupervisor AppSup <0.200.0> children: 3>
 
-bt> Workspace processes do: [:n | Transcript showLine: n registeredName printString]
+bt> Workspace processes do: [:n | Transcript showCr: n registeredName printString]
 #AppSup
 #DatabasePool
 #HTTPRouter

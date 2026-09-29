@@ -20,7 +20,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: BindingChanged do: [:e |
-///   Transcript showLine: e name asString
+///   Transcript showCr: e name asString
 /// ]
 /// ```
 sealed typed Announcement subclass: BindingChanged

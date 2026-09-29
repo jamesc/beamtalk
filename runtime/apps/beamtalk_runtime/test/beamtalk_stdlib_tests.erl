@@ -88,7 +88,7 @@ init_registers_all_classes_test() ->
         beamtalk_object_class:class_name(Pid)
      || Pid <- beamtalk_class_registry:all_classes()
     ],
-    %% At least 15 expected (3 bootstrap + 10 primitives + 2 workspace globals).
+    %% At least 15 expected (3 bootstrap + 10 primitives + 2 workspace-registered classes).
     %% May be more if test fixtures have registered additional classes via on_load.
     ?assert(length(ClassesAfter) >= 15),
 
