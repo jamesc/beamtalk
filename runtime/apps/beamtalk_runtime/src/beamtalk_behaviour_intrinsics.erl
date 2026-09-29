@@ -1792,10 +1792,19 @@ class_source_file_for(ClassNameBin) ->
 %% mutation happens.
 -spec rewrite_class_sites(atom(), map() | undefined, [map()], map()) ->
     {ok, map()} | {error, term()}.
-rewrite_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}) ->
+rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) ->
+    rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification, 'renameTo:').
+
+%% As `rewrite_class_sites/4`, naming `Selector` (the operation the caller
+%% actually sent) in a `no_workspace` refusal.
+-spec rewrite_class_sites(atom(), map() | undefined, [map()], map(), atom()) ->
+    {ok, map()} | {error, term()}.
+rewrite_class_sites(
+    _OldName, undefined, [], #{not_flushable_reason := <<"dynamic">>}, _Selector
+) ->
     {ok, #{definition => undefined, sites => []}};
-rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification) ->
-    ok = beamtalk_capability:require_workspace('renameTo:', OldName),
+rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification, Selector) ->
+    ok = beamtalk_capability:require_workspace(Selector, OldName),
     erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites]).
 
 %% `rewrite_class_sites/4`'s own non-mutating validation half — same shape
@@ -2539,7 +2548,11 @@ rename_selector(Self, OldSelector, NewSelector) ->
                 {ok, DefinitionSite, ReferenceSites, CandidateSites} ->
                     case
                         rewrite_class_sites(
-                            ClassName, DefinitionSite, ReferenceSites, Classification
+                            ClassName,
+                            DefinitionSite,
+                            ReferenceSites,
+                            Classification,
+                            'renameSelector:to:'
                         )
                     of
                         {ok, RewriteResult} ->
