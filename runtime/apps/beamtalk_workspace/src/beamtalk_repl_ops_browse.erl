@@ -2233,6 +2233,23 @@ first_line(Doc) when is_binary(Doc) ->
     beamtalk_xref:source_status(),
     boolean()
 ) -> binary().
+protocol_for_selector(Selector, Info, protocol, SourceStatus, ClassSide) ->
+    %% ADR 0127 §12 — a method flattened from a `uses:`d protocol is filed under
+    %% that protocol, "<Protocol> › <category>" when the provided method carries
+    %% its own category, else the protocol name alone. A class-body override or
+    %% an `excluding:`-ed selector has a different provenance and never gets here.
+    case protocol_origin(Info) of
+        Origin when is_binary(Origin) ->
+            case declared_protocol(Info) of
+                Category when is_binary(Category) ->
+                    <<Origin/binary, " › "/utf8, Category/binary>>;
+                undefined ->
+                    Origin
+            end;
+        undefined ->
+            %% Malformed row (protocol provenance without an origin): fall back.
+            protocol_from_source(Selector, protocol, SourceStatus, ClassSide)
+    end;
 protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide) ->
     case declared_protocol(Info) of
         Category when is_binary(Category) ->
@@ -2241,6 +2258,19 @@ protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide) ->
         undefined ->
             protocol_from_source(Selector, Provenance, SourceStatus, ClassSide)
     end.
+
+%% The protocol name a flattened method came from (xref `origin`), as a binary,
+%% or `undefined` when the row carries none.
+-spec protocol_origin(beamtalk_xref:method_info() | undefined) -> binary() | undefined.
+protocol_origin(Info) when is_map(Info) ->
+    case maps:get(origin, Info, undefined) of
+        Origin when is_atom(Origin), Origin =/= undefined, Origin =/= nil ->
+            atom_to_binary(Origin, utf8);
+        _ ->
+            undefined
+    end;
+protocol_origin(_Info) ->
+    undefined.
 
 %% Tier 1 hook: the method's declared protocol category, or `undefined` when none
 %% is declared. Beamtalk's `beamtalk_xref:method_info/3` does not carry a category
