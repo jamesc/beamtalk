@@ -228,6 +228,24 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
             find_defining_class(selector, hierarchy).map(|class_name| (class_name, None))
         })?;
 
+    // ADR 0127 §12: a method flattened into `defining_class` by `uses:` is not
+    // written in that class's file — jump to the protocol's provision instead
+    // (`MethodInfo::origin`, stamped by `build_hierarchy_with_trait_origins`).
+    // Provisions are instance-side only.
+    let files: Vec<(&'a Utf8PathBuf, &'a Module)> = files.into_iter().collect();
+    if class_side != Some(true) {
+        let origin = hierarchy
+            .find_method(defining_class.as_str(), selector)
+            .and_then(|method| method.origin);
+        if let Some(protocol) = origin {
+            for (file_path, module) in &files {
+                if let Some(span) = find_protocol_provision_in_module(module, &protocol, selector) {
+                    return Some(Location::new((*file_path).clone(), span));
+                }
+            }
+        }
+    }
+
     // Search files for the class definition containing this method
     for (file_path, module) in files {
         if let Some(span) = find_method_in_module(module, &defining_class, selector, class_side) {
@@ -236,6 +254,22 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
     }
 
     None
+}
+
+/// Find the provided (`=>`-bodied) method `selector` of protocol `protocol` in
+/// `module` (ADR 0127 §1).
+fn find_protocol_provision_in_module(
+    module: &Module,
+    protocol: &str,
+    selector: &str,
+) -> Option<Span> {
+    module
+        .protocols
+        .iter()
+        .filter(|p| p.name.name == protocol)
+        .flat_map(|p| p.provided_methods.iter())
+        .find(|method| method.selector.name() == selector)
+        .map(|method| method.span)
 }
 
 /// Find the definition of a method selector scoped to the MRO starting at

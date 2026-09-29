@@ -2191,6 +2191,14 @@ hot-swaps every loaded, source-backed user together — all-or-nothing: if any
 user's recompile fails against the edited protocol, nothing installs and the
 error names the failing user (ADR 0127 §11).
 
+At the REPL, `Describable >> summary => …` adds or replaces a provision in the
+protocol's own source, and `Describable removeSelector: #summary` removes one.
+Both run through the same all-or-nothing re-expansion of every user, are
+recorded in the ChangeLog against the protocol (so `Workspace flush` writes the
+protocol file), and are refused for stdlib protocols. This is a live-image
+edit only: put a provision in a `.bt` file by writing it inside the
+`Protocol define:` body.
+
 ### Two-Protocol String Model (Debug / Display)
 
 Beamtalk follows a **two-string-protocol** model (ADR 0094), mirroring Rust's `Debug` / `Display` split:
