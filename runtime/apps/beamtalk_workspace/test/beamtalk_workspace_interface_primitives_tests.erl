@@ -11,7 +11,7 @@ Tests the Phase 2 dispatch/3 interface for Workspace primitives:
 - actorAt: selector
 - classes selector
 - load: selector (including value_type_name/1 coverage)
-- globals selector
+- bindings selector
 - bind:as: selector (including to_atom_name/1 error paths)
 - unbind: selector
 - get_user_bindings/0 external API
@@ -237,7 +237,7 @@ load_file_not_found_test() ->
     end.
 
 %%====================================================================
-%% bind:as: / unbind: / globals Tests
+%% bind:as: / unbind: / bindings Tests
 %%====================================================================
 
 bind_and_unbind_test_() ->
@@ -263,12 +263,12 @@ bind_and_unbind_test_() ->
                     ),
                     ?assertEqual(nil, Result)
                 end},
-                {"globals includes bound value", fun() ->
+                {"bindings includes bound value", fun() ->
                     beamtalk_workspace_interface_primitives:dispatch(
                         'bind:as:', [99, anotherVar], Self
                     ),
                     Globals = beamtalk_workspace_interface_primitives:dispatch(
-                        globals, [], Self
+                        bindings, [], Self
                     ),
                     ?assert(is_map(Globals)),
                     ?assert(maps:is_key(anotherVar, Globals)),
@@ -283,7 +283,7 @@ bind_and_unbind_test_() ->
                     ),
                     ?assertEqual(nil, Result),
                     Globals = beamtalk_workspace_interface_primitives:dispatch(
-                        globals, [], Self
+                        bindings, [], Self
                     ),
                     ?assertNot(maps:is_key(toRemove, Globals))
                 end},
