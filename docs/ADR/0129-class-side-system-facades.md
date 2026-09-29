@@ -318,13 +318,17 @@ with unchanged selectors and types:
 
 - `allClasses`, `classNamed:`;
 - `help:`, `help:selector:`, `erlangHelp:`, `erlangHelp:selector:`;
-- `version`, `releaseInfo`, `shapeManifest`;
-- `logLevel`, `logLevel:`, `logFormat`, `logFormat:`, `debugTargets`,
-  `enableDebug:`, `disableDebug:`, `activeDebugTargets`, `disableAllDebug`,
-  `loggerInfo`.
+- `version`, `releaseInfo`, `shapeManifest`.
 
-The `LogLevel` and `LogFormat` type aliases move with the class. None of
-these methods needs a workspace.
+The logging-control selectors (`logLevel`, `logLevel:`, `logFormat`,
+`logFormat:`, `debugTargets`, `enableDebug:`, `disableDebug:`,
+`activeDebugTargets`, `disableAllDebug`, `loggerInfo`) do **not** stay on
+`Beamtalk`. They moved to class-side `Logger` with unchanged selectors and no
+shim (BT-3653, §9), and the `LogLevel` and `LogFormat` type aliases moved with
+them. ADR 0064 Alternative E rejected a separate `LogConfig` *singleton*; a
+class-side `Logger` is a sealed, stateless class-side facade (§2), not a
+singleton, so that rejection does not apply. None of these methods needs a
+workspace.
 
 **`Beamtalk globals` is removed**, with `beamtalk_interface:globals/0` and
 `handle_globals/0`. Use `Beamtalk classNamed:`, `Beamtalk allClasses` or

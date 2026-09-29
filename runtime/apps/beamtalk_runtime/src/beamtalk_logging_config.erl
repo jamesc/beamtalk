@@ -110,7 +110,7 @@ set_domain(SubDomain) ->
 %% as a bare error branch. As a result the spec reader emits
 %% `Result(Dynamic, Nil) | Symbol` for `logLevel/0` rather than the singleton
 %% union it produces for `error`-free enumerations like `logFormat/0`
-%% (`text | json` -> `#text | #json`). The user-facing `Beamtalk logLevel`
+%% (`text | json` -> `#text | #json`). The user-facing `Logger logLevel`
 %% return type is therefore carried by the source annotation in
 %% `beamtalk.bt` (compiled into `generated_builtins.rs`), which every
 %% consumer of the getter sees; it is a subtype of the inferred
@@ -134,7 +134,7 @@ logLevel(Level) when is_atom(Level) ->
         true ->
             ok = logger:set_primary_config(level, Level),
             %% Also update the file handler level if it exists, so that
-            %% `Beamtalk logLevel: #debug` makes debug messages visible.
+            %% `Logger logLevel: #debug` makes debug messages visible.
             case logger:get_handler_config(beamtalk_file_log) of
                 {ok, _} -> logger:update_handler_config(beamtalk_file_log, level, Level);
                 _ -> ok

@@ -55,6 +55,8 @@ Logger setLevel: #warning           // restore — works
 
 ### 1. Logging Control on `Beamtalk` (BeamtalkInterface)
 
+> **Update (BT-3653, ADR 0129):** the logging-control selectors now live on class-side `Logger` (`Logger logLevel:`, `Logger enableDebug:`, ...), not `Beamtalk`. Read `Beamtalk` as `Logger` in the usage examples below. Alternative E's rejection targeted a `LogConfig` singleton; a sealed, stateless class-side `Logger` is not one. See ADR 0129 §2/§9.
+
 Logging configuration belongs on the system facade, not on `Logger`. Rationale:
 
 - **DDD boundary.** `Logger` is a stdlib class in the Object System Context — it emits log messages. Logging *configuration* (managing OTP handlers, installing filters, setting per-module/per-process levels) is a Runtime Context operation. A stdlib class reaching into runtime to call `logger:set_module_level`, install primary filters, and manage handler formatters crosses DDD boundaries. The stdlib should be pure; system tooling belongs higher up.

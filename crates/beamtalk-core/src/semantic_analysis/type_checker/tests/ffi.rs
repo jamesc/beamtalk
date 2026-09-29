@@ -201,7 +201,7 @@ fn ffi_list_tuple_element_propagates_into_iteration_and_literal_at() {
 /// return type (`#text | #json`). A getter declaring exactly that union must
 /// type-check cleanly — the inferred FFI body type matches the declared return,
 /// so no return-type-mismatch diagnostic is produced. This is the end-to-end
-/// path that lets `Beamtalk logFormat -> #text | #json` compile instead of
+/// path that lets `Logger logFormat -> #text | #json` compile instead of
 /// failing against a bare `Symbol` inference.
 #[test]
 fn ffi_singleton_union_return_matches_declared_annotation() {

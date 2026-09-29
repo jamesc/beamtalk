@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Connected to REPL, starting MCP server on stdio");
 
     // Spawn background task to watch for MCP debug signal file.
-    // The signal file is written by `Beamtalk enableDebug: #mcp` on the
+    // The signal file is written by `Logger enableDebug: #mcp` on the
     // Erlang side and tells us to switch to debug-level tracing.
     if let Some(ref ws_id) = workspace_id_for_signal {
         let signal_path = mcp_debug_signal_path(ws_id);
