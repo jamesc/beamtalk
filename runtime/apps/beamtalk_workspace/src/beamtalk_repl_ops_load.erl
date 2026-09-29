@@ -322,6 +322,12 @@ do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid, PackageName) ->
     ],
     record_file_mtimes_from_snapshot(SuccessfulBtMtimes),
     Errors = lists:reverse(NativeErrors, BtErrors),
+    %% BT-3662: `beamtalk build` is the only writer of the `.app` class list, so
+    %% classes loaded here (or defined in the REPL) would stay invisible to
+    %% `Package classes` until the next build. Refresh the loaded `.app`'s
+    %% `classes` env from the live registry — the in-memory equivalent of
+    %% regenerating it.
+    ok = refresh_package_classes(PackageName),
     ClassNames =
         [
             case maps:get(name, C, "") of
@@ -1710,6 +1716,14 @@ resolve_package_name(ProjectRoot, _Requested) ->
                     end
             end
     end.
+
+-doc "Refresh the root package's loaded `.app` class list (BT-3662).".
+-spec refresh_package_classes(binary() | undefined) -> ok.
+refresh_package_classes(undefined) ->
+    ok;
+refresh_package_classes(PackageName) ->
+    _ = beamtalk_package:refresh_app_classes(PackageName),
+    ok.
 
 -spec launcher_project_path() -> string() | undefined.
 launcher_project_path() ->

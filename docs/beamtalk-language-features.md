@@ -5042,6 +5042,14 @@ package's `.app`. It never returns `nil`; it raises a structured error instead:
 | `ambiguous_program_package` | `beamtalk test` runs several packages at once (a single package under test is the root) |
 | `package_not_loaded` | The root package's `.app` is not on the code path (run `beamtalk build`) |
 
+`Package classes` reads the `classes` list of the package's `.app`, which
+`beamtalk build` writes. A workspace `sync` (`load-project`, `Workspace sync`,
+`:sync`) refreshes that in-memory list from the live class registry, so a class
+added to the project's `src/` appears in `Package classes` after the sync
+without a rebuild. A class defined only by evaluating source in the REPL is
+listed once it is synced from a file; the `.app` file on disk is only rewritten
+by `beamtalk build`.
+
 ### `SystemNavigation` — Cross-class code queries
 
 `SystemNavigation` provides Smalltalk-style live-image queries over the loaded
