@@ -40,7 +40,7 @@ into REPL session state. Workspace readiness is detected via
 | `actorAt:'    | Look up actor by pid string                         |
 | `classes'     | List all loaded user classes                        |
 | `load:'       | Compile and load a .bt file                         |
-| `globals'     | Full workspace namespace snapshot (Dictionary)      |
+| `bindings'    | Full workspace namespace snapshot (Dictionary)      |
 | `sync'        | Incremental project sync (compile changed files)   |
 | `bind:as:'    | Register a value in workspace namespace             |
 | `unbind:'     | Remove a value from workspace namespace             |
@@ -68,7 +68,7 @@ into REPL session state. Workspace readiness is detected via
 %% long-lived process (prevents table from being deleted when eval workers exit)
 -export([create_bindings_table/0]).
 %% Direct exports for Erlang FFI calls from sealed Object Workspace
--export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
+-export([actors/0, actorAt/1, classes/0, load/1, bindings/0, bind/2, unbind/1, rootSupervisor/0]).
 
 -export([currentSession/0, sessions/0]).
 %% Supervisor lifecycle management
@@ -121,8 +121,8 @@ dispatch(classes, [], _Self) ->
     classes();
 dispatch('load:', [Path], _Self) ->
     load(Path);
-dispatch(globals, [], _Self) ->
-    globals();
+dispatch(bindings, [], _Self) ->
+    bindings();
 dispatch('bind:as:', [Value, Name], _Self) ->
     bind(Value, Name);
 dispatch('unbind:', [Name], _Self) ->
@@ -1267,12 +1267,12 @@ setAutoflush(Other) ->
 
 -doc """
 Return the full workspace namespace snapshot.
-Called via `(Erlang beamtalk_workspace_interface_primitives) globals`.
+Called via `(Erlang beamtalk_workspace_interface_primitives) bindings`.
 """.
--spec globals() -> map().
-globals() ->
+-spec bindings() -> map().
+bindings() ->
     UserBindings = all_user_bindings(),
-    handle_globals(UserBindings).
+    handle_bindings(UserBindings).
 
 -doc """
 Register a value in the workspace namespace under a given atom name.
@@ -2078,9 +2078,9 @@ handle_load_after_native(Path) ->
             {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
     end.
 
--doc "Return the full workspace globals snapshot.".
--spec handle_globals(map()) -> map().
-handle_globals(UserBindings) ->
+-doc "Return the full workspace bindings snapshot.".
+-spec handle_bindings(map()) -> map().
+handle_bindings(UserBindings) ->
     Base = handle_session_bindings(UserBindings),
     Classes = handle_classes(),
     lists:foldl(
@@ -2138,8 +2138,24 @@ check_bind_conflicts(AtomName) ->
     end.
 
 -spec is_protected_name(atom()) -> boolean().
-is_protected_name('Transcript') -> true;
-is_protected_name(_) -> false.
+is_protected_name('Transcript') ->
+    true;
+is_protected_name(Name) ->
+    is_stdlib_class_name(Name).
+
+-doc """
+Whether `Name` is a live stdlib class (ADR 0129 §7): `bind:as:` must not
+shadow any stdlib class name. Only stdlib-provided classes are protected;
+user-defined classes remain bindable (with a reload warning).
+""".
+-spec is_stdlib_class_name(atom()) -> boolean().
+is_stdlib_class_name(Name) ->
+    case beamtalk_class_registry:whereis_class(Name) of
+        Pid when is_pid(Pid) ->
+            beamtalk_class_registry:is_stdlib_module(beamtalk_object_class:module_name(Pid));
+        undefined ->
+            false
+    end.
 
 -doc "Warn if name is an existing loaded class.".
 -spec maybe_warn_loaded_class(atom()) -> ok.
