@@ -131,7 +131,8 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'title' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -168,7 +169,8 @@ let <_ProtoReg_Describable> = call 'beamtalk_protocol_registry':'register_protoc
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'title' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
 
 end

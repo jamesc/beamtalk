@@ -147,7 +147,8 @@ let _InitMap2 = call 'maps':'new'() in let _Packed3 = call 'maps':'put'('__local
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+      'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -182,7 +183,8 @@ let _InitMap2 = call 'maps':'new'() in let _Packed3 = call 'maps':'put'('__local
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+      'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
     }~
 
 end

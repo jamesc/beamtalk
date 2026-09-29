@@ -22,6 +22,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 
 -export([
     class_send/3,
+    lookup_direct_call/3,
     class_self_dispatch/4,
     class_self_dispatch_local/4,
     metaclass_send/4,
@@ -99,12 +100,49 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% Report it the way `handle_metaclass_self_call/2` already reports
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
-class_send(ClassPid, Selector, _Args) when ClassPid =:= self() ->
-    handle_class_self_call(Selector);
 class_send(ClassPid, Selector, Args) ->
-    class_send_with_recovery(ClassPid, Selector, fun(P) ->
-        class_send_dispatch(P, Selector, Args)
-    end).
+    %% ADR 0129 Phase 0b: sealed, stateless classes' eligible class methods run
+    %% in the caller, exactly like the static direct call. The eligibility set
+    %% is generated metadata (Rust's `compute_direct_call_eligible`), never
+    %% re-derived here. Checked before the self-call guard: a direct call has no
+    %% gen_server to deadlock on.
+    case lookup_direct_call(ClassPid, Selector, Args) of
+        {ok, Module, SafeFn} ->
+            erlang:apply(Module, SafeFn, [nil, #{} | Args]);
+        error when ClassPid =:= self() ->
+            handle_class_self_call(Selector);
+        error ->
+            class_send_with_recovery(ClassPid, Selector, fun(P) ->
+                class_send_dispatch(P, Selector, Args)
+            end)
+    end.
+
+-doc """
+Resolve a dynamic class-side send to a direct module call, if eligible.
+
+Eligible when the class's `direct_class_methods` lists the selector and the
+compiled function exists at the right arity (`nil, #{}` plus the arguments);
+an arity mismatch falls through to the gen_server path so the usual structured
+error is raised.
+""".
+-spec lookup_direct_call(pid(), selector(), list()) -> {ok, module(), atom()} | error.
+lookup_direct_call(ClassPid, Selector, Args) when is_pid(ClassPid), is_list(Args) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_direct_class_method(ClassName, Selector) of
+                {ok, Module, SafeFn} = Found ->
+                    case erlang:function_exported(Module, SafeFn, length(Args) + 2) of
+                        true -> Found;
+                        false -> error
+                    end;
+                error ->
+                    error
+            end;
+        not_found ->
+            error
+    end;
+lookup_direct_call(_ClassPid, _Selector, _Args) ->
+    error.
 
 -doc """
 Report a class-method self-send that would deadlock.

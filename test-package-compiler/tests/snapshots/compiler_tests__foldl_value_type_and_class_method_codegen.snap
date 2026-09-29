@@ -134,7 +134,8 @@ let _temp19 = _coll18 in let _temp20 = case call 'erlang':'is_list'(_temp19) of 
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -180,7 +181,8 @@ let _temp19 = _coll18 in let _temp20 = case call 'erlang':'is_list'(_temp19) of 
       'class_field_kinds' => ~{'total' => 'eager'}~,
       'initialize_assigns' => [],
       'method_info' => ~{}~,
-      'class_method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+      'class_method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
     }~
                 }~
                 in let _Reg1 = case call 'beamtalk_class_builder':'register'(_BuilderState1) of
@@ -216,7 +218,8 @@ let _temp19 = _coll18 in let _temp20 = case call 'erlang':'is_list'(_temp19) of 
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
 
 end

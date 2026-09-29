@@ -98,6 +98,7 @@ fn test_meta_provenance_keys_emitted_when_supplied() {
     let provenance = MetaProvenance {
         beamtalk_version: Some("0.4.0-dev+abc123"),
         otp_release: Some("28-16.4"),
+        ..MetaProvenance::default()
     };
     let output = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -162,6 +163,7 @@ fn test_meta_provenance_version_only_when_otp_unknown() {
     let provenance = MetaProvenance {
         beamtalk_version: Some("1.2.3"),
         otp_release: None,
+        ..MetaProvenance::default()
     };
     let output = CoreErlangGenerator::build_meta_map_doc(
         module.classes.first().unwrap(),
@@ -833,5 +835,53 @@ fn test_meta_map_initialize_assigns_excludes_conditionally_assigned_slot() {
     assert!(
         output.contains("'initialize_assigns' => []"),
         "a slot assigned only inside ifTrue: (no else) must not appear. Got: {output}"
+    );
+}
+
+#[test]
+fn test_meta_direct_class_methods_emitted_empty_by_default() {
+    // ADR 0129 Phase 0b: the key is always present so the runtime can tell
+    // "no direct methods" from a module compiled before the key existed.
+    let module = module_with(make_actor_class("Counter"));
+    let output = CoreErlangGenerator::build_meta_map_doc(
+        module.classes.first().unwrap(),
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    )
+    .to_pretty_string();
+    assert!(
+        output.contains("'direct_class_methods' => ~{}~"),
+        "meta map should carry an empty direct_class_methods. Got: {output}"
+    );
+}
+
+#[test]
+fn test_meta_direct_class_methods_maps_selector_to_safe_fn() {
+    let module = module_with(make_actor_class("Counter"));
+    let direct = vec![
+        ("double:".to_string(), "class_double:".to_string()),
+        ("ping".to_string(), "class_ping".to_string()),
+    ];
+    let provenance = MetaProvenance {
+        direct_class_methods: &direct,
+        ..MetaProvenance::default()
+    };
+    let output = CoreErlangGenerator::build_meta_map_doc(
+        module.classes.first().unwrap(),
+        &module,
+        false,
+        false,
+        None,
+        provenance,
+    )
+    .to_pretty_string();
+    assert!(
+        output.contains(
+            "'direct_class_methods' => ~{'double:' => 'class_double:', 'ping' => 'class_ping'}~"
+        ),
+        "direct_class_methods should map raw selector to safe fn. Got: {output}"
     );
 }

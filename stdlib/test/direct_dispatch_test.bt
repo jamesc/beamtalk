@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless
+// classes call the module function directly in the caller, so they behave
+// identically to the static form. Eligibility is generated metadata
+// (`direct_class_methods`), computed by `compute_direct_call_eligible`.
+//
+// Fixtures: fixtures/direct_dispatch_stateless.bt,
+// fixtures/direct_dispatch_stateful.bt.
+
+TestCase subclass: DirectDispatchTest
+
+  // --- static and dynamic forms agree, and run in the caller ---------------
+  testStaticSendRunsInCallersProcess =>
+    self assert: DirectDispatchStateless callerPid equals: Erlang erlang self
+
+  testVariableReceiverRunsInCallersProcess =>
+    cls := DirectDispatchStateless
+    self assert: cls callerPid equals: Erlang erlang self
+
+  testPerformRunsInCallersProcess =>
+    self assert: (DirectDispatchStateless perform: #callerPid) equals: Erlang erlang self
+
+  testPerformWithArgumentsRunsDirectly =>
+    self assert: (DirectDispatchStateless perform: #double: withArguments: #(4)) equals: 8
+
+  testStaticAndDynamicResultsMatch =>
+    cls := DirectDispatchStateless
+    self assert: (cls double: 5) equals: (DirectDispatchStateless double: 5)
+
+  testClassPassedAsArgument =>
+    self assert: (DirectDispatchStateless relay: DirectDispatchStateless) equals: 42
+
+  // --- hazards ---------------------------------------------------------------
+
+  // The method messages its own class. Dynamically dispatched through the
+  // class gen_server this used to raise `dispatch_error`.
+  testDynamicSelfMessagingMethodNoLongerRaisesDispatchError =>
+    cls := DirectDispatchStateless
+    self assert: (cls relay: cls) equals: 42
+
+  // A block passed into an eligible method now runs in the caller.
+  testBlockRunsInCallerProcess =>
+    cls := DirectDispatchStateless
+    pid := cls callBlock: [Erlang erlang self]
+    self assert: pid equals: Erlang erlang self
+
+  // A class with `classState:` keeps the gen_server hop.
+  testStatefulClassStillRunsInClassProcess =>
+    cls := DirectDispatchStateful
+    self deny: (cls callerPid =:= Erlang erlang self)
+
+  testStatefulClassPerformStillRunsInClassProcess =>
+    self deny: ((DirectDispatchStateful perform: #callerPid) =:= Erlang erlang self)
+
+  testStatefulClassStateStillWorksDynamically =>
+    cls := DirectDispatchStateful
+    first := cls bump
+    self assert: cls bump equals: first + 1

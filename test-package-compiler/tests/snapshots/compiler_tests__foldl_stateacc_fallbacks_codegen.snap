@@ -403,7 +403,8 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'controlFlowMutationFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'destructureLastExprFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'nestedListOpInConditional:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
     }~
 
 'register_class'/0 = fun () ->
@@ -442,7 +443,8 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'controlFlowMutationFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'destructureLastExprFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'nestedListOpInConditional:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~
+      'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'
         }~

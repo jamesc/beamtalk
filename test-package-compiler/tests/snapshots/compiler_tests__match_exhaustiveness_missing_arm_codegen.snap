@@ -127,7 +127,8 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -162,7 +163,8 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
 
 end

@@ -140,7 +140,8 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -175,7 +176,8 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{}~
+      'class_method_info' => ~{}~,
+      'direct_class_methods' => ~{}~
     }~
 
 end

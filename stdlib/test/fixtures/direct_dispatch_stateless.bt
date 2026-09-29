@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3639 / ADR 0129 Phase 0b: a sealed class with no `classState:` whose
+// `class sealed` methods are direct-call eligible — dynamic sends must run
+// them in the caller's process, exactly like the static direct call.
+
+sealed Object subclass: DirectDispatchStateless
+
+  class sealed callerPid => Erlang erlang self
+
+  class sealed double: n :: Integer -> Integer => n * 2
+
+  // Messages its own class (through a class object passed in) — before the
+  // direct path a dynamic send of this method ran in the class process and the
+  // inner send raised `dispatch_error`.
+  class sealed relay: aClass => aClass double: 21
+
+  // Calls the block in whichever process runs the method.
+  class sealed callBlock: aBlock :: Block => aBlock value
