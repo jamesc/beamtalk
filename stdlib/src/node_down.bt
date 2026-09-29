@@ -13,7 +13,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: NodeDown do: [:e |
-///   Transcript showLine: "lost " ++ e node name asString ++ " (" ++ e reason asString ++ ")"
+///   Transcript showCr: "lost " ++ e node name asString ++ " (" ++ e reason asString ++ ")"
 /// ]
 /// ```
 sealed typed Announcement subclass: NodeDown

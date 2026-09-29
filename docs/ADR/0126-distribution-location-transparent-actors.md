@@ -461,7 +461,7 @@ shared class whose `shapeVersion` differs, it announces one `NodeShapeSkew`:
 
 ```beamtalk
 SystemAnnouncer current when: NodeShapeSkew do: [:e |
-  Transcript showLine: e node name asString, ": ", e className asString,
+  Transcript showCr: e node name asString, ": ", e className asString,
     " local v", e localVersion printString, " remote v", e remoteVersion printString
 ]
 ```
@@ -719,7 +719,7 @@ sealed typed Announcement subclass: NodeShapeSkew
 
 ```beamtalk
 SystemAnnouncer current when: NodeDown do: [:e |
-  Transcript showLine: "lost ", e node name asString, " (", e reason asString, ")"
+  Transcript showCr: "lost ", e node name asString, " (", e reason asString, ")"
 ]
 ```
 

@@ -5,7 +5,7 @@
 // ADR 0129 / BT-3641).
 //
 // `Workspace` is a sealed, stateless class-side facade. Under `beamtalk test`
-// (workspace_mode: false) no workspace runs, so every send except
+// (no workspace runs), so every send except
 // `isAvailable` raises `no_workspace`. Selector tests use class-side
 // introspection (`Workspace class includesSelector:`). Live functionality tests
 // are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt

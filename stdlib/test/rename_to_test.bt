@@ -4,7 +4,7 @@
 // Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)
 //
 // `beamtalk test`'s BUnit runner has no project configured
-// (`workspace_mode: false`), so an ordinary compiled `.bt` fixture class's
+// (no workspace runs), so an ordinary compiled `.bt` fixture class's
 // source file always classifies as a "dependency" (ADR 0114 § Refusal vs
 // flushability) rather than a flushable project class, and `renameTo:`
 // correctly refuses those before any mutation — a dynamic (ClassBuilder)

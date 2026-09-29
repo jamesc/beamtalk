@@ -12,7 +12,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: NodeUp do: [:e |
-///   Transcript showLine: "joined " ++ e node name asString
+///   Transcript showCr: "joined " ++ e node name asString
 /// ]
 /// ```
 sealed typed Announcement subclass: NodeUp

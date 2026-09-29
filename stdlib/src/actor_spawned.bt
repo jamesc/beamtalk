@@ -11,7 +11,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: ActorSpawned do: [:e |
-///   Transcript showLine: e actorClass asString
+///   Transcript showCr: e actorClass asString
 /// ]
 /// Counter spawn   // subscription fires: prints "Counter"
 /// ```
