@@ -195,6 +195,7 @@ pub fn build_release(
         release_cfg.console,
         &release_cfg.bind,
         release_cfg.include_compiler,
+        &parsed.package.name,
     )?;
     assembly::generate_vm_args(project_root, &release_config_dir, &release_cfg.vm_args)?;
 

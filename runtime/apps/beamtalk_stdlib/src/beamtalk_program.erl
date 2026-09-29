@@ -37,7 +37,7 @@ mechanism settled for the `program_name` Open Question (ADR 0099 §2). Absent
 %% unqualified.
 -compile({no_auto_import, [exit/1]}).
 
--export([commandName/0, exit/0, 'exit:'/1, exit/1]).
+-export([commandName/0, package/0, exit/0, 'exit:'/1, exit/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -52,6 +52,44 @@ commandName() ->
         {ok, Name} when is_binary(Name) -> Name;
         {ok, Name} when is_list(Name) -> list_to_binary(Name);
         _ -> <<"beamtalk">>
+    end.
+
+-doc """
+The program's root package (BT-3651): `Package named: <root_package>`, where
+`root_package` is the `beamtalk_runtime` app-env key every launcher sets from
+the Rust-parsed manifest. Never returns `nil`; raises a structured error:
+
+* `no_program_package` - no launcher recorded a root package (bare REPL).
+* `ambiguous_program_package` - `beamtalk test` runs several packages.
+* `package_not_loaded` - the root package's `.app` is not on the code path
+  (the project was never built).
+""".
+-spec package() -> term().
+package() ->
+    case beamtalk_package:root_package() of
+        {ok, Name} ->
+            case beamtalk_package:find_app_for_package(Name) of
+                {ok, _App} ->
+                    beamtalk_package:named(Name);
+                error ->
+                    program_package_error(
+                        package_not_loaded,
+                        <<"The root package ", Name/binary, " is not loaded">>,
+                        <<"Run `beamtalk build` so the package's .app is on the code path.">>
+                    )
+            end;
+        ambiguous ->
+            program_package_error(
+                ambiguous_program_package,
+                <<"More than one package is under test, so there is no single program package">>,
+                <<"Run beamtalk test on a single package, or use Package named: explicitly.">>
+            );
+        undefined ->
+            program_package_error(
+                no_program_package,
+                <<"This program has no root package">>,
+                <<"Run from a project directory containing beamtalk.toml.">>
+            )
     end.
 
 -doc "End this program with status 0 (the job-level, safe exit). Does not return.".
@@ -157,6 +195,12 @@ exit(Code) ->
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
+
+-spec program_package_error(atom(), binary(), binary()) -> no_return().
+program_package_error(Kind, Message, Hint) ->
+    Err0 = beamtalk_error:new(Kind, 'Program', package),
+    Err1 = beamtalk_error:with_message(Err0, Message),
+    beamtalk_error:raise(beamtalk_error:with_hint(Err1, Hint)).
 
 -doc """
 Is the caller an actor's `gen_server` process, mid-dispatch (off any harness's

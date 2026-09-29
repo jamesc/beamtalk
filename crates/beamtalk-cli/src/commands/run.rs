@@ -213,6 +213,7 @@ pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> R
 /// workspace startup.
 fn prepare_eval_environment(
     project_root: &Utf8PathBuf,
+    root_package: &str,
     class_name: &str,
     selector: &str,
     args: &[String],
@@ -253,6 +254,7 @@ fn prepare_eval_environment(
         selector,
         args,
         &beam_env.otp_apps,
+        root_package,
     );
 
     // BEAM code-path + `-eval` invocation args (distinct from the program `args`
@@ -273,7 +275,7 @@ fn prepare_eval_environment(
 /// class message, and exits when it returns.
 fn run_script(
     project_root: &Utf8PathBuf,
-    _pkg: &manifest::PackageManifest,
+    pkg: &manifest::PackageManifest,
     class_name: &str,
     selector: &str,
     program_args: &[String],
@@ -297,7 +299,8 @@ fn run_script(
 
     info!(class = %class_name, selector = %selector, "Running script");
 
-    let args = prepare_eval_environment(project_root, class_name, selector, program_args)?;
+    let args =
+        prepare_eval_environment(project_root, &pkg.name, class_name, selector, program_args)?;
 
     eprintln!("\nRunning {class_name}>>{selector}...");
 
@@ -483,8 +486,12 @@ fn build_script_eval_cmd(
     selector: &str,
     program_args: &[String],
     hex_dep_names: &[String],
+    root_package: &str,
 ) -> String {
     let hex_deps_start = repl_startup::hex_deps_start_fragment(hex_dep_names);
+    // BT-3651: record the root package (and load its .app) before the workspace
+    // starts, from the Rust-parsed manifest.
+    let root_package_start = repl_startup::root_package_fragment(Some(root_package));
 
     // The selector is always quoted as an atom so the arity-1 keyword form
     // (`'main:'`) is valid Erlang; a unary `'run'` is equally well-formed.
@@ -503,6 +510,7 @@ fn build_script_eval_cmd(
 
     format!(
         "{hex_deps_start}\
+         {root_package_start}\
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          application:set_env(beamtalk_runtime, program_name, <<\"beamtalk\">>), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
@@ -599,6 +607,7 @@ fn run_package_as_otp_application(
         max_idle_seconds: None, // use workspace default
         log_level: "info",
         otp_app_name: Some(&pkg.name),
+        root_package: Some(&pkg.name),
         hex_dep_names: &beam_env.otp_apps,
     };
 
@@ -1028,7 +1037,15 @@ mod tests {
     fn test_script_eval_cmd_no_erlang_comments() {
         // Regression: Erlang %% comments in a -eval string comment out
         // everything to end-of-line, which is the entire eval string.
-        let cmd = build_script_eval_cmd("run_42", "/tmp/foo", "SmokeTest", "answer", &[], &[]);
+        let cmd = build_script_eval_cmd(
+            "run_42",
+            "/tmp/foo",
+            "SmokeTest",
+            "answer",
+            &[],
+            &[],
+            "my_pkg",
+        );
         assert!(
             !cmd.contains("%%"),
             "Eval string must not contain Erlang line comments: {cmd}"
@@ -1041,7 +1058,7 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_contains_dispatch_and_halt() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[], "my_pkg");
         // The entry dispatch + implicit exit-code mapping is owned by the run
         // harness (ADR 0099 §3); the eval routes through it instead of an inline
         // class_send + halt(0).
@@ -1074,7 +1091,15 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_interpolates_parameters() {
-        let cmd = build_script_eval_cmd("run_99", "/my/project", "Counter", "increment", &[], &[]);
+        let cmd = build_script_eval_cmd(
+            "run_99",
+            "/my/project",
+            "Counter",
+            "increment",
+            &[],
+            &[],
+            "my_pkg",
+        );
         assert!(cmd.contains("run_99"), "workspace_id not interpolated");
         assert!(cmd.contains("/my/project"), "project_path not interpolated");
         // ADR 0125 §1.4: run mode is `mode => run`, not the removed `repl` boolean.
@@ -1093,7 +1118,8 @@ mod tests {
     #[test]
     fn test_script_eval_cmd_starts_hex_deps() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &hex_deps);
+        let cmd =
+            build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &hex_deps, "my_pkg");
         assert!(
             cmd.contains("application:ensure_all_started(cowboy)"),
             "Should start cowboy: {cmd}"
@@ -1113,7 +1139,7 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_no_hex_deps_unchanged() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[], "my_pkg");
         // Should only have one ensure_all_started call (for workspace)
         let count = cmd.matches("ensure_all_started").count();
         assert_eq!(
@@ -1164,7 +1190,7 @@ mod tests {
         // Args are emitted as explicit UTF-8 byte-segment binaries:
         // "Alice" = 65,108,105,99,101  and  "Bob" = 66,111,98.
         let args = vec!["Alice".to_string(), "Bob".to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[], "my_pkg");
         assert!(
             cmd.contains(
                 "beamtalk_script_harness:dispatch(ClassPid, 'main:', \
@@ -1177,7 +1203,7 @@ mod tests {
     #[test]
     fn test_script_eval_cmd_keyword_dispatch_empty_args_is_empty_list() {
         // No args → the argv List(String) is empty, but the entry is still arity-1.
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &[], &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &[], &[], "my_pkg");
         assert!(
             cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'main:', [[]])"),
             "Empty argv should be a one-element dispatch list holding []: {cmd}"
@@ -1189,7 +1215,7 @@ mod tests {
         // Byte-segment encoding is injection-proof (quotes/backslashes are just
         // bytes) and encoding-agnostic. `a"b\c` = 97,34,98,92,99.
         let args = vec![r#"a"b\c"#.to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[], "my_pkg");
         assert!(
             cmd.contains("<<97, 34, 98, 92, 99>>"),
             "Arg should be emitted as raw UTF-8 bytes, not a quoted literal: {cmd}"
@@ -1201,7 +1227,7 @@ mod tests {
         // "café" → UTF-8 bytes 99,97,102,195,169 (é = 0xC3 0xA9). This matches the
         // escript path's `unicode:characters_to_binary`, not a mangled Latin-1 byte.
         let args = vec!["café".to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[], "my_pkg");
         assert!(
             cmd.contains("<<99, 97, 102, 195, 169>>"),
             "Non-ASCII arg should be a UTF-8 byte sequence: {cmd}"
@@ -1209,10 +1235,23 @@ mod tests {
     }
 
     #[test]
+    fn test_script_eval_cmd_records_root_package_before_workspace_starts() {
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[], "my_pkg");
+        let root = cmd
+            .find(r#"beamtalk_package:set_root_package(<<"my_pkg">>)"#)
+            .unwrap_or_else(|| panic!("root_package not recorded: {cmd}"));
+        let sup = cmd.find("beamtalk_workspace_sup:start_link").unwrap();
+        assert!(
+            root < sup,
+            "root package must precede workspace start: {cmd}"
+        );
+    }
+
+    #[test]
     fn test_script_eval_cmd_seeds_program_name_env() {
         // program_name app env is seeded at boot so `Program name` returns
         // "beamtalk" under run-mode (the escript path overrides it in Phase 4).
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[], "my_pkg");
         assert!(
             cmd.contains(r#"application:set_env(beamtalk_runtime, program_name, <<"beamtalk">>)"#),
             "Run-mode boot should seed program_name: {cmd}"
@@ -1224,7 +1263,7 @@ mod tests {
         // node_owning is recorded as a capability at boot so `System halt:` / `Program exit:`
         // know the program owns the node (ADR 0099 §3, BT-3634). Not set on the
         // shared/persistent path, where halt is refused.
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[], "my_pkg");
         assert!(
             cmd.contains("node_owning => true"),
             "Run-mode boot should record node_owning: {cmd}"

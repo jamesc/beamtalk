@@ -42,6 +42,10 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
     classes/1,
     dependencies/1,
     find_app_for_package/1,
+    root_package/0,
+    root_package_name/0,
+    set_root_package/1,
+    set_ambiguous_root_package/0,
     %% Beamtalk FFI shim: `Package packageNameFor: #ClassName`
     packageNameFor/1
 ]).
@@ -253,6 +257,49 @@ package_name_for_app(AppName) ->
                     undefined
             end
     end.
+
+-doc """
+The program's root package as recorded by whichever launcher booted this
+node (BT-3651): the `beamtalk_runtime` app-env key `root_package`.
+
+* `{ok, Name}` - a single root package (a binary).
+* `ambiguous` - several packages are under test (`beamtalk test`), so no one
+  package is "the program".
+* `undefined` - no launcher recorded one (bare `beamtalk repl`, bare runtime).
+""".
+-spec root_package() -> {ok, binary()} | ambiguous | undefined.
+root_package() ->
+    case application:get_env(beamtalk_runtime, root_package) of
+        {ok, Name} when is_binary(Name), Name =/= <<>> -> {ok, Name};
+        {ok, ambiguous} -> ambiguous;
+        _ -> undefined
+    end.
+
+-doc "The root package name as a binary, or `undefined` (none or ambiguous).".
+-spec root_package_name() -> binary() | undefined.
+root_package_name() ->
+    case root_package() of
+        {ok, Name} -> Name;
+        _ -> undefined
+    end.
+
+-doc """
+Record `Name` as the program's root package and best-effort load its OTP
+application so `Package named:` can see it. A missing `.app` (project never
+built) is not an error here; `Program package` reports it as
+`package_not_loaded` when asked. Called by every launcher, from the
+Rust-parsed manifest.
+""".
+-spec set_root_package(binary()) -> ok.
+set_root_package(Name) when is_binary(Name) ->
+    application:set_env(beamtalk_runtime, root_package, Name),
+    _ = application:load(binary_to_atom(Name, utf8)),
+    ok.
+
+-doc "Record that several packages are under test, so there is no single root.".
+-spec set_ambiguous_root_package() -> ok.
+set_ambiguous_root_package() ->
+    application:set_env(beamtalk_runtime, root_package, ambiguous).
 
 -doc """
 Find the OTP application that hosts a given package name.

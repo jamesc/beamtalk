@@ -1354,12 +1354,10 @@ dependencies_with_package_name_returns_map_test() ->
     WorkspaceId = list_to_binary("test-ws-deps-" ++ Unique),
     Tmp = filename:join(ws_temp_dir(), "bt-deps-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
-    %% A beamtalk.toml at the project path makes get_package_name/0 resolve a
-    %% real name, so dependencies/0 leaves the `undefined` short-circuit.
-    ok = file:write_file(
-        filename:join(Tmp, "beamtalk.toml"),
-        <<"[package]\nname = \"bt_deps_probe_pkg\"\n">>
-    ),
+    %% A recorded root package makes get_package_name/0 resolve a real name,
+    %% so dependencies/0 leaves the `undefined` short-circuit.
+    OldRoot = application:get_env(beamtalk_runtime, root_package),
+    application:set_env(beamtalk_runtime, root_package, <<"bt_deps_probe_pkg">>),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", Tmp),
     MetaPid =
@@ -1383,6 +1381,10 @@ dependencies_with_package_name_returns_map_test() ->
         ?assertEqual(#{}, Result)
     after
         stop_proc(MetaPid),
+        case OldRoot of
+            {ok, RV} -> application:set_env(beamtalk_runtime, root_package, RV);
+            undefined -> application:unset_env(beamtalk_runtime, root_package)
+        end,
         case OldHome of
             false -> os:unsetenv("HOME");
             _ -> os:putenv("HOME", OldHome)

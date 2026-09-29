@@ -303,6 +303,17 @@ pub fn run(
             }
         });
 
+    // The program's root package, from the Rust-parsed manifest (BT-3651).
+    // Recorded as the `root_package` runtime fact in the workspace node; a
+    // bare `beamtalk repl` outside a project records none.
+    let root_package: Option<String> = camino::Utf8Path::from_path(&project_root)
+        .and_then(|root| {
+            crate::commands::manifest::find_manifest(root)
+                .ok()
+                .flatten()
+        })
+        .map(|m| m.name);
+
     // Choose startup mode: workspace (default) or foreground (debug)
     let (beam_guard_opt, is_new_workspace, workspace_id_opt, connect_host, connect_port, cookie): (
         Option<BeamChildGuard>,
@@ -325,6 +336,7 @@ pub fn run(
             max_idle_seconds: None, // not applicable in foreground mode
             log_level,
             otp_app_name: otp_app_name.as_deref(),
+            root_package: root_package.as_deref(),
             hex_dep_names: &hex_dep_names,
         };
 
@@ -388,6 +400,7 @@ pub fn run(
             max_idle_seconds: timeout,
             log_level,
             otp_app_name: otp_app_name.as_deref(),
+            root_package: root_package.as_deref(),
             hex_dep_names: &hex_dep_names,
         };
 

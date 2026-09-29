@@ -84,6 +84,7 @@ pub(crate) fn start_beam_node(
             config.bind_addr,
             config.log_level,
             config.otp_app_name,
+            config.root_package,
             config.hex_dep_names,
         )
     } else {
@@ -92,6 +93,7 @@ pub(crate) fn start_beam_node(
             config.bind_addr,
             config.log_level,
             config.otp_app_name,
+            config.root_package,
             config.hex_dep_names,
         )
     };

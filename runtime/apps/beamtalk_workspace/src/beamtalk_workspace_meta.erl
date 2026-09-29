@@ -518,8 +518,9 @@ init(InitialMetadata) ->
     beamtalk_logging_config:set_domain(runtime),
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
     ProjectPath = maps:get(project_path, InitialMetadata, undefined),
-    %% Auto-detect package name from beamtalk.toml at project_path
-    PackageName = detect_package_name(ProjectPath),
+    %% The root package is recorded by the launcher (from the Rust-parsed
+    %% manifest) in the `root_package` app env; no toml parsing here (BT-3651).
+    PackageName = beamtalk_package:root_package_name(),
     CreatedAt = maps:get(created_at, InitialMetadata),
     ReplPort = maps:get(repl_port, InitialMetadata, undefined),
     Mode = init_mode(InitialMetadata),
@@ -1176,23 +1177,6 @@ init_mode(InitialMetadata) ->
         Other -> erlang:error({bad_config, {invalid_mode, Other}})
     end.
 
--doc """
-Detect the package name from beamtalk.toml at the given project path.
-Uses simple regex extraction — no TOML parser needed since we only need
-the `name = "..."` field from the `[package]` section.
-""".
--spec detect_package_name(binary() | undefined) -> binary() | undefined.
-detect_package_name(undefined) ->
-    undefined;
-detect_package_name(ProjectPath) when is_binary(ProjectPath) ->
-    ManifestPath = filename:join(binary_to_list(ProjectPath), "beamtalk.toml"),
-    case file:read_file(ManifestPath) of
-        {ok, Content} ->
-            extract_package_name(Content);
-        {error, _} ->
-            undefined
-    end.
-
 %% ADR 0082 Phase 4: persist/restore opaque workspace settings via
 %% the JSON metadata blob. Keys are stored as atom strings (so they round-trip
 %% to/from the existing atom-keyed map without intern leaks — we restore only
@@ -1239,29 +1223,3 @@ restore_settings(Map) when is_map(Map) ->
     );
 restore_settings(_) ->
     #{}.
-
--doc """
-Extract the package name from beamtalk.toml content.
-Matches `name = "..."` after `[package]` section header.
-""".
--spec extract_package_name(binary()) -> binary() | undefined.
-extract_package_name(Content) ->
-    %% Find the [package] section and extract name = "value"
-    case re:run(Content, <<"\\[package\\]">>, [{capture, none}]) of
-        match ->
-            %% Extract name = "value" (TOML only supports double-quoted strings)
-            case
-                re:run(
-                    Content,
-                    <<"name\\s*=\\s*\"([a-z][a-z0-9_]*)\"">>,
-                    [{capture, [1], binary}]
-                )
-            of
-                {match, [Name]} ->
-                    Name;
-                nomatch ->
-                    undefined
-            end;
-        nomatch ->
-            undefined
-    end.

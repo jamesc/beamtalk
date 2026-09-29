@@ -717,8 +717,11 @@ loader_setup() ->
     Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
     Proj = Tmp ++ "/bt_loader_proj_" ++ integer_to_list(erlang:unique_integer([positive])),
     ok = file:make_dir(Proj),
-    %% A beamtalk.toml lets workspace_meta auto-detect a package name, which in
-    %% turn exercises compute_package_module_name/1's package-qualified branch.
+    %% A recorded root package (BT-3651: the launcher-set `root_package` env
+    %% workspace_meta reads at init) exercises compute_package_module_name/1's
+    %% package-qualified branch. The beamtalk.toml is still read by the loader's
+    %% own source-index code.
+    application:set_env(beamtalk_runtime, root_package, <<"loaderpkg">>),
     ok = file:write_file(
         filename:join(Proj, "beamtalk.toml"),
         <<"[package]\nname = \"loaderpkg\"\n">>
@@ -756,6 +759,7 @@ loader_setup() ->
     Proj.
 
 loader_teardown(Proj) ->
+    application:unset_env(beamtalk_runtime, root_package),
     %% Stop the singleton servers this fixture started so later test modules
     %% (e.g. beamtalk_workspace_changelog_tests, which start_link their own
     %% registered server with a {ok, Pid} match) see a clean slate.

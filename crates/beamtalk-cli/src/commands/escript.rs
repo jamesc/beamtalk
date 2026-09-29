@@ -115,6 +115,7 @@ pub fn build_escript(
         &selector,
         is_keyword,
         &project_modules,
+        pkg.as_ref().map(|p| p.name.as_str()),
     );
     let boot_erl = tmp_dir.join(format!("{boot_module}.erl"));
     std::fs::write(boot_erl.as_std_path(), boot_src)
@@ -264,7 +265,14 @@ fn generate_boot_module(
     selector: &str,
     is_keyword: bool,
     project_modules: &[String],
+    root_package: Option<&str>,
 ) -> String {
+    // BT-3651: record the root package (from the Rust-parsed manifest) so
+    // `Program package` answers the same as under every other launcher.
+    let root_package_line = match repl_startup::root_package_fragment(root_package).trim_end() {
+        "" => String::new(),
+        frag => format!("    {frag}\n"),
+    };
     let module_list = project_modules
         .iter()
         .map(|m| format!("'{m}'"))
@@ -288,6 +296,7 @@ fn generate_boot_module(
          \n\
          main(Args) ->\n\
          \x20   {{ok, _}} = application:ensure_all_started(beamtalk_workspace),\n\
+         {root_package_line}\
          \x20   application:set_env(beamtalk_runtime, program_name,\n\
          \x20       unicode:characters_to_binary(filename:basename(escript:script_name()))),\n\
          \x20   {{ok, _}} = beamtalk_workspace_sup:start_link(\n\
@@ -531,6 +540,11 @@ mod tests {
             "main:",
             true,
             &["bt@app@greeter".to_string()],
+            Some("app"),
+        );
+        assert!(
+            src.contains("beamtalk_package:set_root_package(<<\"app\">>),"),
+            "{src}"
         );
         assert!(src.contains("-module(greeter_escript)."));
         assert!(src.contains("node_owning => true"));
@@ -542,8 +556,14 @@ mod tests {
 
     #[test]
     fn test_generate_boot_module_unary_passes_no_args() {
-        let src =
-            generate_boot_module("app_escript", "Main", "run", false, &["bt@app@main".into()]);
+        let src = generate_boot_module(
+            "app_escript",
+            "Main",
+            "run",
+            false,
+            &["bt@app@main".into()],
+            None,
+        );
         assert!(src.contains("dispatch(ClassPid, 'run', [])"));
         assert!(!src.contains("BinArgs"));
     }
@@ -552,8 +572,14 @@ mod tests {
     fn test_generate_boot_module_starts_workspace_in_run_mode() {
         // ADR 0125 §1.4: the workspace supervisor takes `mode`, not the removed
         // `repl` boolean; an escript runs in run mode without a compiler.
-        let src =
-            generate_boot_module("app_escript", "Main", "run", false, &["bt@app@main".into()]);
+        let src = generate_boot_module(
+            "app_escript",
+            "Main",
+            "run",
+            false,
+            &["bt@app@main".into()],
+            None,
+        );
         assert!(
             src.contains("mode => run, start_compiler => false"),
             "{src}"

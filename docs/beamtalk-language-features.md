@@ -5011,6 +5011,29 @@ declaration file — replacing the `RenameFile` op that silently no-ops in VS
 Code when the old path is already gone (BT-3285). Ordinary method patches
 continue to use the generic `TextEdit` shape, gated on the file being open.
 
+### `Program` — This running program (ADR 0099 §2)
+
+`Program` names the running program in every execution context. Besides
+`commandName` and `exit` / `exit:`, `Program package` returns the program's
+root `Package` (`Package named: <root package>`), so a program can reach its own
+manifest facts without hard-coding its name:
+
+```beamtalk
+Program package version
+```
+
+Every launcher records the root package as the `beamtalk_runtime` app-env key
+`root_package` from the Rust-parsed `beamtalk.toml` (`beamtalk repl`,
+`beamtalk run` script and service modes, `beamtalk workspace create`, the
+escript bootstrap; `beamtalk release` writes it into `sys.config`) and loads the
+package's `.app`. It never returns `nil`; it raises a structured error instead:
+
+| Kind | When |
+|------|------|
+| `no_program_package` | No project (bare `beamtalk repl`) |
+| `ambiguous_program_package` | `beamtalk test` runs several packages at once (a single package under test is the root) |
+| `package_not_loaded` | The root package's `.app` is not on the code path (run `beamtalk build`) |
+
 ### `SystemNavigation` — Cross-class code queries
 
 `SystemNavigation` provides Smalltalk-style live-image queries over the loaded

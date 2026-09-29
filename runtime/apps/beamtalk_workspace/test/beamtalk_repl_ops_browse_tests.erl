@@ -2298,9 +2298,12 @@ source_origin_meta_without_project_path_falls_back_to_path_test() ->
 %% beamtalk.toml declares package `Pkg`, run `Fun`, then tear meta down.
 with_project_package(Pkg, Fun) ->
     Dir = make_project_dir(Pkg),
+    %% BT-3651: the package name is the launcher-recorded `root_package` env.
+    application:set_env(beamtalk_runtime, root_package, Pkg),
     try
         with_started_meta(#{project_path => Dir}, Fun)
     after
+        application:unset_env(beamtalk_runtime, root_package),
         _ = file:delete(filename:join(Dir, "beamtalk.toml")),
         _ = file:del_dir(Dir)
     end.

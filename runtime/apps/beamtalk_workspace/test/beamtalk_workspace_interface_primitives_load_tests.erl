@@ -274,8 +274,8 @@ new_class_success_installs_and_returns_class(#{tmp := Tmp, unique := U}) ->
 %%====================================================================
 
 %% get_package_name/0 is read from workspace_meta's init-time state (cached,
-%% not re-read per call), so beamtalk.toml must exist BEFORE workspace_meta
-%% starts — `case_setup/0` already started one against `Tmp` with no
+%% not re-read per call), so the `root_package` env must be set BEFORE
+%% workspace_meta starts — `case_setup/0` already started one against `Tmp` with no
 %% beamtalk.toml present yet, so this restarts it against the same
 %% WorkspaceId/Tmp after writing the file (mirroring
 %% `beamtalk_workspace_interface_primitives_tests:dependencies_with_package_name_returns_map_test/0`'s
@@ -283,9 +283,7 @@ new_class_success_installs_and_returns_class(#{tmp := Tmp, unique := U}) ->
 dependencies_with_real_dependency_returns_populated_map(#{
     tmp := Tmp, workspace_id := WorkspaceId
 }) ->
-    ok = file:write_file(
-        filename:join(Tmp, "beamtalk.toml"), <<"[package]\nname = \"wideps_pkg\"\n">>
-    ),
+    application:set_env(beamtalk_runtime, root_package, <<"wideps_pkg">>),
     meck:new(beamtalk_package, [passthrough]),
     meck:expect(beamtalk_package, dependencies, fun(<<"wideps_pkg">>) -> [<<"utils">>] end),
     meck:expect(beamtalk_package, named, fun(<<"utils">>) -> #{name => <<"utils">>} end),
@@ -302,9 +300,7 @@ dependencies_with_real_dependency_returns_populated_map(#{
 %% raises) is silently skipped rather than crashing `dependencies/0` — the
 %% `catch error:_ -> false` arm of the filtermap.
 dependencies_skips_a_dependency_that_fails_to_resolve(#{tmp := Tmp, workspace_id := WorkspaceId}) ->
-    ok = file:write_file(
-        filename:join(Tmp, "beamtalk.toml"), <<"[package]\nname = \"wideps_pkg2\"\n">>
-    ),
+    application:set_env(beamtalk_runtime, root_package, <<"wideps_pkg2">>),
     meck:new(beamtalk_package, [passthrough]),
     meck:expect(beamtalk_package, dependencies, fun(<<"wideps_pkg2">>) ->
         [<<"missing_dep">>]
@@ -320,7 +316,7 @@ dependencies_skips_a_dependency_that_fails_to_resolve(#{tmp := Tmp, workspace_id
     end.
 
 %% Restart workspace_meta against the same WorkspaceId/Tmp so its init-time
-%% `get_package_name/0` cache picks up a beamtalk.toml written after
+%% `get_package_name/0` cache picks up a `root_package` set after
 %% `case_setup/0`'s original start. Runs `Fun/0` while the fresh meta is up,
 %% then stops it; restoring the registered name is left to
 %% `case_teardown/1` (which tolerates the already-dead original pid).
@@ -335,6 +331,7 @@ with_reloaded_meta(WorkspaceId, Tmp, Fun) ->
     try
         Fun()
     after
+        application:unset_env(beamtalk_runtime, root_package),
         stop_proc(FreshMetaPid)
     end.
 
