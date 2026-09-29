@@ -2224,54 +2224,31 @@ handle_op_inspect_live_non_actor_test() ->
 %% Regression test for the bug where state was returned as a binary string, causing
 %% the TypeScript client's Object.entries() to iterate characters instead of fields.
 handle_op_inspect_live_tagged_actor_test() ->
-    %% Ensure no stale registry is running
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            ok;
-        Old ->
-            Ref = erlang:monitor(process, Old),
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+        PidStr = list_to_binary(pid_to_list(ActorPid)),
+        Msg = make_proto_msg(<<"inspect">>, <<"i4">>, #{<<"actor">> => PidStr}),
+        Params = #{<<"actor">> => PidStr},
+        try
+            Result = beamtalk_repl_server:handle_op(<<"inspect">>, Params, Msg, self()),
+            Decoded = json:decode(Result),
+            ?assertMatch(#{<<"id">> := <<"i4">>}, Decoded),
+            %% state must be a JSON object (map), not a string
+            State = maps:get(<<"state">>, Decoded),
+            ?assert(is_map(State)),
+            %% user field 'value' must be present; internal fields must be absent
+            ?assert(maps:is_key(<<"value">>, State)),
+            ?assertNot(maps:is_key(<<"$beamtalk_class">>, State)),
+            ?assertNot(maps:is_key(<<"__methods__">>, State))
+        after
             (try
-                gen_server:stop(Old)
+                gen_server:stop(ActorPid)
             catch
                 _:_ -> ok
-            end),
-            receive
-                {'DOWN', Ref, process, Old, _} -> ok
-            after 1000 ->
-                ok
-            end
-    end,
-    {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
-    ),
-    {ok, ActorPid} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-    PidStr = list_to_binary(pid_to_list(ActorPid)),
-    Msg = make_proto_msg(<<"inspect">>, <<"i4">>, #{<<"actor">> => PidStr}),
-    Params = #{<<"actor">> => PidStr},
-    try
-        Result = beamtalk_repl_server:handle_op(<<"inspect">>, Params, Msg, self()),
-        Decoded = json:decode(Result),
-        ?assertMatch(#{<<"id">> := <<"i4">>}, Decoded),
-        %% state must be a JSON object (map), not a string
-        State = maps:get(<<"state">>, Decoded),
-        ?assert(is_map(State)),
-        %% user field 'value' must be present; internal fields must be absent
-        ?assert(maps:is_key(<<"value">>, State)),
-        ?assertNot(maps:is_key(<<"$beamtalk_class">>, State)),
-        ?assertNot(maps:is_key(<<"__methods__">>, State))
-    after
-        (try
-            gen_server:stop(ActorPid)
-        catch
-            _:_ -> ok
-        end),
-        (try
-            gen_server:stop(RegistryPid)
-        catch
-            _:_ -> ok
-        end)
-    end.
+            end)
+        end
+    end).
 
 handle_op_kill_invalid_pid_test() ->
     Msg = make_proto_msg(<<"kill">>, <<"k1">>, #{<<"actor">> => <<"notapid">>}),

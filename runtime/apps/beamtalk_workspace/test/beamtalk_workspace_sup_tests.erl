@@ -56,7 +56,7 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 13 children: workspace_meta, workspace_changelog,
+    %% Should have 14 children: workspace_capability_guard, workspace_meta, workspace_changelog,
     %% workspace_signature_store, workspace_shape_store,
     %% workspace_shape_recheck_worker, workspace_findings_store,
     %% transcript_stream, workspace_bootstrap, repl_server,
@@ -71,7 +71,8 @@ children_count_test() ->
     %% workspace_shape_recheck_worker added.
     %% ADR 0108 hot-reload re-check trigger: beamtalk_alias_xref added.
     %% ADR 0129: beamtalk_workspace_capability_guard added (first child).
-    ?assertEqual(15, length(ChildSpecs)).
+    %% BT-3633: the actor registry is owned by beamtalk_runtime_sup.
+    ?assertEqual(14, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),

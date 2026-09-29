@@ -170,7 +170,9 @@ TestCase subclass: NodeTest
     c := Counter spawn
     all := Node current actors unwrap
     counters := (Node current actorsOf: Counter) unwrap
-    self assert: (counters allSatisfy: [:a | a class includesBehaviour: Counter])
+    self assert: (counters allSatisfy: [:a |
+      a class includesBehaviour: Counter
+    ])
     self assert: counters size <= all size
     c stop
 
@@ -187,8 +189,7 @@ TestCase subclass: NodeTest
     self assert: result isOk
     self assert: (result unwrap isKindOf: SupervisionTree)
 
-  testCurrentSupervisorsIsOkList =>
-    self assert: Node current supervisors isOk
+  testCurrentSupervisorsIsOkList => self assert: Node current supervisors isOk
 
   testCurrentShapeSkewIsZero =>
     self assert: Node current shapeSkew unwrap equals: 0

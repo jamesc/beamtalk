@@ -48,13 +48,12 @@ TestCase subclass: ProgramTest
   testExitZeroUnderTestRaisesProgramExit =>
     self should: [Program exit] raise: #program_exit
 
-// NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an
-// error — it raises a tagged `script_exit` signal that the session evaluator
-// catches to end the session and report exit code N to the connecting client
-// (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,
-// so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block
-// here has no session evaluator to catch the signal).
-
+  // NOTE: connected-mode `Program exit: N` (non-node-owning) no longer raises an
+  // error — it raises a tagged `script_exit` signal that the session evaluator
+  // catches to end the session and report exit code N to the connecting client
+  // (BT-2688, ADR 0099 §3 / Phase 5). That behaviour needs a live session shell,
+  // so it is covered by the EUnit test `beamtalk_repl_shell_tests` (a BUnit block
+  // here has no session evaluator to catch the signal).
   testRootSupervisorNilWithoutApplication =>
     // BT-3633: `beamtalk test` starts no [application] callback, so no root
     // supervisor is registered. Works without a workspace.

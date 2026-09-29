@@ -37,8 +37,10 @@ dispatch_eval_empty_code_returns_error_term_test() ->
 
 dispatch_actors_no_registry_returns_actors_term_test() ->
     Msg = make_msg(<<"actors">>),
-    %% No beamtalk_actor_registry in unit tests → empty actor list term.
-    ?assertEqual({actors, []}, beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self())).
+    %% No beamtalk_actor_registry registered → empty actor list term.
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual({actors, []}, beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()))
+    end).
 
 dispatch_inspect_invalid_pid_returns_error_term_test() ->
     Msg = make_msg(<<"inspect">>),
@@ -161,12 +163,14 @@ encode_actors_term_matches_handle_op_json_test() ->
     %% Encoding a dispatched term at the edge must reproduce exactly what the
     %% WebSocket transport returns via handle_op/4 (wire format unchanged).
     Msg = make_msg(<<"actors">>),
-    Term = beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()),
-    Encoded = beamtalk_repl_ops:encode(Term, Msg),
-    ViaServer = beamtalk_repl_server:handle_op(<<"actors">>, #{}, Msg, self()),
-    ?assertEqual(ViaServer, Encoded),
-    Decoded = json:decode(Encoded),
-    ?assertEqual([], maps:get(<<"actors">>, Decoded)).
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        Term = beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()),
+        Encoded = beamtalk_repl_ops:encode(Term, Msg),
+        ViaServer = beamtalk_repl_server:handle_op(<<"actors">>, #{}, Msg, self()),
+        ?assertEqual(ViaServer, Encoded),
+        Decoded = json:decode(Encoded),
+        ?assertEqual([], maps:get(<<"actors">>, Decoded))
+    end).
 
 encode_error_term_produces_error_json_test() ->
     Msg = make_msg(<<"inspect">>),

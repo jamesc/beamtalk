@@ -18,10 +18,6 @@ class-side facade (ADR 0129 §4): the `no_workspace` guard and `isAvailable/0`.
 %% Every guarded entry point, as {Fun, Args}.
 guarded_entries() ->
     [
-        {actors, []},
-        {processes, []},
-        {nodes, []},
-        {actorAt, [<<"<0.1.0>">>]},
         {classes, []},
         {bindings, []},
         {currentSession, []},
@@ -40,10 +36,8 @@ guarded_entries() ->
         {testTarget, [nil]},
         {bind, [1, 'X']},
         {unbind, ['X']},
-        {supervisor, []},
         {startSupervisor, [nil]},
         {stopSupervisor, [nil]},
-        {supervisors, []},
         {autoflush, []},
         {autoflush, [false]},
         {dependencies, []}

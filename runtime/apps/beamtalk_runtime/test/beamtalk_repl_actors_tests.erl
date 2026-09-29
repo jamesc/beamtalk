@@ -386,60 +386,62 @@ unknown_info_is_ignored_test() ->
 %%% ===========================================================================
 
 track_spawned_registers_actor_with_resolved_class_test() ->
-    {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
-    ),
-    {ok, ActorPid} = test_counter:start_link(0),
-    try
-        ok = beamtalk_repl_actors:track_spawned(ActorPid, 'Counter'),
-        %% cast is async; a following call is ordered after it
-        {ok, Metadata} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
-        ?assertEqual('Counter', maps:get(class, Metadata))
-    after
-        gen_server:stop(ActorPid),
-        gen_server:stop(RegistryPid)
-    end.
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        try
+            ok = beamtalk_repl_actors:track_spawned(ActorPid, 'Counter'),
+            %% cast is async; a following call is ordered after it
+            {ok, Metadata} = beamtalk_repl_actors:get_actor(RegistryPid, ActorPid),
+            ?assertEqual('Counter', maps:get(class, Metadata))
+        after
+            gen_server:stop(ActorPid)
+        end
+    end).
 
 track_spawned_is_idempotent_with_explicit_register_test() ->
-    {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
-    ),
-    {ok, ActorPid} = test_counter:start_link(0),
-    try
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-        ok = beamtalk_repl_actors:track_spawned(ActorPid, 'Counter'),
-        ?assertEqual(1, length(beamtalk_repl_actors:list_actors(RegistryPid)))
-    after
-        gen_server:stop(ActorPid),
-        gen_server:stop(RegistryPid)
-    end.
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        try
+            ok = beamtalk_repl_actors:register_actor(
+                RegistryPid, ActorPid, 'Counter', test_counter
+            ),
+            ok = beamtalk_repl_actors:track_spawned(ActorPid, 'Counter'),
+            ?assertEqual(1, length(beamtalk_repl_actors:list_actors(RegistryPid)))
+        after
+            gen_server:stop(ActorPid)
+        end
+    end).
 
 track_spawned_without_registry_is_noop_test() ->
-    ?assertEqual(undefined, whereis(beamtalk_actor_registry)),
-    ?assertEqual(ok, beamtalk_repl_actors:track_spawned(self(), 'Counter')).
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual(undefined, whereis(beamtalk_actor_registry)),
+        ?assertEqual(ok, beamtalk_repl_actors:track_spawned(self(), 'Counter'))
+    end).
 
 list_objects_and_object_at_wrap_live_actors_test() ->
-    {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
-    ),
-    {ok, ActorPid} = test_counter:start_link(0),
-    try
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-        ?assertEqual(
-            [{beamtalk_object, 'Counter', test_counter, ActorPid}],
-            beamtalk_repl_actors:list_objects()
-        ),
-        PidStr = pid_to_list(ActorPid),
-        ?assertEqual(
-            {beamtalk_object, 'Counter', test_counter, ActorPid},
-            beamtalk_repl_actors:object_at(PidStr)
-        ),
-        ?assertEqual(nil, beamtalk_repl_actors:object_at("invalid")),
-        ?assertEqual(nil, beamtalk_repl_actors:object_at(not_a_string))
-    after
-        gen_server:stop(ActorPid),
-        gen_server:stop(RegistryPid)
-    end.
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        try
+            ok = beamtalk_repl_actors:register_actor(
+                RegistryPid, ActorPid, 'Counter', test_counter
+            ),
+            ?assertEqual(
+                [{beamtalk_object, 'Counter', test_counter, ActorPid}],
+                beamtalk_repl_actors:list_objects()
+            ),
+            PidStr = pid_to_list(ActorPid),
+            ?assertEqual(
+                {beamtalk_object, 'Counter', test_counter, ActorPid},
+                beamtalk_repl_actors:object_at(PidStr)
+            ),
+            ?assertEqual(nil, beamtalk_repl_actors:object_at("invalid")),
+            ?assertEqual(nil, beamtalk_repl_actors:object_at(not_a_string))
+        after
+            gen_server:stop(ActorPid)
+        end
+    end).
 
 list_objects_without_registry_is_empty_test() ->
-    ?assertEqual([], beamtalk_repl_actors:list_objects()).
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual([], beamtalk_repl_actors:list_objects())
+    end).

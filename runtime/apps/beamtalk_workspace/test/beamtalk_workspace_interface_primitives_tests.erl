@@ -7,8 +7,6 @@
 EUnit tests for beamtalk_workspace_interface_primitives module.
 
 Tests the Phase 2 dispatch/3 interface for Workspace primitives:
-- actors selector
-- actorAt: selector
 - classes selector
 - load: selector (including value_type_name/1 coverage)
 - bindings selector
@@ -21,11 +19,6 @@ Tests the Phase 2 dispatch/3 interface for Workspace primitives:
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
-%% supervisor behaviour callback used by start_bare_workspace_sup/0 in the
-%% supervisors/0 tests (a minimal childless workspace_sup stand-in).
--behaviour(supervisor).
--export([init/1]).
 
 %%====================================================================
 %% Fixtures
@@ -56,13 +49,6 @@ rm_rf(Dir) ->
             file:delete(Dir)
     end.
 
-%% Start the actor registry defensively — tolerates already-started.
-ensure_registry_started() ->
-    case beamtalk_repl_actors:start_link(registered) of
-        {ok, Pid} -> {ok, Pid};
-        {error, {already_started, Pid}} -> {ok, Pid}
-    end.
-
 %% Clean up all ETS entries in the bindings table.
 %% ETS keys are now just atoms (no pid component).
 cleanup_ets_for(_Pid) ->
@@ -73,131 +59,6 @@ cleanup_ets_for(_Pid) ->
             ets:delete_all_objects(beamtalk_wi_user_bindings),
             ok
     end.
-
-%%====================================================================
-%% actors Tests
-%%====================================================================
-
-actors_returns_empty_when_no_registry_test() ->
-    Self = fake_self(self()),
-    Result = beamtalk_workspace_interface_primitives:dispatch(actors, [], Self),
-    ?assertEqual([], Result).
-
-actors_returns_live_actors_test() ->
-    {ok, RegistryPid} = ensure_registry_started(),
-    {ok, Actor1} = test_counter:start_link(0),
-    {ok, Actor2} = test_counter:start_link(10),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
-
-    Result = beamtalk_workspace_interface_primitives:dispatch(actors, [], fake_self(self())),
-    ?assertEqual(2, length(Result)),
-    lists:foreach(
-        fun({beamtalk_object, Class, Module, Pid}) ->
-            ?assertEqual('Counter', Class),
-            ?assertEqual(test_counter, Module),
-            ?assert(is_process_alive(Pid))
-        end,
-        Result
-    ),
-
-    gen_server:stop(Actor1),
-    gen_server:stop(Actor2),
-    gen_server:stop(RegistryPid).
-
-actors_filters_dead_processes_test() ->
-    {ok, RegistryPid} = ensure_registry_started(),
-    {ok, Actor1} = test_counter:start_link(0),
-    {ok, Actor2} = test_counter:start_link(10),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
-
-    gen_server:stop(Actor1),
-
-    Result = beamtalk_workspace_interface_primitives:dispatch(actors, [], fake_self(self())),
-    ?assertEqual(1, length(Result)),
-
-    gen_server:stop(Actor2),
-    gen_server:stop(RegistryPid).
-
-%%====================================================================
-%% actorAt: Tests
-%%====================================================================
-
-actor_at_returns_object_for_valid_pid_test() ->
-    {ok, RegistryPid} = ensure_registry_started(),
-    {ok, Actor} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-
-    PidStr = list_to_binary(pid_to_list(Actor)),
-    Result = beamtalk_workspace_interface_primitives:dispatch(
-        'actorAt:', [PidStr], fake_self(self())
-    ),
-    ?assertMatch({beamtalk_object, 'Counter', test_counter, _}, Result),
-
-    gen_server:stop(Actor),
-    gen_server:stop(RegistryPid).
-
-actor_at_returns_nil_for_unknown_pid_test() ->
-    {ok, RegistryPid} = ensure_registry_started(),
-    Result = beamtalk_workspace_interface_primitives:dispatch(
-        'actorAt:', [<<"<0.99999.0>">>], fake_self(self())
-    ),
-    ?assertEqual(nil, Result),
-    gen_server:stop(RegistryPid).
-
-actor_at_returns_nil_for_invalid_pid_string_test() ->
-    ?assertEqual(
-        nil,
-        beamtalk_workspace_interface_primitives:dispatch(
-            'actorAt:', [<<"not-a-pid">>], fake_self(self())
-        )
-    ),
-    ?assertEqual(
-        nil,
-        beamtalk_workspace_interface_primitives:dispatch(
-            'actorAt:', [<<"">>], fake_self(self())
-        )
-    ),
-    ?assertEqual(
-        nil,
-        beamtalk_workspace_interface_primitives:dispatch(
-            'actorAt:', [42], fake_self(self())
-        )
-    ).
-
-actor_at_returns_nil_for_dead_actor_test() ->
-    {ok, RegistryPid} = ensure_registry_started(),
-    {ok, Actor} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-    PidStr = list_to_binary(pid_to_list(Actor)),
-    gen_server:stop(Actor),
-
-    Result = beamtalk_workspace_interface_primitives:dispatch(
-        'actorAt:', [PidStr], fake_self(self())
-    ),
-    ?assertEqual(nil, Result),
-    gen_server:stop(RegistryPid).
-
-actor_at_returns_nil_when_no_registry_test() ->
-    Result = beamtalk_workspace_interface_primitives:dispatch(
-        'actorAt:', [<<"<0.1.0>">>], fake_self(self())
-    ),
-    ?assertEqual(nil, Result).
-
-actor_at_accepts_list_string_test() ->
-    {ok, RegistryPid} = ensure_registry_started(),
-    {ok, Actor} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-
-    PidStr = pid_to_list(Actor),
-    Result = beamtalk_workspace_interface_primitives:dispatch(
-        'actorAt:', [PidStr], fake_self(self())
-    ),
-    ?assertMatch({beamtalk_object, 'Counter', test_counter, _}, Result),
-
-    gen_server:stop(Actor),
-    gen_server:stop(RegistryPid).
 
 %%====================================================================
 %% classes Tests
@@ -459,7 +320,7 @@ get_session_bindings_includes_user_bindings_test() ->
     end.
 
 %%====================================================================
-%% startSupervisor: / stopSupervisor: / supervisors Validation Tests
+%% startSupervisor: / stopSupervisor: Validation Tests
 %%====================================================================
 
 start_supervisor_type_error_for_non_class_object_test() ->
@@ -485,42 +346,6 @@ stop_supervisor_type_error_for_non_class_object_test() ->
             ?assertEqual('Workspace', Err#beamtalk_error.class),
             ?assertEqual('stopSupervisor:', Err#beamtalk_error.selector)
     end.
-
-%%====================================================================
-%% rootSupervisor Tests
-%%====================================================================
-
-root_supervisor_returns_nil_when_not_registered_test() ->
-    %% rootSupervisor/0 returns nil when no root supervisor has been registered.
-    (try
-        ets:delete(beamtalk_root_supervisor)
-    catch
-        _:_ -> ok
-    end),
-    Self = fake_self(self()),
-    ?assertEqual(nil, beamtalk_workspace_interface_primitives:dispatch(rootSupervisor, [], Self)),
-    ?assertEqual(nil, beamtalk_workspace_interface_primitives:rootSupervisor()).
-
-root_supervisor_returns_registered_value_test() ->
-    %% rootSupervisor/0 returns the tuple registered via beamtalk_supervisor:register_root/1.
-    (try
-        ets:delete(beamtalk_root_supervisor)
-    catch
-        _:_ -> ok
-    end),
-    FakePid = self(),
-    SupTuple = {beamtalk_supervisor, 'AppSup', 'bt@my_app@app_sup', FakePid},
-    beamtalk_supervisor:register_root(SupTuple),
-    Self = fake_self(self()),
-    ?assertEqual(
-        SupTuple, beamtalk_workspace_interface_primitives:dispatch(rootSupervisor, [], Self)
-    ),
-    ?assertEqual(SupTuple, beamtalk_workspace_interface_primitives:rootSupervisor()),
-    (try
-        ets:delete(beamtalk_root_supervisor)
-    catch
-        _:_ -> ok
-    end).
 
 %%====================================================================
 %% sync Tests
@@ -1394,107 +1219,6 @@ dependencies_with_package_name_returns_map_test() ->
             _ -> os:putenv("HOME", OldHome)
         end,
         _ = file:del_dir_r(Tmp)
-    end.
-
-%%====================================================================
-%% supervisors/0 against a bare, locally-registered beamtalk_workspace_sup
-%%
-%% supervisors/0 reads the (possibly empty) root supervisor plus the user
-%% supervisors attached under beamtalk_workspace_sup. We start a minimal
-%% standalone supervisor registered under that name with no children, so the
-%% which_children scan runs for real and the user-supervisor list is empty.
-%% Combined with a registered root, this exercises both the Root branch and
-%% the filtermap over which_children.
-%%====================================================================
-
-supervisors_lists_root_with_empty_user_tree_test() ->
-    %% Only run when no real workspace_sup is already up (suite-ordering safe).
-    case whereis(beamtalk_workspace_sup) of
-        undefined ->
-            {ok, SupPid} = start_bare_workspace_sup(),
-            (try
-                ets:delete(beamtalk_root_supervisor)
-            catch
-                _:_ -> ok
-            end),
-            RootTuple = {beamtalk_supervisor, 'AppRoot', 'bt@app@root', self()},
-            beamtalk_supervisor:register_root(RootTuple),
-            try
-                Result = beamtalk_workspace_interface_primitives:supervisors(),
-                ?assert(is_list(Result)),
-                %% Root is present; no user supervisors attached.
-                ?assert(lists:member(RootTuple, Result)),
-                ?assertEqual([RootTuple], Result)
-            after
-                (try
-                    ets:delete(beamtalk_root_supervisor)
-                catch
-                    _:_ -> ok
-                end),
-                stop_proc(SupPid)
-            end;
-        _ ->
-            %% A workspace_sup is already running (integration suite); just
-            %% assert the call returns a list.
-            ?assert(is_list(beamtalk_workspace_interface_primitives:supervisors()))
-    end.
-
-supervisors_empty_without_root_test() ->
-    case whereis(beamtalk_workspace_sup) of
-        undefined ->
-            {ok, SupPid} = start_bare_workspace_sup(),
-            (try
-                ets:delete(beamtalk_root_supervisor)
-            catch
-                _:_ -> ok
-            end),
-            try
-                ?assertEqual([], beamtalk_workspace_interface_primitives:supervisors())
-            after
-                stop_proc(SupPid)
-            end;
-        _ ->
-            ?assert(is_list(beamtalk_workspace_interface_primitives:supervisors()))
-    end.
-
-%% Start a minimal one_for_one supervisor with no children registered under
-%% the beamtalk_workspace_sup name. supervisor:start_link with the eunit test
-%% module as callback uses init/1 below.
-start_bare_workspace_sup() ->
-    supervisor:start_link({local, beamtalk_workspace_sup}, ?MODULE, bare_sup).
-
-%% supervisor init/1 callback used only by start_bare_workspace_sup/0.
-init(bare_sup) ->
-    {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.
-
-%%====================================================================
-%% dispatch(supervisors, []) routing arm
-%%
-%% supervisors/0 calls supervisor:which_children/1 on beamtalk_workspace_sup,
-%% so this test starts a bare workspace_sup when none is already running —
-%% mirroring the existing supervisors_returns_list_test/supervisors_empty_*
-%% pattern. The dispatch/3 routing arm was previously exercised only by
-%% supervisors/0's direct callers; this test covers the dispatch path itself.
-%%====================================================================
-
-supervisors_via_dispatch_test() ->
-    Self = fake_self(self()),
-    case whereis(beamtalk_workspace_sup) of
-        undefined ->
-            {ok, SupPid} = start_bare_workspace_sup(),
-            try
-                Result = beamtalk_workspace_interface_primitives:dispatch(
-                    supervisors, [], Self
-                ),
-                ?assert(is_list(Result))
-            after
-                stop_proc(SupPid)
-            end;
-        _ ->
-            Result = beamtalk_workspace_interface_primitives:dispatch(
-                supervisors, [], Self
-            ),
-            ?assert(is_list(Result))
     end.
 
 %%====================================================================

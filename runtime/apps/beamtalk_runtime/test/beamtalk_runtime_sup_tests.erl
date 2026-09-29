@@ -214,7 +214,7 @@ reactive_subprocess_sup_child_spec_test() ->
 init_returns_proper_format_test() ->
     Result = beamtalk_runtime_sup:init([]),
     ?assertMatch(
-        {ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _, _, _, _, _, _]}}, Result
+        {ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _, _, _, _, _, _, _]}}, Result
     ).
 
 %%% Behavioral tests

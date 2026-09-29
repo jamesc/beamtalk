@@ -29,6 +29,10 @@ and `isRemote`/`node` on an actor spawned on the peer.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+%% supervisor callback for with_bare_workspace_sup/1 (a childless workspace_sup stand-in).
+-behaviour(supervisor).
+-export([init/1]).
+
 %% RFC 5737 TEST-NET-1: an IP literal that is never a local address.
 -define(OFF_HOST_NODE, 'worker@192.0.2.1').
 
@@ -339,3 +343,155 @@ expect_event(EventClass, PeerNode) ->
     after 10000 ->
         ?assert(false)
     end.
+
+%%====================================================================
+%% Local introspection targets (moved from Workspace, BT-3633)
+%%====================================================================
+
+local_actors_returns_empty_when_no_registry_test() ->
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual([], beamtalk_node:local_actors())
+    end).
+
+local_actors_returns_live_actors_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, Actor1} = test_counter:start_link(0),
+        {ok, Actor2} = test_counter:start_link(10),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
+        try
+            Result = beamtalk_node:local_actors(),
+            ?assertEqual(2, length(Result)),
+            lists:foreach(
+                fun({beamtalk_object, Class, Module, Pid}) ->
+                    ?assertEqual('Counter', Class),
+                    ?assertEqual(test_counter, Module),
+                    ?assert(is_process_alive(Pid))
+                end,
+                Result
+            )
+        after
+            gen_server:stop(Actor1),
+            gen_server:stop(Actor2)
+        end
+    end).
+
+local_actors_filters_dead_processes_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, Actor1} = test_counter:start_link(0),
+        {ok, Actor2} = test_counter:start_link(10),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
+        gen_server:stop(Actor1),
+        try
+            ?assertEqual(1, length(beamtalk_node:local_actors()))
+        after
+            gen_server:stop(Actor2)
+        end
+    end).
+
+local_actor_at_returns_object_for_valid_pid_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, Actor} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
+        try
+            PidBin = list_to_binary(pid_to_list(Actor)),
+            ?assertMatch(
+                {beamtalk_object, 'Counter', test_counter, _}, beamtalk_node:local_actor_at(PidBin)
+            ),
+            %% A charlist pid string is accepted too.
+            ?assertMatch(
+                {beamtalk_object, 'Counter', test_counter, _},
+                beamtalk_node:local_actor_at(pid_to_list(Actor))
+            )
+        after
+            gen_server:stop(Actor)
+        end
+    end).
+
+local_actor_at_returns_nil_for_unknown_or_invalid_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(_RegistryPid) ->
+        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"<0.99999.0>">>)),
+        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"not-a-pid">>)),
+        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"">>)),
+        ?assertEqual(nil, beamtalk_node:local_actor_at(42))
+    end).
+
+local_actor_at_returns_nil_for_dead_actor_test() ->
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, Actor} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
+        PidBin = list_to_binary(pid_to_list(Actor)),
+        gen_server:stop(Actor),
+        ?assertEqual(nil, beamtalk_node:local_actor_at(PidBin))
+    end).
+
+local_actor_at_returns_nil_when_no_registry_test() ->
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"<0.1.0>">>))
+    end).
+
+%% local_supervisors/0 reads the (possibly empty) root supervisor plus the user
+%% supervisors attached under beamtalk_workspace_sup. A childless supervisor
+%% registered under that name makes the which_children scan run for real.
+local_supervisors_lists_root_with_empty_user_tree_test() ->
+    with_bare_workspace_sup(fun() ->
+        clear_root_supervisor(),
+        RootTuple = {beamtalk_supervisor, 'AppRoot', 'bt@app@root', self()},
+        beamtalk_supervisor:register_root(RootTuple),
+        try
+            ?assertEqual([RootTuple], beamtalk_node:local_supervisors())
+        after
+            clear_root_supervisor()
+        end
+    end).
+
+local_supervisors_empty_without_root_test() ->
+    with_bare_workspace_sup(fun() ->
+        clear_root_supervisor(),
+        ?assertEqual([], beamtalk_node:local_supervisors())
+    end).
+
+local_supervisors_without_workspace_sup_lists_only_root_test() ->
+    case whereis(beamtalk_workspace_sup) of
+        undefined ->
+            clear_root_supervisor(),
+            ?assertEqual([], beamtalk_node:local_supervisors());
+        _ ->
+            %% A real workspace_sup is running (integration suite ordering).
+            ?assert(is_list(beamtalk_node:local_supervisors()))
+    end.
+
+clear_root_supervisor() ->
+    (try
+        ets:delete(beamtalk_root_supervisor)
+    catch
+        _:_ -> ok
+    end),
+    ok.
+
+%% Run Fun with a minimal childless supervisor registered as
+%% beamtalk_workspace_sup; skips (runs Fun anyway) if a real one is running.
+with_bare_workspace_sup(Fun) ->
+    case whereis(beamtalk_workspace_sup) of
+        undefined ->
+            Old = process_flag(trap_exit, true),
+            {ok, Sup} = supervisor:start_link({local, beamtalk_workspace_sup}, ?MODULE, bare_sup),
+            try
+                Fun()
+            after
+                unlink(Sup),
+                exit(Sup, shutdown),
+                receive
+                    {'EXIT', Sup, _} -> ok
+                after 1000 -> ok
+                end,
+                process_flag(trap_exit, Old)
+            end;
+        _ ->
+            ok
+    end.
+
+%% supervisor callback used only by with_bare_workspace_sup/1.
+init(bare_sup) ->
+    {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.

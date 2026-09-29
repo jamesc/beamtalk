@@ -30,22 +30,6 @@ inside the `try`).
 make_msg(Op, Id, Session) ->
     {protocol_msg, Op, Id, Session, #{}}.
 
-%% Stop any stale globally-registered actor registry so start_link/4 below
-%% does not fail with {already_started, _}. Mirrors the pattern in
-%% beamtalk_repl_server_tests.
-stop_registry_if_running() ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            ok;
-        Old ->
-            Ref = erlang:monitor(process, Old),
-            catch gen_server:stop(Old),
-            receive
-                {'DOWN', Ref, process, Old, _} -> ok
-            after 1000 -> ok
-            end
-    end.
-
 %%====================================================================
 %% validate_actor_pid/1
 %%====================================================================
@@ -66,10 +50,12 @@ validate_valid_pid_no_registry_returns_unknown_actor_test() ->
     %% list_to_pid succeeds, but beamtalk_actor_registry is not running in unit
     %% tests so is_known_actor/1 returns false → unknown_actor.
     PidStr = pid_to_list(self()),
-    ?assertEqual(
-        {error, unknown_actor},
-        beamtalk_repl_ops_actors:validate_actor_pid(PidStr)
-    ).
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual(
+            {error, unknown_actor},
+            beamtalk_repl_ops_actors:validate_actor_pid(PidStr)
+        )
+    end).
 
 %%====================================================================
 %% is_known_actor/1
@@ -77,7 +63,9 @@ validate_valid_pid_no_registry_returns_unknown_actor_test() ->
 
 is_known_actor_no_registry_returns_false_test() ->
     %% whereis(beamtalk_actor_registry) returns undefined in unit tests → false.
-    ?assertEqual(false, beamtalk_repl_ops_actors:is_known_actor(self())).
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        ?assertEqual(false, beamtalk_repl_ops_actors:is_known_actor(self()))
+    end).
 
 %%====================================================================
 %% handle/4 — actors op
@@ -85,11 +73,13 @@ is_known_actor_no_registry_returns_false_test() ->
 
 handle_actors_no_registry_returns_empty_list_test() ->
     Msg = make_msg(<<"actors">>, <<"a-1">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(<<"actors">>, #{}, Msg, self()),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"actors">>, Decoded)),
-    ?assertEqual([], maps:get(<<"actors">>, Decoded)),
-    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+    beamtalk_test_actor_registry:without_registry(fun() ->
+        Result = beamtalk_repl_ops_actors:handle(<<"actors">>, #{}, Msg, self()),
+        Decoded = json:decode(Result),
+        ?assert(maps:is_key(<<"actors">>, Decoded)),
+        ?assertEqual([], maps:get(<<"actors">>, Decoded)),
+        ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded))
+    end).
 
 %%====================================================================
 %% handle/4 — inspect op (invalid / unknown PID paths)
@@ -197,25 +187,22 @@ handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
     %% `try` (is_tagged → field_names → maps:with) to its normal completion — the
     %% body that was moved back inside the `try` so any future throw there
     %% is caught rather than escaping the op handler.
-    stop_registry_if_running(),
-    {ok, RegistryPid} = gen_server:start_link(
-        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
-    ),
-    {ok, ActorPid} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-    PidBin = list_to_binary(pid_to_list(ActorPid)),
-    Msg = make_msg(<<"inspect">>, <<"i-live">>, undefined),
-    try
-        Result = beamtalk_repl_ops_actors:handle_term(
-            <<"inspect">>, #{<<"actor">> => PidBin}, Msg, self()
-        ),
-        ?assertMatch({inspect, M} when is_map(M), Result),
-        {inspect, Fields} = Result,
-        %% User-visible field is present; internal bookkeeping keys are filtered.
-        ?assert(maps:is_key(value, Fields)),
-        ?assertNot(maps:is_key('$beamtalk_class', Fields)),
-        ?assertNot(maps:is_key('__methods__', Fields))
-    after
-        catch gen_server:stop(ActorPid),
-        catch gen_server:stop(RegistryPid)
-    end.
+    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
+        {ok, ActorPid} = test_counter:start_link(0),
+        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+        PidBin = list_to_binary(pid_to_list(ActorPid)),
+        Msg = make_msg(<<"inspect">>, <<"i-live">>, undefined),
+        try
+            Result = beamtalk_repl_ops_actors:handle_term(
+                <<"inspect">>, #{<<"actor">> => PidBin}, Msg, self()
+            ),
+            ?assertMatch({inspect, M} when is_map(M), Result),
+            {inspect, Fields} = Result,
+            %% User-visible field is present; internal bookkeeping keys are filtered.
+            ?assert(maps:is_key(value, Fields)),
+            ?assertNot(maps:is_key('$beamtalk_class', Fields)),
+            ?assertNot(maps:is_key('__methods__', Fields))
+        after
+            catch gen_server:stop(ActorPid)
+        end
+    end).
