@@ -3234,7 +3234,14 @@ compile_rewrite_group(#rewrite_class_group{
 }) ->
     LoadPath = source_path_or_empty(SourcePath),
     NewSourceStr = unicode:characters_to_list(NewSourceBin),
-    compile_reload_source(NewSourceStr, LoadPath, ModuleNameOverride, undefined).
+    %% ADR 0127 §10a (BT-3650): same ambient `protocol_sources` merge
+    %% `reload_compile_and_load/4` and `reload_protocol_fanout/3` do, so a
+    %% rewritten class whose `uses:` names a protocol from a different,
+    %% already-loaded file doesn't report "unknown protocol".
+    PrebuiltIndexes = with_ambient_protocol_sources(
+        beamtalk_repl_compiler:build_class_indexes()
+    ),
+    compile_reload_source(NewSourceStr, LoadPath, ModuleNameOverride, undefined, PrebuiltIndexes).
 
 %% Is `Group`'s class's CURRENT `beamtalk_workspace_meta` source
 %% still byte-identical to what `build_class_group/2` snapshotted into

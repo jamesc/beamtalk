@@ -259,6 +259,48 @@ rewrite_sites_success(#{counter_path := CounterPath, sub_counter_path := SubCoun
     ].
 
 %%====================================================================
+%% Cross-file protocol `uses:` (BT-3650, ADR 0127 §10a): `compile_rewrite_group/1`
+%% must merge the ambient `protocol_sources` like `reload_compile_and_load/4`
+%% does, or rewriting a class whose `uses:` names a protocol defined in a
+%% DIFFERENT, already-loaded file fails with "unknown protocol".
+%%====================================================================
+
+rewrite_sites_cross_file_protocol_uses_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun rewrite_sites_cross_file_protocol_uses/1}.
+
+rewrite_sites_cross_file_protocol_uses(#{proj_dir := ProjDir}) ->
+    ProtoPath = filename:join(ProjDir, "rw_greeter.bt"),
+    UserPath = filename:join(ProjDir, "rw_greeter_user.bt"),
+    ok = file:write_file(
+        ProtoPath, "Protocol define: RwGreeter\n  greet -> String => \"hello\"\n"
+    ),
+    ok = file:write_file(
+        UserPath,
+        "Value subclass: RwGreeterUser\n  uses: RwGreeter\n  ping -> Integer => 1\n"
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(ProtoPath, State0),
+    {ok, _, _State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
+    UserSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"RwGreeterUser">>)
+    ),
+    [PingSpan] = word_spans(UserSource, <<"ping">>),
+    Site = #{
+        class => <<"RwGreeterUser">>,
+        source_file => list_to_binary(UserPath),
+        span => PingSpan,
+        new_text => <<"pong">>
+    },
+    Result = beamtalk_repl_loader:rewrite_sites(Site, []),
+    NewSource = unicode:characters_to_binary(
+        beamtalk_workspace_meta:get_class_source(<<"RwGreeterUser">>)
+    ),
+    [
+        ?_assertMatch({ok, _}, Result),
+        ?_assertEqual(1, length(word_spans(NewSource, <<"pong">>)))
+    ].
+
+%%====================================================================
 %% Same-start tie: a zero-length insertion sharing a `start` with a
 %% same-position replacement, in both caller-supplied orders (ADR 0114).
 %% `validate_no_overlaps/3`
