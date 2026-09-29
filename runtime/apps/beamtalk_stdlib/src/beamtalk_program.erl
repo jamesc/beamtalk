@@ -34,7 +34,7 @@ mechanism settled for the `program_name` Open Question (ADR 0099 §2). Absent
 """.
 
 %% `exit/1` shadows the auto-imported `erlang:exit/1` BIF; we never call the BIF
-%% unqualified, and only ever call `erlang:halt/1` (also qualified).
+%% unqualified.
 -compile({no_auto_import, [exit/1]}).
 
 -export([commandName/0, exit/0, 'exit:'/1, exit/1]).
@@ -60,49 +60,79 @@ exit() ->
     'exit:'(0).
 
 -doc """
-End this program with status `Code` — the job-level, safe exit (ADR 0099 §3).
+End this program with status `Code` — the job-level, safe exit (ADR 0099 §3,
+amended by BT-3634). What it does depends on who owns the node
+(`beamtalk_capability:exit_policy/0`):
 
-In a **node-owning** context (run-mode / escript — the program *is* the node)
-this exits the node with `Code` via `erlang:halt/1` (which flushes the `io`
-layer). In a **shared/connected** context (REPL / MCP / LSP / connected
-`beamtalk run`) it must end only *this session's* job and leave the node up; it
-raises a tagged `script_exit` signal carrying the status, which the session
-evaluator catches to report the status to the connecting client and terminate
-the session (ADR 0099 §3 / Phase 5).
+* **`node`** (`beamtalk run`, escript, release `eval`/`foreground`): the
+  program owns the node, so it stops *gracefully* with `init:stop(Code)` (the
+  supervision tree runs down, `terminate/2` runs, Logger handlers flush). The
+  calling process blocks until the node dies. From the entry method's own call
+  chain it throws `{beamtalk_script_exit, Code}` to the nearest harness
+  (`beamtalk_script_harness:dispatch/3`, `beamtalk_repl_eval:dispatch_sync/3`),
+  which stops the node (`eval`/`run`) or ends only that session (`rpc`).
+  From an **actor** (a service process, off any harness's call chain) it stops
+  the node directly. `init:stop/1` is asynchronous and bounded by the
+  supervisors' shutdown timeouts: a hanging `terminate/2` delays the exit.
+* **`shared`** (REPL / MCP / LSP / connected `run`): ends only *this session*.
+  The throw is caught by the session evaluator, which reports the status and
+  stops the session. From an **actor** there is no session to end, so it raises
+  `#beamtalk_error{kind = program_exit_outside_entry}`: return a status to the
+  entry method and call `Program exit:` there.
+* **`none`** (`beamtalk test`, a bare runtime): raises
+  `#beamtalk_error{kind = program_exit, details = #{status => Code}}` so code
+  that calls it is testable with `should: [...] raise: #program_exit`.
 
-**Process boundary.** The run-mode/escript path is an immediate `erlang:halt/1`,
-so it is effective from *any* process — including a spawned/supervised Actor —
-because the node is dedicated to this one program; there is no harness throw to
-unwind, so the ADR 0099 §3 supervised-Actor-restart caveat does not apply here.
-That caveat *does* apply to the connected-mode path: the signal is caught by the
-session evaluator, so it is effective only from the entry method's own
-synchronous call chain; a spawned Actor there must return a status to the entry
-method and let *it* call `exit:`.
+No context lets `{beamtalk_script_exit, _}` escape as an uncaught throw from an
+actor or a test.
 
-**`on:do:` caveat (connected mode).** Because the connected exit is a `throw`, a
-block that wraps `Program exit:` in an `on:do:` whose handler class matches
-(`on: Error do:` / `on: Exception do:` / a catch-all) will intercept it as an
-`erlang_throw` rather than letting the session end. `ensure:` is unaffected (it
-re-raises after running cleanup, so the exit still propagates). The robust fix is
-to add this signal to the non-local-return passthrough the `on:do:` codegen
-already emits for `{'$bt_nlr', _}` (see `control_flow/exception_handling.rs`);
-that is a known follow-up. In practice `Program exit:` is called at
-the top of a `main:` or as a bare REPL expression, neither of which is wrapped in
-such a handler.
+**`on:do:` caveat.** Because the entry-chain exit is a `throw`, a block that
+wraps `Program exit:` in an `on:do:` whose handler matches (`on: Error do:`, a
+catch-all) intercepts it as an `erlang_throw`. `ensure:` re-raises after its
+cleanup, so the exit still propagates.
 """.
 -spec 'exit:'(integer()) -> no_return().
 'exit:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
-    case node_owning() of
-        true ->
-            erlang:halt(Code);
-        false ->
-            %% Connected/shared context: end only THIS session's job, not the
-            %% shared node. The tagged `script_exit` signal carries the status; the
-            %% session evaluator (`beamtalk_repl_eval`/`beamtalk_repl_shell`) catches
-            %% it, replies with the exit status, and stops the session shell.
-            %% `throw` (not `error`) keeps it distinct from a user-level
-            %% `#beamtalk_error{}`, so an ordinary `on:do:` handler does not swallow
-            %% it.
+    Policy = beamtalk_capability:exit_policy(),
+    case {Policy, in_actor()} of
+        {none, _} ->
+            Err0 = beamtalk_error:new(program_exit, 'Program', 'exit:'),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary(
+                    io_lib:format("Program exit: ~B with no program or workspace to end", [Code])
+                )
+            ),
+            Err2 = beamtalk_error:with_details(Err1, #{status => Code}),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Err2,
+                    <<
+                        "This node has no workspace (for example under beamtalk test), so "
+                        "there is nothing to exit. Assert with should: [...] raise: #program_exit."
+                    >>
+                )
+            );
+        {node, true} ->
+            beamtalk_script_harness:stop_node(Code);
+        {shared, true} ->
+            Err0 = beamtalk_error:new(program_exit_outside_entry, 'Program', 'exit:'),
+            Err1 = beamtalk_error:with_details(Err0, #{status => Code}),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Err1,
+                    <<
+                        "Program exit: from an actor has no session to end in a shared "
+                        "workspace. Return a status to the entry method and call "
+                        "Program exit: there."
+                    >>
+                )
+            );
+        {_, false} ->
+            %% On an entry call chain: unwind to the nearest harness (a script
+            %% harness, the REPL evaluator, or `rpc`). `throw` (not `error`) keeps
+            %% it distinct from a user-level `#beamtalk_error{}`, so an ordinary
+            %% `on:do:` handler does not swallow it.
             throw({beamtalk_script_exit, Code})
     end;
 'exit:'(Code) when is_integer(Code) ->
@@ -128,7 +158,10 @@ exit(Code) ->
 %%% Internal helpers
 %%% ============================================================================
 
--doc "Whether this invocation owns the node (run-mode / escript boot sets the env).".
--spec node_owning() -> boolean().
-node_owning() ->
-    application:get_env(beamtalk_runtime, node_owning, false) =:= true.
+-doc """
+Is the caller an actor's `gen_server` process, mid-dispatch (off any harness's
+call chain)? Actor dispatch stashes its state under `'$bt_actor_state'`.
+""".
+-spec in_actor() -> boolean().
+in_actor() ->
+    get('$bt_actor_state') =/= undefined.

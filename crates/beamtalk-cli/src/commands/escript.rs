@@ -12,8 +12,9 @@
 //! generated `main/1` bootstrap module.
 //!
 //! The bootstrap reuses ADR 0061's run-mode lifecycle: it starts the workspace
-//! (`mode => run`), registers the project classes (topo-ordered), seeds the
-//! `node_owning` / `program_name` app envs (ADR 0099 §§2-3), dispatches the
+//! (`mode => run`, `node_owning => true` — a capability, BT-3634), registers the
+//! project classes (topo-ordered), seeds the `program_name` app env
+//! (ADR 0099 §§2-3), dispatches the
 //! entry method, and maps the outcome to a POSIX exit status via the shared run
 //! harness.
 
@@ -287,12 +288,12 @@ fn generate_boot_module(
          \n\
          main(Args) ->\n\
          \x20   {{ok, _}} = application:ensure_all_started(beamtalk_workspace),\n\
-         \x20   application:set_env(beamtalk_runtime, node_owning, true),\n\
          \x20   application:set_env(beamtalk_runtime, program_name,\n\
          \x20       unicode:characters_to_binary(filename:basename(escript:script_name()))),\n\
          \x20   {{ok, _}} = beamtalk_workspace_sup:start_link(\n\
          \x20       #{{workspace_id => <<\"escript\">>, project_path => undefined,\n\
-         \x20         mode => run, start_compiler => false}}),\n\
+         \x20         mode => run, start_compiler => false,\n\
+         \x20         node_owning => true}}),\n\
          \x20   {{ok, ActivationErrors}} =\n\
          \x20       beamtalk_module_activation:activate_modules([{module_list}], #{{}}),\n\
          \x20   case ActivationErrors of\n\
@@ -532,7 +533,8 @@ mod tests {
             &["bt@app@greeter".to_string()],
         );
         assert!(src.contains("-module(greeter_escript)."));
-        assert!(src.contains("application:set_env(beamtalk_runtime, node_owning, true)"));
+        assert!(src.contains("node_owning => true"));
+        assert!(!src.contains("set_env(beamtalk_runtime, node_owning"));
         assert!(src.contains("activate_modules(['bt@app@greeter'], #{})"));
         assert!(src.contains("BinArgs = [unicode:characters_to_binary(A) || A <- Args]"));
         assert!(src.contains("dispatch(ClassPid, 'main:', [BinArgs])"));

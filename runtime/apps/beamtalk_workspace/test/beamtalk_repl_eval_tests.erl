@@ -2418,6 +2418,22 @@ do_dispatch_keyword_success() ->
     ?assertMatch({ok, 3, _, _, _}, Result).
 
 do_dispatch_script_exit() ->
+    %% A REPL session runs under a workspace supervisor, which records `shared`
+    %% capabilities; without them `Program exit:` raises #program_exit (BT-3634).
+    Prev = beamtalk_capability:recorded(),
+    ok = beamtalk_capability:set(#{
+        mode => workspace, include_compiler => true, node_owning => false
+    }),
+    try
+        do_dispatch_script_exit_shared()
+    after
+        case Prev of
+            none -> beamtalk_capability:clear();
+            {ok, Caps} -> beamtalk_capability:set(Caps)
+        end
+    end.
+
+do_dispatch_script_exit_shared() ->
     ClassSource =
         "Object subclass: EvalDispatchExitCls\n"
         "  class run => Program exit: 7",

@@ -122,9 +122,22 @@ handle_term_eval_error_wraps_in_beamtalk_error_test_() ->
 %% terminates after surfacing the exit status (ADR 0099 §3).
 %%====================================================================
 
+%% A REPL session runs under a workspace supervisor, which records `shared`
+%% capabilities; without them `Program exit:` has no program or workspace to end
+%% (BT-3634). Cleared again by `teardown_shared_workspace/1`.
+setup_shared_workspace(Name) ->
+    ok = beamtalk_capability:set(#{
+        mode => workspace, include_compiler => true, node_owning => false
+    }),
+    setup_with_stdlib(Name).
+
+teardown_shared_workspace(Ctx) ->
+    teardown(Ctx),
+    beamtalk_capability:clear().
+
 handle_term_non_trace_script_exit_test_() ->
-    {setup, fun() -> setup_with_stdlib(<<"test-eval-ops-script-exit-nontrace">>) end,
-        fun teardown/1, fun(SessionPid) ->
+    {setup, fun() -> setup_shared_workspace(<<"test-eval-ops-script-exit-nontrace">>) end,
+        fun teardown_shared_workspace/1, fun(SessionPid) ->
             [
                 ?_test(begin
                     Msg = make_msg(<<"eval">>),
@@ -177,8 +190,8 @@ handle_term_trace_mode_error_wraps_in_beamtalk_error_test_() ->
     end}.
 
 handle_term_trace_mode_script_exit_test_() ->
-    {setup, fun() -> setup_with_stdlib(<<"test-eval-ops-script-exit-trace">>) end, fun teardown/1,
-        fun(SessionPid) ->
+    {setup, fun() -> setup_shared_workspace(<<"test-eval-ops-script-exit-trace">>) end,
+        fun teardown_shared_workspace/1, fun(SessionPid) ->
             [
                 ?_test(begin
                     Msg = make_msg(<<"eval">>),
