@@ -111,13 +111,13 @@ File writeAll: _widgetPath contents: _widgetSource
 // => Result ok: nil
 
 Workspace load: _counterPath
-// => _
+// => ["Bt3273Counter"]
 
 Workspace load: _subPath
-// => _
+// => ["Bt3273SubCounter"]
 
 Workspace load: _widgetPath
-// => _
+// => ["Bt3273Widget"]
 
 Bt3273Counter new increment
 // => incremented
@@ -253,13 +253,13 @@ Workspace changes clear
 // => _
 
 Workspace load: _counterPath
-// => _
+// => ["Bt3273Counter"]
 
 Workspace load: _subPath
-// => _
+// => ["Bt3273SubCounter"]
 
 Workspace load: _widgetPath
-// => _
+// => ["Bt3273Widget"]
 
 Bt3273Counter new incrementBy
 // => incremented
@@ -297,13 +297,13 @@ Bt3273Counter removeFromSystem
 // => nil
 
 (Erlang file) delete: _counterPath
-// => _
+// => Result ok: nil
 
 (Erlang file) delete: _subPath
-// => _
+// => Result ok: nil
 
 (Erlang file) delete: _widgetPath
-// => _
+// => Result ok: nil
 
 (Erlang file) del_dir: _projDir
 // => Result ok: nil
