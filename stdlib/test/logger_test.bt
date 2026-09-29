@@ -54,12 +54,13 @@ TestCase subclass: LoggerTest
     [
       Logger logLevel: #notice
       self assert: Logger logLevel equals: #notice
-    ] ensure: [
-      // Restore the level BUnit started with (test sys.config uses #error),
-      // even if the assertion above fails. Not asserted: the `#error` atom
-      // is coerced to a Result on return.
-      Logger logLevel: #error
     ]
+      ensure: [
+        // Restore the level BUnit started with (test sys.config uses #error),
+        // even if the assertion above fails. Not asserted: the `#error` atom
+        // is coerced to a Result on return.
+        Logger logLevel: #error
+      ]
     self assert: (saved isKindOf: Symbol)
 
   testLogFormatIsTextOrJson =>
