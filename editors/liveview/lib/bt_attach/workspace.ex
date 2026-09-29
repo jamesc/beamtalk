@@ -303,7 +303,7 @@ defmodule BtAttach.Workspace do
   def nodes(session_pid) when is_pid(session_pid) do
     case eval(
            session_pid,
-           "Node connected collect: [:n | #{#name => n name, #skewCount => (n shapeSkew ifOk: [:c | c] ifError: [:e | 0])}]"
+           "Node connected collect: [:n | \#{#name => n name, #skewCount => (n shapeSkew ifOk: [:c | c] ifError: [:e | 0])}]"
          ) do
       {:ok, value, _output, _warnings} -> {:ok, value}
       {:error, reason, _output, _warnings} -> {:error, reason}
