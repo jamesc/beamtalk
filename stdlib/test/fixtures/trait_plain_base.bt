@@ -5,6 +5,7 @@
 // `announce`/`label` shape, but `announce` is written in the class body.
 
 Actor subclass: TraitPlainBase
+
   label -> String => "base"
 
   announce -> String => "announce: " ++ self label

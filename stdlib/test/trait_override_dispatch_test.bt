@@ -24,8 +24,7 @@ TestCase subclass: TraitOverrideDispatchTest
   field: plainSub = nil
 
   setUp =>
-    (((self withBase: TraitLabelledBase spawn) withSub: TraitLabelledOverride spawn)
-      withPlainBase: TraitPlainBase spawn) withPlainSub: TraitPlainOverride spawn
+    (((self withBase: TraitLabelledBase spawn) withSub: TraitLabelledOverride spawn) withPlainBase: TraitPlainBase spawn) withPlainSub: TraitPlainOverride spawn
 
   tearDown =>
     self.base isNil ifFalse: [self.base stop]
