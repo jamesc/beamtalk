@@ -139,10 +139,17 @@ Protocol define: Printable
   asString -> String
 
 Protocol define: Comparable
+  /// Required — the using class must implement this.
   < other :: Self -> Boolean
-  > other :: Self -> Boolean
-  <= other :: Self -> Boolean
-  >= other :: Self -> Boolean
+
+  // Provided — derived from `<`, flattened into every `uses: Comparable` class.
+  > other :: Self -> Boolean => other < self
+  <= other :: Self -> Boolean => (other < self) not
+  >= other :: Self -> Boolean => (self < other) not
+  between: min :: Self and: max :: Self -> Boolean =>
+    (self >= min) and: [self <= max]
+  min: other :: Self -> Self => (self < other) ifTrue: [self] ifFalse: [other]
+  max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]
 
 Protocol define: Collection(E)
   size -> Integer
@@ -151,7 +158,7 @@ Protocol define: Collection(E)
   select: block :: Block(E, Boolean) -> Self
 ```
 
-Protocol bodies use method signatures without `=>` (no implementation body).
+Protocol bodies list **required** methods as bare signatures (no `=>`). A protocol may also carry **provided** methods — signatures with `=>` and a body — making it a **trait** (ADR 0127). `Comparable` above is one: only `<` is required; all other selectors are derived from it. See [§ Traits](../beamtalk-language-features.md#traits-adr-0127) for full details.
 
 ### Using protocols as types
 
