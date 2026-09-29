@@ -608,7 +608,7 @@ fn release_launcher_eval_adopts_program_exit_code_test() {
         .assert()
         .success();
 
-    let out = launcher_command(&output_dir, "cli_subprocess_fixture")
+    let out = isolated_launcher(&output_dir, "cli_subprocess_fixture", "l1")
         .args(["eval", "Exiter run"])
         .output()
         .expect("spawn bin/<name> eval");
@@ -739,6 +739,21 @@ fn launcher_command(release_dir: &std::path::Path, name: &str) -> Command {
 #[cfg(windows)]
 fn launcher_command(release_dir: &std::path::Path, name: &str) -> Command {
     Command::new(release_dir.join("bin").join(format!("{name}.cmd")))
+}
+
+/// `launcher_command` with a distinct `RELEASE_NODE` per call site. Every
+/// fixture release shares the package name `cli_subprocess_fixture`, which is
+/// also the launcher's default node name, so release tests that run `eval` /
+/// `ping` / `version` under Rust's parallel test execution collided on that
+/// name ("name ... seems to be in use by another Erlang node"; intermittent
+/// on Windows CI, BT-3659). `tag` must differ per call site.
+fn isolated_launcher(release_dir: &std::path::Path, name: &str, tag: &str) -> Command {
+    let mut cmd = launcher_command(release_dir, name);
+    cmd.env(
+        "RELEASE_NODE",
+        format!("bt3659_{tag}_{}", std::process::id()),
+    );
+    cmd
 }
 
 /// Build a releasable fixture (with `Smoke`) at `output_dir`, returning it.
@@ -930,7 +945,7 @@ fn release_launcher_version_verb_test() {
     let output_dir = project.path().join("dist");
     build_release_fixture(project.path(), &output_dir);
 
-    let out = launcher_command(&output_dir, "cli_subprocess_fixture")
+    let out = isolated_launcher(&output_dir, "cli_subprocess_fixture", "l2")
         .arg("version")
         .output()
         .expect("spawn bin/<name> version");
@@ -975,7 +990,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     let mut foreground = spawn_foreground_and_wait_for_ping(&output_dir, name, &node, &cookie);
 
     // `eval` — a separate VM, dispatch `Smoke run`, halt with the outcome.
-    let eval = launcher_command(&output_dir, name)
+    let eval = isolated_launcher(&output_dir, name, "l3")
         .args(["eval", "Smoke run"])
         .output()
         .expect("spawn bin/<name> eval");
@@ -1044,7 +1059,7 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // `eval "Beamtalk releaseInfo"` — the same singleton resolution in
     // `eval`'s separate throwaway VM (BT-3612); `eval` prints nothing on
     // success, so the exit status is the whole contract.
-    let eval_release_info = launcher_command(&output_dir, name)
+    let eval_release_info = isolated_launcher(&output_dir, name, "l4")
         .args(["eval", "Beamtalk releaseInfo"])
         .output()
         .expect("spawn bin/<name> eval \"Beamtalk releaseInfo\"");
@@ -1109,7 +1124,7 @@ fn release_launcher_eval_does_not_start_project_app_test() {
     build_release_fixture(project.path(), &output_dir);
 
     let name = "cli_subprocess_fixture";
-    let eval = launcher_command(&output_dir, name)
+    let eval = isolated_launcher(&output_dir, name, "l5")
         .args(["eval", "Smoke run"])
         .output()
         .expect("spawn bin/<name> eval");
@@ -1124,7 +1139,7 @@ fn release_launcher_eval_does_not_start_project_app_test() {
     // wrongly started the project's own app, which nothing here supervises
     // past this call), a stray port/name clash would be the likely symptom
     // on the second attempt.
-    let eval2 = launcher_command(&output_dir, name)
+    let eval2 = isolated_launcher(&output_dir, name, "l6")
         .args(["eval", "Smoke run"])
         .output()
         .expect("spawn bin/<name> eval (second run)");
@@ -1170,7 +1185,7 @@ fn release_launcher_refuses_out_of_range_otp_via_provenance_test() {
     .unwrap();
 
     let name = "cli_subprocess_fixture";
-    let out = launcher_command(&output_dir, name)
+    let out = isolated_launcher(&output_dir, name, "l7")
         .arg("ping")
         .output()
         .expect("spawn bin/<name> ping");
