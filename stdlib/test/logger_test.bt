@@ -47,7 +47,6 @@ TestCase subclass: LoggerTest
     }) equals: nil
 
   // === Logging configuration (BT-3653: moved from Beamtalk) ===
-
   testLogLevelReturnsSymbol => self assert: (Logger logLevel isKindOf: Symbol)
 
   testLogLevelRoundTrip =>
