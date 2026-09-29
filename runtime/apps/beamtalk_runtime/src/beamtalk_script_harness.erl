@@ -32,9 +32,11 @@ immediate `halt_node/1`.
     halt_unless_stopping/1,
     flush_loggers/0,
     stop_requested/0,
-    mark_stop_requested/1,
-    clear_stop_requested/0
+    mark_stop_requested/1
 ]).
+-ifdef(TEST).
+-export([clear_stop_requested/0]).
+-endif.
 
 -define(STOP_KEY, {?MODULE, stop_requested}).
 
@@ -102,7 +104,9 @@ stop_node(Code) ->
 
 -doc """
 Record, synchronously, that a graceful stop with status `Code` was requested.
-The first request wins (as it does for `init:stop/1`).
+Sequential calls keep the first code; this is a check-then-act, not a
+compare-and-swap, so concurrent callers may race. Only the flag's presence is
+used downstream, so that is harmless.
 """.
 -spec mark_stop_requested(0..255) -> ok.
 mark_stop_requested(Code) ->
@@ -120,10 +124,12 @@ stop_requested() ->
     end.
 
 -doc "Forget a recorded stop request (tests only; a real stop ends the node).".
+-ifdef(TEST).
 -spec clear_stop_requested() -> ok.
 clear_stop_requested() ->
     _ = persistent_term:erase(?STOP_KEY),
     ok.
+-endif.
 
 -doc """
 Halt with the implicit exit status `Code`, unless a graceful stop was already
