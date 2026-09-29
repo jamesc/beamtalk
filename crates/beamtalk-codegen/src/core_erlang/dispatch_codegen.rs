@@ -394,8 +394,6 @@ impl CoreErlangGenerator {
         );
 
         let result = self.fresh_temp_var("Unwrapped");
-        let wrapped_res = self.fresh_temp_var("WR");
-        let plain_res = self.fresh_temp_var("PR");
 
         // ADR 0118 phase 5a: the call-setup and unwrap steps stay opaque
         // `Statement`s (the SAME `Document` text this function always built,
@@ -406,18 +404,45 @@ impl CoreErlangGenerator {
         // frame the caller splices the prelude into (ADR 0118 §Decision 4),
         // not just to this producer's own isolated `construct_and_verify_class_var_bind`
         // check above.
+        let (call_stmt_doc, unwrap_stmt_doc) =
+            self.class_send_call_and_unwrap_docs(&call_result, &result, call_doc);
+        let span = beamtalk_core::source_analysis::Span::default();
+        let mut prelude = args_prelude;
+        prelude.push(ThreadedStmt::Statement(call_stmt_doc, span));
+        prelude.push(bind);
+        prelude.push(ThreadedStmt::Statement(unwrap_stmt_doc, span));
+        ThreadedValue {
+            prelude,
+            value: ValueRef::Var(result),
+        }
+    }
+
+    /// The two opaque statements every same-class self-send lowers to: bind the
+    /// call's reply to `call_result`, then peel the `{'class_var_result', Value,
+    /// _}` wrapper (if any) into `result`. Shared by
+    /// [`Self::emit_class_var_result_unwrap`] (which additionally rebinds the
+    /// returned class variables) and [`Self::emit_pure_class_self_send_unwrap`]
+    /// (which drops them).
+    fn class_send_call_and_unwrap_docs(
+        &mut self,
+        call_result: &str,
+        result: &str,
+        call_doc: Document<'static>,
+    ) -> (Document<'static>, Document<'static>) {
+        let wrapped_res = self.fresh_temp_var("WR");
+        let plain_res = self.fresh_temp_var("PR");
         let call_stmt_doc = docvec![
             "let ",
-            leaf::var(call_result.clone()),
+            leaf::var(call_result.to_string()),
             " = ",
             call_doc,
             " in ",
         ];
         let unwrap_stmt_doc = docvec![
             "let ",
-            leaf::var(result.clone()),
+            leaf::var(result.to_string()),
             " = case ",
-            leaf::var(call_result),
+            leaf::var(call_result.to_string()),
             " of <{'class_var_result', ",
             leaf::var(wrapped_res.clone()),
             ", _}> when 'true' -> ",
@@ -428,10 +453,27 @@ impl CoreErlangGenerator {
             leaf::var(plain_res),
             " end in ",
         ];
+        (call_stmt_doc, unwrap_stmt_doc)
+    }
+
+    /// Unwraps the reply of a same-class self-send to a class method that never
+    /// writes a class variable (see the call site in
+    /// [`Self::generate_class_method_self_send`]): the `{'class_var_result',
+    /// Value, _}` wrapper is peeled off, but — unlike
+    /// [`Self::emit_class_var_result_unwrap`] — the returned class variables are
+    /// dropped instead of rebound, so no `ClassVars` version is minted.
+    fn emit_pure_class_self_send_unwrap(
+        &mut self,
+        args_prelude: Vec<ThreadedStmt>,
+        call_doc: Document<'static>,
+    ) -> ThreadedValue {
+        let call_result = self.fresh_temp_var("CMR");
+        let result = self.fresh_temp_var("Unwrapped");
+        let (call_stmt_doc, unwrap_stmt_doc) =
+            self.class_send_call_and_unwrap_docs(&call_result, &result, call_doc);
         let span = beamtalk_core::source_analysis::Span::default();
         let mut prelude = args_prelude;
         prelude.push(ThreadedStmt::Statement(call_stmt_doc, span));
-        prelude.push(bind);
         prelude.push(ThreadedStmt::Statement(unwrap_stmt_doc, span));
         ThreadedValue {
             prelude,
@@ -1400,6 +1442,20 @@ impl CoreErlangGenerator {
                 args_doc,
                 ")"
             ];
+            // A callee that provably never writes a class variable
+            // (`class_var_mutating_selectors` is a whole-class fixed point that
+            // assumes the worst for anything it cannot resolve) hands back the
+            // caller's own `ClassVars` unchanged, so no rebind is minted: the
+            // call site then never consumes or produces a `ClassVars` version,
+            // and can sit in any nesting (conditional arm, block) without
+            // needing to thread one. Every class-side facade
+            // (`SystemNavigation`, ADR 0129) has no class variables at all.
+            if !self
+                .class_var_mutating_selectors()
+                .contains(selector_atom.as_str())
+            {
+                return Ok(self.emit_pure_class_self_send_unwrap(args_preamble, call_doc));
+            }
             // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
             return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }

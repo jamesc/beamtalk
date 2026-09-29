@@ -8,7 +8,7 @@ in ADRs and issues can be checked against real data.
 
 ADR 0087 introduces a runtime-maintained cross-reference index
 (`beamtalk_xref`) so navigation queries read from ETS instead of re-parsing
-every method source on each call. Phase 3 migrated `SystemNavigation default
+every method source on each call. Phase 3 migrated `SystemNavigation
 sendersOf:` to the index, with a source-scan fallback for loaded-but-unindexed
 classes. The ADR commits to "sub-millisecond ETS read" vs "a few seconds on a
 200-class workspace"; this benchmark confirms the order-of-magnitude win.
@@ -44,7 +44,7 @@ stdlib + ≥10 classes / ≥1000 methods; the stdlib alone satisfies this).
 
 ### Results
 
-Query: `SystemNavigation default sendersOf: #asString`
+Query: `SystemNavigation sendersOf: #asString`
 
 | Path | Iterations | ms/op | Hits |
 |---|---|---|---|

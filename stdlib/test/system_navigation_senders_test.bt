@@ -20,7 +20,7 @@ TestCase subclass: SystemNavigationSendersTest
 
   // --- selector existence ---
   testIncludesSelectorSendersOf =>
-    self assert: (SystemNavigation includesSelector: #sendersOf:)
+    self assert: (SystemNavigation class includesSelector: #sendersOf:)
 
   // --- composition primitives must be in place ---
 
@@ -35,7 +35,7 @@ TestCase subclass: SystemNavigationSendersTest
   // The internal helper `collectSendersFor:in:into:` factors out per-class
   // iteration so it can be unit-checked separately.
   testHelperCollectSendersIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectSendersFor:in:into:)
+    self assert: (SystemNavigation class includesSelector: #collectSendersFor:in:into:)
 
   // --- BT-2195: class-side scanning ---
   //
@@ -47,13 +47,13 @@ TestCase subclass: SystemNavigationSendersTest
   // CompiledMethod with non-empty source, and that the underlying
   // primitives `methods` / `respondsTo:` work on a metaclass scope.
 
-  // `SystemNavigation class >> #default` returns a CompiledMethod with
+  // `SystemNavigation class >> #allClasses` returns a CompiledMethod with
   // non-empty source — confirms the metaclass path through `>>` is wired
   // (the resolver routes `class = 'Metaclass'` receivers to the
   // `{class_method, _}` handler, which now plumbs `class_method_source`
   // into `__source__`).
   testMetaclassMethodHasSource =>
-    cm := SystemNavigation class >> #default
+    cm := SystemNavigation class >> #allClasses
     self deny: cm isNil
     self deny: cm source isEmpty
 
@@ -63,7 +63,7 @@ TestCase subclass: SystemNavigationSendersTest
   // receiver responds to `>>` (so the `respondsTo:` guard in
   // `collectSendersFor:in:into:` does not skip class-side scopes).
   testMetaclassScopePrimitivesPresent =>
-    self assert: ((SystemNavigation class) methods includes: #default)
+    self assert: ((SystemNavigation class) methods includes: #allClasses)
     self assert: ((SystemNavigation class) respondsTo: #'>>')
 
   // --- BT-2196: extension method scanning ---
@@ -75,11 +75,11 @@ TestCase subclass: SystemNavigationSendersTest
   // because the compiler port needed to parse extension source bodies is
   // not running under BUnit.
   testHelperCollectExtensionSendersIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectExtensionSendersFor:into:)
+    self assert: (SystemNavigation class includesSelector: #collectExtensionSendersFor:into:)
 
   // The class-tag resolver helper is present.
   testHelperResolveExtensionClassIsDefined =>
-    self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+    self assert: (SystemNavigation class includesSelector: #resolveExtensionClass:)
 
   // --- BT-2299: xref-backed read path + miss-policy fallback ---
   //
@@ -97,9 +97,9 @@ TestCase subclass: SystemNavigationSendersTest
   // The index-row -> result-record mapper is present (the `sendersOf:` body
   // delegates to it for the indexed call sites).
   testHelperIndexedSenderRecordsIsDefined =>
-    self assert: (SystemNavigation includesSelector: #indexedSenderRecordsFrom:into:)
+    self assert: (SystemNavigation class includesSelector: #indexedSenderRecordsFrom:into:)
 
   // The owner-tag/class-side -> `#class` resolver is present (instance-side
   // hits report the class object, class-side hits the metaclass object).
   testHelperSenderClassForIsDefined =>
-    self assert: (SystemNavigation includesSelector: #senderClassFor:classSide:)
+    self assert: (SystemNavigation class includesSelector: #senderClassFor:classSide:)

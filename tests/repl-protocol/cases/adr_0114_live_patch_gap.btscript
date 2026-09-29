@@ -56,13 +56,13 @@ Erlang beamtalk_extensions register: #Counter selector: #btAdr0114TimerExt fun: 
 // NOT a gap: referencesTo: Timer DOES surface this extension method as a
 // site, via the unconditional extension rescan described above — even
 // though the xref TABLE row for this method carries `references => []`.
-((SystemNavigation default referencesTo: Timer) collect: [:r | r at: #selector]) includes: #btAdr0114TimerExt
+((SystemNavigation referencesTo: Timer) collect: [:r | r at: #selector]) includes: #btAdr0114TimerExt
 // => true
 
 // The sends channel finds it too, via the ordinary (non-extension-special-
 // cased) xref path — sends_from_source/1 re-derives sends for every
 // source-bearing extension.
-((SystemNavigation default sendersOf: #after:do:) collect: [:r | r at: #selector]) includes: #btAdr0114TimerExt
+((SystemNavigation sendersOf: #after:do:) collect: [:r | r at: #selector]) includes: #btAdr0114TimerExt
 // => true
 
 // Clean up both ETS tables (mirrors workspace_native_api.btscript's own

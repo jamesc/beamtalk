@@ -112,8 +112,8 @@ test_resolve_with_integer() ->
 
 %% Metaclass receivers (class = 'Metaclass') route to the
 %% class-side method dictionary instead of the instance-side one. A
-%% `SystemNavigation class >> #default` lookup must return a CompiledMethod
-%% map whose `__selector__` is `default` — that selector is defined on the
+%% `SystemNavigation class >> #allClasses` lookup must return a CompiledMethod
+%% map whose `__selector__` is `allClasses` — that selector is defined on the
 %% class side of SystemNavigation, not the instance side.
 test_resolve_with_metaclass() ->
     NavPid = beamtalk_class_registry:whereis_class('SystemNavigation'),
@@ -121,8 +121,8 @@ test_resolve_with_metaclass() ->
     MetaObj = #beamtalk_object{
         class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = NavPid
     },
-    Result = beamtalk_method_resolver:resolve(MetaObj, 'default'),
-    ?assertMatch(#{'__selector__' := 'default'}, Result).
+    Result = beamtalk_method_resolver:resolve(MetaObj, 'allClasses'),
+    ?assertMatch(#{'__selector__' := 'allClasses'}, Result).
 
 test_resolve_with_metaclass_missing() ->
     NavPid = beamtalk_class_registry:whereis_class('SystemNavigation'),

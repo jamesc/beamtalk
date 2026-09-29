@@ -5014,7 +5014,10 @@ continue to use the generic `TextEdit` shape, gated on the file being open.
 ### `SystemNavigation` — Cross-class code queries
 
 `SystemNavigation` provides Smalltalk-style live-image queries over the loaded
-class registry. Reach the singleton via `SystemNavigation default`.
+class registry. It is a stateless class-side facade (ADR 0129): every query is a
+`class sealed` method sent to the class itself — there is no instance to
+construct, and `SystemNavigation new` is a compile error. The class is a plain
+value, so `nav := SystemNavigation` and `nav actorClasses` work too.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -5059,7 +5062,7 @@ dispatch) is unresolvable by construction and is silently skipped, so the result
 is discoverability, never a sound or exhaustive emission contract.
 
 ```beamtalk
-nav := SystemNavigation default
+nav := SystemNavigation
 
 nav implementorsOf: #printString
 // => [Object, Integer, String, ...]

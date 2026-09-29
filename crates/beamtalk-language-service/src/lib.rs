@@ -784,7 +784,7 @@ impl SimpleLanguageService {
     }
 
     /// Find every class that defines `selector_name` across all
-    /// indexed files. Mirrors `SystemNavigation default implementorsOf:`
+    /// indexed files. Mirrors `SystemNavigation implementorsOf:`
     /// semantics — local definitions only, both instance- and class-side.
     ///
     /// This is the cold-file AST fallback for `textDocument/implementation`.

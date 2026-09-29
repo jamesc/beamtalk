@@ -2,7 +2,7 @@
 
 **Status:** complete
 **Deliverable:** knowledge. Validate (or refute) that `renameTo:`'s planned
-site-discovery mechanism — the union of `SystemNavigation default
+site-discovery mechanism — the union of `SystemNavigation
 referencesTo: aClass` (ADR 0087) and `beamtalk_class_registry:
 direct_subclasses/1` — is exhaustive against real, compiled code, and measure
 the one known, accepted gap (Constraint 4: `beamtalk_xref:
@@ -142,7 +142,7 @@ rename would call — not just `build_method_entry/5` in isolation.
 
 First checked via `Counter >> makeTimer -> Timer => Timer after: 999999 do:
 [nil]` against a real loaded class (`Counter`), in the E2E harness. Result:
-`SystemNavigation default referencesTo: Timer` **found** the patch — no gap.
+`SystemNavigation referencesTo: Timer` **found** the patch — no gap.
 
 Tracing why: both `>>` (parsed as a standalone `MethodDefinition`,
 `beamtalk_repl_eval:handle_method_definition/4` →

@@ -612,7 +612,7 @@ failed.
 
 Run a `SystemNavigation`-style query directly against the maintained
 selector → sites cross-reference index (`beamtalk_xref`). Unlike `eval` of
-`SystemNavigation default sendersOf: …`, this op returns typed JSON rows
+`SystemNavigation sendersOf: …`, this op returns typed JSON rows
 instead of routing through the Beamtalk inspect-string formatter, so
 clients can decode directly into typed records without parsing display
 output.

@@ -48,31 +48,31 @@ TestCase subclass: SystemNavigationUnusedTest
 
   // --- selector existence ---
   testIncludesSelectorUnusedSelectors =>
-    self assert: (SystemNavigation includesSelector: #unusedSelectors)
+    self assert: (SystemNavigation class includesSelector: #unusedSelectors)
 
   // --- the documented runtime-called-overrides exclusion list ---
 
   // The exclusion list is present and non-empty (it is the static list of
   // framework selectors the runtime invokes without a source-visible send).
   testRuntimeCalledSelectorsIsDefined =>
-    self assert: (SystemNavigation includesSelector: #runtimeCalledSelectors)
+    self assert: (SystemNavigation class includesSelector: #runtimeCalledSelectors)
 
   testRuntimeCalledSelectorsIsNotEmpty =>
-    self deny: (SystemNavigation default runtimeCalledSelectors) isEmpty
+    self deny: (SystemNavigation runtimeCalledSelectors) isEmpty
 
   // The verified-real entries must be present: the DNU override is
   // `doesNotUnderstand:args:` (NOT `doesNotUnderstand:`), and lifecycle /
   // display / hash overrides are runtime-called too.
   testRuntimeCalledSelectorsContainsDnuOverride =>
-    self assert: ((SystemNavigation default runtimeCalledSelectors) includes: #doesNotUnderstand:args:)
+    self assert: ((SystemNavigation runtimeCalledSelectors) includes: #doesNotUnderstand:args:)
 
   testRuntimeCalledSelectorsContainsLifecycleHooks =>
-    rcs := SystemNavigation default runtimeCalledSelectors
+    rcs := SystemNavigation runtimeCalledSelectors
     self assert: (rcs includes: #initialize)
     self assert: (rcs includes: #terminate:)
 
   testRuntimeCalledSelectorsContainsDisplayAndHash =>
-    rcs := SystemNavigation default runtimeCalledSelectors
+    rcs := SystemNavigation runtimeCalledSelectors
     self assert: (rcs includes: #printString)
     self assert: (rcs includes: #displayString)
     self assert: (rcs includes: #inspect)
@@ -83,42 +83,42 @@ TestCase subclass: SystemNavigationUnusedTest
   // The sent-set is built by walking methods, fetching source via `>>`, and
   // collecting every send via `allSendsIn:` into a Set.
   testHelperCollectSentSelectorsIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectSentSelectorsIn:into:)
+    self assert: (SystemNavigation class includesSelector: #collectSentSelectorsIn:into:)
 
   testHelperAddSentSelectorsIsDefined =>
-    self assert: (SystemNavigation includesSelector: #addSentSelectorsIn:into:)
+    self assert: (SystemNavigation class includesSelector: #addSentSelectorsIn:into:)
 
   testHelperCollectExtensionSentSelectorsIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectExtensionSentSelectorsInto:)
+    self assert: (SystemNavigation class includesSelector: #collectExtensionSentSelectorsInto:)
 
   // The candidate side walks owners and applies the exclusions per selector.
   testHelperCollectUnusedIsDefined =>
-    self assert: (SystemNavigation includesSelector: #collectUnusedFor:owner:sent:excluded:into:)
+    self assert: (SystemNavigation class includesSelector: #collectUnusedFor:owner:sent:excluded:into:)
 
   testHelperRecordUnusedIsDefined =>
-    self assert: (SystemNavigation includesSelector: #recordUnused:scope:owner:isTestCase:sent:excluded:into:)
+    self assert: (SystemNavigation class includesSelector: #recordUnused:scope:owner:isTestCase:sent:excluded:into:)
 
   // The TestCase and primitive predicates back the exclusions.
   testHelperIsTestRunnerSelectorIsDefined =>
-    self assert: (SystemNavigation includesSelector: #isTestRunnerSelector:)
+    self assert: (SystemNavigation class includesSelector: #isTestRunnerSelector:)
 
   testHelperIsPrimitiveMethodIsDefined =>
-    self assert: (SystemNavigation includesSelector: #isPrimitiveMethod:in:)
+    self assert: (SystemNavigation class includesSelector: #isPrimitiveMethod:in:)
 
   // The class-tag resolver helper (shared with the other queries) is present.
   testHelperResolveExtensionClassIsDefined =>
-    self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+    self assert: (SystemNavigation class includesSelector: #resolveExtensionClass:)
 
   // The index-backed sent-set mapper (BT-2303): indexed `all_sent_selectors_bt`
   // selectors are folded into the sent Set via this typed helper.
   testHelperSentSetFromIndexIsDefined =>
-    self assert: (SystemNavigation includesSelector: #sentSetFromIndex:into:)
+    self assert: (SystemNavigation class includesSelector: #sentSetFromIndex:into:)
 
   // --- the predicates compute correctly (these do not need the compiler port) ---
 
   // The test-runner predicate matches setUp / tearDown / test* and nothing else.
   testIsTestRunnerSelectorMatchesRunnerMethods =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     self assert: (nav isTestRunnerSelector: #setUp)
     self assert: (nav isTestRunnerSelector: #tearDown)
     self assert: (nav isTestRunnerSelector: #testSomething)
@@ -127,7 +127,7 @@ TestCase subclass: SystemNavigationUnusedTest
   // The primitive predicate reads the `@intrinsic` / `@primitive` source text:
   // `Object >> #hash` is intrinsic; `Object >> #displayString` is ordinary.
   testIsPrimitiveMethodDetectsIntrinsics =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     self assert: (nav isPrimitiveMethod: #hash in: Object)
     self deny: (nav isPrimitiveMethod: #displayString in: Object)
 
@@ -136,7 +136,7 @@ TestCase subclass: SystemNavigationUnusedTest
   // The implementation walks aClass methods, fetches each via `>>`, reads its
   // source, asks for every send, and accumulates into a Set.
   testCompositionPrimitivesPresent =>
-    self assert: (SystemNavigation includesSelector: #allClasses)
+    self assert: (SystemNavigation class includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #methods)
     self assert: (Behaviour includesSelector: #'>>')
     self assert: (Behaviour includesSelector: #allSuperclasses)

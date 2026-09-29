@@ -69,9 +69,7 @@ fn inline_class_definition_with_superclass_index_compiles_as_value_type() {
         (atom("command"), atom("compile_expression")),
         (
             atom("source"),
-            binary(
-                "Shape subclass: Triangle\n  state: base = 1.0\n  class withBase: b => self new: #{#base => b}",
-            ),
+            binary("Shape subclass: Triangle\n  state: base = 1.0\n  class withBase: b => b"),
         ),
         (atom("module"), binary("bt@triangle")),
         (atom("known_vars"), Term::from(eetf::List::from(vec![]))),

@@ -6,8 +6,8 @@
 // variable. Backs System Browser-style navigation ("who reads/writes this
 // slot?").
 //
-// Both are instance methods on `SystemNavigation`, reached via the `default`
-// (or future scoped) constructor. As with `system_navigation_senders_test.bt` and
+// Both are class-side methods on `SystemNavigation`
+// (no instance is constructed). As with `system_navigation_senders_test.bt` and
 // `system_navigation_references_test.bt`, the behavioural happy-path checks
 // (does the scan actually find reads and writes, with the right #class /
 // #selector / #line shape?) live in the E2E REPL-protocol suite
@@ -32,14 +32,14 @@
 TestCase subclass: SystemNavigationFieldsTest
   field: nav = nil
 
-  setUp => self.nav := SystemNavigation default
+  setUp => self.nav := SystemNavigation
 
   // --- selector existence ---
   testIncludesSelectorFieldReadersOf =>
-    self assert: (SystemNavigation includesSelector: #fieldReadersOf:in:)
+    self assert: (SystemNavigation class includesSelector: #fieldReadersOf:in:)
 
   testIncludesSelectorFieldWritersOf =>
-    self assert: (SystemNavigation includesSelector: #fieldWritersOf:in:)
+    self assert: (SystemNavigation class includesSelector: #fieldWritersOf:in:)
 
   // --- composition primitives must be in place ---
   //
@@ -57,9 +57,9 @@ TestCase subclass: SystemNavigationFieldsTest
   // The shared driver + per-class / per-method helpers are defined so they can
   // be unit-checked separately.
   testHelpersDefined =>
-    self assert: (SystemNavigation includesSelector: #collectFieldAccessesOf:in:readers:)
-    self assert: (SystemNavigation includesSelector: #collectFieldAccessesFor:in:readers:into:)
-    self assert: (SystemNavigation includesSelector: #appendFieldAccessesIn:field:owner:methodSelector:readers:into:)
+    self assert: (SystemNavigation class includesSelector: #collectFieldAccessesOf:in:readers:)
+    self assert: (SystemNavigation class includesSelector: #collectFieldAccessesFor:in:readers:into:)
+    self assert: (SystemNavigation class includesSelector: #appendFieldAccessesIn:field:owner:methodSelector:readers:into:)
 
   // --- argument type validation ---
   //

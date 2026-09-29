@@ -22,7 +22,7 @@ TestCase subclass: SystemNavigationMessagesSentByTest
 
   // --- selector existence ---
   testIncludesSelectorMessagesSentBy =>
-    self assert: (SystemNavigation includesSelector: #messagesSentBy:)
+    self assert: (SystemNavigation class includesSelector: #messagesSentBy:)
 
   // --- composition primitives must be in place ---
   //
@@ -41,13 +41,13 @@ TestCase subclass: SystemNavigationMessagesSentByTest
   // so we suppress the type warning with `@expect type` — the BUnit run is
   // about the *runtime* guard, not the compile-time check.
   testRequiresCompiledMethodArgument =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     @expect type
     self should: [nav messagesSentBy: #notAMethod] raise: #user_error
 
   // Passing a class object also fails the type check.
   testRejectsClassObject =>
-    nav := SystemNavigation default
+    nav := SystemNavigation
     @expect type
     self should: [nav messagesSentBy: Integer] raise: #user_error
 
@@ -58,9 +58,9 @@ TestCase subclass: SystemNavigationMessagesSentByTest
   // because `allSendsIn:` falls back to `[]` when the port is down). The
   // important contract here is the shape: type-checked input → List output.
   testValidArgumentReturnsList =>
-    method := SystemNavigation >> #allClasses
+    method := SystemNavigation class >> #allClasses
     self deny: method isNil
-    nav := SystemNavigation default
+    nav := SystemNavigation
     result := nav messagesSentBy: method
     self assert: (result isKindOf: List)
 
@@ -71,11 +71,11 @@ TestCase subclass: SystemNavigationMessagesSentByTest
   // the same shape as the no-senders path on `sendersOf:`. The synthetic
   // assertion below cannot construct such a method directly in BUnit, but
   // verifying the selector path on a real source-bearing method
-  // (`SystemNavigation >> #allClasses`) confirms the no-crash invariant.
+  // (`SystemNavigation class >> #allClasses`) confirms the no-crash invariant.
   testMetaclassMethodAccepted =>
-    method := SystemNavigation class >> #default
+    method := SystemNavigation class >> #allClasses
     self deny: method isNil
     self deny: method source isEmpty
-    nav := SystemNavigation default
+    nav := SystemNavigation
     result := nav messagesSentBy: method
     self assert: (result isKindOf: List)
