@@ -2247,10 +2247,10 @@ The related display methods on `Object` are:
 | `printString` | **Debug** representation — self-describing, structural; the REPL default and what nested rendering uses |
 | `displayString` | **Display** representation — the string-interpolation `{...}` hook; defaults to `printString`, override for a natural human form |
 | `inspect` | Opens an `Inspector` cursor on the receiver (`Inspector on: self`) — a navigable, drillable view (ADR 0095). For the structural Debug string, use `printString`. |
-| `show: value` | Write `value` to Transcript (nil-safe, returns `self`) |
-| `showCr: value` | Write `value` to Transcript followed by newline (nil-safe, returns `self`) |
+| `show: value` | Write `value` to `Transcript` (returns `self`) |
+| `showCr: value` | Write `value` to `Transcript` followed by newline (returns `self`) |
 
-`show:` and `showCr:` are convenience methods on `Object` that delegate to `TranscriptStream`. They are nil-safe — when no transcript is active (e.g. batch compilation), they silently do nothing and return `self`, making them safe for cascaded chains:
+`show:` and `showCr:` are convenience methods on `Object` that delegate to the `Transcript` class-side facade (ADR 0129). Inside an interactive workspace the output goes to the REPL's transcript; everywhere else (`beamtalk run`, `beamtalk test`, releases) it is one plain `Logger` notice per call in the `[beamtalk, user, transcript]` domain, so they are always safe to call and return `self`. Programs should prefer `Logger` or `Console`; `Transcript recent` and `Transcript clear` are workspace-only and raise `no_workspace` elsewhere:
 
 ```beamtalk
 // Cascaded output
@@ -2261,7 +2261,7 @@ Transcript show: "Hello"; cr; show: "World"
 42 showCr: "hello world"
 ```
 
-`TranscriptStream >> show:` accepts any `Printable` value, so custom classes that conform to `Printable` work directly with `Transcript show:` without manual `asString` conversion.
+`Transcript show:` accepts any `Printable` value, so custom classes that conform to `Printable` work directly with `Transcript show:` without manual `asString` conversion.
 
 ### Navigable Inspector (ADR 0095)
 

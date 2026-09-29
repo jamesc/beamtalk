@@ -94,9 +94,9 @@ Session current bindings includesKey: #sx
 Workspace globals class
 // => BindingsView
 
-// Singletons are visible through the globals view.
+// Class facades (Transcript) are not bindings (ADR 0129).
 Workspace globals includesKey: #Transcript
-// => true
+// => false
 
 // Workspace-global writes are SYNCHRONOUS (route through bind:as:), so the new
 // binding is observable immediately as a bare name on the next line.
