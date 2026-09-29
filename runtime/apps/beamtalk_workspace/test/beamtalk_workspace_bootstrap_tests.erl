@@ -536,54 +536,6 @@ rebootstrap_actor_max_retries_direct_test_() ->
         ]
     end}.
 
-%% Test the max-retries clause for value-singleton rebootstrap (Retries >= 5).
-rebootstrap_value_max_retries_direct_test_() ->
-    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
-        [
-            ?_test(begin
-                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-                BPid ! {rebootstrap_value, 'TestValueSingletonXYZ', some_nonexistent_mod_xyz, 5},
-                timer:sleep(50),
-                ?assert(is_process_alive(BPid))
-            end)
-        ]
-    end}.
-
-%% Test the Retries < 5 clause of {rebootstrap_value, ...} when the module
-%% atom does not exist. bootstrap_value_singleton catches the undef from
-%% Module:new() and schedules a follow-up retry.
-rebootstrap_value_retry_bad_module_test_() ->
-    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
-        [
-            ?_test(begin
-                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-                BPid ! {rebootstrap_value, 'SomeTestClass', bt_nonexistent_module_xyz_abc_1234, 4},
-                timer:sleep(50),
-                ?assert(is_process_alive(BPid))
-            end)
-        ]
-    end}.
-
-%% Test {rebootstrap_value, ..., Retries=4} where Module:new() succeeds but
-%% the class is not registered. set_class_variable returns
-%% {error, class_not_found}, logging a warning and scheduling another retry.
-rebootstrap_value_retry_class_not_found_test_() ->
-    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
-        [
-            ?_test(begin
-                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
-                MockMod = compile_mock_new_module(),
-                try
-                    BPid ! {rebootstrap_value, 'BtUnregisteredClass99XYZ', MockMod, 4},
-                    timer:sleep(100),
-                    ?assert(is_process_alive(BPid))
-                after
-                    purge_mock_module(MockMod)
-                end
-            end)
-        ]
-    end}.
-
 %%====================================================================
 %% Tests for activate_project_modules edge cases
 %%====================================================================
@@ -782,25 +734,6 @@ compile_activation_fixture_with_source(ModName, ClassName, SourcePath) ->
     ],
     {ok, ModName, BeamBin} = compile:forms(Forms, []),
     BeamBin.
-
-%% Dynamically compile and load a minimal module with new/0 -> #{}.
-%% Used to exercise the class_not_found path in bootstrap_value_singleton
-%% where Module:new() succeeds but the class is not in the registry.
-compile_mock_new_module() ->
-    Idx = erlang:unique_integer([positive]),
-    ModName = list_to_atom("bt_test_mock_new_" ++ integer_to_list(Idx)),
-    Forms = [
-        {attribute, 1, module, ModName},
-        {attribute, 2, export, [{new, 0}]},
-        {function, 3, new, 0, [{clause, 3, [], [], [{map, 3, []}]}]}
-    ],
-    {ok, ModName, BeamBin} = compile:forms(Forms, []),
-    {module, ModName} = code:load_binary(ModName, [], BeamBin),
-    ModName.
-
-purge_mock_module(ModName) ->
-    code:purge(ModName),
-    code:delete(ModName).
 
 cleanup_test_source_class(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of

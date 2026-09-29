@@ -31,12 +31,8 @@ branches that need a live compiler + a registered class to exercise — the
     cannot resolve — both needed `beamtalk_package`/`beamtalk_workspace_meta`
     faulted or fed real data, which the existing "empty package" tests don't
     cover.
-  - `resolve_name/2` / `resolve_class_reference/2` Tier 3 (singleton) and
-    Tier 4 (class registry) — the existing suite only reaches Tier 1 (locals),
-    Tier 2 (`bind:as:`), and Tier 5 (undefined); a real class + the
-    `Workspace` singleton itself close the remaining tiers.
-  - `resolve_singleton_instance/1` — the REPL codegen binding-aware
-    class-send fallback surface, untested until now.
+  - `resolve_name/2` / `resolve_class_reference/2` class-registry tier, and
+    the resolver order (session locals, then `bind:as:`, then class registry).
 
 These boot the full stack (compiler port + runtime + workspace_meta +
 changelog) against an isolated, in-project temp tree, mirroring
@@ -72,11 +68,9 @@ primitives_load_test_() ->
             fun start_supervisor_restarts_after_child_spec_deleted/1,
             fun stop_supervisor_detaches_workspace_child/1,
             fun stop_supervisor_not_attached_raises_runtime_error/1,
-            fun resolve_name_singleton_tier_hit/1,
             fun resolve_name_class_registry_tier_hit/1,
-            fun resolve_class_reference_singleton_tier_hit/1,
             fun resolve_class_reference_class_registry_tier_hit/1,
-            fun resolve_singleton_instance_hit_and_miss/1
+            fun resolve_name_order_locals_bind_class/1
         ]}}.
 
 suite_setup() ->
@@ -415,15 +409,9 @@ stop_supervisor_not_attached_raises_runtime_error(#{tmp := Tmp, unique := U}) ->
     ].
 
 %%====================================================================
-%% resolve_name/2, resolve_class_reference/2, resolve_singleton_instance/1 —
-%% Tier 3 (class registry) hits (ADR 0081 Phase 1). There is no singleton
-%% tier since ADR 0129. The existing suite only reaches Tier 1/2/4.
+%% resolve_name/2, resolve_class_reference/2 — class-registry tier hits and the
+%% locals > bind:as: > class registry order (ADR 0081 Phase 1).
 %%====================================================================
-
-%% `Workspace` is a class-side facade (ADR 0129): it resolves as a class.
-resolve_name_singleton_tier_hit(_Ctx) ->
-    Result = beamtalk_workspace_interface_primitives:resolve_name(#{}, 'Workspace'),
-    [?_assertMatch({beamtalk_object, _, _, _}, Result)].
 
 %% Tier 3: a real registered class resolves to a `{beamtalk_object, '<Name>
 %% class', Module, Pid}` tuple via lookup_class_object/1.
@@ -439,10 +427,6 @@ resolve_name_class_registry_tier_hit(#{tmp := Tmp, unique := U}) ->
         )
     ].
 
-resolve_class_reference_singleton_tier_hit(_Ctx) ->
-    Result = beamtalk_workspace_interface_primitives:resolve_class_reference(#{}, 'Workspace'),
-    [?_assertMatch({beamtalk_object, _, _, _}, Result)].
-
 resolve_class_reference_class_registry_tier_hit(#{tmp := Tmp, unique := U}) ->
     ClassName = list_to_binary("WiResolveClsRef" ++ U),
     {_ClassObj, _Path} = define_project_class(Tmp, ClassName),
@@ -450,18 +434,30 @@ resolve_class_reference_class_registry_tier_hit(#{tmp := Tmp, unique := U}) ->
     Result = beamtalk_workspace_interface_primitives:resolve_class_reference(#{}, ClassAtom),
     [?_assertMatch({beamtalk_object, _, _, _}, Result)].
 
-resolve_singleton_instance_hit_and_miss(_Ctx) ->
-    %% No singleton bindings since ADR 0129: always `error`.
-    Workspace = beamtalk_workspace_interface_primitives:resolve_singleton_instance('Workspace'),
-    Transcript = beamtalk_workspace_interface_primitives:resolve_singleton_instance('Transcript'),
-    Miss = beamtalk_workspace_interface_primitives:resolve_singleton_instance(
-        'NotASingletonNameXyz'
-    ),
-    [
-        ?_assertEqual(error, Workspace),
-        ?_assertEqual(error, Transcript),
-        ?_assertEqual(error, Miss)
-    ].
+%% REPL resolver order (ADR 0081 / ADR 0129): session locals, then `bind:as:`,
+%% then the class registry. The same name is made visible at every tier and
+%% each tier is peeled off in turn, so the winner at each step is unambiguous.
+resolve_name_order_locals_bind_class(#{tmp := Tmp, unique := U}) ->
+    ClassName = list_to_binary("WiResolveOrder" ++ U),
+    {_ClassObj, _Path} = define_project_class(Tmp, ClassName),
+    Name = binary_to_atom(ClassName, utf8),
+    ok = beamtalk_workspace_interface_primitives:create_bindings_table(),
+    true = ets:insert(beamtalk_wi_user_bindings, {Name, bound_value}),
+    try
+        AllTiers = beamtalk_workspace_interface_primitives:resolve_name(
+            #{Name => local_value}, Name
+        ),
+        BindOverClass = beamtalk_workspace_interface_primitives:resolve_name(#{}, Name),
+        true = ets:delete(beamtalk_wi_user_bindings, Name),
+        ClassOnly = beamtalk_workspace_interface_primitives:resolve_name(#{}, Name),
+        [
+            ?_assertEqual(local_value, AllTiers),
+            ?_assertEqual(bound_value, BindOverClass),
+            ?_assertMatch({beamtalk_object, _, _, _}, ClassOnly)
+        ]
+    after
+        ets:delete(beamtalk_wi_user_bindings, Name)
+    end.
 
 %%====================================================================
 %% Helpers
