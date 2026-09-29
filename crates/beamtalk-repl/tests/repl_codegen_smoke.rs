@@ -1016,10 +1016,15 @@ fn test_class_method_call_generation() {
 
     let code = generate_repl_expression(&expr, "repl_eval").expect("codegen should succeed");
 
-    // ADR 0019: Beamtalk should check bindings first, then class_send fallback
+    // ADR 0129 §10: class-side sends resolve identically in the REPL and in
+    // batch-compiled code — no session-binding lookup, just the class registry.
     assert!(
-        code.contains("maps':'find") && code.contains("class_send"),
-        "Beamtalk should check bindings then class_send. Got:\n{code}"
+        code.contains("whereis_class") && code.contains("class_send"),
+        "Beamtalk should dispatch via the class registry and class_send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("maps':'find") && !code.contains("resolve_singleton_instance"),
+        "Beamtalk send should not consult session bindings. Got:\n{code}"
     );
     assert!(
         !code.contains("persistent_term"),
@@ -1340,27 +1345,20 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // ADR 0081 Phase 1: an unqualified REPL class reference checks the
-    // session locals map first (so a local shadows the class), then delegates to
-    // the shared runtime resolver. The class object construction and dynamic
-    // module_name lookup now live in beamtalk_workspace:resolve_class_reference/2.
-
-    // Should check the session locals map first (shadowing support).
+    // ADR 0129 §10: a REPL class reference resolves through the class registry
+    // exactly as batch-compiled code does — no session-locals lookup and no
+    // runtime resolver.
     assert!(
-        code.contains("call 'maps':'find'('Point', "),
-        "Should check locals map for the class name first. Got:\n{code}"
+        code.contains("call 'beamtalk_class_registry':'whereis_class'('Point')"),
+        "Should look the class up in the class registry. Got:\n{code}"
     );
-
-    // Should delegate the miss path to the shared runtime resolver.
     assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_class_reference'("),
-        "Should delegate to resolve_class_reference on a locals miss. Got:\n{code}"
+        !code.contains("maps':'find") && !code.contains("resolve_class_reference"),
+        "Should not consult session bindings or the runtime resolver. Got:\n{code}"
     );
-
-    // Should pass the class name as an atom to the resolver.
     assert!(
-        code.contains("'resolve_class_reference'(") && code.contains("'Point')"),
-        "Should pass the class name atom to the resolver. Got:\n{code}"
+        code.contains("'Point class'"),
+        "Should build the class object with the display name. Got:\n{code}"
     );
 }
 
@@ -1394,23 +1392,19 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // ADR 0081 Phase 1: undefined-class validation now happens in the
-    // runtime resolver (beamtalk_workspace:resolve_class_reference/2), which
-    // raises the same class_not_found error. The REPL codegen emits a locals
-    // check then delegates to that resolver.
-
-    // Should check the session locals map first (shadowing support).
+    // ADR 0129 §10: an undefined class raises class_not_found from the
+    // registry lookup itself, identically to batch-compiled code.
     assert!(
-        code.contains("call 'maps':'find'('NonExistentClass', "),
-        "Should check locals map for the class name first. Got:\n{code}"
+        code.contains("call 'beamtalk_class_registry':'whereis_class'('NonExistentClass')"),
+        "Should look the class up in the class registry. Got:\n{code}"
     );
-
-    // Should delegate to the shared resolver, which raises class_not_found for
-    // a genuinely unknown class.
     assert!(
-        code.contains("call 'beamtalk_workspace':'resolve_class_reference'(")
-            && code.contains("'NonExistentClass')"),
-        "Should delegate undefined-class handling to resolve_class_reference. Got:\n{code}"
+        code.contains("'class_not_found', 'NonExistentClass'"),
+        "Should raise class_not_found for an undefined class. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("maps':'find") && !code.contains("resolve_class_reference"),
+        "Should not consult session bindings or the runtime resolver. Got:\n{code}"
     );
 }
 
