@@ -178,7 +178,7 @@ pub(crate) fn build_native_type_registry(
 #[allow(clippy::too_many_lines)] // Multi-pass pipeline is inherently sequential.
 pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
-    use beamtalk_core::source_analysis::{DiagnosticSummary, category_name};
+    use beamtalk_core::source_analysis::DiagnosticSummary;
 
     let source_files = match resolve_source_files(path) {
         Ok(files) => files,
@@ -323,21 +323,6 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // not all resolved files (some may have been unreadable).
     let files_checked = parsed_files.len();
     let summary = DiagnosticSummary::from_diagnostics(&all_diags, files_checked);
-    let totals = summary.totals_by_severity();
-
-    let mut by_category = serde_json::Map::new();
-    for (cat, counts) in &summary.by_category {
-        by_category.insert(
-            category_name(*cat).to_string(),
-            serde_json::json!({
-                "error": counts.error,
-                "warning": counts.warning,
-                "lint": counts.lint,
-                "hint": counts.hint,
-                "total": counts.total(),
-            }),
-        );
-    }
 
     let dynamic_pct = if coverage.total_expressions > 0 {
         let typed_pct = coverage.coverage_percent();
@@ -350,13 +335,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // knows cross-file class extraction may be incomplete.
     let mut result = serde_json::json!({
         "files_checked": files_checked,
-        "totals_by_severity": {
-            "error": totals.error,
-            "warning": totals.warning,
-            "lint": totals.lint,
-            "hint": totals.hint,
-        },
-        "totals_by_category": by_category,
+        "totals_by_severity": summary.severity_totals_json(),
+        "totals_by_category": summary.categories_to_json_map(),
         "total": summary.total(),
         "type_coverage": {
             "typed": coverage.typed_expressions,

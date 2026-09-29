@@ -132,6 +132,41 @@ impl DiagnosticSummary {
     pub fn is_empty(&self) -> bool {
         self.total() == 0
     }
+
+    /// JSON object `{"error", "warning", "lint", "hint"}` for the
+    /// `totals_by_severity` block in `beamtalk lint --format json` and the MCP
+    /// `diagnostic_summary` tool. Does not include a `"total"` key.
+    #[must_use]
+    pub fn severity_totals_json(&self) -> serde_json::Value {
+        let totals = self.totals_by_severity();
+        serde_json::json!({
+            "error": totals.error,
+            "warning": totals.warning,
+            "lint": totals.lint,
+            "hint": totals.hint,
+        })
+    }
+
+    /// JSON map `{category_name: {error, warning, lint, hint, total}}` for the
+    /// `totals_by_category` block in `beamtalk lint --format json` and the MCP
+    /// `diagnostic_summary` tool.
+    #[must_use]
+    pub fn categories_to_json_map(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut map = serde_json::Map::new();
+        for (cat, counts) in &self.by_category {
+            map.insert(
+                category_name(*cat).to_string(),
+                serde_json::json!({
+                    "error": counts.error,
+                    "warning": counts.warning,
+                    "lint": counts.lint,
+                    "hint": counts.hint,
+                    "total": counts.total(),
+                }),
+            );
+        }
+        map
+    }
 }
 
 /// Human-readable name for a `DiagnosticCategory`.
@@ -472,6 +507,50 @@ mod tests {
         );
         assert!(text.contains("1 lint"), "missing lint in breakdown: {text}");
         assert!(text.contains("1 hint"), "missing hint in breakdown: {text}");
+    }
+
+    #[test]
+    fn severity_totals_json_shape() {
+        let diags = vec![
+            make_diag(Severity::Error, Some(DiagnosticCategory::Type)),
+            make_diag(Severity::Warning, Some(DiagnosticCategory::Dnu)),
+            make_diag(Severity::Lint, Some(DiagnosticCategory::Lint)),
+            make_diag(Severity::Hint, Some(DiagnosticCategory::Unused)),
+        ];
+        let summary = DiagnosticSummary::from_diagnostics(&diags, 2);
+        let json = summary.severity_totals_json();
+        assert_eq!(json["error"], 1);
+        assert_eq!(json["warning"], 1);
+        assert_eq!(json["lint"], 1);
+        assert_eq!(json["hint"], 1);
+        assert!(
+            json.get("total").is_none(),
+            "severity_totals_json must not include a 'total' key"
+        );
+    }
+
+    #[test]
+    fn categories_to_json_map_shape() {
+        let diags = vec![
+            make_diag(Severity::Error, Some(DiagnosticCategory::Type)),
+            make_diag(Severity::Warning, Some(DiagnosticCategory::Type)),
+            make_diag(Severity::Hint, Some(DiagnosticCategory::Dnu)),
+        ];
+        let summary = DiagnosticSummary::from_diagnostics(&diags, 1);
+        let map = summary.categories_to_json_map();
+
+        assert!(map.contains_key("Type"), "expected 'Type' key");
+        let type_entry = &map["Type"];
+        assert_eq!(type_entry["error"], 1);
+        assert_eq!(type_entry["warning"], 1);
+        assert_eq!(type_entry["lint"], 0);
+        assert_eq!(type_entry["hint"], 0);
+        assert_eq!(type_entry["total"], 2);
+
+        assert!(map.contains_key("Dnu"), "expected 'Dnu' key");
+        let dnu_entry = &map["Dnu"];
+        assert_eq!(dnu_entry["hint"], 1);
+        assert_eq!(dnu_entry["total"], 1);
     }
 
     #[test]
