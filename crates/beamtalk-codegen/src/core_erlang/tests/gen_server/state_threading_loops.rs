@@ -15,10 +15,7 @@ fn test_class_method_local_var_assignment_of_self_class_method() {
     let src = "Object subclass: Broken\n  class a =>\n    x := self b.\n    x\n\n  class b => 42";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@broken").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@broken"));
     assert!(result.is_ok(), "Codegen should succeed. Got: {result:?}");
     let code = result.unwrap();
     assert!(
@@ -47,10 +44,7 @@ fn test_class_method_local_var_after_class_var_mutation() {
     let src = "Object subclass: CVThenLocal\n  class cv = 0\n  class a =>\n    self.cv := 1.\n    x := self b.\n    x\n\n  class b => 99";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvthenlocal").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvthenlocal"));
     assert!(result.is_ok(), "Codegen should succeed. Got: {result:?}");
     let code = result.unwrap();
     assert!(
@@ -77,10 +71,7 @@ fn test_class_method_self_send_in_while_loop_body_compiles_and_threads_class_var
     let src = "Value subclass: Driver\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self bump\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driver").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driver"));
     let code = result
         .unwrap_or_else(|e| panic!("self bump inside a whileTrue: body must compile. Got: {e:?}"));
     assert!(
@@ -107,10 +98,7 @@ fn test_class_method_self_send_in_to_do_loop_body_compiles_and_threads_class_var
     let src = "Value subclass: DriverToDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    total := 0\n    1 to: n do: [:i | self bump. total := total + i]\n    total";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@drivertodo").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@drivertodo"));
     let code = result
         .unwrap_or_else(|e| panic!("self bump inside a to:do: body must compile. Got: {e:?}"));
     assert!(
@@ -149,10 +137,7 @@ fn test_class_method_self_send_as_local_var_assignment_rhs_in_while_loop_compile
     let src = "Value subclass: DriverAssign\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    i := 1\n    result := 0\n    [i <= aList size] whileTrue: [\n      x := self bump\n      result := result + x\n      i := i + 1\n    ]\n    result";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driverassign").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driverassign"));
     assert!(
         result.is_ok(),
         "x := self bump inside a whileTrue: body must compile. Got: {result:?}"
@@ -192,10 +177,7 @@ fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl()
     let src = "Actor subclass: CtrNested\n  state: x = 0\n  run: items =>\n    count := 0\n    seen := 0\n    1 to: 3 do: [:i |\n      _y := items do: [:item | seen := seen + 1]\n      count := count + 1\n    ]\n    count";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@ctrnested").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@ctrnested"));
     assert!(
         result.is_ok(),
         "do: assigned to a discarded local var inside a direct-params loop must compile. \
@@ -222,10 +204,7 @@ fn test_class_method_self_send_alongside_local_in_times_repeat_body_compiles() {
     let src = "Value subclass: Driver5\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    total := 0\n    n timesRepeat: [\n      self bump\n      total := total + 1\n    ]\n    total";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driver5").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driver5"));
     let code = result.unwrap_or_else(|e| {
         panic!(
             "self bump alongside a local mutation inside a timesRepeat: body must compile. \
@@ -251,10 +230,7 @@ fn test_non_mutating_class_method_self_send_in_loop_body_also_compiles() {
     let src = "Value subclass: Driver7\n  class helper: x => x * 2\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self helper: i\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driver7").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driver7"));
     assert!(
         result.is_ok(),
         "self helper: (a pure, non-class-var-mutating self-send) inside a whileTrue: body \
@@ -279,10 +255,7 @@ fn test_bare_class_method_self_send_in_times_repeat_body_skips_loop_threading() 
     let src = "Value subclass: Driver4\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: n =>\n    n timesRepeat: [\n      self bump\n      self bump\n    ]\n    nil";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driver4").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driver4"));
     assert!(
         matches!(
             result,
@@ -311,10 +284,7 @@ fn test_class_method_self_send_after_loop_still_compiles() {
     let src = "Value subclass: Driver8\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aBlock over: aList =>\n    i := 1\n    count := 0\n    [i <= aList size] whileTrue: [\n      count := count + 1\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    self bump\n    nil";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driver8").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driver8"));
     assert!(
         result.is_ok(),
         "A class-method self-send after (not inside) the loop body must still \
@@ -344,10 +314,7 @@ fn test_class_method_self_send_alongside_local_in_do_body_survives_via_class_var
     let src = "Value subclass: DriverDo\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class countedRun: aList =>\n    total := 0\n    aList do: [:x | self bump. total := total + x]\n    total";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driverdo").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driverdo"));
     let code = result.unwrap_or_else(|e| {
         panic!("A class-method self-send inside a do: body must compile. Got: {e:?}")
     });
@@ -405,10 +372,7 @@ fn test_class_method_self_send_as_select_predicate_alongside_local_survives_via_
     let src = "Value subclass: DriverSelect2\n  class check: x => x > 0\n  class positives: aList =>\n    seen := 0\n    result := aList select: [:x | seen := seen + 1. self check: x]\n    result";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driverselect2").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driverselect2"));
     let code = result.unwrap_or_else(|e| {
         panic!(
             "A class-method self-send used as select:'s predicate value, alongside a \
@@ -449,10 +413,7 @@ fn test_class_method_self_send_as_collect_transform_still_compiles() {
     let src = "Object subclass: ClassMethodBlockLike\n  class double: x => x * 2\n  class doubleAllCounting: items =>\n    seen := 0\n    items collect: [:item | seen := seen + 1. self double: item]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@classmethodblocklike").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@classmethodblocklike"));
     assert!(
         result.is_ok(),
         "A pure class-method self-send used as collect:'s transform, alongside a \
@@ -477,10 +438,7 @@ fn test_bare_class_method_self_send_in_select_body_skips_loop_threading() {
     let src = "Value subclass: DriverSelect\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    aList select: [:x | self check: x]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driverselect").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driverselect"));
     assert!(
         matches!(
             result,
@@ -517,10 +475,7 @@ fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() 
     let src = "Value subclass: NoClassVarsDriver\n  class doubled: aList =>\n    aList select: [:x | self spawnWith: x]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@noclassvarsdriver").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@noclassvarsdriver"));
     assert!(
         result.is_ok(),
         "A self-send inside a bare block must not be rejected when the enclosing \
@@ -546,10 +501,7 @@ fn test_class_method_mutating_self_send_as_second_cascade_message_in_block_is_co
     let src = "Value subclass: DriverCascade\n  classState: runs = 0\n  class pureLog: x => x\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    aList select: [:x | self pureLog: x; check: x]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@drivercascade").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@drivercascade"));
     assert!(
         matches!(
             result,
@@ -573,10 +525,7 @@ fn test_class_method_self_send_in_erlang_interop_block_is_compile_error() {
     let src = "Value subclass: DriverErlangInterop\n  classState: runs = 0\n  class bump => self.runs := self.runs + 1\n  class run: aList =>\n    (Erlang lists) foreach: [:x | self bump] over: aList\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@drivererlanginterop").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@drivererlanginterop"));
     assert!(
         matches!(
             result,
@@ -602,10 +551,7 @@ fn test_class_method_self_send_in_any_satisfy_block_is_compile_error() {
     let src = "Value subclass: DriverAnySatisfy\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x > 0\n  class positives: aList =>\n    aList anySatisfy: [:x | self check: x]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driveranysatisfy").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driveranysatisfy"));
     assert!(
         matches!(
             result,
@@ -626,10 +572,7 @@ fn test_class_method_self_send_in_sort_block_is_compile_error() {
     let src = "Value subclass: DriverSort\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class sorted: aList =>\n    aList sort: [:a :b | (self check: a) < (self check: b)]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driversort").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driversort"));
     assert!(
         matches!(
             result,
@@ -650,10 +593,7 @@ fn test_class_method_self_send_in_each_with_index_block_is_compile_error() {
     let src = "Value subclass: DriverEachWithIndex\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    aList eachWithIndex: [:item :i | self check: item]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@drivereachwithindex").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@drivereachwithindex"));
     assert!(
         matches!(
             result,
@@ -673,10 +613,7 @@ fn test_class_method_self_send_in_do_separated_by_block_is_compile_error() {
     let src = "Value subclass: DriverDoSeparatedBy\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    aList do: [:x | x] separatedBy: [self check: 0]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driverdoseparatedby").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driverdoseparatedby"));
     assert!(
         matches!(
             result,
@@ -700,10 +637,7 @@ fn test_class_method_self_send_in_detect_if_none_block_alongside_mutating_predic
     let src = "Value subclass: DriverDetectIfNone\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class run: aList =>\n    seen := 0\n    aList detect: [:x | seen := seen + 1. x > 1000] ifNone: [self check: 0]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driverdetectifnone").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driverdetectifnone"));
     assert!(
         matches!(
             result,
@@ -729,10 +663,7 @@ fn test_class_method_self_send_in_pure_inject_into_block_is_compile_error() {
     let src = "Value subclass: DriverInject\n  classState: runs = 0\n  class check: x => self.runs := self.runs + 1. x\n  class sumChecked: aList =>\n    aList inject: 0 into: [:acc :x | acc + (self check: x)]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@driverinject").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@driverinject"));
     assert!(
         matches!(
             result,
@@ -756,10 +687,7 @@ fn test_class_method_self_send_in_while_condition_block_is_compile_error() {
     let src = "Value subclass: DriverCond\n  classState: runs = 0\n  class shouldContinue: n => self.runs := self.runs + 1. self.runs < n\n  class run: n =>\n    i := 0\n    [self shouldContinue: n] whileTrue: [i := i + 1]\n    i";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@drivercond").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@drivercond"));
     assert!(
         matches!(
             result,
@@ -785,10 +713,7 @@ fn test_class_reference_send_in_do_block_is_compile_error() {
     let src = "Object subclass: Holder\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class probe =>\n    self.runs := 0\n    #(1, 2, 3) do: [:x | Holder bump]\n    self.runs";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@classrefdoblock").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@classrefdoblock"));
     assert!(
         matches!(
             result,
@@ -807,10 +732,7 @@ fn test_class_reference_send_in_while_condition_block_is_compile_error() {
     let src = "Value subclass: DriverCondClassRef\n  classState: runs = 0\n  class shouldContinue: n => self.runs := self.runs + 1. self.runs < n\n  class run: n =>\n    i := 0\n    [DriverCondClassRef shouldContinue: n] whileTrue: [i := i + 1]\n    i";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@drivercondclassref").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@drivercondclassref"));
     assert!(
         matches!(
             result,
@@ -833,7 +755,7 @@ fn test_class_reference_send_in_erlang_interop_block_is_compile_error() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@drivererlanginteropclassref").with_workspace_mode(true),
+        CodegenOptions::new("bt@drivererlanginteropclassref"),
     );
     assert!(
         matches!(
@@ -857,10 +779,7 @@ fn test_class_method_self_send_in_block() {
     items sort: [:a :b | self compare: a with: b]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@foo").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@foo"));
     assert!(
         result.is_ok(),
         "Class method with self-send in block should compile. Got: {:?}",
@@ -898,10 +817,7 @@ fn test_class_method_self_send_in_block_local_assignment() {
     ]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@bar").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@bar"));
     assert!(
         result.is_ok(),
         "Block with local := class-method-self-send should compile. Got: {:?}",
@@ -958,10 +874,7 @@ fn bt3562_plain_bare_field_read_in_while_loop_compiles() {
     let src = "typed Actor subclass: CodexClient\n  state: proc :: Integer = 0\n\n  pump: limit =>\n    i := 0\n    [i < limit] whileTrue: [\n      self.proc\n      i := i + 1\n    ]\n    nil\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3562_plain_bare_field_read").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt3562_plain_bare_field_read"));
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
         !code.contains("StateAcc)"),
@@ -982,7 +895,7 @@ fn bt3562_plain_bare_late_field_read_in_while_loop_compiles() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3562_plain_bare_late_field_read").with_workspace_mode(true),
+        CodegenOptions::new("bt3562_plain_bare_late_field_read"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc("bt3562_plain_bare_late_field_read", &code);
@@ -999,7 +912,7 @@ fn bt3562_hybrid_bare_field_read_in_while_loop_compiles() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3562_hybrid_bare_field_read").with_workspace_mode(true),
+        CodegenOptions::new("bt3562_hybrid_bare_field_read"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert_compiles_through_erlc("bt3562_hybrid_bare_field_read", &code);
@@ -1030,7 +943,7 @@ fn bt3562_plain_bare_field_read_in_nested_while_loop_compiles() {
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt3562_plain_bare_field_read_nested").with_workspace_mode(true),
+        CodegenOptions::new("bt3562_plain_bare_field_read_nested"),
     );
     let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
@@ -1069,10 +982,7 @@ fn bt3623_two_sibling_if_true_with_mutations_in_while_loop_compiles() {
     let src = "Actor subclass: Bt3623Repro\n  state: a = 0\n  state: b = 0\n  state: c = 0\n  state: d = 0\n  state: running = true\n\n  run =>\n    [self.running] whileTrue: [\n      self.a := self.a + 1.\n      self.b := self.b + 1.\n      (self.a > 3) ifTrue: [\n        self.b := self.b + 100.\n        self.c := self.c + 1\n      ].\n      (self.a > 5) ifTrue: [\n        self.d := self.d + 1.\n        self.b := self.b + 1000\n      ]\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3623_two_sibling_if_true").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt3623_two_sibling_if_true"));
     let code = result.unwrap_or_else(|e| {
         panic!(
             "two sibling mutation-threaded ifTrue: blocks inside a whileTrue: body \
@@ -1090,10 +1000,7 @@ fn bt3623_nlr_in_first_sibling_if_true_in_while_loop_compiles() {
     let src = "Actor subclass: Bt3623NlrRepro\n  state: a = 0\n  state: b = 0\n  state: c = 0\n  state: d = 0\n  state: running = true\n\n  run =>\n    [self.running] whileTrue: [\n      self.a := self.a + 1.\n      self.b := self.b + 1.\n      (self.a > 3) ifTrue: [\n        self.b := self.b + 100.\n        self.c := self.c + 1.\n        ^self.c\n      ].\n      (self.a > 5) ifTrue: [\n        self.d := self.d + 1.\n        self.b := self.b + 1000\n      ]\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3623_nlr_in_first_sibling").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt3623_nlr_in_first_sibling"));
     let code = result.unwrap_or_else(|e| {
         panic!(
             "a non-local return inside the first of two sibling mutation-threaded \

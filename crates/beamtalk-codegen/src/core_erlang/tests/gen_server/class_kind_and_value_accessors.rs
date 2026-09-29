@@ -485,10 +485,7 @@ fn test_class_method_rejects_field_access() {
     let src = "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("test_class_field").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("test_class_field"));
     assert!(
         result.is_err(),
         "Should reject field access in class method"
@@ -506,10 +503,7 @@ fn test_class_method_rejects_field_assignment() {
     let src = "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value := 42";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("test_class_assign").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("test_class_assign"));
     assert!(
         result.is_err(),
         "Should reject field assignment in class method"

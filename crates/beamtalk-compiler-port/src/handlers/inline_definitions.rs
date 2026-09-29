@@ -144,7 +144,6 @@ pub(crate) fn handle_inline_class_definition(
 
     let mut codegen_options =
         beamtalk_codegen::core_erlang::CodegenOptions::new(&class_module_name)
-            .with_workspace_mode(true)
             .with_source(source)
             .with_class_superclass_index(class_superclass_index.clone())
             .with_class_module_index(class_module_index)
@@ -224,7 +223,6 @@ pub(crate) fn handle_inline_protocol_definition(
 
     let mut codegen_options =
         beamtalk_codegen::core_erlang::CodegenOptions::new(&protocol_module_name)
-            .with_workspace_mode(true)
             .with_source(source)
             .with_class_superclass_index(class_superclass_index.clone())
             .with_class_module_index(class_module_index)

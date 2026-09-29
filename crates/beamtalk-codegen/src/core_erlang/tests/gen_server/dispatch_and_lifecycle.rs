@@ -546,11 +546,8 @@ fn test_script_module_keyword_method_dispatch_destructures_args() {
     let src = "add := [:a :b | a + b]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("test").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed");
 
     let dispatch_body =
         extract_core_fn(&code, "'dispatch'/4 = fun").expect("should have dispatch/4");
@@ -580,11 +577,8 @@ fn test_method_table_with_script_methods_includes_arity() {
     let src = "unary := [42]. binary := [:a :b | a + b]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("test").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed");
 
     let table_body =
         extract_core_fn(&code, "'method_table'/0 = fun").expect("should have method_table/0");

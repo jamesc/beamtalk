@@ -52,7 +52,7 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -104,7 +104,7 @@ fn test_block_with_mixed_local_and_field_mutation_stored_then_invoked_compiles()
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         result.is_ok(),
@@ -128,7 +128,7 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2797)");
 
@@ -176,7 +176,7 @@ fn test_bt2808_cascade_on_tier2_local_var_compiles_and_threads_state() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("cascade of safe value: sends on a Tier 2 local var must compile (BT-2808)");
 
@@ -226,7 +226,7 @@ fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -256,7 +256,7 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -279,7 +279,7 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_co
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -311,7 +311,7 @@ fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_co
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2797)");
 
@@ -372,7 +372,7 @@ fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_c
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -411,7 +411,7 @@ fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_er
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     );
     assert!(
         matches!(
@@ -440,7 +440,7 @@ fn test_bt2797_no_regression_pure_block_value_fast_path() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile");
 
@@ -463,7 +463,7 @@ fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile");
 
@@ -487,7 +487,7 @@ fn test_bt2803_field_stored_block_invoked_via_value_with_arguments_threads_state
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2803)");
 
@@ -561,7 +561,7 @@ fn test_bt2803_no_regression_pure_block_value_with_arguments_fast_path() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile");
 
@@ -587,7 +587,7 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile");
 
@@ -628,7 +628,7 @@ fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2813)");
 
@@ -652,7 +652,7 @@ fn test_bt2813_bare_tier2_value_call_inside_collect_block_unpacks_tuple() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2813)");
 
@@ -683,7 +683,7 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2814)");
 
@@ -720,7 +720,7 @@ fn test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2814)");
 
@@ -757,7 +757,7 @@ fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2815)");
 
@@ -785,7 +785,7 @@ fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let code = crate::core_erlang::generate_module(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        crate::core_erlang::CodegenOptions::new("test"),
     )
     .expect("should compile (BT-2815)");
 
@@ -826,11 +826,8 @@ fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_bran
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("applier_tier2_in_cond").with_workspace_mode(true),
-    )
-    .expect("Tier 2 block value call inside ifTrue: branch with field mutation must compile");
+    let code = generate_module(&module, CodegenOptions::new("applier_tier2_in_cond"))
+        .expect("Tier 2 block value call inside ifTrue: branch with field mutation must compile");
 
     eprintln!("Generated code for Tier 2 local-var assignment inside conditional:\n{code}");
 

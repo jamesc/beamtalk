@@ -98,11 +98,8 @@ pub(crate) fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str)
 pub(crate) fn codegen(src: &str) -> String {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
-    )
-    .expect("codegen should succeed")
+    crate::core_erlang::generate_module(&module, crate::core_erlang::CodegenOptions::new("test"))
+        .expect("codegen should succeed")
 }
 
 /// Builds a Module with a `Value subclass: Point` with x and y slots.

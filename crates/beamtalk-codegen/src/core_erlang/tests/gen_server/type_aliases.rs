@@ -43,9 +43,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
 
     let result = generate_module(
         &module,
-        CodegenOptions::new("bt@my_service")
-            .with_workspace_mode(true)
-            .with_class_hierarchy(vec![pre_class]),
+        CodegenOptions::new("bt@my_service").with_class_hierarchy(vec![pre_class]),
     );
     assert!(result.is_ok(), "generate_module should succeed: {result:?}");
 }

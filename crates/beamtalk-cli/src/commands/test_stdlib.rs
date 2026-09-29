@@ -480,7 +480,6 @@ pub(crate) fn compile_fixture(
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: false,
         allow_primitives: false,
-        workspace_mode: false,
         suppress_warnings,
         // Bootstrap-test fixtures use top-level expressions as test assertions
         // paired with `// =>` comments. Skip the module-expression lint to avoid

@@ -59,11 +59,8 @@ fn test_value_type_field_write_in_ensure_try_body_threads_self_out() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtensureselfthread").with_workspace_mode(true),
-    )
-    .expect("value-type field write inside an ensure: try body must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtensureselfthread"))
+        .expect("value-type field write inside an ensure: try body must compile");
 
     assert!(
         code.contains(", StateAcc1, Self1}"),
@@ -102,11 +99,8 @@ fn test_value_type_field_write_only_ensure_is_not_sequenced_away() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtensureselfonly").with_workspace_mode(true),
-    )
-    .expect("a field-write-only value-type ensure: must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtensureselfonly"))
+        .expect("a field-write-only value-type ensure: must compile");
 
     assert!(
         code.contains("let _ExTuple"),
@@ -142,11 +136,8 @@ fn test_value_type_ensure_cleanup_chains_from_try_bodys_self() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtensurebothself").with_workspace_mode(true),
-    )
-    .expect("field writes in both an ensure: try body and its cleanup must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtensurebothself"))
+        .expect("field writes in both an ensure: try body and its cleanup must compile");
 
     assert!(
         code.contains("let Self = call 'erlang':'element'(3,"),
@@ -181,11 +172,8 @@ fn test_value_type_field_write_in_on_do_handler_threads_self_out() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtondoselfthread").with_workspace_mode(true),
-    )
-    .expect("value-type field write inside an on:do: handler must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtondoselfthread"))
+        .expect("value-type field write inside an on:do: handler must compile");
 
     assert!(
         code.contains(", Self}"),
@@ -226,11 +214,8 @@ fn test_value_type_chained_ensure_constructs_seed_each_arm_from_live_self() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtensurechainself").with_workspace_mode(true),
-    )
-    .expect("two chained value-type field-writing ensure: constructs must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtensurechainself"))
+        .expect("two chained value-type field-writing ensure: constructs must compile");
 
     assert!(
         code.contains("try let Self = Self1 in"),
@@ -274,11 +259,8 @@ fn test_value_type_on_do_both_arms_writing_mint_sibling_self_versions() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtondobothself").with_workspace_mode(true),
-    )
-    .expect("field writes in BOTH on:do: arms must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtondobothself"))
+        .expect("field writes in BOTH on:do: arms must compile");
 
     // Both arms carry their own mutated Self1 in the trailing slot — the
     // handler's raise discards the try body's, which is why the runtime
@@ -320,11 +302,8 @@ fn test_actor_ensure_keeps_two_element_result_tuple() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@actorensurenoselfslot").with_workspace_mode(true),
-    )
-    .expect("an actor ensure: with a state-field write must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@actorensurenoselfslot"))
+        .expect("an actor ensure: with a state-field write must compile");
 
     assert!(
         !code.contains(", Self}") && !code.contains(", Self1}"),
@@ -354,11 +333,8 @@ fn test_value_type_ensure_in_last_position_unwraps_tuple_to_self() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtlastpositionensure").with_workspace_mode(true),
-    )
-    .expect("a value-type ensure: in last position must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtlastpositionensure"))
+        .expect("a value-type ensure: in last position must compile");
     // The method body's OWN trailing expression — not the exception
     // construct's internal try/catch tuple bookkeeping, which legitimately
     // builds `{Result, StateAcc, Self}` tuples throughout — must be the
@@ -402,11 +378,8 @@ fn test_value_type_ensure_as_assignment_rhs_unwraps_tuple_and_rebinds_self() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtassignrhsensure").with_workspace_mode(true),
-    )
-    .expect("a value-type ensure: as an assignment RHS must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtassignrhsensure"))
+        .expect("a value-type ensure: as an assignment RHS must compile");
     assert!(
         !code.contains("let R = let StateAcc"),
         "the assignment target must not be bound to the raw exception-construct tuple. \
@@ -464,11 +437,8 @@ fn test_value_type_parenthesized_ensure_as_assignment_rhs_unwraps_tuple() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@vtparenassignrhsensure").with_workspace_mode(true),
-    )
-    .expect("a parenthesized value-type ensure: as an assignment RHS must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@vtparenassignrhsensure"))
+        .expect("a parenthesized value-type ensure: as an assignment RHS must compile");
     assert!(
         !code.contains("let R = let StateAcc"),
         "the assignment target must not be bound to the raw exception-construct tuple \
@@ -508,11 +478,8 @@ fn test_class_method_ensure_last_position_and_assign_rhs_thread_local() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@classmethodensureprobe").with_workspace_mode(true),
-    )
-    .expect("a class-method ensure: in last / assign-RHS position must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@classmethodensureprobe"))
+        .expect("a class-method ensure: in last / assign-RHS position must compile");
     assert!(
         !code.contains("let R = let StateAcc"),
         "computeAssignRhs's target must not bind to the raw exception-construct tuple. \
@@ -566,11 +533,8 @@ fn test_class_method_self_send_in_ensure_try_body_threads_class_vars_out() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvensureselfsend").with_workspace_mode(true),
-    )
-    .expect("a class-method self-send inside an ensure: try body must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@cvensureselfsend"))
+        .expect("a class-method self-send inside an ensure: try body must compile");
 
     assert!(
         code.contains(", StateAcc1, ClassVars1}") || code.contains(", StateAcc, ClassVars1}"),
@@ -607,11 +571,8 @@ fn test_class_method_self_send_in_on_do_handler_threads_class_vars_out() {
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvondoselfsend").with_workspace_mode(true),
-    )
-    .expect("a class-method self-send inside an on:do: handler must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@cvondoselfsend"))
+        .expect("a class-method self-send inside an on:do: handler must compile");
 
     assert!(
         code.contains(", ClassVars}"),
@@ -661,14 +622,11 @@ fn test_class_method_self_send_ensure_with_co_occurring_local_mutation_compiles(
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvensureselfsendwithlocal").with_workspace_mode(true),
-    )
-    .expect(
-        "a class-method self-send alongside a co-occurring local mutation inside an \
+    let code = generate_module(&module, CodegenOptions::new("bt@cvensureselfsendwithlocal"))
+        .expect(
+            "a class-method self-send alongside a co-occurring local mutation inside an \
          ensure: try body must compile without a ThreadedIr verify failure",
-    );
+        );
     assert_compiles_through_erlc("bt@cvensureselfsendwithlocal", &code);
 }
 
@@ -700,10 +658,7 @@ fn test_class_method_direct_class_var_write_in_ensure_try_body_still_rejected() 
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvensuredirectwrite").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvensuredirectwrite"));
     let err = match result {
         Err(err @ CodeGenError::ClassVarAssignmentInThreadedBody { .. }) => err,
         other => panic!(
@@ -763,11 +718,8 @@ fn test_class_method_self_send_in_sub_expression_of_ensure_try_body_threads_clas
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvensuresubexprselfsend").with_workspace_mode(true),
-    )
-    .expect("a class-method self-send in a try-body statement's sub-expression must compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@cvensuresubexprselfsend"))
+        .expect("a class-method self-send in a try-body statement's sub-expression must compile");
 
     assert!(
         code.contains(", ClassVars1}"),
@@ -807,10 +759,7 @@ fn test_class_method_self_send_nested_in_conditional_in_ensure_try_body_is_compi
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvnestedensureprobe").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvnestedensureprobe"));
     let err = match result {
         Err(err @ CodeGenError::ClassMethodSelfSendInUnthreadedBlock { .. }) => err,
         other => panic!(
@@ -848,10 +797,7 @@ fn test_class_method_self_send_nested_in_conditional_in_on_do_handler_is_compile
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvnestedondohandler").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvnestedondohandler"));
     assert!(
         matches!(
             result,
@@ -884,10 +830,7 @@ fn test_class_method_bare_class_var_write_nested_in_conditional_in_ensure_is_com
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvnestedbarewriteensure").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvnestedbarewriteensure"));
     let err = match result {
         Err(err @ CodeGenError::ClassVarAssignmentInThreadedBody { .. }) => err,
         other => panic!(
@@ -953,11 +896,8 @@ fn test_class_method_non_mutating_self_send_nested_in_conditional_in_ensure_stil
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvnestedpureselfsend").with_workspace_mode(true),
-    )
-    .expect("a provably non-class-var-mutating nested self-send must still compile");
+    let code = generate_module(&module, CodegenOptions::new("bt@cvnestedpureselfsend"))
+        .expect("a provably non-class-var-mutating nested self-send must still compile");
     assert_compiles_through_erlc("bt@cvnestedpureselfsend", &code);
 }
 
@@ -989,10 +929,7 @@ fn test_class_method_self_send_reaching_mutation_via_class_reference_wrapper_is_
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvclassrefwrapper").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvclassrefwrapper"));
     assert!(
         matches!(
             result,
@@ -1032,10 +969,7 @@ fn test_class_method_self_send_nested_in_match_arm_in_ensure_is_compile_error() 
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvmatcharmnestedensure").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvmatcharmnestedensure"));
     assert!(
         matches!(
             result,
@@ -1071,10 +1005,7 @@ fn test_class_method_self_send_nested_in_nested_ensure_in_ensure_try_body_is_com
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvnestedensureinensure").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvnestedensureinensure"));
     assert!(
         matches!(
             result,
@@ -1107,10 +1038,7 @@ fn test_class_method_self_send_nested_in_conditional_in_ensure_cleanup_block_is_
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt@cvnestedensurecleanup").with_workspace_mode(true),
-    );
+    let result = generate_module(&module, CodegenOptions::new("bt@cvnestedensurecleanup"));
     assert!(
         matches!(
             result,
