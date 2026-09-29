@@ -273,15 +273,26 @@ parameters) stays authoritative. Only the in-memory application environment
 changes; the `.app` file on disk is rewritten by the next `beamtalk build`.
 
 Returns the names of the classes added. A package whose `.app` is not loaded
-yields `[]`.
+yields `[]`. Concurrent refreshes of one package can race on the env write;
+the loss is transient and the next sync re-adds whatever was dropped.
 """.
 -spec refresh_app_classes(binary()) -> [atom()].
 refresh_app_classes(PkgName) when is_binary(PkgName) ->
+    %% `PkgName` can come straight from a `load-project` request, so it must
+    %% never mint an atom (the atom table is node-wide and never collected).
+    %% A package with live classes already has its atom, so an unknown name has
+    %% nothing to refresh.
+    try binary_to_existing_atom(PkgName, utf8) of
+        AppAtom -> refresh_app_classes(PkgName, AppAtom)
+    catch
+        error:badarg -> []
+    end.
+
+-spec refresh_app_classes(binary(), atom()) -> [atom()].
+refresh_app_classes(PkgName, AppAtom) ->
     %% A library with no classes yet has an empty `classes` env, which
     %% `find_app_for_package/1` does not recognise as a Beamtalk package, so
     %% resolve the app by its name (app name == package name) first.
-    % elp:fixme W0023 intentional atom creation
-    AppAtom = binary_to_atom(PkgName, utf8),
     AppName =
         case lists:keymember(AppAtom, 1, application:loaded_applications()) of
             true ->

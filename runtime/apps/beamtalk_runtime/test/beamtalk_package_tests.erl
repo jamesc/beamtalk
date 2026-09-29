@@ -464,6 +464,12 @@ refresh_app_classes_unknown_package_test() ->
     setup(),
     ?assertEqual([], beamtalk_package:refresh_app_classes(<<"bt3662_no_such_package">>)).
 
+refresh_app_classes_does_not_mint_atoms_test() ->
+    %% The name comes from a wire request: an unknown package must not create an atom.
+    Name = iolist_to_binary(["bt3662_unminted_", integer_to_list(erlang:unique_integer([positive]))]),
+    ?assertEqual([], beamtalk_package:refresh_app_classes(Name)),
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)).
+
 refresh_app_classes_leaves_existing_entries_test() ->
     %% A loaded package with a build-time class entry and no live classes of its
     %% own: the refresh adds nothing and never rewrites the existing entry.
