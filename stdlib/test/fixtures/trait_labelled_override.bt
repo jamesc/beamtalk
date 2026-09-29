@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3625: overrides the *required* selector the flattened `announce`
+// self-sends. `announce` itself is inherited from `TraitLabelledBase`.
+
+TraitLabelledBase subclass: TraitLabelledOverride
+
+  label -> String => "override"

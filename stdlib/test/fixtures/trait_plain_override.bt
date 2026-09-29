@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3625: control subclass overriding `label` (see trait_plain_base.bt).
+
+TraitPlainBase subclass: TraitPlainOverride
+
+  label -> String => "override"

@@ -125,6 +125,22 @@ impl CoreErlangGenerator {
             Document::Nil
         };
 
+        // ADR 0127 §10: a protocol module *with provisions* exports
+        // `'__beamtalk_protocol_source'/0`, returning its own source text —
+        // the carrier a compile path uses to flatten a trait it has only as a
+        // `.beam` (no checkout). Only on modules that have provisions, and
+        // only when the source text is known.
+        let has_protocol_source = self.source_text.is_some()
+            && module
+                .protocols
+                .iter()
+                .any(|p| !p.provided_methods.is_empty());
+        let protocol_source_export: Document<'static> = if has_protocol_source {
+            Document::Str(", '__beamtalk_protocol_source'/0")
+        } else {
+            Document::Nil
+        };
+
         let base_exports: Document<'static> = docvec![
             "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_continue'/2, \
              'handle_cast'/2, 'handle_call'/3, \
@@ -235,6 +251,7 @@ impl CoreErlangGenerator {
                 sealed_export_doc,
                 class_method_export_doc,
                 supervision_spec_export,
+                protocol_source_export,
                 ", 'register_class'/0]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server'], \
@@ -363,6 +380,17 @@ impl CoreErlangGenerator {
             // extension registration) even though there are no classes.
             docs.push(Document::Str("\n"));
             docs.push(self.generate_register_class(module, false)?);
+        }
+
+        if has_protocol_source {
+            if let Some(source) = self.source_text.as_deref() {
+                docs.push(docvec![
+                    "\n",
+                    "'__beamtalk_protocol_source'/0 = fun () ->\n    ",
+                    leaf::binary_lit(source),
+                    "\n",
+                ]);
+            }
         }
 
         // Module end

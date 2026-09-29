@@ -38,6 +38,7 @@ pub mod name_resolver;
 pub(crate) mod pattern_bindings;
 pub mod primitive_validator;
 pub mod protocol_registry;
+pub mod protocol_source;
 pub mod receiver_knowledge;
 pub mod return_type_writeback;
 pub(crate) mod scope;
@@ -80,6 +81,7 @@ pub use lowering::lower_module_for_codegen;
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
+pub use protocol_source::{ProtocolSource, ProtocolSourceMap};
 pub use receiver_knowledge::{KnowledgeScope, ReceiverKnowledge, classify_receiver};
 pub use return_type_writeback::{
     apply_return_type_writeback, apply_return_type_writeback_from_map,

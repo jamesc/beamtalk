@@ -118,12 +118,14 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     let alias_sources = collect_stdlib_alias_sources(&source_files)?;
     // Live same-run protocol pre-pass, mirroring the alias pre-pass
     // immediately above — see `collect_stdlib_protocol_infos`'s doc for why.
-    let (protocol_infos, protocol_defs) = collect_stdlib_protocol_infos(&source_files);
+    let (protocol_infos, protocol_defs, protocol_sources) =
+        collect_stdlib_protocol_infos(&source_files);
     let compile_ctx = CompileContext {
         native_type_registry: native_type_registry.map(std::sync::Arc::new),
         hierarchy: ClassHierarchyContext {
             pre_loaded_protocols: protocol_infos,
             pre_loaded_protocol_defs: protocol_defs,
+            pre_loaded_protocol_sources: protocol_sources,
             pre_loaded_aliases: stdlib_pre_loaded_aliases(&alias_sources),
             ..ClassHierarchyContext::default()
         },
@@ -1039,15 +1041,21 @@ fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<Alia
 /// conformance/`extending:` resolution exists for provisions, since
 /// `trait_expansion::expand_module`'s own-module-only fallback would
 /// otherwise report every cross-file stdlib trait as "unknown protocol").
-#[allow(clippy::type_complexity)] // 2-tuple mirrors this module's other multi-output extractors
+///
+/// The third element is each such protocol's source file (path + text —
+/// ADR 0127 §3, "Source locations"; BT-3625), so codegen can map a
+/// flattened provision's spans to lines of the *protocol's* file.
+#[allow(clippy::type_complexity)] // 3-tuple mirrors this module's other multi-output extractors
 fn collect_stdlib_protocol_infos(
     source_files: &[Utf8PathBuf],
 ) -> (
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::ast::ProtocolDefinition>,
+    beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) {
     let mut all = Vec::new();
     let mut all_defs = Vec::new();
+    let mut all_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     for file in source_files {
         let Ok(source) = fs::read_to_string(file) else {
             continue;
@@ -1059,14 +1067,22 @@ fn collect_stdlib_protocol_infos(
                 &module,
             ),
         );
-        all_defs.extend(
-            module
-                .protocols
-                .into_iter()
-                .filter(|p| !p.provided_methods.is_empty()),
-        );
+        for protocol in module
+            .protocols
+            .into_iter()
+            .filter(|p| !p.provided_methods.is_empty())
+        {
+            all_sources.insert(
+                protocol.name.name.clone(),
+                beamtalk_core::semantic_analysis::ProtocolSource {
+                    path: Some(file.as_str().into()),
+                    text: source.as_str().into(),
+                },
+            );
+            all_defs.push(protocol);
+        }
     }
-    (all, all_defs)
+    (all, all_defs, all_sources)
 }
 
 /// The `CompilerOptions` every stdlib compile in [`build_stdlib`] runs with.
@@ -2424,7 +2440,7 @@ mod tests {
         // actually calls it — over *all* source files in one pass, before
         // any compile happens (a live scan, not a seed from any prior
         // "generated" snapshot).
-        let (protocol_infos, _protocol_defs) =
+        let (protocol_infos, _protocol_defs, _sources) =
             collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
         assert_eq!(
             protocol_infos.len(),
@@ -2536,7 +2552,7 @@ mod tests {
         )
         .unwrap();
 
-        let (_protocol_infos, protocol_defs) =
+        let (_protocol_infos, protocol_defs, _sources) =
             collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
         assert_eq!(
             protocol_defs.len(),
@@ -4084,7 +4100,7 @@ mod tests {
         let real = dir.join("printable.bt");
         fs::write(&real, "Protocol define: Printable\n  asString -> String\n").unwrap();
 
-        let (infos, defs) = collect_stdlib_protocol_infos(&[missing, real]);
+        let (infos, defs, _sources) = collect_stdlib_protocol_infos(&[missing, real]);
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].name.as_str(), "Printable");
         // `Printable` here declares no provided methods, so it contributes
@@ -4115,7 +4131,8 @@ mod tests {
         )
         .unwrap();
 
-        let (infos, defs) = collect_stdlib_protocol_infos(&[requirement_only, with_provision]);
+        let (infos, defs, _sources) =
+            collect_stdlib_protocol_infos(&[requirement_only, with_provision]);
         assert_eq!(infos.len(), 2, "both protocols are tracked as ProtocolInfo");
         assert_eq!(
             defs.len(),

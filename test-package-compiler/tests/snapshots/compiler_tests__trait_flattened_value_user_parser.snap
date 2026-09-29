@@ -9,16 +9,16 @@ Module {
             name: Identifier {
                 name: "Report",
                 span: Span {
-                    start: 1095,
-                    end: 1101,
+                    start: 643,
+                    end: 649,
                 },
             },
             superclass: Some(
                 Identifier {
                     name: "Value",
                     span: Span {
-                        start: 1079,
-                        end: 1084,
+                        start: 627,
+                        end: 632,
                     },
                 },
             ),
@@ -49,8 +49,8 @@ Module {
                                     "Report",
                                 ),
                                 Span {
-                                    start: 1144,
-                                    end: 1152,
+                                    start: 692,
+                                    end: 700,
                                 },
                             ),
                             preceding_blank_line: false,
@@ -61,8 +61,8 @@ Module {
                             Identifier {
                                 name: "String",
                                 span: Span {
-                                    start: 1134,
-                                    end: 1140,
+                                    start: 682,
+                                    end: 688,
                                 },
                             },
                         ),
@@ -80,18 +80,118 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 1125,
-                        end: 1152,
+                        start: 673,
+                        end: 700,
                     },
                 },
             ],
             class_methods: [],
             class_variables: [],
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3625 (ADR 0127 §3/§10): a Value class's `uses:` provision must reach",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "compiled Core Erlang output through the existing value-type generator",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "unchanged — and, because the protocol lives in its own file",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "(`describable.bt`, as ADR 0127 requires), the flattened method's BEAM line",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "annotation must carry the *protocol's* file and line, not `main.bt`'s.",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "`describable.bt` is the cross-file protocol carrier: the harness hands its",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "parsed protocol to `analyse_full` as `pre_loaded_protocol_defs`, the way the",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "CLI build's Pass 1 does.",
+                        span: Span {
+                            start: 627,
+                            end: 632,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
                 trailing: None,
-                leading_blank_line: true,
-                blank_line_after_comments: false,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
             },
             doc_comment: None,
             backing_module: None,
@@ -104,8 +204,8 @@ Module {
                     protocol: Identifier {
                         name: "Describable",
                         span: Span {
-                            start: 1110,
-                            end: 1121,
+                            start: 658,
+                            end: 669,
                         },
                     },
                     package: None,
@@ -113,259 +213,25 @@ Module {
                     excluding: [],
                     overriding: [],
                     span: Span {
-                        start: 1104,
-                        end: 1121,
+                        start: 652,
+                        end: 669,
                     },
                 },
             ],
             span: Span {
-                start: 1079,
-                end: 1152,
+                start: 627,
+                end: 700,
             },
         },
     ],
     method_definitions: [],
-    protocols: [
-        ProtocolDefinition {
-            name: Identifier {
-                name: "Describable",
-                span: Span {
-                    start: 1020,
-                    end: 1031,
-                },
-            },
-            type_params: [],
-            extending: None,
-            method_signatures: [],
-            class_method_signatures: [],
-            provided_methods: [
-                MethodDefinition {
-                    selector: Unary(
-                        "describe",
-                    ),
-                    parameters: [],
-                    body: [
-                        ExpressionStatement {
-                            comments: CommentAttachment {
-                                leading: [],
-                                trailing: None,
-                                leading_blank_line: false,
-                                blank_line_after_comments: false,
-                            },
-                            expression: Literal(
-                                String(
-                                    "a describable thing",
-                                ),
-                                Span {
-                                    start: 1056,
-                                    end: 1077,
-                                },
-                            ),
-                            preceding_blank_line: false,
-                        },
-                    ],
-                    return_type: Some(
-                        Simple(
-                            Identifier {
-                                name: "String",
-                                span: Span {
-                                    start: 1046,
-                                    end: 1052,
-                                },
-                            },
-                        ),
-                    ),
-                    is_sealed: false,
-                    is_internal: false,
-                    is_class_method: false,
-                    kind: Primary,
-                    expect: None,
-                    comments: CommentAttachment {
-                        leading: [],
-                        trailing: None,
-                        leading_blank_line: false,
-                        blank_line_after_comments: false,
-                    },
-                    doc_comment: None,
-                    span: Span {
-                        start: 1034,
-                        end: 1077,
-                    },
-                },
-            ],
-            comments: CommentAttachment {
-                leading: [
-                    Comment {
-                        content: "Copyright 2026 James Casey",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "SPDX-License-Identifier: Apache-2.0",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "BT-3590 (ADR 0127 §3/§10): a Value class's `uses:` provision must reach",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: true,
-                    },
-                    Comment {
-                        content: "compiled Core Erlang output through the existing value-type generator",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "unchanged.",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "A real `.bt` file may declare either one class or one protocol, never",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "both (ADR 0127 §Constraints, \"One top-level definition per file\"), so",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "this single-file fixture — combining both purely to exercise codegen —",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "is not itself an example of legal package layout. `trait_expansion`",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "(BT-3588) only flattens a `uses:` against a protocol declared in the",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "*same* module; carrying a protocol's AST across files is BT-3591's job.",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "This case's `_semantic` snapshot therefore records the expected",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "\"class and a protocol cannot be in the same file\" diagnostic alongside",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "the correctly-flattened codegen output below — the diagnostic is a",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "known, unrelated limitation this fixture accepts in order to pin the",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "codegen wiring, not a regression.",
-                        span: Span {
-                            start: 1003,
-                            end: 1011,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                ],
-                trailing: None,
-                leading_blank_line: false,
-                blank_line_after_comments: true,
-            },
-            doc_comment: None,
-            span: Span {
-                start: 1003,
-                end: 1077,
-            },
-        },
-    ],
+    protocols: [],
     type_aliases: [],
     native_declarations: [],
     expressions: [],
     span: Span {
-        start: 1003,
-        end: 1152,
+        start: 627,
+        end: 700,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -662,6 +662,12 @@ pub struct ClassHierarchyContext {
     /// cross-file or cross-package `uses:` needs the provided methods'
     /// actual bodies, which only live here.
     pub pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    /// Source file (path + text) each protocol in `pre_loaded_protocol_defs`
+    /// was parsed from (ADR 0127 §3, "Source locations"; BT-3625). Codegen
+    /// maps a flattened provision's spans through this so BEAM line
+    /// annotations and stack traces point at the protocol file rather than
+    /// at the using class's own file.
+    pub pre_loaded_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
     /// Type alias declarations (`type Name = ...`) from other source files in
     /// the same package (ADR 0108). Seeded into the `AliasRegistry`
     /// during semantic analysis so a cross-file alias reference resolves
@@ -762,6 +768,7 @@ pub fn write_core_erlang_with_bindings(
         // instead of falling through to `any()` — mirrors
         // `pre_loaded_classes` immediately above.
         .with_pre_loaded_aliases(hierarchy.pre_loaded_aliases.clone())
+        .with_protocol_sources(hierarchy.pre_loaded_protocol_sources.clone())
         .with_native_type_registry(native_type_registry)
         // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
         .with_provenance(
@@ -1004,6 +1011,7 @@ pub(crate) fn compile_source_with_bindings(
         class_superclass_index: ctx.hierarchy.class_superclass_index.clone(),
         pre_loaded_classes: cross_file_classes,
         pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
+        pre_loaded_protocol_sources: ctx.hierarchy.pre_loaded_protocol_sources.clone(),
         ..ClassHierarchyContext::default()
     };
     // Prepare the AST (inferred return types, supervisor_kind,

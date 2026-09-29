@@ -459,6 +459,7 @@ fn compile_dependency_with_context(
             // among its *own* files still needs same-file definitions.
             pre_loaded_protocols: Vec::new(),
             pre_loaded_protocol_defs: Vec::new(),
+            pre_loaded_protocol_sources: std::collections::HashMap::new(),
             pre_loaded_aliases: all_alias_infos,
             // The dep's own project-wide extensions — its files see
             // each other's extensions during its own compilation. (Exporting

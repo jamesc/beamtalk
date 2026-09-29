@@ -103,6 +103,11 @@ pub struct CodegenOptions {
     /// Pre-computed analysis outputs from the driver's own
     /// `analyse_full` call. See [`Self::with_analysis`].
     pub(in crate::core_erlang) analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
+    /// Source identity (path + text) of every provision-bearing protocol
+    /// this module's `uses:` lines may flatten (ADR 0127 §3, "Source
+    /// locations"). See [`Self::with_protocol_sources`].
+    pub(in crate::core_erlang) protocol_sources:
+        beamtalk_core::semantic_analysis::ProtocolSourceMap,
 }
 
 impl CodegenOptions {
@@ -123,6 +128,7 @@ impl CodegenOptions {
             native_type_registry: None,
             pre_loaded_aliases: Vec::new(),
             analysis: None,
+            protocol_sources: std::collections::HashMap::new(),
         }
     }
 
@@ -281,6 +287,25 @@ impl CodegenOptions {
         analysis: beamtalk_core::semantic_analysis::AnalysisResult,
     ) -> Self {
         self.analysis = Some(analysis);
+        self
+    }
+
+    /// Supplies the source file each provision-bearing protocol was parsed
+    /// from (ADR 0127 §3, "Source locations"; BT-3625).
+    ///
+    /// A `uses:`-flattened method keeps the spans of its *protocol's* file,
+    /// so mapping them through this module's own source would attribute the
+    /// method to the wrong line of the wrong file. With this map, codegen
+    /// maps a flattened method's spans through its protocol's text and
+    /// annotates it with the protocol's path, so BEAM line annotations and
+    /// stack traces point at the protocol file. A protocol absent from the
+    /// map (or a module with no `uses:`) is unaffected.
+    #[must_use]
+    pub fn with_protocol_sources(
+        mut self,
+        protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    ) -> Self {
+        self.protocol_sources = protocol_sources;
         self
     }
 }

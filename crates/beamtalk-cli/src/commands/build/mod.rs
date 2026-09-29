@@ -301,6 +301,7 @@ fn execute_build_passes(
             pre_loaded_classes: index.all_class_infos.clone(),
             pre_loaded_protocols: index.all_protocol_infos.clone(),
             pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
+            pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
             extension_index: index.extension_index.clone(),
         },

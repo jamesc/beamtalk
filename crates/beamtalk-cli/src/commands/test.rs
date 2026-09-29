@@ -275,7 +275,12 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 ///    non-nilable class name to `requires_definite_assignment_for_declared_type`.
 ///    Mirrors `ClassInfo`/`ProtocolInfo` immediately above.
 ///
-/// All five outputs are merged into the pipeline before fixture compilation so
+/// 6. The full ASTs (and source files) of fixture-defined *provision-bearing*
+///    protocols (ADR 0127 §10a; BT-3625) — a `uses:` in one fixture (or test
+///    file) flattens a trait declared in another fixture file, exactly as
+///    `beamtalk build`'s Pass 1 carries `pre_loaded_protocol_defs`.
+///
+/// All outputs are merged into the pipeline before fixture compilation so
 /// that cross-file references and class hierarchy resolution work correctly —
 /// in particular, Value sub-subclasses are recognized as value types rather
 /// than defaulting to actor codegen.
@@ -288,12 +293,14 @@ fn build_fixture_class_indexes(
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+    FixtureProtocolDefs,
 )> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
     let mut class_infos = Vec::new();
     let mut protocol_infos = Vec::new();
     let mut alias_infos = Vec::new();
+    let mut protocol_defs = FixtureProtocolDefs::default();
 
     for file in fixture_files {
         let module_name = fixture_module_name(file)?;
@@ -324,6 +331,21 @@ fn build_fixture_class_indexes(
             ),
         );
 
+        for protocol in module
+            .protocols
+            .iter()
+            .filter(|p| !p.provided_methods.is_empty())
+        {
+            protocol_defs.sources.insert(
+                protocol.name.name.clone(),
+                beamtalk_core::semantic_analysis::ProtocolSource {
+                    path: Some(file.as_str().into()),
+                    text: source.as_str().into(),
+                },
+            );
+            protocol_defs.defs.push(protocol.clone());
+        }
+
         for class in &module.classes {
             let class_name = class.name.name.to_string();
             module_index.insert(class_name.clone(), module_name.clone());
@@ -340,7 +362,16 @@ fn build_fixture_class_indexes(
         class_infos,
         protocol_infos,
         alias_infos,
+        protocol_defs,
     ))
+}
+
+/// Provision-bearing protocol ASTs and their source files from a fixtures
+/// directory (see [`build_fixture_class_indexes`]).
+#[derive(Default)]
+struct FixtureProtocolDefs {
+    defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -805,6 +836,10 @@ struct TestPipeline {
     /// Fixture-defined protocols so the unresolved-class validator
     /// and type checker recognise protocol names declared in `fixtures/*.bt`.
     fixture_protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Full ASTs + source files of fixture-defined provision-bearing
+    /// protocols, so a fixture/test `uses:` flattens a trait declared in a
+    /// different fixture file (ADR 0127 §10a; BT-3625).
+    fixture_protocol_defs: FixtureProtocolDefs,
     /// Fixture class-name to module-name index.
     fixture_class_index: HashMap<String, String>,
     /// Module names of pre-compiled fixtures (from `fixtures/` directory).
@@ -1217,6 +1252,7 @@ fn initialize_pipeline(
         all_class_infos,
         all_alias_infos,
         fixture_protocol_infos: Vec::new(),
+        fixture_protocol_defs: FixtureProtocolDefs::default(),
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
         all_fixture_modules: Vec::new(),
@@ -1256,6 +1292,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         fixture_class_infos,
         fixture_protocol_infos,
         fixture_alias_infos,
+        fixture_protocol_defs,
     ) = if fixtures_dir.is_dir() {
         let fixture_files = find_test_files(&fixtures_dir)?;
         build_fixture_class_indexes(&fixture_files)?
@@ -1266,8 +1303,10 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            FixtureProtocolDefs::default(),
         )
     };
+    pipeline.fixture_protocol_defs = fixture_protocol_defs;
     pipeline
         .class_module_index
         .extend(fixture_class_index.clone());
@@ -1295,6 +1334,8 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         class_superclass_index: pipeline.class_superclass_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
         pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
+        pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
         ..ClassHierarchyContext::default()
     };
@@ -1414,6 +1455,8 @@ fn compile_single_test_file(
         class_superclass_index: file_super_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
         pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
+        pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
         ..ClassHierarchyContext::default()
     };
@@ -2471,7 +2514,7 @@ mod tests {
         .unwrap();
 
         let files = vec![dir.join("counter.bt")];
-        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos, _defs) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("Counter").map(String::as_str),
@@ -2501,7 +2544,7 @@ mod tests {
 
         // fixture_module_name uses the file stem only, so scheme_env.bt → bt@scheme_env
         let files = vec![subdir.join("scheme_env.bt")];
-        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos) =
+        let (module_index, superclass_index, _class_infos, protocol_infos, _alias_infos, _defs) =
             build_fixture_class_indexes(&files).unwrap();
         assert_eq!(
             module_index.get("SchemeEnv").map(String::as_str),

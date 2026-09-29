@@ -36,6 +36,67 @@ fn read_test_case(case_name: &str) -> String {
     })
 }
 
+/// Sibling `.bt` files in a case directory (everything except `main.bt`),
+/// as `(file name, source)` pairs sorted by name.
+///
+/// ADR 0127 requires a protocol and the class that `uses:` it to live in
+/// *separate* files, so a trait case is a directory with `main.bt` (the user)
+/// plus one sibling file per provision-bearing protocol. Those siblings are
+/// the cross-file protocol carrier — exactly what the CLI build hands to
+/// `analyse_full` as `pre_loaded_protocol_defs` — so the case exercises the
+/// legal cross-file path end to end. Empty for every ordinary single-file
+/// case.
+fn read_sibling_sources(case_name: &str) -> Vec<(String, String)> {
+    let dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("cases")
+        .join(case_name);
+    let mut siblings: Vec<(String, String)> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("Failed to read case dir {dir}: {e}"))
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == "main.bt" || !name.ends_with(".bt") {
+                return None;
+            }
+            let text = fs::read_to_string(entry.path())
+                .unwrap_or_else(|e| panic!("Failed to read {name}: {e}"));
+            Some((name, text))
+        })
+        .collect();
+    siblings.sort();
+    siblings
+}
+
+/// Parses each sibling file and returns the provision-bearing protocol ASTs
+/// plus their source identity (file name + text), as the CLI's Pass 1 does.
+fn sibling_protocols(
+    siblings: &[(String, String)],
+) -> (
+    Vec<beamtalk_core::ast::ProtocolDefinition>,
+    semantic_analysis::ProtocolSourceMap,
+) {
+    let mut defs = Vec::new();
+    let mut sources = semantic_analysis::ProtocolSourceMap::new();
+    for (name, text) in siblings {
+        let (module, _) = parse(lex_with_eof(text));
+        for protocol in module
+            .protocols
+            .into_iter()
+            .filter(|p| !p.provided_methods.is_empty())
+        {
+            sources.insert(
+                protocol.name.name.clone(),
+                semantic_analysis::ProtocolSource {
+                    path: Some(name.as_str().into()),
+                    text: text.as_str().into(),
+                },
+            );
+            defs.push(protocol);
+        }
+    }
+    (defs, sources)
+}
+
 /// Test the lexer output for a given test case
 fn test_lexer_snapshot(case_name: &str) {
     let source = read_test_case(case_name);
@@ -84,12 +145,42 @@ fn test_codegen_snapshot(case_name: &str) {
 fn generate_core_erlang(case_name: &str) -> (String, String) {
     let source = read_test_case(case_name);
     let tokens = lex_with_eof(&source);
-    let (module, _diagnostics) = parse(tokens);
+    let (mut module, _diagnostics) = parse(tokens);
 
     // Generate Core Erlang with a module name derived from the test case
     let module_name = case_name.replace('-', "_");
-    let core_erlang = generate_module(&module, CodegenOptions::new(&module_name))
-        .unwrap_or_else(|e| panic!("Codegen failed for '{}': {}", case_name, e));
+    let options = CodegenOptions::new(&module_name);
+
+    let siblings = read_sibling_sources(case_name);
+    if siblings.is_empty() {
+        let core_erlang = generate_module(&module, options)
+            .unwrap_or_else(|e| panic!("Codegen failed for '{}': {}", case_name, e));
+        return (module_name, core_erlang);
+    }
+
+    // Cross-file trait case: the CLI build pipeline —
+    // `analyse_full` (with the sibling protocols) -> `lower_module_for_codegen`
+    // -> `generate_module(..).with_analysis(..)`.
+    let (protocol_defs, protocol_sources) = sibling_protocols(&siblings);
+    let analysis = semantic_analysis::analyse_full(
+        &module,
+        semantic_analysis::AnalysisContext::default().with_pre_loaded_protocol_defs(protocol_defs),
+    );
+    semantic_analysis::lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+        &analysis.external_protocols,
+    );
+    let core_erlang = generate_module(
+        &module,
+        options
+            .with_source(&source)
+            .with_source_path_opt(Some("main.bt"))
+            .with_protocol_sources(protocol_sources)
+            .with_analysis(analysis),
+    )
+    .unwrap_or_else(|e| panic!("Codegen failed for '{}': {}", case_name, e));
 
     (module_name, core_erlang)
 }
@@ -157,7 +248,18 @@ fn test_diagnostics_snapshot(
     let tokens = lex_with_eof(&source);
     let (module, _parser_diagnostics) = parse(tokens);
 
-    let result = semantic_analysis::analyse(&module);
+    // Cross-file trait cases analyse `main.bt` against its sibling protocol
+    // files (see `read_sibling_sources`); every other case is single-file.
+    let siblings = read_sibling_sources(case_name);
+    let result = if siblings.is_empty() {
+        semantic_analysis::analyse(&module)
+    } else {
+        semantic_analysis::analyse_full(
+            &module,
+            semantic_analysis::AnalysisContext::default()
+                .with_pre_loaded_protocol_defs(sibling_protocols(&siblings).0),
+        )
+    };
 
     let diagnostics: Vec<_> = result
         .diagnostics
