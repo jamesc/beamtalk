@@ -368,8 +368,8 @@ Configure logger in `test/sys.config` to suppress non-error logs:
 For production, use info level with JSON output for log aggregation (Datadog, Splunk, ELK, Loki):
 
 ```beamtalk
-Beamtalk logLevel: #info
-Beamtalk logFormat: #json
+Logger logLevel: #info
+Logger logFormat: #json
 ```
 
 Or via `sys.config` for static configuration:
@@ -396,19 +396,19 @@ Or via `sys.config` for static configuration:
 Control logging via the `Beamtalk` facade in the REPL:
 
 ```beamtalk
-Beamtalk logLevel                     // => #debug
-Beamtalk logLevel: #warning           // reduce verbosity
+Logger logLevel                     // => #debug
+Logger logLevel: #warning           // reduce verbosity
 
-Beamtalk debugTargets                 // => #(#actor, #supervisor, #dispatch, ...)
-Beamtalk enableDebug: #supervisor     // enable per-subsystem
-Beamtalk enableDebug: Counter         // enable per-class
-Beamtalk activeDebugTargets           // see what's enabled
-Beamtalk disableAllDebug              // reset
+Logger debugTargets                 // => #(#actor, #supervisor, #dispatch, ...)
+Logger enableDebug: #supervisor     // enable per-subsystem
+Logger enableDebug: Counter         // enable per-class
+Logger activeDebugTargets           // see what's enabled
+Logger disableAllDebug              // reset
 
-Beamtalk logFormat: #json             // structured JSON for production
-Beamtalk logFormat: #text             // human-readable (default)
+Logger logFormat: #json             // structured JSON for production
+Logger logFormat: #text             // human-readable (default)
 
-Beamtalk loggerInfo                   // full config dump
+Logger loggerInfo                   // full config dump
 ```
 
 View logs from outside the REPL:

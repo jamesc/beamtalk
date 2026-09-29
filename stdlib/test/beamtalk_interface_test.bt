@@ -35,14 +35,6 @@ TestCase subclass: BeamtalkInterfaceTest
   testErlangHelpReturnsString =>
     self assert: ((Beamtalk erlangHelp: "lists") isKindOf: String)
 
-  testLogLevelReturnsSymbol => self assert: (Beamtalk logLevel isKindOf: Symbol)
-
-  testLogFormatIsTextOrJson =>
-    fmt := Beamtalk logFormat
-    self assert: ((fmt == #text) or: [fmt == #json])
-
-  testDebugTargetsIsList => self assert: (Beamtalk debugTargets isKindOf: List)
-
   testReleaseInfoIsDictionary =>
     self assert: (Beamtalk releaseInfo isKindOf: Dictionary)
 

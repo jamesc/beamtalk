@@ -5410,8 +5410,10 @@ Actor messages automatically carry a propagated context map across boundaries. T
 
 | Concern | API | ADR |
 |---------|-----|-----|
-| **What is happening** — log messages, debug output | `Logger info:`, `Beamtalk enableDebug:` | [ADR 0064](ADR/0064-runtime-logging-control-and-observability-api.md) |
+| **What is happening** — log messages, debug output | `Logger info:`, `Logger enableDebug:` | [ADR 0064](ADR/0064-runtime-logging-control-and-observability-api.md) |
 | **How fast is it happening** — timing, call counts, bottlenecks | `Tracing stats`, `Tracing slowMethods:` | [ADR 0069](ADR/0069-actor-observability-and-tracing.md) |
+
+Runtime logging configuration lives on class-side `Logger` (BT-3653, [ADR 0129](ADR/0129-class-side-system-facades.md)): `Logger logLevel:`, `Logger logFormat:`, `Logger enableDebug:` / `disableDebug:`, `Logger debugTargets`, `Logger activeDebugTargets`, `Logger disableAllDebug` and `Logger loggerInfo`. These moved from `Beamtalk` with no shim.
 
 ---
 

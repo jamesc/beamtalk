@@ -1,12 +1,19 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// The OTP primary log level severities that `Logger logLevel:` accepts.
+type LogLevel = #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug
+/// The log output format on the file handler.
+type LogFormat = #text | #json
 /// Logger — structured logging via Erlang's logger.
 ///
 /// Provides class methods for logging at standard severity levels,
 /// with optional structured metadata. All methods are class-side —
 /// Logger has no instances. Output formatting and routing are handled
-/// by Erlang's logger handlers.
+/// by Erlang's logger handlers. Logger is a sealed, stateless class-side
+/// facade, so runtime logging configuration (`logLevel:`, `logFormat:`,
+/// `enableDebug:`, ...) works identically in the REPL, `run`, `test` and
+/// releases.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -104,3 +111,111 @@ sealed typed Object subclass: Logger
   /// ```
   class sealed debug: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerDebugMeta
+
+  // === Logging configuration (delegates to beamtalk_logging_config) ===
+
+  /// Return the current OTP primary log level as a singleton symbol
+  /// (e.g. `#debug`, `#info`, or the `#all`/`#none` sentinels).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger logLevel
+  /// ```
+  class sealed logLevel -> LogLevel | #all | #none =>
+    (Erlang beamtalk_logging_config) logLevel
+
+  /// Set the OTP primary log level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger logLevel: #debug
+  /// ```
+  class sealed logLevel: level :: LogLevel -> Nil =>
+    (Erlang beamtalk_logging_config) logLevel: level
+
+  /// Return the current log format as a singleton symbol (`#text` or `#json`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger logFormat
+  /// ```
+  class sealed logFormat -> LogFormat =>
+    (Erlang beamtalk_logging_config) logFormat
+
+  /// Switch the log format on the file handler.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger logFormat: #json
+  /// Logger logFormat: #text
+  /// ```
+  class sealed logFormat: format :: LogFormat -> Nil =>
+    (Erlang beamtalk_logging_config) logFormat: format
+
+  /// Return the list of available debug target symbols.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger debugTargets
+  /// ```
+  class sealed debugTargets -> List(Symbol) =>
+    (Erlang beamtalk_logging_config) debugTargets
+
+  /// Enable debug logging for a subsystem, class, or actor instance.
+  ///
+  /// Accepts symbols (#actor, #compiler, ...), class references (Counter),
+  /// or actor instances (myCounter).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger enableDebug: #actor
+  /// Logger enableDebug: Counter
+  /// Logger enableDebug: myCounter
+  /// ```
+  class sealed enableDebug: target :: Object -> Nil =>
+    (Erlang beamtalk_logging_config) enableDebug: target
+
+  /// Disable debug logging for a subsystem, class, or actor instance.
+  ///
+  /// Accepts symbols (#actor, #compiler, ...), class references (Counter),
+  /// or actor instances (myCounter).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger disableDebug: #actor
+  /// Logger disableDebug: Counter
+  /// Logger disableDebug: myCounter
+  /// ```
+  class sealed disableDebug: target :: Object -> Nil =>
+    (Erlang beamtalk_logging_config) disableDebug: target
+
+  /// Return the list of currently enabled debug targets.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger activeDebugTargets
+  /// ```
+  class sealed activeDebugTargets -> List(Symbol) =>
+    (Erlang beamtalk_logging_config) activeDebugTargets
+
+  /// Disable all debug targets.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger disableAllDebug
+  /// ```
+  class sealed disableAllDebug -> Nil =>
+    (Erlang beamtalk_logging_config) disableAllDebug
+
+  /// Return a formatted description of the current logger state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Logger loggerInfo
+  /// ```
+  ///
+  /// BT-2829: the FFI spec types the result `binary()` (`String | Binary`,
+  /// BT-2254) — suppress the resulting return-type mismatch against `String`.
+  @expect type
+  class sealed loggerInfo -> String =>
+    (Erlang beamtalk_logging_config) loggerInfo

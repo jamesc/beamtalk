@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests the Logger class — info:, warn:, error:, debug:, and metadata variants
+// Tests the Logger class — info:, warn:, error:, debug:, metadata variants, and runtime
+// logging configuration (logLevel, logFormat, debug targets)
 
 TestCase subclass: LoggerTest
 
@@ -44,3 +45,31 @@ TestCase subclass: LoggerTest
     self assert: (Logger debug: "test debug" metadata: #{
       "count" => 42
     }) equals: nil
+
+  // === Logging configuration (BT-3653: moved from Beamtalk) ===
+  testLogLevelReturnsSymbol => self assert: (Logger logLevel isKindOf: Symbol)
+
+  testLogLevelRoundTrip =>
+    saved := Logger logLevel
+    [
+      Logger logLevel: #notice
+      self assert: Logger logLevel equals: #notice
+    ]
+      ensure: [
+        // Restore the level BUnit started with (test sys.config uses #error),
+        // even if the assertion above fails. Not asserted: the `#error` atom
+        // is coerced to a Result on return.
+        Logger logLevel: #error
+      ]
+    self assert: (saved isKindOf: Symbol)
+
+  testLogFormatIsTextOrJson =>
+    fmt := Logger logFormat
+    self assert: ((fmt == #text) or: [fmt == #json])
+
+  testDebugTargetsIsList => self assert: (Logger debugTargets isKindOf: List)
+
+  testActiveDebugTargetsIsList =>
+    self assert: (Logger activeDebugTargets isKindOf: List)
+
+  testLoggerInfoIsString => self assert: (Logger loggerInfo isKindOf: String)
