@@ -996,6 +996,13 @@ pub(crate) fn compile_source_with_bindings(
             &diag_ctx,
         );
     diagnostics = new_diagnostics;
+    // ADR 0127 §3: an `@expect` written in a protocol's provided method
+    // suppresses that provision's diagnostic here, on the using file's copy,
+    // before it is cached, counted or published in the protocol's file.
+    beamtalk_core::compilation::diagnostics_policy::apply_protocol_expect_directives(
+        &ctx.hierarchy.pre_loaded_protocol_defs,
+        &mut diagnostics,
+    );
 
     // Check for errors (and optionally treat warnings/hints as errors).
     // Deprecation-category warnings and structural validation warnings

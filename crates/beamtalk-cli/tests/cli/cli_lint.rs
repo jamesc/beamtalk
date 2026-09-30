@@ -244,6 +244,80 @@ fn expect_type_on_ffi_arg_mismatch_is_not_stale_across_lint_and_build_bt_2851() 
         .stderr(contains("stale @expect").not());
 }
 
+/// Writes a protocol with a provided method whose body has a type error
+/// (`3 bogus`), plus a class that flattens it via `uses:` (ADR 0127 §3).
+/// `expect` is spliced in above the offending provided method.
+fn write_broken_provision_project(project: &std::path::Path, expect: &str) {
+    std::fs::write(
+        project.join("src/Broken.bt"),
+        format!(
+            "// Copyright 2026 James Casey\n\
+             // SPDX-License-Identifier: Apache-2.0\n\
+             \n\
+             Protocol define: Broken\n\
+             \x20\x20name -> String\n\
+             \n\
+             {expect}\
+             \x20\x20probe -> Integer => 3 bogus\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/Alpha.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Alpha\n\
+         \x20\x20uses: Broken\n\
+         \x20\x20name -> String => \"alpha\"\n",
+    )
+    .unwrap();
+}
+
+/// BT-3671: a flattened-provision diagnostic is published once, in the
+/// protocol's file — so an `@expect` written above the offending provided
+/// method must suppress it there (and not be reported stale) on both the
+/// `lint` and `build` surfaces. Without the `@expect` both surfaces report it.
+#[test]
+fn expect_in_protocol_file_suppresses_provision_diagnostic_on_lint_and_build_bt_3671() {
+    // Baseline: no `@expect` — both surfaces publish the provision diagnostic
+    // against the protocol's file.
+    let project = cli_common::fixture_project();
+    write_broken_provision_project(project.path(), "");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .stderr(contains("does not understand"));
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .stderr(contains("does not understand"));
+
+    // With the `@expect`: suppressed on both, and not stale.
+    let project = cli_common::fixture_project();
+    write_broken_provision_project(project.path(), "  @expect type\n");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "--format=json"])
+        .assert()
+        .stdout(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+}
+
 /// `beamtalk lint` requires `@expect dead_assignment` to suppress a
 /// real `DeadAssignment` diagnostic — without the pragma, lint fails.
 ///

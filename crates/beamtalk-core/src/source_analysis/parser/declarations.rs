@@ -2871,13 +2871,37 @@ impl Parser {
             && !self.is_at_native_declaration()
             && !self.is_at_standalone_method_definition()
         {
+            // A declaration-level `@expect category` (BT-3671) applies to the
+            // provided method that follows it, exactly as in a class body —
+            // it suppresses the flattened-provision diagnostics published in
+            // this (the protocol's) file.
+            let pending = self.parse_pending_declaration_expect();
+            let pending_has_expect = pending.expect.is_some();
+            if let Some((_, _, span)) = pending.expect {
+                if !self.is_at_method_definition() {
+                    self.diagnostics.push(Diagnostic::error(
+                        "`@expect` in a protocol body applies only to a provided method (one with a `=>` body)",
+                        span,
+                    ));
+                    while self.match_token(&TokenKind::Period) {}
+                    continue;
+                }
+            }
+
             // A provided method — any selector shape ending in `=>`,
             // possibly `class`-prefixed. Checked first (pure lookahead, no
             // trivia consumed yet) so `parse_method_definition` itself
             // collects the doc comment/leading comments off the right
             // token, exactly as in a class body.
             if self.is_at_method_definition() {
-                if let Some(method) = self.parse_method_definition() {
+                if let Some(mut method) = self.parse_method_definition() {
+                    if pending_has_expect {
+                        pending.apply_to(
+                            &mut method.expect,
+                            &mut method.doc_comment,
+                            &mut method.comments,
+                        );
+                    }
                     if method.is_class_method {
                         self.diagnostics.push(Diagnostic::error(
                             "class-side provided methods are not yet supported",

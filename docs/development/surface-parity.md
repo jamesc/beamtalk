@@ -519,6 +519,18 @@ file, so it is only meaningful there.
   using file, merged across users, and published once in the protocol's file
   (text and `--format=json`, where `file` is the protocol path), for
   same-package and dependency protocols.
+- `@expect` (BT-3671), `build` and `lint` alike: a declaration-level `@expect`
+  (now parsed in protocol bodies) written above the offending provided method,
+  or a statement-level one inside its body, suppresses the provision
+  diagnostic published in the protocol file. A provision diagnostic is matched
+  only against protocol-file directives (`apply_protocol_expect_directives`),
+  never against the using file's own `@expect`s, since its span is an offset
+  into another file. Such a directive is never reported stale: whether a
+  provision diagnostic exists depends on which users were analysed.
+- `beamtalk lint <subset>` caveat: a provision diagnostic is published against
+  the protocol's file even when that file was not itself a lint target (the
+  using file was), and against a `<protocol Name>` placeholder (`file` in
+  `--format=json`) when the protocol's source identity is not carried.
 - LSP, MCP `lint`/`diagnostic_summary`: not yet attributed. The tagged
   diagnostic is still rendered at its raw span in the using file. Follow-up:
   carry a `ProtocolSourceMap` through `dependency_classes.rs` (currently
