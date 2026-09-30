@@ -204,9 +204,7 @@ register(Class, Selector, Fun, Owner, Source) when
     %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
     %% exactly "some row exists under this tag" whenever the lock is free.
     with_shadow_lock(Class, fun() ->
-        %% Only class-object tags (`'Foo class'`) are read by the guard.
-        beamtalk_class_registry:is_class_name(Class) andalso
-            beamtalk_class_shadow_flags:set(extension, Class),
+        beamtalk_class_shadow_flags:set(extension, Class),
         %% Check for existing registration
         case ets:lookup(?EXTENSIONS_TABLE, Key) of
             [] ->
@@ -332,7 +330,14 @@ for tests that need to hold the lock deterministically.
 """.
 -spec with_shadow_lock(atom(), fun(() -> T)) -> T.
 with_shadow_lock(Tag, Fun) ->
-    global:trans({{?MODULE, shadow_flag, Tag}, self()}, Fun, [node()], infinity).
+    %% Only class-object tags (`'Foo class'`) have a flag the guard reads;
+    %% instance-side tags skip the lock (global:trans/4 backs off randomly when
+    %% contended and register/5 runs from parallel -on_load chains). The lock is
+    %% not FIFO-fair; contention is limited to rare same-class-tag writes.
+    case beamtalk_class_registry:is_class_name(Tag) of
+        true -> global:trans({{?MODULE, shadow_flag, Tag}, self()}, Fun, [node()], infinity);
+        false -> Fun()
+    end.
 
 -spec has_any(atom()) -> boolean().
 has_any(Class) ->

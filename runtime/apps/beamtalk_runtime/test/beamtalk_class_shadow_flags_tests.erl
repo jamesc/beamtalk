@@ -104,7 +104,8 @@ shadow_flag_test_() ->
                 Parent = self(),
                 ok = beamtalk_extensions:register(Tag, bt3669_ser_a, noop_fun(), bt3669),
                 %% Hold the per-tag lock: an unregister of the last extension and a
-                %% following register both queue behind it, in that order.
+                %% register both block behind it (acquisition order is not FIFO).
+                %% The assertions below hold for either order.
                 beamtalk_extensions:with_shadow_lock(Tag, fun() ->
                     U = spawn_link(fun() ->
                         ok = beamtalk_extensions:unregister('Bt3669Ser', bt3669_ser_a, true),
