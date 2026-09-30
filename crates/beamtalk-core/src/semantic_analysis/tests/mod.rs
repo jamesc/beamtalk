@@ -50,6 +50,7 @@ mod analyser_core_and_block_context;
 mod class_hierarchy_and_method_validators;
 mod dead_code_super_and_shadowing;
 mod extension_method_integration;
+mod flattened_provision_diagnostics;
 mod hierarchy_injection_and_singleton_types;
 mod match_arm_analysis;
 mod self_misuse_and_unused_variables;

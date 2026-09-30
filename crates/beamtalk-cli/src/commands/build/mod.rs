@@ -155,6 +155,21 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     Ok(())
 }
 
+/// When compiling a file failed, prints the provision diagnostics gathered so
+/// far before the error propagates — otherwise a build stopped by a type error
+/// in a shared provision would never show it (ADR 0127 §3).
+fn flush_provision_on_error<T>(
+    result: Result<T>,
+    ctx: &CompileContext<'_>,
+    options: &beamtalk_core::CompilerOptions,
+) -> Result<T> {
+    if result.is_err() {
+        ctx.provision_sink
+            .flush(&ctx.hierarchy.pre_loaded_protocol_sources, options);
+    }
+    result
+}
+
 /// Phase 5-8: Build the class index (Pass 1), merge dependency indexes,
 /// compile changed source files (Pass 2), and compile Core Erlang to BEAM.
 #[allow(clippy::too_many_lines)] // orchestration function — one call per build phase
@@ -309,6 +324,9 @@ fn execute_build_passes(
         strict_deps,
         native_type_registry,
         diagnostics_overrides,
+        // ADR 0127 §3: a provision shared by several users is reported once,
+        // against its protocol's file, after every file has compiled.
+        provision_sink: crate::beam_compiler::ProvisionSink::collecting(),
     };
     // Collect diagnostics from all compiled files for the summary.
     // Seed with stubs/ diagnostics (skipped signatures, version drift).
@@ -343,8 +361,11 @@ fn execute_build_passes(
 
         if changed_set.contains(file.as_path()) {
             let cached = cached_asts.remove(file);
-            let file_diags =
-                compile_file(file, module_name, core_file, options, &compile_ctx, cached)?;
+            let file_diags = flush_provision_on_error(
+                compile_file(file, module_name, core_file, options, &compile_ctx, cached),
+                &compile_ctx,
+                options,
+            )?;
             files_with_known_diagnostics += 1;
             new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
             all_build_diags.extend(file_diags);
@@ -368,6 +389,13 @@ fn execute_build_passes(
                     );
                 }
             }
+            // A replayed provision diagnostic joins the other users' so it is
+            // still reported once, against the protocol's file.
+            compile_ctx.provision_sink.report(
+                cached_diags,
+                &compile_ctx.hierarchy.pre_loaded_protocol_sources,
+                options,
+            );
             files_with_known_diagnostics += 1;
             all_build_diags.extend(cached_diags.iter().cloned());
             new_diagnostics_cache.insert(file.as_str().to_string(), cached_diags.clone());
@@ -383,13 +411,21 @@ fn execute_build_passes(
         // even though the file was never in `cached_asts`.
         debug!(file = %file, "Unchanged file has no diagnostics cache entry — recompiling");
         let cached = cached_asts.remove(file);
-        let file_diags = compile_file(file, module_name, core_file, options, &compile_ctx, cached)?;
+        let file_diags = flush_provision_on_error(
+            compile_file(file, module_name, core_file, options, &compile_ctx, cached),
+            &compile_ctx,
+            options,
+        )?;
         files_with_known_diagnostics += 1;
         diagnostics_cache_miss_recompiles += 1;
         new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
         all_build_diags.extend(file_diags);
         core_files.push(core_file.clone());
     }
+
+    compile_ctx
+        .provision_sink
+        .flush(&compile_ctx.hierarchy.pre_loaded_protocol_sources, options);
 
     compile_to_beam(
         &env.build_dir,

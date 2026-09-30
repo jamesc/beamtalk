@@ -481,6 +481,7 @@ fn compile_dependency_with_context(
         // impact — dependency diagnostics are never surfaced to or promoted
         // for the consuming build — but worth revisiting if that changes.
         diagnostics_overrides: crate::commands::manifest::DiagnosticsTable::new(),
+        provision_sink: crate::beam_compiler::ProvisionSink::default(),
     };
 
     let (core_files, module_names) = compile_sources_to_core(
