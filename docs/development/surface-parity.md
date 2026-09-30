@@ -512,10 +512,21 @@ file, so it is only meaningful there.
 - `beamtalk build` (CLI), **surface-specific (today):** reported once,
   against the protocol's file, with a "while flattening into A, B" note, for
   protocols whose source identity the build carries (same package and
-  dependency packages).
-- `beamtalk lint`, LSP, MCP `lint`: not yet attributed. The tagged diagnostic
-  is still rendered at its raw span in the using file, as before BT-3663;
-  publishing it in the protocol file is tracked as a follow-up.
+  dependency packages). The trailing diagnostic summary counts a shared
+  provision diagnostic once (BT-3665), matching what is printed.
+- `beamtalk lint` (CLI), **surface-specific (today):** same attribution as
+  `build` (BT-3665): provision-tagged diagnostics are held back from each
+  using file, merged across users, and published once in the protocol's file
+  (text and `--format=json`, where `file` is the protocol path), for
+  same-package and dependency protocols.
+- LSP, MCP `lint`/`diagnostic_summary`: not yet attributed. The tagged
+  diagnostic is still rendered at its raw span in the using file. Follow-up:
+  carry a `ProtocolSourceMap` through `dependency_classes.rs` (currently
+  returns only `protocol_defs`) and `ProjectIndex`, then publish in the
+  protocol file once.
+- Same-named protocols across packages resolve first-wins (project before
+  dependencies) in both `ProtocolRegistry::add_pre_loaded` and
+  `analyse_full`'s carried protocol map, and in the source map (BT-3665).
 
 ## Drift Check (CI)
 

@@ -533,18 +533,7 @@ impl ProcessManager {
             assert!(status.success(), "Failed to build runtime");
         }
 
-        // Isolate `~/.beamtalk/workspaces/<id>/metadata.json`: workspace ids are
-        // small per-VM counters, so a stale file left by another run would
-        // otherwise be loaded over this node's project path. HOME is repointed
-        // inside the VM (not on the `erl` process, whose launcher needs the real
-        // HOME) before the workspace starts.
-        let home_dir = project_dir.join(".bt_e2e_home");
-        fs::create_dir_all(&home_dir).expect("create isolated HOME");
-        let eval_cmd = format!(
-            "os:putenv(\"HOME\", \"{}\"), {}",
-            home_dir.display(),
-            repl_startup::build_eval_cmd(0, None, "info", None, Some(root_package), &[])
-        );
+        let eval_cmd = repl_startup::build_eval_cmd(0, None, "info", None, Some(root_package), &[]);
         let mut pa_args = repl_startup::beam_pa_args(&paths);
         pa_args.push("-pa".into());
         pa_args.push(project_dir.join("_build/dev/ebin").into_os_string());

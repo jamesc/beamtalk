@@ -313,3 +313,21 @@ fn provision_may_not_use_another_packages_internal_class() {
     let origin = visibility[0].provision.as_ref().expect("attributed");
     assert_eq!(origin.protocol.as_str(), "Helps");
 }
+
+/// Two carried protocols share a name (e.g. project and a dependency): the
+/// first wins, consistent with `ProtocolRegistry::add_pre_loaded`.
+#[test]
+fn same_named_carried_protocols_resolve_first_wins() {
+    let mut defs = protocol_defs(BAD_TRAIT);
+    defs.extend(protocol_defs(
+        "Protocol define: Broken\n  name -> String\n\n  probe -> Integer => 3\n",
+    ));
+    let tagged = provision_diagnostics(analyse_user(
+        "Object subclass: Alpha\n  uses: Broken\n  name -> String => \"a\"\n",
+        &defs,
+    ));
+    assert!(
+        !tagged.is_empty(),
+        "the first (broken) definition must be the one flattened"
+    );
+}

@@ -419,6 +419,50 @@ persist_and_restore_modules_test() ->
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
 
+stale_metadata_project_path_does_not_override_launcher_test() ->
+    %% BT-3664: a stale metadata.json (workspace ids are per-VM counters) with a
+    %% different project_path must not change how sync names project modules.
+    WsId = <<"stale_pp_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    StaleDir = "bt_test_3664_stale_project",
+    RealDir = "bt_test_3664_real_project",
+    filelib:ensure_dir(MetaFile),
+    ok = file:write_file(
+        MetaFile,
+        json:encode(#{
+            <<"project_path">> => list_to_binary(StaleDir),
+            <<"created_at">> => 1,
+            <<"last_active">> => 1
+        })
+    ),
+    PrevPkg = application:get_env(beamtalk_runtime, root_package),
+    ok = beamtalk_package:set_root_package(<<"mypkg">>),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => list_to_binary(RealDir),
+        created_at => 2000000
+    }),
+    try
+        {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+        ?assertEqual(list_to_binary(RealDir), maps:get(project_path, Meta)),
+        ?assertEqual(
+            <<"bt@mypkg@lib_thing">>,
+            beamtalk_repl_loader:compute_package_module_name(
+                filename:join([RealDir, "src", "lib_thing.bt"])
+            )
+        )
+    after
+        gen_server:stop(Pid),
+        case PrevPkg of
+            {ok, V} -> application:set_env(beamtalk_runtime, root_package, V);
+            undefined -> application:unset_env(beamtalk_runtime, root_package)
+        end,
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
 load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
     WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
