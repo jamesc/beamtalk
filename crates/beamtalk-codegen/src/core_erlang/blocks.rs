@@ -1176,7 +1176,7 @@ impl CoreErlangGenerator {
                 || self.is_self_clear_field_class_var(value)
                 || self.is_class_method_self_send(value))
         {
-            let cv_version_before = self.class_var_version();
+            let cv_version_before = self.class_var_scope_mark();
             let val_doc = self.expression_doc(value)?;
             self.bind_var(var_name, &core_var);
             let refresh = self

@@ -349,7 +349,7 @@ impl CoreErlangGenerator {
         // see `refresh_class_var_after_opaque_scope`'s own doc comment. A
         // no-op (`None`) for the `ValueType`/`Actor` boundaries, where
         // `class_var_version` never advances.
-        let cv_version_before = self.class_var_version();
+        let cv_version_before = self.class_var_scope_mark();
         let Some(threaded) = self.lower_threaded_last(expr, position)? else {
             return Ok(false);
         };

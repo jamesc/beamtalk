@@ -307,6 +307,19 @@ impl CoreErlangGenerator {
     ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
+        // BT-3667: in an open class the callee may be a subclass override that
+        // writes a class variable from a scope that cannot thread the rebind
+        // out (a bare block closure, a nested conditional arm). Start the call
+        // from the newest shadow-written class vars by re-binding the live
+        // `ClassVars` name — which the caller already captured by name into
+        // `call_doc`, and which the plain-reply fall-back below reads too — so
+        // an earlier send in the same scope (the previous iteration of a
+        // `collect:`) is not overwritten from a stale lexical copy.
+        let sync_doc = if self.is_class_sealed() {
+            None
+        } else {
+            Some(Self::class_var_shadow_rebind_doc(&cv, &cv))
+        };
         // the version numbers driving both verify() and the real
         // Bind rendered below — captured before minting, matching the old
         // `cv`/`new_cv` name-capture ordering exactly (fresh_temp_var call
@@ -408,6 +421,9 @@ impl CoreErlangGenerator {
             self.class_send_call_and_unwrap_docs(&call_result, &result, call_doc);
         let span = beamtalk_core::source_analysis::Span::default();
         let mut prelude = args_prelude;
+        if let Some(sync_doc) = sync_doc {
+            prelude.push(ThreadedStmt::Statement(sync_doc, span));
+        }
         prelude.push(ThreadedStmt::Statement(call_stmt_doc, span));
         prelude.push(bind);
         prelude.push(ThreadedStmt::Statement(unwrap_stmt_doc, span));
@@ -479,6 +495,86 @@ impl CoreErlangGenerator {
             prelude,
             value: ValueRef::Var(result),
         }
+    }
+
+    /// BT-3667: the `ThreadedIr` counterpart of
+    /// [`Self::refresh_class_var_after_opaque_scope`], for statement
+    /// sequences that are built as `ThreadedStmt`s (an `on:do:`/`ensure:` arm
+    /// body) rather than spliced `Document`s.
+    ///
+    /// Generating one statement of `stmts` may mint `ClassVars` versions the
+    /// sequence cannot see: a late-bound self-send nested in a conditional
+    /// arm mints a version that is rolled back (the live version stays put),
+    /// and one nested in a `match:` arm leaves the live version advanced to a
+    /// name bound only inside that arm's own scope. Either way the
+    /// construct's trailing `ClassVars` slot would carry a stale or unbound
+    /// variable. Returns a real `Bind` of a fresh `ClassVarsN` from the ADR
+    /// 0110 shadow (falling back to the last version bound in `stmts`), so
+    /// the slot carries the write. Empty when nothing was lost: nothing was
+    /// minted, or the live version is bound in `stmts` (threaded precisely).
+    pub(super) fn confined_class_var_refresh_stmt(
+        &mut self,
+        mark: super::generator::version::ClassVarScopeMark,
+        stmts: &[ThreadedStmt],
+        frame: super::threaded_ir::FrameId,
+        span: Span,
+    ) -> Vec<ThreadedStmt> {
+        let current = self.class_var_version();
+        if !self.in_class_method() {
+            return Vec::new();
+        }
+        let advanced = current != mark.version;
+        if !advanced && self.class_var_mints() == mark.mints {
+            return Vec::new();
+        }
+        // Advanced: precisely threaded when a `Bind` (or a construct that
+        // produces it) in this sequence already binds the live version.
+        if advanced && Self::stmts_bind_class_var_version(stmts, current) {
+            return Vec::new();
+        }
+        let mut source_counter = super::threaded_ir::VersionCounter::new();
+        source_counter.set_version(mark.version);
+        let source_var = source_counter.current_var(VersionPrefix::ClassVars);
+        self.next_class_var();
+        let target_version = self.class_var_version();
+        let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
+            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
+                Self::class_var_shadow_read_doc(&source_var),
+            )),
+            false,
+            frame,
+            false,
+            mark.version,
+            target_version,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "class-var refresh from the shadow after a confined late-bound self-send",
+            span,
+        );
+        // The literal separator space the preceding opaque `let … in`
+        // statement does not end with (the statement sequencer in
+        // `generate_exception_body_with_threading_inner` inserts the same one
+        // between source statements).
+        vec![ThreadedStmt::Statement(Document::Str(" "), span), bind]
+    }
+
+    /// Whether `stmts` (recursively) contains a `ClassVars` `Bind` whose
+    /// target is `version`.
+    fn stmts_bind_class_var_version(stmts: &[ThreadedStmt], version: usize) -> bool {
+        stmts.iter().any(|stmt| match stmt {
+            ThreadedStmt::Bind { target, .. } => {
+                target.prefix == VersionPrefix::ClassVars && target.version == version
+            }
+            ThreadedStmt::Threaded { body, produces, .. } => {
+                produces
+                    .iter()
+                    .any(|v| v.prefix == VersionPrefix::ClassVars && v.version == version)
+                    || Self::stmts_bind_class_var_version(body, version)
+            }
+            _ => false,
+        })
     }
 
     /// ADR 0111 Addendum 9, Questions 2/3: rebinds `ClassVarsN`
