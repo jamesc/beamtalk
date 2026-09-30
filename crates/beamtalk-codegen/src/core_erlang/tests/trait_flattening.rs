@@ -258,6 +258,90 @@ fn flattened_provision_without_protocol_source_still_compiles() {
     assert!(code.contains("describe"));
 }
 
+/// BT-3663: a *dependency-package* protocol carries its own source identity
+/// (checkout file, declaring package). Its flattened method's BEAM line
+/// annotation names the dependency's file, and the provision's free class
+/// name still compiles when the user's package has a same-named class (ADR
+/// 0127 §3, "Name resolution"; the compiler-side resolution is covered in
+/// `semantic_analysis`).
+#[test]
+fn dependency_package_provision_maps_to_its_file_and_compiles_beside_a_same_named_class() {
+    use beamtalk_core::semantic_analysis::{ClassHierarchy, ProtocolSource};
+
+    let protocol_src = concat!(
+        "// header\n\n",
+        "Protocol define: Runs\n",
+        "  run: text :: String -> Integer => Parser parse: text\n",
+    );
+    let protocol = parse_protocol_file(protocol_src);
+    // Class infos of the other files: the user package's own `Parser` (a
+    // sibling file, no class-side `parse:`) listed first so it holds the bare
+    // name in the hierarchy, and json's.
+    let mut classes = ClassHierarchy::extract_class_infos(&parse_fixture(
+        "Object subclass: Parser\n  size -> Integer => 0\n",
+    ));
+    ClassHierarchy::stamp_package_on_infos(&mut classes, "app");
+    let mut dep_classes = ClassHierarchy::extract_class_infos(&parse_fixture(
+        "Object subclass: Parser\n  class parse: text :: String -> Integer => 1\n",
+    ));
+    ClassHierarchy::stamp_package_on_infos(&mut dep_classes, "json");
+    classes.extend(dep_classes);
+    let sources: beamtalk_core::semantic_analysis::ProtocolSourceMap = [(
+        protocol.name.name.clone(),
+        ProtocolSource {
+            path: Some("deps/json/src/runs.bt".into()),
+            text: protocol_src.into(),
+            package: Some("json".into()),
+        },
+    )]
+    .into_iter()
+    .collect();
+
+    let user_src = "Object subclass: Job\n  uses: Runs\n";
+    let mut module = parse_fixture(user_src);
+    let options = beamtalk_core::CompilerOptions {
+        current_package: Some("app".into()),
+        ..Default::default()
+    };
+    let analysis = analyse_full(
+        &module,
+        AnalysisContext::default()
+            .with_options(&options)
+            .with_pre_loaded_classes(classes)
+            .with_pre_loaded_protocol_defs(vec![protocol])
+            .with_protocol_sources(sources.clone()),
+    );
+    lower_module_for_codegen(
+        &mut module,
+        &analysis.class_hierarchy,
+        &analysis.method_return_types,
+        &analysis.external_protocols,
+    );
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("job")
+            .with_source(user_src)
+            .with_source_path_opt(Some("src/job.bt"))
+            .with_protocol_sources(sources)
+            .with_analysis(analysis),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("{'file', \"deps/json/src/runs.bt\"}") && code.contains("[4,"),
+        "expected `run:` annotated with the dependency file, line 4, got:\n{code}"
+    );
+    // Sends to a class reference resolve through the runtime's name-keyed class
+    // registry (`whereis_class`), package-qualified or not — so qualifying the
+    // provision's reference changes what the *compiler* resolves it to, not
+    // the emitted lookup. (A per-package runtime registry is a separate ADR
+    // 0070 concern.)
+    assert!(
+        code.contains("'whereis_class'('Parser')"),
+        "expected the provision's `Parser` send to still compile, got:\n{code}"
+    );
+}
+
 /// Phase 0 pin (Linear AC): a subclass override of a flattened provision
 /// must be the one actually reached from an inherited actor method's
 /// self-send — records the dynamic-dispatch binding ADR 0127 §6 relies on
