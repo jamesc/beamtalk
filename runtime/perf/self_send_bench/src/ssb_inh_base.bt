@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: inherited class-side method whose `self foo` reaches a subclass override.
+
+Object subclass: SsbInhBase
+
+  class foo -> Integer => 1
+
+  class loop: n :: Integer -> Integer =>
+    1 to: n do: [:i | self foo]
+    n

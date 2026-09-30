@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: sealed_actor self-send hot loop.
+
+sealed Actor subclass: SsbSealedActor
+
+  foo -> Integer => 1
+
+  loop: n :: Integer -> Integer =>
+    1 to: n do: [:i | self foo]
+    n

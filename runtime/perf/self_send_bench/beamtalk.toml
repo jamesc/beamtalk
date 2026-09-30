@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "self_send_bench"
+version = "0.1.0"
+description = "BT-3666 micro-benchmarks: self-send cost in open vs sealed classes"
+
+[dependencies]

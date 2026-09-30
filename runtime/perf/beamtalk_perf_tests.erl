@@ -118,6 +118,7 @@ all_benchmarks() ->
     bench_overhead_comparison_hires(),
     bench_block_threading(),
     bench_method_threading(),
+    bench_self_send_override(),
     bench_class_self_dispatch().
 
 %% --- 1. Raw message send/receive (baseline) ---
@@ -1103,3 +1104,46 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
     %% Collection chain; 2_000ns leaves headroom for CI noise.
     ?assert(HelperMedian < 2_000),    %% helper < 2µs per call
     ?assert(DirectMedian < 10_000).   %% direct apply < 10µs per call
+
+%% --- BT-3666: self-send cost, open vs sealed classes ---
+%%
+%% Late-bound self-sends (subclass overrides reachable from inherited
+%% methods) add a `'__class_mod__'` map lookup for actors and a runtime
+%% hierarchy walk for class-side sends. The benchmark is a Beamtalk package
+%% (`self_send_bench/`, driver `SsbMain run`) run through the `beamtalk` CLI,
+%% because the numbers only mean something for real compiled code. It prints
+%% its own `PERF: <name> <ns>ns/op` lines to stderr.
+
+bench_self_send_override() ->
+    {ok, Cwd} = file:get_cwd(),
+    PackageDir = filename:join([Cwd, "perf", "self_send_bench"]),
+    case find_beamtalk_cli() of
+        false ->
+            io:format(standard_error,
+                "PERF: self_send_override SKIP (beamtalk CLI not found; run `cargo build`)~n", []);
+        Cli ->
+            Cmd = "cd " ++ filename:nativename(PackageDir) ++ " && "
+                ++ filename:nativename(Cli) ++ " run SsbMain run 2>&1",
+            Out = os:cmd(Cmd),
+            Lines = [L || L <- string:split(Out, "\n", all),
+                          string:prefix(L, "PERF: ") =/= nomatch],
+            case Lines of
+                [] ->
+                    io:format(standard_error,
+                        "PERF: self_send_override SKIP (no PERF output: ~ts)~n",
+                        [string:slice(Out, 0, 200)]);
+                _ ->
+                    [io:format(standard_error, "~ts~n", [L]) || L <- Lines],
+                    ok
+            end
+    end.
+
+find_beamtalk_cli() ->
+    {ok, Cwd} = file:get_cwd(),
+    Root = filename:join(Cwd, ".."),
+    Candidates = [filename:join([Root, "target", Profile, "beamtalk"])
+                  || Profile <- ["release", "debug"]],
+    case [C || C <- Candidates, filelib:is_regular(C)] of
+        [C | _] -> C;
+        [] -> os:find_executable("beamtalk")
+    end.

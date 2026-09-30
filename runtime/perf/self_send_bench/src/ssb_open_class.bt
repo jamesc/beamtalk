@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: open_class class-side self-send hot loop.
+
+Object subclass: SsbOpenClass
+
+  class foo -> Integer => 1
+
+  class loop: n :: Integer -> Integer =>
+    1 to: n do: [:i | self foo]
+    n

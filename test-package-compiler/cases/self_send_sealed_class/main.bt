@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: sealed class self-sends stay direct calls; the pure shortcut applies (no ClassVars rebind).
+
+sealed Object subclass: SealedSelfSendClass
+  class foo => 1
+
+  class bar => self foo

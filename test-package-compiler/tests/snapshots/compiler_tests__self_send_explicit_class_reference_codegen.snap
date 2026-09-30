@@ -1,0 +1,150 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: core_erlang
+---
+module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'class_foo'/2, 'class_bar'/2]
+  attributes ['on_load' = [{'register_class', 0}],
+     'beamtalk_class' = [{'ExplicitRefOpenClass', 'Object'}],
+     'spec' =
+        [{{'class_foo', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'any', []}, {'type', 0, 'map', 'any'}]}, {'type', 0, 'integer', []}]}]}],
+     'spec' =
+        [{{'class_bar', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'any', []}, {'type', 0, 'map', 'any'}]}, {'type', 0, 'integer', []}]}]}]]
+
+'new'/0 = fun () ->
+    ~{'$beamtalk_class' => 'ExplicitRefOpenClass'}~
+
+
+'new'/1 = fun (InitArgs) ->
+    let DefaultState = call 'self_send_explicit_class_reference':'new'() in
+    call 'maps':'merge'(DefaultState, InitArgs)
+
+
+'dispatch'/3 = fun (Selector, Args, Self) ->
+    case Selector of
+        <'class'> when 'true' ->
+            'ExplicitRefOpenClass'
+        <'respondsTo:'> when 'true' ->
+            case Args of
+                <[RtSelector | _]> when 'true' -> call 'self_send_explicit_class_reference':'has_method'(RtSelector)
+                <_> when 'true' -> 'false'
+            end
+        <'perform:'> when 'true' ->
+            let <PerfSel> = call 'erlang':'hd'(Args) in
+            call 'self_send_explicit_class_reference':'dispatch'(PerfSel, [], Self)
+        <'perform:withArguments:'> when 'true' ->
+            let <PwaSel> = call 'erlang':'hd'(Args) in
+            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in
+            call 'self_send_explicit_class_reference':'dispatch'(PwaSel, PwaArgs, Self)
+        <_Other> when 'true' ->
+            case call 'beamtalk_extensions':'lookup'('ExplicitRefOpenClass', Selector) of
+                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                    apply ExtFun(Args, Self)
+                <'not_found'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+            end
+    end
+
+
+'dispatch'/4 = fun (Selector, Args, Self, State) ->
+    try call 'self_send_explicit_class_reference':'dispatch'(Selector, Args, Self)
+    of <D4Result> -> {'reply', D4Result, State}
+    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+
+
+'has_method'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'perform:', 'perform:withArguments:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('ExplicitRefOpenClass', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
+            end
+    end
+
+
+'superclass'/0 = fun () -> 'Object'
+
+
+'class_foo'/2 = fun (ClassSelf, ClassVars) ->
+    let _Ret1 = 1 in _Ret1
+
+'class_bar'/2 = fun (ClassSelf, ClassVars) ->
+    let _CMR2 = call 'self_send_explicit_class_reference':'class_foo'(ClassSelf, ClassVars) in let ClassVars1 = case _CMR2 of <{'class_var_result', _MR4, _CV3}> when 'true' -> _CV3 <_PCV5> when 'true' -> ClassVars end in let _Unwrapped6 = case _CMR2 of <{'class_var_result', _WR7, _}> when 'true' -> _WR7 <_PR8> when 'true' -> _PR8 end in {'class_var_result', _Unwrapped6, ClassVars1}
+
+'register_class'/0 = fun () ->
+    try
+        let _BuilderState0 = ~{
+            'className' => 'ExplicitRefOpenClass',
+            'superclassRef' => 'Object',
+            'moduleName' => 'self_send_explicit_class_reference',
+            'methodSource' => ~{}~,
+            'classMethodSource' => ~{'foo' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<49>(8,1,'integer',['unsigned'|['big']])}#, 'bar' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<69>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<82>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<79>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<67>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'methodSignatures' => ~{}~,
+            'classMethodSignatures' => ~{'foo' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#, 'bar' => #{#<98>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'methodXref' => [~{'class_side' => 'true', 'selector' => 'foo', 'line' => 1, 'sends' => [], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'true', 'selector' => 'bar', 'line' => 1, 'sends' => [~{'selector' => 'foo', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'ExplicitRefOpenClass class'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~, ~{'class' => 'ExplicitRefOpenClass', 'line' => 1}~], 'source_status' => 'indexed'}~],
+            'stateVarXref' => [],
+            'classState' => ~{'hits' => 0}~,
+            'classDoc' => 'none',
+            'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
+            'meta' => ~{'class' => 'ExplicitRefOpenClass',
+      'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
+      'fields' => [],
+      'class_fields' => ['hits'],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'uses' => [],
+      'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{'hits' => 'eager'}~,
+      'initialize_assigns' => [],
+      'method_info' => ~{}~,
+      'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
+    }~
+        }~
+        in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', _Err0}> when 'true' -> {'error', _Err0}
+        end
+
+        in _Reg0
+
+    of _ClassRegResult -> _ClassRegResult
+    catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
+
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'ExplicitRefOpenClass',
+      'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
+      'fields' => [],
+      'class_fields' => ['hits'],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'uses' => [],
+      'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{'hits' => 'eager'}~,
+      'initialize_assigns' => [],
+      'method_info' => ~{}~,
+      'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'direct_class_methods' => ~{}~
+    }~
+
+end

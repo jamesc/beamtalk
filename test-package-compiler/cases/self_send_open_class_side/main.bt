@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: open-class class-side self foo is late-bound (class_self_send) and rebinds ClassVars.
+
+Object subclass: OpenSelfSendClassSide
+  classState: hits = 0
+
+  class foo => 1
+
+  class bar => self foo

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: a base class with no classState: still returns class_var_result when a late-bound self-send rebinds ClassVars.
+
+Object subclass: ClassVarLessBase
+  class foo => 1
+
+  class bar => self foo

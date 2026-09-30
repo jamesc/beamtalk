@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: override target for SsbInhBase.
+
+SsbInhBase subclass: SsbInhSub
+
+  class foo -> Integer => 2
