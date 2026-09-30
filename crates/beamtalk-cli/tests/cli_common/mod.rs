@@ -46,8 +46,11 @@ pub fn beamtalk() -> Command {
     // fixture projects in temp dirs that have no Cargo.toml or target/ directory).
     // The runtime would normally search for it relative to the project root, but
     // falls back to this explicit path if set.
-    cmd.env("BEAMTALK_COMPILER_PORT_BIN",
-        std::path::Path::new(env!("CARGO_BIN_EXE_beamtalk")).with_file_name("beamtalk-compiler-port"));
+    cmd.env(
+        "BEAMTALK_COMPILER_PORT_BIN",
+        std::path::Path::new(env!("CARGO_BIN_EXE_beamtalk"))
+            .with_file_name("beamtalk-compiler-port"),
+    );
     // Pin the runtime/sysroot to this workspace so tests do not depend on a
     // system-installed beamtalk. `repl_startup::find_runtime_dir_with_layout`
     // honours `BEAMTALK_RUNTIME_DIR` first, which keeps `doctor`/`build`/`test`
