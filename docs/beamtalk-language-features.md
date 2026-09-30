@@ -5171,7 +5171,7 @@ first.
 | Actor in a node-owning context | Stops the node gracefully | Immediate halt |
 | Workspace (actor send) | Raises `program_exit_outside_entry` | Raises `unsupported` |
 | `beamtalk test` | Raises `#program_exit` with `status` | Raises `unsupported` |
-| Release console REPL | Raises `program_exit_outside_entry` | Allowed (the release owns the node) |
+| Release console REPL | Ends this session; the release node keeps running | Allowed (the release owns the node) |
 
 ### `SystemNavigation` — Cross-class code queries
 
