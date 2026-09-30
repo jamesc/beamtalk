@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: template-method fixture; see self_send_override_test.bt.
+
+Value subclass: SsoTraitValueBase
+  uses: SsoLabelled
+
+  foo -> String => "base"

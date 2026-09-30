@@ -118,6 +118,7 @@ all_benchmarks() ->
     bench_overhead_comparison_hires(),
     bench_block_threading(),
     bench_method_threading(),
+    bench_self_send_override(),
     bench_class_self_dispatch().
 
 %% --- 1. Raw message send/receive (baseline) ---
@@ -1103,3 +1104,87 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
     %% Collection chain; 2_000ns leaves headroom for CI noise.
     ?assert(HelperMedian < 2_000),    %% helper < 2µs per call
     ?assert(DirectMedian < 10_000).   %% direct apply < 10µs per call
+
+%% --- BT-3666: self-send cost, open vs sealed classes ---
+%%
+%% Late-bound self-sends (subclass overrides reachable from inherited
+%% methods) add a `'__class_mod__'` map lookup for actors and a runtime
+%% hierarchy walk for class-side sends. The benchmark is a Beamtalk package
+%% (`self_send_bench/`, driver `SsbMain run`) run through the `beamtalk` CLI,
+%% because the numbers only mean something for real compiled code. It prints
+%% its own `PERF: <name> <ns>ns/op` lines to stderr.
+
+bench_self_send_override() ->
+    {ok, Cwd} = file:get_cwd(),
+    PackageDir = filename:join([Cwd, "perf", "self_send_bench"]),
+    case find_beamtalk_cli(Cwd) of
+        false ->
+            io:format(
+                standard_error,
+                "PERF: self_send_override SKIP (no target/{release,debug}/beamtalk; run `cargo build`)~n",
+                []
+            );
+        Cli ->
+            io:format(standard_error, "PERF: self_send_override using ~ts~n", [Cli]),
+            {Status, Out} = run_cli(Cli, PackageDir, ["run", "SsbMain", "run"]),
+            Lines = [
+                L
+             || L <- string:split(Out, "\n", all),
+                string:prefix(L, "PERF: ") =/= nomatch
+            ],
+            case {Status, Lines} of
+                {0, [_ | _]} ->
+                    [io:format(standard_error, "~ts~n", [L]) || L <- Lines],
+                    ok;
+                _ ->
+                    Tail = string:slice(Out, max(0, string:length(Out) - 400)),
+                    erlang:error({self_send_bench_failed, Status, Tail})
+            end
+    end.
+
+%% Run the CLI without a shell (no quoting issues); returns {ExitStatus, Output}.
+run_cli(Cli, Dir, Args) ->
+    Port = open_port(
+        {spawn_executable, Cli},
+        [{cd, Dir}, {args, Args}, stderr_to_stdout, exit_status, binary]
+    ),
+    collect_port(Port, []).
+
+collect_port(Port, Acc) ->
+    receive
+        {Port, {data, Data}} -> collect_port(Port, [Data | Acc]);
+        {Port, {exit_status, Status}} -> {Status, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
+    after 600000 ->
+        kill_port_os_process(Port),
+        catch port_close(Port),
+        {timeout, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
+    end.
+
+%% port_close/1 does not terminate the spawned OS process; kill it so a hung
+%% benchmark does not keep running.
+kill_port_os_process(Port) ->
+    case erlang:port_info(Port, os_pid) of
+        {os_pid, OsPid} ->
+            Cmd =
+                case os:type() of
+                    {win32, _} -> "taskkill /F /T /PID " ++ integer_to_list(OsPid);
+                    _ -> "kill -9 " ++ integer_to_list(OsPid)
+                end,
+            _ = os:cmd(Cmd),
+            ok;
+        _ ->
+            ok
+    end.
+
+%% Only the CLI built from this tree counts; a `beamtalk` found on PATH could
+%% be a different compiler, so there is deliberately no PATH fallback.
+find_beamtalk_cli(Cwd) ->
+    Root = filename:join(Cwd, ".."),
+    Candidates = [
+        filename:join([Root, "target", Profile, Name])
+     || Profile <- ["release", "debug"], Name <- ["beamtalk", "beamtalk.exe"]
+    ],
+    case [C || C <- Candidates, filelib:is_regular(C)] of
+        [C | _] -> C;
+        [] -> false
+    end.

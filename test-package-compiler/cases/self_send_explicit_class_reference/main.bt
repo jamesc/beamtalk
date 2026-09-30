@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: explicit own-class reference in an open class is a static call that still rebinds ClassVars.
+
+Object subclass: ExplicitRefOpenClass
+  classState: hits = 0
+
+  class foo => 1
+
+  class bar => ExplicitRefOpenClass foo

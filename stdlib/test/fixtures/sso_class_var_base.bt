@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: base `foo` never writes a class variable, so `bar`'s self-send site
+// looks pure to the base class; a subclass override of `foo` that does write
+// one must still have that write kept. See self_send_override_test.bt.
+
+Object subclass: SsoClassVarBase
+  classState: hits = 0
+
+  class foo -> Integer => 1
+
+  class bar -> Integer => self foo
+
+  class hits -> Integer => self.hits

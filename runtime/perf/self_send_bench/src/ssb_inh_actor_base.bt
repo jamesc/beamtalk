@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: inherited actor method whose `self foo` reaches a subclass override.
+
+Actor subclass: SsbInhActorBase
+
+  foo -> Integer => 1
+
+  loop: n :: Integer -> Integer =>
+    1 to: n do: [:i | self foo]
+    n

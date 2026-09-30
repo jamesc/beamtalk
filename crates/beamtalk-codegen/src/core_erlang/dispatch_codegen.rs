@@ -824,14 +824,13 @@ impl CoreErlangGenerator {
         let selector_atom = selector.name().to_string();
         let discard_var = self.fresh_temp_var("Cast");
         let current_state = self.current_state_var();
-        let module = self.module_name.clone();
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
             "let ",
             leaf::var(discard_var),
             " = ",
-            Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+            self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
             " in 'ok'",
         ];
 
@@ -1278,7 +1277,7 @@ impl CoreErlangGenerator {
                 // `threaded_expression`'s own producer recognition), so the
                 // producer's prelude is closed inline into a self-contained
                 // `Document` here rather than left open.
-                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                let tv = self.generate_class_method_self_send(selector, arguments, false)?;
                 return Ok(Some(self.close_threaded_value_doc(tv)));
             }
             // ADR 0129 §7: only REPL top-level expressions can name a session
@@ -1348,7 +1347,7 @@ impl CoreErlangGenerator {
                 // ADR 0118 phase 5b: reached through ordinary
                 // `generate_expression`, not `threaded_expression`'s own
                 // producer recognition — close the prelude inline.
-                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                let tv = self.generate_class_method_self_send(selector, arguments, true)?;
                 return Ok(Some(self.close_threaded_value_doc(tv)));
             }
         }
@@ -1375,6 +1374,7 @@ impl CoreErlangGenerator {
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
+        receiver_is_self: bool,
     ) -> Result<ThreadedValue> {
         let selector_atom = selector.name().to_string();
 
@@ -1407,9 +1407,25 @@ impl CoreErlangGenerator {
             return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }
 
-        if self.class_method_selectors().contains(&selector_atom) {
+        // BT-3666: a class-side self-send to a selector this class defines is
+        // only bound statically (`class_<sel>` direct call) when the class is
+        // sealed — nothing can override the selector. In an open class a
+        // subclass may override it, and an inherited method's `self foo` must
+        // reach that override (template-method pattern), so it routes through
+        // the runtime hierarchy walk below instead.
+        let defines_selector = self.class_method_selectors().contains(&selector_atom);
+        // A `class sealed` selector cannot be overridden either (ADR 0129
+        // facade shape), so it keeps the direct call in an open class too.
+        // So does an explicit own-class reference (`Base foo`): naming the
+        // class binds statically; only `self foo` late-binds on the receiver.
+        if defines_selector
+            && (self.is_class_sealed()
+                || !receiver_is_self
+                || self
+                    .sealed_class_method_selectors()
+                    .contains(&selector_atom))
+        {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
-            let module = self.module_name.clone();
             // Hoist any open let-chains from sub-expression class
             // method self-sends in the args. The preamble must be emitted
             // before our own `let _CMR = ...` so the ClassVarsN bindings it
@@ -1419,23 +1435,13 @@ impl CoreErlangGenerator {
             // ClassVars binding to thread into the callee.
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
-            let comma = if arguments.is_empty() { "" } else { ", " };
-
-            // Apply the same atom-length guard used by the
-            // keyword-constructor path below — long selectors must be hashed to
-            // stay within Erlang's 255-char atom limit.
-            let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
-            let call_doc = docvec![
-                "call ",
-                leaf::atom(module),
-                ":",
-                leaf::atom(safe_fn),
-                "(ClassSelf, ",
-                leaf::var(cv),
-                comma,
+            let call_doc = Self::class_direct_call_doc(
+                &self.module_name,
+                &selector_atom,
+                &cv,
                 args_doc,
-                ")"
-            ];
+                !arguments.is_empty(),
+            );
             // A callee that provably never writes a class variable
             // (`class_var_mutating_selectors` is a whole-class fixed point that
             // assumes the worst for anything it cannot resolve) hands back the
@@ -1444,13 +1450,63 @@ impl CoreErlangGenerator {
             // and can sit in any nesting (conditional arm, block) without
             // needing to thread one. Every class-side facade
             // (`SystemNavigation`, ADR 0129) has no class variables at all.
-            if !self
-                .class_var_mutating_selectors()
-                .contains(selector_atom.as_str())
+            //
+            // BT-3666: that analysis is the base class's view, and the callee's
+            // own `self foo` sends are late-bound in an open class, so they may
+            // reach a subclass override that writes a class variable. The
+            // shortcut is therefore only sound in a sealed class.
+            if self.is_class_sealed()
+                && !self
+                    .class_var_mutating_selectors()
+                    .contains(selector_atom.as_str())
             {
                 return Ok(self.emit_pure_class_self_send_unwrap(args_preamble, call_doc));
             }
             // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+        }
+        if defines_selector {
+            // Bind every argument once, before the guarded `case`: the doc is
+            // spliced into both arms, and an inline block argument containing
+            // further open-class self-sends would otherwise double per nesting
+            // level (2^depth code growth).
+            let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
+            let args_doc = Self::join_docs_with_commas(arg_refs);
+            let cv = self.current_class_var();
+            // Fast path: when the receiving class IS this class (its metaclass
+            // tag is a compile-time constant) and nothing shadows the compiled
+            // method (no class-side extension, no runtime-installed
+            // class-method fun, ADR 0084), the walk would resolve to
+            // `class_<sel>` in this very module, so call it directly. Any
+            // other receiver (a subclass running an inherited method) takes
+            // the walk, which reaches the subclass override.
+            let walk_doc = Self::class_self_send_call_doc(&selector_atom, &cv, args_doc.clone());
+            let direct_doc = Self::class_direct_call_doc(
+                &self.module_name,
+                &selector_atom,
+                &cv,
+                args_doc,
+                !arguments.is_empty(),
+            );
+            let class_name = self.class_name();
+            let call_doc = docvec![
+                "case call 'beamtalk_class_dispatch':'class_self_direct_ok'(call 'erlang':'element'(2, ",
+                leaf::var("ClassSelf"),
+                "), ",
+                leaf::atom([class_name.as_str(), " class"].concat()),
+                ", ",
+                leaf::atom(class_name),
+                ", ",
+                leaf::atom(selector_atom.clone()),
+                ") of <'true'> when 'true' -> ",
+                direct_doc,
+                " <_> when 'true' -> ",
+                walk_doc,
+                " end"
+            ];
+            // Late-bound: a subclass override may write a class variable even
+            // when this class's own `selector` never does, so the purity
+            // shortcut is unsound here. Always rebind the returned ClassVars.
             return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }
         // Auto-generated keyword constructor for Value subclass: classes.
@@ -1557,7 +1613,7 @@ impl CoreErlangGenerator {
         // NOT on the direct-call path — `is_class_auto_export_selector` must
         // stay in sync with the actual reachable set. Anything else that falls
         // through here — inherited or missing — routes through
-        // class_self_dispatch/4, which raises a structured does_not_understand
+        // class_self_send/4, which raises a structured does_not_understand
         // error for genuine DNU.
         if is_class_auto_export_selector(&selector_atom, arguments.len()) {
             // Hoist preambles from sub-expression class var mutations.
@@ -1583,28 +1639,66 @@ impl CoreErlangGenerator {
 
         let (args_preamble, args_doc) = self.thread_args(arguments)?;
         let cv = self.current_class_var();
-        // ADR 0109 amendment: derive the target class from `ClassSelf`
-        // (closure-captured, so correct even when this self-send executes inside a
-        // block running in a foreign class's process) instead of
-        // `erlang:get('beamtalk_class_name')` (the *executing process's* identity,
-        // which is only the same thing outside a block). `class_name_from_tag/1`
-        // strips the `' class'` metaclass tag `element(2, ClassSelf)` carries.
-        let call_doc = docvec![
-            "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
-            "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
-            leaf::var("ClassSelf"),
-            ")), ",
-            leaf::atom(selector_atom),
-            ", ",
-            leaf::var(cv),
-            ", [",
-            args_doc,
-            "])"
-        ];
+        let call_doc = Self::class_self_send_call_doc(&selector_atom, &cv, args_doc);
         // NOTE: prelude stays real `ThreadedStmt`s here — the caller splices
         // it into its own frame or closes it (matches the local-class-method
         // branch above).
         Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc))
+    }
+
+    /// Direct call `class_<sel>(ClassSelf, ClassVars, Args...)` into this
+    /// module. Long selectors are hashed to stay within Erlang's 255-char
+    /// atom limit (same guard as the keyword-constructor path).
+    fn class_direct_call_doc(
+        module: &str,
+        selector_atom: &str,
+        class_vars: &str,
+        args_doc: Document<'static>,
+        has_args: bool,
+    ) -> Document<'static> {
+        let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector_atom);
+        let comma = if has_args { ", " } else { "" };
+        docvec![
+            "call ",
+            leaf::atom(module.to_string()),
+            ":",
+            leaf::atom(safe_fn),
+            "(ClassSelf, ",
+            leaf::var(class_vars.to_string()),
+            comma,
+            args_doc,
+            ")"
+        ]
+    }
+
+    /// The runtime hierarchy-walk call behind every class-side self-send that
+    /// is not bound statically: `class_self_send/4` starting at the
+    /// receiving class (BT-3666: so a subclass override wins over the method
+    /// compiled here).
+    ///
+    /// ADR 0109 amendment: the target class is derived from `ClassSelf`
+    /// (closure-captured, so correct even when this self-send executes inside a
+    /// block running in a foreign class's process) instead of
+    /// `erlang:get('beamtalk_class_name')` (the *executing process's* identity,
+    /// which is only the same thing outside a block). `class_name_from_tag/1`
+    /// strips the `' class'` metaclass tag `element(2, ClassSelf)` carries.
+    fn class_self_send_call_doc(
+        selector_atom: &str,
+        class_vars: &str,
+        args_doc: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_class_dispatch':'class_self_send'(",
+            "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
+            leaf::var("ClassSelf"),
+            ")), ",
+            leaf::atom(selector_atom.to_string()),
+            ", ",
+            leaf::var(class_vars.to_string()),
+            ", [",
+            args_doc,
+            "])"
+        ]
     }
 
     /// ADR 0109 amendment: the class-name expression derived from
@@ -1909,14 +2003,13 @@ impl CoreErlangGenerator {
         let result_var = self.fresh_var("SelfResult");
         let state_var = self.fresh_var("SelfState");
         let current_state = self.current_state_var();
-        let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
         let doc = docvec![
             "case ",
-            Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+            self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
             " of ",
             "<{'reply', ",
             leaf::var(result_var.clone()),
@@ -2115,12 +2208,11 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Normal: safe_dispatch/3
-                let module = self.module_name.clone();
                 docvec![
                     "let ",
                     leaf::var(dispatch_var.clone()),
                     " = case ",
-                    Self::safe_dispatch_call_doc(module, selector_atom, args_doc, current_state),
+                    self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
                     " of ",
                 ]
             };
@@ -3456,8 +3548,7 @@ impl CoreErlangGenerator {
                 "let ",
                 leaf::var(dispatch_var.to_string()),
                 " = case ",
-                Self::safe_dispatch_call_doc(
-                    module.to_string(),
+                self.safe_dispatch_call_doc(
                     selector_atom.to_string(),
                     args_doc,
                     current_state.to_string()
@@ -3467,19 +3558,43 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// builds the shared `call Module:'safe_dispatch'(Selector,
-    /// [Args], State)` fragment used by every non-sealed self-dispatch call
-    /// site (self-cast, discarding self-dispatch, open self-dispatch, and the
-    /// Tier 2 dispatch call above).
+    /// Builds the shared `safe_dispatch/3` self-send fragment used by every
+    /// non-sealed self-dispatch call site (self-cast, discarding
+    /// self-dispatch, open self-dispatch, and the Tier 2 dispatch call above).
+    ///
+    /// BT-3666: the callee module is looked up at run time from the actor's
+    /// own `'__class_mod__'` state key — the module of the *instance's* class
+    /// (each compiled actor's `init/1` stamps its own module there) — rather
+    /// than bound statically to the module the send was compiled in. A
+    /// method inherited from a superclass (or flattened in from a trait)
+    /// that does `self foo` therefore reaches a subclass override of `foo`
+    /// (the template-method pattern), exactly as `Actor>>self_dispatch/2`
+    /// (aliased self-sends) already does. The `'maps':'get'` default is the
+    /// compiling module, so a state without the key keeps the old binding.
+    ///
+    /// ```erlang
+    /// let _CM = call 'maps':'get'('__class_mod__', State, 'module') in
+    ///   call _CM:'safe_dispatch'('selector', [Args], State)
+    /// ```
+    ///
+    /// Sealed classes never reach this helper: they cannot be subclassed, so
+    /// their self-sends stay statically bound (see the sealed branches).
     fn safe_dispatch_call_doc(
-        module: impl Into<String>,
+        &mut self,
         selector_atom: impl Into<String>,
         args_doc: Document<'static>,
         state_var: String,
     ) -> Document<'static> {
+        let class_mod_var = self.fresh_temp_var("ClassMod");
         docvec![
-            "call ",
-            leaf::atom(module),
+            "let ",
+            leaf::var(class_mod_var.clone()),
+            " = call 'maps':'get'('__class_mod__', ",
+            leaf::var(state_var.clone()),
+            ", ",
+            leaf::atom(self.module_name.clone()),
+            ") in call ",
+            leaf::var(class_mod_var),
             ":'safe_dispatch'(",
             leaf::atom(selector_atom),
             ", [",

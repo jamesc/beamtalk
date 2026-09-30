@@ -1,0 +1,17 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 194, end: 200 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3666: a base class with no classState: still returns class_var_result when a late-bound self-send rebinds ClassVars."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 201, end: 210 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("ClassVarLessBase"), span: Span { start: 211, end: 227 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 230, end: 235 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("foo"), span: Span { start: 236, end: 239 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 240, end: 242 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 243, end: 244 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 248, end: 253 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("bar"), span: Span { start: 254, end: 257 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 258, end: 260 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 261, end: 265 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("foo"), span: Span { start: 266, end: 269 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 270, end: 270 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

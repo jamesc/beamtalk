@@ -396,6 +396,29 @@ Most stdlib classes are `sealed` — this prevents user code from subclassing bu
 
 **Performance:** Sealed actor classes benefit from a direct-call optimization — self-sends within the class emit direct function calls instead of dynamic dispatch, since the compiler knows no subclass can override the method. This is automatic and requires no user intervention.
 
+### Self-Sends and Overrides (BT-3666)
+
+A `self` send is late-bound on the *receiver*, as in every Smalltalk: an inherited (or trait-flattened, ADR 0127) method that does `self foo` runs the `foo` of the receiver's class, so a subclass override is reached. This is what makes the template-method pattern work.
+
+```beamtalk
+Actor subclass: Report
+  title -> String => "Report"
+  render -> String => "== " ++ self title ++ " =="
+
+Report subclass: SalesReport
+  title -> String => "Sales"
+
+// SalesReport spawn render  => "== Sales =="
+```
+
+This holds for instance-side sends on actors and value classes, for class-side sends (`class foo` / `self foo` inside a class method), and for a protocol's provided methods flattened into a class whose subclass overrides a required selector.
+
+`super` is the exception by design — it is always bound to the superclass of the class that *contains* the method. A `sealed` class cannot be subclassed, so its self-sends are compiled as direct calls (no lookup).
+
+Implementation notes: an actor self-send dispatches through the module named by the instance's own `'__class_mod__'` state key (a per-send map lookup); a class-side self-send in a non-sealed class calls the compiled method directly when the receiver is the defining class and nothing shadows it (`beamtalk_class_dispatch:class_self_direct_ok/4`), and otherwise walks the class hierarchy from the receiving class (`beamtalk_class_dispatch:class_self_send/4`). Only `self foo` late-binds: naming the class explicitly (`Base foo`) calls `Base`'s own method directly, but the running receiver (`ClassSelf` and its class variables) is still the subclass's, so `self` sends nested inside `Base foo` still late-bind to overrides and class-variable writes go to the subclass's class variables. A class-variable write made by a subclass override is kept at a class method's top level, because open-class class-side self-sends always thread the returned class variables. Known limitation ([BT-3667](https://linear.app/beamtalk/issue/BT-3667)): inside a bare block (`collect:`, `select:`, ...), or nested in a conditional inside `ensure:`/`on:do:` bodies or loops, the compiler still judges `self foo` by the base class's own view of `foo`, so an override's class-variable write there can be dropped; keep class-variable mutation at a method's top level, or in selectors the base class also mutates. A selector declared `class sealed` cannot be overridden and stays a direct call.
+
+**Cost:** every non-sealed actor self-send does a `maps:get('__class_mod__', State, Module)` lookup (tens of nanoseconds). An open-class class-side `self foo` is a guarded direct call: when the receiver is the defining class itself and no class-side extension or runtime-installed method shadows `foo`, it calls the compiled `class_foo` directly (a couple of ETS reads more than a sealed class); when the receiver is a subclass it walks the class hierarchy (microseconds). Seal the class (or the selector, class-side) to keep plain direct calls.
+
 ### Value subclass: in Depth
 
 `Value subclass:` defines an immutable value object. All slots are set at construction time; there is no mutation.

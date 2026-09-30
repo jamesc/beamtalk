@@ -2730,3 +2730,47 @@ ensure_counter_loaded() ->
         _Pid ->
             ok
     end.
+
+%%% ============================================================================
+%%% class_self_direct_ok/4 (BT-3666 compiled fast-path guard)
+%%% ============================================================================
+
+class_self_direct_ok_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"defining-class receiver with no shadowing takes the direct call", fun() ->
+            ?assert(
+                beamtalk_class_dispatch:class_self_direct_ok(
+                    'Object class', 'Object class', 'Object', bt3666_no_such_selector
+                )
+            )
+        end},
+        {"subclass receiver declines (walk reaches the override)", fun() ->
+            ?assertNot(
+                beamtalk_class_dispatch:class_self_direct_ok(
+                    'Integer class', 'Object class', 'Object', bt3666_no_such_selector
+                )
+            )
+        end},
+        {"a class-side extension shadows the compiled method", fun() ->
+            Sel = bt3666_ext_shadow,
+            ok = beamtalk_extensions:register(
+                'Object class', Sel, fun(_, _) -> ok end, bt3666_test
+            ),
+            try
+                ?assertNot(
+                    beamtalk_class_dispatch:class_self_direct_ok(
+                        'Object class', 'Object class', 'Object', Sel
+                    )
+                )
+            after
+                beamtalk_extensions:unregister('Object', Sel, true)
+            end
+        end},
+        {"TestCase run selectors never take the direct call", fun() ->
+            ?assertNot(
+                beamtalk_class_dispatch:class_self_direct_ok(
+                    'TestCase class', 'TestCase class', 'TestCase', runAll
+                )
+            )
+        end}
+    ]}.

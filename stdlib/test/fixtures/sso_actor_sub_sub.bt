@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: a third level that inherits the override without redefining it.
+
+SsoActorSub subclass: SsoActorSubSub

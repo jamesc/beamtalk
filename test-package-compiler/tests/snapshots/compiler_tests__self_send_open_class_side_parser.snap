@@ -1,0 +1,228 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "OpenSelfSendClassSide",
+                span: Span {
+                    start: 186,
+                    end: 207,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 169,
+                        end: 175,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [],
+            methods: [],
+            class_methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "foo",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Literal(
+                                Integer(
+                                    1,
+                                ),
+                                Span {
+                                    start: 247,
+                                    end: 248,
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: true,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 234,
+                        end: 248,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "bar",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 265,
+                                            end: 269,
+                                        },
+                                    },
+                                ),
+                                selector: Unary(
+                                    "foo",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 265,
+                                    end: 273,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: true,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 252,
+                        end: 273,
+                    },
+                },
+            ],
+            class_variables: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "hits",
+                        span: Span {
+                            start: 222,
+                            end: 226,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 229,
+                                end: 230,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    slot_kind: Eager,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 210,
+                        end: 230,
+                    },
+                },
+            ],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 169,
+                            end: 175,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 169,
+                            end: 175,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-3666: open-class class-side self foo is late-bound (class_self_send) and rebinds ClassVars.",
+                        span: Span {
+                            start: 169,
+                            end: 175,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
+            },
+            doc_comment: None,
+            backing_module: None,
+            handle_scope: None,
+            shape_version: None,
+            type_params: [],
+            superclass_type_args: [],
+            uses: [],
+            span: Span {
+                start: 169,
+                end: 273,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    type_aliases: [],
+    native_declarations: [],
+    expressions: [],
+    span: Span {
+        start: 169,
+        end: 273,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

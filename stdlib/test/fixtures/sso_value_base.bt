@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: template-method fixture; see self_send_override_test.bt.
+
+Value subclass: SsoValueBase
+
+  class make -> String => "make:" ++ self tag
+
+  class tag -> String => "base"
+
+  foo -> String => "base"
+
+  bar -> String => "bar:" ++ self foo

@@ -1,0 +1,21 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 176, end: 182 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-3666: explicit own-class reference in an open class is a static call that still rebinds ClassVars."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 183, end: 192 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("ExplicitRefOpenClass"), span: Span { start: 193, end: 213 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("classState:"), span: Span { start: 216, end: 227 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("hits"), span: Span { start: 228, end: 232 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 233, end: 234 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 235, end: 236 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 240, end: 245 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("foo"), span: Span { start: 246, end: 249 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 250, end: 252 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 253, end: 254 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("class"), span: Span { start: 258, end: 263 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("bar"), span: Span { start: 264, end: 267 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 268, end: 270 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("ExplicitRefOpenClass"), span: Span { start: 271, end: 291 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("foo"), span: Span { start: 292, end: 295 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 296, end: 296 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: driver. Prints `PERF: <name> <ns/op>` lines to stderr.
+
+Object subclass: SsbMain
+
+  class run =>
+    n := 200000
+    self
+      report: "actor_self_send_open"
+      ns: (self timeActor: SsbOpenActor spawn n: n)
+      n: n
+    self
+      report: "actor_self_send_sealed"
+      ns: (self timeActor: SsbSealedActor spawn n: n)
+      n: n
+    self
+      report: "actor_self_send_inherited_override"
+      ns: (self timeActor: SsbInhActorSub spawn n: n)
+      n: n
+    self
+      report: "class_self_send_open"
+      ns: (self timeClass: SsbOpenClass n: n)
+      n: n
+    self
+      report: "class_self_send_sealed"
+      ns: (self timeClass: SsbSealedClass n: n)
+      n: n
+    self
+      report: "class_self_send_inherited_override"
+      ns: (self timeClass: SsbInhSub n: n)
+      n: n
+    nil
+
+  class timeActor: a n: n =>
+    a loop: 1000
+    start := DateTime monotonicNow
+    a loop: n
+    DateTime monotonicNow - start
+
+  class timeClass: c n: n =>
+    c loop: 1000
+    start := DateTime monotonicNow
+    c loop: n
+    DateTime monotonicNow - start
+
+  class report: name ns: total n: n =>
+    Console errorLine: "PERF: " ++ name ++ " " ++ (total / n) printString ++ "ns/op"

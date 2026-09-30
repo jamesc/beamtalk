@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: open-class actor self-send resolves the callee module from the instance's '__class_mod__'.
+
+Actor subclass: OpenSelfSendActor
+  state: count = 0
+
+  foo => 1
+
+  bar => self foo

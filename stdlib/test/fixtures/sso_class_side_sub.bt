@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: template-method fixture; see self_send_override_test.bt.
+
+SsoClassSideBase subclass: SsoClassSideSub
+
+  class foo -> String => "sub"

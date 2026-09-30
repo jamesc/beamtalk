@@ -342,13 +342,16 @@ fn dependency_package_provision_maps_to_its_file_and_compiles_beside_a_same_name
     );
 }
 
-/// Phase 0 pin (Linear AC): a subclass override of a flattened provision
-/// must be the one actually reached from an inherited actor method's
-/// self-send — records the dynamic-dispatch binding ADR 0127 §6 relies on
-/// (flattening only splices the provision into the *class that uses the
-/// protocol*; a further subclass overriding that same selector must still
-/// win via ordinary self-send dispatch, exactly as it would for a
-/// hand-written method).
+/// A subclass override of a flattened provision must be the one actually
+/// reached from an inherited actor method's self-send (ADR 0127 §6; BT-3666
+/// corrected BT-3625's "Phase 0 pin", which claimed this but did not hold:
+/// the self-send was bound to the lexical module). Flattening only splices
+/// the provision into the *class that uses the protocol*; a further subclass
+/// overriding that same selector must still win via ordinary late-bound
+/// self-send dispatch, exactly as it would for a hand-written method — so the
+/// flattened `announce` resolves its callee module from the instance's own
+/// `'__class_mod__'`. Runtime behaviour is covered end to end by
+/// `stdlib/test/trait_override_dispatch_test.bt`.
 #[test]
 fn subclass_override_of_a_flattened_provision_is_reached_from_inherited_self_send() {
     let src = concat!(
@@ -375,6 +378,11 @@ fn subclass_override_of_a_flattened_provision_is_reached_from_inherited_self_sen
     assert!(
         code.contains("announce"),
         "expected Base's flattened announce/1 (self describe) in generated code, got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('__class_mod__', "),
+        "flattened announce's `self describe` must dispatch on the instance's class module \
+         so a subclass override is reached, got:\n{code}"
     );
 }
 

@@ -2176,6 +2176,13 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.name().to_string())
             .collect();
 
+        *self.sealed_class_method_selectors_mut() = class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary && m.is_sealed)
+            .map(|m| m.selector.name().to_string())
+            .collect();
+
         // Populate the class-var-mutating selector set (transitive
         // closure over same-class self-sends) — see
         // `compute_class_var_mutating_selectors`'s doc comment. Depends on
@@ -2257,8 +2264,13 @@ impl CoreErlangGenerator {
                 // Capture the result so `frame`'s `Drop` (pop scope, clear
                 // `in_class_method`, restore the selector) runs before the
                 // `?` below propagates an error, same as on the success path.
-                let body_stmts_result =
-                    frame.lower_class_method_body(method, !class.class_variables.is_empty());
+                // BT-3666: in a non-sealed class a late-bound `self foo` may reach a
+                // subclass override that declares class variables this class does
+                // not, so bodies are lowered as if class vars may be present; the
+                // `{class_var_result, ..}` wrap still only happens when a rebind
+                // actually occurred (`class_var_mutated`).
+                let has_class_vars = !class.class_variables.is_empty() || !frame.is_class_sealed();
+                let body_stmts_result = frame.lower_class_method_body(method, has_class_vars);
                 frame.set_current_nlr_token(None);
                 let mut body_stmts = body_stmts_result?;
                 // Use class_var_mutated (not just whether class vars are declared)
@@ -2314,6 +2326,7 @@ impl CoreErlangGenerator {
         }
         self.class_var_names_mut().clear();
         self.class_method_selectors_mut().clear();
+        self.sealed_class_method_selectors_mut().clear();
         self.set_class_slot_constructor_selector(None);
         Ok(Document::Vec(docs))
     }
@@ -2525,7 +2538,12 @@ impl CoreErlangGenerator {
             None
         };
 
-        let has_class_vars = !self.class_var_names().is_empty();
+        // BT-3666: a ClassBuilder class is never sealed, so its self-sends are
+        // late-bound and an override may write class vars; always lower the
+        // body as if class vars may be present. (Not `is_class_sealed()`: that
+        // reads the flag of the *enclosing* class, which the builder cascade
+        // does not reset.)
+        let has_class_vars = true;
         let body_doc: Document<'static> = if method.body.is_empty() {
             self.set_current_nlr_token(None);
             docvec!["ClassSelf"]

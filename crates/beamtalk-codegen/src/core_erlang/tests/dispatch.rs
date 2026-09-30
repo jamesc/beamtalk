@@ -3487,8 +3487,11 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
     // triggers generate_class_method_self_send → line 1267 → the fixed path.
     // "class_" (6 bytes) + 250 'a's = 256 bytes — one over the limit.
     let long_sel = "a".repeat(250);
+    // `sealed`: BT-3666 routes an open class's class-side self-send through the
+    // runtime hierarchy walk (a subclass may override); only a sealed class
+    // keeps the static `class_<sel>` call this test is about.
     let src = format!(
-        "Actor subclass: LongSel\n  state: x = 0\n\n  class {long_sel} => 42\n\n  class go => self {long_sel}\n"
+        "sealed Actor subclass: LongSel\n  state: x = 0\n\n  class {long_sel} => 42\n\n  class go => self {long_sel}\n"
     );
     let code = codegen_source(&src);
 
@@ -3504,6 +3507,210 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
     assert!(
         code.contains("call 'test':'class_kw_"),
         "class method self-send must use hashed call target 'class_kw_<hex>'. Got:\n{code}"
+    );
+}
+
+/// BT-3666: in an open class a class-side self-send to a selector the class
+/// itself defines is a guarded direct call: the fast branch is only taken when
+/// the receiver is this very class and nothing shadows the compiled method;
+/// every other receiver (a subclass running an inherited method) falls through
+/// to the runtime hierarchy walk so a subclass override is reached.
+#[test]
+fn test_class_method_self_send_in_open_class_is_guarded_direct_call() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    let guard = "call 'beamtalk_class_dispatch':'class_self_direct_ok'(call 'erlang':'element'(2, ClassSelf), 'OpenCls class', 'OpenCls', 'foo')";
+    let start = code
+        .find("'class_bar'/2 = fun")
+        .expect("class_bar function present");
+    let bar = &code[start..];
+    let guard_at = bar
+        .find(guard)
+        .unwrap_or_else(|| panic!("guard call missing. Got:\n{bar}"));
+    let direct_at = bar[guard_at..]
+        .find("<'true'> when 'true' -> call 'test':'class_foo'(ClassSelf")
+        .unwrap_or_else(|| panic!("direct branch must follow the true clause. Got:\n{bar}"));
+    let walk_at = bar[guard_at..]
+        .find("<_> when 'true' -> call 'beamtalk_class_dispatch':'class_self_send'(")
+        .unwrap_or_else(|| panic!("walk branch must be the catch-all clause. Got:\n{bar}"));
+    assert!(
+        direct_at < walk_at,
+        "direct branch precedes the walk fallback. Got:\n{bar}"
+    );
+}
+
+/// BT-3666: the guarded fast path still threads `ClassVars`: both branches feed
+/// one `class_var_result` unwrap, and it is emitted even for a class-var-less
+/// base (a subclass override reached by the walk may write class variables).
+#[test]
+fn test_class_method_self_send_in_open_class_fast_path_rebinds_class_vars() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_bar'/2 = fun")
+        .expect("class_bar function present");
+    let bar = &code[start..];
+    assert!(
+        bar.contains("class_self_direct_ok") && bar.contains("let ClassVars1 = case"),
+        "fast path must feed the ClassVars rebind. Got:\n{bar}"
+    );
+    assert!(
+        bar.contains("{'class_var_result', "),
+        "class-var-less base must still return class_var_result. Got:\n{bar}"
+    );
+}
+
+/// BT-3666: arguments are bound once before the guarded `case`, so a nested
+/// block argument's body is emitted exactly once (not once per branch, which
+/// would grow as 2^depth for nested DSL-style sends).
+#[test]
+fn test_class_method_self_send_fast_path_does_not_duplicate_block_args() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class section: aBlock => aBlock value\n\n  class go => self section: [self section: [self section: [self foo]]]\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_go'/2 = fun")
+        .expect("class_go function present");
+    let go = &code[start..];
+    let end = go[1..].find("\n'").map_or(go.len(), |e| e + 1);
+    let go = &go[..end];
+    assert_eq!(
+        go.matches("'foo')").count(),
+        1,
+        "innermost block body must appear once. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("class_self_direct_ok").count(),
+        4,
+        "one guard per send (3 section: + foo), no duplication. Got:\n{go}"
+    );
+}
+
+/// BT-3666: neither an explicit own-class reference, a `class sealed` selector
+/// nor a sealed class gets the guard (they are statically bound).
+#[test]
+fn test_static_class_self_sends_have_no_fast_path_guard() {
+    for src in [
+        "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n",
+        "Object subclass: OpenCls\n  class sealed foo => 1\n\n  class bar => self foo\n",
+        "sealed Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n",
+    ] {
+        let code = codegen_source(src);
+        assert!(
+            !code.contains("class_self_direct_ok"),
+            "statically bound send must not carry the guard. Got:\n{code}"
+        );
+    }
+}
+
+/// BT-3666: a sealed class cannot be subclassed, so its class-side self-send
+/// keeps the direct call (no runtime walk).
+#[test]
+fn test_class_method_self_send_in_sealed_class_stays_static() {
+    let src = "sealed Object subclass: SealedCls\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'test':'class_foo'(ClassSelf"),
+        "sealed class self-send must stay a direct class_foo call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'class_self_send'"),
+        "sealed class self-send must not use the runtime walk. Got:\n{code}"
+    );
+}
+
+/// BT-3666: a `class sealed` selector in an open class cannot be overridden,
+/// so its class-side self-send keeps the direct call.
+#[test]
+fn test_class_method_self_send_to_class_sealed_selector_stays_static() {
+    let src = "Object subclass: OpenCls\n  class sealed foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'test':'class_foo'(ClassSelf"),
+        "class sealed selector self-send must stay a direct call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'class_self_send'"),
+        "class sealed selector self-send must not use the runtime walk. Got:\n{code}"
+    );
+}
+
+/// BT-3666: an open-class self-send to a selector the base proves pure still
+/// rebinds the returned `ClassVars`, since a subclass override may write one.
+#[test]
+fn test_class_method_self_send_in_open_class_rebinds_class_vars() {
+    let src = "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'class_var_result'"),
+        "open class self-send must unwrap class_var_result. Got:\n{code}"
+    );
+}
+
+/// BT-3666: an explicit own-class reference (`Base foo`) is bound statically,
+/// never late-bound on the receiver.
+#[test]
+fn test_class_method_explicit_class_reference_stays_static() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'test':'class_foo'(ClassSelf"),
+        "explicit own-class reference must stay a direct class_foo call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'class_self_send'"),
+        "explicit own-class reference must not late-bind. Got:\n{code}"
+    );
+}
+
+/// BT-3666: a static call in an open class (explicit own-class reference or a
+/// `class sealed` selector) cannot use the purity shortcut, because the callee's
+/// own late-bound `self` sends may reach an override that writes a class var.
+#[test]
+fn test_open_class_static_class_self_send_rebinds_class_vars() {
+    for body in [
+        "class foo => 1\n\n  class bar => self foo\n\n  class baz => OpenCls bar\n",
+        "class foo => 1\n\n  class sealed bar => self foo\n\n  class baz => self bar\n",
+    ] {
+        let src = format!("Object subclass: OpenCls\n  {body}");
+        let code = codegen_source(&src);
+        // Slice just `class_baz`: `class_bar` itself always rebinds.
+        let start = code
+            .find("'class_baz'/2 = fun")
+            .expect("class_baz function present");
+        let rest = &code[start..];
+        let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
+        let baz = &rest[..end];
+        assert!(
+            baz.contains("call 'test':'class_bar'(ClassSelf")
+                && baz.contains("let ClassVars1 = case"),
+            "static open-class call must rebind ClassVars. Got:\n{baz}"
+        );
+    }
+}
+
+/// BT-3666: an open Actor's instance-side self-send resolves the callee
+/// module from the instance's own `'__class_mod__'` at run time, so an
+/// inherited method's `self foo` reaches a subclass override.
+#[test]
+fn test_actor_self_send_in_open_class_uses_instance_class_module() {
+    let src = "Actor subclass: OpenActor\n  foo => 1\n\n  bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'maps':'get'('__class_mod__', ")
+            && code.contains(":'safe_dispatch'('foo'"),
+        "open actor self-send must dispatch on the instance's class module. Got:\n{code}"
+    );
+}
+
+/// BT-3666: a sealed Actor cannot be subclassed, so its self-sends stay
+/// statically bound (direct `dispatch/4`, no `'__class_mod__'` lookup).
+#[test]
+fn test_actor_self_send_in_sealed_class_stays_static() {
+    let src = "sealed Actor subclass: SealedActor\n  foo => 1\n\n  bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("call 'maps':'get'('__class_mod__', "),
+        "sealed actor self-send must not look up the instance class module. Got:\n{code}"
     );
 }
 

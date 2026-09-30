@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: template-method fixture; see self_send_override_test.bt.
+
+Actor subclass: SsoActorBase
+  state: count = 0
+
+  foo -> String => "base"
+
+  bar -> String => "bar:" ++ self foo
+
+  // Argument-passing, in-block, and state-mutating inherited self-sends.
+  scale: n :: Integer -> Integer => n * 2
+
+  scaled: n :: Integer -> Integer => self scale: n
+
+  scaledAll: items -> List => items collect: [:item | self scale: item]
+
+  bump -> Integer =>
+    self.count := self.count + 1
+    self.count
+
+  bumpTwice -> Integer =>
+    self bump
+    self bump
