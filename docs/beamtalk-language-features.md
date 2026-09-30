@@ -5157,6 +5157,22 @@ without a rebuild. A class defined only by evaluating source in the REPL is
 listed once it is synced from a file; the `.app` file on disk is only rewritten
 by `beamtalk build`.
 
+#### `Program exit:` / `System halt:` (ADR 0099 §3, BT-3634)
+
+`Program exit: N` triggers a graceful shutdown (`init:stop(N)`) when the program
+owns the node. `System halt: N` is an immediate stop that flushes Logger handlers
+first.
+
+| Context | `Program exit: N` | `System halt: N` |
+|---------|-------------------|-------------------|
+| `beamtalk run` (script/service) | Stops with exit status `N` | Immediate halt with status `N` |
+| Release `foreground` / `eval` | Stops with exit status `N` | Immediate halt with status `N` |
+| Escript | Stops with exit status `N` | Immediate halt with status `N` |
+| Actor in a node-owning context | Stops the node gracefully | Immediate halt |
+| Workspace (actor send) | Raises `program_exit_outside_entry` | Raises `unsupported` |
+| `beamtalk test` | Raises `#program_exit` with `status` | Raises `unsupported` |
+| Release console REPL | Raises `program_exit_outside_entry` | Allowed (the release owns the node) |
+
 ### `SystemNavigation` — Cross-class code queries
 
 `SystemNavigation` provides Smalltalk-style live-image queries over the loaded
