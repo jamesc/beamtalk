@@ -57,6 +57,11 @@ beamtalk-core = { workspace = true, features = ["test"] }
 tempfile = "3.14"
 # why: parse the shared compiler-port command-vocabulary conformance corpus (BT-3095)
 serde_json = { workspace = true }
+# why: `cargo_workspace_root!()` macro — shared leaf for the identical
+# `CARGO_MANIFEST_DIR/../..` walk used by corpus fixture tests (see
+# docs/development/architecture-principles.md § Duplication &
+# the Shared-Leaf-Module Pattern). Dev-only: only used in `#[cfg(test)]`.
+beamtalk-workspace.workspace = true
 
 [build-dependencies]
 beamtalk-build.workspace = true

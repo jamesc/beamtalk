@@ -70,6 +70,13 @@ serial_test = "4"
 # tests/benches/examples targets, never for the library itself, so nothing
 # depending on `beamtalk-core` as an ordinary library ever sees this edge.
 beamtalk-codegen.workspace = true
+# why: `cargo_workspace_root!()` macro — shared leaf for the identical
+# `CARGO_MANIFEST_DIR/../..` walk used by every test/bench helper that locates
+# corpus fixtures in the repo root (see
+# docs/development/architecture-principles.md § Duplication &
+# the Shared-Leaf-Module Pattern). Dev-only: the macro is used only in
+# `#[cfg(test)]` modules, never in production code paths.
+beamtalk-workspace.workspace = true
 
 [[bench]]
 name = "compiler_pipeline"

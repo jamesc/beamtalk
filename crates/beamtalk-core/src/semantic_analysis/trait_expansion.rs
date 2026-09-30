@@ -201,6 +201,12 @@ pub fn apply_origins(hierarchy: &mut ClassHierarchy, origins: &OriginMap) {
 /// the user's do. Names that are not classes of the protocol's package
 /// (stdlib, generics) are untouched.
 ///
+/// **Scope:** only `ClassReference` expressions in method bodies are
+/// qualified. Type-annotation names in a provision's parameters and return type
+/// are not: `TypeAnnotation` has no package-qualifier slot, and the class
+/// hierarchy and runtime registry are keyed by bare class name (tracked in
+/// BT-3665), so this is not yet complete coverage of ADR 0127 §3.
+///
 /// [`ProtocolSource::package`]: crate::semantic_analysis::ProtocolSource::package
 #[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
 pub fn resolve_provision_names(

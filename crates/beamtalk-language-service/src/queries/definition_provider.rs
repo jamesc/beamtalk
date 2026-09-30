@@ -2142,11 +2142,7 @@ mod tests {
     /// `beamtalk_repl_ops_browse_tests:clause_selector_corpus_test/0`.
     #[test]
     fn clause_selector_matches_shared_corpus() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
+        let path = beamtalk_workspace::cargo_workspace_root!()
             .join("runtime/apps/beamtalk_workspace/test/fixtures/handle_call_clause_corpus.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));

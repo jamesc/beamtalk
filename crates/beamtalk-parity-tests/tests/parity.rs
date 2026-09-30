@@ -353,13 +353,7 @@ fn stage_diagnostic_file() -> Option<PathBuf> {
 }
 
 fn parity_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR points at `crates/beamtalk-parity-tests`.
-    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest)
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("workspace root")
-        .join("tests/parity")
+    beamtalk_workspace::cargo_workspace_root!().join("tests/parity")
 }
 
 fn resolve_placeholders(

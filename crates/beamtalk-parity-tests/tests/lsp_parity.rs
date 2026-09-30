@@ -326,12 +326,7 @@ async fn check_erlang_ffi_hover_parity(mcp: &mut McpDriver) -> Result<(), String
 /// the LSP child can index the on-disk tree without touching the
 /// repository copy.
 fn stage_widget_project() -> Result<PathBuf, String> {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR").map_err(|e| format!("manifest: {e}"))?;
-    let src = PathBuf::from(manifest)
-        .parent()
-        .and_then(|p| p.parent())
-        .ok_or_else(|| "workspace root".to_string())?
-        .join("tests/parity/lsp/widget_project");
+    let src = beamtalk_workspace::cargo_workspace_root!().join("tests/parity/lsp/widget_project");
     if !src.is_dir() {
         return Err(format!("fixture missing: {}", src.display()));
     }
