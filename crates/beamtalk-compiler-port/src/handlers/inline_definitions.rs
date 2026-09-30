@@ -130,11 +130,25 @@ pub(crate) fn handle_inline_class_definition(
             .iter()
             .map(|s| s.expression.clone())
             .collect();
-        match beamtalk_repl::codegen::generate_repl_expressions_with_index(
-            &trailing_exprs,
-            expr_module_name,
-            class_module_index.clone(),
-        ) {
+        // ADR 0129 §2: trailing sends must get the same direct-call
+        // eligibility as a plain `compile_expression`, so a sealed stateless
+        // facade defined in this same turn is direct-called. `analysis` is
+        // `None` when a standalone method merge made it stale; that falls back
+        // to `class_send` (correct, just not the direct-call fast path).
+        let trailing_result = match analysis.as_ref() {
+            Some(analysis) => beamtalk_repl::codegen::generate_repl_expressions_with_hierarchy(
+                &trailing_exprs,
+                expr_module_name,
+                class_module_index.clone(),
+                &analysis.class_hierarchy,
+            ),
+            None => beamtalk_repl::codegen::generate_repl_expressions_with_index(
+                &trailing_exprs,
+                expr_module_name,
+                class_module_index.clone(),
+            ),
+        };
+        match trailing_result {
             Ok(code) => Some(code),
             Err(e) => {
                 return error_response(&[format_codegen_error(&e, source)]);

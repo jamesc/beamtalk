@@ -111,6 +111,44 @@ fn inline_class_definition_with_superclass_index_compiles_as_value_type() {
     );
 }
 
+/// BT-3652 (ADR 0129 §2): a trailing send to a sealed, stateless facade
+/// defined in the same turn emits a direct `call`, not `class_send`.
+#[test]
+fn inline_class_definition_trailing_send_to_sealed_facade_is_direct_call() {
+    let request = Map::from([
+        (atom("command"), atom("compile_expression")),
+        (
+            atom("source"),
+            binary(
+                "sealed Object subclass: Facade\n  class sealed osName -> String => \"linux\"\n\nFacade osName",
+            ),
+        ),
+        (atom("module"), binary("bt@repl_trailing")),
+        (atom("known_vars"), Term::from(eetf::List::from(vec![]))),
+    ]);
+
+    let response = handle_compile_expression(&request);
+    let Term::Map(ref m) = response else {
+        panic!("Expected a map response, got: {response:?}");
+    };
+    assert_eq!(
+        map_get(m, "kind"),
+        Some(&atom("class_definition")),
+        "Expected class_definition kind, got: {response:?}"
+    );
+    let trailing = map_get(m, "trailing_core_erlang")
+        .and_then(term_to_string)
+        .expect("trailing_core_erlang field must be present");
+    assert!(
+        trailing.contains("call 'bt@facade':"),
+        "Expected a direct call into the class module in: {trailing}"
+    );
+    assert!(
+        !trailing.contains("'class_send'"),
+        "Eligible trailing send must not go through class_send in: {trailing}"
+    );
+}
+
 #[test]
 fn directive_defaults() {
     assert_eq!(
