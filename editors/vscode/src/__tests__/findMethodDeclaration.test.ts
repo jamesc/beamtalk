@@ -45,7 +45,7 @@ Object subclass: Main
     env := ev defaultEnv
 
     eval := [:src | printer print: (ev eval: (reader read: src) in: env)]
-    (WorkspaceInterface current) bind: eval as: #eval
+    Workspace bind: eval as: #eval
 
     self traceCr: "Run: eval value: \\"(* 6 7)\\"."
     self
@@ -458,7 +458,7 @@ describe("findMethodDeclaration — sealed/internal modifiers", () => {
     expect(src.slice(offset, offset + 6)).toBe("isMeta");
   });
 
-  it("finds an internal keyword instance method (stdlib: BeamtalkInterface>>help:)", () => {
+  it("finds an internal keyword instance method (stdlib: Beamtalk class>>help:)", () => {
     const src = "Object subclass: Foo\n  internal help: aClass :: Object => nil\n";
     const offset = findMethodDeclaration(src, "help:", "instance");
     expect(offset).not.toBe(-1);
@@ -554,7 +554,7 @@ describe("findMethodDeclaration — type-position syntax in params/returns", () 
     expect(src.slice(offset, offset + 2)).toBe(">>");
   });
 
-  it("finds a method with singleton symbols in a union return type (stdlib: BeamtalkInterface>>logLevel)", () => {
+  it("finds a method with singleton symbols in a union return type (stdlib: Beamtalk class>>logLevel)", () => {
     const src = "Object subclass: Foo\n  logLevel -> LogLevel | #all | #none => nil\n";
     const offset = findMethodDeclaration(src, "logLevel", "instance");
     expect(offset).not.toBe(-1);

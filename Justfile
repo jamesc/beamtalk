@@ -780,7 +780,7 @@ bench:
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names
 
 # Lint: reject non-ASCII inside Erlang binary literals that lack /utf8 (BT-3026).
 # Binary literals are bytes, so `<<"—">>` truncates U+2014 to 0x14 (a DC4 control
@@ -797,6 +797,20 @@ lint-binary-literal-encoding:
 [windows]
 lint-binary-literal-encoding:
     @echo "lint-binary-literal-encoding: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-3646, ADR 0129 Phase 5): the pre-ADR-0129 injected-singleton names
+# (the retired names listed in scripts/ci/lint-removed-facade-names.sh) must not
+# reappear in tracked files outside ADRs, the changelog and the generated corpora.
+# To clear a failure: use the class-side facades (`Beamtalk`, `Workspace bindings`,
+# `SystemNavigation`) instead. Unix-only (shells out to bash); Linux CI covers it,
+# so the Windows variant is a no-op.
+[unix]
+lint-removed-facade-names:
+    @bash scripts/ci/lint-removed-facade-names.sh
+
+[windows]
+lint-removed-facade-names:
+    @echo "lint-removed-facade-names: skipped on Windows (covered by Linux CI)"
 
 # Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
 # reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders

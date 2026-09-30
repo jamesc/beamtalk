@@ -479,14 +479,14 @@ typed Object subclass: SpeciesUser
 
 // ---------------------------------------------------------------------------
 // Implicit class-side `new` on concrete Object subclasses (subsumes the
-// `SystemNavigation default` `@expect dnu`).
+// former singleton-accessor `@expect dnu`).
 // ---------------------------------------------------------------------------
 
 #[test]
 fn implicit_new_on_sealed_object_subclass_no_dnu() {
     // A `sealed typed Object subclass` with no explicit class `new` — `self new`
     // in a class method must NOT warn (runtime supplies the implicit
-    // instantiation path). This is the `SystemNavigation default` shape.
+    // instantiation path). This is the shape of a singleton-accessor class method.
     let source = "
 sealed typed Object subclass: Nav
   class default -> Nav => self new

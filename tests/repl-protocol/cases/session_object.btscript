@@ -70,7 +70,7 @@ Session current bindings includesKey: #sy
 Session current resolve: #sx
 // => 42
 
-// A singleton resolves through the workspace-globals layer.
+// A class facade resolves through the class registry (non-nil).
 (Session current resolve: #Workspace) notNil
 // => true
 

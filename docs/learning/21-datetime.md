@@ -212,4 +212,4 @@ dt2 day =:= dt day      // => true
 ```
 </details>
 
-Next: Chapter 22 — Workspace & Globals
+Next: Chapter 22 — Workspace & Bindings

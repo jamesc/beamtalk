@@ -211,7 +211,7 @@ impl TypeChecker {
             // instantiation path, even when no explicit class-side `new` is
             // declared (e.g. a `sealed typed Object subclass`). Suppress the DNU
             // for these so the implicit-`new` override (previously documented
-            // with `@expect dnu`, e.g. `SystemNavigation default`) is no longer
+            // with `@expect dnu`, e.g. a former singleton accessor) is no longer
             // needed.
             //
             // Excluded:

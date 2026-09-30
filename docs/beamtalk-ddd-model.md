@@ -26,7 +26,7 @@ This document presents a domain-driven design (DDD) analysis of the Beamtalk com
   - [Hot Reload Context](#hot-reload-context)
   - [Workspace Context](#workspace-context)
   - [REPL Session Context](#repl-session-context)
-  - [Beamtalk Global Context](#beamtalk-global-context)
+  - [Beamtalk Facade Context](#beamtalk-facade-context)
 - [Cross-Cutting Concerns](#cross-cutting-concerns)
 - [Domain Events](#domain-events)
 - [Architecture Decision Records](#architecture-decision-records)
@@ -918,7 +918,7 @@ code_change(_OldVsn, State, #{module := Module}) when is_map(State) ->
 - `ActorSupervisor` (`beamtalk_actor_sup`): `simple_one_for_one` supervisor for all user actors in the workspace; actors are `temporary` (no restart on crash by default)
 - `SessionSupervisor` (`beamtalk_session_sup`): `simple_one_for_one` supervisor for REPL session shell processes; sessions are `temporary`
 - `WorkspaceBootstrap` (`beamtalk_workspace_bootstrap`): Startup logic — reads config, starts stdlib, initialises metadata
-- `Workspace` (`bt@stdlib@workspace` + `beamtalk_workspace_interface_primitives`): Compiled Beamtalk singleton actor for workspace introspection; `@primitive` methods delegated to `beamtalk_workspace_interface_primitives`
+- `Workspace` (`bt@stdlib@workspace` + `beamtalk_workspace_facade`): sealed, stateless class-side facade over the running workspace (ADR 0129); each call is guarded by `beamtalk_capability:require_workspace/1`
 
 **Key Patterns:**
 - **Node-per-Workspace:** Each workspace is a separate BEAM node (isolated code path, separate port/cookie)
@@ -1037,69 +1037,54 @@ do_eval(Expression, State, Subscriber) ->
     end.
 ```
 
-### Beamtalk Global Context
+### Beamtalk Facade Context
 
-**Purpose:** Expose a stable, Smalltalk-inspired global object (`Beamtalk`) that gives user code and REPL sessions a single entry point for runtime introspection — listing actors, modules, classes, and sessions — without exposing raw Erlang APIs.
+**Purpose:** Expose stable, Smalltalk-inspired class-side facades (`Beamtalk`, `Workspace`, `Transcript`, `SystemNavigation`) that give user code a single entry point for reflection and workspace operations without exposing raw Erlang APIs (ADR 0129).
 
-**Analogy:** `Beamtalk` is to Beamtalk what `Smalltalk` is to Pharo: a globally accessible system dictionary and runtime façade.
+**Analogy:** `Beamtalk` is to Beamtalk what `Smalltalk` is to Pharo: the system reflection entry point. It is an ordinary sealed class, not an injected global.
 
 **Aggregates:**
 
-#### 1. BeamtalkGlobal (Singleton Façade)
+#### 1. Beamtalk (Class-Side Facade)
 
 **Invariants:**
-- Always available in every REPL session (no import needed)
-- Delegates to `beamtalk_workspace_meta`, `beamtalk_class_registry`, and `beamtalk_object_instances` — never holds state itself
-- Read-only introspection API; mutation is done via normal actor message sends
+- A sealed, stateless class whose API is entirely class-side (`class sealed` methods); no instance, no `current`
+- Resolves through the class registry like any other class, so it means the same thing in the REPL, `beamtalk run`, `beamtalk test` and releases
+- Delegates to the backing native module (`beamtalk_interface`) and the class registry; never holds state itself
+- Read-only reflection; mutation is done via normal message sends
 
 **Entities:**
 - (None — stateless façade, no mutable entities)
 
-**Value Objects:**
-- `ClassList`: Ordered list of all registered class objects
-- `ActorList`: List of `{pid, class, spawned_at}` tuples for all supervised actors
-- `SessionList`: List of active REPL session IDs
-- `ModuleList`: List of loaded Beamtalk module atoms
-
 **Domain Services:**
-- `BeamtalkSystemDictionary` (`stdlib/src/SystemDictionary.bt`, `beamtalk_stdlib.erl`): Implements `Beamtalk allClasses`, `Beamtalk classNamed:`, `Beamtalk globals`, and delegates to runtime for actors/sessions/modules
+- `Beamtalk` (`stdlib/src/beamtalk.bt`, native module `beamtalk_interface`): class registry (`allClasses`, `classNamed:`), help (`help:`, `help:selector:`, `erlangHelp:`, `erlangHelp:selector:`) and release reflection (`version`, `releaseInfo`, `shapeManifest`)
+- `Workspace` (`stdlib/src/workspace.bt`, native module `beamtalk_workspace_facade`): project operations, guarded by `no_workspace` where no workspace runs
+- `Transcript` (`stdlib/src/transcript.bt`, native module `beamtalk_transcript_facade`): the REPL's shared log; falls back to Logger outside an interactive workspace
+- `SystemNavigation` (`stdlib/src/system_navigation.bt`): class-registry navigation queries
 
-**Key Operations (available in all REPL sessions):**
+**Key Operations:**
 
 | Message | Return | Delegates To |
 |---------|--------|-------------|
 | `Beamtalk allClasses` | List of class objects | `beamtalk_class_registry` |
 | `Beamtalk classNamed: #Counter` | Class object (or nil) | `beamtalk_class_registry` |
-| `Beamtalk actors` | List of running actors | `beamtalk_workspace_meta` |
-| `Beamtalk modules` | List of loaded modules | `beamtalk_workspace_meta` |
 | `Beamtalk version` | Version string | Runtime app env |
-| `Beamtalk nodeName` | BEAM node atom | `erlang:node()` |
-| `Beamtalk projectPath` | Project path binary | `beamtalk_workspace_meta` |
+| `Beamtalk releaseInfo` | Release provenance Dictionary | `beamtalk_release` |
+| `Workspace isAvailable` | Boolean | `beamtalk_capability` |
+| `Node current actors` | `Result` of live actors | Runtime actor registry (node facts live on `Node`, not `Beamtalk`) |
 
 **Key Patterns:**
-- **Façade over Multiple Contexts:** Beamtalk Global hides the Workspace, Object System, and Actor System contexts behind a single object; callers don't need to know which gen_server to query
-- **Read-Only:** No mutating operations — actors are spawned via `ClassName spawn`, not via `Beamtalk spawn:`
-- **Always Available:** Implemented as a globally registered class in `beamtalk_class_registry`; available before any user code loads
+- **Façade over Multiple Contexts:** the facades hide the Workspace, Object System and Actor System contexts behind a few classes; callers don't need to know which gen_server to query
+- **Read-Only Reflection:** actors are spawned via `ClassName spawn`, not via `Beamtalk spawn:`
+- **Always Resolvable:** the facades are ordinary registered classes, available before any user code loads; only `Workspace` operations (and `Transcript recent`/`clear`) need a running workspace
 
 **Example Domain Logic:**
 
 ```beamtalk
-// User code in any REPL session
-Beamtalk allClasses          // => #(Counter, Logger, Actor, Object, ...)
+Beamtalk allClasses           // => #(Counter, Logger, Actor, Object, ...)
 Beamtalk classNamed: #Counter // => Counter
-Beamtalk actors               // => #(<0.123.0> Counter, <0.124.0> Logger)
 Beamtalk version              // => '0.4.0'
-```
-
-```erlang
-%% Erlang implementation delegates to workspace context
-beamtalk_actors() ->
-    case beamtalk_workspace_meta:supervised_actors() of
-        Pids when is_list(Pids) ->
-            [{Pid, beamtalk_class_registry:class_of(Pid)} || Pid <- Pids, is_process_alive(Pid)];
-        _ ->
-            []
-    end.
+Workspace isAvailable         // => true (in a workspace), false under `beamtalk test`
 ```
 
 ---

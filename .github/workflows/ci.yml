@@ -120,7 +120,9 @@ jobs:
         # test-grammar (BT-3261) also no-ops on Windows (JS-only, Linux covers it): keeps
         # the TextMate section-divider grammar and parse_divider_name from silently
         # drifting apart, via a shared fixture run through the real Oniguruma engine.
-        run: just build clippy fmt-check test-rust lint-workaround-comments lint-binary-literal-encoding test-grammar
+        # lint-removed-facade-names (BT-3646, ADR 0129) also no-ops on Windows; it keeps the
+        # retired injected-singleton names (see scripts/ci/lint-removed-facade-names.sh) out.
+        run: just build clippy fmt-check test-rust lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names test-grammar
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches

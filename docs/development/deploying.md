@@ -31,11 +31,9 @@ pre-existing `--output` directory even if it doesn't look like a prior
 `beamtalk release` output; use it deliberately, not as a default habit.
 
 `Beamtalk releaseInfo` is the parity-neutral reflective send that names the
-release, its version and the toolchain OTP release. `rpc`/`eval` resolve the
-workspace globals (`Beamtalk`, `Workspace`, `Transcript`) to their live
-singleton instances before falling back to registered classes, so
-`rpc "Beamtalk releaseInfo"` and `rpc "BeamtalkInterface releaseInfo"` (the
-class-side method) answer the same Dictionary.
+release, its version and the toolchain OTP release. `rpc`/`eval` resolve `Beamtalk`, `Workspace` and `Transcript` as ordinary
+class names (class registry), so `rpc "Beamtalk releaseInfo"` is a plain
+class-side send.
 
 ## `[release]` manifest keys
 

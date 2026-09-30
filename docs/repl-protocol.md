@@ -331,9 +331,9 @@ List the current session's local binding names:
 {"id": "msg-011", "value": ["x", "counter"], "status": ["done"]}
 ```
 
-Read workspace globals, or another session's locals:
+Read workspace bindings, or another session's locals:
 ```json
-{"op": "eval", "id": "msg-012", "code": "Workspace globals keys"}
+{"op": "eval", "id": "msg-012", "code": "Workspace bindings keys"}
 {"op": "eval", "id": "msg-013", "code": "(Session withId: id) bindings keys"}
 ```
 
