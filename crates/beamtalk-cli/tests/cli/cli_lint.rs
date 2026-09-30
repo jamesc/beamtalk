@@ -318,6 +318,41 @@ fn expect_in_protocol_file_suppresses_provision_diagnostic_on_lint_and_build_bt_
         .stderr(contains("stale @expect").not());
 }
 
+/// BT-3671 review follow-up: with two provided methods, an `@expect` above the
+/// *second* one must attach to it (not be swallowed into the first method's
+/// body) so it suppresses that method's provision diagnostic on `lint` and
+/// `build`.
+#[test]
+fn expect_above_second_provided_method_suppresses_on_lint_and_build_bt_3671() {
+    let project = cli_common::fixture_project();
+    write_broken_provision_project(project.path(), "");
+    std::fs::write(
+        project.path().join("src/Broken.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Protocol define: Broken\n\
+         \x20\x20name -> String\n\
+         \n\
+         \x20\x20fine -> Integer => 1\n\
+         \x20\x20@expect type\n\
+         \x20\x20probe -> Integer => 3 bogus\n",
+    )
+    .unwrap();
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+}
+
 /// `beamtalk lint` requires `@expect dead_assignment` to suppress a
 /// real `DeadAssignment` diagnostic — without the pragma, lint fails.
 ///

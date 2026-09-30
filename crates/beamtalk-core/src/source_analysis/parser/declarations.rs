@@ -1080,7 +1080,7 @@ impl Parser {
     /// can only ever be the ordinary statement-level directive, never a
     /// boundary, regardless of indentation.
     pub(super) fn is_at_declaration_level_expect(&self) -> bool {
-        self.in_class_body
+        (self.in_class_body || self.in_protocol_body)
             && self
                 .current_token()
                 .indentation_after_newline()
@@ -2694,8 +2694,11 @@ impl Parser {
 
         // Parse protocol body: required signatures (no `=>`) and provided
         // methods (`=>` body — ADR 0127 §1).
+        let was_in_protocol_body = self.in_protocol_body;
+        self.in_protocol_body = true;
         let (method_signatures, class_method_signatures, provided_methods) =
             self.parse_protocol_body();
+        self.in_protocol_body = was_in_protocol_body;
 
         // Determine end span
         let mut end = name.span;

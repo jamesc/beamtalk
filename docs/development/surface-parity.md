@@ -527,6 +527,8 @@ file, so it is only meaningful there.
   never against the using file's own `@expect`s, since its span is an offset
   into another file. Such a directive is never reported stale: whether a
   provision diagnostic exists depends on which users were analysed.
+  The LSP, REPL and test-fixture compile paths do not apply protocol-file
+  `@expect` yet (only `build` and `lint` do).
 - `beamtalk lint <subset>` caveat: a provision diagnostic is published against
   the protocol's file even when that file was not itself a lint target (the
   using file was), and against a `<protocol Name>` placeholder (`file` in
