@@ -28798,6 +28798,58 @@
       "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
     },
     {
+      "id": "stdlib-test-fixtures-sso-class-var-base",
+      "title": "SsoClassVarBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Object",
+        "SsoClassVarBase",
+        "bar",
+        "extends",
+        "field",
+        "foo",
+        "hits",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "sso_class_var_base",
+        "subclassing"
+      ],
+      "source": "// BT-3666: base `foo` never writes a class variable, so `bar`'s self-send site\n// looks pure to the base class; a subclass override of `foo` that does write\n// one must still have that write kept. See self_send_override_test.bt.\n\nObject subclass: SsoClassVarBase\n  classState: hits = 0\n\n  class foo -> Integer => 1\n\n  class bar -> Integer => self foo\n\n  class hits -> Integer => self.hits",
+      "explanation": "BT-3666: base `foo` never writes a class variable, so `bar`'s self-send site looks pure to the base class; a subclass override of `foo` that does write one must still have that write kept. See self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-class-var-sub",
+      "title": "SsoClassVarSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoClassVarBase",
+        "SsoClassVarSub",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "foo",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "sso_class_var_sub",
+        "subHits",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nSsoClassVarBase subclass: SsoClassVarSub\n  classState: subHits = 0\n\n  class foo -> Integer =>\n    self.subHits := self.subHits + 1\n    2\n\n  class subHits -> Integer => self.subHits",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-sso-labelled",
       "title": "Sso Labelled",
       "category": "stdlib-fixtures",
@@ -34068,6 +34120,7 @@
         "testActorOverrideThatMutatesStateIsThreaded",
         "testClassSideBaseUnchanged",
         "testClassSideInheritedSelfSendReachesOverride",
+        "testClassSideOverrideClassVarWriteFromPureBaseSite",
         "testFlattenedTraitActorBase",
         "testFlattenedTraitActorReachesOverride",
         "testFlattenedTraitValueBase",
@@ -34077,7 +34130,7 @@
         "testValueClassSideInheritedSelfSendReachesOverride",
         "testValueInheritedSelfSendReachesOverride"
       ],
-      "source": "// BT-3666: an override of `foo` in a subclass must be reached from an\n// inherited method's `self foo` (template-method pattern).\n//\n// Fixtures: stdlib/test/fixtures/self_send_override.bt\n\nTestCase subclass: SelfSendOverrideTest\n\n  testActorInheritedSelfSendReachesOverride =>\n    a := SsoActorSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorOverrideReachedWithArgument =>\n    a := SsoActorSub spawn\n    self assert: (a scaled: 3) equals: 30\n    a stop\n\n  testActorOverrideReachedFromInsideBlock =>\n    a := SsoActorSub spawn\n    self assert: (a scaledAll: #(1, 2)) equals: #(10, 20)\n    a stop\n\n  testActorOverrideThatMutatesStateIsThreaded =>\n    a := SsoActorSub spawn\n    self assert: a bumpTwice equals: 20\n    self assert: (a fieldAt: #count) equals: 20\n    a stop\n\n  testActorBaseMutationUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bumpTwice equals: 2\n    a stop\n\n  testActorOverrideInheritedByThirdLevel =>\n    a := SsoActorSubSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorBaseUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bar equals: \"bar:base\"\n    a stop\n\n  testValueInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub new bar equals: \"bar:sub\"\n\n  testValueBaseUnchanged => self assert: SsoValueBase new bar equals: \"bar:base\"\n\n  testClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoClassSideSub bar equals: \"bar:sub\"\n\n  testClassSideBaseUnchanged =>\n    self assert: SsoClassSideBase bar equals: \"bar:base\"\n\n  // The receiver goes through an untyped parameter: the static checker does\n  // not see a flattened provision (`bar`) on a cross-file trait user's class.\n  callBar: obj => obj bar\n\n  testFlattenedTraitActorReachesOverride =>\n    a := SsoTraitActorSub spawn\n    self assert: (self callBar: a) equals: \"bar:sub\"\n    a stop\n\n  testFlattenedTraitActorBase =>\n    a := SsoTraitActorBase spawn\n    self assert: (self callBar: a) equals: \"bar:base\"\n    a stop\n\n  testFlattenedTraitValueReachesOverride =>\n    self assert: (self callBar: SsoTraitValueSub new) equals: \"bar:sub\"\n\n  testFlattenedTraitValueBase =>\n    self assert: (self callBar: SsoTraitValueBase new) equals: \"bar:base\"\n\n  testValueClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub make equals: \"make:sub\"\n\n  testValueClassSideBaseUnchanged =>\n    self assert: SsoValueBase make equals: \"make:base\"",
+      "source": "// BT-3666: an override of `foo` in a subclass must be reached from an\n// inherited method's `self foo` (template-method pattern).\n//\n// Fixtures: stdlib/test/fixtures/self_send_override.bt\n\nTestCase subclass: SelfSendOverrideTest\n\n  testActorInheritedSelfSendReachesOverride =>\n    a := SsoActorSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorOverrideReachedWithArgument =>\n    a := SsoActorSub spawn\n    self assert: (a scaled: 3) equals: 30\n    a stop\n\n  testActorOverrideReachedFromInsideBlock =>\n    a := SsoActorSub spawn\n    self assert: (a scaledAll: #(1, 2)) equals: #(10, 20)\n    a stop\n\n  testActorOverrideThatMutatesStateIsThreaded =>\n    a := SsoActorSub spawn\n    self assert: a bumpTwice equals: 20\n    self assert: (a fieldAt: #count) equals: 20\n    a stop\n\n  testActorBaseMutationUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bumpTwice equals: 2\n    a stop\n\n  testActorOverrideInheritedByThirdLevel =>\n    a := SsoActorSubSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorBaseUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bar equals: \"bar:base\"\n    a stop\n\n  testValueInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub new bar equals: \"bar:sub\"\n\n  testValueBaseUnchanged => self assert: SsoValueBase new bar equals: \"bar:base\"\n\n  testClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoClassSideSub bar equals: \"bar:sub\"\n\n  testClassSideBaseUnchanged =>\n    self assert: SsoClassSideBase bar equals: \"bar:base\"\n\n  // A class-variable write made by an override reached from a base-class site\n  // that looks pure must not be dropped.\n  testClassSideOverrideClassVarWriteFromPureBaseSite =>\n    self assert: SsoClassVarSub bar equals: 2\n    self assert: SsoClassVarSub subHits equals: 1\n    self assert: SsoClassVarSub bar equals: 2\n    self assert: SsoClassVarSub subHits equals: 2\n\n  // The receiver goes through an untyped parameter: the static checker does\n  // not see a flattened provision (`bar`) on a cross-file trait user's class.\n  callBar: obj => obj bar\n\n  testFlattenedTraitActorReachesOverride =>\n    a := SsoTraitActorSub spawn\n    self assert: (self callBar: a) equals: \"bar:sub\"\n    a stop\n\n  testFlattenedTraitActorBase =>\n    a := SsoTraitActorBase spawn\n    self assert: (self callBar: a) equals: \"bar:base\"\n    a stop\n\n  testFlattenedTraitValueReachesOverride =>\n    self assert: (self callBar: SsoTraitValueSub new) equals: \"bar:sub\"\n\n  testFlattenedTraitValueBase =>\n    self assert: (self callBar: SsoTraitValueBase new) equals: \"bar:base\"\n\n  testValueClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub make equals: \"make:sub\"\n\n  testValueClassSideBaseUnchanged =>\n    self assert: SsoValueBase make equals: \"make:base\"",
       "explanation": "BT-3666: an override of `foo` in a subclass must be reached from an inherited method's `self foo` (template-method pattern).  Fixtures: stdlib/test/fixtures/self_send_override.bt"
     },
     {

@@ -3544,6 +3544,34 @@ fn test_class_method_self_send_in_sealed_class_stays_static() {
     );
 }
 
+/// BT-3666: a `class sealed` selector in an open class cannot be overridden,
+/// so its class-side self-send keeps the direct call.
+#[test]
+fn test_class_method_self_send_to_class_sealed_selector_stays_static() {
+    let src = "Object subclass: OpenCls\n  class sealed foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'test':'class_foo'(ClassSelf"),
+        "class sealed selector self-send must stay a direct call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'class_self_send'"),
+        "class sealed selector self-send must not use the runtime walk. Got:\n{code}"
+    );
+}
+
+/// BT-3666: an open-class self-send to a selector the base proves pure still
+/// rebinds the returned `ClassVars`, since a subclass override may write one.
+#[test]
+fn test_class_method_self_send_in_open_class_rebinds_class_vars() {
+    let src = "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'class_var_result'"),
+        "open class self-send must unwrap class_var_result. Got:\n{code}"
+    );
+}
+
 /// BT-3666: an open Actor's instance-side self-send resolves the callee
 /// module from the instance's own `'__class_mod__'` at run time, so an
 /// inherited method's `self foo` reaches a subclass override.

@@ -2176,6 +2176,13 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.name().to_string())
             .collect();
 
+        *self.sealed_class_method_selectors_mut() = class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary && m.is_sealed)
+            .map(|m| m.selector.name().to_string())
+            .collect();
+
         // Populate the class-var-mutating selector set (transitive
         // closure over same-class self-sends) — see
         // `compute_class_var_mutating_selectors`'s doc comment. Depends on
@@ -2314,6 +2321,7 @@ impl CoreErlangGenerator {
         }
         self.class_var_names_mut().clear();
         self.class_method_selectors_mut().clear();
+        self.sealed_class_method_selectors_mut().clear();
         self.set_class_slot_constructor_selector(None);
         Ok(Document::Vec(docs))
     }

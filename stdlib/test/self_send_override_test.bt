@@ -55,6 +55,14 @@ TestCase subclass: SelfSendOverrideTest
   testClassSideBaseUnchanged =>
     self assert: SsoClassSideBase bar equals: "bar:base"
 
+  // A class-variable write made by an override reached from a base-class site
+  // that looks pure must not be dropped.
+  testClassSideOverrideClassVarWriteFromPureBaseSite =>
+    self assert: SsoClassVarSub bar equals: 2
+    self assert: SsoClassVarSub subHits equals: 1
+    self assert: SsoClassVarSub bar equals: 2
+    self assert: SsoClassVarSub subHits equals: 2
+
   // The receiver goes through an untyped parameter: the static checker does
   // not see a flattened provision (`bar`) on a cross-file trait user's class.
   callBar: obj => obj bar

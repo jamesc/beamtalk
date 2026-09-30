@@ -1413,7 +1413,14 @@ impl CoreErlangGenerator {
         // reach that override (template-method pattern), so it routes through
         // the runtime hierarchy walk below instead.
         let defines_selector = self.class_method_selectors().contains(&selector_atom);
-        if defines_selector && self.is_class_sealed() {
+        // A `class sealed` selector cannot be overridden either (ADR 0129
+        // facade shape), so it keeps the direct call in an open class too.
+        if defines_selector
+            && (self.is_class_sealed()
+                || self
+                    .sealed_class_method_selectors()
+                    .contains(&selector_atom))
+        {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
             let module = self.module_name.clone();
             // Hoist any open let-chains from sub-expression class
@@ -1463,18 +1470,9 @@ impl CoreErlangGenerator {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
             let call_doc = Self::class_self_send_call_doc(&selector_atom, &cv, args_doc);
-            // Same purity rule as the static path: a selector this class proves
-            // never writes a class variable hands back the caller's `ClassVars`
-            // unchanged, so no rebind is minted and the call can sit in any
-            // nesting. (An override in a subclass that writes a class variable
-            // from such a site has that write dropped — see the language
-            // features doc, "Self-sends and overrides".)
-            if !self
-                .class_var_mutating_selectors()
-                .contains(selector_atom.as_str())
-            {
-                return Ok(self.emit_pure_class_self_send_unwrap(args_preamble, call_doc));
-            }
+            // Late-bound: a subclass override may write a class variable even
+            // when this class's own `selector` never does, so the purity
+            // shortcut is unsound here. Always rebind the returned ClassVars.
             return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }
         // Auto-generated keyword constructor for Value subclass: classes.

@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: template-method fixture; see self_send_override_test.bt.
+
+SsoClassVarBase subclass: SsoClassVarSub
+  classState: subHits = 0
+
+  class foo -> Integer =>
+    self.subHits := self.subHits + 1
+    2
+
+  class subHits -> Integer => self.subHits

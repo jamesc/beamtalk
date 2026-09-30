@@ -78,6 +78,10 @@ pub(in crate::core_erlang) struct ClassContext {
     /// Selector names of class methods in the current class.
     /// Used to route self-sends to class method functions vs module exports.
     pub class_method_selectors: std::collections::HashSet<String>,
+    /// Selector names of the class methods declared `class sealed` in the
+    /// current class (BT-3666): they cannot be overridden, so a class-side
+    /// self-send to one stays a direct call even in an open class.
+    pub sealed_class_method_selectors: std::collections::HashSet<String>,
     /// Selector names of class methods (in the current class) that are
     /// known or suspected to mutate a class variable, directly or transitively
     /// — see `block_analysis::compute_class_var_mutating_selectors`. Used to
@@ -176,6 +180,7 @@ impl ClassContext {
             class_identity: None,
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
+            sealed_class_method_selectors: std::collections::HashSet::new(),
             class_var_mutating_selectors: std::collections::HashSet::new(),
             class_var_version: VersionCounter::new(),
             class_var_mutated: false,

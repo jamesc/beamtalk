@@ -415,7 +415,7 @@ This holds for instance-side sends on actors and value classes, for class-side s
 
 `super` is the exception by design — it is always bound to the superclass of the class that *contains* the method. A `sealed` class cannot be subclassed, so its self-sends are compiled as direct calls (no lookup).
 
-Implementation notes: an actor self-send dispatches through the module named by the instance's own `'__class_mod__'` state key (a per-send map lookup); a class-side self-send in a non-sealed class walks the class hierarchy from the receiving class (`beamtalk_class_dispatch:class_self_send/4`). One limitation remains on the class side: a class-variable write made by a *subclass override* is dropped when the call site sits in a method the compiler proved never writes class variables (the base class's own view of the selector). Keep class-variable mutation in selectors the base class also mutates.
+Implementation notes: an actor self-send dispatches through the module named by the instance's own `'__class_mod__'` state key (a per-send map lookup); a class-side self-send in a non-sealed class walks the class hierarchy from the receiving class (`beamtalk_class_dispatch:class_self_send/4`). A class-variable write made by a subclass override is kept, because open-class class-side self-sends always thread the returned class variables; a selector declared `class sealed` cannot be overridden and stays a direct call.
 
 ### Value subclass: in Depth
 

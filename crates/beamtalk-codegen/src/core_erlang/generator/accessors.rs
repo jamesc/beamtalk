@@ -109,6 +109,24 @@ impl CoreErlangGenerator {
         &mut self.class_context_mut().class_method_selectors
     }
 
+    /// Returns the selectors of `class sealed` class methods (cannot be overridden).
+    pub(in crate::core_erlang) fn sealed_class_method_selectors(
+        &self,
+    ) -> &std::collections::HashSet<String> {
+        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
+            std::sync::LazyLock::new(std::collections::HashSet::new);
+        self.class_context
+            .as_ref()
+            .map_or(&*EMPTY, |ctx| &ctx.sealed_class_method_selectors)
+    }
+
+    /// Mutable access to the `class sealed` class-method selector set.
+    pub(in crate::core_erlang) fn sealed_class_method_selectors_mut(
+        &mut self,
+    ) -> &mut std::collections::HashSet<String> {
+        &mut self.class_context_mut().sealed_class_method_selectors
+    }
+
     /// Returns a reference to the class-var-mutating selectors set.
     pub(in crate::core_erlang) fn class_var_mutating_selectors(
         &self,
