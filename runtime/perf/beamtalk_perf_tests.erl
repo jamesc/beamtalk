@@ -1176,6 +1176,8 @@ kill_port_os_process(Port) ->
                 case os:type() of
                     {win32, _} -> "taskkill /F /T /PID " ++ integer_to_list(OsPid);
                     _ ->
+                        %% Note: pkill -P reaches direct children only; a shell wrapper
+                        %% between `beamtalk run` and beam.smp could leave a grandchild.
                         Pid = integer_to_list(OsPid),
                         "pkill -9 -P " ++ Pid ++ "; kill -9 " ++ Pid
                 end,

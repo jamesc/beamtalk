@@ -204,7 +204,10 @@ register(Class, Selector, Fun, Owner, Source) when
     %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
     %% exactly "some row exists under this tag" whenever the lock is free.
     with_shadow_lock(Class, fun() ->
-        beamtalk_class_shadow_flags:set(extension, Class),
+        %% Only class-object tags are read by the guard; instance-side tags
+        %% must not churn persistent_term (each erase scans all processes).
+        beamtalk_class_registry:is_class_name(Class) andalso
+            beamtalk_class_shadow_flags:set(extension, Class),
         %% Check for existing registration
         case ets:lookup(?EXTENSIONS_TABLE, Key) of
             [] ->
@@ -319,9 +322,9 @@ unregister(Class, Selector, ClassSide) when
 %% interleave between the emptiness check and the clear.
 -spec sync_shadow_flag(atom()) -> ok.
 sync_shadow_flag(EtsClass) ->
-    case has_any(EtsClass) of
-        true -> ok;
-        false -> beamtalk_class_shadow_flags:clear(extension, EtsClass)
+    case beamtalk_class_registry:is_class_name(EtsClass) andalso not has_any(EtsClass) of
+        true -> beamtalk_class_shadow_flags:clear(extension, EtsClass);
+        false -> ok
     end.
 
 -doc """

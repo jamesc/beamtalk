@@ -98,6 +98,22 @@ shadow_flag_test_() ->
                 beamtalk_class_metadata:delete(Name)
             end
         end},
+        {"instance-side register/unregister leaves no extension flag entry", fun() ->
+            ok = beamtalk_extensions:register('Object', bt3669_inst, noop_fun(), bt3669),
+            try
+                ?assertNot(beamtalk_class_shadow_flags:is_set(extension, 'Object')),
+                ?assertEqual(
+                    [],
+                    [
+                        K
+                     || {K = {beamtalk_class_shadow, extension, 'Object'}, _} <- persistent_term:get()
+                    ]
+                )
+            after
+                beamtalk_extensions:unregister('Object', bt3669_inst, false)
+            end,
+            ?assertNot(beamtalk_class_shadow_flags:is_set(extension, 'Object'))
+        end},
         {"register is serialized against an in-flight last-unregister (no false flag beside a row)",
             fun() ->
                 Tag = 'Bt3669Ser class',
