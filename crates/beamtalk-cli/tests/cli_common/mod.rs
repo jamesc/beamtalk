@@ -17,17 +17,9 @@ use std::sync::OnceLock;
 use tempfile::TempDir;
 
 /// Resolve the workspace root (repo root) from `CARGO_MANIFEST_DIR`.
-///
-/// `CARGO_MANIFEST_DIR` points at `crates/beamtalk-cli`, so two `parent()`
-/// calls reach the repo root.
 #[allow(dead_code)]
 pub fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 /// Path to the `beamtalk` binary, for tests that spawn it via
@@ -50,6 +42,15 @@ pub fn beamtalk_binary() -> PathBuf {
 #[allow(dead_code)] // some test binaries don't call every helper
 pub fn beamtalk() -> Command {
     let mut cmd = Command::cargo_bin("beamtalk").expect("beamtalk binary built by cargo");
+    // Pin the compiler port binary so the runtime can find it (tests run against
+    // fixture projects in temp dirs that have no Cargo.toml or target/ directory).
+    // The runtime would normally search for it relative to the project root, but
+    // falls back to this explicit path if set.
+    cmd.env(
+        "BEAMTALK_COMPILER_PORT_BIN",
+        beamtalk_workspace::resolve_sibling_binary("beamtalk-compiler-port")
+            .expect("beamtalk-compiler-port binary not found; run `cargo build` first"),
+    );
     // Pin the runtime/sysroot to this workspace so tests do not depend on a
     // system-installed beamtalk. `repl_startup::find_runtime_dir_with_layout`
     // honours `BEAMTALK_RUNTIME_DIR` first, which keeps `doctor`/`build`/`test`
@@ -176,15 +177,7 @@ fn sweep_stale_cache_dirs_once() {
 /// Locate the workspace `runtime/` directory.
 fn runtime_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        // crates/beamtalk-cli -> crates -> repo root -> runtime
-        manifest
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|root| root.join("runtime"))
-            .expect("workspace root has runtime/ directory")
-    })
+    DIR.get_or_init(|| beamtalk_workspace::cargo_workspace_root!().join("runtime"))
 }
 
 /// Create a fresh temp directory holding a minimal Beamtalk library project.

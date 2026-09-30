@@ -359,14 +359,9 @@ mod completion_word_boundary_tests {
     /// `beamtalk_repl_ops_dev_tests:is_identifier_char_matches_shared_corpus_test/0`.
     #[test]
     fn completion_word_char_matches_shared_corpus() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
-            .join(
-                "runtime/apps/beamtalk_workspace/test/fixtures/completion_word_boundary_corpus.json",
-            );
+        let path = beamtalk_workspace::cargo_workspace_root!().join(
+            "runtime/apps/beamtalk_workspace/test/fixtures/completion_word_boundary_corpus.json",
+        );
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
         let cases: Vec<serde_json::Value> =

@@ -73,14 +73,8 @@ fn repl_timeout() -> Duration {
     Duration::from_secs(secs)
 }
 
-/// Find the workspace root directory.
 fn workspace_root() -> PathBuf {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    PathBuf::from(&manifest_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("Cannot find workspace root")
-        .to_path_buf()
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 /// Find the runtime directory.

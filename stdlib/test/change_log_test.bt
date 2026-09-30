@@ -438,7 +438,7 @@ TestCase subclass: ChangeLogTest
 
   testEnumerableDetectIfNone =>
     found := self mixedLog detect: [:e | e authorKind == #agent] ifNone: [nil]
-    self assert: found notNil
+    self assert: found selector equals: #decrement
     self assert: (self emptyLog detect: [:e |
       true
     ] ifNone: [#none]) equals: #none

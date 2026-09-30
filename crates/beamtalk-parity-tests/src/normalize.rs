@@ -108,21 +108,11 @@ fn collapse_whitespace(s: &str) -> String {
     out.trim().to_string()
 }
 
-/// Cached project root (the directory containing `Cargo.toml` workspace
-/// manifest). Used by drivers when resolving binary paths.
+/// Cached workspace root (the directory containing the top-level `Cargo.toml`).
 pub fn project_root() -> &'static std::path::Path {
     static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
-    ROOT.get_or_init(|| {
-        // CARGO_MANIFEST_DIR for this crate is `crates/beamtalk-parity-tests`.
-        let manifest =
-            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set during test");
-        std::path::PathBuf::from(manifest)
-            .parent()
-            .and_then(|p| p.parent())
-            .expect("workspace root has at least two ancestors")
-            .to_path_buf()
-    })
-    .as_path()
+    ROOT.get_or_init(|| beamtalk_workspace::cargo_workspace_root!())
+        .as_path()
 }
 
 #[cfg(test)]

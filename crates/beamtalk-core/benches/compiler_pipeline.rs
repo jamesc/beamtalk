@@ -8,8 +8,6 @@
 //!
 //! Run with: `just bench` or `cargo bench -p beamtalk-core`
 
-use std::path::Path;
-
 use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -25,11 +23,7 @@ use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
 /// Load a fixture file relative to the workspace root.
 fn load_fixture(relative_path: &str) -> String {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
+    let workspace = beamtalk_workspace::cargo_workspace_root!();
     let path = workspace.join(relative_path);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("Failed to read fixture {}: {e}", path.display()))

@@ -74,3 +74,19 @@ TestCase subclass: AtomicCounterTest
     self.counter incrementBy: 10
     self.counter decrementBy: 3
     self assert: self.counter value equals: 7
+
+  testDecrementStaleCounterRaisesError =>
+    self.counter delete
+    self should: [self.counter decrement] raise: #stale_counter
+
+  testIncrementByStaleCounterRaisesError =>
+    self.counter delete
+    self should: [self.counter incrementBy: 1] raise: #stale_counter
+
+  testDecrementByStaleCounterRaisesError =>
+    self.counter delete
+    self should: [self.counter decrementBy: 1] raise: #stale_counter
+
+  testResetStaleCounterRaisesError =>
+    self.counter delete
+    self should: [self.counter reset] raise: #stale_counter
