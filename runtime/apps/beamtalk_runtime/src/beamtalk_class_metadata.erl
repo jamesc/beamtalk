@@ -265,6 +265,8 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
     %% row yet) before overwriting it, so the subclass index can drop the
     %% stale edge from the old superclass if this call changes it.
     OldSuperclass = field(Name, #class_metadata.superclass),
+    %% BT-3669: a full-row write resets has_runtime_class_methods to false.
+    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     try
         ets:insert(?TABLE, Row),
         sync_subclass_index(Name, OldSuperclass, Superclass),
@@ -349,6 +351,7 @@ delete(Name) ->
     %% a class that is removed (or whose process terminates) leaves no stale
     %% dispatch entries behind.
     delete_class_method_funs(Name),
+    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     %% Read the superclass before the row disappears, so the reverse
     %% edge {Superclass, Name} can be dropped from the subclass index too —
     %% otherwise Name would linger forever as a phantom subclass of its old
@@ -730,16 +733,11 @@ lookup_class_method_fun(Name, Selector) ->
         false ->
             error;
         true ->
-            case ets:info(?FUN_TABLE) of
-                undefined ->
-                    error;
-                _ ->
-                    try ets:lookup(?FUN_TABLE, {Name, Selector}) of
-                        [{_, Info}] -> {ok, Info};
-                        [] -> error
-                    catch
-                        error:badarg -> error
-                    end
+            try ets:lookup(?FUN_TABLE, {Name, Selector}) of
+                [{_, Info}] -> {ok, Info};
+                [] -> error
+            catch
+                error:badarg -> error
             end
     end.
 
@@ -788,6 +786,8 @@ Leaves `module` and `superclass` untouched. A no-op if the row is absent.
 -spec set_runtime_class_methods(class_name(), [selector()]) -> ok.
 set_runtime_class_methods(Name, Selectors) ->
     new(),
+    %% BT-3669: raise the compiled-fast-path shadow flag before the gate opens.
+    beamtalk_class_shadow_flags:set(runtime_fun, Name),
     try
         ets:update_element(?TABLE, Name, [
             {#class_metadata.selectors, Selectors},
@@ -811,6 +811,7 @@ A no-op if the row is absent.
 -spec reset_runtime_class_methods(class_name()) -> ok.
 reset_runtime_class_methods(Name) ->
     new(),
+    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     try
         ets:update_element(?TABLE, Name, [
             {#class_metadata.has_runtime_class_methods, false}
@@ -886,14 +887,10 @@ field(Name, Pos) ->
 
 -spec row(class_name()) -> {ok, #class_metadata{}} | not_found.
 row(Name) ->
-    case ets:info(?TABLE) of
-        undefined ->
-            not_found;
-        _ ->
-            try ets:lookup(?TABLE, Name) of
-                [Row] -> {ok, Row};
-                [] -> not_found
-            catch
-                error:badarg -> not_found
-            end
+    %% No `ets:info/1` pre-check (see field/2): a missing table raises `badarg`.
+    try ets:lookup(?TABLE, Name) of
+        [Row] -> {ok, Row};
+        [] -> not_found
+    catch
+        error:badarg -> not_found
     end.

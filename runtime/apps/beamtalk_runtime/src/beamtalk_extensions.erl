@@ -199,6 +199,12 @@ register(Class, Selector, Fun, Owner, Source) when
 ->
     Key = {Class, Selector},
 
+    %% BT-3669: raise the "class has shadows" flag BEFORE the row becomes
+    %% visible (and again after, see below) so the compiled class-side
+    %% self-send guard can never see the row with the flag unset, even when a
+    %% concurrent unregister clears the flag between the two.
+    beamtalk_class_shadow_flags:set(extension, Class),
+
     %% Check for existing registration
     case ets:lookup(?EXTENSIONS_TABLE, Key) of
         [] ->
@@ -226,6 +232,8 @@ register(Class, Selector, Fun, Owner, Source) when
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
             maybe_store_source(Key, Source)
     end,
+
+    beamtalk_class_shadow_flags:set(extension, Class),
 
     %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
@@ -294,6 +302,7 @@ unregister(Class, Selector, ClassSide) when
     Key = {EtsClass, Selector},
     ets:delete(?EXTENSIONS_TABLE, Key),
     ets:delete(?SOURCES_TABLE, Key),
+    sync_shadow_flag(EtsClass),
     %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),
@@ -302,6 +311,28 @@ unregister(Class, Selector, ClassSide) when
     %% no-op if the xref gen_server is unavailable.
     safe_xref(fun() -> beamtalk_xref:purge_method(EtsClass, false, Selector) end),
     ok.
+
+%% BT-3669: drop the class's "has shadows" flag once its last extension is gone.
+%% Lock-free against a concurrent `register/5`: the registrant sets the flag
+%% before inserting (and again after), so if it inserts after our emptiness
+%% check the flag is re-raised after our erase; if it inserted before, the
+%% re-check below sees the row and restores the flag.
+-spec sync_shadow_flag(atom()) -> ok.
+sync_shadow_flag(EtsClass) ->
+    case has_any(EtsClass) of
+        true ->
+            ok;
+        false ->
+            beamtalk_class_shadow_flags:clear(extension, EtsClass),
+            case has_any(EtsClass) of
+                true -> beamtalk_class_shadow_flags:set(extension, EtsClass);
+                false -> ok
+            end
+    end.
+
+-spec has_any(atom()) -> boolean().
+has_any(Class) ->
+    ets:select_count(?EXTENSIONS_TABLE, [{{{Class, '_'}, '_', '_'}, [], [true]}]) > 0.
 
 -doc """
 Purge every extension registered under the class key `Class`.
