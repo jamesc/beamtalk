@@ -432,6 +432,70 @@ stale_counter_value_test() ->
         beamtalk_atomic_counter:value(C)
     ).
 
+stale_counter_decrement_test() ->
+    (try
+        ets:delete(bt_ac_test_stale_decr)
+    catch
+        _:_ -> ok
+    end),
+    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_decr),
+    beamtalk_atomic_counter:delete(C),
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
+        },
+        beamtalk_atomic_counter:decrement(C)
+    ).
+
+stale_counter_incrementBy_test() ->
+    (try
+        ets:delete(bt_ac_test_stale_incrby)
+    catch
+        _:_ -> ok
+    end),
+    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_incrby),
+    beamtalk_atomic_counter:delete(C),
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
+        },
+        beamtalk_atomic_counter:incrementBy(C, 1)
+    ).
+
+stale_counter_decrementBy_test() ->
+    (try
+        ets:delete(bt_ac_test_stale_decrby)
+    catch
+        _:_ -> ok
+    end),
+    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_decrby),
+    beamtalk_atomic_counter:delete(C),
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
+        },
+        beamtalk_atomic_counter:decrementBy(C, 1)
+    ).
+
+stale_counter_reset_test() ->
+    (try
+        ets:delete(bt_ac_test_stale_reset)
+    catch
+        _:_ -> ok
+    end),
+    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_reset),
+    beamtalk_atomic_counter:delete(C),
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
+        },
+        beamtalk_atomic_counter:reset(C)
+    ).
+
 %%% ============================================================================
 %%% Concurrent increment test
 %%% ============================================================================
