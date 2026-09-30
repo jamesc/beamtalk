@@ -522,15 +522,17 @@ set_git_toplevel(ProjectPath, Toplevel) when is_binary(ProjectPath), is_binary(T
             ok
     end.
 
-%% @doc Generate a workspace id for an anonymous foreground (REPL) workspace.
-%%
-%% BT-3670: ids must be unique across runs, because `metadata.json' under
-%% `~/.beamtalk/workspaces/<id>/' is restored when the id matches (that is
-%% intended for explicitly named/persistent workspaces only). A bare
-%% `erlang:unique_integer/1' is a small per-VM counter and collided across
-%% runs, resurrecting settings/timestamps/sources from an unrelated session
-%% (ADR 0129: no image mechanics). The OS pid, wall-clock microseconds and a
-%% per-VM counter together make a collision across runs practically impossible.
+-doc """
+Generate a workspace id for an anonymous foreground (REPL) workspace.
+
+BT-3670: ids must be unique across runs, because `metadata.json` under
+`~/.beamtalk/workspaces/<id>/` is restored when the id matches (that is
+intended for explicitly named/persistent workspaces only). A bare
+`erlang:unique_integer/1` is a small per-VM counter and collided across
+runs, resurrecting settings/timestamps/sources from an unrelated session
+(ADR 0129: no image mechanics). The OS pid, wall-clock microseconds and a
+per-VM counter together make a collision across runs practically impossible.
+""".
 -spec new_foreground_id() -> binary().
 new_foreground_id() ->
     iolist_to_binary([
@@ -869,8 +871,8 @@ load_metadata_from_disk(State) ->
                         end,
                     %% BT-3664: `project_path' is deliberately NOT restored from
                     %% disk. It is a runtime fact supplied by the launcher
-                    %% (ADR 0129: no image mechanics), and workspace ids are
-                    %% small per-VM counters, so a stale metadata.json from an
+                    %% (ADR 0129: no image mechanics), and a named workspace's id
+                    %% is reused across runs, so a stale metadata.json from an
                     %% unrelated run must never override it (it made `sync`
                     %% name project modules `bt@lib_thing` instead of
                     %% `bt@<pkg>@lib_thing`). The launcher's value stays in
