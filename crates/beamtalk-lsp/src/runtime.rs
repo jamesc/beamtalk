@@ -1199,11 +1199,7 @@ mod tests {
     /// comment).
     #[test]
     fn from_wire_matches_shared_wire_corpus() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
+        let path = beamtalk_workspace::cargo_workspace_root!()
             .join("runtime/apps/beamtalk_workspace/test/fixtures/flush_file_kind_wire_corpus.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));

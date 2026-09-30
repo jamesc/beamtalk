@@ -37,6 +37,11 @@ insta.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 futures-util = "0.3"
+# why: `cargo_workspace_root!()` macro — shared leaf for the identical
+# `CARGO_MANIFEST_DIR/../..` walk used by corpus fixture tests (see
+# docs/development/architecture-principles.md § Duplication &
+# the Shared-Leaf-Module Pattern). Dev-only: only used in `#[cfg(test)]`.
+beamtalk-workspace.workspace = true
 
 [features]
 default = []

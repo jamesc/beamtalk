@@ -36,12 +36,7 @@ use crate::source_analysis::method_span::MethodSide;
 /// `enumerate_methods` above already does for `unparse` — see this module's
 /// doc for why a second copy of this computation is not the fix.
 pub(crate) fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf()
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 /// Recursively collects every `.bt` file under `dir`.

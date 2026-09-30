@@ -3354,15 +3354,10 @@ mod tests {
         );
     }
 
-    /// Project root, two levels up from this crate's manifest directory —
-    /// mirrors `erlfmt.rs`'s `project_root()` test helper.
     fn project_root() -> Utf8PathBuf {
-        let manifest_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        manifest_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .expect("project root")
-            .to_owned()
+        beamtalk_workspace::cargo_workspace_root!()
+            .try_into()
+            .expect("workspace root is valid UTF-8")
     }
 
     /// `beamtalk_primitive:is_string_binary_shared_selector/1` hand-lists

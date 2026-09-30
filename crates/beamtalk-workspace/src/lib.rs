@@ -21,6 +21,37 @@ use sha2::{Digest, Sha256};
 /// deregistration polling, registration lookup.
 pub mod epmd;
 
+/// Returns the Cargo workspace root for the calling crate: two levels up from
+/// [`CARGO_MANIFEST_DIR`](std::env::var), which cargo sets to the manifest
+/// directory of the crate being compiled or tested.
+///
+/// This is a `macro_rules!` macro (not a function) because
+/// `env!("CARGO_MANIFEST_DIR")` is a compile-time expansion that resolves to
+/// the **calling crate**'s manifest directory — a library function would
+/// capture `beamtalk-workspace`'s own directory instead.
+///
+/// The shared leaf under every "locate the workspace root in a test/bench
+/// helper" need in these tools — `beamtalk-cli`, `beamtalk-core`,
+/// `beamtalk-language-service`, and `beamtalk-parity-tests` all need the
+/// identical `CARGO_MANIFEST_DIR/../..` walk and must not each carry their own
+/// copy (see `docs/development/architecture-principles.md` § Duplication &
+/// the Shared-Leaf-Module Pattern).
+///
+/// # Panics
+///
+/// Panics if the path does not have at least two ancestor directories (i.e.,
+/// the crate is not nested two levels below the workspace root).
+#[macro_export]
+macro_rules! cargo_workspace_root {
+    () => {
+        ::std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root is two levels above CARGO_MANIFEST_DIR")
+            .to_path_buf()
+    };
+}
+
 /// Lowercase-hex-encode a byte slice.
 ///
 /// The shared leaf under every hash-to-hex-string need in these tools —
