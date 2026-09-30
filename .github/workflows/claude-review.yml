@@ -74,7 +74,8 @@ jobs:
         env:
           FULL_RANGE: ${{ steps.ranges.outputs.full }}
         run: |
-          # Config-only PRs get the cheaper Haiku model; anything touching code OR docs
+          # Config-only PRs get the cheaper Haiku model; PRs touching complex code paths
+          # (see complex_re below) get Opus; anything else touching code OR docs
           # (incl. ADRs under docs/, whose review is valuable) stays on Sonnet. Unknown
           # extensions default to Sonnet — never silently downgrade a substantive change.
           # Sonnet 5 uses a new tokenizer (~30% more tokens for the same text than
@@ -88,6 +89,13 @@ jobs:
           config_re='\.(toml|ya?ml|json|lock|cfg|ini|conf|config)$|(^|/)\.(gitignore|gitattributes|editorconfig|dockerignore)$|^$'
           if [ -n "${files}" ] && ! printf '%s\n' "${files}" | grep -qvE "${config_re}"; then
             model='claude-haiku-4-5'
+          fi
+          # Complex, high-risk code paths (codegen incl. ThreadedIr state-threading,
+          # semantic analysis, the Erlang runtime) get Opus. A missed bug there is costly,
+          # and these are the PRs where the extra review depth pays for itself.
+          complex_re='^(crates/beamtalk-codegen/|crates/beamtalk-core/src/semantic_analysis/|runtime/apps/beamtalk_runtime/src/)'
+          if printf '%s\n' "${files}" | grep -qE "${complex_re}"; then
+            model='claude-opus-5-5'
           fi
           echo "Selected model: ${model}"
           echo "model=${model}" >> "$GITHUB_OUTPUT"
