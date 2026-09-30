@@ -35,6 +35,7 @@ fn shared_provision_diagnostic_is_collected_once_across_users() {
         ProtocolSource {
             path: Some(protocol_path.as_str().into()),
             text: BROKEN.into(),
+            package: Some("test_pkg".into()),
         },
     )]
     .into_iter()

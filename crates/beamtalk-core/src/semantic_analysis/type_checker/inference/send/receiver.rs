@@ -303,6 +303,16 @@ impl TypeChecker {
         if let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() {
             let class_name = &name.name;
 
+            // ADR 0127 §3 "Name resolution": `json@Parser` where this hierarchy
+            // only describes another package's `Parser` — nothing to check
+            // against, and the user's same-named class must not capture it.
+            if hierarchy.qualified_ref_names_other_class(
+                class_name,
+                package.as_ref().map(|p| p.name.as_str()),
+            ) {
+                return InferredType::Dynamic(DynamicReason::Unknown);
+            }
+
             // ADR 0075: `Erlang <module>` — return ErlangModule<module_name> type
             // to enable FFI call type inference on the outer message send.
             // Class protocol selectors (class, new, superclass, etc.)

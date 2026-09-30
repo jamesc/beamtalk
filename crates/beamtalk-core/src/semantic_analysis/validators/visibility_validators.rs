@@ -22,14 +22,14 @@
 //! whose expansion transitively reaches an internal class or alias is a leak
 //! at its own declaration — see [`check_alias_leaked_visibility`].
 
-use crate::ast::{Expression, Module, TypeAnnotation};
+use crate::ast::{Expression, MethodDefinition, Module, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::DiagnosticCategory;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Checks all class-level visibility rules for the module.
 ///
@@ -40,10 +40,17 @@ pub fn check_class_visibility(
     hierarchy: &ClassHierarchy,
     alias_registry: &AliasRegistry,
     current_package: Option<&str>,
+    provision_packages: &HashMap<EcoString, EcoString>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(current_pkg) = current_package else {
         return;
+    };
+    // Provisions flattened in from a protocol in another package are checked
+    // against *that* package by `check_provision_visibility`, not here.
+    let is_foreign_provision = |class: &crate::ast::ClassDefinition, method: &MethodDefinition| {
+        foreign_provision_package(class, method, hierarchy, provision_packages, current_pkg)
+            .is_some()
     };
 
     for class in &module.classes {
@@ -71,6 +78,9 @@ pub fn check_class_visibility(
 
         // E0401: type annotations in methods (both instance and class-side)
         for method in class.methods.iter().chain(class.class_methods.iter()) {
+            if is_foreign_provision(class, method) {
+                continue;
+            }
             // Parameter types
             for param in &method.parameters {
                 if let Some(ref ty) = param.type_annotation {
@@ -97,6 +107,9 @@ pub fn check_class_visibility(
     }
     for class in &module.classes {
         for method in class.methods.iter().chain(class.class_methods.iter()) {
+            if is_foreign_provision(class, method) {
+                continue;
+            }
             for stmt in &method.body {
                 check_expression_cross_package(
                     &stmt.expression,
@@ -142,6 +155,95 @@ pub fn check_class_visibility(
     }
 }
 
+/// The package a flattened provision was declared in, when it differs from
+/// `current_pkg` and is known (ADR 0127 §3, "Name resolution").
+fn foreign_provision_package<'a>(
+    class: &crate::ast::ClassDefinition,
+    method: &MethodDefinition,
+    hierarchy: &ClassHierarchy,
+    provision_packages: &'a HashMap<EcoString, EcoString>,
+    current_pkg: &str,
+) -> Option<&'a EcoString> {
+    if method.is_class_method {
+        return None;
+    }
+    let selector = method.selector.name();
+    let origin = hierarchy
+        .get_class(&class.name.name)?
+        .methods
+        .iter()
+        .find(|m| m.selector == selector)?
+        .origin
+        .as_ref()?;
+    provision_packages
+        .get(origin)
+        .filter(|pkg| pkg.as_str() != current_pkg)
+}
+
+/// E0401 for flattened provisions: their references are checked against the
+/// *protocol's* package (ADR 0127 §3, "Name resolution"), so a provision may
+/// use its own package's `internal` classes but not another package's. The
+/// diagnostic lies in the protocol's file and is attributed to it (once
+/// merged across users, [`crate::source_analysis::merge_provision_diagnostics`]).
+///
+/// `provision_packages` maps a protocol name to its declaring package.
+pub fn check_provision_visibility(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    current_package: Option<&str>,
+    provision_packages: &HashMap<EcoString, EcoString>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(current_pkg) = current_package else {
+        return;
+    };
+    for class in &module.classes {
+        for method in &class.methods {
+            let Some(protocol_pkg) = foreign_provision_package(
+                class,
+                method,
+                hierarchy,
+                provision_packages,
+                current_pkg,
+            ) else {
+                continue;
+            };
+            let Some(protocol) = hierarchy
+                .get_class(&class.name.name)
+                .and_then(|c| {
+                    c.methods
+                        .iter()
+                        .find(|m| m.selector == method.selector.name())
+                })
+                .and_then(|m| m.origin.clone())
+            else {
+                continue;
+            };
+            let mut found = Vec::new();
+            for param in &method.parameters {
+                if let Some(ref ty) = param.type_annotation {
+                    check_type_annotation_cross_package(ty, protocol_pkg, hierarchy, &mut found);
+                }
+            }
+            if let Some(ref ty) = method.return_type {
+                check_type_annotation_cross_package(ty, protocol_pkg, hierarchy, &mut found);
+            }
+            for stmt in &method.body {
+                check_expression_cross_package(
+                    &stmt.expression,
+                    protocol_pkg,
+                    hierarchy,
+                    &mut found,
+                );
+            }
+            for mut diagnostic in found {
+                diagnostic.set_provision_origin(protocol.clone(), class.name.name.clone());
+                diagnostics.push(diagnostic);
+            }
+        }
+    }
+}
+
 /// Recursively checks expressions for cross-package internal class references (E0401).
 ///
 /// Walks all `ClassReference` nodes in the expression tree. This catches
@@ -155,8 +257,15 @@ fn check_expression_cross_package(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match expr {
-        Expression::ClassReference { name, .. } => {
-            check_cross_package_ref(&name.name, name.span, current_pkg, hierarchy, diagnostics);
+        Expression::ClassReference { name, package, .. } => {
+            check_qualified_cross_package_ref(
+                &name.name,
+                package.as_ref().map(|p| p.name.as_str()),
+                name.span,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
         }
 
         Expression::MessageSend {
@@ -270,6 +379,24 @@ fn check_cross_package_ref(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    check_qualified_cross_package_ref(class_name, None, span, current_pkg, hierarchy, diagnostics);
+}
+
+/// As [`check_cross_package_ref`], for a reference that may carry a package
+/// qualifier (`json@Parser`). A qualified reference naming a class other than
+/// the one the hierarchy holds under the bare name is not that class — there
+/// is nothing to enforce against (ADR 0127 §3, "Name resolution").
+fn check_qualified_cross_package_ref(
+    class_name: &ecow::EcoString,
+    qualifier: Option<&str>,
+    span: Span,
+    current_pkg: &str,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if hierarchy.qualified_ref_names_other_class(class_name, qualifier) {
+        return;
+    }
     let Some(info) = hierarchy.get_class(class_name) else {
         return; // Unknown class — other passes handle this
     };
@@ -1168,6 +1295,7 @@ mod tests {
             &h,
             &AliasRegistry::new(),
             Some("my_app"),
+            &HashMap::new(),
             &mut diags,
         );
 
@@ -1191,7 +1319,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let errors: Vec<_> = diags
             .iter()
@@ -1244,6 +1379,7 @@ mod tests {
             &h,
             &AliasRegistry::new(),
             Some("my_app"),
+            &HashMap::new(),
             &mut diags,
         );
 
@@ -1267,6 +1403,7 @@ mod tests {
             &h,
             &AliasRegistry::new(),
             Some("my_app"),
+            &HashMap::new(),
             &mut diags,
         );
 
@@ -1288,6 +1425,7 @@ mod tests {
             &h,
             &AliasRegistry::new(),
             Some("my_app"),
+            &HashMap::new(),
             &mut diags,
         );
 
@@ -1304,7 +1442,14 @@ mod tests {
         let module = parse_bt("ParserState subclass: MyParser\n  parse => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), None, &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            None,
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.is_empty(),
@@ -1322,6 +1467,7 @@ mod tests {
             &h,
             &AliasRegistry::new(),
             Some("my_app"),
+            &HashMap::new(),
             &mut diags,
         );
 
@@ -1344,6 +1490,7 @@ mod tests {
             &h,
             &AliasRegistry::new(),
             Some("my_app"),
+            &HashMap::new(),
             &mut diags,
         );
 
@@ -1366,6 +1513,7 @@ mod tests {
             &h,
             &AliasRegistry::new(),
             Some("my_app"),
+            &HashMap::new(),
             &mut diags,
         );
 
@@ -1391,7 +1539,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1414,7 +1569,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1437,7 +1599,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1461,7 +1630,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let leaked: Vec<_> = diags
             .iter()
@@ -1488,7 +1664,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let leaked: Vec<_> = diags
             .iter()
@@ -1514,7 +1697,14 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &AliasRegistry::new(), None, &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            None,
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.is_empty(),
@@ -1553,7 +1743,14 @@ mod tests {
         );
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &alias_registry,
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1573,7 +1770,14 @@ mod tests {
         );
         let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &alias_registry,
+            Some("json"),
+            &HashMap::new(),
+            &mut diags,
+        );
 
         let leaked: Vec<_> = diags
             .iter()

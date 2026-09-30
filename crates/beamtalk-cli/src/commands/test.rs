@@ -341,6 +341,7 @@ fn build_fixture_class_indexes(
                 beamtalk_core::semantic_analysis::ProtocolSource {
                     path: Some(file.as_str().into()),
                     text: source.as_str().into(),
+                    package: None,
                 },
             );
             protocol_defs.defs.push(protocol.clone());

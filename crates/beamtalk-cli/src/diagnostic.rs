@@ -356,6 +356,7 @@ mod tests {
             ProtocolSource {
                 path: Some("src/broken.bt".into()),
                 text: protocol_text.into(),
+                package: None,
             },
         )]
         .into_iter()
