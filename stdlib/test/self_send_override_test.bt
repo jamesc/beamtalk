@@ -74,6 +74,13 @@ TestCase subclass: SelfSendOverrideTest
 
   testClassSideNestedBaseUnchanged => self assert: SsoNestedBase baz equals: 1
 
+  // The base class declares no classState:, so its methods must still hand
+  // back the ClassVars an override rebound.
+  testClassSideOverrideClassVarWriteFromClassVarLessBase =>
+    before := SsoNoVarsSub hits
+    self assert: SsoNoVarsSub bar equals: 2
+    self assert: SsoNoVarsSub hits equals: before + 1
+
   // A class-variable write made by an override reached from a base-class site
   // that looks pure must not be dropped.
   testClassSideOverrideClassVarWriteFromPureBaseSite =>

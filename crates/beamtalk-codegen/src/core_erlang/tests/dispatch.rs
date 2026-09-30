@@ -3599,10 +3599,17 @@ fn test_open_class_static_class_self_send_rebinds_class_vars() {
     ] {
         let src = format!("Object subclass: OpenCls\n  {body}");
         let code = codegen_source(&src);
+        // Slice just `class_baz`: `class_bar` itself always rebinds.
+        let start = code
+            .find("'class_baz'/2 = fun")
+            .expect("class_baz function present");
+        let rest = &code[start..];
+        let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
+        let baz = &rest[..end];
         assert!(
-            code.contains("'class_var_result'")
-                && code.contains("call 'test':'class_bar'(ClassSelf"),
-            "static open-class call must unwrap class_var_result. Got:\n{code}"
+            baz.contains("call 'test':'class_bar'(ClassSelf")
+                && baz.contains("let ClassVars1 = case"),
+            "static open-class call must rebind ClassVars. Got:\n{baz}"
         );
     }
 }

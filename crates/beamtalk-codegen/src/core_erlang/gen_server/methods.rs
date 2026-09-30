@@ -2264,8 +2264,13 @@ impl CoreErlangGenerator {
                 // Capture the result so `frame`'s `Drop` (pop scope, clear
                 // `in_class_method`, restore the selector) runs before the
                 // `?` below propagates an error, same as on the success path.
-                let body_stmts_result =
-                    frame.lower_class_method_body(method, !class.class_variables.is_empty());
+                // BT-3666: in a non-sealed class a late-bound `self foo` may reach a
+                // subclass override that declares class variables this class does
+                // not, so bodies are lowered as if class vars may be present; the
+                // `{class_var_result, ..}` wrap still only happens when a rebind
+                // actually occurred (`class_var_mutated`).
+                let has_class_vars = !class.class_variables.is_empty() || !frame.is_class_sealed();
+                let body_stmts_result = frame.lower_class_method_body(method, has_class_vars);
                 frame.set_current_nlr_token(None);
                 let mut body_stmts = body_stmts_result?;
                 // Use class_var_mutated (not just whether class vars are declared)
@@ -2533,7 +2538,8 @@ impl CoreErlangGenerator {
             None
         };
 
-        let has_class_vars = !self.class_var_names().is_empty();
+        // BT-3666: see `generate_class_method_functions` — builder classes are open.
+        let has_class_vars = !self.class_var_names().is_empty() || !self.is_class_sealed();
         let body_doc: Document<'static> = if method.body.is_empty() {
             self.set_current_nlr_token(None);
             docvec!["ClassSelf"]

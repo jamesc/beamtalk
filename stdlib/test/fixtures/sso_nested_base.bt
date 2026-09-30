@@ -6,7 +6,6 @@
 // self_send_override_test.bt.
 
 Object subclass: SsoNestedBase
-  classState: baseHits = 0
 
   class foo -> Integer => 1
 
