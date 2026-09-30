@@ -835,7 +835,7 @@ load_metadata_from_disk(State) ->
                     ),
                     ValidatedModules = maps:from_list(ModuleAtoms),
 
-                    %% Restore timestamps and project path if present
+                    %% Restore timestamps if present
                     CreatedAt =
                         case maps:get(<<"created_at">>, Map, State#state.created_at) of
                             CreatedAtValue when is_integer(CreatedAtValue) -> CreatedAtValue;
@@ -846,11 +846,14 @@ load_metadata_from_disk(State) ->
                             LastActiveValue when is_integer(LastActiveValue) -> LastActiveValue;
                             _ -> State#state.last_activity
                         end,
-                    ProjectPath =
-                        case maps:get(<<"project_path">>, Map, State#state.project_path) of
-                            ProjectPathValue when is_binary(ProjectPathValue) -> ProjectPathValue;
-                            _ -> State#state.project_path
-                        end,
+                    %% BT-3664: `project_path' is deliberately NOT restored from
+                    %% disk. It is a runtime fact supplied by the launcher
+                    %% (ADR 0129: no image mechanics), and workspace ids are
+                    %% small per-VM counters, so a stale metadata.json from an
+                    %% unrelated run must never override it (it made `sync`
+                    %% name project modules `bt@lib_thing` instead of
+                    %% `bt@<pkg>@lib_thing`). The launcher's value stays in
+                    %% State#state.project_path.
 
                     %% Restore class sources map (binary class name → source string).
                     %% an entry survives only if (a) the class it
@@ -898,7 +901,6 @@ load_metadata_from_disk(State) ->
                     Settings = restore_settings(maps:get(<<"settings">>, Map, #{})),
 
                     State#state{
-                        project_path = ProjectPath,
                         created_at = CreatedAt,
                         last_activity = LastActive,
                         % Always start fresh
