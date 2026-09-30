@@ -463,6 +463,86 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
         _ = file:del_dir(MetaDir)
     end.
 
+new_foreground_id_is_unique_test() ->
+    %% BT-3670: foreground ids must not repeat across runs.
+    A = beamtalk_workspace_meta:new_foreground_id(),
+    B = beamtalk_workspace_meta:new_foreground_id(),
+    ?assertNotEqual(A, B),
+    ?assertMatch(<<"foreground_", _/binary>>, A),
+    %% Embeds the OS pid so concurrent VMs can never share an id.
+    ?assertNotEqual(nomatch, binary:match(A, list_to_binary(os:getpid()))),
+    %% Not the old bare per-VM counter form `foreground_<integer>'.
+    %% (foreground, pid, microseconds, counter).
+    ?assertEqual(4, length(binary:split(A, <<"_">>, [global]))).
+
+stale_metadata_under_colliding_id_does_not_leak_into_foreground_workspace_test() ->
+    %% BT-3670: a stale metadata.json left under an old-style colliding id
+    %% (`foreground_1') must not affect a workspace started with a fresh id.
+    OldId = <<"foreground_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    OldFile = metadata_path_for(OldId),
+    OldDir = filename:dirname(OldFile),
+    filelib:ensure_dir(OldFile),
+    ok = file:write_file(
+        OldFile,
+        json:encode(#{
+            <<"created_at">> => 1,
+            <<"last_active">> => 1,
+            <<"settings">> => #{<<"autoflush">> => true}
+        })
+    ),
+    NewId = beamtalk_workspace_meta:new_foreground_id(),
+    ?assertNotEqual(OldId, NewId),
+    NewFile = metadata_path_for(NewId),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => NewId,
+        project_path => <<"bt_test_3670_project">>,
+        created_at => 2000000
+    }),
+    try
+        {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+        ?assertEqual(2000000, maps:get(created_at, Meta)),
+        ?assert(maps:get(last_activity, Meta) > 1),
+        ?assertEqual(unset, beamtalk_workspace_meta:get_setting(autoflush, unset))
+    after
+        gen_server:stop(Pid),
+        _ = file:delete(OldFile),
+        _ = file:del_dir(OldDir),
+        _ = file:delete(NewFile),
+        _ = file:del_dir(filename:dirname(NewFile))
+    end.
+
+named_workspace_still_restores_metadata_test() ->
+    %% BT-3670: explicitly named/persistent workspaces intentionally reuse
+    %% their id and must keep restoring timestamps and settings.
+    WsId = <<"named_ws_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    filelib:ensure_dir(MetaFile),
+    ok = file:write_file(
+        MetaFile,
+        json:encode(#{
+            <<"created_at">> => 12345,
+            <<"last_active">> => 12346,
+            <<"settings">> => #{<<"autoflush">> => true}
+        })
+    ),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"bt_test_3670_named">>,
+        created_at => 2000000
+    }),
+    try
+        {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+        ?assertEqual(12345, maps:get(created_at, Meta)),
+        ?assertEqual(true, beamtalk_workspace_meta:get_setting(autoflush, false))
+    after
+        gen_server:stop(Pid),
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
 load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
     WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,

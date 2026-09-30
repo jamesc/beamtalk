@@ -22,6 +22,7 @@ and can be queried by other components (e.g., idle monitor).
 -include_lib("kernel/include/logger.hrl").
 
 %% Public API
+-export([new_foreground_id/0]).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([on_actor_spawned/2, register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
@@ -520,6 +521,26 @@ set_git_toplevel(ProjectPath, Toplevel) when is_binary(ProjectPath), is_binary(T
         exit:{noproc, _} ->
             ok
     end.
+
+%% @doc Generate a workspace id for an anonymous foreground (REPL) workspace.
+%%
+%% BT-3670: ids must be unique across runs, because `metadata.json' under
+%% `~/.beamtalk/workspaces/<id>/' is restored when the id matches (that is
+%% intended for explicitly named/persistent workspaces only). A bare
+%% `erlang:unique_integer/1' is a small per-VM counter and collided across
+%% runs, resurrecting settings/timestamps/sources from an unrelated session
+%% (ADR 0129: no image mechanics). The OS pid, wall-clock microseconds and a
+%% per-VM counter together make a collision across runs practically impossible.
+-spec new_foreground_id() -> binary().
+new_foreground_id() ->
+    iolist_to_binary([
+        <<"foreground_">>,
+        os:getpid(),
+        $_,
+        integer_to_binary(erlang:system_time(microsecond)),
+        $_,
+        integer_to_binary(erlang:unique_integer([positive]))
+    ]).
 
 %%% gen_server callbacks
 
