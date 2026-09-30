@@ -3560,6 +3560,31 @@ fn test_class_method_self_send_in_open_class_fast_path_rebinds_class_vars() {
     );
 }
 
+/// BT-3666: arguments are bound once before the guarded `case`, so a nested
+/// block argument's body is emitted exactly once (not once per branch, which
+/// would grow as 2^depth for nested DSL-style sends).
+#[test]
+fn test_class_method_self_send_fast_path_does_not_duplicate_block_args() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class section: aBlock => aBlock value\n\n  class go => self section: [self section: [self section: [self foo]]]\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_go'/2 = fun")
+        .expect("class_go function present");
+    let go = &code[start..];
+    let end = go[1..].find("\n'").map_or(go.len(), |e| e + 1);
+    let go = &go[..end];
+    assert_eq!(
+        go.matches("'foo')").count(),
+        1,
+        "innermost block body must appear once. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("class_self_direct_ok").count(),
+        4,
+        "one guard per send (3 section: + foo), no duplication. Got:\n{go}"
+    );
+}
+
 /// BT-3666: neither an explicit own-class reference, a `class sealed` selector
 /// nor a sealed class gets the guard (they are statically bound).
 #[test]

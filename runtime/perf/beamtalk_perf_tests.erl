@@ -1155,8 +1155,25 @@ collect_port(Port, Acc) ->
         {Port, {data, Data}} -> collect_port(Port, [Data | Acc]);
         {Port, {exit_status, Status}} -> {Status, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
     after 600000 ->
+        kill_port_os_process(Port),
         catch port_close(Port),
         {timeout, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
+    end.
+
+%% port_close/1 does not terminate the spawned OS process; kill it so a hung
+%% benchmark does not keep running.
+kill_port_os_process(Port) ->
+    case erlang:port_info(Port, os_pid) of
+        {os_pid, OsPid} ->
+            Cmd =
+                case os:type() of
+                    {win32, _} -> "taskkill /F /T /PID " ++ integer_to_list(OsPid);
+                    _ -> "kill -9 " ++ integer_to_list(OsPid)
+                end,
+            _ = os:cmd(Cmd),
+            ok;
+        _ ->
+            ok
     end.
 
 %% Only the CLI built from this tree counts; a `beamtalk` found on PATH could

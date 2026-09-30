@@ -2763,7 +2763,7 @@ class_self_direct_ok_test_() ->
                     )
                 )
             after
-                ets:delete(beamtalk_extensions, {{'Object class', Sel}})
+                beamtalk_extensions:unregister('Object', Sel, true)
             end
         end},
         {"TestCase run selectors never take the direct call", fun() ->

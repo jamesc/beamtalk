@@ -119,6 +119,12 @@ TestCase subclass: SelfSendOverrideTest
   // subclass receiver still takes the walk and reaches its override.
   testFastPathDefiningClassReceiver => self assert: SsoFastBase bar equals: 1
 
+  // Nested DSL-style sends with block arguments: arguments are bound once, so
+  // nesting neither duplicates the block bodies nor changes the result.
+  testFastPathNestedBlockArguments =>
+    self assert: SsoFastBase nested equals: 1
+    self assert: SsoFastSub nested equals: 2
+
   testFastPathSubclassReceiverReachesOverride =>
     self assert: SsoFastSub bar equals: 2
     self assert: SsoFastBase bar equals: 1
@@ -133,12 +139,14 @@ TestCase subclass: SelfSendOverrideTest
       selector: #foo
       fun: extFun
       owner: #test
-    shadowed := SsoShadowBase bar
-    subclassResult := SsoShadowSub bar
-    Erlang beamtalk_extensions
-      unregister: #SsoShadowBase
-      selector: #foo
-      classSide: true
-    self assert: shadowed equals: 99
-    self assert: subclassResult equals: 2
+    [
+      self assert: SsoShadowBase bar equals: 99
+      self assert: SsoShadowSub bar equals: 2
+    ]
+      ensure: [
+        Erlang beamtalk_extensions
+          unregister: #SsoShadowBase
+          selector: #foo
+          classSide: true
+      ]
     self assert: SsoShadowBase bar equals: 1

@@ -1466,7 +1466,12 @@ impl CoreErlangGenerator {
             return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
         }
         if defines_selector {
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            // Bind every argument once, before the guarded `case`: the doc is
+            // spliced into both arms, and an inline block argument containing
+            // further open-class self-sends would otherwise double per nesting
+            // level (2^depth code growth).
+            let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
+            let args_doc = Self::join_docs_with_commas(arg_refs);
             let cv = self.current_class_var();
             // Fast path: when the receiving class IS this class (its metaclass
             // tag is a compile-time constant) and nothing shadows the compiled
