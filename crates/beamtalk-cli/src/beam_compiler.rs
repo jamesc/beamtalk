@@ -955,6 +955,7 @@ pub(crate) fn compile_source_with_bindings(
             cross_file_classes: cross_file_classes.clone(),
             pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
             pre_loaded_protocol_defs: ctx.hierarchy.pre_loaded_protocol_defs.clone(),
+            pre_loaded_protocol_sources: ctx.hierarchy.pre_loaded_protocol_sources.clone(),
             // Cross-file/package type aliases from Pass 1 — see
             // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
             // filters out any name the current module redeclares itself, so no

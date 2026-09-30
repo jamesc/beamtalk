@@ -576,6 +576,19 @@ impl TypeChecker {
             // keeps `:: Class` / `:: Behaviour` parameter checks and `isKindOf:`
             // satisfied; `x class = Foo` narrowing is AST-driven (class_eq.rs) and
             // unaffected by this inference change.
+            // A package-qualified reference (`json@Parser`, ADR 0070) to a class
+            // the hierarchy holds under a *different* package's bare `Parser`
+            // (ADR 0127 §3 "Name resolution": a provision's reference must not
+            // be captured by a same-named class in the user's package) names a
+            // class this hierarchy cannot describe — treat it as unknown.
+            Expression::ClassReference { name, package, .. }
+                if hierarchy.qualified_ref_names_other_class(
+                    &name.name,
+                    package.as_ref().map(|p| p.name.as_str()),
+                ) =>
+            {
+                InferredType::Dynamic(DynamicReason::Unknown)
+            }
             Expression::ClassReference { name, .. } => InferredType::meta(name.name.clone()),
             // Field access — infer type from declared state type for self.field
             // Check env first for narrowed type (e.g. inside isNil ifFalse: block)

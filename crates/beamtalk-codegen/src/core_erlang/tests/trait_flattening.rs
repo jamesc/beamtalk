@@ -178,6 +178,7 @@ fn generate_cross_file(
                 beamtalk_core::semantic_analysis::ProtocolSource {
                     path: Some(protocol_path.into()),
                     text: protocol_src.into(),
+                    package: None,
                 },
             )]
             .into_iter()

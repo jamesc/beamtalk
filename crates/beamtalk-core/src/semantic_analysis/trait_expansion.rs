@@ -93,6 +93,7 @@ use crate::ast_walker::{walk_expression, walk_expression_mut};
 use crate::method_source_walker::collect_self_sends;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::protocol_source::ProtocolSourceMap;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::{TypeChecker, is_generic_type_param};
 use crate::source_analysis::Diagnostic;
@@ -178,6 +179,65 @@ pub fn apply_origins(hierarchy: &mut ClassHierarchy, origins: &OriginMap) {
                 .find(|m| &m.selector == selector)
             {
                 method.origin = Some(protocol_name.clone());
+            }
+        }
+    }
+}
+
+/// Resolves the free class names of every provision in `protocols` in the
+/// protocol's own package (ADR 0127 §3, "Name resolution").
+///
+/// Provisions are flattened into a user in another package, where ADR 0070
+/// resolves a bare `Parser` lazily at the use site — so a same-named class in
+/// the user's package would capture the reference, and the protocol's own
+/// package-private names would look foreign. This rewrites each unqualified
+/// `ClassReference` in a provision body that names a class of the protocol's
+/// package (`classes`, entries stamped with their `package`) to its
+/// package-qualified form (`json@Parser`), which later passes and codegen
+/// treat as unambiguous.
+///
+/// A protocol whose package is unknown (no [`ProtocolSource::package`]) or
+/// equals `current_package` is left alone: its names already resolve where
+/// the user's do. Names that are not classes of the protocol's package
+/// (stdlib, generics) are untouched.
+///
+/// [`ProtocolSource::package`]: crate::semantic_analysis::ProtocolSource::package
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn resolve_provision_names(
+    protocols: &mut HashMap<EcoString, ProtocolDefinition>,
+    sources: &ProtocolSourceMap,
+    classes: &[ClassInfo],
+    current_package: Option<&str>,
+) {
+    for (name, protocol) in protocols.iter_mut() {
+        let Some(package) = sources.get(name).and_then(|s| s.package.as_ref()) else {
+            continue;
+        };
+        if current_package == Some(package.as_str()) {
+            continue;
+        }
+        let in_package: HashSet<&EcoString> = classes
+            .iter()
+            .filter(|c| c.package.as_ref() == Some(package))
+            .map(|c| &c.name)
+            .collect();
+        if in_package.is_empty() {
+            continue;
+        }
+        for method in &mut protocol.provided_methods {
+            for stmt in &mut method.body {
+                walk_expression_mut(&mut stmt.expression, &mut |expr| {
+                    if let Expression::ClassReference {
+                        name,
+                        package: qualifier @ None,
+                        ..
+                    } = expr
+                    {
+                        if in_package.contains(&name.name) {
+                            *qualifier = Some(Identifier::new(package.clone(), name.span));
+                        }
+                    }
+                });
             }
         }
     }

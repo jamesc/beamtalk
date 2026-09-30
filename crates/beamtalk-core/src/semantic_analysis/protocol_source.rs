@@ -27,6 +27,11 @@ pub struct ProtocolSource {
     pub path: Option<EcoString>,
     /// The full source text of the protocol's file.
     pub text: EcoString,
+    /// The package the protocol is declared in, when known (ADR 0127 §3,
+    /// "Name resolution"): a provision's free class names resolve there, not
+    /// in the using class's package. `None` keeps today's resolution in the
+    /// user's package.
+    pub package: Option<EcoString>,
 }
 
 /// Protocol name → [`ProtocolSource`].

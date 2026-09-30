@@ -621,6 +621,9 @@ fn collect_project_protocol_and_alias_infos(
                 beamtalk_core::semantic_analysis::ProtocolSource {
                     path: Some(file.as_str().into()),
                     text: source.as_str().into(),
+                    // `""` when the caller only wants the protocol half (see
+                    // this function's `pkg_name` doc).
+                    package: (!pkg_name.is_empty()).then(|| pkg_name.into()),
                 },
             );
             all_protocol_defs.push(protocol.clone());

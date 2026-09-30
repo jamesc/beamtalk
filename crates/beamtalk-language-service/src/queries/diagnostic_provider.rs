@@ -59,6 +59,11 @@ pub struct ProjectDiagnosticContext<'a> {
     /// above (name/signature metadata only). Empty for a caller with no
     /// cross-file/cross-package carrying to offer.
     pub pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    /// Source identity (file and declaring package) of the protocols in
+    /// `pre_loaded_protocol_defs` (ADR 0127 §3) — analysis resolves a
+    /// provision's free class names in the protocol's package. Empty keeps
+    /// resolution in the user's package.
+    pub pre_loaded_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
     /// Pre-loaded type alias definitions from other source files in the same
     /// package (ADR 0108). Mirrors `pre_loaded_protocols` — seeded
     /// into the `AliasRegistry` before the current module's own aliases are
@@ -167,6 +172,7 @@ pub fn compute_project_diagnostics_with_analysis(
         .with_pre_loaded_classes(ctx.cross_file_classes.clone())
         .with_pre_loaded_protocols(ctx.pre_loaded_protocols.clone())
         .with_pre_loaded_protocol_defs(ctx.pre_loaded_protocol_defs.clone())
+        .with_protocol_sources(ctx.pre_loaded_protocol_sources.clone())
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
         .with_native_type_registry(ctx.native_type_registry.clone())
         .with_cross_file_extensions(&ctx.cross_file_extensions)

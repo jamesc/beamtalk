@@ -340,6 +340,13 @@ pub struct AnalysisContext<'a> {
     /// case a `uses:` outside the current module reports "unknown protocol"
     /// (same-module resolution only), exactly as before this field existed.
     pub pre_loaded_protocol_defs: Vec<ProtocolDefinition>,
+    /// Source identity (file and declaring package) of the protocols in
+    /// `pre_loaded_protocol_defs` (ADR 0127 §3). Analysis reads the
+    /// *package*: a provision's free class names resolve, and `internal`
+    /// (ADR 0071) is checked, in the protocol's package rather than the
+    /// user's. A protocol without an entry (or without a package) keeps
+    /// resolving in the user's package.
+    pub protocol_sources: ProtocolSourceMap,
     /// Type alias definitions extracted from other source files or packages
     /// (ADR 0108 Phase 5), *or* type aliases declared in earlier turns of
     /// the same REPL session (ADR 0108 Phase 8) — both uses funnel through
@@ -432,6 +439,14 @@ impl<'a> AnalysisContext<'a> {
         pre_loaded_protocol_defs: Vec<ProtocolDefinition>,
     ) -> Self {
         self.pre_loaded_protocol_defs = pre_loaded_protocol_defs;
+        self
+    }
+
+    /// Source identity of the provision-bearing protocols carried in
+    /// `pre_loaded_protocol_defs` — see the `protocol_sources` field's doc.
+    #[must_use]
+    pub fn with_protocol_sources(mut self, protocol_sources: ProtocolSourceMap) -> Self {
+        self.protocol_sources = protocol_sources;
         self
     }
 
@@ -559,6 +574,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         pre_loaded_classes,
         pre_loaded_protocols,
         pre_loaded_protocol_defs,
+        protocol_sources,
         pre_loaded_aliases,
         known_packages,
         current_package,
@@ -594,10 +610,35 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // later (Phase 0.55), which needs the same protocol definitions to check
     // a cross-file/cross-package `uses:` line's requirements and
     // `excluding:`/`overriding:` names.
-    let external_protocols: HashMap<EcoString, ProtocolDefinition> = pre_loaded_protocol_defs
+    let mut external_protocols: HashMap<EcoString, ProtocolDefinition> = pre_loaded_protocol_defs
         .into_iter()
         .map(|p| (p.name.name.clone(), p))
         .collect();
+    // ADR 0127 §3 "Name resolution": a provision's free class names resolve
+    // in the protocol's package, so a same-named class in this module's
+    // package cannot capture them. Done on the carried definitions, before
+    // expansion, so `result.external_protocols` (which codegen's own
+    // `expand_module` re-reads) is already resolved.
+    trait_expansion::resolve_provision_names(
+        &mut external_protocols,
+        &protocol_sources,
+        &pre_loaded_classes,
+        current_package,
+    );
+
+    // Protocol name -> declaring package, for the protocols whose package is
+    // known (see `ProtocolSource::package`).
+    let provision_packages: HashMap<EcoString, EcoString> = protocol_sources
+        .iter()
+        .filter_map(|(name, src)| Some((name.clone(), src.package.clone()?)))
+        .collect();
+    // A flattened provision's resolved names are package-qualified with the
+    // protocol's package (`resolve_provision_names`), which is a dependency
+    // of this package but need not be a *declared* one.
+    let known_packages = known_packages.map(|mut known| {
+        known.extend(provision_packages.values().map(ToString::to_string));
+        known
+    });
 
     let expanded_module_storage;
     let trait_origins;
@@ -1124,6 +1165,16 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &result.alias_registry,
         current_package,
+        &provision_packages,
+        &mut result.diagnostics,
+    );
+    // ADR 0127 §3 "Name resolution": flattened provisions are checked
+    // against their protocol's package instead.
+    validators::check_provision_visibility(
+        module,
+        &result.class_hierarchy,
+        current_package,
+        &provision_packages,
         &mut result.diagnostics,
     );
     // E0402: internal method satisfying a public protocol requirement

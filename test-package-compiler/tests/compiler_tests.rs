@@ -89,6 +89,7 @@ fn sibling_protocols(
                 semantic_analysis::ProtocolSource {
                     path: Some(name.as_str().into()),
                     text: text.as_str().into(),
+                    package: None,
                 },
             );
             defs.push(protocol);
