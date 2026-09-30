@@ -754,3 +754,101 @@ fn test_cross_file_alias_reference_emits_user_type_in_generated_core_erlang() {
              Got:\n{core_src}"
     );
 }
+
+/// BT-3668: `build_class_index` flattens a cross-file trait's provided methods
+/// into the `ClassInfo` of the class that `uses:` it — on a cold build and on
+/// a second build where Pass 1 serves every file from its cache (no
+/// `cached_asts` entry, so the file is re-read) — while leaving a same-named
+/// dependency class alone and keeping Pass 1's `surface_incomplete` marker.
+#[test]
+fn build_class_index_flattens_cross_file_trait_provisions() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
+
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_path = project_path.join("src");
+    fs::create_dir_all(&src_path).unwrap();
+    write_test_file(
+        &project_path.join("beamtalk.toml"),
+        "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\n",
+    );
+    write_test_file(
+        &src_path.join("tagged.bt"),
+        "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+    );
+    write_test_file(
+        &src_path.join("widget.bt"),
+        "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n",
+    );
+    write_test_file(
+        &src_path.join("caller.bt"),
+        "Object subclass: Caller\n  describe: w :: Widget -> String => w tag\n",
+    );
+
+    let env = setup_build_environment(project_path.as_str()).unwrap();
+    let dep_ctx = DependencyContext {
+        resolved_deps: Vec::new(),
+        has_native_deps: false,
+    };
+    let provides_tag = |infos: &[ClassInfo]| {
+        infos
+            .iter()
+            .filter(|c| c.name == "Widget" && c.package.as_deref() == Some("test_pkg"))
+            .all(|c| c.methods.iter().any(|m| m.selector == "tag"))
+    };
+
+    // Cold build: every file has a `cached_asts` entry.
+    let cold = build_class_index(&env, &dep_ctx, &default_options(), true).unwrap();
+    assert!(
+        cold.all_class_infos.iter().any(|c| c.name == "Widget"),
+        "Widget must be indexed"
+    );
+    assert!(
+        provides_tag(&cold.all_class_infos),
+        "cold build: Widget's ClassInfo must carry Tagged's `tag`"
+    );
+
+    // Second build: Pass 1 serves every file from its cache, so the trait
+    // user is re-read from disk instead.
+    let warm = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
+    assert!(
+        warm.cached_asts.is_empty(),
+        "second build must be cache-fresh: {:?}",
+        warm.cached_asts.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        provides_tag(&warm.all_class_infos),
+        "cache-fresh build: Widget's ClassInfo must carry Tagged's `tag`"
+    );
+
+    // Direct check of the slot filter and the `surface_incomplete` marker.
+    let mut infos = warm.all_class_infos.clone();
+    let widget = infos.iter().position(|c| c.name == "Widget").unwrap();
+    let mut dep_widget = infos[widget].clone();
+    dep_widget.package = Some("other_pkg".into());
+    dep_widget.methods.retain(|m| m.selector != "tag");
+    infos.push(dep_widget);
+    infos[widget].surface_incomplete = true;
+    infos[widget].methods.retain(|m| m.selector != "tag");
+    crate::commands::build::class_index::flatten_trait_user_class_infos(
+        &mut infos,
+        &warm.file_protocol_uses,
+        &HashMap::new(),
+        &warm.all_protocol_defs,
+        "test_pkg",
+    );
+    assert!(
+        infos[widget].methods.iter().any(|m| m.selector == "tag"),
+        "the package's own Widget is re-flattened"
+    );
+    assert!(
+        infos[widget].surface_incomplete,
+        "Pass 1's completeness marker is kept"
+    );
+    let dep = infos.last().unwrap();
+    assert_eq!(dep.package.as_deref(), Some("other_pkg"));
+    assert!(
+        !dep.methods.iter().any(|m| m.selector == "tag"),
+        "a same-named dependency class is left alone"
+    );
+}

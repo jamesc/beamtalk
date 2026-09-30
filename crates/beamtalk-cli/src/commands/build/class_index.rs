@@ -295,7 +295,7 @@ pub(crate) fn build_class_index(
 /// [`beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos`],
 /// the same pass analysis and codegen run. Entries are matched by class name
 /// within `pkg_name`, leaving a same-named dependency class alone.
-fn flatten_trait_user_class_infos(
+pub(crate) fn flatten_trait_user_class_infos(
     all_class_infos: &mut [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     file_protocol_uses: &HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
     cached_asts: &HashMap<Utf8PathBuf, CachedAst>,
@@ -346,8 +346,11 @@ fn flatten_trait_user_class_infos(
             pkg_name,
         );
         for info in flattened {
+            // Last match: `module_index` is last-wins for a class name
+            // duplicated across files of the package.
             if let Some(slot) = all_class_infos
                 .iter_mut()
+                .rev()
                 .find(|c| c.name == info.name && c.package.as_deref() == Some(pkg_name))
             {
                 // Keep Pass 1's completeness marker for a file with parse errors.
