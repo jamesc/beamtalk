@@ -265,20 +265,20 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
     %% row yet) before overwriting it, so the subclass index can drop the
     %% stale edge from the old superclass if this call changes it.
     OldSuperclass = field(Name, #class_metadata.superclass),
-    %% BT-3669: a full-row write resets has_runtime_class_methods to false.
-    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     try
         ets:insert(?TABLE, Row),
-        sync_subclass_index(Name, OldSuperclass, Superclass),
-        ok
+        sync_subclass_index(Name, OldSuperclass, Superclass)
     catch
         error:badarg ->
             %% Table vanished between new/0 and ets:insert/2 — recreate and retry once.
             new(),
             ets:insert(?TABLE, Row),
-            sync_subclass_index(Name, OldSuperclass, Superclass),
-            ok
-    end.
+            sync_subclass_index(Name, OldSuperclass, Superclass)
+    end,
+    %% BT-3669: a full-row write resets has_runtime_class_methods to false;
+    %% clear the shadow flag only AFTER the gate is closed (a stale true is safe).
+    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+    ok.
 
 -doc """
 Merge identity fields into an **existing** metadata row — row *update*.
@@ -811,15 +811,16 @@ A no-op if the row is absent.
 -spec reset_runtime_class_methods(class_name()) -> ok.
 reset_runtime_class_methods(Name) ->
     new(),
-    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     try
         ets:update_element(?TABLE, Name, [
             {#class_metadata.has_runtime_class_methods, false}
-        ]),
-        ok
+        ])
     catch
         error:badarg -> ok
-    end.
+    end,
+    %% BT-3669: clear the flag only after the gate is closed.
+    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+    ok.
 
 %%====================================================================
 %% Internal

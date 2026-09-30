@@ -24,8 +24,10 @@ Two independent kinds:
   installed class-method funs.
 
 The flags are conservative: a stale `true` only costs the slow path (the
-hierarchy walk is always correct); writers set a flag *before* making the
-shadow visible and clear it only after confirming nothing remains.
+hierarchy walk is always correct); `runtime_fun` writers set the flag *before* making the
+shadow visible and clear it only *after* the gate is closed; `extension`
+transitions are serialized per tag under a lock in `beamtalk_extensions`
+(an unlocked erase-then-recheck could leave the flag false beside a visible row).
 `persistent_term` writes that change a value trigger a global scan, so only
 actual transitions write (set when unset, erase when set); both are rare
 (registration / class (re)definition), never on the send path.

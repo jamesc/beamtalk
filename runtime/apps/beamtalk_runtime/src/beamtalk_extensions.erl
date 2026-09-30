@@ -74,6 +74,7 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     register/5,
     unregister/2,
     unregister/3,
+    with_shadow_lock/2,
     purge_class/1,
     lookup/2,
     list/1,
@@ -199,41 +200,41 @@ register(Class, Selector, Fun, Owner, Source) when
 ->
     Key = {Class, Selector},
 
-    %% BT-3669: raise the "class has shadows" flag BEFORE the row becomes
-    %% visible (and again after, see below) so the compiled class-side
-    %% self-send guard can never see the row with the flag unset, even when a
-    %% concurrent unregister clears the flag between the two.
-    beamtalk_class_shadow_flags:set(extension, Class),
+    %% BT-3669: flag transitions and row writes for one tag are serialized under
+    %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
+    %% exactly "some row exists under this tag" whenever the lock is free.
+    with_shadow_lock(Class, fun() ->
+        %% Only class-object tags (`'Foo class'`) are read by the guard.
+        beamtalk_class_registry:is_class_name(Class) andalso
+            beamtalk_class_shadow_flags:set(extension, Class),
+        %% Check for existing registration
+        case ets:lookup(?EXTENSIONS_TABLE, Key) of
+            [] ->
+                %% New registration
+                ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+                maybe_store_source(Key, Source);
+            [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
+                %% Same owner updating - no conflict
+                ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+                maybe_store_source(Key, Source);
+            [{Key, _OldFun, OldOwner}] ->
+                %% Conflict: different owner
+                ?LOG_WARNING(
+                    "Extension conflict: '~p' on '~p' (from '~p') overwritten by '~p'",
+                    [Selector, Class, OldOwner, Owner],
+                    #{domain => [beamtalk, runtime]}
+                ),
 
-    %% Check for existing registration
-    case ets:lookup(?EXTENSIONS_TABLE, Key) of
-        [] ->
-            %% New registration
-            ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source);
-        [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
-            %% Same owner updating - no conflict
-            ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source);
-        [{Key, _OldFun, OldOwner}] ->
-            %% Conflict: different owner
-            ?LOG_WARNING(
-                "Extension conflict: '~p' on '~p' (from '~p') overwritten by '~p'",
-                [Selector, Class, OldOwner, Owner],
-                #{domain => [beamtalk, runtime]}
-            ),
+                %% Record conflict for tooling - record BOTH owners
+                Timestamp = erlang:system_time(millisecond),
+                ets:insert(?CONFLICTS_TABLE, {Key, OldOwner, Timestamp}),
+                ets:insert(?CONFLICTS_TABLE, {Key, Owner, Timestamp + 1}),
 
-            %% Record conflict for tooling - record BOTH owners
-            Timestamp = erlang:system_time(millisecond),
-            ets:insert(?CONFLICTS_TABLE, {Key, OldOwner, Timestamp}),
-            ets:insert(?CONFLICTS_TABLE, {Key, Owner, Timestamp + 1}),
-
-            %% Overwrite (last-writer-wins)
-            ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source)
-    end,
-
-    beamtalk_class_shadow_flags:set(extension, Class),
+                %% Overwrite (last-writer-wins)
+                ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+                maybe_store_source(Key, Source)
+        end
+    end),
 
     %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
@@ -300,9 +301,11 @@ unregister(Class, Selector, ClassSide) when
             false -> Class
         end,
     Key = {EtsClass, Selector},
-    ets:delete(?EXTENSIONS_TABLE, Key),
-    ets:delete(?SOURCES_TABLE, Key),
-    sync_shadow_flag(EtsClass),
+    with_shadow_lock(EtsClass, fun() ->
+        ets:delete(?EXTENSIONS_TABLE, Key),
+        ets:delete(?SOURCES_TABLE, Key),
+        sync_shadow_flag(EtsClass)
+    end),
     %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),
@@ -313,26 +316,27 @@ unregister(Class, Selector, ClassSide) when
     ok.
 
 %% BT-3669: drop the class's "has shadows" flag once its last extension is gone.
-%% Lock-free against a concurrent `register/5`: the registrant sets the flag
-%% before inserting (and again after), so if it inserts after our emptiness
-%% check the flag is re-raised after our erase; if it inserted before, the
-%% re-check below sees the row and restores the flag.
+%% Runs under the per-tag lock held by `unregister/3`, and `register/5` also
+%% takes that lock around its flag raise + row insert, so no registration can
+%% interleave between the emptiness check and the clear.
 -spec sync_shadow_flag(atom()) -> ok.
 sync_shadow_flag(EtsClass) ->
     case has_any(EtsClass) of
-        true ->
-            ok;
-        false ->
-            beamtalk_class_shadow_flags:clear(extension, EtsClass),
-            case has_any(EtsClass) of
-                true -> beamtalk_class_shadow_flags:set(extension, EtsClass);
-                false -> ok
-            end
+        true -> ok;
+        false -> beamtalk_class_shadow_flags:clear(extension, EtsClass)
     end.
+
+-doc """
+Run `Fun` holding the per-tag shadow-flag lock (BT-3669). Internal; exported
+for tests that need to hold the lock deterministically.
+""".
+-spec with_shadow_lock(atom(), fun(() -> T)) -> T.
+with_shadow_lock(Tag, Fun) ->
+    global:trans({{?MODULE, shadow_flag, Tag}, self()}, Fun, [node()], infinity).
 
 -spec has_any(atom()) -> boolean().
 has_any(Class) ->
-    ets:select_count(?EXTENSIONS_TABLE, [{{{Class, '_'}, '_', '_'}, [], [true]}]) > 0.
+    ets:select(?EXTENSIONS_TABLE, [{{{Class, '_'}, '_', '_'}, [], [true]}], 1) =/= '$end_of_table'.
 
 -doc """
 Purge every extension registered under the class key `Class`.

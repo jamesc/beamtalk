@@ -98,6 +98,47 @@ shadow_flag_test_() ->
                 beamtalk_class_metadata:delete(Name)
             end
         end},
+        {"register is serialized against an in-flight last-unregister (no false flag beside a row)",
+            fun() ->
+                Tag = 'Bt3669Ser class',
+                Parent = self(),
+                ok = beamtalk_extensions:register(Tag, bt3669_ser_a, noop_fun(), bt3669),
+                %% Hold the per-tag lock: an unregister of the last extension and a
+                %% following register both queue behind it, in that order.
+                beamtalk_extensions:with_shadow_lock(Tag, fun() ->
+                    U = spawn_link(fun() ->
+                        ok = beamtalk_extensions:unregister('Bt3669Ser', bt3669_ser_a, true),
+                        Parent ! {u_done, self()}
+                    end),
+                    timer:sleep(100),
+                    R = spawn_link(fun() ->
+                        ok = beamtalk_extensions:register(Tag, bt3669_ser_b, noop_fun(), bt3669),
+                        Parent ! {r_done, self()}
+                    end),
+                    timer:sleep(100),
+                    %% Neither has run: state is untouched while the lock is held.
+                    ?assert(beamtalk_class_shadow_flags:is_set(extension, Tag)),
+                    put(bt3669_workers, {U, R})
+                end),
+                {U, R} = erase(bt3669_workers),
+                receive
+                    {u_done, U} -> ok
+                after 5000 -> error(u_timeout)
+                end,
+                receive
+                    {r_done, R} -> ok
+                after 5000 -> error(r_timeout)
+                end,
+                try
+                    %% The row exists, so the flag must be up and the guard must decline.
+                    ?assertMatch({ok, _, bt3669}, beamtalk_extensions:lookup(Tag, bt3669_ser_b)),
+                    ?assert(beamtalk_class_shadow_flags:is_set(extension, Tag)),
+                    ?assertNot(direct(Tag, 'Bt3669Ser', bt3669_ser_b))
+                after
+                    beamtalk_extensions:unregister('Bt3669Ser', bt3669_ser_b, true)
+                end,
+                ?assertNot(beamtalk_class_shadow_flags:is_set(extension, Tag))
+            end},
         {"concurrent register/unregister settles with the flag cleared", fun() ->
             Tag = 'Bt3669Conc class',
             Parent = self(),
@@ -107,9 +148,7 @@ shadow_flag_test_() ->
                     lists:foreach(
                         fun(_) ->
                             ok = beamtalk_extensions:register(Tag, Sel, noop_fun(), bt3669),
-                            %% Not asserting the flag here: a concurrent unregister may
-                            %% transiently clear it before re-checking (conservative,
-                            %% self-healing); only the settled state is an invariant.
+                            %% Only the settled state is asserted here.
                             ok = beamtalk_extensions:unregister('Bt3669Conc', Sel, true)
                         end,
                         lists:seq(1, 200)
