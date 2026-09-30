@@ -682,6 +682,76 @@ pub struct Diagnostic {
     /// origin of the relevant type or value. Inspired by Rust's "type
     /// originated here" secondary labels.
     pub notes: Vec<DiagnosticNote>,
+    /// Set when [`Self::span`] lies in a protocol's file rather than the
+    /// file being compiled — see [`ProvisionOrigin`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub provision: Option<ProvisionOrigin>,
+}
+
+/// File identity for a diagnostic raised inside a flattened trait provision
+/// (ADR 0127 §3, "Source locations").
+///
+/// A provision's spans are byte offsets into the *protocol's* file, but the
+/// type checker sees it as part of every user class it was flattened into, so
+/// the diagnostic would otherwise be reported once per user, against the
+/// wrong file. Tagging it lets a reporter render it against the protocol's
+/// source and collapse the per-user copies with
+/// [`merge_provision_diagnostics`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ProvisionOrigin {
+    /// The protocol whose file the diagnostic's span lies in.
+    pub protocol: EcoString,
+    /// The classes the provision was flattened into when the diagnostic
+    /// arose (sorted, unique).
+    pub users: Vec<EcoString>,
+}
+
+/// Prefix of the note [`Diagnostic::with_provision_origin`] attaches.
+const FLATTENING_NOTE_PREFIX: &str = "while flattening into ";
+
+/// Collapses provision diagnostics that are the same finding reached through
+/// different users of one protocol (ADR 0127 §3): same protocol, span,
+/// severity, message, hint and category. The first occurrence is kept and its
+/// `users` (and "while flattening into A, B" note) become the union. Order of
+/// first occurrence is preserved; diagnostics without a provision origin pass
+/// through unchanged.
+#[must_use]
+pub fn merge_provision_diagnostics(
+    diagnostics: impl IntoIterator<Item = Diagnostic>,
+) -> Vec<Diagnostic> {
+    let mut merged: Vec<Diagnostic> = Vec::new();
+    for diagnostic in diagnostics {
+        let Some(origin) = diagnostic.provision.as_ref() else {
+            merged.push(diagnostic);
+            continue;
+        };
+        let existing = merged.iter_mut().find(|d| {
+            d.provision
+                .as_ref()
+                .is_some_and(|o| o.protocol == origin.protocol)
+                && d.span == diagnostic.span
+                && d.severity == diagnostic.severity
+                && d.message == diagnostic.message
+                && d.hint == diagnostic.hint
+                && d.category == diagnostic.category
+        });
+        match existing {
+            Some(existing) => {
+                let users = existing.provision.as_mut().map(|o| {
+                    o.users.extend(origin.users.iter().cloned());
+                    o.users.sort();
+                    o.users.dedup();
+                    o.users.clone()
+                });
+                if let Some(users) = users {
+                    existing.set_flattening_note(&users);
+                }
+            }
+            None => merged.push(diagnostic),
+        }
+    }
+    merged
 }
 
 impl Diagnostic {
@@ -695,6 +765,7 @@ impl Diagnostic {
             hint: None,
             category: None,
             notes: Vec::new(),
+            provision: None,
         }
     }
 
@@ -708,6 +779,7 @@ impl Diagnostic {
             hint: None,
             category: None,
             notes: Vec::new(),
+            provision: None,
         }
     }
 
@@ -721,6 +793,7 @@ impl Diagnostic {
             hint: None,
             category: None,
             notes: Vec::new(),
+            provision: None,
         }
     }
 
@@ -734,6 +807,7 @@ impl Diagnostic {
             hint: None,
             category: Some(DiagnosticCategory::Lint),
             notes: Vec::new(),
+            provision: None,
         }
     }
 
@@ -749,6 +823,44 @@ impl Diagnostic {
     pub fn with_category(mut self, category: DiagnosticCategory) -> Self {
         self.category = Some(category);
         self
+    }
+
+    /// Marks this diagnostic as lying in `protocol`'s file, raised while
+    /// flattening the provision into `user` (ADR 0127 §3), and attaches the
+    /// "while flattening into `user`" note.
+    #[must_use]
+    pub fn with_provision_origin(
+        mut self,
+        protocol: impl Into<EcoString>,
+        user: impl Into<EcoString>,
+    ) -> Self {
+        self.set_provision_origin(protocol, user);
+        self
+    }
+
+    /// In-place form of [`Self::with_provision_origin`].
+    pub fn set_provision_origin(
+        &mut self,
+        protocol: impl Into<EcoString>,
+        user: impl Into<EcoString>,
+    ) {
+        let users = vec![user.into()];
+        self.set_flattening_note(&users);
+        self.provision = Some(ProvisionOrigin {
+            protocol: protocol.into(),
+            users,
+        });
+    }
+
+    /// Replaces any existing "while flattening into …" note with one naming
+    /// `users`.
+    fn set_flattening_note(&mut self, users: &[EcoString]) {
+        self.notes
+            .retain(|n| !n.message.starts_with(FLATTENING_NOTE_PREFIX));
+        self.notes.push(DiagnosticNote {
+            message: format!("{FLATTENING_NOTE_PREFIX}{}", users.join(", ")).into(),
+            span: None,
+        });
     }
 
     /// Attaches a note explaining the diagnostic context.

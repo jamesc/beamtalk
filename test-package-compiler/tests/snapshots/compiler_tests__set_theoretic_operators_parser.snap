@@ -1050,5 +1050,5 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected `\\\\` in type annotation; did you mean `\\` (type difference)?", span: Span { start: 2393, end: 2395 }, hint: None, category: None, notes: [] }
-Diagnostic { severity: Error, message: "Cannot mix `&` and `\\` in a type annotation without parentheses; parenthesise to disambiguate", span: Span { start: 3390, end: 3391 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected `\\\\` in type annotation; did you mean `\\` (type difference)?", span: Span { start: 2393, end: 2395 }, hint: None, category: None, notes: [], provision: None }
+Diagnostic { severity: Error, message: "Cannot mix `&` and `\\` in a type annotation without parentheses; parenthesise to disambiguate", span: Span { start: 3390, end: 3391 }, hint: None, category: None, notes: [], provision: None }

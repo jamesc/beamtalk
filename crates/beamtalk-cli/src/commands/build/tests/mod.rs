@@ -11,6 +11,8 @@
 //!   package/module naming, including declared-alias metadata
 //! - [`cross_file_resolution`] — the class-module index and cross-file
 //!   class/alias resolution
+//! - [`flattened_provision_reporting`] — flattened-provision diagnostics are
+//!   reported once, in the protocol's file (ADR 0127 §3)
 //! - [`incremental_build`] — stale-artifact cleanup and `detect_changes`
 //! - [`native_erlang_build`] — ADR 0072 Phase 1 native Erlang compilation
 //!   and native-module collision detection
@@ -42,6 +44,7 @@ pub(crate) fn default_options() -> beamtalk_core::CompilerOptions {
 
 mod build_basics;
 mod cross_file_resolution;
+mod flattened_provision_reporting;
 mod incremental_build;
 mod module_naming;
 mod native_deps_and_headers;

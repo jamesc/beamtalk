@@ -232,6 +232,71 @@ impl TypeChecker {
         check_typed_annotations: bool,
         hierarchy: &ClassHierarchy,
     ) {
+        let diagnostics_before = self.diagnostics.len();
+        self.check_method_body_inner(
+            method,
+            class_name,
+            is_class_method,
+            is_abstract,
+            is_typed,
+            check_override,
+            check_typed_annotations,
+            hierarchy,
+        );
+        self.attribute_provision_diagnostics(
+            method,
+            class_name,
+            is_class_method,
+            diagnostics_before,
+            hierarchy,
+        );
+    }
+
+    /// ADR 0127 §3 ("Source locations"): a diagnostic raised while checking a
+    /// flattened trait provision has a span in the *protocol's* file, so tag
+    /// everything `check_method_body_inner` just pushed with the protocol and
+    /// the using class. Reporters render the tagged diagnostic against the
+    /// protocol's source and collapse the per-user copies
+    /// ([`crate::source_analysis::merge_provision_diagnostics`]).
+    fn attribute_provision_diagnostics(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+        is_class_method: bool,
+        diagnostics_before: usize,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if is_class_method || self.diagnostics.len() == diagnostics_before {
+            return;
+        }
+        let selector = method.selector.name();
+        let Some(protocol) = hierarchy
+            .get_class(class_name)
+            .and_then(|c| c.methods.iter().find(|m| m.selector == selector))
+            .and_then(|m| m.origin.clone())
+        else {
+            return;
+        };
+        for diagnostic in &mut self.diagnostics[diagnostics_before..] {
+            if diagnostic.provision.is_none() {
+                diagnostic.set_provision_origin(protocol.clone(), class_name.clone());
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)] // mirrors `check_method_body`
+    #[allow(clippy::fn_params_excessive_bools)] // mirrors `check_method_body`
+    fn check_method_body_inner(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+        is_class_method: bool,
+        is_abstract: bool,
+        is_typed: bool,
+        check_override: bool,
+        check_typed_annotations: bool,
+        hierarchy: &ClassHierarchy,
+    ) {
         let mut method_env = TypeEnv::new();
         method_env.in_class_method = is_class_method;
         method_env.set_local(

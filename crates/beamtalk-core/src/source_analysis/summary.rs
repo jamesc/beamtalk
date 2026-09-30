@@ -306,6 +306,7 @@ mod tests {
             hint: None,
             category,
             notes: Vec::new(),
+            provision: None,
         }
     }
 
