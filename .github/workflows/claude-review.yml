@@ -80,7 +80,7 @@ jobs:
           # Sonnet 5 uses a new tokenizer (~30% more tokens for the same text than
           # Sonnet 4.6) — the pre-computed diffs and -U20 context above are what keep
           # that in check, so don't widen them without re-checking review cost.
-          model='claude-sonnet-5'
+          model='claude-sonnet-5-5'
           files="$(git diff --name-only "${FULL_RANGE}")"
           # A file is "config" if it matches this pattern. If grep finds any changed file
           # that does NOT match (and is non-empty), the PR touches code/docs → Sonnet.
