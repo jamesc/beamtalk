@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: an override of `foo` in a subclass must be reached from an
+// inherited method's `self foo` (template-method pattern).
+//
+// Fixtures: stdlib/test/fixtures/self_send_override.bt
+
+TestCase subclass: SelfSendOverrideTest
+
+  testActorInheritedSelfSendReachesOverride =>
+    a := SsoActorSub spawn
+    self assert: a bar equals: "bar:sub"
+    a stop
+
+  testActorOverrideReachedWithArgument =>
+    a := SsoActorSub spawn
+    self assert: (a scaled: 3) equals: 30
+    a stop
+
+  testActorOverrideReachedFromInsideBlock =>
+    a := SsoActorSub spawn
+    self assert: (a scaledAll: #(1, 2)) equals: #(10, 20)
+    a stop
+
+  testActorOverrideThatMutatesStateIsThreaded =>
+    a := SsoActorSub spawn
+    self assert: a bumpTwice equals: 20
+    self assert: (a fieldAt: #count) equals: 20
+    a stop
+
+  testActorBaseMutationUnchanged =>
+    a := SsoActorBase spawn
+    self assert: a bumpTwice equals: 2
+    a stop
+
+  testActorOverrideInheritedByThirdLevel =>
+    a := SsoActorSubSub spawn
+    self assert: a bar equals: "bar:sub"
+    a stop
+
+  testActorBaseUnchanged =>
+    a := SsoActorBase spawn
+    self assert: a bar equals: "bar:base"
+    a stop
+
+  testValueInheritedSelfSendReachesOverride =>
+    self assert: SsoValueSub new bar equals: "bar:sub"
+
+  testValueBaseUnchanged => self assert: SsoValueBase new bar equals: "bar:base"
+
+  testClassSideInheritedSelfSendReachesOverride =>
+    self assert: SsoClassSideSub bar equals: "bar:sub"
+
+  testClassSideBaseUnchanged =>
+    self assert: SsoClassSideBase bar equals: "bar:base"
+
+  // The receiver goes through an untyped parameter: the static checker does
+  // not see a flattened provision (`bar`) on a cross-file trait user's class.
+  callBar: obj => obj bar
+
+  testFlattenedTraitActorReachesOverride =>
+    a := SsoTraitActorSub spawn
+    self assert: (self callBar: a) equals: "bar:sub"
+    a stop
+
+  testFlattenedTraitActorBase =>
+    a := SsoTraitActorBase spawn
+    self assert: (self callBar: a) equals: "bar:base"
+    a stop
+
+  testFlattenedTraitValueReachesOverride =>
+    self assert: (self callBar: SsoTraitValueSub new) equals: "bar:sub"
+
+  testFlattenedTraitValueBase =>
+    self assert: (self callBar: SsoTraitValueBase new) equals: "bar:base"
+
+  testValueClassSideInheritedSelfSendReachesOverride =>
+    self assert: SsoValueSub make equals: "make:sub"
+
+  testValueClassSideBaseUnchanged =>
+    self assert: SsoValueBase make equals: "make:base"

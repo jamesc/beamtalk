@@ -218,8 +218,9 @@ sole top-level definition (ADR 0119). Inherited methods are never copied:
 actors walk the class registry at run time and value types call the
 superclass module statically. A method body is **not class-neutral**: it
 bakes in the lexical class name (`super`, error hints), the lexical module
-(actor self-sends go to `<module>:safe_dispatch`,
-`dispatch_codegen.rs:2019-2028`), the class kind (`{reply, R, State}` clause
+(actor `super` sends and sealed self-sends go to `<module>`; ordinary actor
+self-sends resolve the module from the instance's `'__class_mod__'` since
+BT-3666), the class kind (`{reply, R, State}` clause
 vs. plain function), and per-class facts (`late` slots, sealed selectors,
 class-var names). `ClassInfo.methods` is a `Vec<MethodInfo>` whose entries
 already carry `defined_in` (`class_hierarchy/class_info.rs:50-80`), and
@@ -698,8 +699,19 @@ mismatches are warnings, as everywhere else (ADR 0025).
 - `self` is the instance of the using class. Self-sends in a provided method
   resolve against the using class, including its own overrides, because the
   method *is* the using class's method after flattening — for actors it is a
-  clause of that class's `dispatch/4`, so the lexical-module self-send goes
-  to the right module.
+  clause of that class's `dispatch/4`.
+  A *further subclass* of the using class that overrides a required (or any
+  other) selector is reached from the flattened method's self-send too:
+  self-sends are late-bound on the receiver, exactly as for a hand-written
+  method (BT-3666). Actor self-sends resolve the callee module from the
+  instance's own `'__class_mod__'` at run time rather than binding to the
+  lexical module; class-side self-sends walk the hierarchy from the receiving
+  class (`beamtalk_class_dispatch:class_self_send/4`). Both stay statically
+  bound in a `sealed` class, which nothing can override. (BT-3625's original
+  Phase 0 pin claimed this held before it did; it did not — every self-send
+  was bound to the lexical module for actors and to the lexical
+  `class_<sel>` for class-side methods. Value-class instance sends were
+  already late-bound.)
 - `super` means the using class's superclass, as it would in a method written
   in the body. Traits have no superclass; `super` in a trait body that is
   never used by a class is simply unreachable code.
@@ -985,10 +997,10 @@ A trait is therefore a compile-time dependency of its users; §10a says how
 each build path tracks it.
 
 **Why not a shared trait module + dispatch step** (foreign-extension style):
-an actor method's self-sends are compiled against the lexical module
-(`<module>:safe_dispatch`, `dispatch_codegen.rs:2019-2028`); compiled once in
-a trait module they would target a module with no gen_server and no
-`dispatch/4`. The calling convention differs by kind, so a shared module
+an actor method's `super` and sealed self-sends are compiled against the
+lexical module, and its ordinary self-sends dispatch through the instance's
+own class module (BT-3666); compiled once in a trait module they would
+target a module with no gen_server and no `dispatch/4`. The calling convention differs by kind, so a shared module
 would need one body per kind per method. Every send on every class would pay
 an extra ETS lookup in the chain walk that ADR 0032 just shortened. And
 `super`, sealed self-sends, `late` slot guards and error hints all bake in

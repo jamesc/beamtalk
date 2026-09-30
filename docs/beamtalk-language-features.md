@@ -396,6 +396,27 @@ Most stdlib classes are `sealed` — this prevents user code from subclassing bu
 
 **Performance:** Sealed actor classes benefit from a direct-call optimization — self-sends within the class emit direct function calls instead of dynamic dispatch, since the compiler knows no subclass can override the method. This is automatic and requires no user intervention.
 
+### Self-Sends and Overrides (BT-3666)
+
+A `self` send is late-bound on the *receiver*, as in every Smalltalk: an inherited (or trait-flattened, ADR 0127) method that does `self foo` runs the `foo` of the receiver's class, so a subclass override is reached. This is what makes the template-method pattern work.
+
+```beamtalk
+Actor subclass: Report
+  title -> String => "Report"
+  render -> String => "== " ++ self title ++ " =="
+
+Report subclass: SalesReport
+  title -> String => "Sales"
+
+// SalesReport spawn render  => "== Sales =="
+```
+
+This holds for instance-side sends on actors and value classes, for class-side sends (`class foo` / `self foo` inside a class method), and for a protocol's provided methods flattened into a class whose subclass overrides a required selector.
+
+`super` is the exception by design — it is always bound to the superclass of the class that *contains* the method. A `sealed` class cannot be subclassed, so its self-sends are compiled as direct calls (no lookup).
+
+Implementation notes: an actor self-send dispatches through the module named by the instance's own `'__class_mod__'` state key (a per-send map lookup); a class-side self-send in a non-sealed class walks the class hierarchy from the receiving class (`beamtalk_class_dispatch:class_self_send/4`). One limitation remains on the class side: a class-variable write made by a *subclass override* is dropped when the call site sits in a method the compiler proved never writes class variables (the base class's own view of the selector). Keep class-variable mutation in selectors the base class also mutates.
+
 ### Value subclass: in Depth
 
 `Value subclass:` defines an immutable value object. All slots are set at construction time; there is no mutation.

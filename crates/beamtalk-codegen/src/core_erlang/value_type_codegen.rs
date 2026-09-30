@@ -255,7 +255,13 @@ impl CoreErlangGenerator {
 
         // Set class identity early so that class_name() returns the AST
         // class name rather than deriving from the module name.
-        self.set_class_identity(Some(ClassIdentity::new(&class.name.name)));
+        // BT-3666: carry `sealed`/`abstract` so class-side self-sends can stay
+        // statically bound in a sealed class (nothing can override them).
+        self.set_class_identity(Some(ClassIdentity::from_class_def(
+            &class.name.name,
+            class.is_sealed,
+            class.is_abstract,
+        )));
         // record field declared types so `self.<field>`
         // comparisons/arithmetic on object-typed fields route through the guard.
         self.set_class_field_types(&class.state);

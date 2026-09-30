@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3625 (ADR 0127 Phase 0 pin, §6): what an inherited actor method's
-// self-send reaches when a further subclass overrides the selector.
+// BT-3625 (ADR 0127 §6), corrected by BT-3666: what an inherited actor
+// method's self-send reaches when a further subclass overrides the selector.
 //
 // `announce` is a trait provision flattened into `TraitLabelledBase` (the
 // trait lives in its own file — fixtures/trait_labelled.bt — so this is a
@@ -13,9 +13,10 @@
 // identical shape with `announce` written in the class body instead of
 // flattened in. Flattening means "exactly the class with the provisions
 // written into its body" (ADR 0127 §3), so the trait and hand-written
-// variants must behave identically — whatever an inherited actor method's
-// self-send reaches for the hand-written class, it reaches for the flattened
-// one, no more and no less.
+// variants must behave identically — and, since self-sends are late-bound on
+// the receiver, both reach the subclass override. (The original BT-3625 pin
+// only asserted the two agreed; both were in fact running the *base*
+// `label`, because actor self-sends were bound to the lexical module.)
 
 TestCase subclass: TraitOverrideDispatchTest
   field: base = nil
@@ -40,3 +41,9 @@ TestCase subclass: TraitOverrideDispatchTest
 
   testFlattenedProvisionBehavesLikeTheHandWrittenControlForASubclassOverride =>
     self assert: self.sub announce equals: self.plainSub announce
+
+  testFlattenedProvisionReachesTheSubclassOverride =>
+    self assert: self.sub announce equals: "announce: override"
+
+  testHandWrittenControlReachesTheSubclassOverride =>
+    self assert: self.plainSub announce equals: "announce: override"

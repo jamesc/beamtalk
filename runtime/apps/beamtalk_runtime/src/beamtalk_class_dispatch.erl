@@ -24,6 +24,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_send/3,
     lookup_direct_call/3,
     class_self_dispatch/4,
+    class_self_send/4,
     class_self_dispatch_local/4,
     metaclass_send/4,
     unwrap_class_call/1,
@@ -230,6 +231,34 @@ class_self_dispatch(ClassName, Selector, ClassVars, Args) ->
     end.
 
 -doc """
+Virtual class-side self-send (BT-3666): like `class_self_dispatch/4`, but the
+hierarchy walk starts at `ClassName` itself instead of its superclass.
+
+`ClassName` is the *receiving* class — the class named by `ClassSelf`, which
+for an inherited class method is a subclass of the class whose code is
+running. Starting at that class means an override of `Selector` (or a
+subclass-only implementation of a template-method hook) is found before the
+inherited definition, exactly as an instance-side self-send resolves.
+`class_self_dispatch/4` keeps its start-at-superclass semantics because
+builder-class `super` sends (ADR 0084) rely on them.
+""".
+-spec class_self_send(class_name(), selector(), map(), list()) ->
+    {class_var_result, term(), map()} | term() | no_return().
+class_self_send(ClassName, Selector, ClassVars, Args) ->
+    case check_class_self_extension(ClassName, Selector, ClassVars, Args) of
+        {ok, Outcome} ->
+            Outcome;
+        not_found ->
+            class_self_dispatch_chain(
+                ClassName,
+                Selector,
+                ClassVars,
+                Args,
+                find_class_method_from_class(Selector, ClassName)
+            )
+    end.
+
+-doc """
 The superclass-chain half of `class_self_dispatch/4`, factored out
 so `class_self_dispatch_local/4` can fall through to it directly after its
 own single extension check, instead of re-checking the (already-confirmed
@@ -238,7 +267,16 @@ absent) extension a second time via a nested `class_self_dispatch/4` call.
 -spec class_self_dispatch_chain(class_name(), selector(), map(), list()) ->
     {class_var_result, term(), map()} | term() | no_return().
 class_self_dispatch_chain(ClassName, Selector, ClassVars, Args) ->
-    case find_class_method_in_chain(Selector, ClassName) of
+    class_self_dispatch_chain(
+        ClassName, Selector, ClassVars, Args, find_class_method_in_chain(Selector, ClassName)
+    ).
+
+-spec class_self_dispatch_chain(
+    class_name(), selector(), map(), list(), {ok, class_name(), atom()} | not_found
+) ->
+    {class_var_result, term(), map()} | term() | no_return().
+class_self_dispatch_chain(ClassName, Selector, ClassVars, Args, Found) ->
+    case Found of
         {ok, DefiningClass, DefiningModule} ->
             %% Route through the same internal helper the gen_server path uses
             %% (`invoke_class_method/7`), so both paths share error classification
@@ -1184,7 +1222,21 @@ per-ancestor ETS probe.
 -spec find_class_method_in_chain(selector(), class_name()) ->
     {ok, class_name(), atom()} | not_found.
 find_class_method_in_chain(Selector, ClassName) ->
-    SuperclassName = superclass_from_ets(ClassName),
+    walk_class_method_chain(Selector, superclass_from_ets(ClassName), ClassName).
+
+-doc """
+Like `find_class_method_in_chain/2`, but the walk starts at `ClassName`
+itself rather than its superclass (BT-3666): used by a class-side
+self-send, whose receiving class may define the selector directly.
+""".
+-spec find_class_method_from_class(selector(), class_name()) ->
+    {ok, class_name(), atom()} | not_found.
+find_class_method_from_class(Selector, ClassName) ->
+    walk_class_method_chain(Selector, ClassName, ClassName).
+
+-spec walk_class_method_chain(selector(), class_name() | none, class_name()) ->
+    {ok, class_name(), atom()} | not_found.
+walk_class_method_chain(Selector, StartName, ClassName) ->
     StepFun = fun(AncestorName, _Depth) ->
         case beamtalk_class_metadata:lookup_methods(AncestorName) of
             {ok, AncestorModule, Selectors} ->
@@ -1196,7 +1248,7 @@ find_class_method_in_chain(Selector, ClassName) ->
                 not_found
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors(SuperclassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    case beamtalk_hierarchy:walk_ancestors(StartName, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, {AncestorName, AncestorModule}} ->
             {ok, AncestorName, AncestorModule};
         not_found ->

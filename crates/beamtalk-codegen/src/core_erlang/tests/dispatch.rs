@@ -3487,8 +3487,11 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
     // triggers generate_class_method_self_send → line 1267 → the fixed path.
     // "class_" (6 bytes) + 250 'a's = 256 bytes — one over the limit.
     let long_sel = "a".repeat(250);
+    // `sealed`: BT-3666 routes an open class's class-side self-send through the
+    // runtime hierarchy walk (a subclass may override); only a sealed class
+    // keeps the static `class_<sel>` call this test is about.
     let src = format!(
-        "Actor subclass: LongSel\n  state: x = 0\n\n  class {long_sel} => 42\n\n  class go => self {long_sel}\n"
+        "sealed Actor subclass: LongSel\n  state: x = 0\n\n  class {long_sel} => 42\n\n  class go => self {long_sel}\n"
     );
     let code = codegen_source(&src);
 
@@ -3504,6 +3507,66 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
     assert!(
         code.contains("call 'test':'class_kw_"),
         "class method self-send must use hashed call target 'class_kw_<hex>'. Got:\n{code}"
+    );
+}
+
+/// BT-3666: in an open class a class-side self-send to a selector the class
+/// itself defines must reach a subclass override, so it routes through the
+/// runtime hierarchy walk starting at the receiving class — not a static
+/// `class_<sel>` call bound to the module the send was compiled in.
+#[test]
+fn test_class_method_self_send_in_open_class_dispatches_dynamically() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'beamtalk_class_dispatch':'class_self_send'("),
+        "open class self-send must use the virtual class_self_send walk. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("call 'test':'class_foo'(ClassSelf"),
+        "open class self-send must not be statically bound to class_foo. Got:\n{code}"
+    );
+}
+
+/// BT-3666: a sealed class cannot be subclassed, so its class-side self-send
+/// keeps the direct call (no runtime walk).
+#[test]
+fn test_class_method_self_send_in_sealed_class_stays_static() {
+    let src = "sealed Object subclass: SealedCls\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'test':'class_foo'(ClassSelf"),
+        "sealed class self-send must stay a direct class_foo call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'class_self_send'"),
+        "sealed class self-send must not use the runtime walk. Got:\n{code}"
+    );
+}
+
+/// BT-3666: an open Actor's instance-side self-send resolves the callee
+/// module from the instance's own `'__class_mod__'` at run time, so an
+/// inherited method's `self foo` reaches a subclass override.
+#[test]
+fn test_actor_self_send_in_open_class_uses_instance_class_module() {
+    let src = "Actor subclass: OpenActor\n  foo => 1\n\n  bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'maps':'get'('__class_mod__', ")
+            && code.contains(":'safe_dispatch'('foo'"),
+        "open actor self-send must dispatch on the instance's class module. Got:\n{code}"
+    );
+}
+
+/// BT-3666: a sealed Actor cannot be subclassed, so its self-sends stay
+/// statically bound (direct `dispatch/4`, no `'__class_mod__'` lookup).
+#[test]
+fn test_actor_self_send_in_sealed_class_stays_static() {
+    let src = "sealed Actor subclass: SealedActor\n  foo => 1\n\n  bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("call 'maps':'get'('__class_mod__', "),
+        "sealed actor self-send must not look up the instance class module. Got:\n{code}"
     );
 }
 

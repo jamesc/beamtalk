@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: template-method fixture; see self_send_override_test.bt.
+
+SsoActorBase subclass: SsoActorSub
+
+  foo -> String => "sub"
+
+  scale: n :: Integer -> Integer => n * 10
+
+  bump -> Integer =>
+    self.count := self.count + 10
+    self.count
