@@ -103,8 +103,8 @@ b := Beamtalk
 b classNamed: #Integer
 // => Integer
 
-Beamtalk perform: #version
-// => Beamtalk version
+(Beamtalk perform: #version) == Beamtalk version
+// => true
 
 Beamtalk perform: #classNamed: withArguments: #(#Integer)
 // => Integer

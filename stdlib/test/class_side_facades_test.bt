@@ -13,7 +13,6 @@
 TestCase subclass: ClassSideFacadesTest
 
   // --- Beamtalk ---
-
   testBeamtalkClassNamed =>
     self assert: (Beamtalk classNamed: #Integer) equals: Integer
 
@@ -29,7 +28,6 @@ TestCase subclass: ClassSideFacadesTest
     self should: [Beamtalk perform: #globals] raise: #does_not_understand
 
   // --- dynamic sends match static sends ---
-
   testDynamicSendThroughVariable =>
     b := Beamtalk
     self assert: (b classNamed: #Integer) equals: Integer
@@ -42,18 +40,15 @@ TestCase subclass: ClassSideFacadesTest
     self assert: (Beamtalk classNamed: #Beamtalk) version equals: Beamtalk version
 
   // --- SystemNavigation ---
-
   testSystemNavigationImplementorsOfStatic =>
     self assert: ((SystemNavigation implementorsOf: #printString) includes: Object)
 
   testSystemNavigationImplementorsOfThroughVariable =>
     nav := SystemNavigation
     self assert: ((nav implementorsOf: #printString) includes: Object)
-    self assert: (nav implementorsOf: #printString) size
-      equals: (SystemNavigation implementorsOf: #printString) size
+    self assert: (nav implementorsOf: #printString) size equals: (SystemNavigation implementorsOf: #printString) size
 
   // --- Workspace: unavailable under `beamtalk test` ---
-
   testWorkspaceIsAvailableIsFalse =>
     Workspace isAvailable ifTrue: [^self skip: "a workspace is running"]
     self assert: Workspace isAvailable equals: false
@@ -63,7 +58,6 @@ TestCase subclass: ClassSideFacadesTest
     self should: [Workspace classes] raise: #no_workspace
 
   // --- Transcript: writes work, the buffer needs a workspace ---
-
   testTranscriptShowCrSucceeds =>
     self assert: (Transcript showCr: "class-side facades") equals: nil
 
