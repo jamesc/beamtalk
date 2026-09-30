@@ -791,10 +791,12 @@ fn build_class_index_flattens_cross_file_trait_provisions() {
         has_native_deps: false,
     };
     let provides_tag = |infos: &[ClassInfo]| {
-        infos
+        let mut widgets = infos
             .iter()
             .filter(|c| c.name == "Widget" && c.package.as_deref() == Some("test_pkg"))
-            .all(|c| c.methods.iter().any(|m| m.selector == "tag"))
+            .peekable();
+        // Non-vacuous: a package-stamped Widget must exist and carry `tag`.
+        widgets.peek().is_some() && widgets.all(|c| c.methods.iter().any(|m| m.selector == "tag"))
     };
 
     // Cold build: every file has a `cached_asts` entry.
