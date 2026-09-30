@@ -173,7 +173,7 @@ sealed typed Value subclass: ChangeEntry
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace changes do: [:e | Transcript showLine: e diff]
+  /// Workspace changes do: [:e | Transcript showCr: e diff]
   /// ```
   diff -> String | Nil => self.diff
 

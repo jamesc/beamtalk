@@ -20,7 +20,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: ObjectStateChanged do: [:e |
-///   Transcript showLine: e actorClass asString, " changed ", e changedSlots printString
+///   Transcript showCr: e actorClass asString, " changed ", e changedSlots printString
 /// ]
 /// ```
 sealed typed Announcement subclass: ObjectStateChanged

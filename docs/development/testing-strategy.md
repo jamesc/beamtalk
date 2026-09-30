@@ -375,6 +375,8 @@ find stdlib/test -maxdepth 1 -name '*.bt' | wc -l
 
 **How it works:** The `beamtalk test` command first pre-compiles all `.bt` files in the `fixtures/` subdirectory, making fixture classes available on the BEAM code path — similar to how all classes exist in a Smalltalk image. It then discovers `.bt` files containing `TestCase subclass:` definitions, compiles them through the normal pipeline, generates EUnit wrapper modules, and runs all test methods. Each test method starting with `test` is auto-discovered and run with a fresh instance. **Limitation:** currently only the first `TestCase` subclass in each `.bt` file is compiled (a warning is emitted if more are found), so put each test class in its own file.
 
+**No workspace under `beamtalk test`:** the class-side facades (ADR 0129) are ordinary classes, so `Beamtalk`, `Transcript show:` (which falls back to Logger) and `SystemNavigation` work in BUnit. `Workspace` has no live workspace behind it there: `Workspace isAvailable` answers `false` and every other `Workspace` selector raises `no_workspace`. BUnit therefore checks `Workspace` selectors by reflection (`Workspace class includesSelector: #load:`); live behaviour belongs in `tests/repl-protocol/cases/*.btscript` (see `stdlib/test/workspace_test.bt`).
+
 **Test fixtures:** Place fixture classes in `stdlib/test/fixtures/`. All `.bt` files in this directory are automatically compiled and made available to all test files — no explicit loading needed. Just use the class name directly in your tests.
 
 **Hazard — shared `Supervisor`/`DynamicSupervisor` fixtures:** `supervise` on a `Supervisor`/`DynamicSupervisor` subclass registers the running process under `{local, ClassName}` — one node-wide, name-registered singleton, not a per-test instance (`beamtalk_supervisor:startLink/1`). Since BUnit runs non-serial test classes concurrently, any two test classes that call `supervise`/`stop` on the *same* fixture class race: one test's teardown can `stop` the shared supervisor (and its children) out from under another test still using it, producing spurious "actor process has terminated" failures (BT-2729, BT-3379). If a test class touches a shared `Supervisor`/`DynamicSupervisor` fixture, declare `class serial -> Boolean => true` on it (see `SupervisorWhichTest` or `DynamicSupervisorDefaultsTest`) so it never runs concurrently with another class sharing that fixture.
@@ -621,7 +623,7 @@ find tests/repl-protocol/cases -name '*.btscript' | wc -l
 **Test harness:** `crates/beamtalk-cli/tests/repl_protocol.rs`
 
 **What they test:**
-- Workspace bindings (Transcript, Beamtalk globals)
+- Workspace bindings (`Workspace bind:as:` / `Workspace bindings`) and the class-side facades that need a live workspace (`Workspace`, `Transcript recent`/`clear`)
 - REPL commands (`:load`, variable persistence)
 - Actor auto-await behavior
 - `ERROR:` assertion patterns
@@ -749,7 +751,7 @@ fixture that populates `__doc__` directly), and `workspace_doc_block_test.exs`
 asserts the LiveView renders that payload as escaped HTML (against a stub). The
 compiler seam — that a `///` comment in `.bt` source actually flows through to
 `__doc__` / `get_doc` at runtime — is exercised by the `help:` tests
-(`beamtalk_repl_docs` / `beamtalk_interface_test.bt`), **not** through the
+(`beamtalk_repl_docs` / `beamtalk_facade_test.bt`), **not** through the
 browser. There is intentionally no browser e2e walking source → codegen →
 render (an earlier attempt was fragile against the mount-time class tree); if
 doc-comment rendering regresses, check those three suites in that order.

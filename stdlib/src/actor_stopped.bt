@@ -11,7 +11,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: ActorStopped do: [:e |
-///   Transcript showLine: e actorClass asString
+///   Transcript showCr: e actorClass asString
 /// ]
 /// ```
 sealed typed Announcement subclass: ActorStopped

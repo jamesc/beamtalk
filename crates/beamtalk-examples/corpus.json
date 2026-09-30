@@ -925,7 +925,7 @@
         "to_string",
         "where"
       ],
-      "source": "tree := Node current processes unwrap   // == ProcessNavigation default tree\ntree root                          // => the snapshot root SupervisionNode\ntree size                          // => total node count\ntree do: [:node | Transcript showLine: node printString]\ntree select: [:node | node isSupervisor]\ntree findClass: Counter            // => every running Counter as SupervisionNodes\ntree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)",
+      "source": "tree := Node current processes unwrap   // == ProcessNavigation default tree\ntree root                          // => the snapshot root SupervisionNode\ntree size                          // => total node count\ntree do: [:node | Transcript showCr: node printString]\ntree select: [:node | node isSupervisor]\ntree findClass: Counter            // => every running Counter as SupervisionNodes\ntree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1608,17 +1608,17 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-203",
-      "title": "Beamtalk — System reflection (BeamtalkInterface) (beamtalk-language-features)",
+      "title": "Beamtalk — System reflection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "Beamtalk version\n// => \"0.4.0\"\n\nBeamtalk allClasses includes: Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
+      "source": "Beamtalk version\n// => \"0.4.0\"\n\nBeamtalk allClasses includes: Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\nBeamtalk help: Integer\n// => \"== Integer < Number ==\\n...\"\n\nBeamtalk help: Integer selector: #+\n// => \"Integer >> +\\n...\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-204",
-      "title": "Workspace — Project operations (Workspace) (beamtalk-language-features)",
+      "title": "Workspace — Project operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "async",
@@ -1628,11 +1628,21 @@
         "genserver",
         "process"
       ],
-      "source": "(Workspace load: \"examples/counter.bt\")\n// => nil  (Counter is now registered)\n\n(Workspace classes) includes: Counter\n// => true\n\n(Workspace testClasses) includes: CounterTest\n// => true\n\n(Workspace test: CounterTest) failed\n// => 0  (all tests pass)\n\nNode current actors unwrap size\n// => 3  (number of live actors; see Node introspection below)",
+      "source": "Workspace isAvailable\n// => true  (false under `beamtalk test`, where every other selector raises no_workspace)\n\nWorkspace load: \"examples/counter.bt\"\n// => #(Counter)  (Counter is now registered)\n\nWorkspace classes includes: Counter\n// => true\n\nWorkspace testClasses includes: CounterTest\n// => true\n\n(Workspace test: CounterTest) failed\n// => 0  (all tests pass)\n\nNode current actors unwrap size\n// => 3  (number of live actors; see Node introspection below)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-205",
+      "title": "Transcript — The REPL's shared log (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "Transcript showCr: \"Hello\"\nTranscript show: \"a\"; cr; show: \"b\"\nTranscript recent",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Node introspection (ADR 0129 amendment) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1653,7 +1663,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-206",
+      "id": "docs-beamtalk-language-features-block-207",
       "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1666,7 +1676,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-209",
+      "id": "docs-beamtalk-language-features-block-210",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1676,7 +1686,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-210",
+      "id": "docs-beamtalk-language-features-block-211",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1689,7 +1699,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-213",
+      "id": "docs-beamtalk-language-features-block-214",
       "title": "Destructive flush — flushIncludingDestructive and confirmDestructive (ADR 0113) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1699,7 +1709,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-216",
       "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1722,7 +1732,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Session — a first-class session value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1736,21 +1746,21 @@
         "set",
         "throw"
       ],
-      "source": "x := 42\n// => 42\n\nSession current bindings keys\n// => #(#x)\n\nSession current bindings at: #x\n// => 42\n\nSession current resolve: #Transcript\n// => the Transcript singleton\n\nSession current resolve: #notDefinedAnywhere\n// => Error: Undefined variable: notDefinedAnywhere\n\nSession current clear\n// => nil",
+      "source": "x := 42\n// => 42\n\nSession current bindings keys\n// => #(#x)\n\nSession current bindings at: #x\n// => 42\n\nSession current resolve: #Transcript\n// => Transcript (the class, from the class registry)\n\nSession current resolve: #notDefinedAnywhere\n// => Error: Undefined variable: notDefinedAnywhere\n\nSession current clear\n// => nil",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-218",
+      "id": "docs-beamtalk-language-features-block-219",
       "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "// Session-local write — DEFERRED to end of eval, visible on the NEXT line:\nSession current bindings at: #y put: 99\n// => 99\ny\n// => 99\n\n// Workspace-global write — SYNCHRONOUS (routes through bind:as:),\n// visible immediately on the next line:\nWorkspace globals at: #answer put: 42\n// => 42\nanswer\n// => 42",
+      "source": "// Session-local write — DEFERRED to end of eval, visible on the NEXT line:\nSession current bindings at: #y put: 99\n// => 99\ny\n// => 99\n\n// Workspace-binding write — SYNCHRONOUS (routes through bind:as:),\n// visible immediately on the next line:\nWorkspace bindings at: #answer put: 42\n// => 42\nanswer\n// => 42",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-220",
+      "id": "docs-beamtalk-language-features-block-221",
       "title": "Cross-session access (read-only) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1774,7 +1784,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "Tracing Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1784,7 +1794,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1799,7 +1809,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-223",
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "Trace Event Queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1817,7 +1827,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-224",
+      "id": "docs-beamtalk-language-features-block-225",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1832,7 +1842,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-225",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "Live Health (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1847,7 +1857,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-226",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1857,7 +1867,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-227",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1877,7 +1887,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-228",
+      "id": "docs-beamtalk-language-features-block-229",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1906,7 +1916,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-229",
+      "id": "docs-beamtalk-language-features-block-230",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1933,11 +1943,11 @@
         "toString",
         "to_string"
       ],
-      "source": "a := Announcer new\n\n// Subscribe: returns a Subscription token. The handler block receives the event.\nsub := a when: PriceChanged do: [:e | Transcript showLine: \"now \" ++ e newPrice printString]\nsub class       // => Subscription\nsub isActive    // => true\n\n// Publish asynchronously (fire-and-forget). Every matching subscriber runs.\na announce: (PriceChanged newPrice: 42)    // prints \"now 42\"\n\n// Stop listening.\nsub unsubscribe\nsub isActive    // => false",
+      "source": "a := Announcer new\n\n// Subscribe: returns a Subscription token. The handler block receives the event.\nsub := a when: PriceChanged do: [:e | Transcript showCr: \"now \" ++ e newPrice printString]\nsub class       // => Subscription\nsub isActive    // => true\n\n// Publish asynchronously (fire-and-forget). Every matching subscriber runs.\na announce: (PriceChanged newPrice: 42)    // prints \"now 42\"\n\n// Stop listening.\nsub unsubscribe\nsub isActive    // => false",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-231",
+      "id": "docs-beamtalk-language-features-block-232",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1956,7 +1966,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-232",
+      "id": "docs-beamtalk-language-features-block-233",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1980,11 +1990,11 @@
         "property",
         "subclassing"
       ],
-      "source": "Announcement subclass: UIEvent\nUIEvent subclass: ButtonClicked\n  field: buttonId :: String = \"\"\n\na when: UIEvent do: [:e | Transcript showLine: \"ui event\"]\na announce: (ButtonClicked buttonId: \"submit\")   // matches — \"ui event\"",
+      "source": "Announcement subclass: UIEvent\nUIEvent subclass: ButtonClicked\n  field: buttonId :: String = \"\"\n\na when: UIEvent do: [:e | Transcript showCr: \"ui event\"]\na announce: (ButtonClicked buttonId: \"submit\")   // matches — \"ui event\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-233",
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2001,11 +2011,11 @@
         "loop",
         "process"
       ],
-      "source": "SystemAnnouncer current when: ActorSpawned do: [:e |\n  Transcript showLine: e actorClass asString\n]\nCounter spawn    // the subscription fires: prints \"Counter\"",
+      "source": "SystemAnnouncer current when: ActorSpawned do: [:e |\n  Transcript showCr: e actorClass asString\n]\nCounter spawn    // the subscription fires: prints \"Counter\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-235",
+      "id": "docs-beamtalk-language-features-block-236",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2015,7 +2025,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-236",
+      "id": "docs-beamtalk-language-features-block-237",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2030,7 +2040,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-237",
+      "id": "docs-beamtalk-language-features-block-238",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2045,7 +2055,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-238",
+      "id": "docs-beamtalk-language-features-block-239",
       "title": "Node — a first-class value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2060,7 +2070,20 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-24",
+      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-240",
       "title": "Remote spawn and lookup (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2080,20 +2103,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-24",
-      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-240",
+      "id": "docs-beamtalk-language-features-block-241",
       "title": "Cluster-unique names — scope: #global (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2108,7 +2118,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-245",
+      "id": "docs-beamtalk-language-features-block-246",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2129,7 +2139,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-246",
+      "id": "docs-beamtalk-language-features-block-247",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2180,7 +2190,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-251",
+      "id": "docs-beamtalk-language-features-block-252",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2201,7 +2211,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-252",
+      "id": "docs-beamtalk-language-features-block-253",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2219,7 +2229,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-254",
+      "id": "docs-beamtalk-language-features-block-255",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2229,7 +2239,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-257",
+      "id": "docs-beamtalk-language-features-block-258",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2248,7 +2258,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-258",
+      "id": "docs-beamtalk-language-features-block-259",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2273,7 +2283,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-260",
+      "id": "docs-beamtalk-language-features-block-261",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2283,7 +2293,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-262",
+      "id": "docs-beamtalk-language-features-block-263",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2296,7 +2306,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-263",
+      "id": "docs-beamtalk-language-features-block-264",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2306,7 +2316,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-264",
+      "id": "docs-beamtalk-language-features-block-265",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2322,7 +2332,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-265",
+      "id": "docs-beamtalk-language-features-block-266",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2346,7 +2356,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-266",
+      "id": "docs-beamtalk-language-features-block-267",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2365,7 +2375,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-267",
+      "id": "docs-beamtalk-language-features-block-268",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2386,7 +2396,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-268",
+      "id": "docs-beamtalk-language-features-block-269",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2396,22 +2406,6 @@
         "where"
       ],
       "source": "// Terminal forces computation through the pipeline\n((Stream from: 1) select: [:n | n isEven]) take: 5\n// => [2,4,6,8,10]\n\n(Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]\n// => 10",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-269",
-      "title": "printString — Pipeline Inspection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "string conversion",
-        "toString",
-        "to_string",
-        "where"
-      ],
-      "source": "(Stream from: 1) printString\n// => Stream(from: 1)\n\n(Stream on: #(1, 2, 3)) printString\n// => Stream(on: [...])\n\n((Stream from: 1) select: [:n | n isEven]) printString\n// => Stream(from: 1) | select: [...]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2431,6 +2425,22 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-270",
+      "title": "printString — Pipeline Inspection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "string conversion",
+        "toString",
+        "to_string",
+        "where"
+      ],
+      "source": "(Stream from: 1) printString\n// => Stream(from: 1)\n\n(Stream on: #(1, 2, 3)) printString\n// => Stream(on: [...])\n\n((Stream from: 1) select: [:n | n isEven]) printString\n// => Stream(from: 1) | select: [...]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-271",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2443,7 +2453,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-271",
+      "id": "docs-beamtalk-language-features-block-272",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2462,7 +2472,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-272",
+      "id": "docs-beamtalk-language-features-block-273",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2472,7 +2482,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-273",
+      "id": "docs-beamtalk-language-features-block-274",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2493,7 +2503,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-274",
+      "id": "docs-beamtalk-language-features-block-275",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2512,7 +2522,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-276",
+      "id": "docs-beamtalk-language-features-block-277",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2530,7 +2540,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-277",
+      "id": "docs-beamtalk-language-features-block-278",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2545,31 +2555,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-278",
+      "id": "docs-beamtalk-language-features-block-279",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-279",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Collection",
-        "Object",
-        "beamtalk-language-features",
-        "extends",
-        "first",
-        "inherit",
-        "inheritance",
-        "object",
-        "subclassing"
-      ],
-      "source": "typed Object subclass: Collection(E)\n  @expect type\n  first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2593,7 +2585,25 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-282",
+      "id": "docs-beamtalk-language-features-block-280",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Collection",
+        "Object",
+        "beamtalk-language-features",
+        "extends",
+        "first",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "typed Object subclass: Collection(E)\n  @expect type\n  first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-283",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2616,7 +2626,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-283",
+      "id": "docs-beamtalk-language-features-block-284",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2626,7 +2636,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-284",
+      "id": "docs-beamtalk-language-features-block-285",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2636,7 +2646,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-285",
+      "id": "docs-beamtalk-language-features-block-286",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2659,7 +2669,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-287",
+      "id": "docs-beamtalk-language-features-block-288",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2674,7 +2684,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-288",
+      "id": "docs-beamtalk-language-features-block-289",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2699,7 +2709,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-290",
+      "id": "docs-beamtalk-language-features-block-291",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2712,7 +2722,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-291",
+      "id": "docs-beamtalk-language-features-block-292",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2735,7 +2745,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-292",
+      "id": "docs-beamtalk-language-features-block-293",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2763,7 +2773,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-293",
+      "id": "docs-beamtalk-language-features-block-294",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2791,7 +2801,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-296",
+      "id": "docs-beamtalk-language-features-block-297",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2822,7 +2832,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-297",
+      "id": "docs-beamtalk-language-features-block-298",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -6992,44 +7002,44 @@
       "explanation": "Code example from docs/learning/21-datetime.md"
     },
     {
-      "id": "docs-learning-22-workspace-globals-block-0",
-      "title": "Transcript — the shared log (22-workspace-globals)",
+      "id": "docs-learning-22-workspace-bindings-block-0",
+      "title": "Transcript — the shared log (22-workspace-bindings)",
       "category": "learning",
       "tags": [
-        "22-workspace-globals"
+        "22-workspace-bindings"
       ],
-      "source": "Transcript show: \"Hello from Beamtalk\"\nTranscript show: \"Step 1 complete\"; cr\nTranscript show: 42",
-      "explanation": "Code example from docs/learning/22-workspace-globals.md"
+      "source": "Transcript showCr: \"Hello from Beamtalk\"\nTranscript show: \"Step 1 complete\"; cr\nTranscript show: 42",
+      "explanation": "Code example from docs/learning/22-workspace-bindings.md"
     },
     {
-      "id": "docs-learning-22-workspace-globals-block-11",
-      "title": "Access from compiled code (22-workspace-globals)",
+      "id": "docs-learning-22-workspace-bindings-block-10",
+      "title": "Access from compiled code (22-workspace-bindings)",
       "category": "learning",
       "tags": [
-        "22-workspace-globals"
+        "22-workspace-bindings"
       ],
       "source": "Transcript showCr: \"Hello from compiled code\"\nWorkspace classes\nBeamtalk version",
-      "explanation": "Code example from docs/learning/22-workspace-globals.md"
+      "explanation": "Code example from docs/learning/22-workspace-bindings.md"
     },
     {
-      "id": "docs-learning-22-workspace-globals-block-8",
-      "title": "Custom bindings (22-workspace-globals)",
+      "id": "docs-learning-22-workspace-bindings-block-7",
+      "title": "Custom bindings (22-workspace-bindings)",
       "category": "learning",
       "tags": [
-        "22-workspace-globals"
+        "22-workspace-bindings"
       ],
-      "source": "Workspace bind: myConfig as: #Config   // register a binding\nWorkspace globals                       // see all bindings as a Dictionary\nWorkspace unbind: #Config              // remove a binding",
-      "explanation": "Code example from docs/learning/22-workspace-globals.md"
+      "source": "Workspace bind: myConfig as: #Config   // register a binding\nWorkspace bindings                     // live view of all bindings\nWorkspace unbind: #Config              // remove a binding",
+      "explanation": "Code example from docs/learning/22-workspace-bindings.md"
     },
     {
-      "id": "docs-learning-22-workspace-globals-block-9",
-      "title": "Beamtalk — system reflection (22-workspace-globals)",
+      "id": "docs-learning-22-workspace-bindings-block-8",
+      "title": "Beamtalk — system reflection (22-workspace-bindings)",
       "category": "learning",
       "tags": [
-        "22-workspace-globals"
+        "22-workspace-bindings"
       ],
-      "source": "Beamtalk version              // the Beamtalk version string\nBeamtalk allClasses           // list all registered classes\nBeamtalk classNamed: #Integer // look up a class by name\nBeamtalk globals              // Dictionary of all system-level names",
-      "explanation": "Code example from docs/learning/22-workspace-globals.md"
+      "source": "Beamtalk version              // the Beamtalk version string\nBeamtalk allClasses           // list all registered classes\nBeamtalk classNamed: #Integer // look up a class by name",
+      "explanation": "Code example from docs/learning/22-workspace-bindings.md"
     },
     {
       "id": "docs-learning-23-streams-block-15",
@@ -14183,15 +14193,15 @@
       "explanation": "BUnit tests for Bag — immutable multiset collection (BT-1249)"
     },
     {
-      "id": "stdlib-test-beamtalk-interface-test",
-      "title": "BeamtalkInterfaceTest",
+      "id": "stdlib-test-beamtalk-facade-test",
+      "title": "BeamtalkFacadeTest",
       "category": "stdlib-tests",
       "tags": [
-        "BeamtalkInterfaceTest",
+        "BeamtalkFacadeTest",
         "TestCase",
         "assign",
         "assignment",
-        "beamtalk_interface_test",
+        "beamtalk_facade_test",
         "extends",
         "inherit",
         "inheritance",
@@ -14211,7 +14221,7 @@
         "testReleaseInfoIsDictionary",
         "testVersionIsNonEmptyString"
       ],
-      "source": "// BUnit live-behaviour tests for the class-side `Beamtalk` facade\n// (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends\n// work under `beamtalk test` (no workspace binding required).\n//\n// Covers: version, allClasses, classNamed:, help:, help:selector:,\n// erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the\n// removed `current`/`globals` API.\n\nTestCase subclass: BeamtalkInterfaceTest\n\n  testClassNamedFindsIntegerClass =>\n    self assert: (Beamtalk classNamed: #Integer) equals: Integer\n\n  testClassNamedUnknownIsNil =>\n    self assert: (Beamtalk classNamed: #NoSuchClassAnywhere) isNil\n\n  testAllClassesIncludesIntegerAndBeamtalk =>\n    classes := Beamtalk allClasses\n    self assert: (classes includes: Integer)\n    self assert: (classes includes: Beamtalk)\n\n  testVersionIsNonEmptyString =>\n    self assert: (Beamtalk version isKindOf: String)\n    self assert: Beamtalk version isEmpty not\n\n  testHelpMentionsClassName =>\n    self assert: ((Beamtalk help: Integer) includesSubstring: \"Integer\")\n\n  testHelpSelectorReturnsString =>\n    self assert: ((Beamtalk help: Integer selector: #'+') isKindOf: String)\n\n  testErlangHelpReturnsString =>\n    self assert: ((Beamtalk erlangHelp: \"lists\") isKindOf: String)\n\n  testReleaseInfoIsDictionary =>\n    self assert: (Beamtalk releaseInfo isKindOf: Dictionary)\n\n  testInheritsFromObject => self assert: (Beamtalk inheritsFrom: Object)\n\n  testCurrentAndGlobalsAreRemoved =>\n    self deny: (Beamtalk class includesSelector: #current)\n    self deny: (Beamtalk class includesSelector: #globals)\n    self deny: (Beamtalk class includesSelector: #resetCurrent)",
+      "source": "// BUnit live-behaviour tests for the class-side `Beamtalk` facade\n// (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends\n// work under `beamtalk test` (no workspace binding required).\n//\n// Covers: version, allClasses, classNamed:, help:, help:selector:,\n// erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the\n// removed `current`/`globals` API.\n\nTestCase subclass: BeamtalkFacadeTest\n\n  testClassNamedFindsIntegerClass =>\n    self assert: (Beamtalk classNamed: #Integer) equals: Integer\n\n  testClassNamedUnknownIsNil =>\n    self assert: (Beamtalk classNamed: #NoSuchClassAnywhere) isNil\n\n  testAllClassesIncludesIntegerAndBeamtalk =>\n    classes := Beamtalk allClasses\n    self assert: (classes includes: Integer)\n    self assert: (classes includes: Beamtalk)\n\n  testVersionIsNonEmptyString =>\n    self assert: (Beamtalk version isKindOf: String)\n    self assert: Beamtalk version isEmpty not\n\n  testHelpMentionsClassName =>\n    self assert: ((Beamtalk help: Integer) includesSubstring: \"Integer\")\n\n  testHelpSelectorReturnsString =>\n    self assert: ((Beamtalk help: Integer selector: #'+') isKindOf: String)\n\n  testErlangHelpReturnsString =>\n    self assert: ((Beamtalk erlangHelp: \"lists\") isKindOf: String)\n\n  testReleaseInfoIsDictionary =>\n    self assert: (Beamtalk releaseInfo isKindOf: Dictionary)\n\n  testInheritsFromObject => self assert: (Beamtalk inheritsFrom: Object)\n\n  testCurrentAndGlobalsAreRemoved =>\n    self deny: (Beamtalk class includesSelector: #current)\n    self deny: (Beamtalk class includesSelector: #globals)\n    self deny: (Beamtalk class includesSelector: #resetCurrent)",
       "explanation": "BUnit live-behaviour tests for the class-side `Beamtalk` facade (ADR 0129 Phase 1). `Beamtalk` is a sealed, stateless class, so these sends work under `beamtalk test` (no workspace binding required).  Covers: version, allClasses, classNamed:, help:, help:selector:, erlangHelp:, logLevel/logFormat/debugTargets, and the absence of the removed `current`/`globals` API."
     },
     {
@@ -33321,8 +33331,8 @@
         "testRenameSucceedsAndReRegisters",
         "unless"
       ],
-      "source": "// Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)\n//\n// `beamtalk test`'s BUnit runner has no project configured\n// (`workspace_mode: false`), so an ordinary compiled `.bt` fixture class's\n// source file always classifies as a \"dependency\" (ADR 0114 § Refusal vs\n// flushability) rather than a flushable project class, and `renameTo:`\n// correctly refuses those before any mutation — a dynamic (ClassBuilder)\n// class is the one classification this sandbox can drive through the full\n// success path. The ordinary-project-class success path — a real `.bt`\n// file's own declaration-header rewrite, plus `referencesTo:`/\n// `direct_subclasses:`-discovered reference sites across a small fixture\n// graph, and the resulting `'rename-class'` ChangeLog entry's `sites` list —\n// is exercised with `project_path` configured (so those files classify as\n// flushable) by\n// runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_to_tests.erl,\n// mirroring BT-3270's own `beamtalk_repl_loader_rewrite_sites_tests.erl`\n// fixture pattern.\n//\n// Full integration coverage (disk flush, reference-site rewrite committed to\n// files) is out of scope here (BT-3271) and lives in the e2e suite.\n\nTestCase subclass: RenameToTest\n  field: renamedClass = nil\n\n  tearDown =>\n    self.renamedClass isNil ifFalse: [self.renamedClass removeFromSystem]\n\n  // Dynamic-class success path: re-registers under the new name, and the\n  // old name no longer resolves.\n  testRenameSucceedsAndReRegisters =>\n    target := Object classBuilder name: #Bt3278RenameFixtureTarget;\n      superclass: Actor;\n      register\n\n    self.renamedClass := target renameTo: #Bt3278RenameFixtureRenamed\n\n    self assert: self.renamedClass name equals: #Bt3278RenameFixtureRenamed\n    self assert: (SystemNavigation findClass: #Bt3278RenameFixtureRenamed) equals: self.renamedClass\n    self assert: (SystemNavigation findClass: #Bt3278RenameFixtureTarget) isNil\n\n  // Collision refusal (ADR 0114 § Decision): renaming to an already-loaded\n  // class name raises rather than silently overwriting.\n  testRenameRefusesCollisionWithExistingClass =>\n    self.renamedClass := Object classBuilder name: #Bt3278RenameFixtureTarget;\n      superclass: Object;\n      register\n\n    self should: [\n      self.renamedClass renameTo: #Integer\n    ] raise: #class_already_exists\n\n  // Stdlib refusal (ADR 0114 § Refusal vs flushability): refused before any\n  // memory mutation, unlike removeSelector:'s \"flushable, not refusal\" rule.\n  testRenameRefusesStdlibClass =>\n    self should: [Integer renameTo: #Whole] raise: #runtime_error\n\n  testRenameRefusesStdlibClassObject =>\n    self should: [Object renameTo: #Thing] raise: #runtime_error\n\n  // Dependency-class refusal (ADR 0114 § Refusal vs flushability): a compiled\n  // .bt fixture class has its source file recorded but no project_path is\n  // configured in BUnit mode, so it classifies as \"dependency:\" and is refused\n  // before any memory mutation — covering the uncovered branch in\n  // ensure_class_renamable/2 and dependency_rename_refusal_error/2.\n  testRenameRefusesDependencyClass =>\n    self should: [Counter renameTo: #CounterRenamed] raise: #runtime_error",
-      "explanation": "Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)  `beamtalk test`'s BUnit runner has no project configured (`workspace_mode: false`), so an ordinary compiled `.bt` fixture class's source file always classifies as a \"dependency\" (ADR 0114 § Refusal vs flushability) rather than a flushable project class, and `renameTo:` correctly refuses those before any mutation — a dynamic (ClassBuilder) class is the one classification this sandbox can drive through the full success path. The ordinary-project-class success path — a real `.bt` file's own declaration-header rewrite, plus `referencesTo:`/ `direct_subclasses:`-discovered reference sites across a small fixture graph, and the resulting `'rename-class'` ChangeLog entry's `sites` list — is exercised with `project_path` configured (so those files classify as flushable) by runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_to_tests.erl, mirroring BT-3270's own `beamtalk_repl_loader_rewrite_sites_tests.erl` fixture pattern.  Full integration coverage (disk flush, reference-site rewrite committed to files) is out of scope here (BT-3271) and lives in the e2e suite."
+      "source": "// Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)\n//\n// `beamtalk test`'s BUnit runner has no project configured\n// (no workspace runs), so an ordinary compiled `.bt` fixture class's\n// source file always classifies as a \"dependency\" (ADR 0114 § Refusal vs\n// flushability) rather than a flushable project class, and `renameTo:`\n// correctly refuses those before any mutation — a dynamic (ClassBuilder)\n// class is the one classification this sandbox can drive through the full\n// success path. The ordinary-project-class success path — a real `.bt`\n// file's own declaration-header rewrite, plus `referencesTo:`/\n// `direct_subclasses:`-discovered reference sites across a small fixture\n// graph, and the resulting `'rename-class'` ChangeLog entry's `sites` list —\n// is exercised with `project_path` configured (so those files classify as\n// flushable) by\n// runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_to_tests.erl,\n// mirroring BT-3270's own `beamtalk_repl_loader_rewrite_sites_tests.erl`\n// fixture pattern.\n//\n// Full integration coverage (disk flush, reference-site rewrite committed to\n// files) is out of scope here (BT-3271) and lives in the e2e suite.\n\nTestCase subclass: RenameToTest\n  field: renamedClass = nil\n\n  tearDown =>\n    self.renamedClass isNil ifFalse: [self.renamedClass removeFromSystem]\n\n  // Dynamic-class success path: re-registers under the new name, and the\n  // old name no longer resolves.\n  testRenameSucceedsAndReRegisters =>\n    target := Object classBuilder name: #Bt3278RenameFixtureTarget;\n      superclass: Actor;\n      register\n\n    self.renamedClass := target renameTo: #Bt3278RenameFixtureRenamed\n\n    self assert: self.renamedClass name equals: #Bt3278RenameFixtureRenamed\n    self assert: (SystemNavigation findClass: #Bt3278RenameFixtureRenamed) equals: self.renamedClass\n    self assert: (SystemNavigation findClass: #Bt3278RenameFixtureTarget) isNil\n\n  // Collision refusal (ADR 0114 § Decision): renaming to an already-loaded\n  // class name raises rather than silently overwriting.\n  testRenameRefusesCollisionWithExistingClass =>\n    self.renamedClass := Object classBuilder name: #Bt3278RenameFixtureTarget;\n      superclass: Object;\n      register\n\n    self should: [\n      self.renamedClass renameTo: #Integer\n    ] raise: #class_already_exists\n\n  // Stdlib refusal (ADR 0114 § Refusal vs flushability): refused before any\n  // memory mutation, unlike removeSelector:'s \"flushable, not refusal\" rule.\n  testRenameRefusesStdlibClass =>\n    self should: [Integer renameTo: #Whole] raise: #runtime_error\n\n  testRenameRefusesStdlibClassObject =>\n    self should: [Object renameTo: #Thing] raise: #runtime_error\n\n  // Dependency-class refusal (ADR 0114 § Refusal vs flushability): a compiled\n  // .bt fixture class has its source file recorded but no project_path is\n  // configured in BUnit mode, so it classifies as \"dependency:\" and is refused\n  // before any memory mutation — covering the uncovered branch in\n  // ensure_class_renamable/2 and dependency_rename_refusal_error/2.\n  testRenameRefusesDependencyClass =>\n    self should: [Counter renameTo: #CounterRenamed] raise: #runtime_error",
+      "explanation": "Tests for Behaviour >> renameTo: (ADR 0114 Phase 2, BT-3278)  `beamtalk test`'s BUnit runner has no project configured (no workspace runs), so an ordinary compiled `.bt` fixture class's source file always classifies as a \"dependency\" (ADR 0114 § Refusal vs flushability) rather than a flushable project class, and `renameTo:` correctly refuses those before any mutation — a dynamic (ClassBuilder) class is the one classification this sandbox can drive through the full success path. The ordinary-project-class success path — a real `.bt` file's own declaration-header rewrite, plus `referencesTo:`/ `direct_subclasses:`-discovered reference sites across a small fixture graph, and the resulting `'rename-class'` ChangeLog entry's `sites` list — is exercised with `project_path` configured (so those files classify as flushable) by runtime/apps/beamtalk_workspace/test/beamtalk_behaviour_intrinsics_rename_to_tests.erl, mirroring BT-3270's own `beamtalk_repl_loader_rewrite_sites_tests.erl` fixture pattern.  Full integration coverage (disk flush, reference-site rewrite committed to files) is out of scope here (BT-3271) and lives in the e2e suite."
     },
     {
       "id": "stdlib-test-result-match-actor-test",
@@ -37633,8 +37643,8 @@
         "testTestRaisesNoWorkspaceWhenUnavailable",
         "workspace_test"
       ],
-      "source": "// BUnit tests for the `Workspace` class-side facade (BT-849 / ADR 0040 Phase 6,\n// ADR 0129 / BT-3641).\n//\n// `Workspace` is a sealed, stateless class-side facade. Under `beamtalk test`\n// (workspace_mode: false) no workspace runs, so every send except\n// `isAvailable` raises `no_workspace`. Selector tests use class-side\n// introspection (`Workspace class includesSelector:`). Live functionality tests\n// are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, bindings, load:, test, test:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (Workspace class includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (Workspace class includesSelector: #testClasses)\n\n  testIncludesSelectorBindings =>\n    self assert: (Workspace class includesSelector: #bindings)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (Workspace class includesSelector: #load:)\n\n  // ADR 0082 Phase 1 (BT-2285): new-class creation facade method. The live\n  // happy path + the four validation errors require a workspace + project tree\n  // and are covered in tests/repl-protocol/cases/workspace_new_class.btscript\n  // and the loader's EUnit tests; BUnit only verifies the selector exists.\n  testIncludesSelectorNewClassAt =>\n    self assert: (Workspace class includesSelector: #newClass:at:)\n\n  // ADR 0114 Phase 2 (BT-3272): pure file-move facade method. Like\n  // `newClass:at:` above, the live success/refusal paths need a project\n  // tree + real class objects and are covered in\n  // beamtalk_repl_loader_move_class_tests (EUnit) — the `Workspace` facade\n  // is not available in this BUnit context (see this file's own header\n  // comment), so BUnit only verifies the selector is present on the facade.\n  testIncludesSelectorMoveClassTo =>\n    self assert: (Workspace class includesSelector: #moveClass:to:)\n\n  // ADR 0082 Phase 2 (BT-2286): flush + flush: selectors. Live splice + atomic\n  // rename + external-edit detection are covered in the\n  // beamtalk_workspace_flush_tests EUnit suite. BUnit only verifies the\n  // selectors are present on the facade.\n  testIncludesSelectorFlush =>\n    self assert: (Workspace class includesSelector: #flush)\n\n  testIncludesSelectorFlushColon =>\n    self assert: (Workspace class includesSelector: #flush:)\n\n  // ADR 0113 Phase 2 (BT-3207): destructive-tier flush selectors. Live\n  // tiering behaviour is covered in beamtalk_workspace_flush_tests (EUnit)\n  // and tests/repl-protocol/cases/workspace_flush_destructive.btscript;\n  // BUnit only verifies the selectors are present on the facade.\n  testIncludesSelectorFlushIncludingDestructive =>\n    self assert: (Workspace class includesSelector: #flushIncludingDestructive)\n\n  testIncludesSelectorFlushConfirmDestructive =>\n    self assert: (Workspace class includesSelector: #flush:confirmDestructive:)\n\n  testIncludesSelectorTest =>\n    self assert: (Workspace class includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (Workspace class includesSelector: #test:)\n\n  // BT-3633: node/program introspection moved off Workspace (ADR 0129\n  // amendment): actors/actorAt:/actorsOf:/processes/supervisors -> Node,\n  // supervisor -> Program rootSupervisor, nodes -> Node connected + shapeSkew.\n  testNodeIntrospectionSelectorsAreNotOnWorkspace =>\n    self deny: (Workspace class includesSelector: #actors)\n    self deny: (Workspace class includesSelector: #actorAt:)\n    self deny: (Workspace class includesSelector: #actorsOf:)\n    self deny: (Workspace class includesSelector: #processes)\n    self deny: (Workspace class includesSelector: #supervisors)\n    self deny: (Workspace class includesSelector: #supervisor)\n    self deny: (Workspace class includesSelector: #nodes)\n\n  testIncludesSelectorBindAs =>\n    self assert: (Workspace class includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (Workspace class includesSelector: #unbind:)\n\n  // ADR 0081 Phases 5 & 7 (BT-2368): session navigation. BUnit only verifies\n  // the selectors exist on the facade. Live behaviour (currentSession value\n  // inside an eval vs nil outside, sessions enumeration, cross-session\n  // reads/writes) is covered by the beamtalk_session_primitives /\n  // beamtalk_workspace_interface_primitives EUnit suites and the e2e btscript.\n  testIncludesSelectorCurrentSession =>\n    self assert: (Workspace class includesSelector: #currentSession)\n\n  testIncludesSelectorSessions =>\n    self assert: (Workspace class includesSelector: #sessions)\n\n  testInheritsFromObject => self assert: (Workspace inheritsFrom: Object)\n\n  testIncludesSelectorIsAvailable =>\n    self assert: (Workspace class includesSelector: #isAvailable)\n\n  // `current`/`resetCurrent` were removed with the singleton (ADR 0129).\n  testCurrentIsGone =>\n    self deny: (Workspace class includesSelector: #current)\n    self deny: (Workspace class includesSelector: #resetCurrent)\n\n  // `isAvailable` never raises, in any context.\n  testIsAvailableIsBoolean =>\n    self assert: (Workspace isAvailable isKindOf: Boolean)\n\n  // Context-explicit refusal: with no workspace on this node (the `beamtalk\n  // test` context) the guard raises the structured `no_workspace` error.\n  // Skipped when a workspace is running.\n  testClassesRaisesNoWorkspaceWhenUnavailable =>\n    Workspace isAvailable ifTrue: [^self skip: \"a workspace is running\"]\n    self should: [Workspace classes] raise: #no_workspace\n\n  testKeywordSendRaisesNoWorkspaceWhenUnavailable =>\n    Workspace isAvailable ifTrue: [^self skip: \"a workspace is running\"]\n    self should: [Workspace load: \"x.bt\"] raise: #no_workspace\n\n  testTestRaisesNoWorkspaceWhenUnavailable =>\n    Workspace isAvailable ifTrue: [^self skip: \"a workspace is running\"]\n    self should: [Workspace test] raise: #no_workspace",
-      "explanation": "BUnit tests for the `Workspace` class-side facade (BT-849 / ADR 0040 Phase 6, ADR 0129 / BT-3641).  `Workspace` is a sealed, stateless class-side facade. Under `beamtalk test` (workspace_mode: false) no workspace runs, so every send except `isAvailable` raises `no_workspace`. Selector tests use class-side introspection (`Workspace class includesSelector:`). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt  Covers: classes, testClasses, bindings, load:, test, test:, bind:as:, unbind:"
+      "source": "// BUnit tests for the `Workspace` class-side facade (BT-849 / ADR 0040 Phase 6,\n// ADR 0129 / BT-3641).\n//\n// `Workspace` is a sealed, stateless class-side facade. Under `beamtalk test`\n// (no workspace runs), so every send except\n// `isAvailable` raises `no_workspace`. Selector tests use class-side\n// introspection (`Workspace class includesSelector:`). Live functionality tests\n// are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, bindings, load:, test, test:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (Workspace class includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (Workspace class includesSelector: #testClasses)\n\n  testIncludesSelectorBindings =>\n    self assert: (Workspace class includesSelector: #bindings)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (Workspace class includesSelector: #load:)\n\n  // ADR 0082 Phase 1 (BT-2285): new-class creation facade method. The live\n  // happy path + the four validation errors require a workspace + project tree\n  // and are covered in tests/repl-protocol/cases/workspace_new_class.btscript\n  // and the loader's EUnit tests; BUnit only verifies the selector exists.\n  testIncludesSelectorNewClassAt =>\n    self assert: (Workspace class includesSelector: #newClass:at:)\n\n  // ADR 0114 Phase 2 (BT-3272): pure file-move facade method. Like\n  // `newClass:at:` above, the live success/refusal paths need a project\n  // tree + real class objects and are covered in\n  // beamtalk_repl_loader_move_class_tests (EUnit) — the `Workspace` facade\n  // is not available in this BUnit context (see this file's own header\n  // comment), so BUnit only verifies the selector is present on the facade.\n  testIncludesSelectorMoveClassTo =>\n    self assert: (Workspace class includesSelector: #moveClass:to:)\n\n  // ADR 0082 Phase 2 (BT-2286): flush + flush: selectors. Live splice + atomic\n  // rename + external-edit detection are covered in the\n  // beamtalk_workspace_flush_tests EUnit suite. BUnit only verifies the\n  // selectors are present on the facade.\n  testIncludesSelectorFlush =>\n    self assert: (Workspace class includesSelector: #flush)\n\n  testIncludesSelectorFlushColon =>\n    self assert: (Workspace class includesSelector: #flush:)\n\n  // ADR 0113 Phase 2 (BT-3207): destructive-tier flush selectors. Live\n  // tiering behaviour is covered in beamtalk_workspace_flush_tests (EUnit)\n  // and tests/repl-protocol/cases/workspace_flush_destructive.btscript;\n  // BUnit only verifies the selectors are present on the facade.\n  testIncludesSelectorFlushIncludingDestructive =>\n    self assert: (Workspace class includesSelector: #flushIncludingDestructive)\n\n  testIncludesSelectorFlushConfirmDestructive =>\n    self assert: (Workspace class includesSelector: #flush:confirmDestructive:)\n\n  testIncludesSelectorTest =>\n    self assert: (Workspace class includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (Workspace class includesSelector: #test:)\n\n  // BT-3633: node/program introspection moved off Workspace (ADR 0129\n  // amendment): actors/actorAt:/actorsOf:/processes/supervisors -> Node,\n  // supervisor -> Program rootSupervisor, nodes -> Node connected + shapeSkew.\n  testNodeIntrospectionSelectorsAreNotOnWorkspace =>\n    self deny: (Workspace class includesSelector: #actors)\n    self deny: (Workspace class includesSelector: #actorAt:)\n    self deny: (Workspace class includesSelector: #actorsOf:)\n    self deny: (Workspace class includesSelector: #processes)\n    self deny: (Workspace class includesSelector: #supervisors)\n    self deny: (Workspace class includesSelector: #supervisor)\n    self deny: (Workspace class includesSelector: #nodes)\n\n  testIncludesSelectorBindAs =>\n    self assert: (Workspace class includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (Workspace class includesSelector: #unbind:)\n\n  // ADR 0081 Phases 5 & 7 (BT-2368): session navigation. BUnit only verifies\n  // the selectors exist on the facade. Live behaviour (currentSession value\n  // inside an eval vs nil outside, sessions enumeration, cross-session\n  // reads/writes) is covered by the beamtalk_session_primitives /\n  // beamtalk_workspace_interface_primitives EUnit suites and the e2e btscript.\n  testIncludesSelectorCurrentSession =>\n    self assert: (Workspace class includesSelector: #currentSession)\n\n  testIncludesSelectorSessions =>\n    self assert: (Workspace class includesSelector: #sessions)\n\n  testInheritsFromObject => self assert: (Workspace inheritsFrom: Object)\n\n  testIncludesSelectorIsAvailable =>\n    self assert: (Workspace class includesSelector: #isAvailable)\n\n  // `current`/`resetCurrent` were removed with the singleton (ADR 0129).\n  testCurrentIsGone =>\n    self deny: (Workspace class includesSelector: #current)\n    self deny: (Workspace class includesSelector: #resetCurrent)\n\n  // `isAvailable` never raises, in any context.\n  testIsAvailableIsBoolean =>\n    self assert: (Workspace isAvailable isKindOf: Boolean)\n\n  // Context-explicit refusal: with no workspace on this node (the `beamtalk\n  // test` context) the guard raises the structured `no_workspace` error.\n  // Skipped when a workspace is running.\n  testClassesRaisesNoWorkspaceWhenUnavailable =>\n    Workspace isAvailable ifTrue: [^self skip: \"a workspace is running\"]\n    self should: [Workspace classes] raise: #no_workspace\n\n  testKeywordSendRaisesNoWorkspaceWhenUnavailable =>\n    Workspace isAvailable ifTrue: [^self skip: \"a workspace is running\"]\n    self should: [Workspace load: \"x.bt\"] raise: #no_workspace\n\n  testTestRaisesNoWorkspaceWhenUnavailable =>\n    Workspace isAvailable ifTrue: [^self skip: \"a workspace is running\"]\n    self should: [Workspace test] raise: #no_workspace",
+      "explanation": "BUnit tests for the `Workspace` class-side facade (BT-849 / ADR 0040 Phase 6, ADR 0129 / BT-3641).  `Workspace` is a sealed, stateless class-side facade. Under `beamtalk test` (no workspace runs), so every send except `isAvailable` raises `no_workspace`. Selector tests use class-side introspection (`Workspace class includesSelector:`). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt  Covers: classes, testClasses, bindings, load:, test, test:, bind:as:, unbind:"
     },
     {
       "id": "tests-repl-protocol-fixtures-actor-initialize-fixture",

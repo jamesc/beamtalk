@@ -7,7 +7,7 @@
 Unit tests for beamtalk_session_primitives (ADR 0081 Phase 3).
 
 Covers the factory primitives (current/0, withId/1, id/1), the session
-operations (bindings/1, resolve/2, clear/1), the workspace-globals
+operations (bindings/1, resolve/2, clear/1), the workspace-bindings
 view, the BindingsView read/write primitives, cross-session read + write
 rejection, and the dead-session liveness error.
 """.

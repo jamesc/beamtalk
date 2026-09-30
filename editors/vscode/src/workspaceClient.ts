@@ -271,7 +271,7 @@ export class WorkspaceClient {
    * BT-2369 (ADR 0081 Phase 6): the dedicated `bindings` protocol op was
    * removed. We now read session state through the Beamtalk-native `Session`
    * API via `eval`, mirroring how `reload` routes through `ClassName reload`.
-   * Session locals only — workspace globals are a separate `Workspace globals`
+   * Session locals only — workspace bindings are a separate `Workspace bindings`
    * layer.
    *
    * Cross-session note: the runtime's `eval` always runs in *this* WebSocket's

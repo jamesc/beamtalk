@@ -27,7 +27,7 @@
 /// tree := ProcessNavigation default tree
 /// tree root                          // => the snapshot root SupervisionNode
 /// tree size                          // => total node count
-/// tree do: [:node | Transcript showLine: node printString]
+/// tree do: [:node | Transcript showCr: node printString]
 /// tree select: [:node | node isSupervisor]
 /// tree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)
 /// tree findClass: Counter            // => List(SupervisionNode) for Counter actors
@@ -101,7 +101,7 @@ typed Value subclass: SupervisionTree
   ///
   /// ## Examples
   /// ```beamtalk
-  /// tree do: [:node | Transcript showLine: node printString]
+  /// tree do: [:node | Transcript showCr: node printString]
   /// ```
   do: aBlock :: Block(SupervisionNode, Object) -> SupervisionTree =>
     self nodes do: aBlock

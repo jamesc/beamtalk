@@ -83,11 +83,11 @@ The standard library APIs you'll reach for most often: file handling, text proce
 
 ### Part 6 — The Environment
 
-The workspace globals you'll use in every REPL session.
+The workspace facades and bindings you'll use in every REPL session.
 
 | # | Chapter | What you'll learn |
 |---|---------|-------------------|
-| [22](22-workspace-globals.md) | Workspace & Globals | Transcript logging, Workspace introspection, Beamtalk reflection, custom bindings |
+| [22](22-workspace-bindings.md) | Workspace & Bindings | Transcript logging, Workspace introspection, Beamtalk reflection, custom bindings |
 
 ### Part 7 — Advanced Topics
 

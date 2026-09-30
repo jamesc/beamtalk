@@ -605,35 +605,57 @@ dispatching via `native delegate` (`self delegate`) to `beamtalk_file.erl`, not 
 | `class cwd` | native delegate | ✅ | Current working directory |
 | `class tempDirectory` | native delegate | ✅ | OS temporary directory path |
 
-### Beamtalk / BeamtalkInterface (`stdlib/src/beamtalk_interface.bt`)
+### Beamtalk (`stdlib/src/beamtalk.bt`)
 
-**Class:** `BeamtalkInterface` — superclass: `Actor`
-**Methods:** 20/20 implemented (100%)
-**Correction (BT-2976):** the previous revision of this table (4 methods) predated the logger/debug-target
-control-plane and Erlang-module-help selectors below.
+**Class:** `Beamtalk` — superclass: `Object` (native: `beamtalk_interface`), `sealed typed`; all methods are `class sealed`
+**Methods:** 9/9 implemented (100%)
+**Note (ADR 0129):** `Beamtalk` is a class-side facade, so it needs no instance or `current` accessor and works in every boot context. `globals` is removed. The logger/debug-target control-plane selectors (`logLevel`, `logFormat`, `debugTargets`, `enableDebug:`, ...) moved to `Logger` (BT-3653); see `stdlib/src/logger.bt`.
 
 | Selector | Mechanism | Status | Pharo Equivalent |
 |----------|-----------|--------|-------------------|
-| `class current` | pure BT | ✅ | Current singleton instance (nil before workspace bootstrap) |
-| `class current:` | pure BT | ✅ | Set the current singleton instance |
-| `allClasses` | pure BT | ✅ | `Smalltalk>>allClasses` |
-| `classNamed:` | pure BT | ✅ | `Smalltalk>>at:` |
-| `globals` | pure BT | ✅ | `Smalltalk>>globals` |
-| `help:` | pure BT | ✅ | Class documentation: name, superclass, method signatures |
-| `help:selector:` | pure BT | ✅ | Detailed documentation for a specific method |
-| `erlangHelp:` | pure BT | ✅ | Documentation for an Erlang module (type sigs + EEP-48 docs) |
-| `erlangHelp:selector:` | pure BT | ✅ | Documentation for a specific Erlang module function |
-| `version` | pure BT | ✅ | Beamtalk version string |
-| `logLevel` | pure BT | ✅ | Current OTP primary log level |
-| `logLevel:` | pure BT | ✅ | Set the OTP primary log level |
-| `logFormat` | pure BT | ✅ | Current log format (`#text`/`#json`) |
-| `logFormat:` | pure BT | ✅ | Switch the log format on the file handler |
-| `debugTargets` | pure BT | ✅ | Available debug target symbols |
-| `enableDebug:` | pure BT | ✅ | Enable debug logging for a subsystem/class/actor |
-| `disableDebug:` | pure BT | ✅ | Disable debug logging for a subsystem/class/actor |
-| `activeDebugTargets` | pure BT | ✅ | Currently enabled debug targets |
-| `disableAllDebug` | pure BT | ✅ | Disable all debug targets |
-| `loggerInfo` | pure BT | ✅ | Formatted description of the current logger state |
+| `class allClasses` | native delegate | ✅ | `Smalltalk>>allClasses` |
+| `class classNamed:` | native delegate | ✅ | `Smalltalk>>at:` |
+| `class help:` | native delegate | ✅ | Class documentation: name, superclass, method signatures |
+| `class help:selector:` | native delegate | ✅ | Detailed documentation for a specific method |
+| `class erlangHelp:` | native delegate | ✅ | Documentation for an Erlang module (type sigs + EEP-48 docs) |
+| `class erlangHelp:selector:` | native delegate | ✅ | Documentation for a specific Erlang module function |
+| `class version` | native delegate | ✅ | Beamtalk version string |
+| `class releaseInfo` | FFI | ✅ | This node's release provenance (`beamtalk-provenance.json`) |
+| `class shapeManifest` | FFI | ✅ | Shape manifest of every registered project class |
+
+### Workspace (`stdlib/src/workspace.bt`)
+
+**Class:** `Workspace` — superclass: `Object` (native: `beamtalk_workspace_facade`), `sealed typed`; all methods are `class sealed`
+**Note (ADR 0129):** class-side facade over the running workspace. Every selector except `isAvailable` raises `no_workspace` where no workspace runs (e.g. `beamtalk test`). `globals` was renamed `bindings`; node introspection (`actors`, `actorsOf:`, `actorAt:`, `processes`, `supervisors`) moved to `Node` and the root supervisor to `Program`.
+
+| Selector | Mechanism | Status | Description |
+|----------|-----------|--------|-------------|
+| `class isAvailable` | native delegate | ✅ | True iff a workspace runs on this node; never raises |
+| `class classes` / `testClasses` | native delegate / pure BT | ✅ | Loaded user classes / the `TestCase` subclasses among them |
+| `class bindings` | native delegate | ✅ | Live `BindingsView` over the `bind:as:` entries |
+| `class bind:as:` / `unbind:` | native delegate | ✅ | Register / remove a workspace binding |
+| `class currentSession` / `sessions` | native delegate | ✅ | The calling `Session` (or nil) / all live sessions |
+| `class sync` / `recheckImage` | native delegate | ✅ | Compile the project's changed files / whole-image type re-check |
+| `class load:` / `newClass:at:` / `moveClass:to:` | native delegate | ✅ | Load, create and move class source |
+| `class test` / `test:` | pure BT | ✅ | Run all test classes / one test class |
+| `class changes` | native delegate | ✅ | The `ChangeLog` of pending in-memory edits |
+| `class flush` / `flush:` / `flush:confirmDestructive:` / `flushIncludingDestructive` | native delegate | ✅ | Write ChangeLog entries back to source files |
+| `class autoflush` / `autoflush:` | native delegate | ✅ | Read / set the write-through setting |
+| `class startSupervisor:` / `stopSupervisor:` | native delegate | ✅ | Attach / stop a supervisor under the workspace supervisor |
+| `class dependencies` | native delegate | ✅ | Direct dependency packages |
+
+### Transcript (`stdlib/src/transcript.bt`)
+
+**Class:** `Transcript` — superclass: `Object` (native: `beamtalk_transcript_facade`), `sealed typed`; all methods are `class sealed`
+**Note (ADR 0129 §5):** class-side facade. In an interactive workspace it writes to the workspace's `TranscriptStream`; elsewhere `show:`/`showCr:` emit a Logger event and `cr` is a no-op. There is no `showLine:`.
+
+| Selector | Mechanism | Status | Pharo Equivalent |
+|----------|-----------|--------|-------------------|
+| `class show:` | native delegate | ✅ | `Transcript>>show:` |
+| `class cr` | native delegate | ✅ | `Transcript>>cr` |
+| `class showCr:` | native delegate | ✅ | `Transcript>>showCr:` |
+| `class recent` | native delegate | ✅ | N/A (raises `no_workspace` outside a workspace) |
+| `class clear` | native delegate | ✅ | N/A (raises `no_workspace` outside a workspace) |
 
 ### Dictionary (`stdlib/src/dictionary.bt` — BT-418)
 
@@ -765,14 +787,11 @@ below — all are now empty `Error` subclasses that exist purely to be caught by
 ### TranscriptStream (`stdlib/src/transcript_stream.bt`)
 
 **Class:** `TranscriptStream` — superclass: `Actor` (native: `beamtalk_transcript_stream`)
-**Methods:** 9/9 implemented (100%)
-**Correction (BT-2976):** `class current`/`class current:`/`class resetCurrent` (singleton accessors) were undocumented.
+**Methods:** 6/6 implemented (100%)
+**Note (ADR 0129 §5):** the `current` singleton accessors are gone; user code talks to the `Transcript` class-side facade, which routes to this stream inside an interactive workspace.
 
 | Selector | Mechanism | Status | Pharo Equivalent |
 |----------|-----------|--------|-------------------|
-| `class current` | pure BT | ✅ | N/A |
-| `class current:` | pure BT | ✅ | N/A |
-| `class resetCurrent` | pure BT | ✅ | N/A |
 | `show:` | native delegate | ✅ | `Transcript>>show:` — accepts `Printable` |
 | `cr` | native delegate | ✅ | `Transcript>>cr` |
 | `subscribe` | native delegate | ✅ | N/A |
@@ -908,7 +927,7 @@ were undocumented.
 **Conformance:** Automatic — any class implementing both `asString` and `printString` conforms.
 Most stdlib classes conform because `Object` provides a default `printString` and subclasses typically override `asString`.
 
-**Usage:** `TranscriptStream >> show:` accepts `Printable`, so conforming objects can be displayed directly without manual `asString` calls.
+**Usage:** `Transcript show:` accepts `Printable`, so conforming objects can be displayed directly without manual `asString` calls.
 
 ### JsonRepresentable (`stdlib/src/json_representable.bt`)
 
@@ -940,6 +959,7 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `AtomicCounter` | `Object` | `atomic_counter.bt` | Lock-free counter via `atomics` |
 | `BEAMError` | `Error` | `beamerror.bt` | Wraps raw BEAM exceptions |
 | `Bag` | `Collection` | `bag.bt` | Multiset / counted collection |
+| `Beamtalk` | `Object` | `beamtalk.bt` | Class-side facade: class registry, help, release reflection (ADR 0129) |
 | `Behaviour` | `Object` | `behaviour.bt` | Metaclass introspection |
 | `BindingChanged` | `Announcement` | `binding_changed.bt` | System event: workspace binding changed (ADR 0093) |
 | `BindingsView` | `Object` | `bindings_view.bt` | Live Dictionary-protocol view over session/workspace bindings (ADR 0081) |
@@ -1008,8 +1028,10 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `TimeoutProxy` | `Object` | `timeout_proxy.bt` | Timeout wrapper |
 | `Timer` | `Object` | `timer.bt` | Timer operations |
 | `Tracing` | `Object` | `tracing.bt` | Actor observability |
+| `Transcript` | `Object` | `transcript.bt` | Class-side facade: the REPL's shared log; Logger elsewhere (ADR 0129 §5) |
+| `TranscriptStream` | `Actor` | `transcript_stream.bt` | Workspace-internal transcript buffer and subscribers behind `Transcript` |
 | `Uuid` | `Value` | `uuid.bt` | RFC 9562 UUIDs (v4 random, v7 time-ordered) |
-| `Workspace` | `Actor` | `workspace_interface.bt` | Workspace management |
+| `Workspace` | `Object` | `workspace.bt` | Class-side facade over the running workspace (ADR 0129) |
 
 ---
 
@@ -1118,7 +1140,6 @@ row previously here has been removed.
 | **True/False** | `isTrue`, `isFalse`, `printString` |
 | **Exception** | `signal`, `signal:` |
 | **TranscriptStream** | `subscribe`, `unsubscribe`, `recent`, `clear` |
-| **BeamtalkInterface** | `globals` |
 
 ---
 

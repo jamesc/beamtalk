@@ -50,20 +50,21 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
 
   /// Return a live `BindingsView` over the project namespace (ADR 0081).
   ///
-  /// Reads reflect the current workspace singleton (Transcript) and user-registered bindings (`bind:as:`). It is the same
+  /// Reads reflect the user-registered bindings (`bind:as:`) only. Class
+  /// facades such as `Transcript` are ordinary classes resolved through the
+  /// class registry, so they are not bindings. It is the same
   /// `BindingsView` type as `Session current bindings`, so both binding layers
   /// share one Dictionary protocol (`at:`, `at:put:`, `removeKey:`,
   /// `includesKey:`, `keys`, `values`, `size`, `do:`).
   ///
   /// Writes are synchronous: `at:put:` routes through `bind:as:` and
-  /// `removeKey:` through `unbind:`, inheriting their protected-name conflict
+  /// `removeKey:` through `unbind:`, inheriting their class-name conflict
   /// checks (the class registry, `Beamtalk allClasses`, stays a `List`;
   /// it is not a mutable binding layer.)
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace bindings at: #Transcript     // => the Transcript singleton
-  /// Workspace bindings includesKey: #Transcript   // => true
+  /// Workspace bindings includesKey: #Transcript   // => false
   /// ```
   class sealed bindings -> BindingsView => self delegate
 
@@ -339,7 +340,7 @@ sealed typed Object subclass: Workspace native: beamtalk_workspace_facade
 
   /// Register a value in the workspace namespace under a given name.
   /// Subsequent REPL evals can reference the value by name.
-  /// Raises an error if name exists in Beamtalk globals (system name conflict).
+  /// Raises an error if name is already a registered class (system name conflict).
   /// Warns if name is an existing loaded class (use reload instead).
   ///
   /// ## Examples

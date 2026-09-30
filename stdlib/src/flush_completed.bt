@@ -13,7 +13,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: FlushCompleted do: [:e |
-///   e files do: [:path | Transcript showLine: path]
+///   e files do: [:path | Transcript showCr: path]
 /// ]
 /// ```
 sealed typed Announcement subclass: FlushCompleted

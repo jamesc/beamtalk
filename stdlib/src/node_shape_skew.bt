@@ -17,7 +17,7 @@
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: NodeShapeSkew do: [:e |
-///   Transcript showLine: e className asString ++ " skewed with " ++ e node name asString
+///   Transcript showCr: e className asString ++ " skewed with " ++ e node name asString
 /// ]
 /// ```
 sealed typed Announcement subclass: NodeShapeSkew

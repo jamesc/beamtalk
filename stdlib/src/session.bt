@@ -15,7 +15,7 @@
 /// `self` to a `*For:` primitive that extracts that identity.
 ///
 /// There is **no** class-side operation mirror (no `Session bindings`, no
-/// `Session clear`) and **no** `globals` accessor — globals are workspace
+/// `Session clear`) and **no** workspace-wide accessor — workspace bindings are workspace
 /// state, reached via `Workspace bindings`. You write `Session current bindings`
 /// or `(Session withId: anId) bindings`.
 ///
@@ -62,7 +62,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// Reads return current values; `at:put:` and `removeKey:` mutate
   /// session state (write-through, for the calling session only).
   ///
-  /// There is no `globals` here — globals are workspace-owned; use
+  /// There is no workspace-wide view here — workspace bindings are workspace-owned; use
   /// `Workspace bindings`.
   ///
   /// ## Examples
@@ -72,8 +72,8 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   bindings -> BindingsView => self delegate
 
   /// Resolve a name exactly the way bare-name lookup does, returning the
-  /// first match or nil. Order: session locals → workspace globals
-  /// (bind:as: + singletons) → class registry. Primarily a REPL debugging
+  /// first match or nil. Order: session locals → workspace bindings
+  /// (`bind:as:`) → class registry. Primarily a REPL debugging
   /// tool: answers "where does this name resolve from?" interactively.
   ///
   /// ## Examples

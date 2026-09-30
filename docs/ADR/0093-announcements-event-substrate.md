@@ -483,14 +483,14 @@ PriceChanged
 bt> a := Announcer new
 #Announcer<0.521.0>
 
-bt> a when: PriceChanged do: [:e | Transcript showLine: "now " ++ e newPrice printString]
+bt> a when: PriceChanged do: [:e | Transcript showCr: "now " ++ e newPrice printString]
 #Subscription<...>
 
 bt> a announce: (PriceChanged newPrice: 42)
 now 42
 
 bt> "Subscribe to the system bus — one feed for everything the system emits:"
-bt> SystemAnnouncer current when: ActorSpawned do: [:e | Transcript showLine: e actorClass name]
+bt> SystemAnnouncer current when: ActorSpawned do: [:e | Transcript showCr: e actorClass name]
 #Subscription<...>
 
 bt> Counter spawn

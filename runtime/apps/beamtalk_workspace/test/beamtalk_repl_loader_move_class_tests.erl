@@ -7,8 +7,8 @@
 Integration tests for `beamtalk_repl_loader:move_class/2` (ADR 0114 Phase 2;
 `Workspace moveClass:to:`) against a real, in-project fixture.
 
-`Workspace` (the singleton) is not available in the BUnit test context
-(`workspace_mode: false` — see `stdlib/test/workspace_test.bt`'s
+`Workspace` (the class-side facade) has no live workspace behind it in the BUnit test context
+(no workspace runs under `beamtalk test` — see `stdlib/test/workspace_test.bt`'s
 own header comment), so `Workspace moveClass:to:` cannot be exercised there
 at all — BUnit only verifies the selector is present on the facade
 (`testIncludesSelectorMoveClassTo`). This module is where `moveClass:to:`'s
