@@ -53,11 +53,10 @@ pub(crate) struct ClassIndexResult {
     /// cross-package `uses:` flattens instead of reporting "unknown
     /// protocol".
     pub(crate) all_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
-    /// Source file (path + text) of each same-package provision-bearing
-    /// protocol in `all_protocol_defs` (ADR 0127 §3; BT-3625). Dependency
-    /// protocols are not included — their checkout sources are not carried
-    /// here — so a dependency-provided method keeps mapping through the
-    /// using file until that is plumbed.
+    /// Source identity (file path + text, declaring package) of each
+    /// provision-bearing protocol in `all_protocol_defs`, project and
+    /// dependency alike (ADR 0127 §3; BT-3625, BT-3663) — so a flattened
+    /// dependency method maps its lines to the dependency's own file.
     pub(crate) all_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
     /// Project-wide standalone extension index from Pass 1.
     pub(crate) extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
@@ -169,6 +168,7 @@ pub(crate) fn build_class_index(
     let mut dep_class_infos = Vec::new();
     let mut dep_protocol_infos = Vec::new();
     let mut dep_protocol_defs = Vec::new();
+    let mut dep_protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let mut dep_alias_infos = Vec::new();
     for dep in &dep_ctx.resolved_deps {
         for (class_name, module_name) in &dep.class_module_index {
@@ -183,6 +183,7 @@ pub(crate) fn build_class_index(
         dep_class_infos.extend(dep.class_infos.clone());
         dep_protocol_infos.extend(dep.protocol_infos.clone());
         dep_protocol_defs.extend(dep.protocol_defs.clone());
+        dep_protocol_sources.extend(dep.protocol_sources.clone());
         dep_alias_infos.extend(dep.alias_infos.clone());
     }
 
@@ -229,7 +230,14 @@ pub(crate) fn build_class_index(
                     collect_all_protocol_infos(&[&scan.protocol_infos, &dep_protocol_infos]),
                     [scan.protocol_defs, dep_protocol_defs].concat(),
                     collect_all_alias_infos(&[&scan.alias_infos, &dep_alias_infos]),
-                    scan.protocol_sources,
+                    // Project sources first, then the dependencies' — the
+                    // same precedence `analyse_full` gives the defs (a later
+                    // same-named entry wins).
+                    {
+                        let mut sources = scan.protocol_sources;
+                        sources.extend(dep_protocol_sources);
+                        sources
+                    },
                 )
             }
             None => (

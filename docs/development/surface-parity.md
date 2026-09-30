@@ -511,7 +511,8 @@ file, so it is only meaningful there.
 
 - `beamtalk build` (CLI), **surface-specific (today):** reported once,
   against the protocol's file, with a "while flattening into A, B" note, for
-  protocols whose source identity the build carries (same-package protocols).
+  protocols whose source identity the build carries (same package and
+  dependency packages).
 - `beamtalk lint`, LSP, MCP `lint`: not yet attributed. The tagged diagnostic
   is still rendered at its raw span in the using file, as before BT-3663;
   publishing it in the protocol file is tracked as a follow-up.
