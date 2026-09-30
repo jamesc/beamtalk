@@ -42,6 +42,12 @@ pub fn beamtalk_binary() -> PathBuf {
 #[allow(dead_code)] // some test binaries don't call every helper
 pub fn beamtalk() -> Command {
     let mut cmd = Command::cargo_bin("beamtalk").expect("beamtalk binary built by cargo");
+    // Pin the compiler port binary so the runtime can find it (tests run against
+    // fixture projects in temp dirs that have no Cargo.toml or target/ directory).
+    // The runtime would normally search for it relative to the project root, but
+    // falls back to this explicit path if set.
+    cmd.env("BEAMTALK_COMPILER_PORT_BIN",
+        std::path::Path::new(env!("CARGO_BIN_EXE_beamtalk")).with_file_name("beamtalk-compiler-port"));
     // Pin the runtime/sysroot to this workspace so tests do not depend on a
     // system-installed beamtalk. `repl_startup::find_runtime_dir_with_layout`
     // honours `BEAMTALK_RUNTIME_DIR` first, which keeps `doctor`/`build`/`test`
