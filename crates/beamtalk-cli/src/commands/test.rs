@@ -360,13 +360,10 @@ fn build_fixture_class_indexes(
     // declared in a *different* fixture is flattened into its class's info,
     // exactly as codegen flattens it (BT-3668) — otherwise a typed call to a
     // provided method on that class reports "does not understand".
-    let mut external_protocols: HashMap<ecow::EcoString, beamtalk_core::ast::ProtocolDefinition> =
-        HashMap::new();
-    for def in &protocol_defs.defs {
-        external_protocols
-            .entry(def.name.name.clone())
-            .or_insert_with(|| def.clone());
-    }
+    let external_protocols =
+        beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+            protocol_defs.defs.iter().cloned(),
+        );
     for module in &parsed_modules {
         class_infos.extend(
             beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos(

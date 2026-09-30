@@ -615,10 +615,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // matching `ProtocolRegistry::add_pre_loaded`'s first-wins skip — a
     // last-wins `collect()` here would let the registry and the flattener
     // disagree about which same-named protocol a `uses:` line resolves to.
-    let mut external_protocols: HashMap<EcoString, ProtocolDefinition> = HashMap::new();
-    for p in pre_loaded_protocol_defs {
-        external_protocols.entry(p.name.name.clone()).or_insert(p);
-    }
+    let mut external_protocols = trait_expansion::first_wins_protocol_map(pre_loaded_protocol_defs);
     // ADR 0127 §3 "Name resolution": a provision's free class names resolve
     // in the protocol's package, so a same-named class in this module's
     // package cannot capture them. Done on the carried definitions, before

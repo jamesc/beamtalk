@@ -195,6 +195,22 @@ pub fn extract_flattened_class_infos(
     infos
 }
 
+/// Builds the `external_protocols` map [`expand_module`] takes from protocol
+/// definitions in precedence order: the first definition of a name wins
+/// (project before dependencies), matching `ProtocolRegistry::add_pre_loaded`,
+/// so the registry and the flattener agree on which same-named protocol a
+/// `uses:` line resolves to.
+#[must_use]
+pub fn first_wins_protocol_map(
+    defs: impl IntoIterator<Item = ProtocolDefinition>,
+) -> HashMap<EcoString, ProtocolDefinition> {
+    let mut map = HashMap::new();
+    for def in defs {
+        map.entry(def.name.name.clone()).or_insert(def);
+    }
+    map
+}
+
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s
 /// `MethodInfo` entries, once it has been built from the same (already
 /// flattened) module.

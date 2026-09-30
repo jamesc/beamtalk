@@ -263,6 +263,7 @@ pub(crate) fn build_class_index(
         flatten_trait_user_class_infos(
             &mut all_class_infos,
             &file_protocol_uses,
+            &cached_asts,
             &all_protocol_defs,
             pkg,
         );
@@ -297,16 +298,14 @@ pub(crate) fn build_class_index(
 fn flatten_trait_user_class_infos(
     all_class_infos: &mut [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     file_protocol_uses: &HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
+    cached_asts: &HashMap<Utf8PathBuf, CachedAst>,
     protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
     pkg_name: &str,
 ) {
-    let mut external_protocols: HashMap<ecow::EcoString, beamtalk_core::ast::ProtocolDefinition> =
-        HashMap::new();
-    for def in protocol_defs {
-        external_protocols
-            .entry(def.name.name.clone())
-            .or_insert_with(|| def.clone());
-    }
+    let external_protocols =
+        beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+            protocol_defs.iter().cloned(),
+        );
     let mut user_files: Vec<&Utf8PathBuf> = file_protocol_uses
         .iter()
         .filter(|(_, uses)| !uses.is_empty())
@@ -314,15 +313,32 @@ fn flatten_trait_user_class_infos(
         .collect();
     user_files.sort();
     for file in user_files {
-        let Ok(source) = fs::read_to_string(file) else {
-            continue;
+        // Pass 1 already parsed every changed file; only a cache-fresh file
+        // has no `cached_asts` entry and is re-read here.
+        let parsed;
+        let module = if let Some(cached) = cached_asts.get(file) {
+            &cached.module
+        } else {
+            let source = match fs::read_to_string(file) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        file = %file,
+                        error = %e,
+                        "Cannot read source file to flatten trait provisions; typed calls to its provided methods may report does-not-understand"
+                    );
+                    continue;
+                }
+            };
+            parsed = beamtalk_core::source_analysis::parse(
+                beamtalk_core::source_analysis::lex_with_eof(&source),
+            )
+            .0;
+            &parsed
         };
-        let (module, _) = beamtalk_core::source_analysis::parse(
-            beamtalk_core::source_analysis::lex_with_eof(&source),
-        );
         let mut flattened =
             beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos(
-                &module,
+                module,
                 &external_protocols,
             );
         beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
