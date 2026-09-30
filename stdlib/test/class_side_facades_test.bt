@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3648: ADR 0129 end-to-end validation under `beamtalk test`.
+//
+// The four system facades are sealed class-side facades, so they resolve the
+// same way here as in the REPL. `Beamtalk` and `SystemNavigation` behave
+// identically in both; `Workspace` and the `Transcript` buffer are
+// workspace-bound and raise the structured `no_workspace` error when no
+// workspace runs. The REPL counterpart is
+// tests/repl-protocol/cases/class_side_facades.btscript.
+
+TestCase subclass: ClassSideFacadesTest
+
+  // --- Beamtalk ---
+  testBeamtalkClassNamed =>
+    self assert: (Beamtalk classNamed: #Integer) equals: Integer
+
+  testBeamtalkClassNamedUnknownIsNil =>
+    self assert: (Beamtalk classNamed: #NoSuchThingAnywhere) isNil
+
+  testBeamtalkVersion =>
+    self assert: (Beamtalk version isKindOf: String)
+    self assert: Beamtalk version isEmpty not
+
+  testBeamtalkGlobalsRaisesDnu =>
+    // `perform:` keeps the removed selector out of the static type check.
+    self should: [Beamtalk perform: #globals] raise: #does_not_understand
+
+  // --- dynamic sends match static sends ---
+  testDynamicSendThroughVariable =>
+    b := Beamtalk
+    self assert: (b classNamed: #Integer) equals: Integer
+
+  testPerformVersion =>
+    self assert: (Beamtalk perform: #version) equals: Beamtalk version
+
+  testClassNamedBeamtalkVersion =>
+    @expect type
+    self assert: (Beamtalk classNamed: #Beamtalk) version equals: Beamtalk version
+
+  // --- SystemNavigation ---
+  testSystemNavigationImplementorsOfStatic =>
+    self assert: ((SystemNavigation implementorsOf: #printString) includes: Object)
+
+  testSystemNavigationImplementorsOfThroughVariable =>
+    nav := SystemNavigation
+    self assert: ((nav implementorsOf: #printString) includes: Object)
+    self assert: (nav implementorsOf: #printString) size equals: (SystemNavigation implementorsOf: #printString) size
+
+  // --- Workspace: unavailable under `beamtalk test` ---
+  testWorkspaceIsAvailableIsFalse =>
+    Workspace isAvailable ifTrue: [^self skip: "a workspace is running"]
+    self assert: Workspace isAvailable equals: false
+
+  testWorkspaceClassesRaisesNoWorkspace =>
+    Workspace isAvailable ifTrue: [^self skip: "a workspace is running"]
+    self should: [Workspace classes] raise: #no_workspace
+
+  // --- Transcript: writes work, the buffer needs a workspace ---
+  testTranscriptShowCrSucceeds =>
+    self assert: (Transcript showCr: "class-side facades") equals: nil
+
+  testTranscriptRecentRaisesNoWorkspace =>
+    Workspace isAvailable ifTrue: [^self skip: "a workspace is running"]
+    self should: [Transcript recent] raise: #no_workspace

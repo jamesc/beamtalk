@@ -1,0 +1,138 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E validation of ADR 0129 (class-side system facades, BT-3648).
+//
+// `Beamtalk`, `Workspace`, `Transcript` and `SystemNavigation` are ordinary
+// sealed classes, so an identifier means the same thing in the REPL, in a
+// loaded method body, and in a dynamic send. These tests need E2E because
+// `Workspace` and the transcript pane only exist when the REPL server runs.
+// BUnit counterpart (no workspace): stdlib/test/class_side_facades_test.bt
+
+// @load tests/repl-protocol/fixtures/facade_probe.bt
+// => Loaded: FacadeProbe
+
+// ===========================================================================
+// BEAMTALK — SYSTEM REFLECTION
+// ===========================================================================
+
+Beamtalk classNamed: #Integer
+// => Integer
+
+Beamtalk classNamed: #NoSuchThingAnywhere
+// => nil
+
+v := Beamtalk version
+// => _
+
+v isEmpty
+// => false
+
+// `Beamtalk globals` was removed (ADR 0129 §3).
+Beamtalk globals
+// => ERROR: does not understand
+
+_error kind
+// => does_not_understand
+
+// ===========================================================================
+// WORKSPACE — AVAILABLE IN A REPL
+// ===========================================================================
+
+Workspace isAvailable
+// => true
+
+Workspace bind: 42 as: #answer
+// => nil
+
+Workspace bindings at: #answer
+// => 42
+
+answer
+// => 42
+
+Workspace unbind: #answer
+// => nil
+
+// Class names cannot be shadowed by bind:as: (ADR 0129 §7).
+Workspace bind: 3 as: #Transcript
+// => ERROR: is a system name and cannot be shadowed
+
+_error kind
+// => name_conflict
+
+// ===========================================================================
+// TRANSCRIPT — REACHES THE TRANSCRIPT PANE
+// ===========================================================================
+
+Transcript clear
+// => nil
+
+Transcript show: "facade-top-level"
+// => nil
+
+Transcript recent includes: "facade-top-level"
+// => true
+
+// ===========================================================================
+// LOADED METHODS BEHAVE LIKE TOP-LEVEL EXPRESSIONS (the silent-nil bug class)
+// ===========================================================================
+
+FacadeProbe lookupInteger
+// => Integer
+
+FacadeProbe lookupVia: #String
+// => String
+
+FacadeProbe say: "facade-in-method"
+// => said
+
+Transcript recent includes: "facade-in-method"
+// => true
+
+FacadeProbe versionMatches
+// => true
+
+// ===========================================================================
+// DYNAMIC SENDS MATCH STATIC SENDS
+// ===========================================================================
+
+b := Beamtalk
+// => Beamtalk
+
+b classNamed: #Integer
+// => Integer
+
+(Beamtalk perform: #version) == Beamtalk version
+// => true
+
+Beamtalk perform: #classNamed: withArguments: #(#Integer)
+// => Integer
+
+(Beamtalk classNamed: #Beamtalk) version == Beamtalk version
+// => true
+
+(Beamtalk classNamed: #Beamtalk) classNamed: #Integer
+// => Integer
+
+// ===========================================================================
+// SYSTEMNAVIGATION — STATIC AND THROUGH A VARIABLE
+// ===========================================================================
+
+staticImpls := SystemNavigation implementorsOf: #printString
+// => _
+
+staticImpls isEmpty
+// => false
+
+nav := SystemNavigation
+// => SystemNavigation
+
+viaVar := nav implementorsOf: #printString
+// => _
+
+viaVar size == staticImpls size
+// => true
+
+viaVar includes: Object
+// => true

@@ -10,7 +10,8 @@
 # Historical records are exempt: ADRs (docs/ADR/), the changelog, and the
 # generated example corpora (regenerate those, do not edit them). CLAUDE.md
 # names the retired singletons in a "don't copy this" rule, and this script
-# holds the patterns themselves.
+# holds the patterns themselves. The class_side_facades REPL case is exempt
+# because it asserts that `Beamtalk globals` raises does_not_understand.
 #
 # Usage: scripts/ci/lint-removed-facade-names.sh
 
@@ -27,7 +28,8 @@ hits="$(git grep -nE "$PATTERN" -- . \
     ':(exclude)CLAUDE.md' \
     ':(exclude)crates/beamtalk-examples/corpus.json' \
     ':(exclude)crates/beamtalk-examples/class_corpus.json' \
-    ':(exclude)scripts/ci/lint-removed-facade-names.sh' || true)"
+    ':(exclude)scripts/ci/lint-removed-facade-names.sh' \
+    ':(exclude)tests/repl-protocol/cases/class_side_facades.btscript' || true)"
 
 if [[ -n "$hits" ]]; then
     echo "❌ Removed ADR 0129 facade names found (use the class-side facades; see docs/ADR/0129-class-side-system-facades.md):"
