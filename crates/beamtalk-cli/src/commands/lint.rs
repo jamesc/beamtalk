@@ -254,6 +254,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         extension_index,
         mut all_protocol_infos,
         mut all_protocol_defs,
+        mut all_protocol_sources,
         mut all_alias_infos,
         parsed_files,
     ) = parse_and_extract_class_infos(
@@ -273,6 +274,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             &mut all_class_infos,
             &mut all_protocol_infos,
             &mut all_protocol_defs,
+            &mut all_protocol_sources,
             &mut all_alias_infos,
         )
     } else {
@@ -348,6 +350,8 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
+    // Flattened-provision diagnostics, held until every file has been analysed.
+    let mut all_provision_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
 
     // `all_alias_infos` (the pre-loaded/cross-package alias seed
     // list) is identical on every iteration of the Pass 2 loop below, so a
@@ -418,6 +422,14 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
             .collect();
 
+        // ADR 0127 §3 / BT-3665: a diagnostic in a flattened trait provision
+        // has a span in the *protocol's* file, so it is held back here and
+        // published once (merged across the using classes) in that file
+        // after the loop, instead of at a meaningless offset in this one.
+        let (provision_diags, lint_diags): (Vec<_>, Vec<_>) =
+            lint_diags.into_iter().partition(|d| d.provision.is_some());
+        all_provision_diags.extend(provision_diags);
+
         for diag in &lint_diags {
             match format {
                 OutputFormat::Text => {
@@ -444,6 +456,32 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
 
         // Collect diagnostics for the summary.
         all_diags.extend(lint_diags);
+    }
+
+    // Publish each flattened-provision diagnostic once, in its protocol's file.
+    for diag in crate::diagnostic::dedupe_provision_diagnostics(all_provision_diags) {
+        let Some((protocol_path, protocol_text)) =
+            crate::diagnostic::provision_report_target(&diag, &all_protocol_sources)
+        else {
+            continue;
+        };
+        match format {
+            OutputFormat::Text => {
+                let compile_diag =
+                    CompileDiagnostic::from_core_diagnostic(&diag, &protocol_path, protocol_text);
+                eprintln!("{:?}", miette::Report::new(compile_diag));
+            }
+            OutputFormat::Json => {
+                println!(
+                    "{}",
+                    crate::diagnostic::diagnostic_to_json(&protocol_path, &diag)
+                );
+            }
+        }
+        if diag.severity == Severity::Lint {
+            total_lint_count += 1;
+        }
+        all_diags.push(diag);
     }
 
     // Lint native .erl files.
@@ -659,6 +697,7 @@ fn parse_and_extract_class_infos(
     beamtalk_core::compilation::extension_index::ExtensionIndex,
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::ast::ProtocolDefinition>,
+    beamtalk_core::semantic_analysis::ProtocolSourceMap,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     Vec<ParsedLintFile>,
 )> {
@@ -682,6 +721,7 @@ fn parse_and_extract_class_infos(
     // `extending:` diagnostics could disagree between `build` and `lint`.
     let mut all_protocol_infos = Vec::new();
     let mut all_protocol_defs = Vec::new();
+    let mut all_protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let mut all_alias_infos = Vec::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
 
@@ -736,13 +776,23 @@ fn parse_and_extract_class_infos(
         // BT-3591) — the trait-flattening counterpart to `all_protocol_infos`
         // immediately above; see `collect_diagnostics`'s
         // `pre_loaded_protocol_defs` parameter.
-        all_protocol_defs.extend(
-            module
-                .protocols
-                .iter()
-                .filter(|p| !p.provided_methods.is_empty())
-                .cloned(),
-        );
+        for protocol in module
+            .protocols
+            .iter()
+            .filter(|p| !p.provided_methods.is_empty())
+        {
+            // Source identity (ADR 0127 §3), first definition wins — the
+            // file the provisions' spans are offsets into, so a diagnostic
+            // in a flattened provision is reported against it.
+            all_protocol_sources
+                .entry(protocol.name.name.clone())
+                .or_insert_with(|| beamtalk_core::semantic_analysis::ProtocolSource {
+                    path: Some(file.as_str().into()),
+                    text: source.as_str().into(),
+                    package: current_package.map(Into::into),
+                });
+            all_protocol_defs.push(protocol.clone());
+        }
         let mut alias_infos =
             beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
                 &module,
@@ -764,6 +814,7 @@ fn parse_and_extract_class_infos(
         extension_index,
         all_protocol_infos,
         all_protocol_defs,
+        all_protocol_sources,
         all_alias_infos,
         parsed_files,
     ))
@@ -806,6 +857,7 @@ fn merge_dependency_infos(
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     all_protocol_infos: &mut Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
+    all_protocol_sources: &mut beamtalk_core::semantic_analysis::ProtocolSourceMap,
     all_alias_infos: &mut Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 ) -> Vec<super::deps::path::ResolvedDependency> {
     let options = beamtalk_core::CompilerOptions::default();
@@ -815,6 +867,12 @@ fn merge_dependency_infos(
                 all_class_infos.extend(dep.class_infos.clone());
                 all_protocol_infos.extend(dep.protocol_infos.clone());
                 all_protocol_defs.extend(dep.protocol_defs.clone());
+                // First definition wins (project, then dependencies).
+                for (name, src) in &dep.protocol_sources {
+                    all_protocol_sources
+                        .entry(name.clone())
+                        .or_insert_with(|| src.clone());
+                }
                 all_alias_infos.extend(dep.alias_infos.clone());
             }
             resolved_deps
@@ -1346,6 +1404,37 @@ mod tests {
         );
     }
 
+    /// BT-3665: lint carries each provision-bearing protocol's source path so
+    /// a provision diagnostic can be published in the protocol's file once.
+    #[test]
+    fn lint_extraction_records_protocol_source_identity() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"xpkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let proto = root.join("src/broken.bt");
+        let text = "Protocol define: Broken\n  name -> String\n\n  probe -> Integer => 3 bogus\n";
+        std::fs::write(&proto, text).unwrap();
+        let user = root.join("src/alpha.bt");
+        std::fs::write(
+            &user,
+            "Object subclass: Alpha\n  uses: Broken\n  name -> String => \"a\"\n",
+        )
+        .unwrap();
+
+        let (_, _, _, defs, sources, _, _) =
+            parse_and_extract_class_infos(&[user], Some(&root), Some("xpkg")).unwrap();
+        assert_eq!(defs.len(), 1);
+        let src = sources.get("Broken").expect("protocol source recorded");
+        assert_eq!(src.path.as_deref(), Some(proto.as_str()));
+        assert_eq!(src.text.as_str(), text);
+        assert_eq!(src.package.as_deref(), Some("xpkg"));
+    }
+
     /// Regression — linting `test/` in a package must pull class
     /// infos from sibling `src/` so references to src-defined classes resolve.
     #[test]
@@ -1514,6 +1603,7 @@ mod tests {
             extension_index,
             mut all_protocol_infos,
             mut all_protocol_defs,
+            mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
@@ -1523,6 +1613,7 @@ mod tests {
             &mut all_class_infos,
             &mut all_protocol_infos,
             &mut all_protocol_defs,
+            &mut all_protocol_sources,
             &mut all_alias_infos,
         );
 
@@ -1718,6 +1809,7 @@ mod tests {
     /// the bug this guards against only manifests when the same pre-loaded
     /// alias list is re-seeded into a fresh `AliasRegistry` once per file.
     #[test]
+    #[allow(clippy::too_many_lines)] // end-to-end pipeline fixture
     fn lint_across_many_files_does_not_flag_a_singly_declared_dependency_alias_as_colliding() {
         let temp = tempfile::TempDir::new().unwrap();
         let root = temp.path();
@@ -1772,6 +1864,7 @@ mod tests {
             extension_index,
             mut all_protocol_infos,
             mut all_protocol_defs,
+            mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
@@ -1781,6 +1874,7 @@ mod tests {
             &mut all_class_infos,
             &mut all_protocol_infos,
             &mut all_protocol_defs,
+            &mut all_protocol_sources,
             &mut all_alias_infos,
         );
         assert_eq!(
@@ -1895,6 +1989,7 @@ mod tests {
             extension_index,
             mut all_protocol_infos,
             mut all_protocol_defs,
+            mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
@@ -1904,6 +1999,7 @@ mod tests {
             &mut all_class_infos,
             &mut all_protocol_infos,
             &mut all_protocol_defs,
+            &mut all_protocol_sources,
             &mut all_alias_infos,
         );
         assert_eq!(

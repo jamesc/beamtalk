@@ -155,6 +155,39 @@ pub fn print_provision_diagnostics(
     }
 }
 
+/// Collapses the per-user copies of a shared flattened-provision diagnostic to
+/// one, exactly as [`print_provision_diagnostics`] does when printing, so a
+/// trailing summary counts each provision diagnostic once rather than once per
+/// using class. Untagged diagnostics keep their order and come first.
+pub(crate) fn dedupe_provision_diagnostics(
+    diagnostics: Vec<CoreDiagnostic>,
+) -> Vec<CoreDiagnostic> {
+    let (tagged, mut rest): (Vec<_>, Vec<_>) =
+        diagnostics.into_iter().partition(|d| d.provision.is_some());
+    rest.extend(beamtalk_core::source_analysis::merge_provision_diagnostics(
+        tagged,
+    ));
+    rest
+}
+
+/// The file a provision diagnostic is reported against: its protocol's path,
+/// or `<protocol Name>` when the protocol's source identity is not carried.
+pub(crate) fn provision_report_target<'a>(
+    diagnostic: &CoreDiagnostic,
+    protocol_sources: &'a beamtalk_core::semantic_analysis::ProtocolSourceMap,
+) -> Option<(String, &'a str)> {
+    let origin = diagnostic.provision.as_ref()?;
+    Some(match protocol_sources.get(&origin.protocol) {
+        Some(src) => (
+            src.path
+                .as_deref()
+                .map_or_else(|| format!("<protocol {}>", origin.protocol), str::to_string),
+            src.text.as_str(),
+        ),
+        None => (format!("<protocol {}>", origin.protocol), ""),
+    })
+}
+
 /// The reports [`print_provision_diagnostics`] prints, separated out so the
 /// merge-and-attribute step is testable.
 fn render_provision_diagnostics(
@@ -167,16 +200,7 @@ fn render_provision_diagnostics(
         .into_iter()
         .filter(|d| !is_suppressed(d, options))
         .filter_map(|diagnostic| {
-            let origin = diagnostic.provision.as_ref()?;
-            let (path, text) = match protocol_sources.get(&origin.protocol) {
-                Some(src) => (
-                    src.path
-                        .as_deref()
-                        .map_or_else(|| format!("<protocol {}>", origin.protocol), str::to_string),
-                    src.text.as_str(),
-                ),
-                None => (format!("<protocol {}>", origin.protocol), ""),
-            };
+            let (path, text) = provision_report_target(&diagnostic, protocol_sources)?;
             Some(CompileDiagnostic::from_core_diagnostic(
                 &diagnostic,
                 &path,

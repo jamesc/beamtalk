@@ -183,7 +183,11 @@ pub(crate) fn build_class_index(
         dep_class_infos.extend(dep.class_infos.clone());
         dep_protocol_infos.extend(dep.protocol_infos.clone());
         dep_protocol_defs.extend(dep.protocol_defs.clone());
-        dep_protocol_sources.extend(dep.protocol_sources.clone());
+        for (name, src) in &dep.protocol_sources {
+            dep_protocol_sources
+                .entry(name.clone())
+                .or_insert_with(|| src.clone());
+        }
         dep_alias_infos.extend(dep.alias_infos.clone());
     }
 
@@ -231,11 +235,14 @@ pub(crate) fn build_class_index(
                     [scan.protocol_defs, dep_protocol_defs].concat(),
                     collect_all_alias_infos(&[&scan.alias_infos, &dep_alias_infos]),
                     // Project sources first, then the dependencies' — the
-                    // same precedence `analyse_full` gives the defs (a later
-                    // same-named entry wins).
+                    // same first-wins precedence `analyse_full` and
+                    // `ProtocolRegistry::add_pre_loaded` give the protocols
+                    // themselves (BT-3665).
                     {
                         let mut sources = scan.protocol_sources;
-                        sources.extend(dep_protocol_sources);
+                        for (name, src) in dep_protocol_sources {
+                            sources.entry(name).or_insert(src);
+                        }
                         sources
                     },
                 )
@@ -624,16 +631,16 @@ fn collect_project_protocol_and_alias_infos(
         {
             // Source identity for flattened-method line mapping (ADR 0127
             // §3; BT-3625): the file the provisions' spans are offsets into.
-            protocol_sources.insert(
-                protocol.name.name.clone(),
-                beamtalk_core::semantic_analysis::ProtocolSource {
+            // First definition wins, like the defs pushed below.
+            protocol_sources
+                .entry(protocol.name.name.clone())
+                .or_insert(beamtalk_core::semantic_analysis::ProtocolSource {
                     path: Some(file.as_str().into()),
                     text: source.as_str().into(),
                     // `""` when the caller only wants the protocol half (see
                     // this function's `pkg_name` doc).
                     package: (!pkg_name.is_empty()).then(|| pkg_name.into()),
-                },
-            );
+                });
             all_protocol_defs.push(protocol.clone());
         }
 

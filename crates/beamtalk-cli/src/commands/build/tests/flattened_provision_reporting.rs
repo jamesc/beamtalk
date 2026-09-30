@@ -140,7 +140,7 @@ fn build_summary_counts_shared_provision_diagnostic_once() {
     let per_user = all.iter().filter(|d| d.provision.is_some()).count();
     assert!(per_user >= 2, "one copy per user expected: {all:?}");
 
-    let deduped = dedupe_provision_diagnostics(all.clone());
+    let deduped = crate::diagnostic::dedupe_provision_diagnostics(all.clone());
     let merged_count = deduped.iter().filter(|d| d.provision.is_some()).count();
     assert_eq!(merged_count, per_user / 2, "{deduped:?}");
     assert_eq!(
