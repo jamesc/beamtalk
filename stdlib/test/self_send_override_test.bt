@@ -72,8 +72,7 @@ TestCase subclass: SelfSendOverrideTest
     self assert: SsoNestedSub viaSealed equals: 2
     self assert: SsoNestedSub hits equals: before + 1
 
-  testClassSideNestedBaseUnchanged =>
-    self assert: SsoNestedBase baz equals: 1
+  testClassSideNestedBaseUnchanged => self assert: SsoNestedBase baz equals: 1
 
   // A class-variable write made by an override reached from a base-class site
   // that looks pure must not be dropped.
