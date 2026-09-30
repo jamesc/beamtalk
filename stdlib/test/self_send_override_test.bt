@@ -89,25 +89,21 @@ TestCase subclass: SelfSendOverrideTest
     self assert: SsoClassVarSub bar equals: 2
     self assert: SsoClassVarSub subHits equals: 2
 
-  // The receiver goes through an untyped parameter: the static checker does
-  // not see a flattened provision (`bar`) on a cross-file trait user's class.
-  callBar: obj => obj bar
-
   testFlattenedTraitActorReachesOverride =>
     a := SsoTraitActorSub spawn
-    self assert: (self callBar: a) equals: "bar:sub"
+    self assert: a bar equals: "bar:sub"
     a stop
 
   testFlattenedTraitActorBase =>
     a := SsoTraitActorBase spawn
-    self assert: (self callBar: a) equals: "bar:base"
+    self assert: a bar equals: "bar:base"
     a stop
 
   testFlattenedTraitValueReachesOverride =>
-    self assert: (self callBar: SsoTraitValueSub new) equals: "bar:sub"
+    self assert: SsoTraitValueSub new bar equals: "bar:sub"
 
   testFlattenedTraitValueBase =>
-    self assert: (self callBar: SsoTraitValueBase new) equals: "bar:base"
+    self assert: SsoTraitValueBase new bar equals: "bar:base"
 
   testValueClassSideInheritedSelfSendReachesOverride =>
     self assert: SsoValueSub make equals: "make:sub"
