@@ -206,8 +206,10 @@ register(Class, Selector, Fun, Owner, Source) when
     with_shadow_lock(Class, fun() ->
         %% Only class-object tags are read by the guard; instance-side tags
         %% must not churn persistent_term (each erase scans all processes).
-        beamtalk_class_registry:is_class_name(Class) andalso
-            beamtalk_class_shadow_flags:set(extension, Class),
+        case beamtalk_class_registry:is_class_name(Class) of
+            true -> beamtalk_class_shadow_flags:set(extension, Class);
+            false -> ok
+        end,
         %% Check for existing registration
         case ets:lookup(?EXTENSIONS_TABLE, Key) of
             [] ->

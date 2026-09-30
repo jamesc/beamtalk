@@ -28,6 +28,16 @@ hierarchy walk is always correct); `runtime_fun` writers set the flag *before* m
 shadow visible and clear it only *after* the gate is closed; `extension`
 transitions are serialized per tag under a lock in `beamtalk_extensions`
 (an unlocked erase-then-recheck could leave the flag false beside a visible row).
+Concurrency: the `runtime_fun` flag is unlocked and relies on a single writer
+per class. All its writers (`insert`, `set_runtime_class_methods`,
+`reset_runtime_class_methods`, `delete` in `beamtalk_class_metadata`) run inside
+the class's own `beamtalk_object_class` gen_server, so they never interleave. A
+future writer outside the class process would need a lock: e.g. a `set` racing
+a `reset` could have the reset close the gate and then clear the flag just after
+the set raised it (or vice versa), leaving the flag false while the gate is open.
+(`extension` flags, written from arbitrary processes, are instead serialized per
+tag in `beamtalk_extensions`.)
+
 `persistent_term` writes that change a value trigger a global scan, so only
 actual transitions write (set when unset, erase when set); both are rare
 (registration / class (re)definition), never on the send path.
