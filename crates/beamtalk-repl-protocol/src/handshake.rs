@@ -240,14 +240,9 @@ mod tests {
     }
 
     fn load_corpus() -> Vec<Case> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
-            .join(
-                "runtime/apps/beamtalk_workspace/test/fixtures/ws_auth_handshake_wire_corpus.json",
-            );
+        let path = beamtalk_workspace::cargo_workspace_root!().join(
+            "runtime/apps/beamtalk_workspace/test/fixtures/ws_auth_handshake_wire_corpus.json",
+        );
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
         let cases: Vec<serde_json::Value> =

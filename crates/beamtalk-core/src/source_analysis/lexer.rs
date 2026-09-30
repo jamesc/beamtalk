@@ -2496,15 +2496,10 @@ mod tests {
     /// `beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`.
     #[test]
     fn string_and_character_literal_span_matches_shared_corpus() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
-            .join(
-                "runtime/apps/beamtalk_workspace/test/fixtures/\
-                 string_and_character_literal_span_corpus.json",
-            );
+        let path = beamtalk_workspace::cargo_workspace_root!().join(
+            "runtime/apps/beamtalk_workspace/test/fixtures/\
+             string_and_character_literal_span_corpus.json",
+        );
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
         let cases: Vec<serde_json::Value> =
@@ -2556,11 +2551,7 @@ mod tests {
     /// `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0`.
     #[test]
     fn comment_span_matches_shared_corpus() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
+        let path = beamtalk_workspace::cargo_workspace_root!()
             .join("runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));

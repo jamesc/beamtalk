@@ -17,17 +17,9 @@ use std::sync::OnceLock;
 use tempfile::TempDir;
 
 /// Resolve the workspace root (repo root) from `CARGO_MANIFEST_DIR`.
-///
-/// `CARGO_MANIFEST_DIR` points at `crates/beamtalk-cli`, so two `parent()`
-/// calls reach the repo root.
 #[allow(dead_code)]
 pub fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 /// Path to the `beamtalk` binary, for tests that spawn it via
@@ -176,15 +168,7 @@ fn sweep_stale_cache_dirs_once() {
 /// Locate the workspace `runtime/` directory.
 fn runtime_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        // crates/beamtalk-cli -> crates -> repo root -> runtime
-        manifest
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|root| root.join("runtime"))
-            .expect("workspace root has runtime/ directory")
-    })
+    DIR.get_or_init(|| beamtalk_workspace::cargo_workspace_root!().join("runtime"))
 }
 
 /// Create a fresh temp directory holding a minimal Beamtalk library project.

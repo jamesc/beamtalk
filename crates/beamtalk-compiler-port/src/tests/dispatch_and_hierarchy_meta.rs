@@ -15,14 +15,9 @@ use super::*;
 /// See `handle_request`'s doc comment for the full rationale.
 #[test]
 fn handle_request_recognizes_shared_command_vocabulary_corpus() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
-            .join(
-                "runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json",
-            );
+    let path = beamtalk_workspace::cargo_workspace_root!().join(
+        "runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json",
+    );
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
     let corpus: Vec<String> = serde_json::from_str(&raw).expect("corpus is a JSON array");

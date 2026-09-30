@@ -191,14 +191,10 @@ mod tests {
         (dir, utf8_path)
     }
 
-    /// Return the project root (two levels up from the crate manifest directory).
     fn project_root() -> Utf8PathBuf {
-        let manifest_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        manifest_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .expect("project root")
-            .to_owned()
+        beamtalk_workspace::cargo_workspace_root!()
+            .try_into()
+            .expect("workspace root is valid UTF-8")
     }
 
     #[test]

@@ -18,15 +18,8 @@ use std::process::Command;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-/// Locate the workspace root (repo root) by walking up from `CARGO_MANIFEST_DIR`.
 fn workspace_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // crates/beamtalk-cli -> repo root (two levels up)
-    manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("cannot determine workspace root")
-        .to_path_buf()
+    beamtalk_workspace::cargo_workspace_root!()
 }
 
 /// Locate the `beamtalk` binary in the target directory.
