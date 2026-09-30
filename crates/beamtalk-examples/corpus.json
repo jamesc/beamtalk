@@ -34,24 +34,36 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-10",
-      "title": "Construction forms (beamtalk-language-features)",
+      "title": "Self-Sends and Overrides (BT-3666) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "assign",
-        "assignment",
+        "Actor",
+        "Report",
+        "SalesReport",
+        "actor",
+        "append",
+        "async",
         "beamtalk-language-features",
-        "constructor",
-        "create",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "set"
+        "concat",
+        "concatenate",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "object",
+        "process",
+        "render",
+        "string join",
+        "subclassing",
+        "title"
       ],
-      "source": "// 1. new — all slots get their declared defaults\np := Point new                       // => Point(0, 0)\n\n// 2. new: — provide a map of slot values; missing keys keep defaults\np := Point new: #{#x => 3, #y => 4}  // => Point(3, 4)\n\n// 3. Keyword constructor — auto-generated from slot names\np := Point x: 3 y: 4                 // => Point(3, 4)",
+      "source": "Actor subclass: Report\n  title -> String => \"Report\"\n  render -> String => \"== \" ++ self title ++ \" ==\"\n\nReport subclass: SalesReport\n  title -> String => \"Sales\"\n\n// SalesReport spawn render  => \"== Sales ==\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-103",
+      "id": "docs-beamtalk-language-features-block-104",
       "title": "Named Type Aliases (type Declarations) (ADR 0108) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -61,7 +73,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-104",
+      "id": "docs-beamtalk-language-features-block-105",
       "title": "Named Type Aliases (type Declarations) (ADR 0108) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -80,7 +92,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-105",
+      "id": "docs-beamtalk-language-features-block-106",
       "title": "Named Type Aliases (type Declarations) (ADR 0108) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -93,7 +105,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-106",
+      "id": "docs-beamtalk-language-features-block-107",
       "title": "Named Type Aliases (type Declarations) (ADR 0108) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -108,7 +120,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-108",
+      "id": "docs-beamtalk-language-features-block-109",
       "title": "Named Type Aliases (type Declarations) (ADR 0108) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -122,7 +134,7 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-11",
-      "title": "with*: functional setters (beamtalk-language-features)",
+      "title": "Construction forms (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "assign",
@@ -135,28 +147,7 @@
         "mutation",
         "set"
       ],
-      "source": "p  := Point x: 1 y: 2\np2 := p withX: 10       // new object: x=10, y=2\np  x                     // => 1   (original unchanged)\np2 x                     // => 10\np2 y                     // => 2\n\n// Chaining\np3 := (Point new withX: 5) withY: 7   // x=5, y=7",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-110",
-      "title": "Conditional Return Type Inference (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "branch",
-        "conditional",
-        "if",
-        "if not",
-        "mutate",
-        "mutation",
-        "negation",
-        "set",
-        "unless"
-      ],
-      "source": "x := condition ifTrue: [42] ifFalse: [0]\n// x is inferred as Integer (not Dynamic)\n\nresult isOk ifTrue: [result unwrap] ifFalse: [default]\n// inferred as the common type of both arms",
+      "source": "// 1. new — all slots get their declared defaults\np := Point new                       // => Point(0, 0)\n\n// 2. new: — provide a map of slot values; missing keys keep defaults\np := Point new: #{#x => 3, #y => 4}  // => Point(3, 4)\n\n// 3. Keyword constructor — auto-generated from slot names\np := Point x: 3 y: 4                 // => Point(3, 4)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -177,7 +168,7 @@
         "set",
         "unless"
       ],
-      "source": "flag :: Boolean := x > y\nflag ifTrue: [1]\n// inferred as Boolean | Integer, not Dynamic\n\nflag ifFalse: [\"no\"]\n// inferred as Boolean | String",
+      "source": "x := condition ifTrue: [42] ifFalse: [0]\n// x is inferred as Integer (not Dynamic)\n\nresult isOk ifTrue: [result unwrap] ifFalse: [default]\n// inferred as the common type of both arms",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -188,11 +179,17 @@
         "assign",
         "assignment",
         "beamtalk-language-features",
+        "branch",
+        "conditional",
+        "if",
+        "if not",
         "mutate",
         "mutation",
-        "set"
+        "negation",
+        "set",
+        "unless"
       ],
-      "source": "name :: String | nil := dictionary at: \"name\"\nresult := name ifNil: [\"unknown\"] ifNotNil: [:n | n size]\n// result is inferred as String | Integer\n\nvalue := name ifNil: [^nil] ifNotNil: [:n | n]\n// value is inferred as String (nil branch contributes Never, skipped)",
+      "source": "flag :: Boolean := x > y\nflag ifTrue: [1]\n// inferred as Boolean | Integer, not Dynamic\n\nflag ifFalse: [\"no\"]\n// inferred as Boolean | String",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -207,11 +204,26 @@
         "mutation",
         "set"
       ],
-      "source": "name :: String | nil := dictionary at: \"name\"\nname ifNil: [\"unknown\"]\n// inferred as String (T | R, where T = String and R = String both dedup)\n\ncount :: Integer | nil := dictionary at: \"count\"\ncount ifNil: [\"none\"]\n// inferred as Integer | String (T | R)\n\nname ifNotNil: [:n | n size]\n// inferred as Integer | Nil (R | Nil)",
+      "source": "name :: String | nil := dictionary at: \"name\"\nresult := name ifNil: [\"unknown\"] ifNotNil: [:n | n size]\n// result is inferred as String | Integer\n\nvalue := name ifNil: [^nil] ifNotNil: [:n | n]\n// value is inferred as String (nil branch contributes Never, skipped)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-114",
+      "title": "Conditional Return Type Inference (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "name :: String | nil := dictionary at: \"name\"\nname ifNil: [\"unknown\"]\n// inferred as String (T | R, where T = String and R = String both dedup)\n\ncount :: Integer | nil := dictionary at: \"count\"\ncount ifNil: [\"none\"]\n// inferred as Integer | String (T | R)\n\nname ifNotNil: [:n | n size]\n// inferred as Integer | Nil (R | Nil)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-115",
       "title": "Union + Narrowing Compose (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -229,7 +241,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-115",
+      "id": "docs-beamtalk-language-features-block-116",
       "title": "Local Variable Mutations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -250,7 +262,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-116",
+      "id": "docs-beamtalk-language-features-block-117",
       "title": "Field Mutations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -283,7 +295,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-118",
+      "id": "docs-beamtalk-language-features-block-119",
       "title": "What Works and What Doesn't (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -302,24 +314,21 @@
       "title": "with*: functional setters (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "assign",
+        "assignment",
         "beamtalk-language-features",
-        "exception",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "property",
-        "raise",
-        "subclassing",
-        "throw"
+        "constructor",
+        "create",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "set"
       ],
-      "source": "// Compile error — rejected before the code runs:\n// Value subclass: Weird\n//   field: x = 0\n//   field: X = 0   ← error: both `x` and `X` produce the setter `withX:`",
+      "source": "p  := Point x: 1 y: 2\np2 := p withX: 10       // new object: x=10, y=2\np  x                     // => 1   (original unchanged)\np2 x                     // => 10\np2 y                     // => 2\n\n// Chaining\np3 := (Point new withX: 5) withY: 7   // x=5, y=7",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-120",
+      "id": "docs-beamtalk-language-features-block-121",
       "title": "Error Messages (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -340,7 +349,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-124",
+      "id": "docs-beamtalk-language-features-block-125",
       "title": "Custom Timeouts (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -364,7 +373,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-128",
+      "id": "docs-beamtalk-language-features-block-129",
       "title": "Static Typing of Actor Protocols (ADR 0104) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -379,7 +388,28 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-129",
+      "id": "docs-beamtalk-language-features-block-13",
+      "title": "with*: functional setters (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "raise",
+        "subclassing",
+        "throw"
+      ],
+      "source": "// Compile error — rejected before the code runs:\n// Value subclass: Weird\n//   field: x = 0\n//   field: X = 0   ← error: both `x` and `X` produce the setter `withX:`",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-130",
       "title": "Caller-Process Class Method Dispatch (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -389,33 +419,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-13",
-      "title": "Immutability enforcement (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "property",
-        "raise",
-        "set",
-        "subclassing",
-        "throw"
-      ],
-      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   field: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-130",
+      "id": "docs-beamtalk-language-features-block-131",
       "title": "Passing Blocks Through Class Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -436,33 +440,6 @@
         "value"
       ],
       "source": "Value subclass: Driver\n  class run: aBlock over: aList -> Nil =>\n    aList do: [:x | aBlock value: x]      // aBlock runs in Driver's class process\n    nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-131",
-      "title": "Passing Blocks Through Class Methods (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "LoopCounter",
-        "Object",
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "countUpTo:",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "object",
-        "property",
-        "set",
-        "subclassing"
-      ],
-      "source": "Object subclass: LoopCounter\n  classState: runs = 0\n\n  // Compiles and correctly accumulates: `i := i + 1` triggers state\n  // threading for this loop body, so `self.runs`'s mutation threads\n  // through it too, one class-var write per iteration.\n  class countUpTo: n =>\n    i := 0.\n    [i < n] whileTrue: [\n      self.runs := self.runs + 1.\n      i := i + 1\n    ].\n    self.runs",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -489,11 +466,38 @@
         "set",
         "subclassing"
       ],
-      "source": "Object subclass: LoopCounter\n  classState: runs = 0\n\n  // Rejected: nothing else in the loop body reads or writes a local, so\n  // this body never reaches state threading at all — the mutation would\n  // be silently lost.\n  class countUpTo: n =>\n    n timesRepeat: [\n      self.runs := self.runs + 1    // compile error — mutation can't thread back\n    ].\n    self.runs\n\n  // Fix #1: give the body a local to thread alongside the class var —\n  // it doesn't even need to be used afterward.\n  class countUpTo: n =>\n    seen := 0.\n    n timesRepeat: [\n      self.runs := self.runs + 1.\n      seen := seen + 1\n    ].\n    self.runs\n\n  // Fix #2: accumulate locally, mutate the class var once after the loop.\n  class countUpTo: n =>\n    count := self.runs.\n    n timesRepeat: [ count := count + 1 ].\n    self.runs := count",
+      "source": "Object subclass: LoopCounter\n  classState: runs = 0\n\n  // Compiles and correctly accumulates: `i := i + 1` triggers state\n  // threading for this loop body, so `self.runs`'s mutation threads\n  // through it too, one class-var write per iteration.\n  class countUpTo: n =>\n    i := 0.\n    [i < n] whileTrue: [\n      self.runs := self.runs + 1.\n      i := i + 1\n    ].\n    self.runs",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-133",
+      "title": "Passing Blocks Through Class Methods (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "LoopCounter",
+        "Object",
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "countUpTo:",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "Object subclass: LoopCounter\n  classState: runs = 0\n\n  // Rejected: nothing else in the loop body reads or writes a local, so\n  // this body never reaches state threading at all — the mutation would\n  // be silently lost.\n  class countUpTo: n =>\n    n timesRepeat: [\n      self.runs := self.runs + 1    // compile error — mutation can't thread back\n    ].\n    self.runs\n\n  // Fix #1: give the body a local to thread alongside the class var —\n  // it doesn't even need to be used afterward.\n  class countUpTo: n =>\n    seen := 0.\n    n timesRepeat: [\n      self.runs := self.runs + 1.\n      seen := seen + 1\n    ].\n    self.runs\n\n  // Fix #2: accumulate locally, mutate the class var once after the loop.\n  class countUpTo: n =>\n    count := self.runs.\n    n timesRepeat: [ count := count + 1 ].\n    self.runs := count",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-134",
       "title": "Passing Blocks Through Class Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -522,7 +526,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-134",
+      "id": "docs-beamtalk-language-features-block-135",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -532,7 +536,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-135",
+      "id": "docs-beamtalk-language-features-block-136",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -542,7 +546,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-136",
+      "id": "docs-beamtalk-language-features-block-137",
       "title": "Defining a Server (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -571,7 +575,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-138",
+      "id": "docs-beamtalk-language-features-block-139",
       "title": "Timer Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -612,21 +616,32 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-14",
-      "title": "Value equality (beamtalk-language-features)",
+      "title": "Immutability enforcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "assign",
         "assignment",
         "beamtalk-language-features",
+        "exception",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
         "mutate",
         "mutation",
-        "set"
+        "property",
+        "raise",
+        "set",
+        "subclassing",
+        "throw"
       ],
-      "source": "p1 := Point x: 3 y: 4\np2 := Point x: 3 y: 4\np1 == p2    // => true\n\np3 := Point x: 9 y: 9\np1 == p3    // => false\n\n// with*: result equals a freshly constructed object\n(p1 withX: 10) == (Point x: 10 y: 4)   // => true",
+      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   field: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-140",
+      "id": "docs-beamtalk-language-features-block-141",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -647,7 +662,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-141",
+      "id": "docs-beamtalk-language-features-block-142",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -665,7 +680,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-142",
+      "id": "docs-beamtalk-language-features-block-143",
       "title": "Class-Side Configuration Defaults (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -688,7 +703,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-143",
+      "id": "docs-beamtalk-language-features-block-144",
       "title": "Actor Supervision Policy (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -713,7 +728,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-146",
+      "id": "docs-beamtalk-language-features-block-147",
       "title": "SupervisionSpec — Per-Child Overrides (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -734,7 +749,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-148",
+      "id": "docs-beamtalk-language-features-block-149",
       "title": "Dynamic Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -760,7 +775,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-149",
+      "id": "docs-beamtalk-language-features-block-15",
+      "title": "Value equality (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "p1 := Point x: 3 y: 4\np2 := Point x: 3 y: 4\np1 == p2    // => true\n\np3 := Point x: 9 y: 9\np1 == p3    // => false\n\n// with*: result equals a freshly constructed object\n(p1 withX: 10) == (Point x: 10 y: 4)   // => true",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-150",
       "title": "Dynamic Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -794,32 +824,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-15",
-      "title": "Value objects in collections (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "accumulate",
-        "aggregate",
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "fold",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "reduce",
-        "set",
-        "transform",
-        "where"
-      ],
-      "source": "points := #((Point x: 1 y: 1), (Point x: 2 y: 2), (Point x: 3 y: 3))\n\n// collect: transforms elements\npoints collect: [:p | p x]           // => #(1, 2, 3)\n\n// select: filters elements\npoints select: [:p | p x > 1]        // => #(Point(2,2), Point(3,3))\n\n// inject:into: folds\npoints inject: 0 into: [:sum :p | sum + p x]   // => 6",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-151",
+      "id": "docs-beamtalk-language-features-block-152",
       "title": "Nested Supervisors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -837,7 +842,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-152",
+      "id": "docs-beamtalk-language-features-block-153",
       "title": "Call-site patterns (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -852,7 +857,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-154",
+      "id": "docs-beamtalk-language-features-block-155",
       "title": "Call-site patterns (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -871,7 +876,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-155",
+      "id": "docs-beamtalk-language-features-block-156",
       "title": "Actor Named Registration (ADR 0079) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -894,7 +899,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-156",
+      "id": "docs-beamtalk-language-features-block-157",
       "title": "Introspecting the Live Supervision Tree (ADR 0092) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -929,7 +934,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-157",
+      "id": "docs-beamtalk-language-features-block-158",
       "title": "Introspecting the Live Supervision Tree (ADR 0092) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -947,7 +952,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-158",
+      "id": "docs-beamtalk-language-features-block-159",
       "title": "Introspecting the Live Supervision Tree (ADR 0092) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -961,26 +966,31 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-16",
-      "title": "Reflection (beamtalk-language-features)",
+      "title": "Value objects in collections (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "accumulate",
+        "aggregate",
         "assign",
         "assignment",
-        "async",
         "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
+        "filter",
+        "filtering",
+        "fold",
+        "map",
+        "mapping",
         "mutate",
         "mutation",
-        "process",
-        "set"
+        "reduce",
+        "set",
+        "transform",
+        "where"
       ],
-      "source": "p := Point x: 3 y: 4\np fieldAt: #x          // => 3\np fieldAt: #y          // => 4\np fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)\np class                // => Point\nPoint superclass       // => Value\n\n// Full chain from self up to (and including) Object (or Object class for metaclass receivers)\nCounter superclassChain        // => [Counter, Actor, Object]\nObject superclassChain         // => [Object]\nCounter class superclassChain  // => [Counter class, Actor class, Object class]",
+      "source": "points := #((Point x: 1 y: 1), (Point x: 2 y: 2), (Point x: 3 y: 3))\n\n// collect: transforms elements\npoints collect: [:p | p x]           // => #(1, 2, 3)\n\n// select: filters elements\npoints select: [:p | p x > 1]        // => #(Point(2,2), Point(3,3))\n\n// inject:into: folds\npoints inject: 0 into: [:sum :p | sum + p x]   // => 6",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-160",
+      "id": "docs-beamtalk-language-features-block-161",
       "title": "Before named registration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1008,7 +1018,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-161",
+      "id": "docs-beamtalk-language-features-block-162",
       "title": "After named registration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1030,7 +1040,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-162",
+      "id": "docs-beamtalk-language-features-block-163",
       "title": "Proxy Semantics (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1051,7 +1061,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-163",
+      "id": "docs-beamtalk-language-features-block-164",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1069,7 +1079,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-164",
+      "id": "docs-beamtalk-language-features-block-165",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1082,26 +1092,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-165",
+      "id": "docs-beamtalk-language-features-block-166",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "// direction :: #north | #south | #east | #west\ndirection match: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90\n]\n// ⚠ Warning: non-exhaustive match: `#west` is not handled (residual type: `#west`)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-166",
-      "title": "Match Expression (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "// direction :: #north | #south | #east | #west\n\n// Compile error: matchExhaustive: proves this is NOT exhaustive\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90\n]\n// ⛔ Error: non-exhaustive matchExhaustive: `#west` is not handled (residual type: `#west`)\n\n// Fine: all four members covered — silent, no diagnostic\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90;\n  #west  -> 270\n]\n\n// Fine: an unguarded wildcard is still full coverage\ndirection matchExhaustive: [\n  #north -> 0;\n  _      -> -1\n]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1114,11 +1111,24 @@
         "raise",
         "throw"
       ],
-      "source": "x matchExhaustive: [#ok -> 1; _ -> 0]\n// ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type\n//    `Dynamic` is not a closed union of symbol singletons, `nil`, or\n//    concrete leaf classes",
+      "source": "// direction :: #north | #south | #east | #west\n\n// Compile error: matchExhaustive: proves this is NOT exhaustive\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90\n]\n// ⛔ Error: non-exhaustive matchExhaustive: `#west` is not handled (residual type: `#west`)\n\n// Fine: all four members covered — silent, no diagnostic\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90;\n  #west  -> 270\n]\n\n// Fine: an unguarded wildcard is still full coverage\ndirection matchExhaustive: [\n  #north -> 0;\n  _      -> -1\n]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-168",
+      "title": "Match Expression (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "x matchExhaustive: [#ok -> 1; _ -> 0]\n// ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type\n//    `Dynamic` is not a closed union of symbol singletons, `nil`, or\n//    concrete leaf classes",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-169",
       "title": "Destructuring in Match Arms (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1133,7 +1143,27 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-169",
+      "id": "docs-beamtalk-language-features-block-17",
+      "title": "Reflection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "p := Point x: 3 y: 4\np fieldAt: #x          // => 3\np fieldAt: #y          // => 4\np fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)\np class                // => Point\nPoint superclass       // => Value\n\n// Full chain from self up to (and including) Object (or Object class for metaclass receivers)\nCounter superclassChain        // => [Counter, Actor, Object]\nObject superclassChain         // => [Object]\nCounter class superclassChain  // => [Counter class, Actor class, Object class]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-170",
       "title": "Rest Patterns in Destructuring (BT-1251) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1148,17 +1178,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-17",
-      "title": "Message Sends (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-170",
+      "id": "docs-beamtalk-language-features-block-171",
       "title": "Live Patching (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1194,7 +1214,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-171",
+      "id": "docs-beamtalk-language-features-block-172",
       "title": "Live Patching (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1215,7 +1235,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-175",
+      "id": "docs-beamtalk-language-features-block-176",
       "title": "External-edit conflict — patch, edit on disk, flush (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1226,24 +1246,16 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-18",
-      "title": "Splitting a Message Send Across Lines (beamtalk-language-features)",
+      "title": "Message Sends (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "set",
-        "transform"
+        "beamtalk-language-features"
       ],
-      "source": "// Keyword messages split fine: a bare keyword part (`copyFrom:`) can never\n// start a statement on its own, so it unambiguously continues the receiver\n// above, no matter how it's indented.\nresult := \"abc\"\n  copyFrom: 1\n  to: 2\n\n// A unary selector chained after something else on the same line also\n// splits fine, because only the *continuation* keyword moves to its own line:\nresult := \"abc\" asList\n  collect: [:ch | ch uppercase]",
+      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-181",
+      "id": "docs-beamtalk-language-features-block-182",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1261,7 +1273,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-182",
+      "id": "docs-beamtalk-language-features-block-183",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1280,7 +1292,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-183",
+      "id": "docs-beamtalk-language-features-block-184",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1293,7 +1305,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-187",
+      "id": "docs-beamtalk-language-features-block-188",
       "title": "Live Re-Checking on Reload (ADR 0105) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1306,7 +1318,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-188",
+      "id": "docs-beamtalk-language-features-block-189",
       "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1332,7 +1344,25 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-189",
+      "id": "docs-beamtalk-language-features-block-19",
+      "title": "Splitting a Message Send Across Lines (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "set",
+        "transform"
+      ],
+      "source": "// Keyword messages split fine: a bare keyword part (`copyFrom:`) can never\n// start a statement on its own, so it unambiguously continues the receiver\n// above, no matter how it's indented.\nresult := \"abc\"\n  copyFrom: 1\n  to: 2\n\n// A unary selector chained after something else on the same line also\n// splits fine, because only the *continuation* keyword moves to its own line:\nresult := \"abc\" asList\n  collect: [:ch | ch uppercase]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-190",
       "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1342,25 +1372,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-19",
-      "title": "Splitting a Message Send Across Lines (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// A unary selector alone on its own line, immediately after its intended\n// receiver, does NOT continue it — it parses as a new statement instead:\nresult := \"abc\"\n  asList        // parsed as its own statement, not `\"abc\" asList`",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-190",
+      "id": "docs-beamtalk-language-features-block-191",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1387,7 +1399,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-191",
+      "id": "docs-beamtalk-language-features-block-192",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1414,7 +1426,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-193",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1436,7 +1448,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-193",
+      "id": "docs-beamtalk-language-features-block-194",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1459,7 +1471,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1489,7 +1501,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-196",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1499,7 +1511,35 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-199",
+      "id": "docs-beamtalk-language-features-block-2",
+      "title": "String Operations (Grapheme-Aware) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// First / last grapheme\n\"Hello\" first         // => \"H\"\n\"Hello\" last          // => \"o\"\n\"über\" first          // => \"ü\" (one grapheme, two UTF-8 bytes)\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-20",
+      "title": "Splitting a Message Send Across Lines (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// A unary selector alone on its own line, immediately after its intended\n// receiver, does NOT continue it — it parses as a new statement instead:\nresult := \"abc\"\n  asList        // parsed as its own statement, not `\"abc\" asList`",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-200",
       "title": "Suspend on failure, not resume-on-old-state or kill (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1516,17 +1556,128 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-2",
-      "title": "String Operations (Grapheme-Aware) (beamtalk-language-features)",
+      "id": "docs-beamtalk-language-features-block-201",
+      "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "append",
+        "beamtalk-language-features",
+        "concat",
+        "concatenate",
+        "string join"
+      ],
+      "source": "// Instance method\nString >> shout => self uppercase ++ \"!\"\n\n// Class-side method\nString class >> fromJson: s => // ...parse JSON string\n\n// Keyword method with typed parameter\nArray >> chunksOf: n :: Integer => // ...split into n-sized chunks\n\n// Binary method\nPoint >> + other :: Point => Point x: self x + other x y: self y + other y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-202",
+      "title": "Type annotations on extensions (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "branch",
+        "concurrent",
+        "conditional",
+        "gen_server",
+        "genserver",
+        "if",
+        "if not",
+        "negation",
+        "process",
+        "unless"
+      ],
+      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self reverse\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-203",
+      "title": "Cross-file extensions (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "append",
+        "beamtalk-language-features",
+        "concat",
+        "concatenate",
+        "string conversion",
+        "string join",
+        "toString",
+        "to_string"
+      ],
+      "source": "// In helpers.bt — String is defined in stdlib, not this file\nString >> shoutIt => super printString uppercase ++ \"!\"\n\n// Class-side foreign extension\nString class >> banner => \"=== String ===\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-204",
+      "title": "Beamtalk — System reflection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// First / last grapheme\n\"Hello\" first         // => \"H\"\n\"Hello\" last          // => \"o\"\n\"über\" first          // => \"ü\" (one grapheme, two UTF-8 bytes)\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
+      "source": "Beamtalk version\n// => \"0.4.0\"\n\nBeamtalk allClasses includes: Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\nBeamtalk help: Integer\n// => \"== Integer < Number ==\\n...\"\n\nBeamtalk help: Integer selector: #+\n// => \"Integer >> +\\n...\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-20",
+      "id": "docs-beamtalk-language-features-block-205",
+      "title": "Workspace — Project operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "process"
+      ],
+      "source": "Workspace isAvailable\n// => true  (false under `beamtalk test`, where every other selector raises no_workspace)\n\nWorkspace load: \"examples/counter.bt\"\n// => #(Counter)  (Counter is now registered)\n\nWorkspace classes includes: Counter\n// => true\n\nWorkspace testClasses includes: CounterTest\n// => true\n\n(Workspace test: CounterTest) failed\n// => 0  (all tests pass)\n\nNode current actors unwrap size\n// => 3  (number of live actors; see Node introspection below)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-206",
+      "title": "Transcript — The REPL's shared log (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "Transcript showCr: \"Hello\"\nTranscript show: \"a\"; cr; show: \"b\"\nTranscript recent",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-207",
+      "title": "Node introspection (ADR 0129 amendment) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "fault tolerance",
+        "gen_server",
+        "genserver",
+        "map",
+        "mapping",
+        "process",
+        "restart",
+        "supervision",
+        "transform"
+      ],
+      "source": "Node current actors unwrap size          // every live actor on this node\nNode current actorsOf: Counter           // => Result ok: #(...)\nNode connected collect: [:n | n shapeSkew unwrap]\nProgram rootSupervisor                   // running application's root supervisor, or nil\n(Package named: \"my_app\") supervisorClass  // declared [application] supervisor class, or nil",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-208",
+      "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "Counter sourceFile\n// => \"examples/counter.bt\"\n\nCounter reload\n// => Counter  (recompiled and hot-swapped)\n\nInteger sourceFile\n// => nil  (stdlib built-in, no source file)\n\nInteger reload\n// => Error: Integer has no source file — stdlib classes cannot be reloaded",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-21",
       "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1555,128 +1706,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-200",
-      "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "append",
-        "beamtalk-language-features",
-        "concat",
-        "concatenate",
-        "string join"
-      ],
-      "source": "// Instance method\nString >> shout => self uppercase ++ \"!\"\n\n// Class-side method\nString class >> fromJson: s => // ...parse JSON string\n\n// Keyword method with typed parameter\nArray >> chunksOf: n :: Integer => // ...split into n-sized chunks\n\n// Binary method\nPoint >> + other :: Point => Point x: self x + other x y: self y + other y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-201",
-      "title": "Type annotations on extensions (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "branch",
-        "concurrent",
-        "conditional",
-        "gen_server",
-        "genserver",
-        "if",
-        "if not",
-        "negation",
-        "process",
-        "unless"
-      ],
-      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self reverse\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-202",
-      "title": "Cross-file extensions (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "append",
-        "beamtalk-language-features",
-        "concat",
-        "concatenate",
-        "string conversion",
-        "string join",
-        "toString",
-        "to_string"
-      ],
-      "source": "// In helpers.bt — String is defined in stdlib, not this file\nString >> shoutIt => super printString uppercase ++ \"!\"\n\n// Class-side foreign extension\nString class >> banner => \"=== String ===\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-203",
-      "title": "Beamtalk — System reflection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "Beamtalk version\n// => \"0.4.0\"\n\nBeamtalk allClasses includes: Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\nBeamtalk help: Integer\n// => \"== Integer < Number ==\\n...\"\n\nBeamtalk help: Integer selector: #+\n// => \"Integer >> +\\n...\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-204",
-      "title": "Workspace — Project operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "process"
-      ],
-      "source": "Workspace isAvailable\n// => true  (false under `beamtalk test`, where every other selector raises no_workspace)\n\nWorkspace load: \"examples/counter.bt\"\n// => #(Counter)  (Counter is now registered)\n\nWorkspace classes includes: Counter\n// => true\n\nWorkspace testClasses includes: CounterTest\n// => true\n\n(Workspace test: CounterTest) failed\n// => 0  (all tests pass)\n\nNode current actors unwrap size\n// => 3  (number of live actors; see Node introspection below)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-205",
-      "title": "Transcript — The REPL's shared log (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "Transcript showCr: \"Hello\"\nTranscript show: \"a\"; cr; show: \"b\"\nTranscript recent",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-206",
-      "title": "Node introspection (ADR 0129 amendment) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "fault tolerance",
-        "gen_server",
-        "genserver",
-        "map",
-        "mapping",
-        "process",
-        "restart",
-        "supervision",
-        "transform"
-      ],
-      "source": "Node current actors unwrap size          // every live actor on this node\nNode current actorsOf: Counter           // => Result ok: #(...)\nNode connected collect: [:n | n shapeSkew unwrap]\nProgram rootSupervisor                   // running application's root supervisor, or nil\n(Package named: \"my_app\") supervisorClass  // declared [application] supervisor class, or nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-207",
-      "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "Counter sourceFile\n// => \"examples/counter.bt\"\n\nCounter reload\n// => Counter  (recompiled and hot-swapped)\n\nInteger sourceFile\n// => nil  (stdlib built-in, no source file)\n\nInteger reload\n// => Error: Integer has no source file — stdlib classes cannot be reloaded",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-210",
+      "id": "docs-beamtalk-language-features-block-211",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1686,7 +1716,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-211",
+      "id": "docs-beamtalk-language-features-block-212",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1699,7 +1729,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "Destructive flush — flushIncludingDestructive and confirmDestructive (ADR 0113) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1709,7 +1739,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1732,7 +1762,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-217",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Session — a first-class session value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1750,7 +1780,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-219",
+      "id": "docs-beamtalk-language-features-block-220",
       "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1760,7 +1790,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "Cross-session access (read-only) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1784,7 +1814,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Tracing Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1794,7 +1824,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-223",
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1809,7 +1839,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-224",
+      "id": "docs-beamtalk-language-features-block-225",
       "title": "Trace Event Queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1827,7 +1857,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-225",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1842,7 +1872,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-226",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "Live Health (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1857,7 +1887,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-227",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1867,7 +1897,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-228",
+      "id": "docs-beamtalk-language-features-block-229",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1887,7 +1917,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-229",
+      "id": "docs-beamtalk-language-features-block-230",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1916,7 +1946,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-230",
+      "id": "docs-beamtalk-language-features-block-231",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1947,7 +1977,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-232",
+      "id": "docs-beamtalk-language-features-block-233",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1966,7 +1996,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-233",
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1994,7 +2024,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-234",
+      "id": "docs-beamtalk-language-features-block-235",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2015,7 +2045,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-236",
+      "id": "docs-beamtalk-language-features-block-237",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2025,7 +2055,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-237",
+      "id": "docs-beamtalk-language-features-block-238",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2040,7 +2070,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-238",
+      "id": "docs-beamtalk-language-features-block-239",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2055,7 +2085,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-240",
       "title": "Node — a first-class value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2070,20 +2100,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-24",
-      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-240",
+      "id": "docs-beamtalk-language-features-block-241",
       "title": "Remote spawn and lookup (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2103,7 +2120,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-241",
+      "id": "docs-beamtalk-language-features-block-242",
       "title": "Cluster-unique names — scope: #global (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2118,7 +2135,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-246",
+      "id": "docs-beamtalk-language-features-block-247",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2139,7 +2156,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-247",
+      "id": "docs-beamtalk-language-features-block-248",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2161,6 +2178,87 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-25",
+      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-253",
+      "title": "Binary — Byte-Level Data (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "set",
+        "transform",
+        "where"
+      ],
+      "source": "// Construction\nbin := Binary fromBytes: #(104, 101, 108, 108, 111)\nbin := Binary fromIolist: #(\"hello\", \" \", \"world\")\n\n// Byte access (1-based, Collection protocol)\nbin := Binary fromBytes: #(104, 101, 108)\nbin at: 1                    // => \"h\" (grapheme — runtime dispatches via String)\nbin size                     // => 3\n\n// Byte access (0-based, Erlang-compatible)\nbin byteAt: 0                // => 104 (byte value)\nbin byteSize                 // => 3 (byte count)\n\n// Zero-copy slicing\nbin := Binary fromBytes: #(1, 2, 3, 4, 5)\nbin part: 1 size: 3          // => Binary (bytes 2, 3, 4)\n\n// Concatenation\na := Binary fromBytes: #(1, 2)\nb := Binary fromBytes: #(3, 4)\na concat: b                  // => Binary (1, 2, 3, 4)\n\n// Byte list conversion\nbin toBytes                   // => #(1, 2, 3, 4, 5)\nBinary fromBytes: #(65, 66)  // => Binary\n\n// UTF-8 decoding (Binary → String)\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => \"hello\"\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => \"hello\"\n\n// Serialization (class methods)\netf := Binary serialize: #(1, 2, 3)\nBinary deserialize: etf               // => #(1, 2, 3)\nBinary deserializeWithUsed: etf       // => #(value, bytesConsumed)\n\n// Collection protocol — Binary is a collection of bytes\nbin := Binary fromBytes: #(65, 66, 67, 68, 69)\nbin collect: [:ch | ch]       // => \"ABCDE\" (via String species)\nbin select: [:ch | ch /= \"C\"]  // => \"ABDE\"\nbin includes: \"B\"             // => true\nbin isEmpty                   // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-254",
+      "title": "Binary vs String at Runtime (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set",
+        "string conversion",
+        "toString",
+        "to_string"
+      ],
+      "source": "bytes := Binary fromBytes: #(255, 254, 253)\nbytes class name    // => #Binary\nbytes size          // => 3 (bytes, not graphemes)\nbytes printString   // => \"<<FF FE FD>>\" (hex — never raw invalid UTF-8)\n\n(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-256",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-259",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop"
+      ],
+      "source": "(Set new add: 1) anyOne           // => 1\nSet new anyOne                    // raises empty_collection\n(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee\n#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-26",
       "title": "Equality operators cannot be overridden (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2190,75 +2288,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-252",
-      "title": "Binary — Byte-Level Data (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "set",
-        "transform",
-        "where"
-      ],
-      "source": "// Construction\nbin := Binary fromBytes: #(104, 101, 108, 108, 111)\nbin := Binary fromIolist: #(\"hello\", \" \", \"world\")\n\n// Byte access (1-based, Collection protocol)\nbin := Binary fromBytes: #(104, 101, 108)\nbin at: 1                    // => \"h\" (grapheme — runtime dispatches via String)\nbin size                     // => 3\n\n// Byte access (0-based, Erlang-compatible)\nbin byteAt: 0                // => 104 (byte value)\nbin byteSize                 // => 3 (byte count)\n\n// Zero-copy slicing\nbin := Binary fromBytes: #(1, 2, 3, 4, 5)\nbin part: 1 size: 3          // => Binary (bytes 2, 3, 4)\n\n// Concatenation\na := Binary fromBytes: #(1, 2)\nb := Binary fromBytes: #(3, 4)\na concat: b                  // => Binary (1, 2, 3, 4)\n\n// Byte list conversion\nbin toBytes                   // => #(1, 2, 3, 4, 5)\nBinary fromBytes: #(65, 66)  // => Binary\n\n// UTF-8 decoding (Binary → String)\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => \"hello\"\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => \"hello\"\n\n// Serialization (class methods)\netf := Binary serialize: #(1, 2, 3)\nBinary deserialize: etf               // => #(1, 2, 3)\nBinary deserializeWithUsed: etf       // => #(value, bytesConsumed)\n\n// Collection protocol — Binary is a collection of bytes\nbin := Binary fromBytes: #(65, 66, 67, 68, 69)\nbin collect: [:ch | ch]       // => \"ABCDE\" (via String species)\nbin select: [:ch | ch /= \"C\"]  // => \"ABDE\"\nbin includes: \"B\"             // => true\nbin isEmpty                   // => false",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-253",
-      "title": "Binary vs String at Runtime (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set",
-        "string conversion",
-        "toString",
-        "to_string"
-      ],
-      "source": "bytes := Binary fromBytes: #(255, 254, 253)\nbytes class name    // => #Binary\nbytes size          // => 3 (bytes, not graphemes)\nbytes printString   // => \"<<FF FE FD>>\" (hex — never raw invalid UTF-8)\n\n(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-255",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-258",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "for each",
-        "for-each",
-        "forEach",
-        "instantiate",
-        "iterate",
-        "iteration",
-        "loop"
-      ],
-      "source": "(Set new add: 1) anyOne           // => 1\nSet new anyOne                    // raises empty_collection\n(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee\n#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-259",
+      "id": "docs-beamtalk-language-features-block-260",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2268,22 +2298,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-26",
-      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-261",
+      "id": "docs-beamtalk-language-features-block-262",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2293,7 +2308,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-263",
+      "id": "docs-beamtalk-language-features-block-264",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2306,7 +2321,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-264",
+      "id": "docs-beamtalk-language-features-block-265",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2316,7 +2331,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-265",
+      "id": "docs-beamtalk-language-features-block-266",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2332,7 +2347,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-266",
+      "id": "docs-beamtalk-language-features-block-267",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2356,7 +2371,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-267",
+      "id": "docs-beamtalk-language-features-block-268",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2375,7 +2390,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-268",
+      "id": "docs-beamtalk-language-features-block-269",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2396,7 +2411,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-269",
+      "id": "docs-beamtalk-language-features-block-27",
+      "title": "Equality operators cannot be overridden (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Fractions stored unnormalised: 1/2 and 2/4 are different terms…\nhalf := Fraction numer: 1 denom: 2\ntwoQuarters := Fraction numer: 2 denom: 4\n\nhalf =:= twoQuarters      // => false  (structural — compares representation)\nhalf equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-270",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2409,22 +2439,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-27",
-      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-270",
+      "id": "docs-beamtalk-language-features-block-271",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2440,7 +2455,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-271",
+      "id": "docs-beamtalk-language-features-block-272",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2453,7 +2468,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-272",
+      "id": "docs-beamtalk-language-features-block-273",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2472,7 +2487,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-273",
+      "id": "docs-beamtalk-language-features-block-274",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2482,7 +2497,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-274",
+      "id": "docs-beamtalk-language-features-block-275",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2503,7 +2518,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-275",
+      "id": "docs-beamtalk-language-features-block-276",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2522,7 +2537,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-277",
+      "id": "docs-beamtalk-language-features-block-278",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2540,7 +2555,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-278",
+      "id": "docs-beamtalk-language-features-block-279",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2555,7 +2570,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-279",
+      "id": "docs-beamtalk-language-features-block-28",
+      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-280",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2565,27 +2595,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-28",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Read field\ncurrent := self.value\n\n// Write field\nself.value := 10\n\n// Explicit assignment\nself.value := self.value + 1\nself.count := self.count - delta\nself.total := self.total * factor",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-280",
+      "id": "docs-beamtalk-language-features-block-281",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2603,7 +2613,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-283",
+      "id": "docs-beamtalk-language-features-block-284",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2626,7 +2636,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-284",
+      "id": "docs-beamtalk-language-features-block-285",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2636,7 +2646,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-285",
+      "id": "docs-beamtalk-language-features-block-286",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2646,7 +2656,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-286",
+      "id": "docs-beamtalk-language-features-block-287",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2669,7 +2679,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-288",
+      "id": "docs-beamtalk-language-features-block-289",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2684,7 +2694,27 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-289",
+      "id": "docs-beamtalk-language-features-block-29",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Read field\ncurrent := self.value\n\n// Write field\nself.value := 10\n\n// Explicit assignment\nself.value := self.value + 1\nself.count := self.count - delta\nself.total := self.total * factor",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-290",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2694,22 +2724,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-29",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-291",
+      "id": "docs-beamtalk-language-features-block-292",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2722,7 +2737,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-292",
+      "id": "docs-beamtalk-language-features-block-293",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2745,7 +2760,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-293",
+      "id": "docs-beamtalk-language-features-block-294",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2773,7 +2788,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-294",
+      "id": "docs-beamtalk-language-features-block-295",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2801,7 +2816,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-297",
+      "id": "docs-beamtalk-language-features-block-298",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2832,7 +2847,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-298",
+      "id": "docs-beamtalk-language-features-block-299",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2870,6 +2885,21 @@
       "title": "Field Access and Assignment (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-31",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "anonymous function",
         "assign",
         "assignment",
@@ -2891,7 +2921,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-31",
+      "id": "docs-beamtalk-language-features-block-32",
       "title": "Blocks (Closures) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2906,7 +2936,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-32",
+      "id": "docs-beamtalk-language-features-block-33",
       "title": "Blocks (Closures) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2935,7 +2965,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-34",
+      "id": "docs-beamtalk-language-features-block-35",
       "title": "Class-Side Methods (ADR 0048) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2965,7 +2995,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-35",
+      "id": "docs-beamtalk-language-features-block-36",
       "title": "Class-Side Methods (ADR 0048) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2993,7 +3023,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-36",
+      "id": "docs-beamtalk-language-features-block-37",
       "title": "Programmatic Class Creation (ClassBuilder) (ADR 0038 / ADR 0084) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3011,7 +3041,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-37",
+      "id": "docs-beamtalk-language-features-block-38",
       "title": "Programmatic Class Creation (ClassBuilder) (ADR 0038 / ADR 0084) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3030,41 +3060,6 @@
         "set"
       ],
       "source": "Object classBuilder\n  name: #Tally;\n  superclass: Object;\n  addClassState: #total default: 10;\n  addField: #count default: 0;\n  addMethod: #answer body: [:inst | 42];\n  addClassMethod: #tally body: [:self | self.total := self.total + 5. self.total];\n  register\n\nTally new answer           // => 42\nTally tally                // => 15",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-39",
-      "title": "Doc Comments (///) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Actor",
-        "Counter",
-        "actor",
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "extends",
-        "field",
-        "gen_server",
-        "genserver",
-        "increment",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "instantiate",
-        "member",
-        "mutate",
-        "mutation",
-        "process",
-        "property",
-        "set",
-        "subclassing"
-      ],
-      "source": "/// Counter — A simple incrementing actor.\n///\n/// Demonstrates actor state and message passing.\n///\n/// ## Examples\n/// ```beamtalk\n/// c := Counter spawn\n/// c increment   // => 1\n/// ```\nActor subclass: Counter\n  state: value = 0\n\n  /// Increment the counter by 1 and return the new value.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// Counter spawn increment   // => 1\n  /// ```\n  increment => self.value := self.value + 1",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3107,6 +3102,41 @@
       "title": "Doc Comments (///) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "Actor",
+        "Counter",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "increment",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "/// Counter — A simple incrementing actor.\n///\n/// Demonstrates actor state and message passing.\n///\n/// ## Examples\n/// ```beamtalk\n/// c := Counter spawn\n/// c increment   // => 1\n/// ```\nActor subclass: Counter\n  state: value = 0\n\n  /// Increment the counter by 1 and return the new value.\n  ///\n  /// ## Examples\n  /// ```beamtalk\n  /// Counter spawn increment   // => 1\n  /// ```\n  increment => self.value := self.value + 1",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-41",
+      "title": "Doc Comments (///) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "async",
         "beamtalk-language-features",
         "concurrent",
@@ -3118,7 +3148,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-41",
+      "id": "docs-beamtalk-language-features-block-42",
       "title": "Method Category Dividers (// === Name ===) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3142,7 +3172,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-42",
+      "id": "docs-beamtalk-language-features-block-43",
       "title": "Erlang FFI (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3157,7 +3187,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-43",
+      "id": "docs-beamtalk-language-features-block-44",
       "title": "Erlang FFI (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3175,7 +3205,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-44",
+      "id": "docs-beamtalk-language-features-block-45",
       "title": "Erlang FFI (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3197,7 +3227,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-45",
+      "id": "docs-beamtalk-language-features-block-46",
       "title": "Erlang FFI (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3212,7 +3242,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-46",
+      "id": "docs-beamtalk-language-features-block-47",
       "title": "Erlang FFI (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3236,7 +3266,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-47",
+      "id": "docs-beamtalk-language-features-block-48",
       "title": "Erlang FFI (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3255,7 +3285,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-48",
+      "id": "docs-beamtalk-language-features-block-49",
       "title": "FFI Collection Element Types (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3273,21 +3303,6 @@
         "set"
       ],
       "source": "// allSendsIn/1 is specced [{atom(), pos_integer(), atom()}]:\nsends := (Erlang beamtalk_interface) allSendsIn: source\nsends do: [:s |\n  // s is Tuple(Symbol, Integer, Symbol) — no annotation needed\n  selector := s at: 1   // inferred Symbol\n  arity := s at: 2       // inferred Integer\n]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-49",
-      "title": "FFI Collection Element Types (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "pair := someTupleTyped     // Tuple(Symbol, Integer)\npair at: 1                  // inferred Symbol\npair at: 2                  // inferred Integer",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3329,12 +3344,17 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-50",
-      "title": "FFI Type Stub Files (ADR 0075 Phase 2) (beamtalk-language-features)",
+      "title": "FFI Collection Element Types (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "beamtalk-language-features"
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
       ],
-      "source": "/// Type declarations for Erlang module `lists`.\ndeclare native: lists\n  reverse: list :: List(T) -> List(T)\n  seq: from :: Integer to: to :: Integer -> List(Integer)\n  member: elem :: T in: list :: List(T) -> Boolean",
+      "source": "pair := someTupleTyped     // Tuple(Symbol, Integer)\npair at: 1                  // inferred Symbol\npair at: 2                  // inferred Integer",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3344,11 +3364,21 @@
       "tags": [
         "beamtalk-language-features"
       ],
+      "source": "/// Type declarations for Erlang module `lists`.\ndeclare native: lists\n  reverse: list :: List(T) -> List(T)\n  seq: from :: Integer to: to :: Integer -> List(Integer)\n  member: elem :: T in: list :: List(T) -> Boolean",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-52",
+      "title": "FFI Type Stub Files (ADR 0075 Phase 2) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
       "source": "declare native: erlang\n  node -> Symbol\n  self -> Pid",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-53",
+      "id": "docs-beamtalk-language-features-block-54",
       "title": "Typed Class Syntax (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3381,7 +3411,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-54",
+      "id": "docs-beamtalk-language-features-block-55",
       "title": "late Slots (ADR 0124) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3407,7 +3437,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-55",
+      "id": "docs-beamtalk-language-features-block-56",
       "title": "late Slots (ADR 0124) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3439,7 +3469,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-58",
+      "id": "docs-beamtalk-language-features-block-59",
       "title": "late Slots (ADR 0124) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3475,7 +3505,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-60",
+      "id": "docs-beamtalk-language-features-block-61",
       "title": "Definite Assignment (ADR 0124) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3501,7 +3531,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-61",
+      "id": "docs-beamtalk-language-features-block-62",
       "title": "Definite Assignment (ADR 0124) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3528,7 +3558,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-63",
+      "id": "docs-beamtalk-language-features-block-64",
       "title": "Local Variable Type Annotations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3543,7 +3573,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-64",
+      "id": "docs-beamtalk-language-features-block-65",
       "title": "Missing State Field Annotations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3569,7 +3599,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-65",
+      "id": "docs-beamtalk-language-features-block-66",
       "title": "Dynamic Inference Warnings (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3592,7 +3622,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-66",
+      "id": "docs-beamtalk-language-features-block-67",
       "title": "Suppressing Type Warnings with @expect type (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3615,7 +3645,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-67",
+      "id": "docs-beamtalk-language-features-block-68",
       "title": "Declaring a Generic Class (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3645,21 +3675,6 @@
         "value"
       ],
       "source": "sealed Value subclass: Result(T, E)\n  field: okValue :: T = nil\n  field: errReason :: E = nil\n\n  sealed unwrap -> T =>\n    self.isOk ifTrue: [\n      self.okValue\n    ] ifFalse: [(Erlang beamtalk_result) unwrapError: self.errReason]\n\n  sealed map: block :: Block(T, R) -> Result(R, E) =>\n    self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]\n\n  sealed andThen: block :: Block(T, Result(R, E)) -> Result(R, E) =>\n    self.isOk ifTrue: [block value: self.okValue] ifFalse: [self]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-69",
-      "title": "Type Inference Through Generics (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "r :: Result(Integer, Error) := computeSomething\nr unwrap          // Return type T -> Integer\nr map: [:v | v asString]   // Block param T -> Integer, return Result(String, Error)\nr error           // Return type E -> Error",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3698,11 +3713,26 @@
         "mutation",
         "set"
       ],
-      "source": "r := someMethod        // someMethod returns bare Result (no type params)\nr unwrap               // -> Dynamic (T is unknown)\nr unwrap + 1           // No warning — Dynamic bypasses checking",
+      "source": "r :: Result(Integer, Error) := computeSomething\nr unwrap          // Return type T -> Integer\nr map: [:v | v asString]   // Block param T -> Integer, return Result(String, Error)\nr error           // Return type E -> Error",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-71",
+      "title": "Type Inference Through Generics (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "r := someMethod        // someMethod returns bare Result (no type params)\nr unwrap               // -> Dynamic (T is unknown)\nr unwrap + 1           // No warning — Dynamic bypasses checking",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-72",
       "title": "Constructor Type Inference (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3720,7 +3750,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-72",
+      "id": "docs-beamtalk-language-features-block-73",
       "title": "Generic Inheritance (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3739,7 +3769,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-74",
+      "id": "docs-beamtalk-language-features-block-75",
       "title": "Dialyzer Spec Generation (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3762,7 +3792,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-77",
+      "id": "docs-beamtalk-language-features-block-78",
       "title": "Defining a Protocol (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3807,7 +3837,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-81",
+      "id": "docs-beamtalk-language-features-block-82",
       "title": "Class Method Requirements (BT-1611) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3817,7 +3847,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-82",
+      "id": "docs-beamtalk-language-features-block-83",
       "title": "Type Parameter Bounds (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3840,7 +3870,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-84",
+      "id": "docs-beamtalk-language-features-block-85",
       "title": "Traits (ADR 0127) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3856,7 +3886,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-85",
+      "id": "docs-beamtalk-language-features-block-86",
       "title": "Traits (ADR 0127) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3874,7 +3904,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-86",
+      "id": "docs-beamtalk-language-features-block-87",
       "title": "Composing more than one trait, and excluding:/overriding: (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3901,7 +3931,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-87",
+      "id": "docs-beamtalk-language-features-block-88",
       "title": "Composing more than one trait, and excluding:/overriding: (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3921,29 +3951,6 @@
         "value"
       ],
       "source": "typed Value subclass: SupervisionTree\n  // This class's own `do:` answers `self` (chainable), not `Nil` —\n  // `Enumerable`'s provision is dropped before it can conflict.\n  uses: Enumerable(SupervisionNode) excluding: #(#do:)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-89",
-      "title": "Composing more than one trait, and excluding:/overriding: (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Report",
-        "Value",
-        "beamtalk-language-features",
-        "exception",
-        "extends",
-        "inherit",
-        "inheritance",
-        "raise",
-        "string conversion",
-        "subclassing",
-        "throw",
-        "toString",
-        "to_string",
-        "value"
-      ],
-      "source": "Value subclass: Report\n  uses: Labelled\n  uses: Describable\n  // error: `printString` is provided by both Labelled and Describable in Report.\n  //   Define `printString` in Report, or exclude one:\n  //     uses: Describable excluding: #(#printString)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3983,6 +3990,29 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-90",
+      "title": "Composing more than one trait, and excluding:/overriding: (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Report",
+        "Value",
+        "beamtalk-language-features",
+        "exception",
+        "extends",
+        "inherit",
+        "inheritance",
+        "raise",
+        "string conversion",
+        "subclassing",
+        "throw",
+        "toString",
+        "to_string",
+        "value"
+      ],
+      "source": "Value subclass: Report\n  uses: Labelled\n  uses: Describable\n  // error: `printString` is provided by both Labelled and Describable in Report.\n  //   Define `printString` in Report, or exclude one:\n  //     uses: Describable excluding: #(#printString)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-91",
       "title": "Requirements (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -4006,7 +4036,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-91",
+      "id": "docs-beamtalk-language-features-block-92",
       "title": "Reflection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -4016,7 +4046,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-92",
+      "id": "docs-beamtalk-language-features-block-93",
       "title": "Printable Protocol and Display Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -4042,7 +4072,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-93",
+      "id": "docs-beamtalk-language-features-block-94",
       "title": "Printable Protocol and Display Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -4052,7 +4082,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-94",
+      "id": "docs-beamtalk-language-features-block-95",
       "title": "Navigable Inspector (ADR 0095) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -4070,7 +4100,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-95",
+      "id": "docs-beamtalk-language-features-block-96",
       "title": "Navigable Inspector (ADR 0095) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -4088,7 +4118,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-96",
+      "id": "docs-beamtalk-language-features-block-97",
       "title": "Union Types (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -28630,6 +28660,284 @@
       "explanation": "BT-1218: Actor with explicit #transient supervisionPolicy — fixture for supervision_spec_test.bt"
     },
     {
+      "id": "stdlib-test-fixtures-sso-actor-base",
+      "title": "SsoActorBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "SsoActorBase",
+        "actor",
+        "append",
+        "assign",
+        "assignment",
+        "async",
+        "bar",
+        "bump",
+        "bumpTwice",
+        "concat",
+        "concatenate",
+        "concurrent",
+        "extends",
+        "field",
+        "foo",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "map",
+        "mapping",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "scale:",
+        "scaled:",
+        "scaledAll:",
+        "set",
+        "sso_actor_base",
+        "string join",
+        "subclassing",
+        "transform"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nActor subclass: SsoActorBase\n  state: count = 0\n\n  foo -> String => \"base\"\n\n  bar -> String => \"bar:\" ++ self foo\n\n  // Argument-passing, in-block, and state-mutating inherited self-sends.\n  scale: n :: Integer -> Integer => n * 2\n\n  scaled: n :: Integer -> Integer => self scale: n\n\n  scaledAll: items -> List => items collect: [:item | self scale: item]\n\n  bump -> Integer =>\n    self.count := self.count + 1\n    self.count\n\n  bumpTwice -> Integer =>\n    self bump\n    self bump",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-actor-sub",
+      "title": "SsoActorSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoActorBase",
+        "SsoActorSub",
+        "assign",
+        "assignment",
+        "async",
+        "bump",
+        "concurrent",
+        "extends",
+        "foo",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "scale:",
+        "set",
+        "sso_actor_sub",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nSsoActorBase subclass: SsoActorSub\n\n  foo -> String => \"sub\"\n\n  scale: n :: Integer -> Integer => n * 10\n\n  bump -> Integer =>\n    self.count := self.count + 10\n    self.count",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-actor-sub-sub",
+      "title": "SsoActorSubSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoActorSub",
+        "SsoActorSubSub",
+        "async",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "object",
+        "process",
+        "sso_actor_sub_sub",
+        "subclassing"
+      ],
+      "source": "// BT-3666: a third level that inherits the override without redefining it.\n\nSsoActorSub subclass: SsoActorSubSub",
+      "explanation": "BT-3666: a third level that inherits the override without redefining it."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-class-side-base",
+      "title": "SsoClassSideBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Object",
+        "SsoClassSideBase",
+        "append",
+        "bar",
+        "concat",
+        "concatenate",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "object",
+        "sso_class_side_base",
+        "string join",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nObject subclass: SsoClassSideBase\n\n  class foo -> String => \"base\"\n\n  class bar -> String => \"bar:\" ++ self foo",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-class-side-sub",
+      "title": "SsoClassSideSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoClassSideBase",
+        "SsoClassSideSub",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "object",
+        "sso_class_side_sub",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nSsoClassSideBase subclass: SsoClassSideSub\n\n  class foo -> String => \"sub\"",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-labelled",
+      "title": "Sso Labelled",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "append",
+        "concat",
+        "concatenate",
+        "sso_labelled",
+        "string join"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nProtocol define: SsoLabelled\n  foo -> String\n  bar -> String => \"bar:\" ++ self foo",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-trait-actor-base",
+      "title": "SsoTraitActorBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "SsoTraitActorBase",
+        "actor",
+        "async",
+        "concurrent",
+        "extends",
+        "foo",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "process",
+        "sso_trait_actor_base",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nActor subclass: SsoTraitActorBase\n  uses: SsoLabelled\n\n  foo -> String => \"base\"",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-trait-actor-sub",
+      "title": "SsoTraitActorSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoTraitActorBase",
+        "SsoTraitActorSub",
+        "async",
+        "concurrent",
+        "extends",
+        "foo",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "object",
+        "process",
+        "sso_trait_actor_sub",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nSsoTraitActorBase subclass: SsoTraitActorSub\n\n  foo -> String => \"sub\"",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-trait-value-base",
+      "title": "SsoTraitValueBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoTraitValueBase",
+        "Value",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "sso_trait_value_base",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nValue subclass: SsoTraitValueBase\n  uses: SsoLabelled\n\n  foo -> String => \"base\"",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-trait-value-sub",
+      "title": "SsoTraitValueSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoTraitValueBase",
+        "SsoTraitValueSub",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "object",
+        "sso_trait_value_sub",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nSsoTraitValueBase subclass: SsoTraitValueSub\n\n  foo -> String => \"sub\"",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-value-base",
+      "title": "SsoValueBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoValueBase",
+        "Value",
+        "append",
+        "bar",
+        "concat",
+        "concatenate",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "make",
+        "sso_value_base",
+        "string join",
+        "subclassing",
+        "tag",
+        "value"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nValue subclass: SsoValueBase\n\n  class make -> String => \"make:\" ++ self tag\n\n  class tag -> String => \"base\"\n\n  foo -> String => \"base\"\n\n  bar -> String => \"bar:\" ++ self foo",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-value-sub",
+      "title": "SsoValueSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoValueBase",
+        "SsoValueSub",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "object",
+        "sso_value_sub",
+        "subclassing",
+        "tag"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nSsoValueBase subclass: SsoValueSub\n\n  class tag -> String => \"sub\"\n\n  foo -> String => \"sub\"",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-string-formatter",
       "title": "StringFormatter",
       "category": "stdlib-fixtures",
@@ -33725,6 +34033,54 @@
       "explanation": "Tests for self-reference behavior (BT-172)"
     },
     {
+      "id": "stdlib-test-self-send-override-test",
+      "title": "SelfSendOverrideTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SelfSendOverrideTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "callBar:",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "self_send_override_test",
+        "set",
+        "subclassing",
+        "testActorBaseMutationUnchanged",
+        "testActorBaseUnchanged",
+        "testActorInheritedSelfSendReachesOverride",
+        "testActorOverrideInheritedByThirdLevel",
+        "testActorOverrideReachedFromInsideBlock",
+        "testActorOverrideReachedWithArgument",
+        "testActorOverrideThatMutatesStateIsThreaded",
+        "testClassSideBaseUnchanged",
+        "testClassSideInheritedSelfSendReachesOverride",
+        "testFlattenedTraitActorBase",
+        "testFlattenedTraitActorReachesOverride",
+        "testFlattenedTraitValueBase",
+        "testFlattenedTraitValueReachesOverride",
+        "testValueBaseUnchanged",
+        "testValueClassSideBaseUnchanged",
+        "testValueClassSideInheritedSelfSendReachesOverride",
+        "testValueInheritedSelfSendReachesOverride"
+      ],
+      "source": "// BT-3666: an override of `foo` in a subclass must be reached from an\n// inherited method's `self foo` (template-method pattern).\n//\n// Fixtures: stdlib/test/fixtures/self_send_override.bt\n\nTestCase subclass: SelfSendOverrideTest\n\n  testActorInheritedSelfSendReachesOverride =>\n    a := SsoActorSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorOverrideReachedWithArgument =>\n    a := SsoActorSub spawn\n    self assert: (a scaled: 3) equals: 30\n    a stop\n\n  testActorOverrideReachedFromInsideBlock =>\n    a := SsoActorSub spawn\n    self assert: (a scaledAll: #(1, 2)) equals: #(10, 20)\n    a stop\n\n  testActorOverrideThatMutatesStateIsThreaded =>\n    a := SsoActorSub spawn\n    self assert: a bumpTwice equals: 20\n    self assert: (a fieldAt: #count) equals: 20\n    a stop\n\n  testActorBaseMutationUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bumpTwice equals: 2\n    a stop\n\n  testActorOverrideInheritedByThirdLevel =>\n    a := SsoActorSubSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorBaseUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bar equals: \"bar:base\"\n    a stop\n\n  testValueInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub new bar equals: \"bar:sub\"\n\n  testValueBaseUnchanged => self assert: SsoValueBase new bar equals: \"bar:base\"\n\n  testClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoClassSideSub bar equals: \"bar:sub\"\n\n  testClassSideBaseUnchanged =>\n    self assert: SsoClassSideBase bar equals: \"bar:base\"\n\n  // The receiver goes through an untyped parameter: the static checker does\n  // not see a flattened provision (`bar`) on a cross-file trait user's class.\n  callBar: obj => obj bar\n\n  testFlattenedTraitActorReachesOverride =>\n    a := SsoTraitActorSub spawn\n    self assert: (self callBar: a) equals: \"bar:sub\"\n    a stop\n\n  testFlattenedTraitActorBase =>\n    a := SsoTraitActorBase spawn\n    self assert: (self callBar: a) equals: \"bar:base\"\n    a stop\n\n  testFlattenedTraitValueReachesOverride =>\n    self assert: (self callBar: SsoTraitValueSub new) equals: \"bar:sub\"\n\n  testFlattenedTraitValueBase =>\n    self assert: (self callBar: SsoTraitValueBase new) equals: \"bar:base\"\n\n  testValueClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub make equals: \"make:sub\"\n\n  testValueClassSideBaseUnchanged =>\n    self assert: SsoValueBase make equals: \"make:base\"",
+      "explanation": "BT-3666: an override of `foo` in a subclass must be reached from an inherited method's `self foo` (template-method pattern).  Fixtures: stdlib/test/fixtures/self_send_override.bt"
+    },
+    {
       "id": "stdlib-test-self-spawn-named-test",
       "title": "SelfSpawnNamedTest",
       "category": "stdlib-tests",
@@ -36459,13 +36815,15 @@
         "subclassing",
         "tearDown",
         "testFlattenedProvisionBehavesLikeTheHandWrittenControlForASubclassOverride",
+        "testFlattenedProvisionReachesTheSubclassOverride",
         "testFlattenedProvisionUsesTheUsersOwnRequiredMethod",
+        "testHandWrittenControlReachesTheSubclassOverride",
         "testHandWrittenControlUsesItsOwnRequiredMethod",
         "trait_override_dispatch_test",
         "unless"
       ],
-      "source": "// BT-3625 (ADR 0127 Phase 0 pin, §6): what an inherited actor method's\n// self-send reaches when a further subclass overrides the selector.\n//\n// `announce` is a trait provision flattened into `TraitLabelledBase` (the\n// trait lives in its own file — fixtures/trait_labelled.bt — so this is a\n// legal cross-file `uses:`). It self-sends the required `label`.\n// `TraitLabelledOverride` (a further subclass) overrides `label`.\n//\n// `TraitPlainBase`/`TraitPlainOverride` are the hand-written control: the\n// identical shape with `announce` written in the class body instead of\n// flattened in. Flattening means \"exactly the class with the provisions\n// written into its body\" (ADR 0127 §3), so the trait and hand-written\n// variants must behave identically — whatever an inherited actor method's\n// self-send reaches for the hand-written class, it reaches for the flattened\n// one, no more and no less.\n\nTestCase subclass: TraitOverrideDispatchTest\n  field: base = nil\n  field: sub = nil\n  field: plainBase = nil\n  field: plainSub = nil\n\n  setUp =>\n    (((self withBase: TraitLabelledBase spawn) withSub: TraitLabelledOverride spawn) withPlainBase: TraitPlainBase spawn) withPlainSub: TraitPlainOverride spawn\n\n  tearDown =>\n    self.base isNil ifFalse: [self.base stop]\n    self.sub isNil ifFalse: [self.sub stop]\n    self.plainBase isNil ifFalse: [self.plainBase stop]\n    self.plainSub isNil ifFalse: [self.plainSub stop]\n\n  testFlattenedProvisionUsesTheUsersOwnRequiredMethod =>\n    self assert: self.base announce equals: \"announce: base\"\n\n  testHandWrittenControlUsesItsOwnRequiredMethod =>\n    self assert: self.plainBase announce equals: \"announce: base\"\n\n  testFlattenedProvisionBehavesLikeTheHandWrittenControlForASubclassOverride =>\n    self assert: self.sub announce equals: self.plainSub announce",
-      "explanation": "BT-3625 (ADR 0127 Phase 0 pin, §6): what an inherited actor method's self-send reaches when a further subclass overrides the selector.  `announce` is a trait provision flattened into `TraitLabelledBase` (the trait lives in its own file — fixtures/trait_labelled.bt — so this is a legal cross-file `uses:`). It self-sends the required `label`. `TraitLabelledOverride` (a further subclass) overrides `label`.  `TraitPlainBase`/`TraitPlainOverride` are the hand-written control: the identical shape with `announce` written in the class body instead of flattened in. Flattening means \"exactly the class with the provisions written into its body\" (ADR 0127 §3), so the trait and hand-written variants must behave identically — whatever an inherited actor method's self-send reaches for the hand-written class, it reaches for the flattened one, no more and no less."
+      "source": "// BT-3625 (ADR 0127 §6), corrected by BT-3666: what an inherited actor\n// method's self-send reaches when a further subclass overrides the selector.\n//\n// `announce` is a trait provision flattened into `TraitLabelledBase` (the\n// trait lives in its own file — fixtures/trait_labelled.bt — so this is a\n// legal cross-file `uses:`). It self-sends the required `label`.\n// `TraitLabelledOverride` (a further subclass) overrides `label`.\n//\n// `TraitPlainBase`/`TraitPlainOverride` are the hand-written control: the\n// identical shape with `announce` written in the class body instead of\n// flattened in. Flattening means \"exactly the class with the provisions\n// written into its body\" (ADR 0127 §3), so the trait and hand-written\n// variants must behave identically — and, since self-sends are late-bound on\n// the receiver, both reach the subclass override. (The original BT-3625 pin\n// only asserted the two agreed; both were in fact running the *base*\n// `label`, because actor self-sends were bound to the lexical module.)\n\nTestCase subclass: TraitOverrideDispatchTest\n  field: base = nil\n  field: sub = nil\n  field: plainBase = nil\n  field: plainSub = nil\n\n  setUp =>\n    (((self withBase: TraitLabelledBase spawn) withSub: TraitLabelledOverride spawn) withPlainBase: TraitPlainBase spawn) withPlainSub: TraitPlainOverride spawn\n\n  tearDown =>\n    self.base isNil ifFalse: [self.base stop]\n    self.sub isNil ifFalse: [self.sub stop]\n    self.plainBase isNil ifFalse: [self.plainBase stop]\n    self.plainSub isNil ifFalse: [self.plainSub stop]\n\n  testFlattenedProvisionUsesTheUsersOwnRequiredMethod =>\n    self assert: self.base announce equals: \"announce: base\"\n\n  testHandWrittenControlUsesItsOwnRequiredMethod =>\n    self assert: self.plainBase announce equals: \"announce: base\"\n\n  testFlattenedProvisionBehavesLikeTheHandWrittenControlForASubclassOverride =>\n    self assert: self.sub announce equals: self.plainSub announce\n\n  testFlattenedProvisionReachesTheSubclassOverride =>\n    self assert: self.sub announce equals: \"announce: override\"\n\n  testHandWrittenControlReachesTheSubclassOverride =>\n    self assert: self.plainSub announce equals: \"announce: override\"",
+      "explanation": "BT-3625 (ADR 0127 §6), corrected by BT-3666: what an inherited actor method's self-send reaches when a further subclass overrides the selector.  `announce` is a trait provision flattened into `TraitLabelledBase` (the trait lives in its own file — fixtures/trait_labelled.bt — so this is a legal cross-file `uses:`). It self-sends the required `label`. `TraitLabelledOverride` (a further subclass) overrides `label`.  `TraitPlainBase`/`TraitPlainOverride` are the hand-written control: the identical shape with `announce` written in the class body instead of flattened in. Flattening means \"exactly the class with the provisions written into its body\" (ADR 0127 §3), so the trait and hand-written variants must behave identically — and, since self-sends are late-bound on the receiver, both reach the subclass override. (The original BT-3625 pin only asserted the two agreed; both were in fact running the *base* `label`, because actor self-sends were bound to the lexical module.)"
     },
     {
       "id": "stdlib-test-transcript-test",
