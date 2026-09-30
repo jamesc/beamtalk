@@ -28902,6 +28902,60 @@
       "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
     },
     {
+      "id": "stdlib-test-fixtures-sso-nested-base",
+      "title": "SsoNestedBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Object",
+        "SsoNestedBase",
+        "bar",
+        "baz",
+        "extends",
+        "field",
+        "foo",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "qux",
+        "sso_nested_base",
+        "subclassing",
+        "viaSealed"
+      ],
+      "source": "// BT-3666: `Base bar` is a static call but the running ClassSelf/ClassVars are\n// the receiver's, so its nested `self foo` still late-binds. See\n// self_send_override_test.bt.\n\nObject subclass: SsoNestedBase\n  classState: baseHits = 0\n\n  class foo -> Integer => 1\n\n  class bar -> Integer => self foo\n\n  class baz -> Integer => SsoNestedBase bar\n\n  class sealed qux -> Integer => self foo\n\n  class viaSealed -> Integer => self qux",
+      "explanation": "BT-3666: `Base bar` is a static call but the running ClassSelf/ClassVars are the receiver's, so its nested `self foo` still late-binds. See self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-nested-sub",
+      "title": "SsoNestedSub",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "SsoNestedBase",
+        "SsoNestedSub",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "foo",
+        "hits",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "sso_nested_sub",
+        "subclassing"
+      ],
+      "source": "// BT-3666: template-method fixture; see self_send_override_test.bt.\n\nSsoNestedBase subclass: SsoNestedSub\n  classState: hits = 0\n\n  class foo -> Integer =>\n    self.hits := self.hits + 1\n    2\n\n  class hits -> Integer => self.hits",
+      "explanation": "BT-3666: template-method fixture; see self_send_override_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-sso-trait-actor-base",
       "title": "SsoTraitActorBase",
       "category": "stdlib-fixtures",
@@ -34159,7 +34213,10 @@
         "testClassSideBaseUnchanged",
         "testClassSideExplicitClassReferenceDoesNotLateBind",
         "testClassSideInheritedSelfSendReachesOverride",
+        "testClassSideNestedBaseUnchanged",
         "testClassSideOverrideClassVarWriteFromPureBaseSite",
+        "testClassSideSealedSelectorInOpenClassKeepsNestedOverrideWrite",
+        "testClassSideStaticBaseCallKeepsNestedOverrideAndClassVarWrite",
         "testFlattenedTraitActorBase",
         "testFlattenedTraitActorReachesOverride",
         "testFlattenedTraitValueBase",
@@ -34169,7 +34226,7 @@
         "testValueClassSideInheritedSelfSendReachesOverride",
         "testValueInheritedSelfSendReachesOverride"
       ],
-      "source": "// BT-3666: an override of `foo` in a subclass must be reached from an\n// inherited method's `self foo` (template-method pattern).\n//\n// Fixtures: stdlib/test/fixtures/self_send_override.bt\n\nTestCase subclass: SelfSendOverrideTest\n\n  testActorInheritedSelfSendReachesOverride =>\n    a := SsoActorSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorOverrideReachedWithArgument =>\n    a := SsoActorSub spawn\n    self assert: (a scaled: 3) equals: 30\n    a stop\n\n  testActorOverrideReachedFromInsideBlock =>\n    a := SsoActorSub spawn\n    self assert: (a scaledAll: #(1, 2)) equals: #(10, 20)\n    a stop\n\n  testActorOverrideThatMutatesStateIsThreaded =>\n    a := SsoActorSub spawn\n    self assert: a bumpTwice equals: 20\n    self assert: (a fieldAt: #count) equals: 20\n    a stop\n\n  testActorBaseMutationUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bumpTwice equals: 2\n    a stop\n\n  testActorOverrideInheritedByThirdLevel =>\n    a := SsoActorSubSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorBaseUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bar equals: \"bar:base\"\n    a stop\n\n  testValueInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub new bar equals: \"bar:sub\"\n\n  testValueBaseUnchanged => self assert: SsoValueBase new bar equals: \"bar:base\"\n\n  testClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoClassSideSub bar equals: \"bar:sub\"\n\n  testClassSideBaseUnchanged =>\n    self assert: SsoClassSideBase bar equals: \"bar:base\"\n\n  // Naming the class explicitly binds statically: no late binding.\n  testClassSideExplicitClassReferenceDoesNotLateBind =>\n    self assert: SsoExplicitSub bar equals: 1\n    self assert: SsoExplicitSub barSelf equals: 2\n\n  // A class-variable write made by an override reached from a base-class site\n  // that looks pure must not be dropped.\n  testClassSideOverrideClassVarWriteFromPureBaseSite =>\n    self assert: SsoClassVarSub bar equals: 2\n    self assert: SsoClassVarSub subHits equals: 1\n    self assert: SsoClassVarSub bar equals: 2\n    self assert: SsoClassVarSub subHits equals: 2\n\n  // The receiver goes through an untyped parameter: the static checker does\n  // not see a flattened provision (`bar`) on a cross-file trait user's class.\n  callBar: obj => obj bar\n\n  testFlattenedTraitActorReachesOverride =>\n    a := SsoTraitActorSub spawn\n    self assert: (self callBar: a) equals: \"bar:sub\"\n    a stop\n\n  testFlattenedTraitActorBase =>\n    a := SsoTraitActorBase spawn\n    self assert: (self callBar: a) equals: \"bar:base\"\n    a stop\n\n  testFlattenedTraitValueReachesOverride =>\n    self assert: (self callBar: SsoTraitValueSub new) equals: \"bar:sub\"\n\n  testFlattenedTraitValueBase =>\n    self assert: (self callBar: SsoTraitValueBase new) equals: \"bar:base\"\n\n  testValueClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub make equals: \"make:sub\"\n\n  testValueClassSideBaseUnchanged =>\n    self assert: SsoValueBase make equals: \"make:base\"",
+      "source": "// BT-3666: an override of `foo` in a subclass must be reached from an\n// inherited method's `self foo` (template-method pattern).\n//\n// Fixtures: stdlib/test/fixtures/self_send_override.bt\n\nTestCase subclass: SelfSendOverrideTest\n\n  testActorInheritedSelfSendReachesOverride =>\n    a := SsoActorSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorOverrideReachedWithArgument =>\n    a := SsoActorSub spawn\n    self assert: (a scaled: 3) equals: 30\n    a stop\n\n  testActorOverrideReachedFromInsideBlock =>\n    a := SsoActorSub spawn\n    self assert: (a scaledAll: #(1, 2)) equals: #(10, 20)\n    a stop\n\n  testActorOverrideThatMutatesStateIsThreaded =>\n    a := SsoActorSub spawn\n    self assert: a bumpTwice equals: 20\n    self assert: (a fieldAt: #count) equals: 20\n    a stop\n\n  testActorBaseMutationUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bumpTwice equals: 2\n    a stop\n\n  testActorOverrideInheritedByThirdLevel =>\n    a := SsoActorSubSub spawn\n    self assert: a bar equals: \"bar:sub\"\n    a stop\n\n  testActorBaseUnchanged =>\n    a := SsoActorBase spawn\n    self assert: a bar equals: \"bar:base\"\n    a stop\n\n  testValueInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub new bar equals: \"bar:sub\"\n\n  testValueBaseUnchanged => self assert: SsoValueBase new bar equals: \"bar:base\"\n\n  testClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoClassSideSub bar equals: \"bar:sub\"\n\n  testClassSideBaseUnchanged =>\n    self assert: SsoClassSideBase bar equals: \"bar:base\"\n\n  // Naming the class explicitly binds statically: no late binding.\n  testClassSideExplicitClassReferenceDoesNotLateBind =>\n    self assert: SsoExplicitSub bar equals: 1\n    self assert: SsoExplicitSub barSelf equals: 2\n\n  // `Base baz` calls `Base bar` statically, but the receiver is Sub: the nested\n  // `self foo` still reaches Sub's override and its class-var write is kept.\n  testClassSideStaticBaseCallKeepsNestedOverrideAndClassVarWrite =>\n    before := SsoNestedSub hits\n    self assert: SsoNestedSub baz equals: 2\n    self assert: SsoNestedSub hits equals: before + 1\n\n  testClassSideSealedSelectorInOpenClassKeepsNestedOverrideWrite =>\n    before := SsoNestedSub hits\n    self assert: SsoNestedSub viaSealed equals: 2\n    self assert: SsoNestedSub hits equals: before + 1\n\n  testClassSideNestedBaseUnchanged =>\n    self assert: SsoNestedBase baz equals: 1\n\n  // A class-variable write made by an override reached from a base-class site\n  // that looks pure must not be dropped.\n  testClassSideOverrideClassVarWriteFromPureBaseSite =>\n    self assert: SsoClassVarSub bar equals: 2\n    self assert: SsoClassVarSub subHits equals: 1\n    self assert: SsoClassVarSub bar equals: 2\n    self assert: SsoClassVarSub subHits equals: 2\n\n  // The receiver goes through an untyped parameter: the static checker does\n  // not see a flattened provision (`bar`) on a cross-file trait user's class.\n  callBar: obj => obj bar\n\n  testFlattenedTraitActorReachesOverride =>\n    a := SsoTraitActorSub spawn\n    self assert: (self callBar: a) equals: \"bar:sub\"\n    a stop\n\n  testFlattenedTraitActorBase =>\n    a := SsoTraitActorBase spawn\n    self assert: (self callBar: a) equals: \"bar:base\"\n    a stop\n\n  testFlattenedTraitValueReachesOverride =>\n    self assert: (self callBar: SsoTraitValueSub new) equals: \"bar:sub\"\n\n  testFlattenedTraitValueBase =>\n    self assert: (self callBar: SsoTraitValueBase new) equals: \"bar:base\"\n\n  testValueClassSideInheritedSelfSendReachesOverride =>\n    self assert: SsoValueSub make equals: \"make:sub\"\n\n  testValueClassSideBaseUnchanged =>\n    self assert: SsoValueBase make equals: \"make:base\"",
       "explanation": "BT-3666: an override of `foo` in a subclass must be reached from an inherited method's `self foo` (template-method pattern).  Fixtures: stdlib/test/fixtures/self_send_override.bt"
     },
     {

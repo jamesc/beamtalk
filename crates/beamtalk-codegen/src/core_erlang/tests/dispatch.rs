@@ -3588,6 +3588,25 @@ fn test_class_method_explicit_class_reference_stays_static() {
     );
 }
 
+/// BT-3666: a static call in an open class (explicit own-class reference or a
+/// `class sealed` selector) cannot use the purity shortcut, because the callee's
+/// own late-bound `self` sends may reach an override that writes a class var.
+#[test]
+fn test_open_class_static_class_self_send_rebinds_class_vars() {
+    for body in [
+        "class foo => 1\n\n  class bar => self foo\n\n  class baz => OpenCls bar\n",
+        "class foo => 1\n\n  class sealed bar => self foo\n\n  class baz => self bar\n",
+    ] {
+        let src = format!("Object subclass: OpenCls\n  {body}");
+        let code = codegen_source(&src);
+        assert!(
+            code.contains("'class_var_result'")
+                && code.contains("call 'test':'class_bar'(ClassSelf"),
+            "static open-class call must unwrap class_var_result. Got:\n{code}"
+        );
+    }
+}
+
 /// BT-3666: an open Actor's instance-side self-send resolves the callee
 /// module from the instance's own `'__class_mod__'` at run time, so an
 /// inherited method's `self foo` reaches a subclass override.

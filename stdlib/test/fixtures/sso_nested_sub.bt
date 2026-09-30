@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: template-method fixture; see self_send_override_test.bt.
+
+SsoNestedBase subclass: SsoNestedSub
+  classState: hits = 0
+
+  class foo -> Integer =>
+    self.hits := self.hits + 1
+    2
+
+  class hits -> Integer => self.hits

@@ -1461,9 +1461,15 @@ impl CoreErlangGenerator {
             // and can sit in any nesting (conditional arm, block) without
             // needing to thread one. Every class-side facade
             // (`SystemNavigation`, ADR 0129) has no class variables at all.
-            if !self
-                .class_var_mutating_selectors()
-                .contains(selector_atom.as_str())
+            //
+            // BT-3666: that analysis is the base class's view, and the callee's
+            // own `self foo` sends are late-bound in an open class, so they may
+            // reach a subclass override that writes a class variable. The
+            // shortcut is therefore only sound in a sealed class.
+            if self.is_class_sealed()
+                && !self
+                    .class_var_mutating_selectors()
+                    .contains(selector_atom.as_str())
             {
                 return Ok(self.emit_pure_class_self_send_unwrap(args_preamble, call_doc));
             }

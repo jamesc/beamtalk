@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: `Base bar` is a static call but the running ClassSelf/ClassVars are
+// the receiver's, so its nested `self foo` still late-binds. See
+// self_send_override_test.bt.
+
+Object subclass: SsoNestedBase
+  classState: baseHits = 0
+
+  class foo -> Integer => 1
+
+  class bar -> Integer => self foo
+
+  class baz -> Integer => SsoNestedBase bar
+
+  class sealed qux -> Integer => self foo
+
+  class viaSealed -> Integer => self qux
