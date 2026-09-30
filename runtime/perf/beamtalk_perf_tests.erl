@@ -1117,33 +1117,57 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
 bench_self_send_override() ->
     {ok, Cwd} = file:get_cwd(),
     PackageDir = filename:join([Cwd, "perf", "self_send_bench"]),
-    case find_beamtalk_cli() of
+    case find_beamtalk_cli(Cwd) of
         false ->
-            io:format(standard_error,
-                "PERF: self_send_override SKIP (beamtalk CLI not found; run `cargo build`)~n", []);
+            io:format(
+                standard_error,
+                "PERF: self_send_override SKIP (no target/{release,debug}/beamtalk; run `cargo build`)~n",
+                []
+            );
         Cli ->
-            Cmd = "cd " ++ filename:nativename(PackageDir) ++ " && "
-                ++ filename:nativename(Cli) ++ " run SsbMain run 2>&1",
-            Out = os:cmd(Cmd),
-            Lines = [L || L <- string:split(Out, "\n", all),
-                          string:prefix(L, "PERF: ") =/= nomatch],
-            case Lines of
-                [] ->
-                    io:format(standard_error,
-                        "PERF: self_send_override SKIP (no PERF output: ~ts)~n",
-                        [string:slice(Out, 0, 200)]);
-                _ ->
+            io:format(standard_error, "PERF: self_send_override using ~ts~n", [Cli]),
+            {Status, Out} = run_cli(Cli, PackageDir, ["run", "SsbMain", "run"]),
+            Lines = [
+                L
+             || L <- string:split(Out, "\n", all),
+                string:prefix(L, "PERF: ") =/= nomatch
+            ],
+            case {Status, Lines} of
+                {0, [_ | _]} ->
                     [io:format(standard_error, "~ts~n", [L]) || L <- Lines],
-                    ok
+                    ok;
+                _ ->
+                    Tail = string:slice(Out, max(0, string:length(Out) - 400)),
+                    erlang:error({self_send_bench_failed, Status, Tail})
             end
     end.
 
-find_beamtalk_cli() ->
-    {ok, Cwd} = file:get_cwd(),
+%% Run the CLI without a shell (no quoting issues); returns {ExitStatus, Output}.
+run_cli(Cli, Dir, Args) ->
+    Port = open_port(
+        {spawn_executable, Cli},
+        [{cd, Dir}, {args, Args}, stderr_to_stdout, exit_status, binary]
+    ),
+    collect_port(Port, []).
+
+collect_port(Port, Acc) ->
+    receive
+        {Port, {data, Data}} -> collect_port(Port, [Data | Acc]);
+        {Port, {exit_status, Status}} -> {Status, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
+    after 600000 ->
+        catch port_close(Port),
+        {timeout, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
+    end.
+
+%% Only the CLI built from this tree counts; a `beamtalk` found on PATH could
+%% be a different compiler, so there is deliberately no PATH fallback.
+find_beamtalk_cli(Cwd) ->
     Root = filename:join(Cwd, ".."),
-    Candidates = [filename:join([Root, "target", Profile, "beamtalk"])
-                  || Profile <- ["release", "debug"]],
+    Candidates = [
+        filename:join([Root, "target", Profile, Name])
+     || Profile <- ["release", "debug"], Name <- ["beamtalk", "beamtalk.exe"]
+    ],
     case [C || C <- Candidates, filelib:is_regular(C)] of
         [C | _] -> C;
-        [] -> os:find_executable("beamtalk")
+        [] -> false
     end.

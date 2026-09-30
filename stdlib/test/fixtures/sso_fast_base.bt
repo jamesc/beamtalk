@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: guarded fast-path fixture; see self_send_override_test.bt.
+
+Object subclass: SsoFastBase
+
+  class foo -> Integer => 1
+
+  class bar -> Integer => self foo

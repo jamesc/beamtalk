@@ -114,3 +114,31 @@ TestCase subclass: SelfSendOverrideTest
 
   testValueClassSideBaseUnchanged =>
     self assert: SsoValueBase make equals: "make:base"
+
+  // Guarded fast path: a defining-class receiver takes the direct call, a
+  // subclass receiver still takes the walk and reaches its override.
+  testFastPathDefiningClassReceiver => self assert: SsoFastBase bar equals: 1
+
+  testFastPathSubclassReceiverReachesOverride =>
+    self assert: SsoFastSub bar equals: 2
+    self assert: SsoFastBase bar equals: 1
+
+  // The fast path must not bypass a class-side extension that shadows the
+  // compiled method (the walk honours it), for the defining class only. Own fixture
+  // classes: the extension registry is global and tests run concurrently.
+  testFastPathHonoursShadowingExtension =>
+    extFun := [:a :s | 99]
+    Erlang beamtalk_extensions
+      register: #'SsoShadowBase class'
+      selector: #foo
+      fun: extFun
+      owner: #test
+    shadowed := SsoShadowBase bar
+    subclassResult := SsoShadowSub bar
+    Erlang beamtalk_extensions
+      unregister: #SsoShadowBase
+      selector: #foo
+      classSide: true
+    self assert: shadowed equals: 99
+    self assert: subclassResult equals: 2
+    self assert: SsoShadowBase bar equals: 1

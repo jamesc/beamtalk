@@ -25,6 +25,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     lookup_direct_call/3,
     class_self_dispatch/4,
     class_self_send/4,
+    class_self_direct_ok/4,
     class_self_dispatch_local/4,
     metaclass_send/4,
     unwrap_class_call/1,
@@ -257,6 +258,40 @@ class_self_send(ClassName, Selector, ClassVars, Args) ->
                 find_class_method_from_class(Selector, ClassName)
             )
     end.
+
+-doc """
+Guard for the compiled class-side self-send fast path (BT-3666).
+
+An open class's `self foo` (where the class itself defines `foo`) compiles to
+`case class_self_direct_ok(element(2, ClassSelf), 'Cls class', 'Cls', foo) of
+true -> class_foo(...) ; false -> class_self_send/4 walk end`. The direct call
+is only equivalent to the walk when the receiving class is exactly the
+compiling class (`ReceiverTag =:= ClassTag`) AND nothing would shadow the
+compiled method that the walk honours: a class-side extension on the class
+(`check_class_self_extension/4`) or a runtime-installed class-method fun
+(ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
+`TestCase` run-selector guard (`test_spawn`) is preserved by declining.
+
+Costs two ETS reads for the defining-class receiver; a subclass receiver
+short-circuits on the first clause.
+""".
+-spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
+class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
+    case ClassName =:= 'TestCase' andalso is_test_execution_selector(Selector) of
+        true ->
+            false;
+        false ->
+            %% `badarg` (table not created yet, early bootstrap) declines: the
+            %% walk is always a correct answer.
+            try
+                not beamtalk_extensions:has(Tag, Selector) andalso
+                    not beamtalk_class_metadata:has_runtime_class_methods(ClassName)
+            catch
+                error:badarg -> false
+            end
+    end;
+class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
+    false.
 
 -doc """
 The superclass-chain half of `class_self_dispatch/4`, factored out

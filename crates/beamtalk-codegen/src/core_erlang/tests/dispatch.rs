@@ -3511,21 +3511,70 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
 }
 
 /// BT-3666: in an open class a class-side self-send to a selector the class
-/// itself defines must reach a subclass override, so it routes through the
-/// runtime hierarchy walk starting at the receiving class — not a static
-/// `class_<sel>` call bound to the module the send was compiled in.
+/// itself defines is a guarded direct call: the fast branch is only taken when
+/// the receiver is this very class and nothing shadows the compiled method;
+/// every other receiver (a subclass running an inherited method) falls through
+/// to the runtime hierarchy walk so a subclass override is reached.
 #[test]
-fn test_class_method_self_send_in_open_class_dispatches_dynamically() {
+fn test_class_method_self_send_in_open_class_is_guarded_direct_call() {
     let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
     let code = codegen_source(src);
+    let guard = "call 'beamtalk_class_dispatch':'class_self_direct_ok'(call 'erlang':'element'(2, ClassSelf), 'OpenCls class', 'OpenCls', 'foo')";
+    let start = code
+        .find("'class_bar'/2 = fun")
+        .expect("class_bar function present");
+    let bar = &code[start..];
+    let guard_at = bar
+        .find(guard)
+        .unwrap_or_else(|| panic!("guard call missing. Got:\n{bar}"));
+    let direct_at = bar[guard_at..]
+        .find("<'true'> when 'true' -> call 'test':'class_foo'(ClassSelf")
+        .unwrap_or_else(|| panic!("direct branch must follow the true clause. Got:\n{bar}"));
+    let walk_at = bar[guard_at..]
+        .find("<_> when 'true' -> call 'beamtalk_class_dispatch':'class_self_send'(")
+        .unwrap_or_else(|| panic!("walk branch must be the catch-all clause. Got:\n{bar}"));
     assert!(
-        code.contains("call 'beamtalk_class_dispatch':'class_self_send'("),
-        "open class self-send must use the virtual class_self_send walk. Got:\n{code}"
+        direct_at < walk_at,
+        "direct branch precedes the walk fallback. Got:\n{bar}"
+    );
+}
+
+/// BT-3666: the guarded fast path still threads `ClassVars`: both branches feed
+/// one `class_var_result` unwrap, and it is emitted even for a class-var-less
+/// base (a subclass override reached by the walk may write class variables).
+#[test]
+fn test_class_method_self_send_in_open_class_fast_path_rebinds_class_vars() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_bar'/2 = fun")
+        .expect("class_bar function present");
+    let bar = &code[start..];
+    assert!(
+        bar.contains("class_self_direct_ok") && bar.contains("let ClassVars1 = case"),
+        "fast path must feed the ClassVars rebind. Got:\n{bar}"
     );
     assert!(
-        !code.contains("call 'test':'class_foo'(ClassSelf"),
-        "open class self-send must not be statically bound to class_foo. Got:\n{code}"
+        bar.contains("{'class_var_result', "),
+        "class-var-less base must still return class_var_result. Got:\n{bar}"
     );
+}
+
+/// BT-3666: neither an explicit own-class reference, a `class sealed` selector
+/// nor a sealed class gets the guard (they are statically bound).
+#[test]
+fn test_static_class_self_sends_have_no_fast_path_guard() {
+    for src in [
+        "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n",
+        "Object subclass: OpenCls\n  class sealed foo => 1\n\n  class bar => self foo\n",
+        "sealed Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n",
+    ] {
+        let code = codegen_source(src);
+        assert!(
+            !code.contains("class_self_direct_ok"),
+            "statically bound send must not carry the guard. Got:\n{code}"
+        );
+    }
 }
 
 /// BT-3666: a sealed class cannot be subclassed, so its class-side self-send

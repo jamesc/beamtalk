@@ -875,15 +875,13 @@ delete_subclass_edge(Superclass, Name) ->
 %% into one return value, since none of them is a valid written field value.
 -spec field(class_name(), pos_integer()) -> term().
 field(Name, Pos) ->
-    case ets:info(?TABLE) of
-        undefined ->
-            undefined;
-        _ ->
-            try
-                ets:lookup_element(?TABLE, Name, Pos, undefined)
-            catch
-                error:badarg -> undefined
-            end
+    %% No `ets:info/1` pre-check: it builds the full info list (~0.5us), which
+    %% dominated the compiled class-side self-send fast-path guard (BT-3666).
+    %% A missing table raises `badarg` like a missing key, handled below.
+    try
+        ets:lookup_element(?TABLE, Name, Pos, undefined)
+    catch
+        error:badarg -> undefined
     end.
 
 -spec row(class_name()) -> {ok, #class_metadata{}} | not_found.

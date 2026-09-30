@@ -2538,8 +2538,12 @@ impl CoreErlangGenerator {
             None
         };
 
-        // BT-3666: see `generate_class_method_functions` — builder classes are open.
-        let has_class_vars = !self.class_var_names().is_empty() || !self.is_class_sealed();
+        // BT-3666: a ClassBuilder class is never sealed, so its self-sends are
+        // late-bound and an override may write class vars; always lower the
+        // body as if class vars may be present. (Not `is_class_sealed()`: that
+        // reads the flag of the *enclosing* class, which the builder cascade
+        // does not reset.)
+        let has_class_vars = true;
         let body_doc: Document<'static> = if method.body.is_empty() {
             self.set_current_nlr_token(None);
             docvec!["ClassSelf"]

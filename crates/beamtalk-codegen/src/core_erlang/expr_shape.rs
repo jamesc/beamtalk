@@ -236,8 +236,7 @@ pub(super) fn is_class_method_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -
     else {
         return false;
     };
-    let is_self_receiver =
-        matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self");
+    let is_self_receiver = is_self_identifier(receiver);
     let is_own_class_reference = matches!(
         receiver.as_ref(),
         Expression::ClassReference { name, package, .. }
@@ -248,6 +247,11 @@ pub(super) fn is_class_method_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -
     }
     let sel_atom = selector.name().to_string();
     ctx.class_method_selectors.contains(&sel_atom)
+}
+
+/// Whether `expr` is the bare `self` identifier.
+pub(super) fn is_self_identifier(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
 
 /// Checks if an expression is a local variable assignment (`identifier := value`).

@@ -705,8 +705,11 @@ mismatches are warnings, as everywhere else (ADR 0025).
   self-sends are late-bound on the receiver, exactly as for a hand-written
   method (BT-3666). Actor self-sends resolve the callee module from the
   instance's own `'__class_mod__'` at run time rather than binding to the
-  lexical module; class-side self-sends walk the hierarchy from the receiving
-  class (`beamtalk_class_dispatch:class_self_send/4`). Both stay statically
+  lexical module; class-side self-sends call the compiled method directly when
+  the receiver is the defining class (guarded by
+  `beamtalk_class_dispatch:class_self_direct_ok/4`) and otherwise walk the
+  hierarchy from the receiving class
+  (`beamtalk_class_dispatch:class_self_send/4`). Both stay statically
   bound in a `sealed` class, which nothing can override. (BT-3625's original
   Phase 0 pin claimed this held before it did; it did not — every self-send
   was bound to the lexical module for actors and to the lexical

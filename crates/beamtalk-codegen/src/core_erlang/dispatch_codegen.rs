@@ -1426,7 +1426,6 @@ impl CoreErlangGenerator {
                     .contains(&selector_atom))
         {
             // Route to class_<selector>(ClassSelf, ClassVars, ...)
-            let module = self.module_name.clone();
             // Hoist any open let-chains from sub-expression class
             // method self-sends in the args. The preamble must be emitted
             // before our own `let _CMR = ...` so the ClassVarsN bindings it
@@ -1436,23 +1435,13 @@ impl CoreErlangGenerator {
             // ClassVars binding to thread into the callee.
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
-            let comma = if arguments.is_empty() { "" } else { ", " };
-
-            // Apply the same atom-length guard used by the
-            // keyword-constructor path below — long selectors must be hashed to
-            // stay within Erlang's 255-char atom limit.
-            let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
-            let call_doc = docvec![
-                "call ",
-                leaf::atom(module),
-                ":",
-                leaf::atom(safe_fn),
-                "(ClassSelf, ",
-                leaf::var(cv),
-                comma,
+            let call_doc = Self::class_direct_call_doc(
+                &self.module_name,
+                &selector_atom,
+                &cv,
                 args_doc,
-                ")"
-            ];
+                !arguments.is_empty(),
+            );
             // A callee that provably never writes a class variable
             // (`class_var_mutating_selectors` is a whole-class fixed point that
             // assumes the worst for anything it cannot resolve) hands back the
@@ -1479,7 +1468,37 @@ impl CoreErlangGenerator {
         if defines_selector {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let cv = self.current_class_var();
-            let call_doc = Self::class_self_send_call_doc(&selector_atom, &cv, args_doc);
+            // Fast path: when the receiving class IS this class (its metaclass
+            // tag is a compile-time constant) and nothing shadows the compiled
+            // method (no class-side extension, no runtime-installed
+            // class-method fun, ADR 0084), the walk would resolve to
+            // `class_<sel>` in this very module, so call it directly. Any
+            // other receiver (a subclass running an inherited method) takes
+            // the walk, which reaches the subclass override.
+            let walk_doc = Self::class_self_send_call_doc(&selector_atom, &cv, args_doc.clone());
+            let direct_doc = Self::class_direct_call_doc(
+                &self.module_name,
+                &selector_atom,
+                &cv,
+                args_doc,
+                !arguments.is_empty(),
+            );
+            let class_name = self.class_name();
+            let call_doc = docvec![
+                "case call 'beamtalk_class_dispatch':'class_self_direct_ok'(call 'erlang':'element'(2, ",
+                leaf::var("ClassSelf"),
+                "), ",
+                leaf::atom([class_name.as_str(), " class"].concat()),
+                ", ",
+                leaf::atom(class_name),
+                ", ",
+                leaf::atom(selector_atom.clone()),
+                ") of <'true'> when 'true' -> ",
+                direct_doc,
+                " <_> when 'true' -> ",
+                walk_doc,
+                " end"
+            ];
             // Late-bound: a subclass override may write a class variable even
             // when this class's own `selector` never does, so the purity
             // shortcut is unsound here. Always rebind the returned ClassVars.
@@ -1620,6 +1639,31 @@ impl CoreErlangGenerator {
         // it into its own frame or closes it (matches the local-class-method
         // branch above).
         Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc))
+    }
+
+    /// Direct call `class_<sel>(ClassSelf, ClassVars, Args...)` into this
+    /// module. Long selectors are hashed to stay within Erlang's 255-char
+    /// atom limit (same guard as the keyword-constructor path).
+    fn class_direct_call_doc(
+        module: &str,
+        selector_atom: &str,
+        class_vars: &str,
+        args_doc: Document<'static>,
+        has_args: bool,
+    ) -> Document<'static> {
+        let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector_atom);
+        let comma = if has_args { ", " } else { "" };
+        docvec![
+            "call ",
+            leaf::atom(module.to_string()),
+            ":",
+            leaf::atom(safe_fn),
+            "(ClassSelf, ",
+            leaf::var(class_vars.to_string()),
+            comma,
+            args_doc,
+            ")"
+        ]
     }
 
     /// The runtime hierarchy-walk call behind every class-side self-send that
