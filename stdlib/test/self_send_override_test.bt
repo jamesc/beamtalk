@@ -55,6 +55,11 @@ TestCase subclass: SelfSendOverrideTest
   testClassSideBaseUnchanged =>
     self assert: SsoClassSideBase bar equals: "bar:base"
 
+  // Naming the class explicitly binds statically: no late binding.
+  testClassSideExplicitClassReferenceDoesNotLateBind =>
+    self assert: SsoExplicitSub bar equals: 1
+    self assert: SsoExplicitSub barSelf equals: 2
+
   // A class-variable write made by an override reached from a base-class site
   // that looks pure must not be dropped.
   testClassSideOverrideClassVarWriteFromPureBaseSite =>

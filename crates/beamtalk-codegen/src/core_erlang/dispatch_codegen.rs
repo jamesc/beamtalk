@@ -1277,7 +1277,7 @@ impl CoreErlangGenerator {
                 // `threaded_expression`'s own producer recognition), so the
                 // producer's prelude is closed inline into a self-contained
                 // `Document` here rather than left open.
-                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                let tv = self.generate_class_method_self_send(selector, arguments, false)?;
                 return Ok(Some(self.close_threaded_value_doc(tv)));
             }
             // ADR 0129 §7: only REPL top-level expressions can name a session
@@ -1347,7 +1347,7 @@ impl CoreErlangGenerator {
                 // ADR 0118 phase 5b: reached through ordinary
                 // `generate_expression`, not `threaded_expression`'s own
                 // producer recognition — close the prelude inline.
-                let tv = self.generate_class_method_self_send(selector, arguments)?;
+                let tv = self.generate_class_method_self_send(selector, arguments, true)?;
                 return Ok(Some(self.close_threaded_value_doc(tv)));
             }
         }
@@ -1374,6 +1374,7 @@ impl CoreErlangGenerator {
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
+        receiver_is_self: bool,
     ) -> Result<ThreadedValue> {
         let selector_atom = selector.name().to_string();
 
@@ -1415,8 +1416,11 @@ impl CoreErlangGenerator {
         let defines_selector = self.class_method_selectors().contains(&selector_atom);
         // A `class sealed` selector cannot be overridden either (ADR 0129
         // facade shape), so it keeps the direct call in an open class too.
+        // So does an explicit own-class reference (`Base foo`): naming the
+        // class binds statically; only `self foo` late-binds on the receiver.
         if defines_selector
             && (self.is_class_sealed()
+                || !receiver_is_self
                 || self
                     .sealed_class_method_selectors()
                     .contains(&selector_atom))

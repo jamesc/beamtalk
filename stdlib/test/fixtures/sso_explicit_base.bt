@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3666: naming the class explicitly (`Base foo`) binds statically and must
+// NOT late-bind on the receiver. See self_send_override_test.bt.
+
+Object subclass: SsoExplicitBase
+
+  class foo -> Integer => 1
+
+  class bar -> Integer => SsoExplicitBase foo
+
+  class barSelf -> Integer => self foo

@@ -3572,6 +3572,22 @@ fn test_class_method_self_send_in_open_class_rebinds_class_vars() {
     );
 }
 
+/// BT-3666: an explicit own-class reference (`Base foo`) is bound statically,
+/// never late-bound on the receiver.
+#[test]
+fn test_class_method_explicit_class_reference_stays_static() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'test':'class_foo'(ClassSelf"),
+        "explicit own-class reference must stay a direct class_foo call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'class_self_send'"),
+        "explicit own-class reference must not late-bind. Got:\n{code}"
+    );
+}
+
 /// BT-3666: an open Actor's instance-side self-send resolves the callee
 /// module from the instance's own `'__class_mod__'` at run time, so an
 /// inherited method's `self foo` reaches a subclass override.

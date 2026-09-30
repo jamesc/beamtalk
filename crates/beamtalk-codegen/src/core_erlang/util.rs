@@ -705,6 +705,7 @@ impl CoreErlangGenerator {
         }
         if self.is_class_method_self_send(expr) {
             let Expression::MessageSend {
+                receiver,
                 selector,
                 arguments,
                 ..
@@ -712,9 +713,15 @@ impl CoreErlangGenerator {
             else {
                 unreachable!("is_class_method_self_send guarantees a MessageSend");
             };
-            return Ok(Some(
-                self.generate_class_method_self_send(selector, arguments)?,
-            ));
+            let receiver_is_self = matches!(
+                receiver.as_ref(),
+                Expression::Identifier(id) if id.name == "self"
+            );
+            return Ok(Some(self.generate_class_method_self_send(
+                selector,
+                arguments,
+                receiver_is_self,
+            )?));
         }
         Ok(None)
     }
