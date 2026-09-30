@@ -258,9 +258,9 @@ pub(crate) fn build_class_index(
     // Pass 1's per-file `ClassInfo` (incrementally cached) holds only each
     // class's own body. A class that `uses:` a trait from another file must
     // reach every other file's analysis with the trait's provided methods
-    // flattened in, as codegen flattens them (BT-3668). Gated on
-    // `package_identity`: only manifest (or `--stdlib-mode`) builds reach here
-    // with package-stamped infos, so a manifest-less plain build is a no-op.
+    // flattened in, as codegen flattens them (BT-3668). Only manifest builds
+    // have Pass 1 infos (and `file_protocol_uses`) to rewrite; a manifest-less
+    // build — including `--stdlib-mode` — is a no-op here.
     if let Some(pkg) = package_identity(pkg_manifest, options.stdlib_mode) {
         flatten_trait_user_class_infos(
             &mut all_class_infos,
