@@ -48,8 +48,8 @@ pub fn beamtalk() -> Command {
     // falls back to this explicit path if set.
     cmd.env(
         "BEAMTALK_COMPILER_PORT_BIN",
-        std::path::Path::new(env!("CARGO_BIN_EXE_beamtalk"))
-            .with_file_name("beamtalk-compiler-port"),
+        beamtalk_workspace::resolve_sibling_binary("beamtalk-compiler-port")
+            .expect("beamtalk-compiler-port binary not found; run `cargo build` first"),
     );
     // Pin the runtime/sysroot to this workspace so tests do not depend on a
     // system-installed beamtalk. `repl_startup::find_runtime_dir_with_layout`
