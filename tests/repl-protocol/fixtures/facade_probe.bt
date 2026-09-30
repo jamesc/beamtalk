@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3648 fixture: a loaded class whose method bodies use the class-side
+// facades. Before ADR 0129 these names were REPL-injected, so inside a loaded
+// method `Transcript` / `Beamtalk` silently evaluated to `nil`.
+Object subclass: FacadeProbe
+
+  class lookupInteger => Beamtalk classNamed: #Integer
+
+  class lookupVia: aName :: Symbol => Beamtalk classNamed: aName
+
+  class say: aString :: String =>
+    Transcript showCr: aString
+    #said
+
+  class versionMatches => Beamtalk version == (Beamtalk perform: #version)
