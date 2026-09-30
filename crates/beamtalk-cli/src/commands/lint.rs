@@ -1416,10 +1416,10 @@ mod tests {
         )
         .unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        let proto = root.join("src/broken.bt");
+        let proto = root.join("src").join("broken.bt");
         let text = "Protocol define: Broken\n  name -> String\n\n  probe -> Integer => 3 bogus\n";
         std::fs::write(&proto, text).unwrap();
-        let user = root.join("src/alpha.bt");
+        let user = root.join("src").join("alpha.bt");
         std::fs::write(
             &user,
             "Object subclass: Alpha\n  uses: Broken\n  name -> String => \"a\"\n",
