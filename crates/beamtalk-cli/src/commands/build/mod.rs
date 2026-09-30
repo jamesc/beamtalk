@@ -170,6 +170,21 @@ fn flush_provision_on_error<T>(
     result
 }
 
+/// Collapses the per-user copies of a shared flattened-provision diagnostic to
+/// one, exactly as `ProvisionSink` does when printing, so the trailing summary
+/// counts each provision diagnostic once rather than once per using class.
+/// Untagged diagnostics keep their order and come first.
+fn dedupe_provision_diagnostics(
+    diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    let (tagged, mut rest): (Vec<_>, Vec<_>) =
+        diagnostics.into_iter().partition(|d| d.provision.is_some());
+    rest.extend(beamtalk_core::source_analysis::merge_provision_diagnostics(
+        tagged,
+    ));
+    rest
+}
+
 /// Phase 5-8: Build the class index (Pass 1), merge dependency indexes,
 /// compile changed source files (Pass 2), and compile Core Erlang to BEAM.
 #[allow(clippy::too_many_lines)] // orchestration function — one call per build phase
@@ -449,6 +464,7 @@ fn execute_build_passes(
     // saved hashes assert "this content produced the `.beam` now on disk".
     crate::commands::build_cache::save_beam_hash_cache(&env.build_dir, &changes.source_hashes);
 
+    let all_build_diags = dedupe_provision_diagnostics(all_build_diags);
     let diagnostic_summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
         &all_build_diags,
         files_with_known_diagnostics,
