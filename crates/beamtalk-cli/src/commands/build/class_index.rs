@@ -77,6 +77,12 @@ pub(crate) struct ClassIndexResult {
     /// `IncrementalPass1Result.file_protocol_uses`). Empty for
     /// manifest-less builds, same as `cached_asts`.
     pub(crate) file_protocol_uses: HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
+    /// Hash of the flattened class surface of every class declared in a file
+    /// with `uses:` lines (BT-3674); empty when the package has none.
+    /// `detect_changes` folds it into every file's cache key so an unchanged
+    /// caller of a trait-provided method is re-checked when a provision
+    /// changes. Empty for manifest-less builds.
+    pub(crate) trait_surface_hash: String,
 }
 
 /// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
@@ -261,14 +267,17 @@ pub(crate) fn build_class_index(
     // flattened in, as codegen flattens them (BT-3668). Only manifest builds
     // have Pass 1 infos (and `file_protocol_uses`) to rewrite; a manifest-less
     // build — including `--stdlib-mode` — is a no-op here.
+    let mut trait_surface_hash = String::new();
     if let Some(pkg) = package_identity(pkg_manifest, options.stdlib_mode) {
-        flatten_trait_user_class_infos(
+        let flattened = flatten_trait_user_class_infos(
             &mut all_class_infos,
             &file_protocol_uses,
             &cached_asts,
             &all_protocol_defs,
             pkg,
         );
+        trait_surface_hash =
+            crate::commands::util::class_surface_hash(&all_class_infos, &flattened, pkg);
     }
 
     Ok(ClassIndexResult {
@@ -285,6 +294,7 @@ pub(crate) fn build_class_index(
         force_pass2,
         source_hashes,
         file_protocol_uses,
+        trait_surface_hash,
     })
 }
 
@@ -297,13 +307,18 @@ pub(crate) fn build_class_index(
 /// [`beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos`],
 /// the same pass analysis and codegen run. Entries are matched by class name
 /// within `pkg_name`, leaving a same-named dependency class alone.
+///
+/// Returns the names of the classes whose `ClassInfo` was replaced (BT-3674),
+/// so the caller can hash exactly the cross-file surface that flattening
+/// contributes.
 pub(crate) fn flatten_trait_user_class_infos(
     all_class_infos: &mut [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     file_protocol_uses: &HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
     cached_asts: &HashMap<Utf8PathBuf, CachedAst>,
     protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
     pkg_name: &str,
-) {
+) -> Vec<ecow::EcoString> {
+    let mut flattened_names = Vec::new();
     let external_protocols =
         beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
             protocol_defs.iter().cloned(),
@@ -357,11 +372,13 @@ pub(crate) fn flatten_trait_user_class_infos(
             {
                 // Keep Pass 1's completeness marker for a file with parse errors.
                 let surface_incomplete = slot.surface_incomplete;
+                flattened_names.push(info.name.clone());
                 *slot = info;
                 slot.surface_incomplete = surface_incomplete;
             }
         }
     }
+    flattened_names
 }
 
 /// Check that no dependency exports classes with stdlib-reserved names.

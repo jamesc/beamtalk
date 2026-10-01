@@ -119,6 +119,53 @@ pub(crate) fn protocol_content_hash(protocol: &beamtalk_core::ast::ProtocolDefin
     sha256_hex(beamtalk_core::unparse::unparse_module(&wrapper).as_bytes())
 }
 
+/// Hash of the cross-file class surface contributed by trait flattening
+/// (BT-3674): the `ClassInfo` of each class in `flattened_names` (the classes
+/// declared in files with `uses:` lines) within `pkg_name`, sorted by name.
+///
+/// A caller's type-check depends on these flattened surfaces, but its own
+/// source and the protocols *it* uses do not change when a provision in some
+/// other file is renamed — so `detect_changes` folds this into every file's
+/// cache key. `serde_json::to_value` yields key-sorted maps (the workspace
+/// does not enable `preserve_order`), so the `HashMap` fields of `ClassInfo`
+/// hash deterministically. Empty string when no class uses a protocol, which
+/// leaves every file's key untouched.
+#[must_use]
+pub(crate) fn class_surface_hash(
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    flattened_names: &[ecow::EcoString],
+    pkg_name: &str,
+) -> String {
+    if flattened_names.is_empty() {
+        return String::new();
+    }
+    let mut infos: Vec<_> = all_class_infos
+        .iter()
+        .filter(|c| c.package.as_deref() == Some(pkg_name) && flattened_names.contains(&c.name))
+        .collect();
+    infos.sort_by(|a, b| a.name.cmp(&b.name));
+    surface_hash_of(serde_json::to_value(&infos))
+}
+
+/// Hash a serialized class surface. A serialization failure must not collapse
+/// to a constant hash (that would silently disable invalidation), so it falls
+/// back to a per-call-unique value that forces every file to rebuild.
+fn surface_hash_of(value: serde_json::Result<serde_json::Value>) -> String {
+    match value {
+        Ok(v) => sha256_hex(v.to_string().as_bytes()),
+        Err(e) => {
+            tracing::warn!(
+                "could not serialize trait-provided class surfaces ({e}); \
+                 rebuilding all files this build"
+            );
+            let nanos = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            sha256_hex(format!("unserializable-surface-{nanos}").as_bytes())
+        }
+    }
+}
+
 /// [`content_hash_of`] for every file in `paths`, keyed by path string.
 ///
 /// A single build hashes each source file's content in more than
@@ -262,6 +309,14 @@ pub fn find_files(path: &Utf8Path, extensions: &[&str]) -> Result<Vec<Utf8PathBu
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn surface_hash_of_error_is_not_constant_null_hash() {
+        let err = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+        let h = super::surface_hash_of(Err(err));
+        assert_ne!(h, super::sha256_hex(b"null"));
+        assert!(!h.is_empty());
+    }
 
     #[test]
     fn test_content_hash_of_stable_for_same_content() {
