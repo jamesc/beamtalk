@@ -41,6 +41,40 @@ pub(crate) struct ChangeDetectionResult {
     pub source_hashes: HashMap<String, String>,
 }
 
+/// Cross-file build-graph inputs to `detect_changes`' per-file cache key
+/// (ADR 0127 §10a; BT-3591, BT-3674) — see its doc. `Default` is "no edges":
+/// every file's key reduces to its own content hash.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct BuildGraphEdges {
+    /// Protocol names each file's classes `uses:`.
+    pub file_protocol_uses: HashMap<Utf8PathBuf, Vec<EcoString>>,
+    /// Content hash of each provision-bearing protocol, by bare name.
+    pub protocol_hashes: HashMap<EcoString, String>,
+    /// Hash of the flattened trait-user class surface (empty = none).
+    pub trait_surface_hash: String,
+}
+
+/// Log why a file whose own content is unchanged is being rebuilt. A file
+/// with no protocols only moved because a package-wide trait surface changed
+/// (routine, `info!`); one that uses protocols gets the ADR 0127 §10a warning.
+fn log_rebuild_reason(source_file: &Utf8Path, used_protocols: &[EcoString]) {
+    if used_protocols.is_empty() {
+        info!(
+            file = %source_file,
+            "rebuilding '{source_file}': unchanged itself, but a trait-provided \
+             class surface in this package changed since it was last built"
+        );
+    } else {
+        warn!(
+            file = %source_file,
+            protocols = ?used_protocols,
+            "rebuilding '{source_file}': unchanged itself, but a protocol it uses \
+             (one of {used_protocols:?}) or a trait-provided class surface it may \
+             call changed since it was last built"
+        );
+    }
+}
+
 /// Detect which source files have changed relative to their compiled `.beam` output.
 ///
 /// For each `.bt` source file, computes the expected `.beam` filename in `build_dir`
@@ -76,7 +110,7 @@ pub(crate) struct ChangeDetectionResult {
 /// immediately as the old mtime-based check (which re-read mtime fresh at
 /// this call site).
 ///
-/// `file_protocol_uses`/`protocol_hashes` are ADR 0127 §10a's (BT-3591)
+/// `edges.file_protocol_uses`/`edges.protocol_hashes` are ADR 0127 §10a's (BT-3591)
 /// build-graph edge: a class's `uses:` line makes its file's cache key
 /// depend on that protocol's content too, not just the file's own. For each
 /// source file, [`combined_content_hash`] folds the hashes of every
@@ -86,6 +120,17 @@ pub(crate) struct ChangeDetectionResult {
 /// its bare `Name`, mirroring `trait_expansion`'s own resolution) into that
 /// file's stored/compared hash, so editing a protocol changes its users'
 /// cache keys and rebuilds them, even when their own source is untouched.
+/// `edges.trait_surface_hash` (BT-3674) covers the *other* direction: a file that
+/// merely *calls* a trait-provided method (it names neither the trait nor the
+/// trait user in `uses:`) type-checks against the flattened `ClassInfo` of
+/// trait-using classes in other files. Renaming a provision changes that
+/// surface without touching the caller's own source, so the package-wide hash
+/// of those flattened surfaces is folded into every file's key. Cost: a
+/// change to a trait or to a trait-using class's surface rebuilds the whole
+/// package (not just referencing files); packages without any `uses:` pay
+/// nothing (empty hash is a no-op), and edits that leave the surfaces equal
+/// (method bodies) keep it stable.
+///
 /// Both are empty for a caller with no protocol data to offer (manifest-less
 /// builds, `--stdlib-mode`'s own separate pre-pass, tests), in which case
 /// every file's combined hash reduces to its own content hash — unchanged
@@ -96,9 +141,13 @@ pub(crate) fn detect_changes(
     file_module_pairs: &[(Utf8PathBuf, String, Utf8PathBuf)],
     force: bool,
     known_hashes: &HashMap<String, String>,
-    file_protocol_uses: &HashMap<Utf8PathBuf, Vec<EcoString>>,
-    protocol_hashes: &HashMap<EcoString, String>,
+    edges: &BuildGraphEdges,
 ) -> ChangeDetectionResult {
+    let BuildGraphEdges {
+        file_protocol_uses,
+        protocol_hashes,
+        trait_surface_hash,
+    } = edges;
     // Content hash of each source file as of the last successful
     // `.beam` build, keyed by path string. Also carries each file's
     // own-content-only hash under a synthetic `<path>\0own` key (never a
@@ -123,7 +172,12 @@ pub(crate) fn detect_changes(
             continue;
         };
         let used_protocols = file_protocol_uses.get(source_file).unwrap_or(&empty_uses);
-        let combined_hash = combined_content_hash(&own_hash, used_protocols, protocol_hashes);
+        let combined_hash = combined_content_hash(
+            &own_hash,
+            used_protocols,
+            protocol_hashes,
+            trait_surface_hash,
+        );
 
         // A protocol-driven rebuild (own content unchanged, but the
         // combined key differs because a used protocol's hash changed) is
@@ -132,13 +186,9 @@ pub(crate) fn detect_changes(
         // rather than left indistinguishable from an ordinary content edit.
         if combined_hash != own_hash
             && previous_hashes.get(&own_hash_key(source_file)) == Some(&own_hash)
+            && previous_hashes.get(source_file.as_str()) != Some(&combined_hash)
         {
-            warn!(
-                file = %source_file,
-                protocols = ?used_protocols,
-                "rebuilding '{source_file}': unchanged itself, but a protocol it uses \
-                 (one of {used_protocols:?}) changed since it was last built"
-            );
+            log_rebuild_reason(source_file, used_protocols);
         }
 
         source_hashes.insert(source_file.as_str().to_string(), combined_hash);
@@ -238,13 +288,14 @@ fn combined_content_hash(
     own_hash: &str,
     used_protocols: &[EcoString],
     protocol_hashes: &HashMap<EcoString, String>,
+    trait_surface_hash: &str,
 ) -> String {
     let mut protocol_hash_parts: Vec<&str> = used_protocols
         .iter()
         .filter_map(|name| protocol_hashes.get(name))
         .map(String::as_str)
         .collect();
-    if protocol_hash_parts.is_empty() {
+    if protocol_hash_parts.is_empty() && trait_surface_hash.is_empty() {
         return own_hash.to_string();
     }
     protocol_hash_parts.sort_unstable();
@@ -253,6 +304,10 @@ fn combined_content_hash(
     for part in protocol_hash_parts {
         buf.push('\n');
         buf.push_str(part);
+    }
+    if !trait_surface_hash.is_empty() {
+        buf.push_str("\nsurface:");
+        buf.push_str(trait_surface_hash);
     }
     sha256_hex(buf.as_bytes())
 }

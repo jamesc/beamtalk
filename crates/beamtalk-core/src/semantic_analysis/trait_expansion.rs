@@ -213,12 +213,17 @@ pub fn extract_flattened_class_infos(
 /// class-module index is last-wins for a class duplicated across files. The
 /// replaced entry keeps its `surface_incomplete` marker. Modules without a
 /// `uses:` line are skipped.
+///
+/// Returns the names of the classes whose `ClassInfo` was replaced (BT-3674),
+/// so a caller can hash exactly the cross-file surface that flattening
+/// contributes.
 pub fn flatten_trait_user_class_infos<'a>(
     all_class_infos: &mut [ClassInfo],
     modules: impl IntoIterator<Item = &'a Module>,
     protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
     package: Option<&str>,
-) {
+) -> Vec<EcoString> {
+    let mut flattened_names = Vec::new();
     let external_protocols = first_wins_protocol_map(protocol_defs);
     for module in modules {
         if !module.classes.iter().any(|c| !c.uses.is_empty()) {
@@ -235,11 +240,13 @@ pub fn flatten_trait_user_class_infos<'a>(
                 .find(|c| c.name == info.name && c.package.as_deref() == package)
             {
                 let surface_incomplete = slot.surface_incomplete;
+                flattened_names.push(info.name.clone());
                 *slot = info;
                 slot.surface_incomplete = surface_incomplete;
             }
         }
     }
+    flattened_names
 }
 
 /// Collects, while a caller walks a package's source files once, what
@@ -282,7 +289,7 @@ impl TraitUserCollector {
         all_class_infos: &mut [ClassInfo],
         extra_protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
         package: Option<&str>,
-    ) {
+    ) -> Vec<EcoString> {
         flatten_trait_user_class_infos(
             all_class_infos,
             &self.modules,
@@ -291,7 +298,7 @@ impl TraitUserCollector {
                 .cloned()
                 .chain(extra_protocol_defs),
             package,
-        );
+        )
     }
 }
 
