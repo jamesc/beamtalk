@@ -131,6 +131,33 @@ pub fn is_under_stdlib_dir(file: &Path) -> bool {
         .any(|c| c == "stdlib")
 }
 
+/// Extracts the fetched-dependency package name from `file`'s path.
+///
+/// Returns `Some(name)` when `file` lives under a `_build/deps/<name>/src/`
+/// directory — the conventional layout the build system writes for fetched
+/// dependencies. Returns `None` for a file with no such path segment (a
+/// same-project or stdlib file).
+///
+/// Path components are matched structurally (not as raw strings) so the check
+/// is correct on Windows too, where [`Path::components`] yields `\`-separated
+/// components rather than `/`-separated ones.
+///
+/// This is the authoritative encoding of the `_build/deps/<name>/src/`
+/// convention; [`beamtalk_lsp::server::config::dependency_src_dirs`] enumerates
+/// the same layout from the filesystem side.
+#[must_use]
+pub fn dep_name_for_path(path: &Path) -> Option<String> {
+    let components: Vec<&str> = path
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+    components
+        .windows(2)
+        .position(|w| w == ["_build", "deps"])
+        .and_then(|i| components.get(i + 2))
+        .map(|name| (*name).to_owned())
+}
+
 /// Collect all `.bt` files from a package's conventional source directories
 /// (`src/` and `test/`) for cross-file class resolution.
 ///
@@ -439,5 +466,29 @@ mod tests {
         let (extraction, target_set) = resolve_extraction_files(&file, std::slice::from_ref(&file));
         assert_eq!(extraction.len(), 1);
         assert_eq!(target_set.len(), 1);
+    }
+
+    #[test]
+    fn dep_name_for_path_returns_name_for_dep_src_file() {
+        let path = Path::new("_build/deps/http/src/Types.bt");
+        assert_eq!(dep_name_for_path(path), Some("http".to_owned()));
+    }
+
+    #[test]
+    fn dep_name_for_path_returns_none_for_project_src_file() {
+        let path = Path::new("src/Foo.bt");
+        assert_eq!(dep_name_for_path(path), None);
+    }
+
+    #[test]
+    fn dep_name_for_path_returns_none_for_stdlib_file() {
+        let path = Path::new("stdlib/src/Integer.bt");
+        assert_eq!(dep_name_for_path(path), None);
+    }
+
+    #[test]
+    fn dep_name_for_path_returns_name_for_nested_dep_file() {
+        let path = Path::new("/abs/project/_build/deps/my_lib/src/sub/Module.bt");
+        assert_eq!(dep_name_for_path(path), Some("my_lib".to_owned()));
     }
 }
