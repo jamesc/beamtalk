@@ -183,8 +183,80 @@ TestCase subclass: SelfSendOverrideBlocksTest
     self assert: SsoScopeSealed n equals: 3
 
   // --- BT-3675 review: direct writes between sends in a scope ---------------
-  // PIN-BUG BT-3683: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
-  testArmsInListDo => self assert: SsoScopeOpen armsInListDo equals: 0
+  // BT-3683: a skipped or non-writing arm in a later iteration keeps the
+  // earlier iterations' class-variable writes (open and sealed class).
+  testOpenArmsInListDo => self assert: SsoScopeOpen armsInListDo equals: 1
+
+  testSealedArmsInListDo => self assert: SsoScopeSealed armsInListDo equals: 1
+
+  testOpenArmsInListDoThree =>
+    self assert: SsoScopeOpen armsInListDoThree equals: 2
+
+  testSealedArmsInListDoThree =>
+    self assert: SsoScopeSealed armsInListDoThree equals: 2
+
+  testOpenArmsInToDo => self assert: SsoScopeOpen armsInToDo equals: 1
+
+  testSealedArmsInToDo => self assert: SsoScopeSealed armsInToDo equals: 1
+
+  testOpenArmsInTimesRepeat =>
+    self assert: SsoScopeOpen armsInTimesRepeat equals: 1
+
+  testSealedArmsInTimesRepeat =>
+    self assert: SsoScopeSealed armsInTimesRepeat equals: 1
+
+  testOpenArmsIfTrueIfFalseInListDo =>
+    self assert: SsoScopeOpen armsIfTrueIfFalseInListDo equals: 1
+
+  testSealedArmsIfTrueIfFalseInListDo =>
+    self assert: SsoScopeSealed armsIfTrueIfFalseInListDo equals: 1
+
+  testOpenArmsNestedConditionalInListDo =>
+    self assert: SsoScopeOpen armsNestedConditionalInListDo equals: 1
+
+  testSealedArmsNestedConditionalInListDo =>
+    self assert: SsoScopeSealed armsNestedConditionalInListDo equals: 1
+
+  testOpenArmsInOnDoBody => self assert: SsoScopeOpen armsInOnDoBody equals: 1
+
+  testSealedArmsInOnDoBody =>
+    self assert: SsoScopeSealed armsInOnDoBody equals: 1
+
+  testOpenArmsInOnDoHandler =>
+    self assert: SsoScopeOpen armsInOnDoHandler equals: 1
+
+  testSealedArmsInOnDoHandler =>
+    self assert: SsoScopeSealed armsInOnDoHandler equals: 1
+
+  testOpenArmsDirectWriteBetween =>
+    self assert: SsoScopeOpen armsDirectWriteBetween equals: 100
+
+  testSealedArmsDirectWriteBetween =>
+    self assert: SsoScopeSealed armsDirectWriteBetween equals: 100
+
+  testOpenArmsRaisedIterationDiscarded =>
+    self assert: SsoScopeOpen armsRaisedIterationDiscarded equals: 0
+
+  testSealedArmsRaisedIterationDiscarded =>
+    self assert: SsoScopeSealed armsRaisedIterationDiscarded equals: 0
+
+  testOpenArmsAfterSendInListDo =>
+    self assert: SsoScopeOpen armsAfterSendInListDo equals: 3
+
+  testSealedArmsAfterSendInListDo =>
+    self assert: SsoScopeSealed armsAfterSendInListDo equals: 3
+
+  testOpenArmsAfterAssignedSendInListDo =>
+    self assert: SsoScopeOpen armsAfterAssignedSendInListDo equals: 3
+
+  testSealedArmsAfterAssignedSendInListDo =>
+    self assert: SsoScopeSealed armsAfterAssignedSendInListDo equals: 3
+
+  testOpenArmsAfterDirectWriteInListDo =>
+    self assert: SsoScopeOpen armsAfterDirectWriteInListDo equals: 15
+
+  testSealedArmsAfterDirectWriteInListDo =>
+    self assert: SsoScopeSealed armsAfterDirectWriteInListDo equals: 15
 
   testOpenMixedDirectWriteLoop => self assert: SsoScopeOpen mixedLoop equals: 6
 

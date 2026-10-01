@@ -14,6 +14,8 @@ Object subclass: SsoScopeOpen
 
   class increment -> Integer => self.n := self.n + 1
 
+  class setN: v :: Integer -> Integer => self.n := v
+
   class condArm: x -> Integer =>
     x > 0 ifTrue: [self increment]
     x
@@ -69,9 +71,8 @@ Object subclass: SsoScopeOpen
     0
 
   // A writing send in one arm of a `do:` over a list, then a non-writing send
-  // in another arm of the next iteration; the first write should survive.
-  // BT-3683: the arm refresh currently falls back to the stale lexical
-  // version, so this returns 0.
+  // in another arm of the next iteration; the first write must survive
+  // (BT-3683: the arm refresh used to fall back to the stale lexical version).
   class armsInListDo -> Integer =>
     self.n := 0
     seen := 0
@@ -80,5 +81,156 @@ Object subclass: SsoScopeOpen
         seen := seen + 1
         i =:= 1 ifTrue: [self increment]
         i =:= 2 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  // BT-3683: an arm that is not taken (or sends a non-writing method) in a
+  // later iteration must not roll back an earlier iteration's class-var write.
+  class armsInListDoThree -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        i =:= 2 ifTrue: [self nonWriting]
+        i =:= 3 ifTrue: [self increment]
+      ]
+    self.n
+
+  class armsInToDo -> Integer =>
+    self.n := 0
+    seen := 0
+    1
+      to: 3
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        i =:= 2 ifTrue: [self nonWriting]
+        i =:= 3 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  class armsInTimesRepeat -> Integer =>
+    self.n := 0
+    seen := 0
+    3
+      timesRepeat: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self increment]
+        seen =:= 2 ifTrue: [self nonWriting]
+        seen =:= 3 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  class armsIfTrueIfFalseInListDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment] ifFalse: [self nonWriting]
+      ]
+    self.n
+
+  class armsNestedConditionalInListDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i > 0
+          ifTrue: [
+            i =:= 1 ifTrue: [self increment]
+            i =:= 2 ifTrue: [self nonWriting]
+          ]
+      ]
+    self.n
+
+  class armsInOnDoBody -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        [self nonWriting] on: Error do: [:e | nil]
+      ]
+    self.n
+
+  class armsInOnDoHandler -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        [1 / 0] on: Error do: [:e | self nonWriting]
+      ]
+    self.n
+
+  // A direct write in a later iteration must win over the earlier commit; the
+  // skipped arm must not roll it back.
+  class armsDirectWriteBetween -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        i =:= 2 ifTrue: [self setN: 100]
+        i =:= 3 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  // A write made in an iteration that raised (and was caught) stays discarded
+  // even though a later iteration's skipped arm falls back to the enclosing
+  // scope's commit.
+  class armsRaisedIterationDiscarded -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        [
+          self increment
+          1 / 0
+        ] on: Error do: [:e | nil]
+        i =:= 2 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  // The skipped arm must fall back to whatever the loop body already
+  // committed this iteration, whichever statement shape made it.
+  class armsAfterSendInListDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        self increment
+        i =:= 9 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  class armsAfterAssignedSendInListDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        _r := self increment
+        i =:= 9 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  class armsAfterDirectWriteInListDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        self setN: self n + 5
+        i =:= 9 ifTrue: [self nonWriting]
       ]
     self.n

@@ -594,11 +594,14 @@ impl CoreErlangGenerator {
             } else {
                 mark.version
             };
+        // BT-3683: the fallback is the enclosing scopes' newest commit, not
+        // the (possibly stale) lexical version before this statement.
+        let fallback = self.class_var_scope_refresh_fallback_doc(&cv_before);
         self.next_class_var();
         let target_version = self.class_var_version();
         let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
             super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
-                Self::class_var_scope_take_doc(&token.name, &cv_before),
+                Self::class_var_scope_take_doc(&token.name, fallback),
             )),
             false,
             frame,
