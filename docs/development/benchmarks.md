@@ -898,6 +898,6 @@ export, and three `persistent_term` reads. The actor open self-send increase
 `block/nested_list_op_improvement` in `beamtalk_perf_tests.erl` compares two
 hand-written Erlang functions in `bench_block_threading.erl` (a StateAcc map
 vs an expanded tuple); it exercises no Beamtalk codegen or class dispatch. It
-is flaky near its threshold: over 5 runs per side the ratio ranged 1.34x to
-1.88x on both the pre-BT-3666 baseline and current main (the tuple variant is
+is flaky near its threshold: over 4 (baseline) and 5 (main) runs the ratio ranged 1.34x to
+1.88x, on both the pre-BT-3666 baseline and current main (the tuple variant is
 bimodal, ~730 us or ~930 us).
