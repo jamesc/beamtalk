@@ -133,7 +133,7 @@ pub fn is_under_stdlib_dir(file: &Path) -> bool {
 
 /// Extracts the fetched-dependency package name from `file`'s path.
 ///
-/// Returns `Some(name)` when `file` lives under a `_build/deps/<name>/src/`
+/// Returns `Some(name)` when `file` lives anywhere under a `_build/deps/<name>/`
 /// directory — the conventional layout the build system writes for fetched
 /// dependencies. Returns `None` for a file with no such path segment (a
 /// same-project or stdlib file).
@@ -142,9 +142,9 @@ pub fn is_under_stdlib_dir(file: &Path) -> bool {
 /// is correct on Windows too, where [`Path::components`] yields `\`-separated
 /// components rather than `/`-separated ones.
 ///
-/// This is the authoritative encoding of the `_build/deps/<name>/src/`
-/// convention; [`beamtalk_lsp::server::config::dependency_src_dirs`] enumerates
-/// the same layout from the filesystem side.
+/// This is the authoritative encoding of the `_build/deps` path convention;
+/// `dependency_src_dirs` in `beamtalk-lsp` enumerates the same layout from
+/// the filesystem side.
 #[must_use]
 pub fn dep_name_for_path(path: &Path) -> Option<String> {
     let components: Vec<&str> = path
