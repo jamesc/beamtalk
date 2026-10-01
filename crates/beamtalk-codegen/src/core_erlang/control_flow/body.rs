@@ -433,6 +433,10 @@ impl CoreErlangGenerator {
                 self.lower_class_var_field_assignment_bind(&field.name, value, branch_frame)?;
             stmts.push(ThreadedStmt::Statement(preamble_doc, span));
             stmts.push(bind);
+            // BT-3675: a direct write commits like a send's rebind.
+            if let Some(commit) = self.class_var_write_commit_doc() {
+                stmts.push(ThreadedStmt::Statement(commit, span));
+            }
             return Ok(val_var);
         }
 

@@ -92,6 +92,8 @@ impl<'a> MethodFrame<'a> {
                 generator.reset_state_version();
                 generator.set_class_var_version(0);
                 generator.set_class_var_mutated(false);
+                // BT-3675: a method starts with no open class-variable scopes.
+                let _ = generator.take_class_var_scopes();
             }
         }
         generator.push_scope();

@@ -181,3 +181,25 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testSealedThreadedToDo =>
     self assert: (SsoScopeSealed threadedToDo: 3) equals: 6
     self assert: SsoScopeSealed n equals: 3
+
+  // --- BT-3675 review: direct writes between sends in a scope ---------------
+  testOpenMixedDirectWriteLoop => self assert: SsoScopeOpen mixedLoop equals: 6
+
+  testSealedMixedDirectWriteLoop =>
+    self assert: SsoScopeSealed mixedLoop equals: 6
+
+  testOpenMixedDirectWriteArm =>
+    self assert: (SsoScopeOpen mixedArm: 1) equals: 12
+
+  testSealedMixedDirectWriteArm =>
+    self assert: (SsoScopeSealed mixedArm: 1) equals: 12
+
+  // A closure stored in a local and invoked by a LATER statement keeps the
+  // subclass override's write.
+  testDeferredClosureKeepsWrite =>
+    SsoStaleSub deferred
+    self assert: SsoStaleSub hits equals: 1
+
+  testDeferredClosureInArmKeepsWrite =>
+    SsoStaleSub deferredInArm
+    self assert: SsoStaleSub hits equals: 1

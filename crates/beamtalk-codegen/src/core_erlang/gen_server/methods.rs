@@ -2490,6 +2490,9 @@ impl CoreErlangGenerator {
         self.reset_state_version();
         self.set_class_var_version(0);
         self.set_class_var_mutated(false);
+        // BT-3675: the fun is a separate method body; the enclosing method's
+        // open class-variable scopes are not its scopes.
+        let saved_scopes = self.take_class_var_scopes();
         // ADR 0110: the fun body executes at runtime as a class
         // method's own top frame, even when the builder cascade lexically sits
         // inside a block (`block_depth > 0` at the cascade's position). Reset
@@ -2553,6 +2556,7 @@ impl CoreErlangGenerator {
                 Err(e) => {
                     self.set_current_nlr_token(None);
                     self.block_depth = saved_block_depth;
+                    self.restore_class_var_scopes(saved_scopes);
                     self.pop_scope();
                     return Err(e);
                 }
@@ -2587,6 +2591,7 @@ impl CoreErlangGenerator {
         ];
 
         self.block_depth = saved_block_depth;
+        self.restore_class_var_scopes(saved_scopes);
         self.pop_scope();
         Ok(doc)
     }

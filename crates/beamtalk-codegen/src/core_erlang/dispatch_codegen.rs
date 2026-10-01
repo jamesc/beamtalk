@@ -577,19 +577,30 @@ impl CoreErlangGenerator {
         span: Span,
     ) -> Vec<ThreadedStmt> {
         let prefix = self.class_var_scope_prefix(mark);
-        let Some(token) = self.close_class_var_scope(mark) else {
+        let Some(token) = self.close_scope_for_refresh(mark) else {
             return Vec::new();
         };
-        stmts.insert(start, ThreadedStmt::Statement(prefix, span));
+        if token.used {
+            stmts.insert(start, ThreadedStmt::Statement(prefix, span));
+        }
         let cv_before = Self::class_var_name_at(mark.version);
-        // The version live before the statement is the one bound at this
-        // frame: the live one may be a name minted inside a nested arm.
-        let source_version = mark.version;
+        // The refresh consumes the newest version this statement's own
+        // sequence bound (so a pre-call sync or call rebind is not consumed
+        // twice, which `verify()` rejects as non-linear); when none was bound
+        // here — the live one may be a name minted inside a nested arm — it
+        // consumes the version live before the statement.
+        let live = self.class_var_version();
+        let source_version =
+            if live != mark.version && Self::stmts_bind_class_var_version(stmts, live) {
+                live
+            } else {
+                mark.version
+            };
         self.next_class_var();
         let target_version = self.class_var_version();
         let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
             super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
-                Self::class_var_scope_take_doc(&token.name, &cv_before),
+                self.refresh_take_doc(&token, &cv_before),
             )),
             false,
             frame,
@@ -603,12 +614,30 @@ impl CoreErlangGenerator {
             "class-var refresh from the scope's commit after a confined late-bound self-send",
             span,
         );
+        self.remember_deferred_scope(&token);
         let mut refresh = vec![ThreadedStmt::Statement(Document::Str(" "), span), bind];
         let cv_new = self.current_class_var();
         if let Some(commit) = self.commit_to_innermost_scope_doc(&cv_new) {
             refresh.push(ThreadedStmt::Statement(commit, span));
         }
         refresh
+    }
+
+    /// Whether `stmts` (recursively) contains a `ClassVars` `Bind` whose
+    /// target is `version`.
+    fn stmts_bind_class_var_version(stmts: &[ThreadedStmt], version: usize) -> bool {
+        stmts.iter().any(|stmt| match stmt {
+            ThreadedStmt::Bind { target, .. } => {
+                target.prefix == VersionPrefix::ClassVars && target.version == version
+            }
+            ThreadedStmt::Threaded { body, produces, .. } => {
+                produces
+                    .iter()
+                    .any(|v| v.prefix == VersionPrefix::ClassVars && v.version == version)
+                    || Self::stmts_bind_class_var_version(body, version)
+            }
+            _ => false,
+        })
     }
 
     /// ADR 0111 Addendum 9, Questions 2/3: rebinds `ClassVarsN`

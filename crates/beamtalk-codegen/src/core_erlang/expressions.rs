@@ -816,8 +816,12 @@ impl CoreErlangGenerator {
         let span = value.span();
         let (preamble_doc, bind, val_var) =
             self.lower_class_var_field_assignment_bind(field_name, value, frame)?;
+        let mut prelude = vec![ThreadedStmt::Statement(preamble_doc, span), bind];
+        if let Some(commit) = self.class_var_write_commit_doc() {
+            prelude.push(ThreadedStmt::Statement(commit, span));
+        }
         Ok(ThreadedValue {
-            prelude: vec![ThreadedStmt::Statement(preamble_doc, span), bind],
+            prelude,
             value: ValueRef::Var(val_var),
         })
     }
@@ -957,8 +961,12 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let (preamble_doc, bind, val_var) =
             self.lower_class_var_field_clear_bind(field_name, span, frame)?;
+        let mut prelude = vec![ThreadedStmt::Statement(preamble_doc, span), bind];
+        if let Some(commit) = self.class_var_write_commit_doc() {
+            prelude.push(ThreadedStmt::Statement(commit, span));
+        }
         Ok(ThreadedValue {
-            prelude: vec![ThreadedStmt::Statement(preamble_doc, span), bind],
+            prelude,
             value: ValueRef::Var(val_var),
         })
     }

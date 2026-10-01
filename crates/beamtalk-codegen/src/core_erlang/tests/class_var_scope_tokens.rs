@@ -158,6 +158,50 @@ fn compiled_output_compiles_through_erlc() {
 }
 
 #[test]
+fn direct_write_between_sends_in_a_scope_commits_but_straight_line_does_not() {
+    let code = compile(
+        "bt@scopetokendirect",
+        "Object subclass: ScopeTokenDirect
+  classState: n = 0
+
+  class bump => self.n := self.n + 1
+
+  class straight =>
+    self.n := 1
+    self.n := 2
+    self.n
+
+  class mixed =>
+    self.n := 0
+    seen := 0
+    1 to: 3 do: [:i |
+      self bump
+      self.n := self.n + 1
+      seen := seen + 1]
+    self.n
+",
+    );
+    let straight = code
+        .split("'class_straight'/2 = ")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("class_straight present");
+    assert!(
+        !straight.contains("class_var_scope_"),
+        "straight-line direct writes must not touch the scope helpers. Got:\n{straight}"
+    );
+    let mixed = code
+        .split("'class_mixed'/2 = ")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("class_mixed present");
+    assert!(
+        mixed.matches("'class_var_scope_commit'").count() >= 2,
+        "a direct write in a loop body must commit like the send beside it. Got:\n{mixed}"
+    );
+}
+
+#[test]
 fn runtime_exports_every_helper_codegen_calls() {
     let erl_path =
         repo_root().join("runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl");

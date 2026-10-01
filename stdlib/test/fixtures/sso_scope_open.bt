@@ -36,3 +36,28 @@ Object subclass: SsoScopeOpen
         self increment
       ]
     i
+
+  // BT-3675 review: a direct class-var write between sends inside a scope.
+  class mixedLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    1
+      to: 3
+      do: [:i |
+        self increment
+        self.n := self.n + 1
+        seen := seen + 1
+      ]
+    self.n
+
+  class mixedArm: x -> Integer =>
+    self.n := 0
+    seen := 0
+    x > 0
+      ifTrue: [
+        self increment
+        self.n := self.n + 10
+        self increment
+        seen := seen + 1
+      ]
+    self.n

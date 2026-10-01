@@ -121,3 +121,19 @@ Object subclass: SsoStaleBase
     ] on: Error do: [:e | self noop]
     self noop
     0
+
+  // BT-3675 review: a closure stored in a local, invoked by a later statement.
+  class deferred -> Integer =>
+    b := [self foo]
+    b value
+    self noop
+    self.hits
+
+  class deferredInArm -> Integer =>
+    [
+      b := [self foo]
+      b value
+      self noop
+      nil
+    ] on: Error do: [:e | nil]
+    self.hits
