@@ -1,0 +1,30 @@
+[
+  {
+    "name": "BEAMTALK_HOME override wins over HOME",
+    "env": {"BEAMTALK_HOME": "/fx/bt-home", "HOME": "/fx/home"},
+    "root": "/fx/bt-home",
+    "workspaces": "/fx/bt-home/workspaces",
+    "rust": "always"
+  },
+  {
+    "name": "empty BEAMTALK_HOME is treated as unset",
+    "env": {"BEAMTALK_HOME": "", "HOME": "/fx/home"},
+    "root": "/fx/home/.beamtalk",
+    "workspaces": "/fx/home/.beamtalk/workspaces",
+    "rust": "unix"
+  },
+  {
+    "name": "HOME only resolves to <home>/.beamtalk",
+    "env": {"HOME": "/fx/home"},
+    "root": "/fx/home/.beamtalk",
+    "workspaces": "/fx/home/.beamtalk/workspaces",
+    "rust": "unix"
+  },
+  {
+    "name": "no home and no override resolves to nothing (no cache-dir fallback)",
+    "env": {},
+    "root": null,
+    "workspaces": null,
+    "rust": "never"
+  }
+]

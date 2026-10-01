@@ -104,17 +104,10 @@ load_fake_class_module_qualified(ClassNameAtom, PackageName) ->
     {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
     Mod.
 
-%% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
-%% the same file the module would write to.
+%% Resolve via the shared resolver (BT-3680) so tests check the same file the
+%% module would write to.
 metadata_path_for(WsId) ->
-    Base =
-        case beamtalk_platform:home_dir() of
-            false ->
-                filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
-            Home ->
-                filename:join([Home, ".beamtalk", "workspaces"])
-        end,
-    filename:join([Base, binary_to_list(WsId), "metadata.json"]).
+    filename:join(beamtalk_platform:workspace_dir(WsId), "metadata.json").
 
 %%% Metadata initialization tests
 
