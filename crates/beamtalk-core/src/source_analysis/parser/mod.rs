@@ -933,6 +933,11 @@ pub(super) struct Parser {
     /// Whether the parser is currently inside a class body.
     /// Used to detect trailing expressions via indentation.
     pub(super) in_class_body: bool,
+    /// Whether the parser is currently inside a `Protocol define:` body, where
+    /// a declaration-level `@expect` (BT-3671) also ends the previous provided
+    /// method's body. Distinct from `in_class_body`, which gates other
+    /// class-member-only behaviour.
+    pub(super) in_protocol_body: bool,
     /// The indentation column of the method definition currently being
     /// parsed's own header token (the selector, or a leading `sealed`/
     /// `internal`/`class` modifier) — `None` outside a method body.
@@ -1006,6 +1011,7 @@ impl Parser {
             in_method_body: false,
             current_method_selector: None,
             in_class_body: false,
+            in_protocol_body: false,
             current_method_header_indent: None,
             nesting_depth: 0,
             unattached_doc_comment_indices,

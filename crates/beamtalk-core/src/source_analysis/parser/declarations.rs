@@ -1080,7 +1080,7 @@ impl Parser {
     /// can only ever be the ordinary statement-level directive, never a
     /// boundary, regardless of indentation.
     pub(super) fn is_at_declaration_level_expect(&self) -> bool {
-        self.in_class_body
+        (self.in_class_body || self.in_protocol_body)
             && self
                 .current_token()
                 .indentation_after_newline()
@@ -2694,8 +2694,11 @@ impl Parser {
 
         // Parse protocol body: required signatures (no `=>`) and provided
         // methods (`=>` body — ADR 0127 §1).
+        let was_in_protocol_body = self.in_protocol_body;
+        self.in_protocol_body = true;
         let (method_signatures, class_method_signatures, provided_methods) =
             self.parse_protocol_body();
+        self.in_protocol_body = was_in_protocol_body;
 
         // Determine end span
         let mut end = name.span;
@@ -2871,13 +2874,37 @@ impl Parser {
             && !self.is_at_native_declaration()
             && !self.is_at_standalone_method_definition()
         {
+            // A declaration-level `@expect category` (BT-3671) applies to the
+            // provided method that follows it, exactly as in a class body —
+            // it suppresses the flattened-provision diagnostics published in
+            // this (the protocol's) file.
+            let pending = self.parse_pending_declaration_expect();
+            let pending_has_expect = pending.expect.is_some();
+            if let Some((_, _, span)) = pending.expect {
+                if !self.is_at_method_definition() {
+                    self.diagnostics.push(Diagnostic::error(
+                        "`@expect` in a protocol body applies only to a provided method (one with a `=>` body)",
+                        span,
+                    ));
+                    while self.match_token(&TokenKind::Period) {}
+                    continue;
+                }
+            }
+
             // A provided method — any selector shape ending in `=>`,
             // possibly `class`-prefixed. Checked first (pure lookahead, no
             // trivia consumed yet) so `parse_method_definition` itself
             // collects the doc comment/leading comments off the right
             // token, exactly as in a class body.
             if self.is_at_method_definition() {
-                if let Some(method) = self.parse_method_definition() {
+                if let Some(mut method) = self.parse_method_definition() {
+                    if pending_has_expect {
+                        pending.apply_to(
+                            &mut method.expect,
+                            &mut method.doc_comment,
+                            &mut method.comments,
+                        );
+                    }
                     if method.is_class_method {
                         self.diagnostics.push(Diagnostic::error(
                             "class-side provided methods are not yet supported",

@@ -426,6 +426,13 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         // has a span in the *protocol's* file, so it is held back here and
         // published once (merged across the using classes) in that file
         // after the loop, instead of at a meaningless offset in this one.
+        // An `@expect` in the protocol's provided method suppresses it (and is
+        // matched here, not by the using file's own `@expect` pass).
+        let mut lint_diags = lint_diags;
+        beamtalk_core::compilation::diagnostics_policy::apply_protocol_expect_directives(
+            &all_protocol_defs,
+            &mut lint_diags,
+        );
         let (provision_diags, lint_diags): (Vec<_>, Vec<_>) =
             lint_diags.into_iter().partition(|d| d.provision.is_some());
         all_provision_diags.extend(provision_diags);
