@@ -281,7 +281,23 @@ fn collect_fresh_deps(
     let all_deps = discover_all_dep_roots(project_root, parsed)?;
     let mut resolved = Vec::new();
 
-    for dep in &all_deps {
+    // Scan every dependency first: discovery order is not topological, so a
+    // dependency's classes are flattened only once all dependencies'
+    // protocols are known (BT-3678). A dependency's own protocols win, then
+    // those of the others in discovery order.
+    let scans = all_deps
+        .iter()
+        .map(|dep| path::scan_dep_index(&dep.root, &dep.name))
+        .collect::<Result<Vec<_>>>()?;
+    let protocol_defs_of: Vec<Vec<_>> = scans
+        .iter()
+        .map(|scan| {
+            scan.as_ref()
+                .map_or_else(Vec::new, |s| s.protocol_defs().to_vec())
+        })
+        .collect();
+
+    for (index, (dep, scan)) in all_deps.iter().zip(scans).enumerate() {
         let ebin_path = layout.dep_ebin_dir(&dep.name);
 
         // Rebuild class/protocol/alias indexes from source files (fast — no compilation)
@@ -292,7 +308,14 @@ fn collect_fresh_deps(
             protocol_defs,
             alias_infos,
             protocol_sources,
-        ) = path::build_dep_class_index(&dep.root, &dep.name)?;
+        ) = path::exports_or_empty(
+            scan,
+            protocol_defs_of
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .flat_map(|(_, defs)| defs.iter().cloned()),
+        );
 
         debug!(
             dep = %dep.name,
@@ -983,6 +1006,59 @@ mod tests {
         assert_eq!(
             result[0].class_module_index.get("Helper").unwrap(),
             "bt@utils@helper"
+        );
+    }
+
+    /// BT-3678: the fresh-deps fast path exports a dependency's class with the
+    /// provided methods of a trait declared in the dependency's own
+    /// dependency, although that dependency is discovered after it.
+    #[test]
+    fn test_collect_fresh_deps_flattens_transitive_dep_trait() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let a_dir = temp.path().join("pkg_a");
+        fs::create_dir_all(&a_dir).unwrap();
+        write_manifest(&a_dir, "pkg_a", "0.1.0", "");
+        write_source(
+            &a_dir,
+            "retryable.bt",
+            "Protocol define: Retryable\n  name -> String\n\n  retryTag -> String => self name\n",
+        );
+        let b_dir = temp.path().join("pkg_b");
+        fs::create_dir_all(&b_dir).unwrap();
+        write_manifest(
+            &b_dir,
+            "pkg_b",
+            "0.1.0",
+            "[dependencies]\npkg_a = { path = \"../pkg_a\" }",
+        );
+        write_source(
+            &b_dir,
+            "widget.bt",
+            "Object subclass: Widget\n  uses: pkg_a@Retryable\n  name -> String => \"w\"\n",
+        );
+        create_dep_ebin_with_beam(temp.path(), "pkg_a");
+        create_dep_ebin_with_beam(temp.path(), "pkg_b");
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\npkg_b = { path = \"pkg_b\" }",
+        );
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        let result = collect_fresh_deps(&root, &parsed).unwrap();
+        let b = result.iter().find(|d| d.name == "pkg_b").unwrap();
+        let widget = b.class_infos.iter().find(|c| c.name == "Widget").unwrap();
+        assert!(
+            widget.methods.iter().any(|m| m.selector == "retryTag"),
+            "Widget must carry pkg_a's provided `retryTag`: {:?}",
+            widget
+                .methods
+                .iter()
+                .map(|m| &m.selector)
+                .collect::<Vec<_>>()
         );
     }
 

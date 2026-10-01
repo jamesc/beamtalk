@@ -365,6 +365,21 @@ pub(crate) fn flatten_trait_user_class_infos(
     )
 }
 
+/// Collects `cached_asts`' trait users and provision-bearing protocols (in
+/// sorted-path order) for [`flatten_trait_user_class_infos`] (BT-3673).
+pub(crate) fn package_trait_users(
+    cached_asts: &HashMap<Utf8PathBuf, CachedAst>,
+) -> beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector {
+    let mut files: Vec<&Utf8PathBuf> = cached_asts.keys().collect();
+    files.sort();
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+    for file in files {
+        trait_users.add(&cached_asts[file].module);
+    }
+    trait_users
+}
+
 /// Flattens cross-file trait provisions (BT-3673) into the `ClassInfo`s
 /// [`build_class_module_index`] returned for a whole package, using the
 /// provision-bearing protocols of that package's own `cached_asts` followed
@@ -379,14 +394,7 @@ pub(crate) fn flatten_package_class_infos(
     extra_protocol_defs: impl IntoIterator<Item = beamtalk_core::ast::ProtocolDefinition>,
     pkg_name: &str,
 ) {
-    let mut files: Vec<&Utf8PathBuf> = cached_asts.keys().collect();
-    files.sort();
-    let mut trait_users =
-        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
-    for file in files {
-        trait_users.add(&cached_asts[file].module);
-    }
-    trait_users.flatten(class_infos, extra_protocol_defs, Some(pkg_name));
+    package_trait_users(cached_asts).flatten(class_infos, extra_protocol_defs, Some(pkg_name));
 }
 
 /// Check that no dependency exports classes with stdlib-reserved names.
