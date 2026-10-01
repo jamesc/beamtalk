@@ -2459,12 +2459,9 @@ write_port_file_with_workspace_test() ->
     Result = beamtalk_repl_server:write_port_file(<<"test_ws_627">>, 9999, <<"abc123">>),
     ?assertEqual(ok, Result),
     %% Clean up if file was created
-    case beamtalk_platform:home_dir() of
-        false ->
-            ok;
-        Home ->
-            PortFile = filename:join([Home, ".beamtalk", "workspaces", "test_ws_627", "port"]),
-            file:delete(PortFile)
+    case beamtalk_platform:workspace_dir(<<"test_ws_627">>) of
+        undefined -> ok;
+        WsDir -> file:delete(filename:join(WsDir, "port"))
     end.
 
 %% ===================================================================

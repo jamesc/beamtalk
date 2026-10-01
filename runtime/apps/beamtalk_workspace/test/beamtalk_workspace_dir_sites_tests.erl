@@ -48,8 +48,35 @@ stop_meta() ->
         Pid -> gen_server:stop(Pid)
     end.
 
-%% Exercise every Erlang site once and return the resolved paths.
+%% Exercise every Erlang site once and return the resolved paths. The file
+%% logger site mutates VM-global logger state (primary level and the
+%% `beamtalk_file_log` handler), so snapshot it, start from no handler (a
+%% leftover one would make setup_file_logger/1 reuse it and write no file), and
+%% restore both afterwards.
 site_paths() ->
+    PrimaryConfig = logger:get_primary_config(),
+    OldHandler =
+        case logger:get_handler_config(beamtalk_file_log) of
+            {ok, Cfg} -> Cfg;
+            {error, _} -> undefined
+        end,
+    _ = logger:remove_handler(beamtalk_file_log),
+    try
+        site_paths_inner()
+    after
+        _ = logger:remove_handler(beamtalk_file_log),
+        case OldHandler of
+            undefined ->
+                ok;
+            #{module := Mod} ->
+                _ = logger:add_handler(
+                    beamtalk_file_log, Mod, maps:remove(id, maps:remove(module, OldHandler))
+                )
+        end,
+        _ = logger:set_primary_config(maps:get(level, PrimaryConfig))
+    end.
+
+site_paths_inner() ->
     ok = beamtalk_repl_server:write_port_file(?WS, 4242, <<"noncehex01234567">>),
     ok = beamtalk_workspace_sup:setup_file_logger(?WS),
     stop_meta(),
@@ -60,7 +87,6 @@ site_paths() ->
     }),
     Signal = beamtalk_logging_config:mcp_signal_path(),
     gen_server:stop(Meta),
-    _ = logger:remove_handler(beamtalk_file_log),
     #{
         changes => beamtalk_workspace_changelog:changes_dir(?WS),
         signal => Signal
@@ -101,11 +127,12 @@ sites_honour_beamtalk_home_override_test() ->
     end.
 
 sites_skip_without_home_test() ->
+    %% Computed before HOME is unset: user_cache derives from HOME on Linux.
+    Cache = filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces"),
     with_env(#{}, fun() ->
         #{changes := Changes, signal := Signal} = site_paths(),
         ?assertEqual(undefined, Changes),
         ?assertEqual({error, no_home_dir}, Signal),
         %% No user-cache fallback dir may have been created for the workspace.
-        Cache = filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces"),
         ?assertNot(filelib:is_dir(filename:join(Cache, "dir-sites-ws")))
     end).

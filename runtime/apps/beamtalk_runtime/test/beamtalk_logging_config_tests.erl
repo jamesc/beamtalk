@@ -91,8 +91,7 @@ logging_config_test_() ->
             fun disableAllDebug_with_registered_class_unsets_module_level/0,
             fun loggerInfo_with_mcp_shows_signal_file/0,
             fun enable_supervisor_progress_idempotent/0,
-            fun loggerInfo_handles_no_file_config/0,
-            fun mcp_signal_path_without_home_is_safe/0
+            fun loggerInfo_handles_no_file_config/0
         ]}.
 
 %%====================================================================
@@ -894,24 +893,6 @@ loggerInfo_handles_no_file_config() ->
     Info = beamtalk_logging_config:loggerInfo(),
     ?assert(is_binary(Info)),
     ?assertNotEqual(nomatch, binary:match(Info, <<"Log file:">>)).
-
-mcp_signal_path_without_home_is_safe() ->
-    %% This path requires a running workspace_meta. Without it, the
-    %% function returns workspace_not_started (which is already covered
-    %% elsewhere). We verify here that calling mcp_signal_path is safe
-    %% when HOME is temporarily unset, by saving/restoring the env var.
-    OrigHome = os:getenv("HOME"),
-    try
-        %% Without a workspace, result is {error, workspace_not_started}
-        %% regardless of HOME, but we exercise the branch for safety.
-        Result = beamtalk_logging_config:mcp_signal_path(),
-        ?assertMatch({error, _}, Result)
-    after
-        case OrigHome of
-            false -> os:unsetenv("HOME");
-            Val -> os:putenv("HOME", Val)
-        end
-    end.
 
 %%====================================================================
 %% Test helpers
