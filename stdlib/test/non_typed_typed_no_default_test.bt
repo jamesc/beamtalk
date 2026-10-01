@@ -49,11 +49,15 @@ TestCase subclass: NonTypedTypedNoDefaultTest
     result := [
       NonTypedUninitializedStateActor spawn
     ] on: Exception do: [:e | e hint]
-    self assert: (result includesSubstring: "count")
+    (result includesSubstring: "count") ifFalse: [
+      self fail: "expected hint to include 'count', got hint: {result}"
+    ]
 
   testUninitializedErrorHintContainsTypeName =>
     @expect all
     result := [
       NonTypedUninitializedStateActor spawn
     ] on: Exception do: [:e | e hint]
-    self assert: (result includesSubstring: "Integer")
+    (result includesSubstring: "Integer") ifFalse: [
+      self fail: "expected hint to include 'Integer', got hint: {result}"
+    ]
