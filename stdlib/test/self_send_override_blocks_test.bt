@@ -217,3 +217,18 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testStoredClosureWithStatementsCompilesAndRuns =>
     SsoStaleSub deferredWithStatements
     self assert: SsoStaleSub hits equals: 0
+
+  // A block passed to a user-defined class-side higher-order method.
+  testBlockPassedToClassSideHomKeepsWrite =>
+    SsoStaleSub viaSection
+    self assert: SsoStaleSub hits equals: 1
+
+  testBlockPassedToClassSideHomThenSendKeepsWrite =>
+    SsoStaleSub viaSectionThenSend
+    self assert: SsoStaleSub hits equals: 1
+
+  // The stored-closure limit is not limited to subclass overrides: a closure
+  // calling the class's own mutating selector loses its write too.
+  testStoredClosureOwnMutatingSelectorLosesWrite =>
+    SsoStaleSub storedBump
+    self assert: SsoStaleSub hits equals: 0

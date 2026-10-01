@@ -296,10 +296,9 @@ impl CoreErlangGenerator {
         prelude: &mut Vec<ThreadedStmt>,
     ) -> (String, Option<String>) {
         let cv = self.current_class_var();
-        let Some(token) = self.mark_innermost_scope_used() else {
+        let Some((token, chain)) = self.class_var_send_scopes() else {
             return (cv, None);
         };
-        let chain = self.class_var_scope_chain();
         let source_version = self.class_var_version();
         self.next_class_var();
         let target_version = self.class_var_version();
@@ -1529,8 +1528,54 @@ impl CoreErlangGenerator {
     /// primitives, auto-exports, the slot constructor), closes the
     /// argument prelude into a self-contained call `Document`
     /// ([`Self::close_prelude`]) and wraps it as a pure `ThreadedValue`.
-    #[allow(clippy::too_many_lines)] // Multiple dispatch branches share args-capture scaffolding.
     pub(super) fn generate_class_method_self_send(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        receiver_is_self: bool,
+    ) -> Result<ThreadedValue> {
+        // BT-3675: a block literal passed to a class-side higher-order method
+        // (`self section: [self foo]`) runs inside the callee, which returns
+        // the `ClassVars` it was given. The send is its own scope: the closure
+        // exports its writes into the scope's token when it returns, the send
+        // itself does not commit (its returned class vars would overwrite
+        // that export with the stale ones it was called with), and the refresh
+        // right after the call binds the exported value, falling back to the
+        // version the send itself bound.
+        if !arguments
+            .iter()
+            .any(|arg| matches!(arg.unwrap_parens(), Expression::Block(_)))
+        {
+            return self.generate_class_method_self_send_unscoped(
+                selector,
+                arguments,
+                receiver_is_self,
+            );
+        }
+        let mut mark = self.class_var_scope_mark();
+        let scope_depth = Self::class_var_scope_depth(mark);
+        let saved_skip = self.class_context_mut().class_var_scope_skip_send;
+        self.class_context_mut().class_var_scope_skip_send = scope_depth;
+        let result =
+            self.generate_class_method_self_send_unscoped(selector, arguments, receiver_is_self);
+        self.class_context_mut().class_var_scope_skip_send = saved_skip;
+        let mut tv = result?;
+        let live = self.class_var_version();
+        if Self::stmts_bind_class_var_version(&tv.prelude, live) {
+            mark.version = live;
+        }
+        let frame = self.current_frame();
+        let span = arguments.first().map_or_else(
+            beamtalk_core::source_analysis::Span::default,
+            Expression::span,
+        );
+        let refresh = self.confined_class_var_refresh_stmt(mark, &mut tv.prelude, 0, frame, span);
+        tv.prelude.extend(refresh);
+        Ok(tv)
+    }
+
+    #[allow(clippy::too_many_lines)] // Multiple dispatch branches share args-capture scaffolding.
+    fn generate_class_method_self_send_unscoped(
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],

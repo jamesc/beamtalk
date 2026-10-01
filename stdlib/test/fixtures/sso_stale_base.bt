@@ -164,3 +164,22 @@ Object subclass: SsoStaleBase
     b value
     self noop
     self.hits
+
+  // A block passed to a user-defined class-side higher-order method.
+  class section: aBlock :: Block -> Integer => aBlock value
+
+  class viaSection -> Integer =>
+    self section: [self foo]
+    self.hits
+
+  class viaSectionThenSend -> Integer =>
+    self section: [self foo]
+    self noop
+    self.hits
+
+  // Stored closure with an own-class (non-override) mutating selector.
+  class storedBump -> Integer =>
+    b := [self bump]
+    b value
+    self noop
+    self.hits
