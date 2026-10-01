@@ -198,22 +198,27 @@ TestCase subclass: SelfSendOverrideBlocksTest
   // by a LATER statement exports into the scope of the statement that built
   // it, which was already refreshed, so its class-variable writes are not
   // kept. These pin the actual behaviour (and that it compiles and runs).
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testStoredClosureInvokedLaterLosesWrite =>
     SsoStaleSub deferred
     self assert: SsoStaleSub hits equals: 0
 
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testStoredClosureInvokedLaterInArmLosesWrite =>
     SsoStaleSub deferredInArm
     self assert: SsoStaleSub hits equals: 0
 
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 2). The fix must flip this assertion.
   testStoredClosureInvokedTwiceLosesWrites =>
     SsoStaleSub deferredTwice
     self assert: SsoStaleSub hits equals: 0
 
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 2). The fix must flip this assertion.
   testStoredClosureThenWritingSendKeepsOnlyTheSend =>
     SsoStaleSub deferredThenSend
     self assert: SsoStaleSub hits equals: 1
 
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testStoredClosureWithStatementsCompilesAndRuns =>
     SsoStaleSub deferredWithStatements
     self assert: SsoStaleSub hits equals: 0
@@ -222,10 +227,12 @@ TestCase subclass: SelfSendOverrideBlocksTest
   // class-side higher-order method does not keep its class-variable write (the
   // callee returns the ClassVars it was given), but the callee's own write is
   // kept, with and without a block that writes.
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testBlockPassedToClassSideHomLosesBlockWrite =>
     SsoStaleSub viaSection
     self assert: SsoStaleSub hits equals: 0
 
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testBlockPassedToClassSideHomThenSendLosesBlockWrite =>
     SsoStaleSub viaSectionThenSend
     self assert: SsoStaleSub hits equals: 0
@@ -240,20 +247,24 @@ TestCase subclass: SelfSendOverrideBlocksTest
 
   // The stored-closure limit is not limited to subclass overrides: a closure
   // calling the class's own mutating selector loses its write too.
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testStoredClosureOwnMutatingSelectorLosesWrite =>
     SsoStaleSub storedBump
     self assert: SsoStaleSub hits equals: 0
 
   // Known limit (ADR 0110, BT-3681): a stored closure can also read a stale or
   // reverted value. Correct answers would be 1 and 3; these pin the actual ones.
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testStoredClosureReadsRevertedValueAfterCaughtRaise =>
     self assert: SsoStaleSub staleAfterRaise equals: 2
 
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 3). The fix must flip this assertion.
   testStoredClosureReadsOlderValueAfterBump =>
     self assert: SsoStaleSub staleAfterBump equals: 2
 
   // Same limit inside a loop body (BT-3682 covers both positions). The correct
   // answer would be 1; this pins the actual one.
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testBlockPassedToClassSideHomInLoopBody =>
     SsoStaleSub viaSectionInLoop
     self assert: SsoStaleSub hits equals: 0
