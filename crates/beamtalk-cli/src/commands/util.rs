@@ -307,6 +307,9 @@ pub fn find_files(path: &Utf8Path, extensions: &[&str]) -> Result<Vec<Utf8PathBu
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::fs;
+
     #[test]
     fn surface_hash_of_error_is_not_constant_null_hash() {
         let err = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
@@ -314,9 +317,6 @@ mod tests {
         assert_ne!(h, super::sha256_hex(b"null"));
         assert!(!h.is_empty());
     }
-
-    use super::*;
-    use std::fs;
 
     #[test]
     fn test_content_hash_of_stable_for_same_content() {
