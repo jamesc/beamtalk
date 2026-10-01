@@ -20,9 +20,15 @@ and can be queried by other components (e.g., idle monitor).
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("kernel/include/file.hrl").
+
+%% BT-3672: leftover anonymous foreground workspace dirs idle longer than this
+%% are pruned when a new foreground workspace starts.
+-define(FOREGROUND_MAX_AGE_SECONDS, 7 * 24 * 3600).
 
 %% Public API
--export([new_foreground_id/0]).
+-export([new_foreground_id/0, is_foreground_id/1]).
+-export([workspaces_base_dir/0, prune_stale_foreground_workspaces/3]).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([on_actor_spawned/2, register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
@@ -544,6 +550,108 @@ new_foreground_id() ->
         integer_to_binary(erlang:unique_integer([positive]))
     ]).
 
+-doc """
+True when `WorkspaceId` has the shape produced by `new_foreground_id/0`
+(`foreground_<pid>_<microseconds>_<counter>`, BT-3672). Such workspaces are
+anonymous and per-run: their metadata is never persisted, and their leftover
+directories are eligible for age-based pruning. The strict shape (rather than
+a bare `foreground_` prefix) keeps a user-chosen name like `foreground_demo`
+persistent.
+""".
+-spec is_foreground_id(binary() | string()) -> boolean().
+is_foreground_id(Id) when is_list(Id) ->
+    try iolist_to_binary(Id) of
+        Bin -> is_foreground_id(Bin)
+    catch
+        _:_ -> false
+    end;
+is_foreground_id(<<"foreground_", Rest/binary>>) ->
+    case binary:split(Rest, <<"_">>, [global]) of
+        [Pid, Micros, Counter] ->
+            lists:all(fun is_digits/1, [Pid, Micros, Counter]);
+        _ ->
+            false
+    end;
+is_foreground_id(_) ->
+    false.
+
+is_digits(<<>>) -> false;
+is_digits(Bin) -> lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Bin)).
+
+-doc """
+Root directory holding per-workspace directories
+(`<home>/.beamtalk/workspaces`, or the OS user cache dir without a home).
+""".
+-spec workspaces_base_dir() -> file:filename().
+workspaces_base_dir() ->
+    case beamtalk_platform:home_dir() of
+        false -> filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
+        Home -> filename:join([Home, ".beamtalk", "workspaces"])
+    end.
+
+-doc """
+Remove leftover directories of anonymous foreground workspaces under `BaseDir`
+whose newest top-level entry is older than `MaxAgeSeconds` (BT-3672).
+
+Deliberately conservative, because the directory also holds other state
+(`workspace.log`, `cookie`, `port`, `node.info`, `changes/`): only directories
+whose name passes `is_foreground_id/1` are considered; a directory whose
+`port` file or any entry was touched within the window (i.e. a live or recent
+workspace) is kept; symlinks are never followed or removed. Best effort: all
+errors are swallowed. Returns the number of directories removed.
+""".
+-spec prune_stale_foreground_workspaces(file:filename(), non_neg_integer(), integer()) ->
+    non_neg_integer().
+prune_stale_foreground_workspaces(BaseDir, MaxAgeSeconds, NowSeconds) ->
+    try file:list_dir(BaseDir) of
+        {ok, Names} ->
+            Cutoff = NowSeconds - MaxAgeSeconds,
+            length([
+                N
+             || N <- Names,
+                is_foreground_id(N),
+                prune_if_stale(filename:join(BaseDir, N), Cutoff)
+            ]);
+        {error, _} ->
+            0
+    catch
+        _:_ -> 0
+    end.
+
+-spec prune_if_stale(file:filename(), integer()) -> boolean().
+prune_if_stale(Dir, Cutoff) ->
+    try
+        case file:read_link_info(Dir, [{time, posix}]) of
+            {ok, #file_info{type = directory, mtime = DirMtime}} ->
+                case newest_entry_mtime(Dir, DirMtime) < Cutoff of
+                    true -> file:del_dir_r(Dir) =:= ok;
+                    false -> false
+                end;
+            _ ->
+                false
+        end
+    catch
+        _:_ -> false
+    end.
+
+newest_entry_mtime(Dir, DirMtime) ->
+    case file:list_dir(Dir) of
+        {ok, Entries} ->
+            lists:foldl(
+                fun(E, Acc) ->
+                    case file:read_link_info(filename:join(Dir, E), [{time, posix}]) of
+                        {ok, #file_info{mtime = M}} -> max(M, Acc);
+                        _ -> Acc
+                    end
+                end,
+                DirMtime,
+                Entries
+            );
+        {error, _} ->
+            %% Unreadable: treat as fresh so we never delete what we can't inspect.
+            erlang:system_time(second)
+    end.
+
 %%% gen_server callbacks
 
 init(InitialMetadata) ->
@@ -578,20 +686,21 @@ init(InitialMetadata) ->
             release ->
                 undefined;
             workspace ->
-                case beamtalk_platform:home_dir() of
+                %% BT-3672: anonymous foreground ids are never reused, so a
+                %% persisted metadata.json could never be restored — skip it
+                %% rather than leaving one more stale dir per run. Only
+                %% explicitly named/persistent ids persist and restore.
+                case is_foreground_id(WorkspaceId) of
+                    true ->
+                        _ = prune_stale_foreground_workspaces(
+                            workspaces_base_dir(),
+                            ?FOREGROUND_MAX_AGE_SECONDS,
+                            Now
+                        ),
+                        undefined;
                     false ->
-                        CacheDir = filename:basedir(user_cache, "beamtalk"),
                         filename:join([
-                            CacheDir,
-                            "workspaces",
-                            binary_to_list(WorkspaceId),
-                            "metadata.json"
-                        ]);
-                    Home ->
-                        filename:join([
-                            Home,
-                            ".beamtalk",
-                            "workspaces",
+                            workspaces_base_dir(),
                             binary_to_list(WorkspaceId),
                             "metadata.json"
                         ])

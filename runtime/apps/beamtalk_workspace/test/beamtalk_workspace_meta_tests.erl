@@ -543,6 +543,97 @@ named_workspace_still_restores_metadata_test() ->
         _ = file:del_dir(MetaDir)
     end.
 
+is_foreground_id_test() ->
+    %% BT-3672: strict shape, so user-chosen names stay persistent.
+    ?assert(beamtalk_workspace_meta:is_foreground_id(beamtalk_workspace_meta:new_foreground_id())),
+    ?assert(beamtalk_workspace_meta:is_foreground_id("foreground_12_345_6")),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_demo">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_1">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_1_2_x">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_1__3">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"named_ws_1_2_3">>)).
+
+anonymous_foreground_workspace_does_not_persist_metadata_test() ->
+    %% BT-3672: an anonymous foreground workspace must not leave a
+    %% metadata.json behind (neither on debounce nor on terminate).
+    WsId = beamtalk_workspace_meta:new_foreground_id(),
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"bt_test_3672_foreground">>,
+        created_at => 2000000
+    }),
+    ok = beamtalk_workspace_meta:set_setting(autoflush, true),
+    beamtalk_workspace_meta:update_activity(),
+    {ok, _} = beamtalk_workspace_meta:get_metadata(),
+    gen_server:stop(Pid),
+    try
+        ?assertNot(filelib:is_regular(MetaFile)),
+        ?assertNot(filelib:is_dir(MetaDir))
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
+named_workspace_still_persists_metadata_test() ->
+    %% BT-3672 regression: explicitly named ids keep writing metadata.json.
+    WsId = <<"named_ws_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"bt_test_3672_named">>,
+        created_at => 2000000
+    }),
+    gen_server:stop(Pid),
+    try
+        ?assert(filelib:is_regular(MetaFile))
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
+prune_stale_foreground_workspaces_test() ->
+    %% BT-3672: only stale, strictly-shaped foreground dirs are removed.
+    Base = filename:join("bt_test_3672_prune", integer_to_list(erlang:unique_integer([positive]))),
+    Now = erlang:system_time(second),
+    Stale = <<"foreground_1_2_3">>,
+    Fresh = <<"foreground_4_5_6">>,
+    Named = <<"foreground_demo">>,
+    Other = <<"named_ws_1">>,
+    Mk = fun(Name, Age) ->
+        Dir = filename:join(Base, binary_to_list(Name)),
+        ok = filelib:ensure_path(Dir),
+        File = filename:join(Dir, "workspace.log"),
+        ok = file:write_file(File, <<"x">>),
+        T = calendar:system_time_to_local_time(Now - Age, second),
+        ok = file:write_file_info(File, #file_info{mtime = T, atime = T}),
+        ok = file:write_file_info(Dir, #file_info{mtime = T, atime = T}),
+        Dir
+    end,
+    Week = 7 * 24 * 3600,
+    StaleDir = Mk(Stale, 2 * Week),
+    FreshDir = Mk(Fresh, 60),
+    NamedDir = Mk(Named, 2 * Week),
+    OtherDir = Mk(Other, 2 * Week),
+    try
+        ?assertEqual(1, beamtalk_workspace_meta:prune_stale_foreground_workspaces(Base, Week, Now)),
+        ?assertNot(filelib:is_dir(StaleDir)),
+        ?assert(filelib:is_dir(FreshDir)),
+        ?assert(filelib:is_dir(NamedDir)),
+        ?assert(filelib:is_dir(OtherDir)),
+        %% Missing base dir is a no-op.
+        ?assertEqual(
+            0,
+            beamtalk_workspace_meta:prune_stale_foreground_workspaces("bt_no_such_dir", Week, Now)
+        )
+    after
+        _ = file:del_dir_r("bt_test_3672_prune")
+    end.
+
 load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
     WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
