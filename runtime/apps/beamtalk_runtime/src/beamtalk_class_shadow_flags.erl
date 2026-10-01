@@ -47,8 +47,12 @@ actual transitions write (set when unset, erase when set); both are rare
     set/2,
     clear/2,
     is_set/2,
-    is_shadowed/2
+    is_shadowed/2,
+    mark_ready/0,
+    is_ready/0
 ]).
+
+-define(READY_KEY, beamtalk_class_shadow_ready).
 
 -type kind() :: extension | runtime_fun.
 -export_type([kind/0]).
@@ -89,3 +93,26 @@ on `ClassName` may shadow a compiled class method.
 -spec is_shadowed(atom(), atom()) -> boolean().
 is_shadowed(ClassTag, ClassName) ->
     is_set(extension, ClassTag) orelse is_set(runtime_fun, ClassName).
+
+-doc """
+Mark the flags authoritative: the extension registry exists, so an unset
+`extension` flag really means "no extension". Called once from
+`beamtalk_extensions:init/0`. Until then (early bootstrap) the compiled
+class-side self-send fast path declines to the always-correct hierarchy walk.
+
+BT-3676: this is a `persistent_term` read on the send path, replacing an
+`ets:whereis/1` of the extension table (measurably dearer: a registry lookup
+with a lock per send). The flag is never cleared; a later loss of the table
+cannot make it wrong, because no extension can be registered without the table.
+""".
+-spec mark_ready() -> ok.
+mark_ready() ->
+    case persistent_term:get(?READY_KEY, false) of
+        true -> ok;
+        false -> persistent_term:put(?READY_KEY, true)
+    end.
+
+-doc "True once `mark_ready/0` ran (the extension registry was initialised).".
+-spec is_ready() -> boolean().
+is_ready() ->
+    persistent_term:get(?READY_KEY, false).

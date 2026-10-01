@@ -25,6 +25,14 @@ direct(Tag, Name, Sel) ->
 
 noop_fun() -> fun(_, _) -> ok end.
 
+ready_flag_test() ->
+    %% BT-3676: the fast-path guard reads a readiness flag, not the extension
+    %% table; `beamtalk_extensions:init/0` raises it (idempotently).
+    ok = beamtalk_extensions:init(),
+    ?assert(beamtalk_class_shadow_flags:is_ready()),
+    ok = beamtalk_class_shadow_flags:mark_ready(),
+    ?assert(beamtalk_class_shadow_flags:is_ready()).
+
 shadow_flag_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, [
         {"unregistering the last class-side extension restores the fast path", fun() ->

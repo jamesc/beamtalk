@@ -149,6 +149,8 @@ init() ->
             ok
     end,
 
+    %% BT-3676: the shadow flags are authoritative from here on.
+    beamtalk_class_shadow_flags:mark_ready(),
     ok.
 
 -doc """

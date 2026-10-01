@@ -262,9 +262,10 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testStoredClosureReadsOlderValueAfterBump =>
     self assert: SsoStaleSub staleAfterBump equals: 2
 
-  // Same limit inside a loop body (BT-3682 covers both positions). The correct
-  // answer would be 1; this pins the actual one.
-  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  // The same shape inside a loop body now keeps the block's write (BT-3676: a
+  // confined-scope send no longer commits the unchanged ClassVars its callee
+  // handed back, which used to overwrite the block's committed write). The
+  // non-loop position above (BT-3682) is still limited.
   testBlockPassedToClassSideHomInLoopBody =>
     SsoStaleSub viaSectionInLoop
-    self assert: SsoStaleSub hits equals: 0
+    self assert: SsoStaleSub hits equals: 1
