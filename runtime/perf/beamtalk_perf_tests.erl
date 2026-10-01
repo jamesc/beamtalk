@@ -23,6 +23,12 @@ Tests output parseable results in the format:
 -define(ITERATIONS, 1000).
 %% Number of warmup iterations (discarded)
 -define(WARMUP, 100).
+%% The CLI-driven self-send benchmark kills its process after this long. It
+%% must stay below the EUnit budget or the kill-on-timeout can never fire
+%% (EUnit would abort the test first). Budget: the in-VM benchmarks finish in
+%% well under 180 s, so 180 + CLI timeout < EUNIT_TIMEOUT_S.
+-define(CLI_TIMEOUT_MS, 300000).
+-define(EUNIT_TIMEOUT_S, 600).
 
 %%====================================================================
 %% Test Setup
@@ -104,7 +110,7 @@ perf_test_() ->
     {setup,
      fun setup/0,
      fun(_) -> ok end,
-     {timeout, 180, fun all_benchmarks/0}}.
+     {timeout, ?EUNIT_TIMEOUT_S, fun all_benchmarks/0}}.
 
 all_benchmarks() ->
     bench_raw_message_roundtrip(),
@@ -1154,21 +1160,26 @@ collect_port(Port, Acc) ->
     receive
         {Port, {data, Data}} -> collect_port(Port, [Data | Acc]);
         {Port, {exit_status, Status}} -> {Status, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
-    after 600000 ->
+    after ?CLI_TIMEOUT_MS ->
         kill_port_os_process(Port),
         catch port_close(Port),
         {timeout, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
     end.
 
-%% port_close/1 does not terminate the spawned OS process; kill it so a hung
-%% benchmark does not keep running.
+%% port_close/1 does not terminate the spawned OS process; kill it (and, on
+%% Unix, its children: `beamtalk run` spawns an erl VM) so a hung benchmark
+%% does not keep running.
 kill_port_os_process(Port) ->
     case erlang:port_info(Port, os_pid) of
         {os_pid, OsPid} ->
             Cmd =
                 case os:type() of
                     {win32, _} -> "taskkill /F /T /PID " ++ integer_to_list(OsPid);
-                    _ -> "kill -9 " ++ integer_to_list(OsPid)
+                    _ ->
+                        %% Note: pkill -P reaches direct children only; a shell wrapper
+                        %% between `beamtalk run` and beam.smp could leave a grandchild.
+                        Pid = integer_to_list(OsPid),
+                        "pkill -9 -P " ++ Pid ++ "; kill -9 " ++ Pid
                 end,
             _ = os:cmd(Cmd),
             ok;

@@ -272,8 +272,10 @@ compiled method that the walk honours: a class-side extension on the class
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
-Costs two ETS reads for the defining-class receiver; a subclass receiver
-short-circuits on the first clause.
+Costs one `ets:whereis/1` plus two `persistent_term` reads for the
+defining-class receiver (BT-3669: the per-class `beamtalk_class_shadow_flags`
+replace the former two ETS reads); a subclass receiver short-circuits on the
+first clause.
 """.
 -spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
 class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
@@ -281,14 +283,11 @@ class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
         true ->
             false;
         false ->
-            %% `badarg` (table not created yet, early bootstrap) declines: the
-            %% walk is always a correct answer.
-            try
-                not beamtalk_extensions:has(Tag, Selector) andalso
-                    not beamtalk_class_metadata:has_runtime_class_methods(ClassName)
-            catch
-                error:badarg -> false
-            end
+            %% Extension table not created yet (early bootstrap) declines: the
+            %% walk is always a correct answer. `ets:whereis/1` is a cheap BIF.
+            %% The shadow flags (BT-3669) are persistent_term reads, no ETS.
+            ets:whereis(beamtalk_extensions) =/= undefined andalso
+                not beamtalk_class_shadow_flags:is_shadowed(Tag, ClassName)
     end;
 class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.
