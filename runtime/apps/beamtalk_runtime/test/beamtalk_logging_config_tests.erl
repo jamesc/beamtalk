@@ -92,7 +92,7 @@ logging_config_test_() ->
             fun loggerInfo_with_mcp_shows_signal_file/0,
             fun enable_supervisor_progress_idempotent/0,
             fun loggerInfo_handles_no_file_config/0,
-            fun mcp_signal_path_without_home_uses_cache_dir/0
+            fun mcp_signal_path_without_home_is_safe/0
         ]}.
 
 %%====================================================================
@@ -432,12 +432,7 @@ mcp_signal_file_with_workspace_test_() ->
                 io_lib:format("test_mcp_~p", [erlang:unique_integer([positive])])
             ),
             %% Create workspace directory
-            Home =
-                case os:getenv("HOME") of
-                    false -> filename:basedir(user_cache, "beamtalk");
-                    H -> H
-                end,
-            WsDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(TestWsId)]),
+            WsDir = beamtalk_platform:workspace_dir(TestWsId),
             ok = filelib:ensure_dir(filename:join(WsDir, "dummy")),
             %% Register a mock for beamtalk_workspace_meta via meck
             %% Since we cannot use meck, we test via the signal path function
@@ -498,18 +493,10 @@ mcp_signal_file_with_real_workspace_test_() ->
         fun({TestWsId, MetaPid}) ->
             beamtalk_logging_config:disableAllDebug(),
             %% Best-effort cleanup of the workspace directory
-            case beamtalk_platform:home_dir() of
-                false ->
-                    CacheDir = filename:basedir(user_cache, "beamtalk"),
-                    WsDir = filename:join([
-                        CacheDir, "workspaces", binary_to_list(TestWsId)
-                    ]),
-                    _ = file:delete(filename:join(WsDir, "mcp_debug_enabled")),
-                    _ = file:del_dir(WsDir);
-                Home ->
-                    WsDir = filename:join([
-                        Home, ".beamtalk", "workspaces", binary_to_list(TestWsId)
-                    ]),
+            case beamtalk_platform:workspace_dir(TestWsId) of
+                undefined ->
+                    ok;
+                WsDir ->
                     _ = file:delete(filename:join(WsDir, "mcp_debug_enabled")),
                     _ = file:del_dir(WsDir)
             end,
@@ -908,7 +895,7 @@ loggerInfo_handles_no_file_config() ->
     ?assert(is_binary(Info)),
     ?assertNotEqual(nomatch, binary:match(Info, <<"Log file:">>)).
 
-mcp_signal_path_without_home_uses_cache_dir() ->
+mcp_signal_path_without_home_is_safe() ->
     %% This path requires a running workspace_meta. Without it, the
     %% function returns workspace_not_started (which is already covered
     %% elsewhere). We verify here that calling mcp_signal_path is safe

@@ -28,7 +28,7 @@ and can be queried by other components (e.g., idle monitor).
 
 %% Public API
 -export([new_foreground_id/0, is_foreground_id/1]).
--export([workspaces_base_dir/0, prune_stale_foreground_workspaces/3]).
+-export([prune_stale_foreground_workspaces/3]).
 -export([prune_stale_foreground_workspaces_async/3]).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([on_actor_spawned/2, register_actor/1, unregister_actor/1, supervised_actors/0]).
@@ -580,17 +580,6 @@ is_digits(<<>>) -> false;
 is_digits(Bin) -> lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Bin)).
 
 -doc """
-Root directory holding per-workspace directories
-(`<home>/.beamtalk/workspaces`, or the OS user cache dir without a home).
-""".
--spec workspaces_base_dir() -> file:filename().
-workspaces_base_dir() ->
-    case beamtalk_platform:home_dir() of
-        false -> filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
-        Home -> filename:join([Home, ".beamtalk", "workspaces"])
-    end.
-
--doc """
 Remove leftover directories of anonymous foreground workspaces under `BaseDir`
 (BT-3672). Returns the number of directories removed.
 
@@ -814,23 +803,29 @@ init(InitialMetadata) ->
                         %% probe ports per stale candidate. Tests and harnesses
                         %% set BEAMTALK_NO_FOREGROUND_PRUNE=1 so they never
                         %% prune the developer's real workspaces dir.
-                        case os:getenv("BEAMTALK_NO_FOREGROUND_PRUNE") of
-                            "1" ->
+                        case
+                            {
+                                os:getenv("BEAMTALK_NO_FOREGROUND_PRUNE"),
+                                beamtalk_platform:workspaces_base_dir()
+                            }
+                        of
+                            {"1", _} ->
                                 ok;
-                            _ ->
+                            {_, undefined} ->
+                                ok;
+                            {_, BaseDir} ->
                                 _ = prune_stale_foreground_workspaces_async(
-                                    workspaces_base_dir(),
+                                    BaseDir,
                                     ?FOREGROUND_MAX_AGE_SECONDS,
                                     Now
                                 )
                         end,
                         undefined;
                     false ->
-                        filename:join([
-                            workspaces_base_dir(),
-                            binary_to_list(WorkspaceId),
-                            "metadata.json"
-                        ])
+                        case beamtalk_platform:workspace_dir(WorkspaceId) of
+                            undefined -> undefined;
+                            WsDir -> filename:join(WsDir, "metadata.json")
+                        end
                 end
         end,
 
