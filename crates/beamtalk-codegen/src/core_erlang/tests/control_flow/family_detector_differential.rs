@@ -96,6 +96,35 @@ fn expected_mismatches() -> Vec<Mismatch> {
             line: 72,
             shape: "letrec",
         },
+        // BT-3683: a class's own late-bound `self increment` nested in a
+        // conditional arm of a `to:do:` / `timesRepeat:` body (`armsInToDo`,
+        // `armsInTimesRepeat`, open and sealed). Same shape as the `whileTrue:`
+        // entry above: the loop's own carry-out cannot thread a mutation
+        // nested in an arm, so the write is recovered from the per-scope
+        // commit tokens (BT-3675) and pinned by
+        // `SelfSendOverrideBlocksTest>>test{Open,Sealed}ArmsInToDo` /
+        // `...ArmsInTimesRepeat`. The `do:`-over-a-literal shapes added by the
+        // same issue do not appear here (their old detector already agrees).
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
+            line: 106,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
+            line: 118,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
+            line: 86,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
+            line: 98,
+            shape: "letrec",
+        },
     ]
 }
 

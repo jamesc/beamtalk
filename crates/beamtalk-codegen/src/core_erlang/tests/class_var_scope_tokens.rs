@@ -250,6 +250,46 @@ fn stored_closure_invoked_later_compiles_through_erlc() {
 }
 
 #[test]
+fn nested_scope_refresh_falls_back_to_the_enclosing_scopes_commit() {
+    // BT-3683: an arm of a threaded loop body that is not taken leaves its own
+    // token empty, so its refresh answers the fallback and commits it to the
+    // enclosing loop scope. The fallback must be the enclosing scope's newest
+    // commit (an earlier iteration's write), not the stale lexical version
+    // captured at arm entry.
+    let src = "Object subclass: ScopeTokenArms
+  classState: n = 0
+
+  class foo => self.n := self.n + 1
+
+  class loopArm =>
+    seen := 0
+    #(1, 2) do: [:i |
+      seen := seen + 1
+      i =:= 1 ifTrue: [self foo]
+    ]
+    self.n
+";
+    let code = compile("bt@scopetokenarms", src);
+    let takes: Vec<&str> = code.matches("'class_var_scope_take'(ClassSelf, ").collect();
+    assert!(!takes.is_empty(), "expected a scope refresh. Got:\n{code}");
+    let nested_fallback = code
+        .match_indices("'class_var_scope_take'(ClassSelf, ")
+        .any(|(i, m)| {
+            code[i + m.len()..]
+                .split_once(", ")
+                .is_some_and(|(_, rest)| {
+                    rest.starts_with(
+                        "call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf, [_CVTok",
+                    )
+                })
+        });
+    assert!(
+        nested_fallback,
+        "a nested scope's refresh must fall back to the enclosing scopes' commit. Got:\n{code}"
+    );
+}
+
+#[test]
 fn runtime_exports_every_helper_codegen_calls() {
     let erl_path =
         repo_root().join("runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl");

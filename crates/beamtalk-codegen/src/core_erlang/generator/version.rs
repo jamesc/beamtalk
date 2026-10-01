@@ -490,7 +490,8 @@ impl CoreErlangGenerator {
         let token = self.close_class_var_scope(mark)?;
         let cv_before = Self::class_var_name_at(mark.version);
         let cv_new = self.next_class_var();
-        let take = Self::class_var_scope_take_doc(&token.name, &cv_before);
+        let fallback = self.class_var_scope_refresh_fallback_doc(&cv_before);
+        let take = Self::class_var_scope_take_doc(&token.name, fallback);
         let commit = self.commit_to_innermost_scope_doc(&cv_new);
         Some(docvec![
             "let ",
@@ -525,7 +526,7 @@ impl CoreErlangGenerator {
     /// <token>, <fallback>)`.
     pub(in crate::core_erlang) fn class_var_scope_take_doc(
         token: &str,
-        fallback: &str,
+        fallback: Document<'static>,
     ) -> Document<'static> {
         docvec![
             "call 'beamtalk_class_dispatch':'class_var_scope_take'(",
@@ -533,9 +534,35 @@ impl CoreErlangGenerator {
             ", ",
             leaf::var(token.to_string()),
             ", ",
-            leaf::var(fallback.to_string()),
+            fallback,
             ")",
         ]
+    }
+
+    /// BT-3683: the value a scope's refresh answers when nothing committed
+    /// under the scope's own token (an arm that was not taken, or a scope whose
+    /// only commits were consumed). Call after the scope's token was popped
+    /// ([`Self::close_class_var_scope`]), so the open chain is the ENCLOSING
+    /// scopes.
+    ///
+    /// The lexical version live before the scope (`cv_before`) is a stale copy
+    /// when the scope sits in a loop body or closure: an earlier iteration (or
+    /// invocation) of the enclosing scope may have committed a newer value
+    /// under an enclosing token, and committing `cv_before` over it (the
+    /// refresh commits to the innermost enclosing token) would lose that
+    /// write. So the fallback is the newest commit of the enclosing scopes,
+    /// and `cv_before` only when none exists. With no enclosing scope it is
+    /// `cv_before` itself.
+    pub(in crate::core_erlang) fn class_var_scope_refresh_fallback_doc(
+        &mut self,
+        cv_before: &str,
+    ) -> Document<'static> {
+        let chain = self.class_var_scope_chain();
+        if chain.is_empty() {
+            leaf::var(cv_before.to_string())
+        } else {
+            Self::class_var_scope_read_doc(&chain, cv_before)
+        }
     }
 
     /// `call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf,
