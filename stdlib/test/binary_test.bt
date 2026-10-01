@@ -12,6 +12,8 @@
 
 TestCase subclass: BinaryTest
 
+  field: bin = nil
+
   setUp => self.bin := Binary fromBytes: #(65, 66, 67)
 
   // ═══════════════════════════════════════════════════════════════════
