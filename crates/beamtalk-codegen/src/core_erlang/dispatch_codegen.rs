@@ -274,6 +274,61 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// The `ClassVars` name a class-side send passes to its callee, and the
+    /// per-scope token its result is committed under (BT-3675).
+    ///
+    /// Outside any scope opened by [`Self::class_var_scope_mark`] this is just
+    /// the live `ClassVars` name, with no token: the send's rebind is carried
+    /// lexically and nothing extra is emitted (the sealed-class and
+    /// non-confined hot path).
+    ///
+    /// Inside one, the send is generated where its rebind may be rolled back
+    /// with the enclosing closure or arm, so it joins the scope: the live
+    /// `ClassVars` name is first re-synced from the newest commit of the
+    /// enclosing scopes (the previous iteration's send of the same scope, or
+    /// the previous invocation of the enclosing closure — whatever kind of callee,
+    /// including a statically bound one that READS a class variable before
+    /// its own late-bound send), as a real `ClassVars` `Bind` pushed onto
+    /// `prelude` and `verify()`-checked, rather than rebinding the live name
+    /// inside an opaque statement. The returned name is that fresh version.
+    pub(super) fn class_var_for_send(
+        &mut self,
+        prelude: &mut Vec<ThreadedStmt>,
+    ) -> (String, Option<String>) {
+        let cv = self.current_class_var();
+        let Some(token) = self.mark_innermost_scope_used() else {
+            return (cv, None);
+        };
+        let chain = self.class_var_scope_chain();
+        let source_version = self.class_var_version();
+        self.next_class_var();
+        let target_version = self.class_var_version();
+        let frame = if self.in_loop_body {
+            self.current_branch_frame()
+        } else {
+            super::threaded_ir::FrameId::ROOT
+        };
+        let span = beamtalk_core::source_analysis::Span::default();
+        let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
+            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
+                Self::class_var_scope_read_doc(&chain, &cv),
+            )),
+            false,
+            frame,
+            false,
+            source_version,
+            target_version,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "class-var pre-call sync from the scope's commit",
+            span,
+        );
+        prelude.push(bind);
+        (self.current_class_var(), Some(token))
+    }
+
     /// Wrap a class-method call that may return either a
     /// plain value or a `{'class_var_result', Result, NewClassVars}` tuple,
     /// threading the new class-var binding and exposing the unwrapped result.
@@ -301,35 +356,21 @@ impl CoreErlangGenerator {
     /// and the inherited-dispatch branch in
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
     ///
-    /// `late_bound` is true only for sends a subclass override can intercept
-    /// directly (BT-3667): only those re-sync `ClassVars` from the ADR 0110
-    /// shadow before the call. In an open class EVERY unwrapped send counts
-    /// as a confined mint, including statically bound ones (`class sealed`
-    /// selector, explicit own-class reference, `super`): the callee's own
-    /// `self foo` is late-bound, so it may reach a subclass override that
-    /// writes a class variable, which the base-class purity gates cannot see.
-    /// Only in a sealed class are the purity gates exact.
+    /// `scope_token` is the per-scope token (BT-3675) the call's returned
+    /// `ClassVars` are committed under, from [`Self::class_var_for_send`]:
+    /// `Some` when the send is generated inside a scope that cannot thread the
+    /// rebind out (a bare block, a loop body, a conditional arm, an
+    /// `on:do:`/`ensure:` body, or a prelude closed into an opaque value).
+    /// The commit follows the rebind, so it runs only after the callee
+    /// returned normally.
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
         args_prelude: Vec<ThreadedStmt>,
         call_doc: Document<'static>,
-        late_bound: bool,
+        scope_token: Option<String>,
     ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
-        // BT-3667: in an open class the callee may be a subclass override that
-        // writes a class variable from a scope that cannot thread the rebind
-        // out (a bare block closure, a nested conditional arm). Start the call
-        // from the newest shadow-written class vars by re-binding the live
-        // `ClassVars` name — which the caller already captured by name into
-        // `call_doc`, and which the plain-reply fall-back below reads too — so
-        // an earlier send in the same scope (the previous iteration of a
-        // `collect:`) is not overwritten from a stale lexical copy.
-        let sync_doc = if late_bound {
-            Some(Self::class_var_shadow_rebind_doc(&cv, &cv))
-        } else {
-            None
-        };
         // the version numbers driving both verify() and the real
         // Bind rendered below — captured before minting, matching the old
         // `cv`/`new_cv` name-capture ordering exactly (fresh_temp_var call
@@ -362,9 +403,6 @@ impl CoreErlangGenerator {
         ];
 
         self.next_class_var();
-        if !self.is_class_sealed() {
-            self.note_open_class_var_mint();
-        }
         let target_version = self.class_var_version();
 
         // ADR 0111 Phase D: construct, verify, and
@@ -434,11 +472,14 @@ impl CoreErlangGenerator {
             self.class_send_call_and_unwrap_docs(&call_result, &result, call_doc);
         let span = beamtalk_core::source_analysis::Span::default();
         let mut prelude = args_prelude;
-        if let Some(sync_doc) = sync_doc {
-            prelude.push(ThreadedStmt::Statement(sync_doc, span));
-        }
         prelude.push(ThreadedStmt::Statement(call_stmt_doc, span));
         prelude.push(bind);
+        if let Some(token) = scope_token {
+            prelude.push(ThreadedStmt::Statement(
+                Self::class_var_scope_commit_doc(&token, &self.current_class_var()),
+                span,
+            ));
+        }
         prelude.push(ThreadedStmt::Statement(unwrap_stmt_doc, span));
         ThreadedValue {
             prelude,
@@ -510,85 +551,64 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3667: the `ThreadedIr` counterpart of
+    /// BT-3675: the `ThreadedIr` counterpart of
     /// [`Self::refresh_class_var_after_opaque_scope`], for statement
     /// sequences that are built as `ThreadedStmt`s (an `on:do:`/`ensure:` arm
     /// body) rather than spliced `Document`s.
     ///
-    /// Generating one statement of `stmts` may mint `ClassVars` versions the
-    /// sequence cannot see: a late-bound self-send nested in a conditional
-    /// arm mints a version that is rolled back (the live version stays put),
-    /// and one nested in a `match:` arm leaves the live version advanced to a
-    /// name bound only inside that arm's own scope. Either way the
-    /// construct's trailing `ClassVars` slot would carry a stale or unbound
-    /// variable. Returns a real `Bind` of a fresh `ClassVarsN` from the ADR
-    /// 0110 shadow (falling back to the construct's pre-sequence version, i.e. the version
-    /// live before `stmts` began), so
-    /// the slot carries the write. Empty when nothing was lost: nothing was
-    /// minted, or the live version is bound in `stmts` (threaded precisely).
+    /// Closes the scope `mark` opened before generating one statement of
+    /// `stmts` (whose own `ThreadedStmt`s start at index `start`). A late-bound
+    /// class-side self-send nested in a conditional or `match:` arm of that
+    /// statement mints a `ClassVars` version this sequence cannot carry out
+    /// (the gates that admit the send judge it by the base class's own view of
+    /// the selector, and a subclass override may write a class variable), but
+    /// it committed its returned class variables under the scope's token. When
+    /// the token was used, inserts its `make_ref()` binding at `start` and
+    /// returns a real, `verify()`-checked `Bind` of a fresh `ClassVarsN` from
+    /// that commit (falling back to the version live before the statement), so
+    /// the construct's trailing `ClassVars` slot carries the write. Empty when
+    /// nothing committed.
     pub(super) fn confined_class_var_refresh_stmt(
         &mut self,
         mark: super::generator::version::ClassVarScopeMark,
-        stmts: &[ThreadedStmt],
+        stmts: &mut Vec<ThreadedStmt>,
+        start: usize,
         frame: super::threaded_ir::FrameId,
         span: Span,
     ) -> Vec<ThreadedStmt> {
-        let current = self.class_var_version();
-        if !self.in_class_method() {
+        let prefix = self.class_var_scope_prefix(mark);
+        let Some(token) = self.close_class_var_scope(mark) else {
             return Vec::new();
-        }
-        let advanced = current != mark.version;
-        if !advanced && self.class_var_mints() == mark.mints {
-            return Vec::new();
-        }
-        // Advanced: precisely threaded when a `Bind` (or a construct that
-        // produces it) in this sequence already binds the live version.
-        if advanced && Self::stmts_bind_class_var_version(stmts, current) {
-            return Vec::new();
-        }
-        let mut source_counter = super::threaded_ir::VersionCounter::new();
-        source_counter.set_version(mark.version);
-        let source_var = source_counter.current_var(VersionPrefix::ClassVars);
+        };
+        stmts.insert(start, ThreadedStmt::Statement(prefix, span));
+        let cv_before = Self::class_var_name_at(mark.version);
+        // The version live before the statement is the one bound at this
+        // frame: the live one may be a name minted inside a nested arm.
+        let source_version = mark.version;
         self.next_class_var();
         let target_version = self.class_var_version();
         let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
             super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
-                Self::class_var_shadow_read_doc(&source_var),
+                Self::class_var_scope_take_doc(&token.name, &cv_before),
             )),
             false,
             frame,
             false,
-            mark.version,
+            source_version,
             target_version,
             span,
         );
         self.report_threaded_ir_verify_errors(
             &errors,
-            "class-var refresh from the shadow after a confined late-bound self-send",
+            "class-var refresh from the scope's commit after a confined late-bound self-send",
             span,
         );
-        // The literal separator space the preceding opaque `let … in`
-        // statement does not end with (the statement sequencer in
-        // `generate_exception_body_with_threading_inner` inserts the same one
-        // between source statements).
-        vec![ThreadedStmt::Statement(Document::Str(" "), span), bind]
-    }
-
-    /// Whether `stmts` (recursively) contains a `ClassVars` `Bind` whose
-    /// target is `version`.
-    fn stmts_bind_class_var_version(stmts: &[ThreadedStmt], version: usize) -> bool {
-        stmts.iter().any(|stmt| match stmt {
-            ThreadedStmt::Bind { target, .. } => {
-                target.prefix == VersionPrefix::ClassVars && target.version == version
-            }
-            ThreadedStmt::Threaded { body, produces, .. } => {
-                produces
-                    .iter()
-                    .any(|v| v.prefix == VersionPrefix::ClassVars && v.version == version)
-                    || Self::stmts_bind_class_var_version(body, version)
-            }
-            _ => false,
-        })
+        let mut refresh = vec![ThreadedStmt::Statement(Document::Str(" "), span), bind];
+        let cv_new = self.current_class_var();
+        if let Some(commit) = self.commit_to_innermost_scope_doc(&cv_new) {
+            refresh.push(ThreadedStmt::Statement(commit, span));
+        }
+        refresh
     }
 
     /// ADR 0111 Addendum 9, Questions 2/3: rebinds `ClassVarsN`
@@ -626,7 +646,11 @@ impl CoreErlangGenerator {
             span,
         );
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
-        super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
+        let rebind = super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx);
+        // BT-3675: the rebind is a mint like a send's; commit it to the
+        // enclosing scope so later sends sync from it.
+        let commit = self.commit_live_class_var_doc();
+        docvec![rebind, commit]
     }
 
     /// the value-type `Self` mirror of
@@ -1501,8 +1525,8 @@ impl CoreErlangGenerator {
                     value: ValueRef::Doc(doc),
                 });
             }
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
-            let cv = self.current_class_var();
+            let (mut args_preamble, args_doc) = self.thread_args(arguments)?;
+            let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch_local'(",
                 leaf::atom(builder_class),
@@ -1514,7 +1538,7 @@ impl CoreErlangGenerator {
                 args_doc,
                 "])"
             ];
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, true));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token));
         }
 
         // BT-3666: a class-side self-send to a selector this class defines is
@@ -1543,8 +1567,18 @@ impl CoreErlangGenerator {
             // does NOT roll back class_var_version, so the snapshot we take
             // afterwards (`cv`) reflects the post-args version — that is the
             // ClassVars binding to thread into the callee.
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
-            let cv = self.current_class_var();
+            let (mut args_preamble, args_doc) = self.thread_args(arguments)?;
+            // A provably pure callee in a sealed class neither writes a class variable
+            // nor needs the scope sync (BT-3675).
+            let pure_sealed_send = self.is_class_sealed()
+                && !self
+                    .class_var_mutating_selectors()
+                    .contains(selector_atom.as_str());
+            let (cv, scope_token) = if pure_sealed_send {
+                (self.current_class_var(), None)
+            } else {
+                self.class_var_for_send(&mut args_preamble)
+            };
             let call_doc = Self::class_direct_call_doc(
                 &self.module_name,
                 &selector_atom,
@@ -1565,26 +1599,20 @@ impl CoreErlangGenerator {
             // own `self foo` sends are late-bound in an open class, so they may
             // reach a subclass override that writes a class variable. The
             // shortcut is therefore only sound in a sealed class.
-            if self.is_class_sealed()
-                && !self
-                    .class_var_mutating_selectors()
-                    .contains(selector_atom.as_str())
-            {
+            if pure_sealed_send {
                 return Ok(self.emit_pure_class_self_send_unwrap(args_preamble, call_doc));
             }
             // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
-            // Statically bound (sealed class, `class sealed` selector, or an
-            // explicit own-class reference): not late-bound.
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, false));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token));
         }
         if defines_selector {
             // Bind every argument once, before the guarded `case`: the doc is
             // spliced into both arms, and an inline block argument containing
             // further open-class self-sends would otherwise double per nesting
             // level (2^depth code growth).
-            let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
+            let (mut args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
             let args_doc = Self::join_docs_with_commas(arg_refs);
-            let cv = self.current_class_var();
+            let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
             // Fast path: when the receiving class IS this class (its metaclass
             // tag is a compile-time constant) and nothing shadows the compiled
             // method (no class-side extension, no runtime-installed
@@ -1619,7 +1647,7 @@ impl CoreErlangGenerator {
             // Late-bound: a subclass override may write a class variable even
             // when this class's own `selector` never does, so the purity
             // shortcut is unsound here. Always rebind the returned ClassVars.
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, true));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token));
         }
         // Auto-generated keyword constructor for Value subclass: classes.
         // `ClassName slot: value` inside a class method routes here when the selector
@@ -1749,13 +1777,13 @@ impl CoreErlangGenerator {
             });
         }
 
-        let (args_preamble, args_doc) = self.thread_args(arguments)?;
-        let cv = self.current_class_var();
+        let (mut args_preamble, args_doc) = self.thread_args(arguments)?;
+        let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
         let call_doc = Self::class_self_send_call_doc(&selector_atom, &cv, args_doc);
         // NOTE: prelude stays real `ThreadedStmt`s here — the caller splices
         // it into its own frame or closes it (matches the local-class-method
         // branch above).
-        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, !self.is_class_sealed()))
+        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token))
     }
 
     /// Direct call `class_<sel>(ClassSelf, ClassVars, Args...)` into this
@@ -2774,8 +2802,8 @@ impl CoreErlangGenerator {
         // export, so this must not use the compiled `beamtalk_dispatch:super/5`
         // instance path below.
         if let Some(builder_class) = self.builder_class_method_class() {
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
-            let cv = self.current_class_var();
+            let (mut args_preamble, args_doc) = self.thread_args(arguments)?;
+            let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
                 leaf::atom(builder_class),
@@ -2790,7 +2818,7 @@ impl CoreErlangGenerator {
             // ADR 0118 phase 5b: reached through ordinary
             // `generate_expression` — close the producer's prelude inline.
             // `super` binds statically to the superclass: not late-bound.
-            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc, false);
+            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token);
             return Ok(self.close_threaded_value_doc(tv));
         }
 

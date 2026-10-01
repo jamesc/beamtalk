@@ -1,0 +1,123 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3675: template-method fixture for the per-scope class-variable tokens. The
+// base reads / writes `hits` around late-bound self-sends that
+// SsoStaleSub overrides to write `hits` and (for `boom`) raise. See
+// self_send_override_blocks_test.bt.
+
+Object subclass: SsoStaleBase
+  classState: hits = 0
+
+  class hits -> Integer => self.hits
+
+  class resetHits -> Integer => self.hits := 0
+
+  class bump -> Integer => self.hits := self.hits + 1
+
+  // Overridden by SsoStaleSub: writes `hits`; `boom` writes then raises.
+  class foo -> Integer => 0
+
+  class boom -> Integer => 0
+
+  class noop -> Integer => 0
+
+  // Reads `hits` BEFORE its own late-bound `self foo`.
+  class readThenFoo -> Integer =>
+    r := self.hits
+    self foo
+    r
+
+  // BT-3675 review: a statically bound wrapper in a loop reads the previous
+  // iteration's write.
+  class viaReadLoop -> List =>
+    #(1, 2, 3) collect: [:x | SsoStaleBase readThenFoo]
+
+  // A caught raise from a callee that wrote first, then a `class sealed`
+  // helper inside a block.
+  class sealed sealedNoop -> Integer => 0
+
+  class caughtThenSealedHelper -> Integer =>
+    [self boom] on: Error do: [:e | nil]
+    #(1) do: [:x | self sealedNoop]
+    0
+
+  // The method's own try body writes (via `bump`) and then raises.
+  class ownTryRaise -> Integer =>
+    [
+      self bump
+      1 / 0
+    ] on: Error do: [:e | nil]
+    self noop
+    self.hits
+
+  // A completed writer followed by a raise in the SAME scope: the scope's
+  // writes are discarded as a whole.
+  class completedThenRaise -> Integer =>
+    [
+      #(1) do: [:x | self foo]
+      1 / 0
+    ] on: Error do: [:e | nil]
+    #(1) do: [:x | self noop]
+    0
+
+  // A completed writer in a normally finishing block keeps its write.
+  class completedKept -> Integer =>
+    #(1, 2) do: [:x | self foo]
+    0
+
+  // The same, but the raise is caught by a runtime `Result tryDo:` rather
+  // than a generated `on:do:`.
+  class completedThenRaiseRuntime -> Integer =>
+    Result
+      tryDo: [
+        #(1) do: [:x | self foo]
+        1 / 0
+      ]
+    #(1) do: [:x | self noop]
+    0
+
+  // A successful runtime catcher keeps the closure's writes.
+  class runtimeKept -> Integer =>
+    Result tryDo: [self foo]
+    0
+
+  // Closure bodies: a caught raise inside the closure, then another send.
+  class closureCaughtThenSend -> Integer =>
+    #(1, 2)
+      do: [:x |
+        [
+          self foo
+          1 / 0
+        ] on: Error do: [:e | nil]
+        self foo
+      ]
+    0
+
+  class closureCompletedTry -> Integer =>
+    #(1, 2)
+      do: [:x |
+        [self foo] on: Error do: [:e | nil]
+        self foo
+      ]
+    0
+
+  // Nested closures keep every write.
+  class nestedClosures -> Integer =>
+    #(1, 2) do: [:x | #(1, 2) do: [:y | self foo]]
+    0
+
+  // A handler arm's send is kept.
+  class handlerSend -> Integer =>
+    [1 / 0] on: Error do: [:e | self foo]
+    self noop
+    0
+
+  // A raise caught by an outer handler after the inner scope finished.
+  class outerCaught -> Integer =>
+    [
+      #(1) do: [:x | self foo]
+      1 / 0
+    ] on: Error do: [:e | self noop]
+    self noop
+    0

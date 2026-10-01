@@ -1509,6 +1509,11 @@ impl CoreErlangGenerator {
 
         let mut result_var = "'nil'".to_string();
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
+        // BT-3675: the arm body is a class-variable region around its own
+        // statements' scopes: what a statement's refresh commits stays in this
+        // arm, and reaches the enclosing scope only through the construct's
+        // result slot when the arm completes — never when it raises.
+        let arm_region = self.open_arm_region();
 
         for (i, stmt) in body.body.iter().enumerate() {
             let expr = &stmt.expression;
@@ -1522,8 +1527,10 @@ impl CoreErlangGenerator {
                 stmts.push(ThreadedStmt::Statement(Document::Str(" "), span));
             }
             let is_last = i == body.body.len() - 1;
-            // BT-3667: see the refresh after this statement's lowering below.
+            // BT-3675: this statement is its own class-variable scope; see the
+            // refresh after its lowering below.
             let cv_mark = self.class_var_scope_mark();
+            let stmt_start = stmts.len();
 
             // A value-type `self.field := ...` write nested inside a further
             // construct of this arm's own body — most notably another
@@ -1745,15 +1752,27 @@ impl CoreErlangGenerator {
                 ));
             }
 
-            // BT-3667: a late-bound class-side self-send nested in a
+            // BT-3675: a late-bound class-side self-send nested in a
             // conditional or `match:` arm of this statement mints a
             // `ClassVars` version that this sequence cannot carry out (the
             // gates that admit the send judge it by the base class's own
             // view of the selector, and a subclass override may write a
-            // class variable). Recover the write from the ADR 0110 shadow so
-            // the construct's trailing `ClassVars` slot carries it.
-            let refresh = self.confined_class_var_refresh_stmt(cv_mark, &stmts, frame, span);
+            // class variable). The send committed its returned class
+            // variables under this statement's token once the callee
+            // returned; bind them so the construct's trailing `ClassVars`
+            // slot carries the write.
+            let refresh =
+                self.confined_class_var_refresh_stmt(cv_mark, &mut stmts, stmt_start, frame, span);
             stmts.extend(refresh);
+        }
+        if let Some((arm_prefix, arm_export)) = self.close_arm_region(arm_region) {
+            stmts.insert(0, ThreadedStmt::Statement(arm_prefix, body.span));
+            if let Some(export) = arm_export {
+                // The literal separator space the statement sequencer
+                // inserts between source statements.
+                stmts.push(ThreadedStmt::Statement(Document::Str(" "), body.span));
+                stmts.push(ThreadedStmt::Statement(export, body.span));
+            }
         }
 
         let final_state_version = self.state_version();

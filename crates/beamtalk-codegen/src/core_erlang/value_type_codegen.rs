@@ -2048,6 +2048,9 @@ impl CoreErlangGenerator {
         let rhs_doc = self.expression_doc(value)?;
         let tuple_var = self.fresh_temp_var("AssignThreaded");
 
+        // BT-3675: the scope token the construct's sends committed under must
+        // be bound before the construct.
+        body_parts.push(self.class_var_scope_prefix(cv_version_before));
         // Bind the {value, StateAcc} tuple.
         body_parts.push(docvec![
             "    let ",
@@ -2067,10 +2070,10 @@ impl CoreErlangGenerator {
         // `ClassVars` precisely via the 3rd tuple element
         // below — doing both would rebind `ClassVars` twice, shadowing the
         // Letrec extraction with a redundant (if equivalent) shadow read.
-        if !families.contains(&VersionPrefix::ClassVars) {
-            if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
-                body_parts.push(refresh);
-            }
+        if families.contains(&VersionPrefix::ClassVars) {
+            let _ = self.close_class_var_scope(cv_version_before);
+        } else if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
+            body_parts.push(refresh);
         }
 
         // Bind the assignment target to element 1 (the logical value).
@@ -2433,8 +2436,9 @@ impl CoreErlangGenerator {
             "FoldlListOpResult",
             "FoldlListOpState",
         );
+        let scope_prefix = self.class_var_scope_prefix(cv_version_before);
         if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
-            return Ok(docvec![extraction_doc, refresh]);
+            return Ok(docvec![scope_prefix, extraction_doc, refresh]);
         }
         Ok(extraction_doc)
     }
@@ -4078,6 +4082,11 @@ impl CoreErlangGenerator {
         }
         let mut ctx = RenderCtx::new(self);
         docs.push(render(&extraction, &mut ctx));
+        // BT-3675: a `ClassVars` rebind is a mint like a send's; commit it to
+        // the enclosing scope so later sends sync from it.
+        if families.contains(&VersionPrefix::ClassVars) {
+            docs.push(self.commit_live_class_var_doc());
+        }
     }
 
     /// Returns true if the class is a non-instantiable primitive type.

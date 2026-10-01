@@ -1986,10 +1986,12 @@ impl CoreErlangGenerator {
         // regardless of nesting depth.
         let cv_version_before = self.class_var_scope_mark();
         let expr_code = self.expression_doc(expr)?;
+        let scope_prefix = self.class_var_scope_prefix(cv_version_before);
         let refresh = self
             .refresh_class_var_after_opaque_scope(cv_version_before)
             .unwrap_or(Document::Nil);
         Ok(docvec![
+            scope_prefix,
             "let ",
             leaf::var(result_var.to_string()),
             " = ",

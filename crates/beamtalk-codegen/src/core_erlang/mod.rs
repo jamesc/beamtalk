@@ -339,12 +339,29 @@ impl CoreErlangGenerator {
                         // `refresh_class_var_after_opaque_scope` recovers
                         // the live value via the ADR 0110 shadow write and
                         // re-binds it to a name that IS in scope here.
+                        //
+                        // BT-3675: the value is bound BEFORE the refresh, so
+                        // the refresh (which reads what the value's own
+                        // sends committed) runs after they did.
                         let cv_version_before = self.class_var_scope_mark();
                         let result_doc = self.expression_doc(value)?;
+                        let scope_prefix = self.class_var_scope_prefix(cv_version_before);
                         let refresh = self
                             .refresh_class_var_after_opaque_scope(cv_version_before)
                             .unwrap_or(Document::Nil);
-                        (refresh, result_doc)
+                        let value_var = self.fresh_temp_var("NlrVal");
+                        (
+                            docvec![
+                                scope_prefix,
+                                "let ",
+                                leaf::var(value_var.clone()),
+                                " = ",
+                                result_doc,
+                                " in ",
+                                refresh,
+                            ],
+                            leaf::var(value_var),
+                        )
                     } else {
                         // ADR 0118 phase 2a: `current_frame()` —
                         // this generic `Return` handler fires for a `^`

@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3675: characterises a class's OWN mutating self-send nested in a
+// conditional arm and in a threaded loop body (one that also mutates a captured
+// local). The open and sealed variants must agree.
+
+Object subclass: SsoScopeOpen
+  classState: n = 0
+
+  class n -> Integer => self.n
+
+  class resetN -> Integer => self.n := 0
+
+  class increment -> Integer => self.n := self.n + 1
+
+  class condArm: x -> Integer =>
+    x > 0 ifTrue: [self increment]
+    x
+
+  class threadedTimes: k -> Integer =>
+    i := 0
+    k
+      timesRepeat: [
+        i := i + 1
+        self increment
+      ]
+    i
+
+  class threadedToDo: k -> Integer =>
+    i := 0
+    1
+      to: k
+      do: [:j |
+        i := i + j
+        self increment
+      ]
+    i

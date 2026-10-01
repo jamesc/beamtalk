@@ -10,7 +10,6 @@
 
 use crate::core_erlang::class_meta;
 use crate::core_erlang::generator::CoreErlangGenerator;
-use crate::core_erlang::generator::version::ClassVarScopeMark;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
 use crate::core_erlang::util;
 use beamtalk_cerl_doc::Document;
@@ -165,22 +164,6 @@ impl CoreErlangGenerator {
         self.class_context
             .as_ref()
             .is_some_and(|ctx| ctx.class_var_mutated)
-    }
-
-    /// Monotonic count of `ClassVars{N}` versions minted so far (BT-3667);
-    /// see `ClassContext::class_var_mints`.
-    pub(in crate::core_erlang) fn class_var_mints(&self) -> usize {
-        self.class_context
-            .as_ref()
-            .map_or(0, |ctx| ctx.class_var_mints)
-    }
-
-    /// Snapshot for [`Self::refresh_class_var_after_opaque_scope`].
-    pub(in crate::core_erlang) fn class_var_scope_mark(&self) -> ClassVarScopeMark {
-        ClassVarScopeMark {
-            version: self.class_var_version(),
-            mints: self.class_var_mints(),
-        }
     }
 
     /// Sets the class variable mutated flag.

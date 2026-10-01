@@ -185,6 +185,13 @@
 %% that Rust test fails.
 -define(BT_CLASS_VARS_SHADOW_KEY_ATOM, '$bt_class_vars_shadow').
 
+%% BT-3675: process-dictionary key of the per-scope class-variable commit map
+%% (`#{ScopeToken => ClassVars}`). Compiled code never names it: it calls
+%% `beamtalk_class_dispatch:class_var_scope_commit/3`, `class_var_scope_read/3`
+%% and `class_var_scope_take/3`, and the outermost dispatch
+%% (`invoke_class_method/7`, `invoke_class_extension/7`) erases it in `after`.
+-define(BT_CLASS_VARS_COMMIT_KEY_ATOM, '$bt_class_vars_commit').
+
 %% @doc Process-dictionary key marking
 %% "this process is currently executing a `withClassMethod:` child's factory
 %% method on behalf of `beamtalk_supervisor:start_child_via_class_method/4`,
