@@ -634,45 +634,13 @@ impl CoreErlangGenerator {
         class_vars: &str,
     ) -> Document<'static> {
         docvec![
-            "let _ = ",
-            Self::class_var_scope_commit_call_doc(token, class_vars),
-            " in ",
-        ]
-    }
-
-    /// BT-3676: [`Self::class_var_scope_commit_doc`] guarded by `new =:= old`,
-    /// for a send's commit, where `old` is the version the callee started from
-    /// (already the newest commit of the enclosing scopes, from the pre-call
-    /// sync) and `new` the version it returned. When the callee wrote no class
-    /// variable the two are the same term (a pointer comparison), there is
-    /// nothing newer to commit, and the later reads of the scope already find
-    /// `old`, so the pdict read-modify-write is skipped — the common case for a
-    /// confined-scope self-send (a loop calling a plain class method).
-    pub(in crate::core_erlang) fn class_var_scope_commit_if_changed_doc(
-        token: &str,
-        new_class_vars: &str,
-        old_class_vars: &str,
-    ) -> Document<'static> {
-        docvec![
-            "let _ = case call 'erlang':'=:='(",
-            leaf::var(new_class_vars.to_string()),
-            ", ",
-            leaf::var(old_class_vars.to_string()),
-            ") of <'true'> when 'true' -> 'ok' <'false'> when 'true' -> ",
-            Self::class_var_scope_commit_call_doc(token, new_class_vars),
-            " end in ",
-        ]
-    }
-
-    fn class_var_scope_commit_call_doc(token: &str, class_vars: &str) -> Document<'static> {
-        docvec![
-            "call 'beamtalk_class_dispatch':'class_var_scope_commit'(",
+            "let _ = call 'beamtalk_class_dispatch':'class_var_scope_commit'(",
             leaf::var("ClassSelf"),
             ", ",
             leaf::var(token.to_string()),
             ", ",
             leaf::var(class_vars.to_string()),
-            ")",
+            ") in ",
         ]
     }
 

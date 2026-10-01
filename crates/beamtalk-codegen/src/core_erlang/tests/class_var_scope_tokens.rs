@@ -68,21 +68,6 @@ fn confined_send_binds_token_syncs_commits_and_refreshes() {
 }
 
 #[test]
-fn send_commit_is_skipped_when_the_callee_returned_the_same_class_vars() {
-    // BT-3676: the send's commit is guarded by `new =:= old`, so a confined
-    // self-send whose callee wrote no class variable (the common loop case)
-    // skips the process-dictionary read-modify-write. The commit itself stays
-    // in the `false` arm, so a callee that did write still commits.
-    let code = compile("bt@scopetokenopen", OPEN_CLASS);
-    assert!(
-        code.contains(
-            "let _ = case call 'erlang':'=:='(ClassVars2, ClassVars1) of <'true'> when 'true' -> 'ok' <'false'> when 'true' -> call 'beamtalk_class_dispatch':'class_var_scope_commit'(ClassSelf, _CVTok"
-        ),
-        "a send's commit must be guarded by an unchanged-class-vars check. Got:\n{code}"
-    );
-}
-
-#[test]
 fn compiled_code_never_reads_the_adr_0110_shadow() {
     // The shadow is written when a callee WRITES, so a read from compiled
     // code resurrects the write of a callee that raised and was caught.

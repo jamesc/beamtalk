@@ -183,6 +183,17 @@ TestCase subclass: SelfSendOverrideBlocksTest
     self assert: SsoScopeSealed n equals: 3
 
   // --- BT-3675 review: direct writes between sends in a scope ---------------
+  // An arm's non-writing send must not overwrite an earlier iteration's
+  // committed write with the arm's stale lexical copy (the refresh falls back
+  // to the lexical version when the arm itself committed nothing).
+  testOpenWriteArmThenNonWritingArmInLoop =>
+    self assert: SsoScopeOpen armsInLoop equals: 1
+
+  // PIN-BUG BT-3683: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testArmsInListDo => self assert: SsoScopeOpen armsInListDo equals: 0
+
+  testArmsInTimes => self assert: SsoScopeOpen armsInTimes equals: 1
+
   testOpenMixedDirectWriteLoop => self assert: SsoScopeOpen mixedLoop equals: 6
 
   testSealedMixedDirectWriteLoop =>
@@ -262,10 +273,9 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testStoredClosureReadsOlderValueAfterBump =>
     self assert: SsoStaleSub staleAfterBump equals: 2
 
-  // The same shape inside a loop body now keeps the block's write (BT-3676: a
-  // confined-scope send no longer commits the unchanged ClassVars its callee
-  // handed back, which used to overwrite the block's committed write). The
-  // non-loop position above (BT-3682) is still limited.
+  // Same limit inside a loop body (BT-3682 covers both positions). The correct
+  // answer would be 1; this pins the actual one.
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testBlockPassedToClassSideHomInLoopBody =>
     SsoStaleSub viaSectionInLoop
-    self assert: SsoStaleSub hits equals: 1
+    self assert: SsoStaleSub hits equals: 0

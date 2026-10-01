@@ -371,7 +371,6 @@ impl CoreErlangGenerator {
     ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
-        let pre_call_cv = cv.clone();
         // the version numbers driving both verify() and the real
         // Bind rendered below — captured before minting, matching the old
         // `cv`/`new_cv` name-capture ordering exactly (fresh_temp_var call
@@ -477,11 +476,7 @@ impl CoreErlangGenerator {
         prelude.push(bind);
         if let Some(token) = scope_token {
             prelude.push(ThreadedStmt::Statement(
-                Self::class_var_scope_commit_if_changed_doc(
-                    &token,
-                    &self.current_class_var(),
-                    &pre_call_cv,
-                ),
+                Self::class_var_scope_commit_doc(&token, &self.current_class_var()),
                 span,
             ));
         }

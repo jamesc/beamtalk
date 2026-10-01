@@ -868,30 +868,41 @@ in); "before" is `d8e35f815`; "after" is the BT-3676 change.
 
 | case | profile | baseline | before | after |
 |---|---|---|---|---|
-| class self-send, open class | debug | 105 | 415 | 185 |
-| class self-send, open class | release | 107 | 450 | 198 |
-| class self-send, sealed class | debug | 106 | 90 | 102 |
-| class self-send, sealed class | release | 107 | 98 | 104 |
-| actor self-send, open | debug | 81 | 102 | 103 |
-| actor self-send, open | release | 81 | 104 | 105 |
-| actor self-send, sealed | debug / release | 75 / 70 | 65 / 72 | 65 / 72 |
+| class self-send, open class | debug | 106 | 469 | 338 |
+| class self-send, open class | release | 97 | 449 | 291 |
+| class self-send, sealed class | debug | 102 | 103 | 106 |
+| class self-send, sealed class | release | 101 | 100 | 100 |
+| actor self-send, open | debug | 89 | 104 | 107 |
+| actor self-send, open | release | 87 | 106 | 101 |
+| actor self-send, sealed | debug / release | 67 / 66 | 70 / 81 | 73 / 70 |
 
 "release" is the release-profile Rust CLI; the Erlang runtime is built by
-rebar3 either way, so debug and release differ only within noise.
+rebar3 either way. Min-max spread of the open class-side case is 272-379 ns
+(after, debug) and 249-383 ns (after, release); runs of the same side differ by
+up to ~40%, so the baseline-to-before gap (4x) is far outside noise but the
+before-to-after gain (about 30-35%) is only moderately so.
 
 ### Where the open class-side cost went
 
 An open class's self-send inside a block or loop pays, per iteration: one
 `make_ref` (the scope token), `class_var_scope_read`, the
 `class_self_direct_ok` guard, `class_var_scope_commit` and
-`class_var_scope_export` (BT-3675). Microbenchmarks of each helper showed the
-commit/export process-dictionary read-modify-write and the guard's
-`ets:whereis/1` dominating. BT-3676 skips the commit when the callee returned
-the same `ClassVars` term it was given, and replaces the `ets:whereis/1` with a
-`persistent_term` readiness flag (`beamtalk_class_shadow_flags:is_ready/0`).
-The remaining ~80 ns over baseline is the token `make_ref`, the scope read and
-export, and three `persistent_term` reads. The actor open self-send increase
-(~80 to ~103) comes from BT-3666's late binding and was not profiled.
+`class_var_scope_export` (BT-3675). Standalone microbenchmarks of each helper
+(debug runtime, `erl` shell) put the commit/export process-dictionary
+read-modify-write at ~25-100 ns, the `make_ref` at ~30 ns, and the guard's
+`ets:whereis/1` at ~50-90 ns plus ~30 ns for its two `persistent_term` reads.
+BT-3676 replaces the `ets:whereis/1` with a `persistent_term` readiness flag
+(`beamtalk_class_shadow_flags:is_ready/0`).
+
+Skipping the per-send commit when the callee returned the same `ClassVars`
+term was also tried (it brought the open class-side case to ~185-198 ns), but
+it was dropped: the arm refresh `take`s only its own token and falls back to
+the lexical version, so a skipped commit changes what a later refresh sees
+(it flipped the pinned `testBlockPassedToClassSideHomInLoopBody` answer), and
+doing it safely means changing the refresh's fallback at three codegen sites.
+That is the remaining ~190 ns over baseline and needs a follow-up with a
+proper design. The actor open self-send increase (~85 to ~105) comes from
+BT-3666's late binding and was not profiled.
 
 ### `NestedImprovementRatio >= 1.5`
 

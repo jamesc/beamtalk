@@ -61,3 +61,45 @@ Object subclass: SsoScopeOpen
         seen := seen + 1
       ]
     self.n
+
+  // Statically able to write `n` (so codegen cannot treat it as pure and takes
+  // the full late-bound path), but the write never runs here.
+  class nonWriting -> Integer =>
+    self.n > 100 ifTrue: [self increment]
+    0
+
+  // A writing send in one arm of a loop, then a non-writing send in
+  // another arm of the next iteration; the first write must survive.
+  class armsInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    1
+      to: 2
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        i =:= 2 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  class armsInListDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        i =:= 2 ifTrue: [self nonWriting]
+      ]
+    self.n
+
+  class armsInTimes -> Integer =>
+    self.n := 0
+    k := 0
+    2
+      timesRepeat: [
+        k := k + 1
+        k =:= 1 ifTrue: [self increment]
+        k =:= 2 ifTrue: [self nonWriting]
+      ]
+    self.n
