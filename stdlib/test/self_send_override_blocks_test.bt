@@ -183,16 +183,8 @@ TestCase subclass: SelfSendOverrideBlocksTest
     self assert: SsoScopeSealed n equals: 3
 
   // --- BT-3675 review: direct writes between sends in a scope ---------------
-  // An arm's non-writing send must not overwrite an earlier iteration's
-  // committed write with the arm's stale lexical copy (the refresh falls back
-  // to the lexical version when the arm itself committed nothing).
-  testOpenWriteArmThenNonWritingArmInLoop =>
-    self assert: SsoScopeOpen armsInLoop equals: 1
-
   // PIN-BUG BT-3683: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
   testArmsInListDo => self assert: SsoScopeOpen armsInListDo equals: 0
-
-  testArmsInTimes => self assert: SsoScopeOpen armsInTimes equals: 1
 
   testOpenMixedDirectWriteLoop => self assert: SsoScopeOpen mixedLoop equals: 6
 

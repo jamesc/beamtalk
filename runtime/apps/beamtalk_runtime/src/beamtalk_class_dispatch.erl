@@ -278,8 +278,9 @@ compiled method that the walk honours: a class-side extension on the class
 
 Costs three `persistent_term` reads for the defining-class receiver
 (BT-3669: the per-class `beamtalk_class_shadow_flags` replace the former two
-ETS reads; BT-3676: the readiness flag replaces an `ets:whereis/1`); a subclass receiver short-circuits on the
-first clause.
+ETS reads; BT-3676: the readiness flag replaces an `ets:whereis/1`); a
+subclass receiver short-circuits on the first
+clause.
 """.
 -spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
 class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
