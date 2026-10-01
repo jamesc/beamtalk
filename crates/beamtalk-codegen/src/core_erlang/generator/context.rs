@@ -112,13 +112,6 @@ pub(in crate::core_erlang) struct ClassContext {
     /// leave the numbering of every other generated variable untouched, so
     /// code outside a confined scope stays byte-identical.
     pub(in crate::core_erlang) class_var_scope_counter: usize,
-    /// Tokens of statement scopes that are already closed (refreshed) but that
-    /// a closure built inside them exported into, so a later statement of the
-    /// same body that invokes the stored closure can still recover its writes
-    /// (BT-3675). Their `make_ref()` binding stays in scope for the rest of
-    /// the body's let-chain. Truncated whenever an enclosing scope closes and
-    /// reset at the start of every method.
-    pub(in crate::core_erlang) deferred_scope_tokens: Vec<String>,
     /// Class → compiled module resolution authority for this generation unit
     /// (ADR 0119).
     ///
@@ -205,7 +198,6 @@ impl ClassContext {
             class_var_mutated: false,
             class_var_scope_tokens: Vec::new(),
             class_var_scope_counter: 0,
-            deferred_scope_tokens: Vec::new(),
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,

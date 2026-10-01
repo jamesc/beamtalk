@@ -202,6 +202,54 @@ fn direct_write_between_sends_in_a_scope_commits_but_straight_line_does_not() {
 }
 
 #[test]
+fn stored_closure_invoked_later_compiles_through_erlc() {
+    // A closure stored in a local, with statements of its own, invoked by a
+    // later statement: every scope token named in the output must be bound
+    // (an unbound `_CVTokN` is an erlc failure). The closure's writes are
+    // NOT kept (known limit, ADR 0110).
+    let src = "Object subclass: ScopeTokenStored
+  classState: n = 0
+
+  class foo => 0
+
+  class noop => 0
+
+  class run: aBlock => aBlock value: 1
+
+  // A closure with no enclosing scope (an argument of a precise send) whose
+  // body has a statement scope a nested closure exported into: nothing of it
+  // may leak into the statements after it.
+  class leak =>
+    self run: [:x |
+      y := [self foo] value
+      y]
+    z := [self noop] value
+    z
+
+  class deferred =>
+    b := [
+      x := self noop
+      self foo
+      x]
+    b value
+    b value
+    self noop
+    self.n
+
+  class deferredInArm =>
+    [
+      b := [self foo]
+      b value
+      self noop
+      nil
+    ] on: Error do: [:e | nil]
+    self.n
+";
+    let code = compile("bt@scopetokenstored", src);
+    crate::core_erlang::tests::assert_compiles_through_erlc("bt@scopetokenstored", &code);
+}
+
+#[test]
 fn runtime_exports_every_helper_codegen_calls() {
     let erl_path =
         repo_root().join("runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl");

@@ -194,12 +194,26 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testSealedMixedDirectWriteArm =>
     self assert: (SsoScopeSealed mixedArm: 1) equals: 12
 
-  // A closure stored in a local and invoked by a LATER statement keeps the
-  // subclass override's write.
-  testDeferredClosureKeepsWrite =>
+  // Known limit (ADR 0110, BT-3675): a closure stored in a local and invoked
+  // by a LATER statement exports into the scope of the statement that built
+  // it, which was already refreshed, so its class-variable writes are not
+  // kept. These pin the actual behaviour (and that it compiles and runs).
+  testStoredClosureInvokedLaterLosesWrite =>
     SsoStaleSub deferred
+    self assert: SsoStaleSub hits equals: 0
+
+  testStoredClosureInvokedLaterInArmLosesWrite =>
+    SsoStaleSub deferredInArm
+    self assert: SsoStaleSub hits equals: 0
+
+  testStoredClosureInvokedTwiceLosesWrites =>
+    SsoStaleSub deferredTwice
+    self assert: SsoStaleSub hits equals: 0
+
+  testStoredClosureThenWritingSendKeepsOnlyTheSend =>
+    SsoStaleSub deferredThenSend
     self assert: SsoStaleSub hits equals: 1
 
-  testDeferredClosureInArmKeepsWrite =>
-    SsoStaleSub deferredInArm
-    self assert: SsoStaleSub hits equals: 1
+  testStoredClosureWithStatementsCompilesAndRuns =>
+    SsoStaleSub deferredWithStatements
+    self assert: SsoStaleSub hits equals: 0

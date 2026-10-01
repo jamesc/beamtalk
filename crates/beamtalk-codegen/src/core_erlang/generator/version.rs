@@ -35,11 +35,6 @@ pub(in crate::core_erlang) struct ClassVarScopeToken {
     /// Whether any send (or nested scope refresh) committed under this token,
     /// i.e. whether the scope needs its `make_ref()` binding and a refresh.
     pub(in crate::core_erlang) used: bool,
-    /// Whether a closure body exported into this scope (see
-    /// `ClassContext::deferred_scope_tokens`).
-    pub(in crate::core_erlang) exported_into: bool,
-    /// Length of the deferred-token list when the scope opened.
-    deferred_base: usize,
 }
 
 /// Handle for [`CoreErlangGenerator::class_var_scope_mark`]: the live
@@ -299,56 +294,38 @@ impl CoreErlangGenerator {
         let ctx = self.class_context_mut();
         ctx.class_var_scope_counter += 1;
         let name = format!("_CVTok{}", ctx.class_var_scope_counter);
-        let deferred_base = ctx.deferred_scope_tokens.len();
         let tokens = &mut ctx.class_var_scope_tokens;
         let depth = tokens.len();
-        tokens.push(ClassVarScopeToken {
-            name,
-            used: false,
-            exported_into: false,
-            deferred_base,
-        });
+        tokens.push(ClassVarScopeToken { name, used: false });
         Some(depth)
     }
 
     /// Pops the token at `depth` (dropping any inner scope an early return left
-    /// open above it) and forgets the deferred tokens opened inside it: their
-    /// bindings are not in scope beyond it.
+    /// open above it).
     fn pop_class_var_scope_token(&mut self, depth: usize) -> Option<ClassVarScopeToken> {
         let ctx = self.class_context.as_mut()?;
         if ctx.class_var_scope_tokens.len() <= depth {
             return None;
         }
         ctx.class_var_scope_tokens.truncate(depth + 1);
-        let token = ctx.class_var_scope_tokens.pop()?;
-        ctx.deferred_scope_tokens.truncate(token.deferred_base);
-        Some(token)
+        ctx.class_var_scope_tokens.pop()
     }
 
     /// Hides the enclosing method's open scopes while a nested method body is
     /// generated (a `ClassBuilder` class-method fun); restore with
     /// [`Self::restore_class_var_scopes`].
-    pub(in crate::core_erlang) fn take_class_var_scopes(
-        &mut self,
-    ) -> (Vec<ClassVarScopeToken>, Vec<String>) {
-        self.class_context.as_mut().map_or_else(
-            || (Vec::new(), Vec::new()),
-            |ctx| {
-                (
-                    std::mem::take(&mut ctx.class_var_scope_tokens),
-                    std::mem::take(&mut ctx.deferred_scope_tokens),
-                )
-            },
-        )
+    pub(in crate::core_erlang) fn take_class_var_scopes(&mut self) -> Vec<ClassVarScopeToken> {
+        self.class_context.as_mut().map_or_else(Vec::new, |ctx| {
+            std::mem::take(&mut ctx.class_var_scope_tokens)
+        })
     }
 
     pub(in crate::core_erlang) fn restore_class_var_scopes(
         &mut self,
-        saved: (Vec<ClassVarScopeToken>, Vec<String>),
+        saved: Vec<ClassVarScopeToken>,
     ) {
         if let Some(ctx) = self.class_context.as_mut() {
-            ctx.class_var_scope_tokens = saved.0;
-            ctx.deferred_scope_tokens = saved.1;
+            ctx.class_var_scope_tokens = saved;
         }
     }
 
@@ -389,9 +366,10 @@ impl CoreErlangGenerator {
             return body;
         }
         // The enclosing scope receives the export, so it must exist at run
-        // time; a later statement may invoke the closure after that scope was
-        // refreshed, so the scope is remembered as exported-into.
-        let Some(parent) = self.mark_innermost_scope_exported_into() else {
+        // time. A closure invoked after that scope was refreshed (stored in a
+        // local and invoked by a later statement) exports into a dead entry:
+        // its writes are not kept (ADR 0110, BT-3675 limits).
+        let Some(parent) = self.mark_innermost_scope_used() else {
             return body;
         };
         let result = self.fresh_temp_var("ClosureRes");
@@ -509,11 +487,10 @@ impl CoreErlangGenerator {
         &mut self,
         mark: ClassVarScopeMark,
     ) -> Option<Document<'static>> {
-        let token = self.close_scope_for_refresh(mark)?;
+        let token = self.close_class_var_scope(mark)?;
         let cv_before = Self::class_var_name_at(mark.version);
         let cv_new = self.next_class_var();
-        let take = self.refresh_take_doc(&token, &cv_before);
-        self.remember_deferred_scope(&token);
+        let take = Self::class_var_scope_take_doc(&token.name, &cv_before);
         let commit = self.commit_to_innermost_scope_doc(&cv_new);
         Some(docvec![
             "let ",
@@ -523,64 +500,6 @@ impl CoreErlangGenerator {
             " in ",
             commit.unwrap_or(Document::Nil),
         ])
-    }
-
-    /// Closes the scope opened by `mark` for a refresh: `Some` when the scope
-    /// was used, or when deferred tokens (see
-    /// `ClassContext::deferred_scope_tokens`) may hold the writes of a stored
-    /// closure invoked by this statement, in which case the returned token is
-    /// unused (no binding or own `take`).
-    pub(in crate::core_erlang) fn close_scope_for_refresh(
-        &mut self,
-        mark: ClassVarScopeMark,
-    ) -> Option<ClassVarScopeToken> {
-        let depth = mark.depth?;
-        let token = self.pop_class_var_scope_token(depth)?;
-        let has_deferred = self
-            .class_context
-            .as_ref()
-            .is_some_and(|ctx| !ctx.deferred_scope_tokens.is_empty());
-        (token.used || has_deferred).then_some(token)
-    }
-
-    /// The value a refresh binds: the scope's own entry (when it was used),
-    /// then the deferred tokens' entries (a stored closure invoked by this
-    /// statement), falling back to the version live before the scope.
-    pub(in crate::core_erlang) fn refresh_take_doc(
-        &self,
-        token: &ClassVarScopeToken,
-        cv_before: &str,
-    ) -> Document<'static> {
-        let mut doc = if token.used {
-            Self::class_var_scope_take_doc(&token.name, cv_before)
-        } else {
-            leaf::var(cv_before.to_string())
-        };
-        if let Some(ctx) = self.class_context.as_ref() {
-            for deferred in &ctx.deferred_scope_tokens {
-                doc = docvec![
-                    "call 'beamtalk_class_dispatch':'class_var_scope_take'(",
-                    leaf::var("ClassSelf"),
-                    ", ",
-                    leaf::var(deferred.clone()),
-                    ", ",
-                    doc,
-                    ")",
-                ];
-            }
-        }
-        doc
-    }
-
-    /// After a refresh: a scope a closure exported into stays available to the
-    /// statements that follow it (its `make_ref()` binding is in their
-    /// let-chain), so they can recover a stored closure's writes.
-    pub(in crate::core_erlang) fn remember_deferred_scope(&mut self, token: &ClassVarScopeToken) {
-        if token.used && token.exported_into {
-            if let Some(ctx) = self.class_context.as_mut() {
-                ctx.deferred_scope_tokens.push(token.name.clone());
-            }
-        }
     }
 
     /// Pops the scope opened by `mark` (and any inner scope an early return
@@ -700,16 +619,6 @@ impl CoreErlangGenerator {
         }
         let live = self.current_class_var();
         self.commit_to_innermost_scope_doc(&live)
-    }
-
-    /// Marks the innermost open scope token used and as exported-into by a
-    /// closure body, and returns its name.
-    pub(in crate::core_erlang) fn mark_innermost_scope_exported_into(&mut self) -> Option<String> {
-        let ctx = self.class_context.as_mut()?;
-        let token = ctx.class_var_scope_tokens.last_mut()?;
-        token.used = true;
-        token.exported_into = true;
-        Some(token.name.clone())
     }
 
     /// Marks the innermost open scope token used and returns its name.
