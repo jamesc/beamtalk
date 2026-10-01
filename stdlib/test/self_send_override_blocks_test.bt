@@ -218,13 +218,24 @@ TestCase subclass: SelfSendOverrideBlocksTest
     SsoStaleSub deferredWithStatements
     self assert: SsoStaleSub hits equals: 0
 
-  // A block passed to a user-defined class-side higher-order method.
-  testBlockPassedToClassSideHomKeepsWrite =>
+  // Known limit (ADR 0110, BT-3681): a block literal passed to a user-defined
+  // class-side higher-order method does not keep its class-variable write (the
+  // callee returns the ClassVars it was given), but the callee's own write is
+  // kept, with and without a block that writes.
+  testBlockPassedToClassSideHomLosesBlockWrite =>
     SsoStaleSub viaSection
+    self assert: SsoStaleSub hits equals: 0
+
+  testBlockPassedToClassSideHomThenSendLosesBlockWrite =>
+    SsoStaleSub viaSectionThenSend
+    self assert: SsoStaleSub hits equals: 0
+
+  testClassSideHomKeepsItsOwnWriteWithNonWritingBlock =>
+    SsoStaleSub viaTimedNoWrite
     self assert: SsoStaleSub hits equals: 1
 
-  testBlockPassedToClassSideHomThenSendKeepsWrite =>
-    SsoStaleSub viaSectionThenSend
+  testClassSideHomKeepsItsOwnWriteWithWritingBlock =>
+    SsoStaleSub viaTimedWriting
     self assert: SsoStaleSub hits equals: 1
 
   // The stored-closure limit is not limited to subclass overrides: a closure

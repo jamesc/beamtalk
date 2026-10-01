@@ -112,10 +112,6 @@ pub(in crate::core_erlang) struct ClassContext {
     /// leave the numbering of every other generated variable untouched, so
     /// code outside a confined scope stays byte-identical.
     pub(in crate::core_erlang) class_var_scope_counter: usize,
-    /// Token-stack depth of a scope opened around a class-side send with a
-    /// block-literal argument (`self section: [self foo]`): that send itself
-    /// does not commit under it (see `generate_class_method_self_send`).
-    pub(in crate::core_erlang) class_var_scope_skip_send: Option<usize>,
     /// Class → compiled module resolution authority for this generation unit
     /// (ADR 0119).
     ///
@@ -202,7 +198,6 @@ impl ClassContext {
             class_var_mutated: false,
             class_var_scope_tokens: Vec::new(),
             class_var_scope_counter: 0,
-            class_var_scope_skip_send: None,
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,

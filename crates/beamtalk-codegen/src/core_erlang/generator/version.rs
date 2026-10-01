@@ -286,11 +286,6 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// The token-stack depth of the scope `mark` opened.
-    pub(in crate::core_erlang) fn class_var_scope_depth(mark: ClassVarScopeMark) -> Option<usize> {
-        mark.depth
-    }
-
     /// Pushes a token; `None` outside a class method.
     fn push_class_var_scope(&mut self) -> Option<usize> {
         if !self.in_class_method() || self.class_context.is_none() {
@@ -571,6 +566,23 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// The tokens of every open scope, innermost first, each marked used (a
+    /// token's `make_ref()` binding is only emitted for a used one, and the
+    /// caller is about to reference all of them); empty outside any scope.
+    pub(in crate::core_erlang) fn class_var_scope_chain(&mut self) -> Vec<String> {
+        let Some(ctx) = self.class_context.as_mut() else {
+            return Vec::new();
+        };
+        ctx.class_var_scope_tokens
+            .iter_mut()
+            .rev()
+            .map(|token| {
+                token.used = true;
+                token.name.clone()
+            })
+            .collect()
+    }
+
     /// `let _ = call 'beamtalk_class_dispatch':'class_var_scope_commit'(ClassSelf,
     /// <innermost token>, <class_vars>) in ` — the commit every `ClassVars`
     /// version minted inside a scope makes, marking the token used; `None`
@@ -607,35 +619,6 @@ impl CoreErlangGenerator {
         }
         let live = self.current_class_var();
         self.commit_to_innermost_scope_doc(&live)
-    }
-
-    /// The token a class-side send commits under and the chain it syncs from
-    /// (both innermost first), marking them used. The scope opened around a
-    /// send with a block-literal argument
-    /// (`ClassContext::class_var_scope_skip_send`) is left out for that send
-    /// itself: the closure exports into it, so the send must not overwrite the
-    /// export with the stale class vars the callee returns; it uses the
-    /// enclosing scope, if any.
-    pub(in crate::core_erlang) fn class_var_send_scopes(
-        &mut self,
-    ) -> Option<(String, Vec<String>)> {
-        let ctx = self.class_context.as_mut()?;
-        let mut top = ctx.class_var_scope_tokens.len();
-        if top > 0 && ctx.class_var_scope_skip_send == Some(top - 1) {
-            top -= 1;
-        }
-        if top == 0 {
-            return None;
-        }
-        let chain: Vec<String> = ctx.class_var_scope_tokens[..top]
-            .iter_mut()
-            .rev()
-            .map(|token| {
-                token.used = true;
-                token.name.clone()
-            })
-            .collect();
-        Some((chain[0].clone(), chain))
     }
 
     /// Marks the innermost open scope token used and returns its name.

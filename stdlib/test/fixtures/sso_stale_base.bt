@@ -165,8 +165,23 @@ Object subclass: SsoStaleBase
     self noop
     self.hits
 
-  // A block passed to a user-defined class-side higher-order method.
+  // Known limit (ADR 0110, BT-3681): a block literal passed to a user-defined
+  // class-side higher-order method. The closure runs inside the callee, which
+  // returns the ClassVars it was given, so the closure's write is not kept;
+  // the callee's own write is.
   class section: aBlock :: Block -> Integer => aBlock value
+
+  class timed: aBlock :: Block -> Integer =>
+    self.hits := self.hits + 1
+    aBlock value
+
+  class viaTimedNoWrite -> Integer =>
+    self timed: [self noop]
+    self.hits
+
+  class viaTimedWriting -> Integer =>
+    self timed: [self foo]
+    self.hits
 
   class viaSection -> Integer =>
     self section: [self foo]
