@@ -837,6 +837,8 @@ fn build_class_index_flattens_cross_file_trait_provisions() {
         &warm.file_protocol_uses,
         &HashMap::new(),
         &warm.all_protocol_defs,
+        &warm.class_module_index,
+        env.source_root.as_deref(),
         "test_pkg",
     );
     assert!(
@@ -900,6 +902,8 @@ fn flatten_trait_user_class_infos_is_independent_of_cache_state() {
             &cold.file_protocol_uses,
             cached,
             &cold.all_protocol_defs,
+            &cold.class_module_index,
+            env.source_root.as_deref(),
             "test_pkg",
         );
         let widget = infos
@@ -942,4 +946,72 @@ fn flatten_trait_user_class_infos_is_independent_of_cache_state() {
     assert_eq!(selectors(&only_a), all_cached, "incremental (a cached)");
     assert_eq!(selectors(&only_b), all_cached, "incremental (b cached)");
     assert_eq!(selectors(&HashMap::new()), all_cached, "cache-fresh");
+}
+
+/// BT-3679: when a package declares `Widget` in two files, only the file that
+/// wins the class index gets its flattened `ClassInfo` written to the
+/// `Widget` slot — on a cold build and on a cache-fresh one. The earlier
+/// file's `uses: Tagged` must not leak into the later, trait-less `Widget`;
+/// when the later file also `uses:` the trait, the provisions stay.
+#[test]
+fn flatten_trait_user_class_infos_ignores_a_shadowed_same_named_class() {
+    let tag_in_last_widget = |later_uses_trait: bool| -> (bool, bool) {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+        write_test_file(
+            &project_path.join("beamtalk.toml"),
+            "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\n",
+        );
+        write_test_file(
+            &src_path.join("tagged.bt"),
+            "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+        );
+        write_test_file(
+            &src_path.join("widget_a.bt"),
+            "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"a\"\n",
+        );
+        let later_uses = if later_uses_trait {
+            "  uses: Tagged\n"
+        } else {
+            ""
+        };
+        write_test_file(
+            &src_path.join("widget_b.bt"),
+            &format!("Object subclass: Widget\n{later_uses}  name -> String => \"b\"\n"),
+        );
+
+        let env = setup_build_environment(project_path.as_str()).unwrap();
+        let dep_ctx = DependencyContext {
+            resolved_deps: Vec::new(),
+            has_native_deps: false,
+        };
+        let has_tag = |index: &crate::commands::build::class_index::ClassIndexResult| {
+            index
+                .all_class_infos
+                .iter()
+                .rev()
+                .find(|c| c.name == "Widget" && c.package.as_deref() == Some("test_pkg"))
+                .expect("Widget is indexed")
+                .methods
+                .iter()
+                .any(|m| m.selector == "tag")
+        };
+        let cold = build_class_index(&env, &dep_ctx, &default_options(), true).unwrap();
+        let warm = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
+        assert!(warm.cached_asts.is_empty(), "second build is cache-fresh");
+        (has_tag(&cold), has_tag(&warm))
+    };
+
+    assert_eq!(
+        tag_in_last_widget(false),
+        (false, false),
+        "a later Widget without `uses:` is the real class: no `tag`"
+    );
+    assert_eq!(
+        tag_in_last_widget(true),
+        (true, true),
+        "a later Widget that also uses Tagged carries `tag`"
+    );
 }

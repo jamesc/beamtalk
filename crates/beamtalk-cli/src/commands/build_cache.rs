@@ -744,9 +744,8 @@ fn build_cache_entries(
         };
 
         // Compute the expected module name for this file
-        let module_name = match super::build::compute_relative_module(file, source_root) {
-            Ok(rel) => super::util::bt_qualified_module_name(pkg_name, &rel),
-            Err(_) => continue,
+        let Ok(module_name) = super::build::package_module_name(file, source_root, pkg_name) else {
+            continue;
         };
 
         // Collect classes that belong to this file's module via reverse index

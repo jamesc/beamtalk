@@ -6,7 +6,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use tracing::{debug, warn};
 
@@ -152,6 +152,10 @@ pub(crate) fn build_class_index(
         )
     };
 
+    // The project's own classes only, before dependencies' are merged in:
+    // the winner of a class declared in several project files (BT-3679).
+    let project_class_module_index = class_module_index.clone();
+
     // ADR 0070: Merge dependency class indexes into the main package's indexes
     // so cross-package class references resolve during compilation.
     // Also build a DependencyRegistry for collision detection (Phase 3).
@@ -274,6 +278,8 @@ pub(crate) fn build_class_index(
             &file_protocol_uses,
             &cached_asts,
             &all_protocol_defs,
+            &project_class_module_index,
+            env.source_root.as_deref(),
             pkg,
         );
         trait_surface_hash =
@@ -308,6 +314,11 @@ pub(crate) fn build_class_index(
 /// the same pass analysis and codegen run. Entries are matched by class name
 /// within `pkg_name`, leaving a same-named dependency class alone.
 ///
+/// `project_class_module_index` is Pass 1's class-to-module index of the
+/// project's own classes: a class it maps to another file's module is
+/// `shadowed` there, so this file's provisions are not written into the slot
+/// of the class that wins (BT-3679).
+///
 /// Returns the names of the classes whose `ClassInfo` was replaced (BT-3674),
 /// so the caller can hash exactly the cross-file surface that flattening
 /// contributes.
@@ -316,6 +327,8 @@ pub(crate) fn flatten_trait_user_class_infos(
     file_protocol_uses: &HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
     cached_asts: &HashMap<Utf8PathBuf, CachedAst>,
     protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
+    project_class_module_index: &HashMap<String, String>,
+    source_root: Option<&Utf8Path>,
     pkg_name: &str,
 ) -> Vec<ecow::EcoString> {
     let mut user_files: Vec<&Utf8PathBuf> = file_protocol_uses
@@ -351,11 +364,29 @@ pub(crate) fn flatten_trait_user_class_infos(
     // One pass in sorted path order whatever the cache state, so an
     // incremental build flattens a class duplicated across files exactly as a
     // clean one does.
-    let modules = user_files.iter().filter_map(|f| {
-        cached_asts
-            .get(*f)
-            .map(|c| &c.module)
-            .or_else(|| reparsed.get(*f))
+    let user_modules: Vec<(&beamtalk_core::ast::Module, HashSet<ecow::EcoString>)> = user_files
+        .iter()
+        .filter_map(|f| {
+            let module = cached_asts
+                .get(*f)
+                .map(|c| &c.module)
+                .or_else(|| reparsed.get(*f))?;
+            let module_name = super::sources::package_module_name(f, source_root, pkg_name).ok()?;
+            let shadowed = module
+                .classes
+                .iter()
+                .filter(|c| {
+                    project_class_module_index
+                        .get(c.name.name.as_str())
+                        .is_some_and(|winner| *winner != module_name)
+                })
+                .map(|c| c.name.name.clone())
+                .collect();
+            Some((module, shadowed))
+        })
+        .collect();
+    let modules = user_modules.iter().map(|(module, shadowed)| {
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserModule { module, shadowed }
     });
     beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
         all_class_infos,
@@ -461,9 +492,7 @@ pub(crate) fn build_class_module_index(
     let mut cached_asts: HashMap<Utf8PathBuf, CachedAst> = HashMap::new();
 
     for file in source_files {
-        let relative_module = super::sources::compute_relative_module(file, source_root)?;
-        let module_name =
-            crate::commands::util::bt_qualified_module_name(pkg_name, &relative_module);
+        let module_name = super::sources::package_module_name(file, source_root, pkg_name)?;
 
         let source = match fs::read_to_string(file) {
             Ok(s) => s,

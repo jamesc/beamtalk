@@ -60,7 +60,7 @@ pub(crate) use outputs::{
 pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_dir};
 pub(crate) use sources::{
     collect_project_source_files, compile_file, compile_to_beam, compute_file_module_pairs,
-    compute_relative_module,
+    compute_relative_module, package_module_name,
 };
 pub(crate) use stubs::{
     distribution_stubs_dir, extract_type_specs, load_dependency_stub_registries,

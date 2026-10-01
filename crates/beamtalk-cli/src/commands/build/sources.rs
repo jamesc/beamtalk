@@ -107,6 +107,22 @@ pub(crate) fn compute_relative_module(
     Ok(beamtalk_codegen::core_erlang::to_module_name(stem))
 }
 
+/// The Erlang module name of `file` in package `pkg_name`
+/// (`bt@{package}@{relative_path}`, ADR 0026): [`compute_relative_module`]
+/// qualified with the package. The one place Pass 1, Pass 2 and the trait
+/// flattening derive it (BT-3679).
+pub(crate) fn package_module_name(
+    file: &Utf8Path,
+    source_root: Option<&Utf8Path>,
+    pkg_name: &str,
+) -> Result<String> {
+    let relative_module = compute_relative_module(file, source_root)?;
+    Ok(crate::commands::util::bt_qualified_module_name(
+        pkg_name,
+        &relative_module,
+    ))
+}
+
 /// Compute file-module-core triples for all source files.
 ///
 /// For each `.bt` source file, computes the Erlang module name (using the
@@ -134,8 +150,7 @@ pub(crate) fn compute_file_module_pairs(
         // ADR 0026: Package mode uses bt@{package}@{relative_path} naming
         // ADR 0016: Single-file mode uses bt@{module} naming
         let module_name = if let Some(pkg) = pkg_manifest {
-            let relative_module = compute_relative_module(file, env.source_root.as_deref())?;
-            crate::commands::util::bt_qualified_module_name(&pkg.name, &relative_module)
+            package_module_name(file, env.source_root.as_deref(), &pkg.name)?
         } else {
             crate::commands::util::bt_module_name_from_stem(stem)
         };

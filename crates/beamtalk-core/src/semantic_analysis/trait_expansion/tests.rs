@@ -1445,3 +1445,65 @@ fn protocol_with_no_users_is_still_checked() {
 
     assert!(find_diagnostic(&diagnostics, "a protocol cannot provide `initialize`").is_some());
 }
+
+// ── flatten_trait_user_class_infos slot ownership (BT-3679) ─────────────
+
+const TAGGED: &str = "Protocol define: Tagged
+  name -> String
+
+  tag -> String => self name";
+
+/// Builds the package's `ClassInfo` slots and `TraitUserCollector` from
+/// `files` in order, as every cross-file index builder does, flattens, and
+/// returns the selectors of the *last* `Widget` slot (the class that runs).
+fn last_widget_selectors(files: &[&str]) -> Vec<String> {
+    let mut infos = Vec::new();
+    let mut collector = TraitUserCollector::default();
+    for file in files {
+        let module = parse_source(file);
+        infos.extend(ClassHierarchy::extract_class_infos(&module));
+        collector.add(&module);
+    }
+    collector.flatten(&mut infos, std::iter::empty(), None);
+    let widget = infos
+        .iter()
+        .rev()
+        .find(|c| c.name == "Widget")
+        .expect("Widget slot");
+    widget
+        .methods
+        .iter()
+        .map(|m| m.selector.to_string())
+        .collect()
+}
+
+const WIDGET_USING: &str = "Object subclass: Widget
+  uses: Tagged
+  name -> String => \"a\"";
+const WIDGET_PLAIN: &str = "Object subclass: Widget
+  name -> String => \"b\"";
+
+#[test]
+fn flatten_does_not_write_into_a_later_files_same_named_class() {
+    // The first Widget uses `Tagged`, but the later, plain `Widget` is the
+    // class that wins.
+    let selectors = last_widget_selectors(&[TAGGED, WIDGET_USING, WIDGET_PLAIN]);
+    assert!(
+        !selectors.contains(&"tag".to_string()),
+        "the later, trait-less Widget must not gain `tag`: {selectors:?}"
+    );
+}
+
+#[test]
+fn flatten_keeps_provisions_when_the_later_same_named_class_also_uses_the_trait() {
+    let selectors = last_widget_selectors(&[TAGGED, WIDGET_PLAIN, WIDGET_USING]);
+    assert!(
+        selectors.contains(&"tag".to_string()),
+        "the later Widget uses Tagged: {selectors:?}"
+    );
+    let selectors = last_widget_selectors(&[TAGGED, WIDGET_USING, WIDGET_USING]);
+    assert!(
+        selectors.contains(&"tag".to_string()),
+        "both Widgets use Tagged: {selectors:?}"
+    );
+}
