@@ -428,12 +428,12 @@ impl CoreErlangGenerator {
         name
     }
 
-    /// Records that a `ClassVars` version was minted for a send that is
-    /// late-bound in an open class (BT-3667), so a rollback of that version by
-    /// an enclosing confined scope is observable via
-    /// [`ClassVarScopeMark::mints`]. Sends in a sealed class are direct calls
-    /// the compile-time purity gates already judge exactly, so they are not
-    /// counted.
+    /// Records that a `ClassVars` version was minted by a send in an open
+    /// class (BT-3667), so a rollback of that version by an enclosing confined
+    /// scope is observable via [`ClassVarScopeMark::mints`]. Even a statically
+    /// bound callee may `self`-send late-bound, so every open-class send
+    /// counts; sends in a sealed class are judged exactly by the purity gates
+    /// and are not counted.
     pub(in crate::core_erlang) fn note_late_bound_class_var_mint(&mut self) {
         self.class_context_mut().class_var_mints += 1;
     }

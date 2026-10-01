@@ -302,10 +302,13 @@ impl CoreErlangGenerator {
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
     ///
     /// `late_bound` is true only for sends a subclass override can intercept
-    /// (BT-3667): only those re-sync `ClassVars` from the ADR 0110 shadow
-    /// before the call and count as a confined mint. Statically bound sends
-    /// (sealed class, `class sealed` selector, explicit own-class reference)
-    /// are judged exactly by the compile-time purity gates.
+    /// directly (BT-3667): only those re-sync `ClassVars` from the ADR 0110
+    /// shadow before the call. In an open class EVERY unwrapped send counts
+    /// as a confined mint, including statically bound ones (`class sealed`
+    /// selector, explicit own-class reference, `super`): the callee's own
+    /// `self foo` is late-bound, so it may reach a subclass override that
+    /// writes a class variable, which the base-class purity gates cannot see.
+    /// Only in a sealed class are the purity gates exact.
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
         args_prelude: Vec<ThreadedStmt>,
@@ -359,7 +362,7 @@ impl CoreErlangGenerator {
         ];
 
         self.next_class_var();
-        if late_bound {
+        if !self.is_class_sealed() {
             self.note_late_bound_class_var_mint();
         }
         let target_version = self.class_var_version();

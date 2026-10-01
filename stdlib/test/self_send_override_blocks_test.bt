@@ -67,3 +67,11 @@ TestCase subclass: SelfSendOverrideBlocksTest
     self assert: SsoBlocksSub viaForeign equals: 1
     SsoBlocksSub resetSubHits
     self assert: SsoBlocksSub viaForeign equals: 1
+
+  testOwnClassWrapperInBlock =>
+    SsoBlocksSub viaOwnClassBlock
+    self assert: SsoBlocksSub subHits equals: 2
+
+  testSealedSelectorWrapperInBlock =>
+    SsoBlocksSub viaSealedSelectorBlock
+    self assert: SsoBlocksSub subHits equals: 2

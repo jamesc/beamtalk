@@ -99,3 +99,16 @@ Object subclass: SsoBlocksBase
 
   // A block run inside another class's process (ADR 0109).
   class viaForeign -> Integer => SsoBlocksDriver each: [self tick]
+
+  // Statically bound sends whose callee's own `self foo:` late-binds.
+  class wrapper -> Integer => self foo: 1
+
+  class sealed sealedWrapper -> Integer => self foo: 1
+
+  class viaOwnClassBlock -> Integer =>
+    #(1, 2) do: [:x | SsoBlocksBase wrapper]
+    0
+
+  class viaSealedSelectorBlock -> Integer =>
+    #(1, 2) do: [:x | self sealedWrapper]
+    0
