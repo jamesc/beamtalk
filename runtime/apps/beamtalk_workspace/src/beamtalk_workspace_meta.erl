@@ -759,7 +759,10 @@ pid_is_gone(Name) ->
     case os:type() of
         {unix, _} ->
             [<<"foreground">>, Pid | _] = binary:split(iolist_to_binary(Name), <<"_">>, [global]),
-            Out = os:cmd("kill -0 " ++ binary_to_list(Pid) ++ " 2>&1"),
+            %% Force the C locale: the "No such process" text below is
+            %% locale-dependent (a localized kill would never match, which is
+            %% safe but would silently disable pruning).
+            Out = os:cmd("LC_ALL=C LANG=C kill -0 " ++ binary_to_list(Pid) ++ " 2>&1"),
             string:find(Out, "No such process") =/= nomatch;
         _ ->
             false
@@ -806,12 +809,19 @@ init(InitialMetadata) ->
                 case is_foreground_id(WorkspaceId) of
                     true ->
                         %% Off the startup path: pruning may spawn a shell and
-                        %% probe ports per stale candidate.
-                        _ = prune_stale_foreground_workspaces_async(
-                            workspaces_base_dir(),
-                            ?FOREGROUND_MAX_AGE_SECONDS,
-                            Now
-                        ),
+                        %% probe ports per stale candidate. Tests and harnesses
+                        %% set BEAMTALK_NO_FOREGROUND_PRUNE=1 so they never
+                        %% prune the developer's real workspaces dir.
+                        case os:getenv("BEAMTALK_NO_FOREGROUND_PRUNE") of
+                            "1" ->
+                                ok;
+                            _ ->
+                                _ = prune_stale_foreground_workspaces_async(
+                                    workspaces_base_dir(),
+                                    ?FOREGROUND_MAX_AGE_SECONDS,
+                                    Now
+                                )
+                        end,
                         undefined;
                     false ->
                         filename:join([

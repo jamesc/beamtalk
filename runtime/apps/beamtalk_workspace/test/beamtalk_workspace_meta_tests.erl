@@ -26,6 +26,37 @@ test_metadata() ->
         last_activity => erlang:system_time(second)
     }.
 
+%% Run Fun with BEAMTALK_NO_FOREGROUND_PRUNE=1 so starting a workspace with a
+%% foreground-shaped id never prunes the developer's real workspaces dir.
+with_no_prune(Fun) ->
+    Old = os:getenv("BEAMTALK_NO_FOREGROUND_PRUNE"),
+    os:putenv("BEAMTALK_NO_FOREGROUND_PRUNE", "1"),
+    try
+        Fun()
+    after
+        case Old of
+            false -> os:unsetenv("BEAMTALK_NO_FOREGROUND_PRUNE");
+            V -> os:putenv("BEAMTALK_NO_FOREGROUND_PRUNE", V)
+        end
+    end.
+
+%% Run Fun under a non-English locale (prune must force LC_ALL=C itself).
+with_locale(Fun) ->
+    Old = [{K, os:getenv(K)} || K <- ["LC_ALL", "LANG"]],
+    os:putenv("LC_ALL", "de_DE.UTF-8"),
+    os:putenv("LANG", "de_DE.UTF-8"),
+    try
+        Fun()
+    after
+        [
+            case V of
+                false -> os:unsetenv(K);
+                _ -> os:putenv(K, V)
+            end
+         || {K, V} <- Old
+        ]
+    end.
+
 stop_if_running() ->
     case whereis(beamtalk_workspace_meta) of
         undefined ->
@@ -476,6 +507,9 @@ new_foreground_id_is_unique_test() ->
     ?assertEqual(4, length(binary:split(A, <<"_">>, [global]))).
 
 stale_metadata_under_colliding_id_does_not_leak_into_foreground_workspace_test() ->
+    with_no_prune(fun stale_metadata_no_leak_case/0).
+
+stale_metadata_no_leak_case() ->
     %% BT-3670: a stale metadata.json left under an old-style colliding id
     %% (`foreground_1') must not affect a workspace started with a fresh id.
     OldId = <<"foreground_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
@@ -554,6 +588,9 @@ is_foreground_id_test() ->
     ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"named_ws_1_2_3">>)).
 
 anonymous_foreground_workspace_does_not_persist_metadata_test() ->
+    with_no_prune(fun anonymous_foreground_no_persist_case/0).
+
+anonymous_foreground_no_persist_case() ->
     %% BT-3672: an anonymous foreground workspace must not leave a
     %% metadata.json behind (neither on debounce nor on terminate).
     WsId = beamtalk_workspace_meta:new_foreground_id(),
@@ -600,8 +637,13 @@ prune_stale_foreground_workspaces_test_() ->
     %% BT-3672: only stale, strictly-shaped foreground dirs with a provably
     %% dead owner are removed. Needs POSIX `kill -0` for the dead-pid proof.
     case os:type() of
-        {unix, _} -> {"prune", fun prune_cases/0};
-        _ -> []
+        {unix, _} ->
+            [
+                {"prune", fun prune_cases/0},
+                {"prune under a non-English locale", fun() -> with_locale(fun prune_cases/0) end}
+            ];
+        _ ->
+            []
     end.
 
 prune_cases() ->
