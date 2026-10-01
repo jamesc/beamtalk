@@ -2490,6 +2490,9 @@ impl CoreErlangGenerator {
         self.reset_state_version();
         self.set_class_var_version(0);
         self.set_class_var_mutated(false);
+        // BT-3675: the fun is a separate method body; the enclosing method's
+        // open class-variable scopes are not its scopes.
+        let saved_scopes = self.take_class_var_scopes();
         // ADR 0110: the fun body executes at runtime as a class
         // method's own top frame, even when the builder cascade lexically sits
         // inside a block (`block_depth > 0` at the cascade's position). Reset
@@ -2553,6 +2556,7 @@ impl CoreErlangGenerator {
                 Err(e) => {
                     self.set_current_nlr_token(None);
                     self.block_depth = saved_block_depth;
+                    self.restore_class_var_scopes(saved_scopes);
                     self.pop_scope();
                     return Err(e);
                 }
@@ -2587,6 +2591,7 @@ impl CoreErlangGenerator {
         ];
 
         self.block_depth = saved_block_depth;
+        self.restore_class_var_scopes(saved_scopes);
         self.pop_scope();
         Ok(doc)
     }
@@ -2836,7 +2841,7 @@ impl CoreErlangGenerator {
         // deliberately excluded by that same check) — closing loses the
         // mutated name's LEXICAL visibility, but not the mutation itself,
         // so `refresh_class_var_after_opaque_scope` recovers the live value
-        // via the ADR 0110 shadow write instead of relying on lexical scope.
+        // via the per-scope class-variable commit (BT-3675) instead of relying on lexical scope.
         if has_class_vars {
             if self.is_class_var_assignment(value)
                 || self.is_self_clear_field_class_var(value)
@@ -2876,10 +2881,12 @@ impl CoreErlangGenerator {
                 let result_var = self.fresh_temp_var("Ret");
                 let cv_version_before = self.class_var_scope_mark();
                 let expr_doc = self.expression_doc(value)?;
+                let scope_prefix = self.class_var_scope_prefix(cv_version_before);
                 let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
                 if self.class_var_mutated() {
                     let final_cv = self.current_class_var();
                     Ok(docvec![
+                        scope_prefix,
                         "let ",
                         leaf::var(result_var.clone()),
                         " = ",
@@ -2894,6 +2901,7 @@ impl CoreErlangGenerator {
                     ])
                 } else {
                     Ok(docvec![
+                        scope_prefix,
                         "let ",
                         leaf::var(result_var.clone()),
                         " = ",
@@ -3008,16 +3016,18 @@ impl CoreErlangGenerator {
             // `self`-receiver send regardless of selector). Closing loses
             // the mutated `ClassVarsN` name's LEXICAL visibility, but not
             // the mutation itself — `refresh_class_var_after_opaque_scope`
-            // recovers the live value via the ADR 0110 shadow write rather
+            // recovers the live value via the per-scope class-variable commit (BT-3675) rather
             // than relying on lexical scope, so this is robust to whatever
             // depth/shape the opaque compile below reaches.
             let result_var = self.fresh_temp_var("Ret");
             let cv_version_before = self.class_var_scope_mark();
             let expr_doc = self.expression_doc(expr)?;
+            let scope_prefix = self.class_var_scope_prefix(cv_version_before);
             let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
             if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
+                    scope_prefix,
                     "let ",
                     leaf::var(result_var.clone()),
                     " = ",
@@ -3032,6 +3042,7 @@ impl CoreErlangGenerator {
                 ])
             } else {
                 Ok(docvec![
+                    scope_prefix,
                     "let ",
                     leaf::var(result_var.clone()),
                     " = ",
@@ -3067,18 +3078,28 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        // BT-3667: a statement built by one of the value-type threading
-        // constructs below (a loop, list-op, conditional or `on:do:`/`ensure:`
-        // over captured locals) compiles its nested scopes without carrying a
-        // `ClassVars` rebind out, so a late-bound self-send in one of them
-        // (whose callee a subclass may override with a class-variable write)
-        // mints a version that is rolled back. Recover the write from the
-        // ADR 0110 shadow right after the statement, so the next statement
-        // (and the method's final `class_var_result`) sees it.
+        self.generate_class_method_non_last_expr_inner(expr)
+    }
+
+    /// BT-3675: runs `generate` — one of the value-type threading constructs of
+    /// [`Self::generate_class_method_non_last_expr_inner`] (a loop, list-op,
+    /// conditional or `on:do:`/`ensure:` over captured locals) — as a scope
+    /// with its own class-variable token. The construct compiles its nested
+    /// scopes without carrying a `ClassVars` rebind out, so a class-side
+    /// self-send in one of them (whose callee a subclass may override with a
+    /// class-variable write) commits its returned class variables under the
+    /// token once the callee returned normally; the refresh right after the
+    /// statement carries them to the next statement (and the method's final
+    /// `class_var_result`).
+    fn with_class_var_scope(
+        &mut self,
+        generate: impl FnOnce(&mut Self) -> Result<Document<'static>>,
+    ) -> Result<Document<'static>> {
         let mark = self.class_var_scope_mark();
-        let doc = self.generate_class_method_non_last_expr_inner(expr)?;
-        Ok(match self.refresh_class_var_after_confined_scope(mark) {
-            Some(refresh) => docvec![doc, refresh],
+        let doc = generate(self)?;
+        let scope_prefix = self.class_var_scope_prefix(mark);
+        Ok(match self.refresh_class_var_after_opaque_scope(mark) {
+            Some(refresh) => docvec![scope_prefix, doc, refresh],
             None => doc,
         })
     }
@@ -3095,15 +3116,15 @@ impl CoreErlangGenerator {
             Ok(Document::Vec(binding_docs))
         } else if self.is_do_with_vt_local_threading(expr) {
             // Non-last `do:` loop that mutates captured outer locals.
-            self.generate_value_type_do_open(expr)
+            self.with_class_var_scope(|g| g.generate_value_type_do_open(expr))
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
             // Non-last counted loop (to:do:/to:by:do:/timesRepeat:) that
             // mutates captured outer locals. Extracts the threaded locals from the
             // `{'nil', StateAcc}` tuple so subsequent statements see the updates.
-            self.generate_vt_counted_loop_open(expr)
+            self.with_class_var_scope(|g| g.generate_vt_counted_loop_open(expr))
         } else if self.is_while_with_vt_local_threading(expr) {
             // Non-last whileTrue:/whileFalse: that mutates captured outer locals.
-            self.generate_vt_while_open(expr)
+            self.with_class_var_scope(|g| g.generate_vt_while_open(expr))
         } else if self.is_foldl_list_op_with_vt_local_threading(expr) {
             // Non-last collect:/select:/reject:/inject:into: that mutates captured
             // outer locals. Extracts the threaded locals from the `{value, StateAcc}` tuple
@@ -3111,19 +3132,19 @@ impl CoreErlangGenerator {
             self.generate_vt_foldl_list_op_open(expr)
         } else if self.is_conditional_with_vt_local_threading(expr) {
             // Non-last conditional that mutates captured outer locals.
-            self.generate_vt_conditional_open(expr)
+            self.with_class_var_scope(|g| g.generate_vt_conditional_open(expr))
         } else if self.is_exception_construct_with_vt_local_threading(expr) {
             // Non-last on:do:/ensure: that mutates captured outer
             // locals. Extracts the threaded locals from the returned
             // `{Result, StateAcc}` tuple, same idiom as the loop/conditional
             // arms above.
-            self.generate_vt_exception_construct_open(expr)
+            self.with_class_var_scope(|g| g.generate_vt_exception_construct_open(expr))
         } else {
             // `expr` may dispatch a class-method self-send (locally
             // declared or inherited) that rebinds `ClassVarsN`
             // opaquely, closed by the time this call returns —
             // `refresh_class_var_after_opaque_scope` recovers the live
-            // value via the ADR 0110 shadow write (rather than relying on
+            // value via the per-scope class-variable commit (BT-3675) (rather than relying on
             // lexical scope) so the NEXT statement in this same body — which
             // reads `current_class_var()` when it builds its own call —
             // sees it regardless of nesting depth. Bind the result to the
@@ -3131,10 +3152,12 @@ impl CoreErlangGenerator {
             let tmp_var = self.fresh_temp_var("seq");
             let cv_version_before = self.class_var_scope_mark();
             let expr_doc = self.expression_doc(expr)?;
+            let scope_prefix = self.class_var_scope_prefix(cv_version_before);
             let refresh = self
                 .refresh_class_var_after_opaque_scope(cv_version_before)
                 .unwrap_or(Document::Nil);
             Ok(docvec![
+                scope_prefix,
                 "let ",
                 leaf::var(tmp_var),
                 " = ",
@@ -3159,12 +3182,19 @@ impl CoreErlangGenerator {
                 // target to the raw tuple. Shared with the value-type instance-method
                 // body sequencer via `emit_threaded_assign_rhs`.
                 let mut parts: Vec<Document<'static>> = Vec::new();
+                // BT-3675: the threaded RHS is its own class-variable scope.
+                let scope = self.class_var_scope_mark();
                 if self
                     .emit_threaded_assign_rhs(&id.name, value, &mut parts)?
                     .is_some()
                 {
+                    let scope_prefix = self.class_var_scope_prefix(scope);
+                    let refresh = self.refresh_class_var_after_opaque_scope(scope);
+                    parts.insert(0, scope_prefix);
+                    parts.extend(refresh);
                     return Ok(Document::Vec(parts));
                 }
+                let _ = self.close_class_var_scope(scope);
                 let var_name = &id.name;
                 let core_var = self
                     .lookup_var(var_name)
@@ -3175,16 +3205,18 @@ impl CoreErlangGenerator {
                 // `class_method_selectors()` check only recognizes the
                 // former) may rebind `ClassVarsN` opaquely, closed by the
                 // time this call returns; `refresh_class_var_after_opaque_scope`
-                // recovers the live value via the ADR 0110 shadow write
+                // recovers the live value via the per-scope class-variable commit (BT-3675)
                 // rather than relying on lexical scope, so this is robust
                 // to whatever depth/shape the compile below reaches.
                 let cv_version_before = self.class_var_scope_mark();
                 let val_doc = self.expression_doc(value)?;
                 self.bind_var(var_name, &core_var);
+                let scope_prefix = self.class_var_scope_prefix(cv_version_before);
                 let refresh = self
                     .refresh_class_var_after_opaque_scope(cv_version_before)
                     .unwrap_or(Document::Nil);
                 return Ok(docvec![
+                    scope_prefix,
                     "let ",
                     leaf::var(core_var),
                     " = ",

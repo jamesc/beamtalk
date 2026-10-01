@@ -112,3 +112,19 @@ Object subclass: SsoBlocksBase
   class viaSealedSelectorBlock -> Integer =>
     #(1, 2) do: [:x | self sealedWrapper]
     0
+
+  // BT-3675: a callee that writes a class variable and then raises, caught by
+  // the caller. The write must not be resurrected by a later late-bound send.
+  class hook -> Integer => 0
+
+  class noop -> Integer => 0
+
+  class caughtThenSend -> Integer =>
+    [self hook] on: Error do: [:e | nil]
+    self noop
+    0
+
+  class caughtThenBlock -> Integer =>
+    [self hook] on: Error do: [:e | nil]
+    [self noop] value
+    0

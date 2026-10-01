@@ -351,8 +351,10 @@ impl CoreErlangGenerator {
         // `class_var_version` never advances.
         let cv_version_before = self.class_var_scope_mark();
         let Some(threaded) = self.lower_threaded_last(expr, position)? else {
+            let _ = self.close_class_var_scope(cv_version_before);
             return Ok(false);
         };
+        body_parts.push(self.class_var_scope_prefix(cv_version_before));
         body_parts.push(threaded.value_doc);
         if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
             body_parts.push(refresh);

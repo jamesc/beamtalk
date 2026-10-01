@@ -3,7 +3,11 @@
 
 TestCase subclass: SelfSendOverrideBlocksTest
 
-  setUp => SsoBlocksSub resetSubHits
+  setUp =>
+    SsoBlocksSub resetSubHits
+    SsoStaleSub resetHits
+    SsoScopeOpen resetN
+    SsoScopeSealed resetN
 
   testCollect =>
     self assert: SsoBlocksSub viaCollect equals: #(10, 20)
@@ -75,3 +79,192 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testSealedSelectorWrapperInBlock =>
     SsoBlocksSub viaSealedSelectorBlock
     self assert: SsoBlocksSub subHits equals: 2
+
+  // --- BT-3675: per-scope tokens ------------------------------------------
+
+  // A write made by a callee that raised and was caught must not be
+  // resurrected by a later late-bound send or a later confined scope.
+  testCaughtThenSend =>
+    SsoBlocksSub caughtThenSend
+    self assert: SsoBlocksSub subHits equals: 0
+
+  testCaughtThenBlock =>
+    SsoBlocksSub caughtThenBlock
+    self assert: SsoBlocksSub subHits equals: 0
+
+  testCaughtThenSealedHelperInBlock =>
+    SsoStaleSub caughtThenSealedHelper
+    self assert: SsoStaleSub hits equals: 0
+
+  // The method's own on:do: try body writes (via a self-send) then raises.
+  testOwnTryBodyRaiseThenSend =>
+    self assert: SsoStaleSub ownTryRaise equals: 0
+    self assert: SsoStaleSub hits equals: 0
+
+  // A completed writer followed by a raise in the same scope: all discarded.
+  testCompletedThenRaiseInSameScope =>
+    SsoStaleSub completedThenRaise
+    self assert: SsoStaleSub hits equals: 0
+
+  // ... including when the raise is caught by a runtime `Result tryDo:`.
+  testCompletedThenRaiseCaughtByRuntime =>
+    SsoStaleSub completedThenRaiseRuntime
+    self assert: SsoStaleSub hits equals: 0
+
+  testRuntimeCatcherKeepsCompletedWrites =>
+    SsoStaleSub runtimeKept
+    self assert: SsoStaleSub hits equals: 1
+
+  // Only each iteration's second `foo` counts.
+  testClosureCaughtRaiseThenSend =>
+    SsoStaleSub closureCaughtThenSend
+    self assert: SsoStaleSub hits equals: 2
+
+  testClosureCompletedTryThenSend =>
+    SsoStaleSub closureCompletedTry
+    self assert: SsoStaleSub hits equals: 4
+
+  testNestedClosuresKeepWrites =>
+    SsoStaleSub nestedClosures
+    self assert: SsoStaleSub hits equals: 4
+
+  testHandlerArmSendKept =>
+    SsoStaleSub handlerSend
+    self assert: SsoStaleSub hits equals: 1
+
+  testOuterHandlerDiscardsRaisedTryBody =>
+    SsoStaleSub outerCaught
+    self assert: SsoStaleSub hits equals: 0
+
+  // Control: a normally finishing scope keeps every write.
+  testCompletedWritesKept =>
+    SsoStaleSub completedKept
+    self assert: SsoStaleSub hits equals: 2
+
+  // A statically bound wrapper in a loop that READS before its own late-bound
+  // send sees the previous iteration's write.
+  testWrapperReadSeesPreviousIteration =>
+    self assert: SsoStaleSub viaReadLoop equals: #(0, 1, 2)
+    self assert: SsoStaleSub hits equals: 3
+
+  // Sealed and open classes agree: a class's own mutating self-send nested in
+  // a conditional arm keeps its write.
+  testOpenConditionalArmKeepsWrite =>
+    self assert: (SsoScopeOpen condArm: 5) equals: 5
+    self assert: SsoScopeOpen n equals: 1
+
+  testSealedConditionalArmKeepsWrite =>
+    self assert: (SsoScopeSealed condArm: 5) equals: 5
+    self assert: SsoScopeSealed n equals: 1
+
+  testOpenConditionalArmNotTakenNoWrite =>
+    self assert: (SsoScopeOpen condArm: 0) equals: 0
+    self assert: SsoScopeOpen n equals: 0
+
+  testSealedConditionalArmNotTakenNoWrite =>
+    self assert: (SsoScopeSealed condArm: 0) equals: 0
+    self assert: SsoScopeSealed n equals: 0
+
+  // Threaded loop bodies (also mutating a captured local).
+  testOpenThreadedTimesRepeat =>
+    self assert: (SsoScopeOpen threadedTimes: 3) equals: 3
+    self assert: SsoScopeOpen n equals: 3
+
+  testSealedThreadedTimesRepeat =>
+    self assert: (SsoScopeSealed threadedTimes: 3) equals: 3
+    self assert: SsoScopeSealed n equals: 3
+
+  testOpenThreadedToDo =>
+    self assert: (SsoScopeOpen threadedToDo: 3) equals: 6
+    self assert: SsoScopeOpen n equals: 3
+
+  testSealedThreadedToDo =>
+    self assert: (SsoScopeSealed threadedToDo: 3) equals: 6
+    self assert: SsoScopeSealed n equals: 3
+
+  // --- BT-3675 review: direct writes between sends in a scope ---------------
+  testOpenMixedDirectWriteLoop => self assert: SsoScopeOpen mixedLoop equals: 6
+
+  testSealedMixedDirectWriteLoop =>
+    self assert: SsoScopeSealed mixedLoop equals: 6
+
+  testOpenMixedDirectWriteArm =>
+    self assert: (SsoScopeOpen mixedArm: 1) equals: 12
+
+  testSealedMixedDirectWriteArm =>
+    self assert: (SsoScopeSealed mixedArm: 1) equals: 12
+
+  // Known limit (ADR 0110, BT-3675): a closure stored in a local and invoked
+  // by a LATER statement exports into the scope of the statement that built
+  // it, which was already refreshed, so its class-variable writes are not
+  // kept. These pin the actual behaviour (and that it compiles and runs).
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testStoredClosureInvokedLaterLosesWrite =>
+    SsoStaleSub deferred
+    self assert: SsoStaleSub hits equals: 0
+
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testStoredClosureInvokedLaterInArmLosesWrite =>
+    SsoStaleSub deferredInArm
+    self assert: SsoStaleSub hits equals: 0
+
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 2). The fix must flip this assertion.
+  testStoredClosureInvokedTwiceLosesWrites =>
+    SsoStaleSub deferredTwice
+    self assert: SsoStaleSub hits equals: 0
+
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 2). The fix must flip this assertion.
+  testStoredClosureThenWritingSendKeepsOnlyTheSend =>
+    SsoStaleSub deferredThenSend
+    self assert: SsoStaleSub hits equals: 1
+
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testStoredClosureWithStatementsCompilesAndRuns =>
+    SsoStaleSub deferredWithStatements
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit (ADR 0110, BT-3681): a block literal passed to a user-defined
+  // class-side higher-order method does not keep its class-variable write (the
+  // callee returns the ClassVars it was given), but the callee's own write is
+  // kept, with and without a block that writes.
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testBlockPassedToClassSideHomLosesBlockWrite =>
+    SsoStaleSub viaSection
+    self assert: SsoStaleSub hits equals: 0
+
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testBlockPassedToClassSideHomThenSendLosesBlockWrite =>
+    SsoStaleSub viaSectionThenSend
+    self assert: SsoStaleSub hits equals: 0
+
+  testClassSideHomKeepsItsOwnWriteWithNonWritingBlock =>
+    SsoStaleSub viaTimedNoWrite
+    self assert: SsoStaleSub hits equals: 1
+
+  testClassSideHomKeepsItsOwnWriteWithWritingBlock =>
+    SsoStaleSub viaTimedWriting
+    self assert: SsoStaleSub hits equals: 1
+
+  // The stored-closure limit is not limited to subclass overrides: a closure
+  // calling the class's own mutating selector loses its write too.
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testStoredClosureOwnMutatingSelectorLosesWrite =>
+    SsoStaleSub storedBump
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit (ADR 0110, BT-3681): a stored closure can also read a stale or
+  // reverted value. Correct answers would be 1 and 3; these pin the actual ones.
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testStoredClosureReadsRevertedValueAfterCaughtRaise =>
+    self assert: SsoStaleSub staleAfterRaise equals: 2
+
+  // PIN-BUG BT-3681: pins a KNOWN-WRONG answer (the correct one is 3). The fix must flip this assertion.
+  testStoredClosureReadsOlderValueAfterBump =>
+    self assert: SsoStaleSub staleAfterBump equals: 2
+
+  // Same limit inside a loop body (BT-3682 covers both positions). The correct
+  // answer would be 1; this pins the actual one.
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testBlockPassedToClassSideHomInLoopBody =>
+    SsoStaleSub viaSectionInLoop
+    self assert: SsoStaleSub hits equals: 0

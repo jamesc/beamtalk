@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3675: see sso_stale_base.bt.
+
+SsoStaleBase subclass: SsoStaleSub
+
+  class foo -> Integer => self bump
+
+  class boom -> Integer =>
+    self bump
+    self error: "boom"

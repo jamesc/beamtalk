@@ -433,6 +433,10 @@ impl CoreErlangGenerator {
                 self.lower_class_var_field_assignment_bind(&field.name, value, branch_frame)?;
             stmts.push(ThreadedStmt::Statement(preamble_doc, span));
             stmts.push(bind);
+            // BT-3675: a direct write commits like a send's rebind.
+            if let Some(commit) = self.class_var_write_commit_doc() {
+                stmts.push(ThreadedStmt::Statement(commit, span));
+            }
             return Ok(val_var);
         }
 
@@ -1980,16 +1984,18 @@ impl CoreErlangGenerator {
         // `expr` may dispatch a class-method self-send (locally declared or
         // inherited) that rebinds `ClassVarsN` opaquely, closed
         // by the time this call returns — `refresh_class_var_after_opaque_scope`
-        // recovers the live value via the ADR 0110 shadow write (rather than
+        // recovers the live value via the per-scope class-variable commit (BT-3675) (rather than
         // relying on lexical scope) so the fold's own `{ClassVars, tail}`
         // wrap, built from `current_class_var()` after this call, sees it
         // regardless of nesting depth.
         let cv_version_before = self.class_var_scope_mark();
         let expr_code = self.expression_doc(expr)?;
+        let scope_prefix = self.class_var_scope_prefix(cv_version_before);
         let refresh = self
             .refresh_class_var_after_opaque_scope(cv_version_before)
             .unwrap_or(Document::Nil);
         Ok(docvec![
+            scope_prefix,
             "let ",
             leaf::var(result_var.to_string()),
             " = ",

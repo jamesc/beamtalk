@@ -17,3 +17,7 @@ SsoBlocksBase subclass: SsoBlocksSub
   class tick -> Integer =>
     self.subHits := self.subHits + 1
     self.subHits
+
+  class hook -> Integer =>
+    self.subHits := self.subHits + 1
+    self error: "boom"
