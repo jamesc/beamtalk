@@ -208,22 +208,16 @@ write_port_file(WorkspaceId, Port, Nonce) ->
 
 -spec write_port_file_to_home(binary(), inet:port_number(), binary()) -> ok.
 write_port_file_to_home(WorkspaceId, Port, Nonce) ->
-    case beamtalk_platform:home_dir() of
-        false ->
+    case beamtalk_platform:workspace_dir(WorkspaceId) of
+        undefined ->
             ?LOG_WARNING(
-                "HOME/USERPROFILE not set; skipping port file write for workspace ~p",
+                "No home directory; skipping port file write for workspace ~p",
                 [WorkspaceId],
                 #{domain => [beamtalk, runtime]}
             ),
             ok;
-        Home ->
-            PortFilePath = filename:join([
-                Home,
-                ".beamtalk",
-                "workspaces",
-                binary_to_list(WorkspaceId),
-                "port"
-            ]),
+        WsDir ->
+            PortFilePath = filename:join(WsDir, "port"),
             case filelib:ensure_dir(PortFilePath) of
                 ok ->
                     %% Format: PORT\nNONCE (two lines for stale detection)

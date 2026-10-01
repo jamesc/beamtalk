@@ -2007,20 +2007,18 @@ source_ref_filename(Seq, Which) ->
 
 -doc """
 Return the absolute `changes/` directory for a workspace, or `undefined` when
-there is no workspace (run mode). Mirrors `beamtalk_workspace_meta`'s path
-resolution: `<home>/.beamtalk/workspaces/<id>/changes`, falling back to the OS
-user-cache dir when HOME/USERPROFILE is unset. Exported for tests.
+there is no workspace (run mode) or no home directory (BT-3680; persistence is
+then off, as in run mode). Resolves via `beamtalk_platform:workspace_dir/1`:
+`<home>/.beamtalk/workspaces/<id>/changes`. Exported for tests.
 """.
 -spec changes_dir(binary() | undefined) -> string() | undefined.
 changes_dir(undefined) ->
     undefined;
 changes_dir(WorkspaceId) when is_binary(WorkspaceId) ->
-    Base =
-        case beamtalk_platform:home_dir() of
-            false -> filename:basedir(user_cache, "beamtalk");
-            Home -> filename:join(Home, ".beamtalk")
-        end,
-    filename:join([Base, "workspaces", binary_to_list(WorkspaceId), "changes"]).
+    case beamtalk_platform:workspace_dir(WorkspaceId) of
+        undefined -> undefined;
+        WsDir -> filename:join(WsDir, "changes")
+    end.
 
 -spec log_path(string() | undefined) -> string() | undefined.
 log_path(undefined) -> undefined;
