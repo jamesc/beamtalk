@@ -225,10 +225,10 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // Pass 1: Parse all files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_files = Vec::new();
-    // Modules with `uses:` lines, flattened below once dependency protocols
-    // are merged (BT-3673) — same step as `beamtalk lint`.
-    let mut trait_user_modules: Vec<beamtalk_core::ast::Module> = Vec::new();
-    let mut package_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition> = Vec::new();
+    // Trait users, flattened below once dependency protocols are merged
+    // (BT-3673) — same step as `beamtalk lint`.
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
     let mut unreadable_files: Vec<String> = Vec::new();
     let mut unreadable_target_files: Vec<String> = Vec::new();
 
@@ -259,16 +259,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
         }
         all_class_infos.extend(class_infos);
-        if module.classes.iter().any(|c| !c.uses.is_empty()) {
-            trait_user_modules.push(module.clone());
-        }
-        package_protocol_defs.extend(
-            module
-                .protocols
-                .iter()
-                .filter(|p| !p.provided_methods.is_empty())
-                .cloned(),
-        );
+        trait_users.add(&module);
 
         let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
@@ -287,13 +278,9 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
     // Flatten cross-file trait provisions into the same-package infos (BT-3673),
     // via the helper `beamtalk lint` and `build` use.
-    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
+    trait_users.flatten(
         &mut all_class_infos,
-        &trait_user_modules,
-        package_protocol_defs
-            .iter()
-            .chain(&all_protocol_defs)
-            .cloned(),
+        all_protocol_defs.iter().cloned(),
         current_package.as_deref(),
     );
 
@@ -559,10 +546,10 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         beamtalk_core::ast::Module,
         Vec<beamtalk_core::source_analysis::Diagnostic>,
     )> = Vec::new();
-    // Modules with `uses:` lines, flattened below once dependency protocols
-    // are merged (BT-3673) — same step as `beamtalk lint`.
-    let mut trait_user_modules: Vec<beamtalk_core::ast::Module> = Vec::new();
-    let mut package_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition> = Vec::new();
+    // Trait users, flattened below once dependency protocols are merged
+    // (BT-3673) — same step as `beamtalk lint`.
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
 
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
@@ -608,16 +595,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
         }
         all_class_infos.extend(class_infos);
-        if module.classes.iter().any(|c| !c.uses.is_empty()) {
-            trait_user_modules.push(module.clone());
-        }
-        package_protocol_defs.extend(
-            module
-                .protocols
-                .iter()
-                .filter(|p| !p.provided_methods.is_empty())
-                .cloned(),
-        );
+        trait_users.add(&module);
 
         let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
@@ -636,13 +614,9 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
 
     // Flatten cross-file trait provisions into the same-package infos (BT-3673),
     // via the helper `beamtalk lint` and `build` use.
-    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
+    trait_users.flatten(
         &mut all_class_infos,
-        &trait_user_modules,
-        package_protocol_defs
-            .iter()
-            .chain(&all_protocol_defs)
-            .cloned(),
+        all_protocol_defs.iter().cloned(),
         current_package.as_deref(),
     );
 

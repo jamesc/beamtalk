@@ -312,18 +312,21 @@ pub(crate) fn flatten_trait_user_class_infos(
     user_files.sort();
     // Pass 1 already parsed every changed file; only a cache-fresh file has no
     // `cached_asts` entry and is re-read here.
-    let mut reparsed: Vec<beamtalk_core::ast::Module> = Vec::new();
+    let mut reparsed: HashMap<&Utf8PathBuf, beamtalk_core::ast::Module> = HashMap::new();
     for file in &user_files {
         if cached_asts.contains_key(*file) {
             continue;
         }
         match fs::read_to_string(file) {
-            Ok(source) => reparsed.push(
-                beamtalk_core::source_analysis::parse(
-                    beamtalk_core::source_analysis::lex_with_eof(&source),
-                )
-                .0,
-            ),
+            Ok(source) => {
+                reparsed.insert(
+                    file,
+                    beamtalk_core::source_analysis::parse(
+                        beamtalk_core::source_analysis::lex_with_eof(&source),
+                    )
+                    .0,
+                );
+            }
             Err(e) => warn!(
                 file = %file,
                 error = %e,
@@ -331,10 +334,15 @@ pub(crate) fn flatten_trait_user_class_infos(
             ),
         }
     }
-    let modules = user_files
-        .iter()
-        .filter_map(|f| cached_asts.get(*f).map(|c| &c.module))
-        .chain(reparsed.iter());
+    // One pass in sorted path order whatever the cache state, so an
+    // incremental build flattens a class duplicated across files exactly as a
+    // clean one does.
+    let modules = user_files.iter().filter_map(|f| {
+        cached_asts
+            .get(*f)
+            .map(|c| &c.module)
+            .or_else(|| reparsed.get(*f))
+    });
     beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
         all_class_infos,
         modules,

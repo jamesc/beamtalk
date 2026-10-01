@@ -242,6 +242,53 @@ pub fn flatten_trait_user_class_infos<'a>(
     }
 }
 
+/// Collects, while a caller walks a package's source files once, what
+/// [`flatten_trait_user_class_infos`] needs: the modules with `uses:` lines
+/// (the only ones cloned) and every provision-bearing protocol AST. Used by
+/// the lint surfaces, whose Pass 1 loops consume the parsed modules.
+#[derive(Debug, Default)]
+pub struct TraitUserCollector {
+    modules: Vec<Module>,
+    protocol_defs: Vec<ProtocolDefinition>,
+}
+
+impl TraitUserCollector {
+    /// Records `module`'s provision-bearing protocols and, if any class has a
+    /// `uses:` line, the module itself.
+    pub fn add(&mut self, module: &Module) {
+        if module.classes.iter().any(|c| !c.uses.is_empty()) {
+            self.modules.push(module.clone());
+        }
+        self.protocol_defs.extend(
+            module
+                .protocols
+                .iter()
+                .filter(|p| !p.provided_methods.is_empty())
+                .cloned(),
+        );
+    }
+
+    /// Flattens the collected trait users into `all_class_infos` with
+    /// [`flatten_trait_user_class_infos`], resolving protocols from this
+    /// collection first, then `extra_protocol_defs` (e.g. dependencies').
+    pub fn flatten(
+        &self,
+        all_class_infos: &mut [ClassInfo],
+        extra_protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
+        package: Option<&str>,
+    ) {
+        flatten_trait_user_class_infos(
+            all_class_infos,
+            &self.modules,
+            self.protocol_defs
+                .iter()
+                .cloned()
+                .chain(extra_protocol_defs),
+            package,
+        );
+    }
+}
+
 /// Builds the `external_protocols` map [`expand_module`] takes from protocol
 /// definitions in precedence order: the first definition of a name wins
 /// (project before dependencies), matching `ProtocolRegistry::add_pre_loaded`,

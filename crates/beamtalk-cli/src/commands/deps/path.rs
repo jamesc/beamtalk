@@ -458,8 +458,6 @@ fn compile_dependency_with_context(
     // immediately above. Exporting these aliases to *consumers* of this
     // dependency (cross-package alias resolution) is deferred as a
     // follow-up for this module.
-    let all_alias_infos =
-        crate::commands::build::collect_project_alias_infos(&source_files, dep_name);
     // Taken before `cached_asts` is handed to `compile_sources_to_core`.
     let dep_metadata = extract_dep_protocol_alias_metadata(&cached_asts, dep_name);
 
@@ -475,7 +473,7 @@ fn compile_dependency_with_context(
             pre_loaded_protocols: dep_metadata.protocol_infos,
             pre_loaded_protocol_defs: dep_metadata.protocol_defs,
             pre_loaded_protocol_sources: dep_metadata.protocol_sources,
-            pre_loaded_aliases: all_alias_infos,
+            pre_loaded_aliases: dep_metadata.alias_infos,
             // The dep's own project-wide extensions — its files see
             // each other's extensions during its own compilation. (Exporting
             // them to consumers is WS3 / the ADR 0070 amendment.)
