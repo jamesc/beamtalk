@@ -841,3 +841,74 @@ doc comment on `module_for_value/2` for the ADR 0066 argument this relies
 on). `test_binary_string_shared_selectors_stay_in_sync` gained a note that
 it can't see `extend`-registered overrides (ADR 0066), documenting the
 guarantee boundary the issue asked for.
+
+## Class-side self-send cost (BT-3666 / BT-3669 / BT-3675, measured in BT-3676)
+
+### Harness
+
+`runtime/perf/self_send_bench` is a small Beamtalk package whose `SsbMain run`
+times 200,000 self-sends per case (after a 1,000-iteration warmup) and prints
+`PERF: <case> <ns>ns/op` to stderr:
+
+```bash
+cd runtime/perf/self_send_bench
+beamtalk run SsbMain run
+```
+
+It is not part of `just perf` (`rebar3 eunit --dir=perf` only runs the Erlang
+suite in `runtime/perf/beamtalk_perf_tests.erl`). Run it on a quiet machine,
+build the compiler and stdlib for the commit under test first, and compare
+**interleaved** runs (A, B, A, B, ...) by median; run-to-run spread on one box
+is roughly +/-15%.
+
+### Results (ns/op, median of 6 interleaved runs, 4-core VM, otherwise idle)
+
+Baseline is `f12484e06` (the parent of BT-3666, with the bench directory copied
+in); "before" is `d8e35f815`; "after" is the BT-3676 change.
+
+| case | profile | baseline | before | after |
+|---|---|---|---|---|
+| class self-send, open class | debug | 106 | 469 | 338 |
+| class self-send, open class | release | 97 | 449 | 291 |
+| class self-send, sealed class | debug | 102 | 103 | 106 |
+| class self-send, sealed class | release | 101 | 100 | 100 |
+| actor self-send, open | debug | 89 | 104 | 107 |
+| actor self-send, open | release | 87 | 106 | 101 |
+| actor self-send, sealed | debug / release | 67 / 66 | 70 / 81 | 73 / 70 |
+
+"release" is the release-profile Rust CLI; the Erlang runtime is built by
+rebar3 either way. Min-max spread of the open class-side case is 272-379 ns
+(after, debug) and 249-383 ns (after, release); runs of the same side differ by
+up to ~40%, so the baseline-to-before gap (4x) is far outside noise but the
+before-to-after gain (about 30-35%) is only moderately so.
+
+### Where the open class-side cost went
+
+An open class's self-send inside a block or loop pays, per iteration: one
+`make_ref` (the scope token), `class_var_scope_read`, the
+`class_self_direct_ok` guard, `class_var_scope_commit` and
+`class_var_scope_export` (BT-3675). Standalone microbenchmarks of each helper
+(debug runtime, `erl` shell) put the commit/export process-dictionary
+read-modify-write at ~25-100 ns, the `make_ref` at ~30 ns, and the guard's
+`ets:whereis/1` at ~50-90 ns plus ~30 ns for its two `persistent_term` reads.
+BT-3676 replaces the `ets:whereis/1` with a `persistent_term` readiness flag
+(`beamtalk_class_shadow_flags:is_ready/0`).
+
+Skipping the per-send commit when the callee returned the same `ClassVars`
+term was also tried (it brought the open class-side case to ~185-198 ns), but
+it was dropped: the arm refresh `take`s only its own token and falls back to
+the lexical version, so a skipped commit changes what a later refresh sees
+(it flipped the pinned `testBlockPassedToClassSideHomInLoopBody` answer), and
+doing it safely means changing the refresh's fallback at three codegen sites.
+That is the remaining ~190 ns over baseline and needs a follow-up with a
+proper design. The actor open self-send increase (~85 to ~105) comes from
+BT-3666's late binding and was not profiled.
+
+### `NestedImprovementRatio >= 1.5`
+
+`block/nested_list_op_improvement` in `beamtalk_perf_tests.erl` compares two
+hand-written Erlang functions in `bench_block_threading.erl` (a StateAcc map
+vs an expanded tuple); it exercises no Beamtalk codegen or class dispatch. It
+is flaky near its threshold: over 4 (baseline) and 5 (main) runs the ratio
+ranged 1.34x to 1.88x, on both the pre-BT-3666 baseline and current main (the
+tuple variant is bimodal, ~730 us or ~930 us).

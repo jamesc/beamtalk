@@ -183,6 +183,9 @@ TestCase subclass: SelfSendOverrideBlocksTest
     self assert: SsoScopeSealed n equals: 3
 
   // --- BT-3675 review: direct writes between sends in a scope ---------------
+  // PIN-BUG BT-3683: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testArmsInListDo => self assert: SsoScopeOpen armsInListDo equals: 0
+
   testOpenMixedDirectWriteLoop => self assert: SsoScopeOpen mixedLoop equals: 6
 
   testSealedMixedDirectWriteLoop =>

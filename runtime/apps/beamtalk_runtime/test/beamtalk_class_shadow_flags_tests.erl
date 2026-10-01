@@ -27,6 +27,17 @@ noop_fun() -> fun(_, _) -> ok end.
 
 shadow_flag_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"extension registry init raises the readiness flag the fast path reads", fun() ->
+            %% BT-3676: the guard reads a readiness flag, not the extension
+            %% table; `beamtalk_extensions:init/0` raises it (idempotently).
+            %% Erase it first so removing `mark_ready/0` from `init/0` fails here.
+            _ = persistent_term:erase(beamtalk_class_shadow_ready),
+            ?assertNot(beamtalk_class_shadow_flags:is_ready()),
+            ok = beamtalk_extensions:init(),
+            ?assert(beamtalk_class_shadow_flags:is_ready()),
+            ok = beamtalk_extensions:init(),
+            ?assert(beamtalk_class_shadow_flags:is_ready())
+        end},
         {"unregistering the last class-side extension restores the fast path", fun() ->
             Sel = bt3669_ext_restore,
             ?assert(direct('Object class', 'Object', Sel)),

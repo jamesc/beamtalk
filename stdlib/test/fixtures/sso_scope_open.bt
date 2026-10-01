@@ -61,3 +61,24 @@ Object subclass: SsoScopeOpen
         seen := seen + 1
       ]
     self.n
+
+  // Statically able to write `n` (so codegen cannot treat it as pure and takes
+  // the full late-bound path), but the write never runs here.
+  class nonWriting -> Integer =>
+    self.n > 100 ifTrue: [self increment]
+    0
+
+  // A writing send in one arm of a `do:` over a list, then a non-writing send
+  // in another arm of the next iteration; the first write should survive.
+  // BT-3683: the arm refresh currently falls back to the stale lexical
+  // version, so this returns 0.
+  class armsInListDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self increment]
+        i =:= 2 ifTrue: [self nonWriting]
+      ]
+    self.n
