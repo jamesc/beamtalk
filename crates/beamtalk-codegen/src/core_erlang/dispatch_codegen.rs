@@ -300,10 +300,17 @@ impl CoreErlangGenerator {
     /// the continuation. Shared by the local-class-method branch (branch 1)
     /// and the inherited-dispatch branch in
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
+    ///
+    /// `late_bound` is true only for sends a subclass override can intercept
+    /// (BT-3667): only those re-sync `ClassVars` from the ADR 0110 shadow
+    /// before the call and count as a confined mint. Statically bound sends
+    /// (sealed class, `class sealed` selector, explicit own-class reference)
+    /// are judged exactly by the compile-time purity gates.
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
         args_prelude: Vec<ThreadedStmt>,
         call_doc: Document<'static>,
+        late_bound: bool,
     ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
@@ -315,10 +322,10 @@ impl CoreErlangGenerator {
         // `call_doc`, and which the plain-reply fall-back below reads too — so
         // an earlier send in the same scope (the previous iteration of a
         // `collect:`) is not overwritten from a stale lexical copy.
-        let sync_doc = if self.is_class_sealed() {
-            None
-        } else {
+        let sync_doc = if late_bound {
             Some(Self::class_var_shadow_rebind_doc(&cv, &cv))
+        } else {
+            None
         };
         // the version numbers driving both verify() and the real
         // Bind rendered below — captured before minting, matching the old
@@ -352,7 +359,7 @@ impl CoreErlangGenerator {
         ];
 
         self.next_class_var();
-        if !self.is_class_sealed() {
+        if late_bound {
             self.note_late_bound_class_var_mint();
         }
         let target_version = self.class_var_version();
@@ -512,7 +519,8 @@ impl CoreErlangGenerator {
     /// name bound only inside that arm's own scope. Either way the
     /// construct's trailing `ClassVars` slot would carry a stale or unbound
     /// variable. Returns a real `Bind` of a fresh `ClassVarsN` from the ADR
-    /// 0110 shadow (falling back to the last version bound in `stmts`), so
+    /// 0110 shadow (falling back to the construct's pre-sequence version, i.e. the version
+    /// live before `stmts` began), so
     /// the slot carries the write. Empty when nothing was lost: nothing was
     /// minted, or the live version is bound in `stmts` (threaded precisely).
     pub(super) fn confined_class_var_refresh_stmt(
@@ -1503,7 +1511,7 @@ impl CoreErlangGenerator {
                 args_doc,
                 "])"
             ];
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, true));
         }
 
         // BT-3666: a class-side self-send to a selector this class defines is
@@ -1562,7 +1570,9 @@ impl CoreErlangGenerator {
                 return Ok(self.emit_pure_class_self_send_unwrap(args_preamble, call_doc));
             }
             // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+            // Statically bound (sealed class, `class sealed` selector, or an
+            // explicit own-class reference): not late-bound.
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, false));
         }
         if defines_selector {
             // Bind every argument once, before the guarded `case`: the doc is
@@ -1606,7 +1616,7 @@ impl CoreErlangGenerator {
             // Late-bound: a subclass override may write a class variable even
             // when this class's own `selector` never does, so the purity
             // shortcut is unsound here. Always rebind the returned ClassVars.
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, true));
         }
         // Auto-generated keyword constructor for Value subclass: classes.
         // `ClassName slot: value` inside a class method routes here when the selector
@@ -1742,7 +1752,7 @@ impl CoreErlangGenerator {
         // NOTE: prelude stays real `ThreadedStmt`s here — the caller splices
         // it into its own frame or closes it (matches the local-class-method
         // branch above).
-        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc))
+        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, !self.is_class_sealed()))
     }
 
     /// Direct call `class_<sel>(ClassSelf, ClassVars, Args...)` into this
@@ -2776,7 +2786,8 @@ impl CoreErlangGenerator {
             ];
             // ADR 0118 phase 5b: reached through ordinary
             // `generate_expression` — close the producer's prelude inline.
-            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc);
+            // `super` binds statically to the superclass: not late-bound.
+            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc, false);
             return Ok(self.close_threaded_value_doc(tv));
         }
 
