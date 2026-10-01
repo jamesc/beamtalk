@@ -556,10 +556,16 @@ flattening implementation):
   test` (fixture indexes and the package `src/` index), `beamtalk lint`, MCP
   `lint`/`diagnostic_summary`, `beamtalk type-coverage`, a path dependency's
   own compile and the `class_infos` it exports, and the offline dependency scan
-  MCP uses (`dependency_classes.rs`): **parity**, flattened. Protocols resolve
+  MCP uses (`dependency_classes.rs`): **parity**, flattened. For the project's
+  own surfaces (`build`, `test`, `lint`, MCP, `type-coverage`) protocols resolve
   project-first, then dependencies.
 - A path dependency's own multi-file compile now also pre-loads its sibling
   files' protocols, so a cross-file `uses:` inside a dependency compiles.
+- **Gap (BT-3678):** a dependency's compile, its exported `class_infos`
+  (`build_dep_class_index`) and the offline dependency scan resolve only that
+  dependency's *own* protocols. A `uses:` of a trait from a *transitive*
+  dependency (B's class using a trait of B's dependency A) is not flattened
+  there.
 - MCP `lint`/`diagnostic_summary` flatten the infos with the package's
   provision-bearing protocols, but still do not pass same-package protocol
   ASTs to the per-file analysis (pre-existing gap noted in
