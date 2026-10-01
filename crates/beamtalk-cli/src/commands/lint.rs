@@ -257,6 +257,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         mut all_protocol_sources,
         mut all_alias_infos,
         parsed_files,
+        trait_user_modules,
     ) = parse_and_extract_class_infos(
         &source_files,
         package_root.as_deref(),
@@ -280,6 +281,18 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     } else {
         Vec::new()
     };
+
+    // Flatten cross-file trait provisions into the same-package infos, as
+    // `build` does (BT-3673) — after the dependency merge so a `uses:` of a
+    // dependency's trait resolves too. Without it a typed call to a provided
+    // method on a class whose trait lives in another file reports a false
+    // "does not understand" from every *other* file.
+    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
+        &mut all_class_infos,
+        &trait_user_modules,
+        all_protocol_defs.iter().cloned(),
+        current_package.as_deref(),
+    );
 
     // Populate the FFI type registry via the same
     // `extract_type_specs` that `beamtalk build` calls, instead of only
@@ -707,6 +720,7 @@ fn parse_and_extract_class_infos(
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     Vec<ParsedLintFile>,
+    Vec<beamtalk_core::ast::Module>,
 )> {
     let extraction_files = match package_root {
         Some(root) => collect_package_class_files(root, source_files),
@@ -731,6 +745,9 @@ fn parse_and_extract_class_infos(
     let mut all_protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let mut all_alias_infos = Vec::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
+    // Modules with `uses:` lines (BT-3673): their classes' infos are flattened
+    // by the caller once the dependencies' protocols are merged in.
+    let mut trait_user_modules: Vec<beamtalk_core::ast::Module> = Vec::new();
 
     for file in &extraction_files {
         let source = std::fs::read_to_string(file)
@@ -762,6 +779,9 @@ fn parse_and_extract_class_infos(
             );
         }
         all_class_infos.extend(class_infos);
+        if module.classes.iter().any(|c| !c.uses.is_empty()) {
+            trait_user_modules.push(module.clone());
+        }
 
         // Collect standalone extensions package-wide so cross-file
         // `ClassName >> selector` definitions resolve during lint the same
@@ -824,6 +844,7 @@ fn parse_and_extract_class_infos(
         all_protocol_sources,
         all_alias_infos,
         parsed_files,
+        trait_user_modules,
     ))
 }
 
@@ -1433,7 +1454,7 @@ mod tests {
         )
         .unwrap();
 
-        let (_, _, _, defs, sources, _, _) =
+        let (_, _, _, defs, sources, _, _, _) =
             parse_and_extract_class_infos(&[user], Some(&root), Some("xpkg")).unwrap();
         assert_eq!(defs.len(), 1);
         let src = sources.get("Broken").expect("protocol source recorded");
@@ -1613,6 +1634,7 @@ mod tests {
             mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
+            _trait_user_modules,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
             .unwrap();
         merge_dependency_infos(
@@ -1874,6 +1896,7 @@ mod tests {
             mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
+            _trait_user_modules,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
             .unwrap();
         merge_dependency_infos(
@@ -1999,6 +2022,7 @@ mod tests {
             mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
+            _trait_user_modules,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
             .unwrap();
         merge_dependency_infos(

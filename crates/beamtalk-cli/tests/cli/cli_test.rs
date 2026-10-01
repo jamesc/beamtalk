@@ -150,3 +150,43 @@ fn test_script_fails_on_assertion_mismatch() {
         .assert()
         .failure();
 }
+
+/// BT-3673: `beamtalk test` indexes the package `src/` itself; a typed call
+/// (from a test class) to a trait-provided method on a `src/` class whose
+/// trait lives in another `src/` file must not report "does not understand".
+#[test]
+fn test_resolves_cross_file_trait_provided_method_bt_3673() {
+    let project = cli_common::fixture_project();
+    cli_common::write_cross_file_trait_sources(&project.path().join("src"));
+    std::fs::write(
+        project.path().join("test/WidgetTagTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: WidgetTagTest\n\
+         \n\
+         \x20\x20describe: w :: Widget -> String => w tag\n\
+         \x20\x20broken: w :: Widget => w bogus\n\
+         \x20\x20testTag => self assert: 1 equals: 1\n",
+    )
+    .unwrap();
+
+    let output = cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .output()
+        .unwrap();
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        all.contains("does not understand 'bogus'"),
+        "control: `bogus` must be reported as DNU, got:\n{all}"
+    );
+    assert!(
+        !all.contains("does not understand 'tag'"),
+        "provided method `tag` must resolve on a cross-file trait user, got:\n{all}"
+    );
+}

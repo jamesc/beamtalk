@@ -542,6 +542,35 @@ file, so it is only meaningful there.
   dependencies) in both `ProtocolRegistry::add_pre_loaded` and
   `analyse_full`'s carried protocol map, and in the source map (BT-3665).
 
+### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
+
+A class that `uses:` a trait declared in *another* file only has the trait's
+provided methods in its `ClassInfo` once the provisions are flattened in;
+without that, a typed call to a provided method from a third file reports a
+false "does not understand". Every index builder below routes through
+`trait_expansion::flatten_trait_user_class_infos` (built on
+`extract_flattened_class_infos` and `first_wins_protocol_map`, so there is one
+flattening implementation):
+
+- `beamtalk build` (incremental Pass 1, `build/class_index.rs`), `beamtalk
+  test` (fixture indexes and the package `src/` index), `beamtalk lint`, MCP
+  `lint`/`diagnostic_summary`, `beamtalk type-coverage`, a path dependency's
+  own compile and the `class_infos` it exports, and the offline dependency scan
+  MCP uses (`dependency_classes.rs`): **parity**, flattened. Protocols resolve
+  project-first, then dependencies.
+- A path dependency's own multi-file compile now also pre-loads its sibling
+  files' protocols, so a cross-file `uses:` inside a dependency compiles.
+- MCP `lint`/`diagnostic_summary` flatten the infos with the package's
+  provision-bearing protocols, but still do not pass same-package protocol
+  ASTs to the per-file analysis (pre-existing gap noted in
+  `merge_dependency_class_infos`), so a *using* file's own `uses:` of a
+  sibling-file trait is not resolved there.
+- LSP / `ProjectIndex`, REPL: not changed or verified by BT-3673.
+- Not a gap: packages that declare `[dependencies]` suppress DNU *hints* in
+  `lint`/`build` by design, so the false DNU is only observable in
+  dependency-free packages (the exported dependency `ClassInfo` is asserted
+  directly in tests).
+
 ## Drift Check (CI)
 
 The `beamtalk-surface-drift` binary (`crates/beamtalk-surface-drift/`,

@@ -235,3 +235,34 @@ pub fn fixture_project() -> TempDir {
 
     dir
 }
+
+/// Writes a trait (`Tagged`, with provided method `tag`) and a class that
+/// `uses:` it (`Widget`) into *separate* files under `src_dir` (BT-3673). A
+/// typed call to `tag` on a `Widget` from a third file must resolve on every
+/// surface, because the flattened provision lives only in `Widget`'s
+/// `ClassInfo` there.
+#[allow(dead_code)]
+pub fn write_cross_file_trait_sources(src_dir: &Path) {
+    std::fs::create_dir_all(src_dir).expect("mkdir src");
+    std::fs::write(
+        src_dir.join("Tagged.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Protocol define: Tagged\n\
+         \x20\x20name -> String\n\
+         \n\
+         \x20\x20tag -> String => self name\n",
+    )
+    .expect("write Tagged.bt");
+    std::fs::write(
+        src_dir.join("Widget.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Widget\n\
+         \x20\x20uses: Tagged\n\
+         \x20\x20name -> String => \"w\"\n",
+    )
+    .expect("write Widget.bt");
+}

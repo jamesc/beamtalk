@@ -67,6 +67,20 @@ pub fn run(
         parsed_files.push((file.clone(), source, module));
     }
 
+    // Flatten cross-file trait provisions into the infos (BT-3673), as
+    // `build` does, so coverage doesn't count a provided method as untyped.
+    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
+        &mut all_class_infos,
+        parsed_files.iter().map(|(_, _, m)| m),
+        parsed_files.iter().flat_map(|(_, _, m)| {
+            m.protocols
+                .iter()
+                .filter(|p| !p.provided_methods.is_empty())
+                .cloned()
+        }),
+        None,
+    );
+
     // Pass 2: Run type inference per file and compute coverage.
     let mut report = CoverageReport {
         classes: Vec::new(),
@@ -527,5 +541,43 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
         assert!(run(p.as_str(), false, OutputFormat::Text, None, Some("Foo")).is_ok());
+    }
+
+    /// BT-3673: a typed call to a trait-provided method on a class whose
+    /// trait lives in another file counts as typed (the flattened `ClassInfo`
+    /// carries `tag`), so `Caller` reaches 100% coverage; unflattened, `w tag`
+    /// would be `Dynamic`.
+    #[test]
+    fn run_counts_cross_file_trait_provided_call_as_typed_bt_3673() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("tagged.bt"),
+            "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+        )
+        .unwrap();
+        fs::write(
+            src.join("widget.bt"),
+            "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n",
+        )
+        .unwrap();
+        fs::write(
+            src.join("caller.bt"),
+            "Object subclass: Caller\n  describe: w :: Widget -> String => w tag\n",
+        )
+        .unwrap();
+        let root = Utf8PathBuf::from_path_buf(src).unwrap();
+        let result = run(
+            root.as_str(),
+            false,
+            OutputFormat::Text,
+            Some(100.0),
+            Some("Caller"),
+        );
+        assert!(
+            result.is_ok(),
+            "Caller must be fully typed through the flattened Widget: {result:?}"
+        );
     }
 }
