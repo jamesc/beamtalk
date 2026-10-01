@@ -70,8 +70,8 @@ Object subclass: SsoScopeOpen
 
   // A writing send in one arm of a `do:` over a list, then a non-writing send
   // in another arm of the next iteration; the first write should survive.
-  // BT-3683: it does not on main (the arm refresh falls back to the stale
-  // lexical version).
+  // BT-3683: the arm refresh currently falls back to the stale lexical
+  // version, so this returns 0.
   class armsInListDo -> Integer =>
     self.n := 0
     seen := 0
