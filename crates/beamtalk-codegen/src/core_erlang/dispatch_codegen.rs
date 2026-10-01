@@ -363,7 +363,7 @@ impl CoreErlangGenerator {
 
         self.next_class_var();
         if !self.is_class_sealed() {
-            self.note_late_bound_class_var_mint();
+            self.note_open_class_var_mint();
         }
         let target_version = self.class_var_version();
 

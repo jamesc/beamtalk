@@ -434,7 +434,7 @@ impl CoreErlangGenerator {
     /// bound callee may `self`-send late-bound, so every open-class send
     /// counts; sends in a sealed class are judged exactly by the purity gates
     /// and are not counted.
-    pub(in crate::core_erlang) fn note_late_bound_class_var_mint(&mut self) {
+    pub(in crate::core_erlang) fn note_open_class_var_mint(&mut self) {
         self.class_context_mut().class_var_mints += 1;
     }
 
