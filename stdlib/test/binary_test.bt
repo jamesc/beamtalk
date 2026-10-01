@@ -12,6 +12,8 @@
 
 TestCase subclass: BinaryTest
 
+  setUp => self.bin := Binary fromBytes: #(65, 66, 67)
+
   // ═══════════════════════════════════════════════════════════════════
   // Serialization (class methods — existing)
   // ═══════════════════════════════════════════════════════════════════
@@ -102,9 +104,8 @@ TestCase subclass: BinaryTest
   // ═══════════════════════════════════════════════════════════════════
   testDoIteratesGraphemes =>
     // At runtime, do: goes through String's grapheme iteration
-    bin := Binary fromBytes: #(65, 66, 67)
     collected := List new
-    bin do: [:ch | collected := collected add: ch]
+    self.bin do: [:ch | collected := collected add: ch]
     self assert: collected equals: #("A", "B", "C")
 
   testDoOnEmptyBinary =>
@@ -124,13 +125,10 @@ TestCase subclass: BinaryTest
   // Uses String's grapheme iteration; compares grapheme strings.
   // ═══════════════════════════════════════════════════════════════════
   testIncludesGrapheme =>
-    bin := Binary fromBytes: #(65, 66, 67)
     // At runtime, includes: compares graphemes (single-char strings)
-    self assert: (bin includes: "B")
+    self assert: (self.bin includes: "B")
 
-  testIncludesGraphemeNotFound =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    self deny: (bin includes: "Z")
+  testIncludesGraphemeNotFound => self deny: (self.bin includes: "Z")
 
   testIncludesOnEmpty =>
     bin := Binary fromBytes: #()
@@ -141,9 +139,8 @@ TestCase subclass: BinaryTest
   // Uses String's grapheme iteration; returns String via species.
   // ═══════════════════════════════════════════════════════════════════
   testCollectTransformsGraphemes =>
-    bin := Binary fromBytes: #(65, 66, 67)
     // collect: iterates graphemes and returns String (via species)
-    result := bin collect: [:ch | ch]
+    result := self.bin collect: [:ch | ch]
     self assert: result equals: "ABC"
 
   testCollectOnEmpty =>
@@ -162,8 +159,7 @@ TestCase subclass: BinaryTest
     self assert: result equals: "ABDE"
 
   testSelectNoneMatch =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    result := bin select: [:ch | ch =:= "Z"]
+    result := self.bin select: [:ch | ch =:= "Z"]
     self assert: result equals: ""
 
   testRejectFiltersGraphemes =>
@@ -172,8 +168,7 @@ TestCase subclass: BinaryTest
     self assert: result equals: "ABDE"
 
   testRejectNoneMatch =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    result := bin reject: [:ch | ch =:= "Z"]
+    result := self.bin reject: [:ch | ch =:= "Z"]
     self assert: result equals: "ABC"
 
   // ═══════════════════════════════════════════════════════════════════
@@ -181,8 +176,7 @@ TestCase subclass: BinaryTest
   // Uses String's grapheme iteration; accumulates grapheme strings.
   // ═══════════════════════════════════════════════════════════════════
   testInjectIntoConcatsGraphemes =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    result := bin inject: "" into: [:acc :ch | acc ++ ch]
+    result := self.bin inject: "" into: [:acc :ch | acc ++ ch]
     self assert: result equals: "ABC"
 
   testInjectIntoOnEmpty =>
@@ -202,12 +196,10 @@ TestCase subclass: BinaryTest
   // BT-3028: a no-match raises `not_found` rather than answering nil — the
   // inherited `Collection>>detect:` answers `E`, on every receiver.
   testDetectRaisesNotFoundWhenNoMatch =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    self should: [bin detect: [:ch | ch =:= "Z"]] raise: #not_found
+    self should: [self.bin detect: [:ch | ch =:= "Z"]] raise: #not_found
 
   testDetectIfNoneAnswersDefaultWhenNoMatch =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    self assert: (bin detect: [:ch |
+    self assert: (self.bin detect: [:ch |
       ch =:= "Z"
     ] ifNone: ["none"]) equals: "none"
 
@@ -215,21 +207,13 @@ TestCase subclass: BinaryTest
   // Collection protocol: anySatisfy:, allSatisfy:
   // Uses String's grapheme iteration.
   // ═══════════════════════════════════════════════════════════════════
-  testAnySatisfyTrue =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    self assert: (bin anySatisfy: [:ch | ch =:= "B"])
+  testAnySatisfyTrue => self assert: (self.bin anySatisfy: [:ch | ch =:= "B"])
 
-  testAnySatisfyFalse =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    self deny: (bin anySatisfy: [:ch | ch =:= "Z"])
+  testAnySatisfyFalse => self deny: (self.bin anySatisfy: [:ch | ch =:= "Z"])
 
-  testAllSatisfyTrue =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    self assert: (bin allSatisfy: [:ch | ch size == 1])
+  testAllSatisfyTrue => self assert: (self.bin allSatisfy: [:ch | ch size == 1])
 
-  testAllSatisfyFalse =>
-    bin := Binary fromBytes: #(65, 66, 67)
-    self deny: (bin allSatisfy: [:ch | ch =:= "A"])
+  testAllSatisfyFalse => self deny: (self.bin allSatisfy: [:ch | ch =:= "A"])
 
   // ═══════════════════════════════════════════════════════════════════
   // Byte access: at: (1-based)
