@@ -29,6 +29,7 @@ and can be queried by other components (e.g., idle monitor).
 %% Public API
 -export([new_foreground_id/0, is_foreground_id/1]).
 -export([workspaces_base_dir/0, prune_stale_foreground_workspaces/3]).
+-export([prune_stale_foreground_workspaces_async/3]).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([on_actor_spawned/2, register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
@@ -602,9 +603,10 @@ keeps it:
    entries (`workspace.log`, `cookie`, `port`, `changes/`, ...) and the
    entries one level inside `changes/` (appends there do not bump the
    `changes/` directory mtime) is older than `MaxAgeSeconds`;
-4. its owner is conclusively not running: no `port` file points at a TCP
-   port that accepts a connection on 127.0.0.1, and the OS pid embedded in
-   the id is gone (POSIX `kill -0` reports "No such process"). On other
+4. its owner is conclusively not running: the OS pid embedded in the id is
+   gone (POSIX `kill -0` reports "No such process"; checked first, so a live
+   pid keeps the dir without any probe) AND no `port` file points at a TCP
+   port that accepts a connection on 127.0.0.1. On other
    platforms, or on any other outcome (EPERM, unparsable port file, probe
    timeout, unreadable directory), the directory is kept.
 
@@ -637,6 +639,24 @@ prune_stale_foreground_workspaces(BaseDir, MaxAgeSeconds, NowSeconds) ->
     catch
         _:_ -> 0
     end.
+
+-doc """
+Run `prune_stale_foreground_workspaces/3` in a spawned, unlinked process so
+workspace startup never waits on it (it may spawn a shell and probe a port per
+stale candidate). Errors are swallowed. Returns the worker pid; it exits only
+once pruning has finished, so callers (tests) can monitor it to wait.
+""".
+-spec prune_stale_foreground_workspaces_async(file:filename(), non_neg_integer(), integer()) ->
+    pid().
+prune_stale_foreground_workspaces_async(BaseDir, MaxAgeSeconds, NowSeconds) ->
+    spawn(fun() ->
+        try
+            _ = prune_stale_foreground_workspaces(BaseDir, MaxAgeSeconds, NowSeconds),
+            ok
+        catch
+            _:_ -> ok
+        end
+    end).
 
 -spec prune_if_stale(file:filename(), file:filename(), integer()) -> boolean().
 prune_if_stale(Dir, Name, Cutoff) ->
@@ -699,7 +719,8 @@ newest_child_mtime(Dir, DirMtime) ->
 %% gone. See prune_stale_foreground_workspaces/3 item 4.
 -spec owner_conclusively_dead(file:filename(), file:filename()) -> boolean().
 owner_conclusively_dead(Dir, Name) ->
-    port_file_says_dead(filename:join(Dir, "port")) andalso pid_is_gone(Name).
+    %% Cheapest short-circuit first: a live pid keeps the dir without a probe.
+    pid_is_gone(Name) andalso port_file_says_dead(filename:join(Dir, "port")).
 
 %% Port file written by beamtalk_repl_server:write_port_file/3 (`PORT\nNONCE`).
 %% Absent file => no evidence of life; present => must be a refused connection.
@@ -784,7 +805,9 @@ init(InitialMetadata) ->
                 %% explicitly named/persistent ids persist and restore.
                 case is_foreground_id(WorkspaceId) of
                     true ->
-                        _ = prune_stale_foreground_workspaces(
+                        %% Off the startup path: pruning may spawn a shell and
+                        %% probe ports per stale candidate.
+                        _ = prune_stale_foreground_workspaces_async(
                             workspaces_base_dir(),
                             ?FOREGROUND_MAX_AGE_SECONDS,
                             Now

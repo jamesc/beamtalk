@@ -677,6 +677,34 @@ prune_cases() ->
         _ = file:del_dir_r("bt_test_3672_prune")
     end.
 
+prune_stale_foreground_workspaces_async_test_() ->
+    case os:type() of
+        {unix, _} -> {"async prune", fun prune_async_case/0};
+        _ -> []
+    end.
+
+prune_async_case() ->
+    Base = filename:join("bt_test_3672_async", integer_to_list(erlang:unique_integer([positive]))),
+    Now = erlang:system_time(second),
+    Week = 7 * 24 * 3600,
+    Dir = filename:join(Base, "foreground_2147483000_1_1"),
+    ok = filelib:ensure_path(Dir),
+    T = calendar:system_time_to_local_time(Now - 2 * Week, second),
+    FI = #file_info{mtime = T, atime = T},
+    ok = file:write_file_info(Dir, FI),
+    try
+        Pid = beamtalk_workspace_meta:prune_stale_foreground_workspaces_async(Base, Week, Now),
+        %% The worker exits only after pruning finishes: wait on it, no sleeps.
+        Ref = erlang:monitor(process, Pid),
+        receive
+            {'DOWN', Ref, process, Pid, _} -> ok
+        after 30000 -> ?assert(false)
+        end,
+        ?assertNot(filelib:is_dir(Dir))
+    after
+        _ = file:del_dir_r("bt_test_3672_async")
+    end.
+
 load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
     WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
