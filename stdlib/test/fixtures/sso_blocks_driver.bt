@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3667 review: a class whose process runs a block passed in from another
+// class (ADR 0109). See self_send_override_blocks_test.bt.
+
+Object subclass: SsoBlocksDriver
+
+  class each: aBlock :: Block -> Integer => aBlock value

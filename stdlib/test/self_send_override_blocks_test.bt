@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: SelfSendOverrideBlocksTest
+
+  setUp => SsoBlocksSub resetSubHits
+
+  testCollect =>
+    self assert: SsoBlocksSub viaCollect equals: #(10, 20)
+    self assert: SsoBlocksSub subHits equals: 2
+
+  testDo =>
+    SsoBlocksSub viaDo
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testEnsure =>
+    self assert: (SsoBlocksSub viaEnsure: true) equals: 10
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testOnDo =>
+    self assert: (SsoBlocksSub viaOnDo: true) equals: 10
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testTimes =>
+    SsoBlocksSub viaTimesRepeat
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testToDo =>
+    SsoBlocksSub viaToDo
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testWhile =>
+    SsoBlocksSub viaWhile
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testBlock =>
+    self assert: SsoBlocksSub viaBlock equals: 50
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testEnsureNested =>
+    SsoBlocksSub ensureNested: true
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testOnDoNested =>
+    SsoBlocksSub onDoNested: true
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testWhileNested =>
+    SsoBlocksSub whileNested: true
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testTimesNested =>
+    SsoBlocksSub timesNested: true
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testDoNested =>
+    SsoBlocksSub doNested: true
+    self assert: SsoBlocksSub subHits equals: 2
+
+  testEnsureMatch =>
+    SsoBlocksSub ensureMatch: 1
+    self assert: SsoBlocksSub subHits equals: 1
+
+  // A block passed to another class's method runs in that class's process; a
+  // write there must not leak stale state into the next external call.
+  testForeignProcessBlockDoesNotLeak =>
+    self assert: SsoBlocksSub viaForeign equals: 1
+    SsoBlocksSub resetSubHits
+    self assert: SsoBlocksSub viaForeign equals: 1
+
+  testOwnClassWrapperInBlock =>
+    SsoBlocksSub viaOwnClassBlock
+    self assert: SsoBlocksSub subHits equals: 2
+
+  testSealedSelectorWrapperInBlock =>
+    SsoBlocksSub viaSealedSelectorBlock
+    self assert: SsoBlocksSub subHits equals: 2

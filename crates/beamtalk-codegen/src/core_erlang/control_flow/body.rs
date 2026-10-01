@@ -1984,7 +1984,7 @@ impl CoreErlangGenerator {
         // relying on lexical scope) so the fold's own `{ClassVars, tail}`
         // wrap, built from `current_class_var()` after this call, sees it
         // regardless of nesting depth.
-        let cv_version_before = self.class_var_version();
+        let cv_version_before = self.class_var_scope_mark();
         let expr_code = self.expression_doc(expr)?;
         let refresh = self
             .refresh_class_var_after_opaque_scope(cv_version_before)

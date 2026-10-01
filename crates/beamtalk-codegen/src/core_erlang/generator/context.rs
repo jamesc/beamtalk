@@ -100,6 +100,13 @@ pub(in crate::core_erlang) struct ClassContext {
     pub(in crate::core_erlang) class_var_version: VersionCounter,
     /// Whether class variables were mutated in the current method.
     pub class_var_mutated: bool,
+    /// Monotonic count of every `ClassVars{N}` version ever minted in this
+    /// generation unit (BT-3667). Unlike `class_var_version` it is never
+    /// restored or reset, so a scope that mints a version and then has it
+    /// rolled back (a bare block closure, a nested conditional arm — see
+    /// `CoreErlangGenerator::class_var_scope_mark`) is still observable by
+    /// the statement that contains it.
+    pub class_var_mints: usize,
     /// Class → compiled module resolution authority for this generation unit
     /// (ADR 0119).
     ///
@@ -184,6 +191,7 @@ impl ClassContext {
             class_var_mutating_selectors: std::collections::HashSet::new(),
             class_var_version: VersionCounter::new(),
             class_var_mutated: false,
+            class_var_mints: 0,
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,

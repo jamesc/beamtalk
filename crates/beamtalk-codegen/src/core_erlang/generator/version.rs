@@ -16,6 +16,20 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
+/// A snapshot of the class-variable version state taken before generating an
+/// expression that may rebind `ClassVars` where the rebind cannot escape
+/// lexically — the input to
+/// [`CoreErlangGenerator::refresh_class_var_after_opaque_scope`].
+///
+/// `version` is the live `ClassVars{N}` version; `mints` is the monotonic
+/// count of versions ever minted (never rolled back), so a mint confined to a
+/// closure or a non-carrying branch is still visible afterwards (BT-3667).
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) struct ClassVarScopeMark {
+    pub(in crate::core_erlang) version: usize,
+    pub(in crate::core_erlang) mints: usize,
+}
+
 /// Renders a `VersionPrefix::State` counter value, honoring loop context —
 /// the single shared implementation behind `current_state_var`/
 /// `next_state_var`/`peek_next_state_var` (this impl block) and
@@ -294,37 +308,96 @@ impl CoreErlangGenerator {
     /// `class_self_dispatch`, which may erase the shadow key the same way
     /// `invoke_class_method/7`'s own `after` does) — that path now falls
     /// back safely too, for the same reason.
+    ///
+    /// **Confined rebinds (BT-3667).** The refresh also fires when the
+    /// version did NOT advance but a `ClassVars{N}` was minted and then
+    /// rolled back ([`ClassVarScopeMark::mints`]): a late-bound self-send in
+    /// a bare block closure, or nested in a conditional/loop body that cannot
+    /// carry the rebind, mints a version confined to that scope. The
+    /// compile-time purity gates judge such a send by the base class's own
+    /// view of the selector and so cannot know that a subclass override
+    /// writes a class variable; the override's write is shadow-written (ADR
+    /// 0110) under this class's key, so reading it back here keeps the write
+    /// instead of dropping it with the confined rebind.
     pub(in crate::core_erlang) fn refresh_class_var_after_opaque_scope(
         &mut self,
-        version_before: usize,
+        mark: ClassVarScopeMark,
     ) -> Option<Document<'static>> {
-        if self.class_var_version() == version_before {
+        if self.class_var_version() == mark.version && self.class_var_mints() == mark.mints {
             return None;
         }
         let mut before_counter = VersionCounter::new();
-        before_counter.set_version(version_before);
+        before_counter.set_version(mark.version);
         let cv_before = before_counter.current_var(VersionPrefix::ClassVars);
-        let shadow_raw = self.fresh_temp_var("ClassVarsShadow");
         let cv_new = self.next_class_var();
-        Some(docvec![
+        Some(Self::class_var_shadow_rebind_doc(&cv_new, &cv_before))
+    }
+
+    /// [`Self::refresh_class_var_after_opaque_scope`] restricted to the
+    /// confined case (BT-3667): only when a `ClassVars` version was minted and
+    /// rolled back while the live version stayed put. For a wrapper around a
+    /// construct whose own lowering already refreshes or threads an advanced
+    /// version precisely, so that case is not refreshed twice.
+    pub(in crate::core_erlang) fn refresh_class_var_after_confined_scope(
+        &mut self,
+        mark: ClassVarScopeMark,
+    ) -> Option<Document<'static>> {
+        if self.class_var_version() != mark.version {
+            return None;
+        }
+        self.refresh_class_var_after_opaque_scope(mark)
+    }
+
+    /// `let <target> = <ADR 0110 shadow read, falling back to fallback> in`:
+    /// binds `target` to the class variables last shadow-written under this
+    /// class's key in the current process, or to `fallback` (a bound
+    /// `ClassVars` variable name) when nothing was shadow-written or
+    /// `ClassSelf` is not a class tuple (a direct-called `class sealed`
+    /// method of a stateless class). Shared by
+    /// [`Self::refresh_class_var_after_opaque_scope`] (binds a fresh version)
+    /// and `emit_class_var_result_unwrap` (re-binds the live name just before
+    /// a late-bound call).
+    pub(in crate::core_erlang) fn class_var_shadow_rebind_doc(
+        target: &str,
+        fallback: &str,
+    ) -> Document<'static> {
+        docvec![
             "let ",
-            leaf::var(shadow_raw.clone()),
-            " = case ",
+            leaf::var(target.to_string()),
+            " = ",
+            Self::class_var_shadow_read_doc(fallback),
+            " in ",
+        ]
+    }
+
+    /// The expression behind [`Self::class_var_shadow_rebind_doc`]: the class
+    /// variables last shadow-written (ADR 0110) under this class's key in the
+    /// current process, or the bound variable `fallback` when nothing was
+    /// shadow-written or `ClassSelf` is not a class tuple.
+    pub(in crate::core_erlang) fn class_var_shadow_read_doc(fallback: &str) -> Document<'static> {
+        // BT-3667: only trust the shadow when running in this class's OWN
+        // process (`pid` of `ClassSelf` is `self()`). A block passed into
+        // another class's method runs in that class's process (ADR 0109),
+        // where ADR 0110's BT-3039 amendment leaves a class-tagged entry that
+        // is never erased until that process restarts; reading it would
+        // resurrect stale class variables.
+        docvec![
+            "case case ",
             leaf::var("ClassSelf"),
             " of <_> when call 'erlang':'is_tuple'(",
             leaf::var("ClassSelf"),
-            ") -> call 'erlang':'get'({",
+            ") -> case call 'erlang':'=:='(call 'erlang':'tuple_size'(",
+            leaf::var("ClassSelf"),
+            "), 4) of <'true'> when 'true' -> case call 'erlang':'=:='(call 'erlang':'element'(4, ",
+            leaf::var("ClassSelf"),
+            "), call 'erlang':'self'()) of <'true'> when 'true' -> call 'erlang':'get'({",
             leaf::atom("$bt_class_vars_shadow"),
             ", call 'erlang':'element'(2, ",
             leaf::var("ClassSelf"),
-            ")}) <_> when 'true' -> 'undefined' end in let ",
-            leaf::var(cv_new),
-            " = case ",
-            leaf::var(shadow_raw),
-            " of <'undefined'> when 'true' -> ",
-            leaf::var(cv_before),
-            " <_ShadowVal> when 'true' -> _ShadowVal end in ",
-        ])
+            ")}) <_> when 'true' -> 'undefined' end <_> when 'true' -> 'undefined' end <_> when 'true' -> 'undefined' end of <'undefined'> when 'true' -> ",
+            leaf::var(fallback.to_string()),
+            " <_ShadowVal> when 'true' -> _ShadowVal end",
+        ]
     }
 
     /// Returns the current Self variable name for value type Self-threading.
@@ -353,6 +426,16 @@ impl CoreErlangGenerator {
             .next_var(VersionPrefix::ClassVars);
         self.set_class_var_mutated(true);
         name
+    }
+
+    /// Records that a `ClassVars` version was minted by a send in an open
+    /// class (BT-3667), so a rollback of that version by an enclosing confined
+    /// scope is observable via [`ClassVarScopeMark::mints`]. Even a statically
+    /// bound callee may `self`-send late-bound, so every open-class send
+    /// counts; sends in a sealed class are judged exactly by the purity gates
+    /// and are not counted.
+    pub(in crate::core_erlang) fn note_open_class_var_mint(&mut self) {
+        self.class_context_mut().class_var_mints += 1;
     }
 
     /// Resets the Self version to 0 (call at the start of each value type method).

@@ -2874,7 +2874,7 @@ impl CoreErlangGenerator {
                 }
             } else {
                 let result_var = self.fresh_temp_var("Ret");
-                let cv_version_before = self.class_var_version();
+                let cv_version_before = self.class_var_scope_mark();
                 let expr_doc = self.expression_doc(value)?;
                 let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
                 if self.class_var_mutated() {
@@ -3012,7 +3012,7 @@ impl CoreErlangGenerator {
             // than relying on lexical scope, so this is robust to whatever
             // depth/shape the opaque compile below reaches.
             let result_var = self.fresh_temp_var("Ret");
-            let cv_version_before = self.class_var_version();
+            let cv_version_before = self.class_var_scope_mark();
             let expr_doc = self.expression_doc(expr)?;
             let refresh = self.refresh_class_var_after_opaque_scope(cv_version_before);
             if self.class_var_mutated() {
@@ -3067,6 +3067,27 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-3667: a statement built by one of the value-type threading
+        // constructs below (a loop, list-op, conditional or `on:do:`/`ensure:`
+        // over captured locals) compiles its nested scopes without carrying a
+        // `ClassVars` rebind out, so a late-bound self-send in one of them
+        // (whose callee a subclass may override with a class-variable write)
+        // mints a version that is rolled back. Recover the write from the
+        // ADR 0110 shadow right after the statement, so the next statement
+        // (and the method's final `class_var_result`) sees it.
+        let mark = self.class_var_scope_mark();
+        let doc = self.generate_class_method_non_last_expr_inner(expr)?;
+        Ok(match self.refresh_class_var_after_confined_scope(mark) {
+            Some(refresh) => docvec![doc, refresh],
+            None => doc,
+        })
+    }
+
+    /// See [`Self::generate_class_method_non_last_expr`].
+    fn generate_class_method_non_last_expr_inner(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
         if Self::is_local_var_assignment(expr) {
             self.generate_class_method_local_var_binding(expr)
         } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
@@ -3108,7 +3129,7 @@ impl CoreErlangGenerator {
             // sees it regardless of nesting depth. Bind the result to the
             // seq temp so subsequent code can sequence after it.
             let tmp_var = self.fresh_temp_var("seq");
-            let cv_version_before = self.class_var_version();
+            let cv_version_before = self.class_var_scope_mark();
             let expr_doc = self.expression_doc(expr)?;
             let refresh = self
                 .refresh_class_var_after_opaque_scope(cv_version_before)
@@ -3157,7 +3178,7 @@ impl CoreErlangGenerator {
                 // recovers the live value via the ADR 0110 shadow write
                 // rather than relying on lexical scope, so this is robust
                 // to whatever depth/shape the compile below reaches.
-                let cv_version_before = self.class_var_version();
+                let cv_version_before = self.class_var_scope_mark();
                 let val_doc = self.expression_doc(value)?;
                 self.bind_var(var_name, &core_var);
                 let refresh = self

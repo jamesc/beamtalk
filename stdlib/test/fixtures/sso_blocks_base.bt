@@ -1,0 +1,114 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3667: `foo:` never writes a class variable in the base, so every
+// `self foo:` site below looks pure to the base class. A subclass override that
+// does write one must still have that write kept (or raise a structured error),
+// never silently dropped. See self_send_override_test.bt.
+
+Object subclass: SsoBlocksBase
+  classState: baseHits = 0
+
+  class foo: x -> Integer => x
+
+  class baseHits -> Integer => self.baseHits
+
+  // Bare block argument to a list op.
+  class viaCollect -> List => #(1, 2) collect: [:x | self foo: x]
+
+  class viaDo -> Integer =>
+    #(1, 2, 3) do: [:x | self foo: x]
+    0
+
+  // Conditional nested in an `ensure:` body.
+  class viaEnsure: flag -> Integer =>
+    [flag ifTrue: [self foo: 1] ifFalse: [0]] ensure: [nil]
+
+  // Conditional nested in an `on:do:` body.
+  class viaOnDo: flag -> Integer =>
+    [flag ifTrue: [self foo: 1] ifFalse: [0]] on: Error do: [:e | -1]
+
+  // Loops.
+  class viaTimesRepeat -> Integer =>
+    3 timesRepeat: [self foo: 1]
+    0
+
+  class viaToDo -> Integer =>
+    1 to: 3 do: [:i | self foo: i]
+    0
+
+  class viaWhile -> Integer =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self foo: i
+        i := i + 1
+      ]
+    i
+
+  // Bare block value.
+  class viaBlock -> Integer => [self foo: 5] value
+
+  // Conditional nested in an `ensure:` body, result discarded.
+  class ensureNested: flag -> Integer =>
+    t := 0
+    [
+      flag ifTrue: [t := self foo: 1]
+      nil
+    ] ensure: [nil]
+    t
+
+  class onDoNested: flag -> Integer =>
+    t := 0
+    [
+      flag ifTrue: [t := self foo: 1]
+      nil
+    ] on: Error do: [:e | nil]
+    t
+
+  class whileNested: flag -> Integer =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        flag ifTrue: [self foo: i]
+        i := i + 1
+      ]
+    i
+
+  class timesNested: flag -> Integer =>
+    3 timesRepeat: [flag ifTrue: [self foo: 1]]
+    0
+
+  class doNested: flag -> Integer =>
+    #(1, 2) do: [:x | flag ifTrue: [self foo: x]]
+    0
+
+  class ensureMatch: n -> Integer =>
+    t := 0
+    [
+      t := n match: [
+        1 -> self foo: 1;
+        _ -> 0
+      ]
+      nil
+    ] ensure: [nil]
+    t
+
+  // BT-3667 review: bumped from inside another class's process (ADR 0109).
+  class tick -> Integer => 0
+
+  // A block run inside another class's process (ADR 0109).
+  class viaForeign -> Integer => SsoBlocksDriver each: [self tick]
+
+  // Statically bound sends whose callee's own `self foo:` late-binds.
+  class wrapper -> Integer => self foo: 1
+
+  class sealed sealedWrapper -> Integer => self foo: 1
+
+  class viaOwnClassBlock -> Integer =>
+    #(1, 2) do: [:x | SsoBlocksBase wrapper]
+    0
+
+  class viaSealedSelectorBlock -> Integer =>
+    #(1, 2) do: [:x | self sealedWrapper]
+    0

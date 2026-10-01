@@ -1522,6 +1522,8 @@ impl CoreErlangGenerator {
                 stmts.push(ThreadedStmt::Statement(Document::Str(" "), span));
             }
             let is_last = i == body.body.len() - 1;
+            // BT-3667: see the refresh after this statement's lowering below.
+            let cv_mark = self.class_var_scope_mark();
 
             // A value-type `self.field := ...` write nested inside a further
             // construct of this arm's own body — most notably another
@@ -1742,6 +1744,16 @@ impl CoreErlangGenerator {
                     span,
                 ));
             }
+
+            // BT-3667: a late-bound class-side self-send nested in a
+            // conditional or `match:` arm of this statement mints a
+            // `ClassVars` version that this sequence cannot carry out (the
+            // gates that admit the send judge it by the base class's own
+            // view of the selector, and a subclass override may write a
+            // class variable). Recover the write from the ADR 0110 shadow so
+            // the construct's trailing `ClassVars` slot carries it.
+            let refresh = self.confined_class_var_refresh_stmt(cv_mark, &stmts, frame, span);
+            stmts.extend(refresh);
         }
 
         let final_state_version = self.state_version();

@@ -103,19 +103,17 @@ TestCase subclass: ClassVarNlrShadowTest
     // Per-class ClassVars: the parent's own counter is untouched.
     self assert: ShadowRelayParent hitCount equals: 0
 
-  // --- (d) block-interior mutations stay discarded -------------------------
+  // --- (d) block-interior mutations are kept (BT-3667) ---------------------
 
   // A *direct* class-var assignment inside a block in a class method is a
   // compile-time error (BT-2792 FieldAssignmentInUnsupportedBlock), so the
   // runtime-expressible block-interior mutation is the BT-1550 shape: a
-  // conditional self-call whose callee mutates. That mutation is discarded on
-  // the normal-return path today, and the ADR 0110 shadow write — gated on
-  // the method's own top frame, block_depth == 0 — deliberately does not
-  // change this. (The gate itself is pinned by Rust codegen tests in
-  // crates/beamtalk-core/src/codegen/core_erlang/tests/.)
-  testBlockInteriorMutationStillDiscardedOnNormalReturn =>
+  // conditional self-call whose callee mutates. That mutation used to be
+  // discarded on the normal-return path; BT-3667 recovers it from the
+  // ADR 0110 shadow after the confined scope instead of dropping it.
+  testBlockInteriorMutationKeptOnNormalReturn =>
     self assert: (ClassMethodConditionalSelfCall triggerWithMutation: 5) equals: 5
-    self assert: ClassMethodConditionalSelfCall counterValue equals: 0
+    self assert: ClassMethodConditionalSelfCall counterValue equals: 1
 
   // --- (e) ClassBuilder-defined classes ------------------------------------
 
