@@ -144,8 +144,26 @@ pub(crate) fn class_surface_hash(
         .filter(|c| c.package.as_deref() == Some(pkg_name) && flattened_names.contains(&c.name))
         .collect();
     infos.sort_by(|a, b| a.name.cmp(&b.name));
-    let value = serde_json::to_value(&infos).unwrap_or(serde_json::Value::Null);
-    sha256_hex(value.to_string().as_bytes())
+    surface_hash_of(serde_json::to_value(&infos))
+}
+
+/// Hash a serialized class surface. A serialization failure must not collapse
+/// to a constant hash (that would silently disable invalidation), so it falls
+/// back to a per-call-unique value that forces every file to rebuild.
+fn surface_hash_of(value: serde_json::Result<serde_json::Value>) -> String {
+    match value {
+        Ok(v) => sha256_hex(v.to_string().as_bytes()),
+        Err(e) => {
+            tracing::warn!(
+                "could not serialize trait-provided class surfaces ({e}); \
+                 rebuilding all files this build"
+            );
+            let nanos = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            sha256_hex(format!("unserializable-surface-{nanos}").as_bytes())
+        }
+    }
 }
 
 /// [`content_hash_of`] for every file in `paths`, keyed by path string.
@@ -289,6 +307,14 @@ pub fn find_files(path: &Utf8Path, extensions: &[&str]) -> Result<Vec<Utf8PathBu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn surface_hash_of_error_is_not_constant_null_hash() {
+        let err = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+        let h = super::surface_hash_of(Err(err));
+        assert_ne!(h, super::sha256_hex(b"null"));
+        assert!(!h.is_empty());
+    }
+
     use super::*;
     use std::fs;
 

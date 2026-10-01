@@ -54,6 +54,27 @@ pub(crate) struct BuildGraphEdges {
     pub trait_surface_hash: String,
 }
 
+/// Log why a file whose own content is unchanged is being rebuilt. A file
+/// with no protocols only moved because a package-wide trait surface changed
+/// (routine, `info!`); one that uses protocols gets the ADR 0127 §10a warning.
+fn log_rebuild_reason(source_file: &Utf8Path, used_protocols: &[EcoString]) {
+    if used_protocols.is_empty() {
+        info!(
+            file = %source_file,
+            "rebuilding '{source_file}': unchanged itself, but a trait-provided \
+             class surface in this package changed since it was last built"
+        );
+    } else {
+        warn!(
+            file = %source_file,
+            protocols = ?used_protocols,
+            "rebuilding '{source_file}': unchanged itself, but a protocol it uses \
+             (one of {used_protocols:?}) or a trait-provided class surface it may \
+             call changed since it was last built"
+        );
+    }
+}
+
 /// Detect which source files have changed relative to their compiled `.beam` output.
 ///
 /// For each `.bt` source file, computes the expected `.beam` filename in `build_dir`
@@ -167,13 +188,7 @@ pub(crate) fn detect_changes(
             && previous_hashes.get(&own_hash_key(source_file)) == Some(&own_hash)
             && previous_hashes.get(source_file.as_str()) != Some(&combined_hash)
         {
-            warn!(
-                file = %source_file,
-                protocols = ?used_protocols,
-                "rebuilding '{source_file}': unchanged itself, but a protocol it uses \
-                 (one of {used_protocols:?}) or a trait-provided class surface it may \
-                 call changed since it was last built"
-            );
+            log_rebuild_reason(source_file, used_protocols);
         }
 
         source_hashes.insert(source_file.as_str().to_string(), combined_hash);
