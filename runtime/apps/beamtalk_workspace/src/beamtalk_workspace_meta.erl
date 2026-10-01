@@ -606,7 +606,9 @@ keeps it:
 4. its owner is conclusively not running: the OS pid embedded in the id is
    gone (POSIX `kill -0` reports "No such process"; checked first, so a live
    pid keeps the dir without any probe) AND no `port` file points at a TCP
-   port that accepts a connection on 127.0.0.1. On other
+   port that accepts a connection on 127.0.0.1 (current foreground REPLs write
+   no port file, so for them the pid check alone decides; legacy dirs may
+   have one). On other
    platforms, or on any other outcome (EPERM, unparsable port file, probe
    timeout, unreadable directory), the directory is kept.
 
