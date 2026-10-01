@@ -1062,6 +1062,69 @@ dep_pkg = {{ path = "{dep_str}" }}"#
         );
     }
 
+    /// Lays out `my_app -> pkg_b -> pkg_a`: `pkg_a` declares the trait
+    /// `Retryable` and `pkg_b`'s `Widget` does `uses: pkg_a@Retryable`.
+    fn transitive_trait_project(temp: &TempDir) -> Utf8PathBuf {
+        let a_dir = temp.path().join("pkg_a");
+        fs::create_dir_all(&a_dir).unwrap();
+        write_manifest(&a_dir, "pkg_a", "0.1.0", "");
+        write_source(
+            &a_dir,
+            "retryable.bt",
+            "Protocol define: Retryable\n  name -> String\n\n  retryTag -> String => self name\n",
+        );
+        let b_dir = temp.path().join("pkg_b");
+        fs::create_dir_all(&b_dir).unwrap();
+        write_manifest(
+            &b_dir,
+            "pkg_b",
+            "0.1.0",
+            "[dependencies]\npkg_a = { path = \"../pkg_a\" }",
+        );
+        write_source(
+            &b_dir,
+            "widget.bt",
+            "Object subclass: Widget\n  uses: pkg_a@Retryable\n  name -> String => \"w\"\n",
+        );
+        let root = temp.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            "[dependencies]\npkg_b = { path = \"../pkg_b\" }",
+        );
+        Utf8PathBuf::from_path_buf(root).unwrap()
+    }
+
+    /// BT-3678: a class in dependency B using a trait from B's own
+    /// dependency A compiles, and the `ClassInfo` B exports carries the
+    /// trait's provided method.
+    #[test]
+    fn test_resolve_dependency_graph_flattens_transitive_dep_trait() {
+        let temp = TempDir::new().unwrap();
+        let root = transitive_trait_project(&temp);
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let resolved = resolve_dependency_graph(&root, &options)
+            .expect("pkg_b must compile against pkg_a's trait");
+        let b = resolved.iter().find(|d| d.name == "pkg_b").unwrap();
+        let widget = b
+            .class_infos
+            .iter()
+            .find(|c| c.name == "Widget")
+            .expect("Widget exported by pkg_b");
+        assert!(
+            widget.methods.iter().any(|m| m.selector == "retryTag"),
+            "exported Widget must carry pkg_a's provided `retryTag`: {:?}",
+            widget
+                .methods
+                .iter()
+                .map(|m| &m.selector)
+                .collect::<Vec<_>>()
+        );
+    }
+
     /// Create a local git repo with a beamtalk.toml, a tag, and a branch.
     /// Returns (`TempDir`, url, `commit_sha`).
     fn create_git_dep_repo(pkg_name: &str, version: &str, deps: &str) -> (TempDir, String, String) {

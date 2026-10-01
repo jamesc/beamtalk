@@ -62,7 +62,7 @@
 //! caching, a project with several sizeable dependencies re-lexes and
 //! re-parses every dependency `.bt` file on every call — cost that scales
 //! with total dependency source size, not just the files actually being
-//! linted. [`collect_dep_class_infos`] therefore keeps a process-lifetime
+//! linted. [`scan_dep`] therefore keeps a process-lifetime
 //! cache of resolved `ClassInfo`s per dependency checkout path, keyed by a
 //! cheap [`DepFingerprint`] (file count + latest mtime) so a checkout
 //! replaced by a later `beamtalk build`/re-fetch is detected and
@@ -139,6 +139,7 @@ pub fn resolve_dependency_class_infos(
     let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();
+    let mut scanned: Vec<std::sync::Arc<ScannedDep>> = Vec::new();
 
     // BFS over the transitive dependency graph, matching
     // `discover_all_dep_roots`'s reachability: a queue of
@@ -178,7 +179,9 @@ pub fn resolve_dependency_class_infos(
                 continue;
             }
 
-            collect_dep_class_infos(&dep_root, &name, &mut class_infos, &mut protocol_defs);
+            if let Some(scanned_dep) = scan_dep(&dep_root, &name) {
+                scanned.push(scanned_dep);
+            }
 
             // Queue this dependency's own dependencies for discovery,
             // reading whatever checkout is already on disk — still no
@@ -190,6 +193,22 @@ pub fn resolve_dependency_class_infos(
                 }
             }
         }
+    }
+
+    // Flatten only now that every dependency's protocols are known: a
+    // dependency may `uses:` a trait of its own dependency, which BFS
+    // discovers after it (BT-3678). A dependency's own protocols win, then
+    // those of the others in discovery order.
+    for (index, dep) in scanned.iter().enumerate() {
+        let mut infos = dep.class_infos.clone();
+        let others = scanned
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != index)
+            .flat_map(|(_, other)| other.trait_users.protocol_defs().iter().cloned());
+        dep.trait_users.flatten(&mut infos, others, None);
+        class_infos.extend(infos);
+        protocol_defs.extend(dep.trait_users.protocol_defs().iter().cloned());
     }
 
     (has_package_dependencies, class_infos, protocol_defs)
@@ -222,12 +241,18 @@ impl DepFingerprint {
     }
 }
 
-/// A dependency's cached class infos and provision-bearing protocol ASTs
-/// (ADR 0127 §10a; BT-3591), tagged with the [`DepFingerprint`] they were
-/// resolved under.
-type CachedDepClassInfos = (DepFingerprint, Vec<ClassInfo>, Vec<ProtocolDefinition>);
+/// A scanned dependency: its *unflattened* class infos plus the trait users
+/// and provision-bearing protocol ASTs (ADR 0127 §10a; BT-3591) to flatten
+/// them with once every dependency's protocols are known (BT-3678).
+struct ScannedDep {
+    class_infos: Vec<ClassInfo>,
+    trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+}
 
-/// Process-lifetime cache of [`collect_dep_class_infos`] results, keyed by
+/// A [`ScannedDep`] tagged with the [`DepFingerprint`] it was scanned under.
+type CachedDepClassInfos = (DepFingerprint, std::sync::Arc<ScannedDep>);
+
+/// Process-lifetime cache of [`scan_dep`] results, keyed by
 /// dependency checkout path. See the module docs for why this
 /// exists. Not persisted to disk — cleared automatically when the process
 /// (e.g. the `beamtalk-mcp` server) restarts.
@@ -242,16 +267,10 @@ fn class_info_cache() -> &'static Mutex<HashMap<Utf8PathBuf, CachedDepClassInfos
 static PARSE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Parse every `.bt` file under a dependency's `src/` directory (falling
-/// back to its root if there is no `src/`) and append its class metadata to
-/// `class_infos` and its provision-bearing protocols' full ASTs (ADR 0127
-/// §10a; BT-3591) to `protocol_defs`, reusing a cached result when the
-/// dependency's [`DepFingerprint`] hasn't changed since the last call.
-fn collect_dep_class_infos(
-    dep_root: &Utf8Path,
-    dep_name: &str,
-    class_infos: &mut Vec<ClassInfo>,
-    protocol_defs: &mut Vec<ProtocolDefinition>,
-) {
+/// back to its root if there is no `src/`) into a [`ScannedDep`], reusing a
+/// cached result when the dependency's [`DepFingerprint`] hasn't changed
+/// since the last call. `None` if its source directory can't be walked.
+fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<ScannedDep>> {
     let src_dir = dep_root.join("src");
     let search_dir = if src_dir.is_dir() {
         src_dir.as_path()
@@ -263,7 +282,7 @@ fn collect_dep_class_infos(
         Ok(files) => files,
         Err(e) => {
             warn!(dep = %dep_name, error = %e, "Failed to walk dependency source directory");
-            return;
+            return None;
         }
     };
 
@@ -273,22 +292,17 @@ fn collect_dep_class_infos(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get(search_dir)
-        .filter(|(cached_fingerprint, _, _)| *cached_fingerprint == fingerprint)
-        .map(|(_, cached_infos, cached_protocol_defs)| {
-            (cached_infos.clone(), cached_protocol_defs.clone())
-        });
-    if let Some((cached_infos, cached_protocol_defs)) = cached {
-        class_infos.extend(cached_infos);
-        protocol_defs.extend(cached_protocol_defs);
-        return;
+        .filter(|(cached_fingerprint, _)| *cached_fingerprint == fingerprint)
+        .map(|(_, scanned)| std::sync::Arc::clone(scanned));
+    if cached.is_some() {
+        return cached;
     }
 
     #[cfg(test)]
     PARSE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-    let mut resolved = Vec::new();
-    // Trait users and provision-bearing protocols (ADR 0127 §10a; BT-3591),
-    // flattened once every protocol of the dependency is known (BT-3673).
+    let mut class_infos = Vec::new();
+    // Trait users and provision-bearing protocols (ADR 0127 §10a; BT-3591).
     let mut trait_users =
         beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
     let mut all_read = true;
@@ -304,27 +318,25 @@ fn collect_dep_class_infos(
 
         let tokens = lex_with_eof(&source);
         let (module, _parse_diags) = parse(tokens);
-        resolved
+        class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
         trait_users.add(&module);
     }
 
-    // A class `uses:`-ing a trait declared in another file of the dependency
-    // must export its provided methods, as `beamtalk build` does for it.
-    trait_users.flatten(&mut resolved, std::iter::empty(), None);
-    let resolved_protocol_defs = trait_users.protocol_defs().to_vec();
-
-    class_infos.extend(resolved.iter().cloned());
-    protocol_defs.extend(resolved_protocol_defs.iter().cloned());
+    let scanned = std::sync::Arc::new(ScannedDep {
+        class_infos,
+        trait_users,
+    });
     // Only cache a result derived from every file being read successfully —
     // caching a partial result under this fingerprint would make a transient read failure
     // (e.g. a lock from a concurrent `beamtalk build`) sticky until the fingerprint changes.
     if all_read {
         cache.lock().unwrap_or_else(PoisonError::into_inner).insert(
             search_dir.to_path_buf(),
-            (fingerprint, resolved, resolved_protocol_defs),
+            (fingerprint, std::sync::Arc::clone(&scanned)),
         );
     }
+    Some(scanned)
 }
 
 #[cfg(test)]
@@ -719,6 +731,51 @@ mod tests {
         assert!(
             infos.iter().any(|c| c.name == "BClass"),
             "expected transitive dependency's class to be resolved, got {infos:?}"
+        );
+    }
+
+    /// BT-3678: a class of dependency `b` using a trait of `b`'s own
+    /// dependency `a` (discovered after `b`) carries the provided method.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn transitive_dependency_trait_is_flattened_into_user() {
+        let tmp = TempDir::new().unwrap();
+        let app_dir = tmp.path().join("app");
+        let root = Utf8Path::from_path(app_dir.as_path()).unwrap();
+        write(
+            app_dir.join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nb = { path = \"../b\" }\n",
+        );
+        write(
+            tmp.path().join("b/beamtalk.toml").as_path(),
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\na = { path = \"../a\" }\n",
+        );
+        write(
+            tmp.path().join("b/src/widget.bt").as_path(),
+            "Object subclass: Widget\n  uses: a@Tagged\n  name -> String => \"w\"\n",
+        );
+        write(
+            tmp.path().join("a/src/tagged.bt").as_path(),
+            "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+        );
+
+        let (_, infos, protocol_defs) = resolve_dependency_class_infos(root);
+        let widget = infos.iter().find(|c| c.name == "Widget").unwrap();
+        assert!(
+            widget.methods.iter().any(|m| m.selector == "tag"),
+            "Widget must carry a's provided `tag`: {:?}",
+            widget
+                .methods
+                .iter()
+                .map(|m| &m.selector)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            protocol_defs.len(),
+            1,
+            "only a's Tagged is provision-bearing"
         );
     }
 
