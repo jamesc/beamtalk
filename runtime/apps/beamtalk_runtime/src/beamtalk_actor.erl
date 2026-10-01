@@ -208,7 +208,7 @@ handle_getValue([], State) ->
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
--export([await_initialize/1, safe_spawn/2]).
+-export([await_initialize/1, await_initialize/2, safe_spawn/2]).
 
 %% Message send helpers (lifecycle-aware wrappers)
 -export([async_send/4, sync_send/3, sync_send/4, cast_send/3]).
@@ -477,7 +477,26 @@ or `{error, Reason}` if it crashed during handle_continue.
 """.
 -spec await_initialize(pid()) -> ok | {error, term()}.
 await_initialize(Pid) ->
-    MonRef = erlang:monitor(process, Pid),
+    await_initialize(Pid, erlang:monitor(process, Pid)).
+
+-doc """
+Like `await_initialize/1`, but with a monitor the caller established
+*atomically with the spawn* (`gen_server:start_monitor/3`).
+
+BT-3677: `await_initialize/1` monitors AFTER `gen_server:start/3` returned.
+`handle_continue` runs concurrently with the caller, so under scheduler load
+an actor whose `initialize` fails (e.g. the post-initialize
+uninitialized-state check) can already be dead before the caller reaches
+`erlang:monitor/2`. A monitor on an already-dead process reports the
+reason `noproc`, NOT the real stop reason, so the structured
+`UninitializedStateError` (with its field/type hint) was intermittently
+replaced by a bare `noproc` hint. A monitor created together with the
+process always reports the true exit reason.
+
+`MonRef` is consumed (demonitored or received) by this function.
+""".
+-spec await_initialize(pid(), reference()) -> ok | {error, term()}.
+await_initialize(Pid, MonRef) ->
     try sys:get_state(Pid, 5000) of
         _State ->
             erlang:demonitor(MonRef, [flush]),
@@ -543,8 +562,11 @@ safe_spawn(Module, InitArgs) ->
         true ->
             safe_spawn_linked(Module, InitArgs);
         _ ->
-            case gen_server:start(Module, InitArgs, []) of
-                {ok, Pid} -> await_initialize_or_kill_unlinked(Pid);
+            %% start_monitor (not start + monitor): the monitor must exist before
+            %% the actor can possibly die, or a fast-failing initialize reports
+            %% `noproc` instead of its real stop reason (BT-3677).
+            case gen_server:start_monitor(Module, InitArgs, []) of
+                {ok, {Pid, MonRef}} -> await_initialize_or_kill_unlinked(Pid, MonRef);
                 {error, Reason} -> {error, Reason};
                 ignore -> {error, ignore}
             end
@@ -653,10 +675,16 @@ start_link_and_await(StartFun) ->
                     exit(Pid, kill),
                     %% Wait unconditionally — EXIT is guaranteed after kill
                     receive
-                        {'EXIT', Pid, _} -> ok
-                    end,
-                    erlang:process_flag(trap_exit, OldTrap),
-                    {error, Reason}
+                        {'EXIT', Pid, ExitReason} ->
+                            %% BT-3677: `noproc` means the actor died before
+                            %% await_initialize could monitor it, so the monitor
+                            %% lost the real reason. The link (established
+                            %% atomically by start_link) delivered it in the EXIT
+                            %% signal; prefer that. Any other Reason is already
+                            %% the genuine stop reason / timeout, keep it.
+                            erlang:process_flag(trap_exit, OldTrap),
+                            {error, prefer_exit_reason(Reason, ExitReason)}
+                    end
             end;
         {error, Reason} ->
             erlang:process_flag(trap_exit, OldTrap),
@@ -666,22 +694,26 @@ start_link_and_await(StartFun) ->
             {error, ignore}
     end.
 
+-spec prefer_exit_reason(term(), term()) -> term().
+prefer_exit_reason(noproc, ExitReason) -> ExitReason;
+prefer_exit_reason(Reason, _ExitReason) -> Reason.
+
 -doc """
 Shared await_initialize + force-kill-on-timeout tail for the unlinked
 `safe_spawn/2` path. No link exists to fall back on for an
 'EXIT' message on the force-kill path, so this monitors explicitly to
 deterministically observe termination before returning.
 """.
--spec await_initialize_or_kill_unlinked(pid()) -> {ok, pid()} | {error, term()}.
-await_initialize_or_kill_unlinked(Pid) ->
-    case await_initialize(Pid) of
+-spec await_initialize_or_kill_unlinked(pid(), reference()) -> {ok, pid()} | {error, term()}.
+await_initialize_or_kill_unlinked(Pid, MonRef) ->
+    case await_initialize(Pid, MonRef) of
         ok ->
             {ok, Pid};
         {error, Reason} ->
-            MonRef = erlang:monitor(process, Pid),
+            KillRef = erlang:monitor(process, Pid),
             exit(Pid, kill),
             receive
-                {'DOWN', MonRef, process, Pid, _} -> ok
+                {'DOWN', KillRef, process, Pid, _} -> ok
             end,
             {error, Reason}
     end.
