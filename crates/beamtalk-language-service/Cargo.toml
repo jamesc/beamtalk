@@ -20,6 +20,10 @@ categories = ["compilers", "development-tools"]
 # analysis, unparse, and compilation-diagnostics-policy types. Never the
 # reverse (see docs/development/architecture-principles.md §1).
 beamtalk-core.workspace = true
+# why: `dep_name_for_path` — single authoritative encoding of the
+# `_build/deps/<name>/src/` convention shared with beamtalk-lsp and
+# beamtalk-project's other project-layout helpers.
+beamtalk-project.workspace = true
 ecow.workspace = true
 camino.workspace = true
 # why: `runtime_delegate`'s nav-query request/response types derive
