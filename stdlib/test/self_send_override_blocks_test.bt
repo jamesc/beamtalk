@@ -243,3 +243,17 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testStoredClosureOwnMutatingSelectorLosesWrite =>
     SsoStaleSub storedBump
     self assert: SsoStaleSub hits equals: 0
+
+  // Known limit (ADR 0110, BT-3681): a stored closure can also read a stale or
+  // reverted value. Correct answers would be 1 and 3; these pin the actual ones.
+  testStoredClosureReadsRevertedValueAfterCaughtRaise =>
+    self assert: SsoStaleSub staleAfterRaise equals: 2
+
+  testStoredClosureReadsOlderValueAfterBump =>
+    self assert: SsoStaleSub staleAfterBump equals: 2
+
+  // Same limit inside a loop body (BT-3682 covers both positions). The correct
+  // answer would be 1; this pins the actual one.
+  testBlockPassedToClassSideHomInLoopBody =>
+    SsoStaleSub viaSectionInLoop
+    self assert: SsoStaleSub hits equals: 0
