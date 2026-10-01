@@ -1180,7 +1180,7 @@ impl CoreErlangGenerator {
         // in this same block body (e.g. `^result`, which reads
         // `current_class_var()`) would otherwise reference a name never
         // bound in its own scope. `refresh_class_var_after_opaque_scope`
-        // recovers the live value via the ADR 0110 shadow write and re-binds
+        // recovers the live value via the per-scope class-variable commit (BT-3675) and re-binds
         // it to a name that IS in scope here.
         if self.in_class_method()
             && !(self.is_class_var_assignment(value)

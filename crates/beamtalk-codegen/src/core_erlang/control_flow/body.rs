@@ -1980,7 +1980,7 @@ impl CoreErlangGenerator {
         // `expr` may dispatch a class-method self-send (locally declared or
         // inherited) that rebinds `ClassVarsN` opaquely, closed
         // by the time this call returns — `refresh_class_var_after_opaque_scope`
-        // recovers the live value via the ADR 0110 shadow write (rather than
+        // recovers the live value via the per-scope class-variable commit (BT-3675) (rather than
         // relying on lexical scope) so the fold's own `{ClassVars, tail}`
         // wrap, built from `current_class_var()` after this call, sees it
         // regardless of nesting depth.

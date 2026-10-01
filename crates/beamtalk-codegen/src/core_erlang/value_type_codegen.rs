@@ -2063,13 +2063,13 @@ impl CoreErlangGenerator {
         // `tuple_var` above — any class-var rebind a self-send inside a
         // `Foldl*` construct performed (its own post-accumulator
         // `ClassVarsN`) is confined to that `let`'s RHS and unreachable from
-        // here on. Refresh via the ADR 0110 shadow write so later code (a
+        // here on. Refresh via the per-scope class-variable commit (BT-3675) so later code (a
         // class-var read, or another self-send) references a name that's
         // actually visible — see `refresh_class_var_after_opaque_scope`'s
         // own doc comment. Skipped when the Letrec shape already threads
         // `ClassVars` precisely via the 3rd tuple element
         // below — doing both would rebind `ClassVars` twice, shadowing the
-        // Letrec extraction with a redundant (if equivalent) shadow read.
+        // Letrec extraction with a redundant (if equivalent) commit read.
         if families.contains(&VersionPrefix::ClassVars) {
             let _ = self.close_class_var_scope(cv_version_before);
         } else if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
@@ -2426,7 +2426,7 @@ impl CoreErlangGenerator {
             // opaquely to this extraction's own fresh tuple var, so any
             // `ClassVarsN` rebind a self-send inside the fold's own
             // accumulator performed is confined to that `let`'s RHS and
-            // unreachable from here on — recovered via the shadow-read
+            // unreachable from here on — recovered via the per-scope
             // refresh below instead (BT-3611: previously missing here,
             // unlike every other opaque-wrap call site — the `erlc`
             // "unbound variable 'ClassVarsN'" compiler crash this issue

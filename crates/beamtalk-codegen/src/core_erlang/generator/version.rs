@@ -291,8 +291,10 @@ impl CoreErlangGenerator {
         if !self.in_class_method() || self.class_context.is_none() {
             return None;
         }
-        let name = self.fresh_temp_var("CVTok");
-        let tokens = &mut self.class_context_mut().class_var_scope_tokens;
+        let ctx = self.class_context_mut();
+        ctx.class_var_scope_counter += 1;
+        let name = format!("_CVTok{}", ctx.class_var_scope_counter);
+        let tokens = &mut ctx.class_var_scope_tokens;
         let depth = tokens.len();
         tokens.push(ClassVarScopeToken { name, used: false });
         Some(depth)

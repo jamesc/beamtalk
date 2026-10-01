@@ -2836,7 +2836,7 @@ impl CoreErlangGenerator {
         // deliberately excluded by that same check) — closing loses the
         // mutated name's LEXICAL visibility, but not the mutation itself,
         // so `refresh_class_var_after_opaque_scope` recovers the live value
-        // via the ADR 0110 shadow write instead of relying on lexical scope.
+        // via the per-scope class-variable commit (BT-3675) instead of relying on lexical scope.
         if has_class_vars {
             if self.is_class_var_assignment(value)
                 || self.is_self_clear_field_class_var(value)
@@ -3011,7 +3011,7 @@ impl CoreErlangGenerator {
             // `self`-receiver send regardless of selector). Closing loses
             // the mutated `ClassVarsN` name's LEXICAL visibility, but not
             // the mutation itself — `refresh_class_var_after_opaque_scope`
-            // recovers the live value via the ADR 0110 shadow write rather
+            // recovers the live value via the per-scope class-variable commit (BT-3675) rather
             // than relying on lexical scope, so this is robust to whatever
             // depth/shape the opaque compile below reaches.
             let result_var = self.fresh_temp_var("Ret");
@@ -3139,7 +3139,7 @@ impl CoreErlangGenerator {
             // declared or inherited) that rebinds `ClassVarsN`
             // opaquely, closed by the time this call returns —
             // `refresh_class_var_after_opaque_scope` recovers the live
-            // value via the ADR 0110 shadow write (rather than relying on
+            // value via the per-scope class-variable commit (BT-3675) (rather than relying on
             // lexical scope) so the NEXT statement in this same body — which
             // reads `current_class_var()` when it builds its own call —
             // sees it regardless of nesting depth. Bind the result to the
@@ -3200,7 +3200,7 @@ impl CoreErlangGenerator {
                 // `class_method_selectors()` check only recognizes the
                 // former) may rebind `ClassVarsN` opaquely, closed by the
                 // time this call returns; `refresh_class_var_after_opaque_scope`
-                // recovers the live value via the ADR 0110 shadow write
+                // recovers the live value via the per-scope class-variable commit (BT-3675)
                 // rather than relying on lexical scope, so this is robust
                 // to whatever depth/shape the compile below reaches.
                 let cv_version_before = self.class_var_scope_mark();

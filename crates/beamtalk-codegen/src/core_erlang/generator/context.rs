@@ -107,6 +107,11 @@ pub(in crate::core_erlang) struct ClassContext {
     /// `ClassVars` under the innermost token.
     pub(in crate::core_erlang) class_var_scope_tokens:
         Vec<crate::core_erlang::generator::version::ClassVarScopeToken>,
+    /// Counter naming scope tokens (`_CVTok{N}`). Deliberately NOT the shared
+    /// temp-variable counter: a scope that turns out to need no token must
+    /// leave the numbering of every other generated variable untouched, so
+    /// code outside a confined scope stays byte-identical.
+    pub(in crate::core_erlang) class_var_scope_counter: usize,
     /// Class → compiled module resolution authority for this generation unit
     /// (ADR 0119).
     ///
@@ -192,6 +197,7 @@ impl ClassContext {
             class_var_version: VersionCounter::new(),
             class_var_mutated: false,
             class_var_scope_tokens: Vec::new(),
+            class_var_scope_counter: 0,
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,
