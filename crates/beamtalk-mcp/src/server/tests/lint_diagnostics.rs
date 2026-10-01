@@ -632,3 +632,75 @@ fn compute_diagnostic_summary_reports_e0402_for_cross_file_internal_class_leak()
         "diagnostic_summary should report the E0402 visibility leak, got: {result:?}",
     );
 }
+
+/// BT-3673: a package where trait `Tagged` and its user `Widget` live in
+/// separate files, plus a `Caller` file with a typed call to the provided
+/// `tag` and (as a non-vacuous control) to a method that does not exist.
+/// Returns the temp dir (keep alive) and the path of `src/caller.bt`.
+fn write_cross_file_trait_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("tagged.bt"),
+        "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("widget.bt"),
+        "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n",
+    )
+    .unwrap();
+    let caller = src.join("caller.bt");
+    std::fs::write(
+        &caller,
+        "Object subclass: Caller\n  describe: w :: Widget -> String => w tag\n  broken: w :: Widget => w bogus\n",
+    )
+    .unwrap();
+    (temp, caller)
+}
+
+/// BT-3673: MCP `lint` flattens a cross-file trait's provided methods into
+/// the user class's `ClassInfo` as `beamtalk lint`/`build` do — no DNU for
+/// `tag`, while the genuinely missing `bogus` is still reported.
+#[test]
+fn run_lint_structured_resolves_cross_file_trait_provided_method_bt_3673() {
+    let (_temp, caller) = write_cross_file_trait_fixture();
+    let result = run_lint_structured(caller.to_str().unwrap());
+    let messages: Vec<&str> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("does not understand 'bogus'")),
+        "control: `bogus` must be reported as DNU, got: {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("does not understand 'tag'")),
+        "provided method `tag` must resolve on a cross-file trait user, got: {messages:?}"
+    );
+}
+
+/// BT-3673: same for the `diagnostic_summary` tool — exactly one DNU (the
+/// control `bogus`), none for the provided `tag`.
+#[test]
+fn compute_diagnostic_summary_resolves_cross_file_trait_provided_method_bt_3673() {
+    let (_temp, caller) = write_cross_file_trait_fixture();
+    let result = compute_diagnostic_summary(caller.to_str().unwrap());
+    assert_eq!(
+        result["totals_by_category"]["Dnu"]["total"].as_u64(),
+        Some(1),
+        "only the control `bogus` call may be a DNU, got: {result:?}"
+    );
+}

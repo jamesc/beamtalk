@@ -2044,7 +2044,7 @@ impl CoreErlangGenerator {
         // `class_var_version` only ever advances from class-method-specific
         // code paths, so this is a no-op read for every non-class-method
         // context.
-        let cv_version_before = self.class_var_version();
+        let cv_version_before = self.class_var_scope_mark();
         let rhs_doc = self.expression_doc(value)?;
         let tuple_var = self.fresh_temp_var("AssignThreaded");
 
@@ -2407,7 +2407,7 @@ impl CoreErlangGenerator {
         // comment and `emit_vt_threaded_local_assignment`'s identical
         // Foldl-shape refresh (the pattern this mirrors — that call site
         // never had this gap; this one did).
-        let cv_version_before = self.class_var_version();
+        let cv_version_before = self.class_var_scope_mark();
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::foldl_list_op_body_block(expr)

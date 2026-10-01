@@ -111,8 +111,7 @@ fn test_detect_changes_new_files_no_build_dir() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(result.changed_files.len(), 1);
     assert!(result.unchanged_files.is_empty());
@@ -139,8 +138,7 @@ fn test_detect_changes_no_beam_exists() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(
         result.changed_files.len(),
@@ -176,8 +174,7 @@ fn test_detect_changes_up_to_date() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert!(
         result.changed_files.is_empty(),
@@ -229,8 +226,11 @@ fn test_detect_changes_protocol_hash_change_forces_rebuild_of_user() {
         &pairs,
         true,
         &HashMap::new(),
-        &file_protocol_uses,
-        &protocol_hashes_v1,
+        &BuildGraphEdges {
+            file_protocol_uses: file_protocol_uses.clone(),
+            protocol_hashes: protocol_hashes_v1.clone(),
+            ..BuildGraphEdges::default()
+        },
     );
     super::super::super::build_cache::save_beam_hash_cache(&build_dir, &first.source_hashes);
 
@@ -245,8 +245,11 @@ fn test_detect_changes_protocol_hash_change_forces_rebuild_of_user() {
         &pairs,
         false,
         &HashMap::new(),
-        &file_protocol_uses,
-        &protocol_hashes_v2,
+        &BuildGraphEdges {
+            file_protocol_uses: file_protocol_uses.clone(),
+            protocol_hashes: protocol_hashes_v2.clone(),
+            ..BuildGraphEdges::default()
+        },
     );
     assert_eq!(
         second.changed_files,
@@ -268,8 +271,11 @@ fn test_detect_changes_protocol_hash_change_forces_rebuild_of_user() {
         &pairs,
         false,
         &HashMap::new(),
-        &file_protocol_uses,
-        &protocol_hashes_v2,
+        &BuildGraphEdges {
+            file_protocol_uses: file_protocol_uses.clone(),
+            protocol_hashes: protocol_hashes_v2.clone(),
+            ..BuildGraphEdges::default()
+        },
     );
     assert!(
         third.changed_files.is_empty(),
@@ -374,8 +380,7 @@ fn test_detect_changes_source_modified() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(
         result.changed_files.len(),
@@ -416,8 +421,7 @@ fn test_detect_changes_touch_without_change_not_recompiled() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert!(
         result.changed_files.is_empty(),
@@ -469,8 +473,7 @@ fn test_detect_changes_trusts_known_hashes_over_rereading() {
         &pairs,
         false,
         &known_hashes,
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(
         result.changed_files,
@@ -515,8 +518,7 @@ fn test_detect_changes_branch_switch_scenario() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(
         result.changed_files.len(),
@@ -551,8 +553,7 @@ fn test_detect_changes_force_flag() {
         &pairs,
         true,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(
         result.changed_files.len(),
@@ -586,8 +587,7 @@ fn test_detect_changes_orphaned_beam() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(
         result.orphaned_beam_files.len(),
@@ -636,8 +636,7 @@ fn test_detect_changes_mixed_states() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert_eq!(
         result.changed_files.len(),
@@ -671,11 +670,122 @@ fn test_detect_changes_non_bt_beams_ignored() {
         &pairs,
         false,
         &HashMap::new(),
-        &HashMap::new(),
-        &HashMap::new(),
+        &BuildGraphEdges::default(),
     );
     assert!(
         result.orphaned_beam_files.is_empty(),
         "Non-bt@ beam files should not be flagged as orphaned"
+    );
+}
+
+/// BT-3674: runs Pass 1 + `detect_changes` exactly as `execute_build_passes`
+/// does, then records the hashes (and dummy `.beam`s) as a real successful
+/// build would. Returns the (changed, unchanged) file names, sorted.
+fn detect_and_record(project: &Utf8Path) -> (Vec<String>, Vec<String>) {
+    let env = setup_build_environment(project.as_str()).unwrap();
+    let dep_ctx = DependencyContext {
+        resolved_deps: Vec::new(),
+        has_native_deps: false,
+    };
+    let index = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
+    let protocol_hashes: HashMap<ecow::EcoString, String> = index
+        .all_protocol_defs
+        .iter()
+        .map(|p| {
+            (
+                p.name.name.clone(),
+                crate::commands::util::protocol_content_hash(p),
+            )
+        })
+        .collect();
+    let pairs = compute_file_module_pairs(&env).unwrap();
+    fs::create_dir_all(&env.build_dir).unwrap();
+    let changes = detect_changes(
+        &env.source_files,
+        &env.build_dir,
+        &pairs,
+        false,
+        &index.source_hashes,
+        &BuildGraphEdges {
+            file_protocol_uses: index.file_protocol_uses.clone(),
+            protocol_hashes,
+            trait_surface_hash: index.trait_surface_hash.clone(),
+        },
+    );
+    for (_, module, _) in &pairs {
+        write_test_file(&env.build_dir.join(format!("{module}.beam")), "BEAM");
+    }
+    super::super::super::build_cache::save_beam_hash_cache(&env.build_dir, &changes.source_hashes);
+    let names = |files: &[Utf8PathBuf]| {
+        let mut v: Vec<String> = files
+            .iter()
+            .map(|f| f.file_name().unwrap().to_string())
+            .collect();
+        v.sort();
+        v
+    };
+    (
+        names(&changes.changed_files),
+        names(&changes.unchanged_files),
+    )
+}
+
+/// BT-3674: an unchanged `caller.bt` that calls a trait-provided method must
+/// be rebuilt (and so re-type-checked) when a provision is renamed in the
+/// trait's file, even though neither it nor anything it names changed. A
+/// trait edit that leaves the flattened surface equal (a body-only change)
+/// must not rebuild it.
+#[test]
+fn test_incremental_rebuilds_unchanged_caller_when_provision_renamed() {
+    let temp = TempDir::new().unwrap();
+    let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src = project.join("src");
+    fs::create_dir_all(&src).unwrap();
+    write_test_file(
+        &project.join("beamtalk.toml"),
+        "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\n",
+    );
+    let trait_src = |provision: &str, body: &str| {
+        format!("Protocol define: Tagged\n  name -> String\n\n  {provision} -> String => {body}\n")
+    };
+    write_test_file(&src.join("tagged.bt"), &trait_src("tag", "self name"));
+    write_test_file(
+        &src.join("widget.bt"),
+        "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n",
+    );
+    write_test_file(
+        &src.join("caller.bt"),
+        "Object subclass: Caller\n  describe: w :: Widget -> String => w tag\n",
+    );
+
+    let (changed, _) = detect_and_record(&project);
+    assert_eq!(changed, ["caller.bt", "tagged.bt", "widget.bt"]);
+    let (changed, _) = detect_and_record(&project);
+    assert!(
+        changed.is_empty(),
+        "no-op rebuild must be clean: {changed:?}"
+    );
+
+    // Body-only trait edit: the flattened surface is equal.
+    write_test_file(&src.join("tagged.bt"), &trait_src("tag", "\"fixed\""));
+    let (changed, unchanged) = detect_and_record(&project);
+    assert!(changed.contains(&"widget.bt".to_string()), "{changed:?}");
+    assert!(
+        unchanged.contains(&"caller.bt".to_string()),
+        "a body-only trait edit must not rebuild the caller: {changed:?}"
+    );
+
+    // Rename the provision: caller.bt is byte-identical but now calls a
+    // method that no longer exists.
+    write_test_file(&src.join("tagged.bt"), &trait_src("label", "\"fixed\""));
+    let (changed, _) = detect_and_record(&project);
+    assert!(
+        changed.contains(&"caller.bt".to_string()),
+        "renaming a provision must rebuild the unchanged caller: {changed:?}"
+    );
+    let (changed, _) = detect_and_record(&project);
+    assert!(
+        changed.is_empty(),
+        "must settle once surfaces stop changing: {changed:?}"
     );
 }

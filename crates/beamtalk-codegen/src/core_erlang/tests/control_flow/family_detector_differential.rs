@@ -86,6 +86,16 @@ fn expected_mismatches() -> Vec<Mismatch> {
             line: 38,
             shape: "letrec",
         },
+        // BT-3667: a late-bound `self foo:` (a subclass override may write a
+        // class variable) nested in a conditional in a `whileTrue:` body. The
+        // loop cannot thread it; the write is recovered from the ADR 0110
+        // shadow after the statement and pinned by
+        // `SelfSendOverrideBlocksTest>>testWhileNested`.
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_blocks_base.bt".to_string(),
+            line: 72,
+            shape: "letrec",
+        },
     ]
 }
 

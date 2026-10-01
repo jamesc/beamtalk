@@ -339,7 +339,7 @@ impl CoreErlangGenerator {
                         // `refresh_class_var_after_opaque_scope` recovers
                         // the live value via the ADR 0110 shadow write and
                         // re-binds it to a name that IS in scope here.
-                        let cv_version_before = self.class_var_version();
+                        let cv_version_before = self.class_var_scope_mark();
                         let result_doc = self.expression_doc(value)?;
                         let refresh = self
                             .refresh_class_var_after_opaque_scope(cv_version_before)
