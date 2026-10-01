@@ -93,3 +93,9 @@ Object subclass: SsoBlocksBase
       nil
     ] ensure: [nil]
     t
+
+  // BT-3667 review: bumped from inside another class's process (ADR 0109).
+  class tick -> Integer => 0
+
+  // A block run inside another class's process (ADR 0109).
+  class viaForeign -> Integer => SsoBlocksDriver each: [self tick]

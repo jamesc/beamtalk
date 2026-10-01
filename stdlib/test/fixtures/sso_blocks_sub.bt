@@ -13,3 +13,7 @@ SsoBlocksBase subclass: SsoBlocksSub
   class subHits -> Integer => self.subHits
 
   class resetSubHits -> Integer => self.subHits := 0
+
+  class tick -> Integer =>
+    self.subHits := self.subHits + 1
+    self.subHits

@@ -28801,6 +28801,7 @@
         "set",
         "sso_blocks_base",
         "subclassing",
+        "tick",
         "timesNested:",
         "transform",
         "unless",
@@ -28808,14 +28809,37 @@
         "viaCollect",
         "viaDo",
         "viaEnsure:",
+        "viaForeign",
         "viaOnDo:",
         "viaTimesRepeat",
         "viaToDo",
         "viaWhile",
         "whileNested:"
       ],
-      "source": "// BT-3667: `foo:` never writes a class variable in the base, so every\n// `self foo:` site below looks pure to the base class. A subclass override that\n// does write one must still have that write kept (or raise a structured error),\n// never silently dropped. See self_send_override_test.bt.\n\nObject subclass: SsoBlocksBase\n  classState: baseHits = 0\n\n  class foo: x -> Integer => x\n\n  class baseHits -> Integer => self.baseHits\n\n  // Bare block argument to a list op.\n  class viaCollect -> List => #(1, 2) collect: [:x | self foo: x]\n\n  class viaDo -> Integer =>\n    #(1, 2, 3) do: [:x | self foo: x]\n    0\n\n  // Conditional nested in an `ensure:` body.\n  class viaEnsure: flag -> Integer =>\n    [flag ifTrue: [self foo: 1] ifFalse: [0]] ensure: [nil]\n\n  // Conditional nested in an `on:do:` body.\n  class viaOnDo: flag -> Integer =>\n    [flag ifTrue: [self foo: 1] ifFalse: [0]] on: Error do: [:e | -1]\n\n  // Loops.\n  class viaTimesRepeat -> Integer =>\n    3 timesRepeat: [self foo: 1]\n    0\n\n  class viaToDo -> Integer =>\n    1 to: 3 do: [:i | self foo: i]\n    0\n\n  class viaWhile -> Integer =>\n    i := 0\n    [i < 3]\n      whileTrue: [\n        self foo: i\n        i := i + 1\n      ]\n    i\n\n  // Bare block value.\n  class viaBlock -> Integer => [self foo: 5] value\n\n  // Conditional nested in an `ensure:` body, result discarded.\n  class ensureNested: flag -> Integer =>\n    t := 0\n    [\n      flag ifTrue: [t := self foo: 1]\n      nil\n    ] ensure: [nil]\n    t\n\n  class onDoNested: flag -> Integer =>\n    t := 0\n    [\n      flag ifTrue: [t := self foo: 1]\n      nil\n    ] on: Error do: [:e | nil]\n    t\n\n  class whileNested: flag -> Integer =>\n    i := 0\n    [i < 3]\n      whileTrue: [\n        flag ifTrue: [self foo: i]\n        i := i + 1\n      ]\n    i\n\n  class timesNested: flag -> Integer =>\n    3 timesRepeat: [flag ifTrue: [self foo: 1]]\n    0\n\n  class doNested: flag -> Integer =>\n    #(1, 2) do: [:x | flag ifTrue: [self foo: x]]\n    0\n\n  class ensureMatch: n -> Integer =>\n    t := 0\n    [\n      t := n match: [\n        1 -> self foo: 1;\n        _ -> 0\n      ]\n      nil\n    ] ensure: [nil]\n    t",
+      "source": "// BT-3667: `foo:` never writes a class variable in the base, so every\n// `self foo:` site below looks pure to the base class. A subclass override that\n// does write one must still have that write kept (or raise a structured error),\n// never silently dropped. See self_send_override_test.bt.\n\nObject subclass: SsoBlocksBase\n  classState: baseHits = 0\n\n  class foo: x -> Integer => x\n\n  class baseHits -> Integer => self.baseHits\n\n  // Bare block argument to a list op.\n  class viaCollect -> List => #(1, 2) collect: [:x | self foo: x]\n\n  class viaDo -> Integer =>\n    #(1, 2, 3) do: [:x | self foo: x]\n    0\n\n  // Conditional nested in an `ensure:` body.\n  class viaEnsure: flag -> Integer =>\n    [flag ifTrue: [self foo: 1] ifFalse: [0]] ensure: [nil]\n\n  // Conditional nested in an `on:do:` body.\n  class viaOnDo: flag -> Integer =>\n    [flag ifTrue: [self foo: 1] ifFalse: [0]] on: Error do: [:e | -1]\n\n  // Loops.\n  class viaTimesRepeat -> Integer =>\n    3 timesRepeat: [self foo: 1]\n    0\n\n  class viaToDo -> Integer =>\n    1 to: 3 do: [:i | self foo: i]\n    0\n\n  class viaWhile -> Integer =>\n    i := 0\n    [i < 3]\n      whileTrue: [\n        self foo: i\n        i := i + 1\n      ]\n    i\n\n  // Bare block value.\n  class viaBlock -> Integer => [self foo: 5] value\n\n  // Conditional nested in an `ensure:` body, result discarded.\n  class ensureNested: flag -> Integer =>\n    t := 0\n    [\n      flag ifTrue: [t := self foo: 1]\n      nil\n    ] ensure: [nil]\n    t\n\n  class onDoNested: flag -> Integer =>\n    t := 0\n    [\n      flag ifTrue: [t := self foo: 1]\n      nil\n    ] on: Error do: [:e | nil]\n    t\n\n  class whileNested: flag -> Integer =>\n    i := 0\n    [i < 3]\n      whileTrue: [\n        flag ifTrue: [self foo: i]\n        i := i + 1\n      ]\n    i\n\n  class timesNested: flag -> Integer =>\n    3 timesRepeat: [flag ifTrue: [self foo: 1]]\n    0\n\n  class doNested: flag -> Integer =>\n    #(1, 2) do: [:x | flag ifTrue: [self foo: x]]\n    0\n\n  class ensureMatch: n -> Integer =>\n    t := 0\n    [\n      t := n match: [\n        1 -> self foo: 1;\n        _ -> 0\n      ]\n      nil\n    ] ensure: [nil]\n    t\n\n  // BT-3667 review: bumped from inside another class's process (ADR 0109).\n  class tick -> Integer => 0\n\n  // A block run inside another class's process (ADR 0109).\n  class viaForeign -> Integer => SsoBlocksDriver each: [self tick]",
       "explanation": "BT-3667: `foo:` never writes a class variable in the base, so every `self foo:` site below looks pure to the base class. A subclass override that does write one must still have that write kept (or raise a structured error), never silently dropped. See self_send_override_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-sso-blocks-driver",
+      "title": "SsoBlocksDriver",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Object",
+        "SsoBlocksDriver",
+        "anonymous function",
+        "callback",
+        "closure",
+        "each:",
+        "extends",
+        "inherit",
+        "inheritance",
+        "lambda",
+        "object",
+        "sso_blocks_driver",
+        "subclassing"
+      ],
+      "source": "// BT-3667 review: a class whose process runs a block passed in from another\n// class (ADR 0109). See self_send_override_blocks_test.bt.\n\nObject subclass: SsoBlocksDriver\n\n  class each: aBlock :: Block -> Integer => aBlock value",
+      "explanation": "BT-3667 review: a class whose process runs a block passed in from another class (ADR 0109). See self_send_override_blocks_test.bt."
     },
     {
       "id": "stdlib-test-fixtures-sso-blocks-sub",
@@ -28845,9 +28869,10 @@
         "set",
         "sso_blocks_sub",
         "subHits",
-        "subclassing"
+        "subclassing",
+        "tick"
       ],
-      "source": "// BT-3667: template-method fixture; see self_send_override_test.bt.\n\nSsoBlocksBase subclass: SsoBlocksSub\n  classState: subHits = 0\n\n  class foo: x -> Integer =>\n    self.subHits := self.subHits + 1\n    x * 10\n\n  class subHits -> Integer => self.subHits\n\n  class resetSubHits -> Integer => self.subHits := 0",
+      "source": "// BT-3667: template-method fixture; see self_send_override_test.bt.\n\nSsoBlocksBase subclass: SsoBlocksSub\n  classState: subHits = 0\n\n  class foo: x -> Integer =>\n    self.subHits := self.subHits + 1\n    x * 10\n\n  class subHits -> Integer => self.subHits\n\n  class resetSubHits -> Integer => self.subHits := 0\n\n  class tick -> Integer =>\n    self.subHits := self.subHits + 1\n    self.subHits",
       "explanation": "BT-3667: template-method fixture; see self_send_override_test.bt."
     },
     {
@@ -34424,6 +34449,7 @@
         "testEnsure",
         "testEnsureMatch",
         "testEnsureNested",
+        "testForeignProcessBlockDoesNotLeak",
         "testOnDo",
         "testOnDoNested",
         "testTimes",
@@ -34432,7 +34458,7 @@
         "testWhile",
         "testWhileNested"
       ],
-      "source": "TestCase subclass: SelfSendOverrideBlocksTest\n\n  setUp => SsoBlocksSub resetSubHits\n\n  testCollect =>\n    self assert: SsoBlocksSub viaCollect equals: #(10, 20)\n    self assert: SsoBlocksSub subHits equals: 2\n\n  testDo =>\n    SsoBlocksSub viaDo\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testEnsure =>\n    self assert: (SsoBlocksSub viaEnsure: true) equals: 10\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testOnDo =>\n    self assert: (SsoBlocksSub viaOnDo: true) equals: 10\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testTimes =>\n    SsoBlocksSub viaTimesRepeat\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testToDo =>\n    SsoBlocksSub viaToDo\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testWhile =>\n    SsoBlocksSub viaWhile\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testBlock =>\n    self assert: SsoBlocksSub viaBlock equals: 50\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testEnsureNested =>\n    SsoBlocksSub ensureNested: true\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testOnDoNested =>\n    SsoBlocksSub onDoNested: true\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testWhileNested =>\n    SsoBlocksSub whileNested: true\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testTimesNested =>\n    SsoBlocksSub timesNested: true\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testDoNested =>\n    SsoBlocksSub doNested: true\n    self assert: SsoBlocksSub subHits equals: 2\n\n  testEnsureMatch =>\n    SsoBlocksSub ensureMatch: 1\n    self assert: SsoBlocksSub subHits equals: 1",
+      "source": "TestCase subclass: SelfSendOverrideBlocksTest\n\n  setUp => SsoBlocksSub resetSubHits\n\n  testCollect =>\n    self assert: SsoBlocksSub viaCollect equals: #(10, 20)\n    self assert: SsoBlocksSub subHits equals: 2\n\n  testDo =>\n    SsoBlocksSub viaDo\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testEnsure =>\n    self assert: (SsoBlocksSub viaEnsure: true) equals: 10\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testOnDo =>\n    self assert: (SsoBlocksSub viaOnDo: true) equals: 10\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testTimes =>\n    SsoBlocksSub viaTimesRepeat\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testToDo =>\n    SsoBlocksSub viaToDo\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testWhile =>\n    SsoBlocksSub viaWhile\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testBlock =>\n    self assert: SsoBlocksSub viaBlock equals: 50\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testEnsureNested =>\n    SsoBlocksSub ensureNested: true\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testOnDoNested =>\n    SsoBlocksSub onDoNested: true\n    self assert: SsoBlocksSub subHits equals: 1\n\n  testWhileNested =>\n    SsoBlocksSub whileNested: true\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testTimesNested =>\n    SsoBlocksSub timesNested: true\n    self assert: SsoBlocksSub subHits equals: 3\n\n  testDoNested =>\n    SsoBlocksSub doNested: true\n    self assert: SsoBlocksSub subHits equals: 2\n\n  testEnsureMatch =>\n    SsoBlocksSub ensureMatch: 1\n    self assert: SsoBlocksSub subHits equals: 1\n\n  // A block passed to another class's method runs in that class's process; a\n  // write there must not leak stale state into the next external call.\n  testForeignProcessBlockDoesNotLeak =>\n    self assert: SsoBlocksSub viaForeign equals: 1\n    SsoBlocksSub resetSubHits\n    self assert: SsoBlocksSub viaForeign equals: 1",
       "explanation": ""
     },
     {

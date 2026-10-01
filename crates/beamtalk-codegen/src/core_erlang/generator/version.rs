@@ -375,16 +375,26 @@ impl CoreErlangGenerator {
     /// current process, or the bound variable `fallback` when nothing was
     /// shadow-written or `ClassSelf` is not a class tuple.
     pub(in crate::core_erlang) fn class_var_shadow_read_doc(fallback: &str) -> Document<'static> {
+        // BT-3667: only trust the shadow when running in this class's OWN
+        // process (`pid` of `ClassSelf` is `self()`). A block passed into
+        // another class's method runs in that class's process (ADR 0109),
+        // where ADR 0110's BT-3039 amendment leaves a class-tagged entry that
+        // is never erased until that process restarts; reading it would
+        // resurrect stale class variables.
         docvec![
             "case case ",
             leaf::var("ClassSelf"),
             " of <_> when call 'erlang':'is_tuple'(",
             leaf::var("ClassSelf"),
-            ") -> call 'erlang':'get'({",
+            ") -> case call 'erlang':'=:='(call 'erlang':'tuple_size'(",
+            leaf::var("ClassSelf"),
+            "), 4) of <'true'> when 'true' -> case call 'erlang':'=:='(call 'erlang':'element'(4, ",
+            leaf::var("ClassSelf"),
+            "), call 'erlang':'self'()) of <'true'> when 'true' -> call 'erlang':'get'({",
             leaf::atom("$bt_class_vars_shadow"),
             ", call 'erlang':'element'(2, ",
             leaf::var("ClassSelf"),
-            ")}) <_> when 'true' -> 'undefined' end of <'undefined'> when 'true' -> ",
+            ")}) <_> when 'true' -> 'undefined' end <_> when 'true' -> 'undefined' end <_> when 'true' -> 'undefined' end of <'undefined'> when 'true' -> ",
             leaf::var(fallback.to_string()),
             " <_ShadowVal> when 'true' -> _ShadowVal end",
         ]
@@ -414,9 +424,18 @@ impl CoreErlangGenerator {
             .class_context_mut()
             .class_var_version
             .next_var(VersionPrefix::ClassVars);
-        self.class_context_mut().class_var_mints += 1;
         self.set_class_var_mutated(true);
         name
+    }
+
+    /// Records that a `ClassVars` version was minted for a send that is
+    /// late-bound in an open class (BT-3667), so a rollback of that version by
+    /// an enclosing confined scope is observable via
+    /// [`ClassVarScopeMark::mints`]. Sends in a sealed class are direct calls
+    /// the compile-time purity gates already judge exactly, so they are not
+    /// counted.
+    pub(in crate::core_erlang) fn note_late_bound_class_var_mint(&mut self) {
+        self.class_context_mut().class_var_mints += 1;
     }
 
     /// Resets the Self version to 0 (call at the start of each value type method).

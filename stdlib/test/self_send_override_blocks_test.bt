@@ -60,3 +60,10 @@ TestCase subclass: SelfSendOverrideBlocksTest
   testEnsureMatch =>
     SsoBlocksSub ensureMatch: 1
     self assert: SsoBlocksSub subHits equals: 1
+
+  // A block passed to another class's method runs in that class's process; a
+  // write there must not leak stale state into the next external call.
+  testForeignProcessBlockDoesNotLeak =>
+    self assert: SsoBlocksSub viaForeign equals: 1
+    SsoBlocksSub resetSubHits
+    self assert: SsoBlocksSub viaForeign equals: 1
