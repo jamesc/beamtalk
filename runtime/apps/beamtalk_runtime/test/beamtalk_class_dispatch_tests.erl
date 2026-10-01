@@ -1389,19 +1389,22 @@ test_invoke_extension_erases_shadow_after_raise() ->
         error(bt3675_deliberate_crash)
     end,
     try
-        Result = beamtalk_class_dispatch:invoke_class_extension(
-            Fun,
+        beamtalk_extensions:init(),
+        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+        ok = beamtalk_extensions:register(ClassTag, raisingExt, Fun, test),
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            raisingExt,
             [],
             ClassName,
-            beamtalk_class_registry:class_object_tag(ClassName),
             beamtalk_class_dispatch_test_helper,
-            #{count => 1},
-            raisingExt
+            #{},
+            #{count => 1}
         ),
         ?assertMatch({reply, {error, _}, #{count := 1}}, Result),
         ?assertEqual(undefined, erlang:get(ShadowKey)),
         ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
     after
+        beamtalk_extensions:unregister(ClassName, raisingExt, true),
         erlang:erase(ShadowKey),
         erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
     end.
@@ -1416,19 +1419,22 @@ test_invoke_extension_erases_shadow_after_return() ->
         ok
     end,
     try
-        Result = beamtalk_class_dispatch:invoke_class_extension(
-            Fun,
+        beamtalk_extensions:init(),
+        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+        ok = beamtalk_extensions:register(ClassTag, returningExt, Fun, test),
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            returningExt,
             [],
             ClassName,
-            beamtalk_class_registry:class_object_tag(ClassName),
             beamtalk_class_dispatch_test_helper,
-            #{count => 1},
-            returningExt
+            #{},
+            #{count => 1}
         ),
         ?assertMatch({reply, {ok, ok}, _}, Result),
         ?assertEqual(undefined, erlang:get(ShadowKey)),
         ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
     after
+        beamtalk_extensions:unregister(ClassName, returningExt, true),
         erlang:erase(ShadowKey),
         erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
     end.
