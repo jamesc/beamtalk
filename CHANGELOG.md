@@ -317,6 +317,9 @@
 
 ### Tooling
 
+- **Build: provision diagnostics deduplicated and attributed to the protocol file** — a type error (or other diagnostic) in a flattened provision is now reported once, in the protocol file, with a note naming every class it was flattened into (e.g. `while flattening into Alpha, Beta`). Previously the same error was repeated at each use site. Package-scoped name resolution now validates `internal` provisions from dependency packages, and dependency-package provisions carry their own source identity for BEAM line annotations (BT-3663, #4106, #4107, #4108).
+- **`beamtalk lint` publishes provision diagnostics in the protocol file** — `beamtalk lint` now reports provision diagnostics once in the protocol file, matching the build surface. The build summary deduplicates shared provision diagnostic counts (BT-3665, #4111).
+- **Launcher: project path takes precedence over stale workspace metadata** — the launcher's project path now wins over a stale `~/.beamtalk/workspaces/<id>/metadata.json`, so moving or renaming a project directory no longer requires manual metadata cleanup (BT-3664, #4111).
 - **LSP hover: trait provenance for provided methods** — hovering a send that resolves to a trait-provided method now shows a "provided by `Trait`" line (BT-3655, #4069).
 - **Browse groups trait-provided methods under their protocol** — in the REPL browser, methods flattened in via `uses:` now appear under their protocol name (e.g. `Comparable`) rather than a selector-name bucket (BT-3654, #4077).
 - **`beamtalk new` template uses `Console`** — the generated `Main.bt` template is now `class run => Console printLine: "Hello from {name}!"` (BT-3642, #4087).
@@ -505,6 +508,9 @@
 
 ### Internal
 
+- Fix REPL/MCP inline class definitions not passing the class hierarchy to trailing-expression codegen — defining a sealed facade inline and immediately calling it in the same turn now emits a direct call, matching ADR 0129 §2 (BT-3652, #4101).
+- Extract `cargo_workspace_root!()` macro, eliminating 17+ duplicated path-resolution snippets across crates (#4103).
+- Provision-collision resolution in `add_pre_loaded` and `analyse_full` is now deterministic first-wins (#4111).
 - Codegen for flattened classes: BEAM line annotations for provisions now point at the protocol file; protocol modules with provisions expose `'__beamtalk_protocol_source'/0`; `beamtalk test` fixtures can use protocols from other files (BT-3625, #4091).
 - Extract `DiagnosticSummary` JSON helpers to eliminate CLI/MCP duplication (#4063).
 - Remove last Erlang `beamtalk.toml` parser (`read_package_name/1`) — package name resolution now uses the request or runtime root-package fact (BT-3661, #4089).
