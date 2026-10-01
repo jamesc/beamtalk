@@ -225,6 +225,10 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // Pass 1: Parse all files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_files = Vec::new();
+    // Trait users, flattened below once dependency protocols are merged
+    // (BT-3673) — same step as `beamtalk lint`.
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
     let mut unreadable_files: Vec<String> = Vec::new();
     let mut unreadable_target_files: Vec<String> = Vec::new();
 
@@ -255,6 +259,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
         }
         all_class_infos.extend(class_infos);
+        trait_users.add(&module);
 
         let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
@@ -270,6 +275,14 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     let mut all_protocol_defs = Vec::new();
     let has_package_dependencies =
         merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
+
+    // Flatten cross-file trait provisions into the same-package infos (BT-3673),
+    // via the helper `beamtalk lint` and `build` use.
+    trait_users.flatten(
+        &mut all_class_infos,
+        all_protocol_defs.iter().cloned(),
+        current_package.as_deref(),
+    );
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
@@ -533,6 +546,10 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         beamtalk_core::ast::Module,
         Vec<beamtalk_core::source_analysis::Diagnostic>,
     )> = Vec::new();
+    // Trait users, flattened below once dependency protocols are merged
+    // (BT-3673) — same step as `beamtalk lint`.
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
 
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
@@ -578,6 +595,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
         }
         all_class_infos.extend(class_infos);
+        trait_users.add(&module);
 
         let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
@@ -593,6 +611,14 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     let mut all_protocol_defs = Vec::new();
     let has_package_dependencies =
         merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
+
+    // Flatten cross-file trait provisions into the same-package infos (BT-3673),
+    // via the helper `beamtalk lint` and `build` use.
+    trait_users.flatten(
+        &mut all_class_infos,
+        all_protocol_defs.iter().cloned(),
+        current_package.as_deref(),
+    );
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);

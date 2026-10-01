@@ -318,67 +318,75 @@ pub(crate) fn flatten_trait_user_class_infos(
     protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
     pkg_name: &str,
 ) -> Vec<ecow::EcoString> {
-    let mut flattened_names = Vec::new();
-    let external_protocols =
-        beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
-            protocol_defs.iter().cloned(),
-        );
     let mut user_files: Vec<&Utf8PathBuf> = file_protocol_uses
         .iter()
         .filter(|(_, uses)| !uses.is_empty())
         .map(|(file, _)| file)
         .collect();
     user_files.sort();
-    for file in user_files {
-        // Pass 1 already parsed every changed file; only a cache-fresh file
-        // has no `cached_asts` entry and is re-read here.
-        let parsed;
-        let module = if let Some(cached) = cached_asts.get(file) {
-            &cached.module
-        } else {
-            let source = match fs::read_to_string(file) {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!(
-                        file = %file,
-                        error = %e,
-                        "Cannot read source file to flatten trait provisions; typed calls to its provided methods may report does-not-understand"
-                    );
-                    continue;
-                }
-            };
-            parsed = beamtalk_core::source_analysis::parse(
-                beamtalk_core::source_analysis::lex_with_eof(&source),
-            )
-            .0;
-            &parsed
-        };
-        let mut flattened =
-            beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos(
-                module,
-                &external_protocols,
-            );
-        beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
-            &mut flattened,
-            pkg_name,
-        );
-        for info in flattened {
-            // Last match: `module_index` is last-wins for a class name
-            // duplicated across files of the package.
-            if let Some(slot) = all_class_infos
-                .iter_mut()
-                .rev()
-                .find(|c| c.name == info.name && c.package.as_deref() == Some(pkg_name))
-            {
-                // Keep Pass 1's completeness marker for a file with parse errors.
-                let surface_incomplete = slot.surface_incomplete;
-                flattened_names.push(info.name.clone());
-                *slot = info;
-                slot.surface_incomplete = surface_incomplete;
+    // Pass 1 already parsed every changed file; only a cache-fresh file has no
+    // `cached_asts` entry and is re-read here.
+    let mut reparsed: HashMap<&Utf8PathBuf, beamtalk_core::ast::Module> = HashMap::new();
+    for file in &user_files {
+        if cached_asts.contains_key(*file) {
+            continue;
+        }
+        match fs::read_to_string(file) {
+            Ok(source) => {
+                reparsed.insert(
+                    file,
+                    beamtalk_core::source_analysis::parse(
+                        beamtalk_core::source_analysis::lex_with_eof(&source),
+                    )
+                    .0,
+                );
             }
+            Err(e) => warn!(
+                file = %file,
+                error = %e,
+                "Cannot read source file to flatten trait provisions; typed calls to its provided methods may report does-not-understand"
+            ),
         }
     }
-    flattened_names
+    // One pass in sorted path order whatever the cache state, so an
+    // incremental build flattens a class duplicated across files exactly as a
+    // clean one does.
+    let modules = user_files.iter().filter_map(|f| {
+        cached_asts
+            .get(*f)
+            .map(|c| &c.module)
+            .or_else(|| reparsed.get(*f))
+    });
+    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
+        all_class_infos,
+        modules,
+        protocol_defs.iter().cloned(),
+        Some(pkg_name),
+    )
+}
+
+/// Flattens cross-file trait provisions (BT-3673) into the `ClassInfo`s
+/// [`build_class_module_index`] returned for a whole package, using the
+/// provision-bearing protocols of that package's own `cached_asts` followed
+/// by `extra_protocol_defs` (e.g. its dependencies', first definition wins).
+///
+/// For callers that index every file of a package in one non-incremental
+/// call (`beamtalk test`'s `src/` index, path dependencies); `build`'s
+/// incremental Pass 1 uses [`flatten_trait_user_class_infos`] instead.
+pub(crate) fn flatten_package_class_infos(
+    class_infos: &mut [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    cached_asts: &HashMap<Utf8PathBuf, CachedAst>,
+    extra_protocol_defs: impl IntoIterator<Item = beamtalk_core::ast::ProtocolDefinition>,
+    pkg_name: &str,
+) {
+    let mut files: Vec<&Utf8PathBuf> = cached_asts.keys().collect();
+    files.sort();
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+    for file in files {
+        trait_users.add(&cached_asts[file].module);
+    }
+    trait_users.flatten(class_infos, extra_protocol_defs, Some(pkg_name));
 }
 
 /// Check that no dependency exports classes with stdlib-reserved names.

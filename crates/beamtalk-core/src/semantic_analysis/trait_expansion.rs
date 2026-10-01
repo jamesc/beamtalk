@@ -195,6 +195,113 @@ pub fn extract_flattened_class_infos(
     infos
 }
 
+/// Replaces, in `all_class_infos`, the `ClassInfo` of every class declared in
+/// one of `modules` that has `uses:` lines with the flattened one from
+/// [`extract_flattened_class_infos`] (BT-3673).
+///
+/// This is the single place every cross-file index builder (lint, MCP lint,
+/// `beamtalk test`, dependency exports, type coverage, `build`) turns Pass 1's
+/// unflattened infos into ones carrying cross-file trait provisions, so a
+/// typed call to a provided method never reports "does not understand" on
+/// one surface while another accepts it. `protocol_defs` are the
+/// provision-bearing protocol ASTs in precedence order (first wins, see
+/// [`first_wins_protocol_map`]).
+///
+/// Entries are matched by class name and `package` (the stamp
+/// `ClassHierarchy::stamp_package_on_infos` put on them), so a same-named
+/// class of another package is left alone; the last match wins, as the
+/// class-module index is last-wins for a class duplicated across files. The
+/// replaced entry keeps its `surface_incomplete` marker. Modules without a
+/// `uses:` line are skipped.
+///
+/// Returns the names of the classes whose `ClassInfo` was replaced (BT-3674),
+/// so a caller can hash exactly the cross-file surface that flattening
+/// contributes.
+pub fn flatten_trait_user_class_infos<'a>(
+    all_class_infos: &mut [ClassInfo],
+    modules: impl IntoIterator<Item = &'a Module>,
+    protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
+    package: Option<&str>,
+) -> Vec<EcoString> {
+    let mut flattened_names = Vec::new();
+    let external_protocols = first_wins_protocol_map(protocol_defs);
+    for module in modules {
+        if !module.classes.iter().any(|c| !c.uses.is_empty()) {
+            continue;
+        }
+        let mut flattened = extract_flattened_class_infos(module, &external_protocols);
+        if let Some(pkg) = package {
+            ClassHierarchy::stamp_package_on_infos(&mut flattened, pkg);
+        }
+        for info in flattened {
+            if let Some(slot) = all_class_infos
+                .iter_mut()
+                .rev()
+                .find(|c| c.name == info.name && c.package.as_deref() == package)
+            {
+                let surface_incomplete = slot.surface_incomplete;
+                flattened_names.push(info.name.clone());
+                *slot = info;
+                slot.surface_incomplete = surface_incomplete;
+            }
+        }
+    }
+    flattened_names
+}
+
+/// Collects, while a caller walks a package's source files once, what
+/// [`flatten_trait_user_class_infos`] needs: the modules with `uses:` lines
+/// (the only ones cloned) and every provision-bearing protocol AST. Used by
+/// the lint surfaces, whose Pass 1 loops consume the parsed modules.
+#[derive(Debug, Default)]
+pub struct TraitUserCollector {
+    modules: Vec<Module>,
+    protocol_defs: Vec<ProtocolDefinition>,
+}
+
+impl TraitUserCollector {
+    /// Records `module`'s provision-bearing protocols and, if any class has a
+    /// `uses:` line, the module itself.
+    pub fn add(&mut self, module: &Module) {
+        if module.classes.iter().any(|c| !c.uses.is_empty()) {
+            self.modules.push(module.clone());
+        }
+        self.protocol_defs.extend(
+            module
+                .protocols
+                .iter()
+                .filter(|p| !p.provided_methods.is_empty())
+                .cloned(),
+        );
+    }
+
+    /// The provision-bearing protocol ASTs collected so far, in `add` order.
+    #[must_use]
+    pub fn protocol_defs(&self) -> &[ProtocolDefinition] {
+        &self.protocol_defs
+    }
+
+    /// Flattens the collected trait users into `all_class_infos` with
+    /// [`flatten_trait_user_class_infos`], resolving protocols from this
+    /// collection first, then `extra_protocol_defs` (e.g. dependencies').
+    pub fn flatten(
+        &self,
+        all_class_infos: &mut [ClassInfo],
+        extra_protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
+        package: Option<&str>,
+    ) -> Vec<EcoString> {
+        flatten_trait_user_class_infos(
+            all_class_infos,
+            &self.modules,
+            self.protocol_defs
+                .iter()
+                .cloned()
+                .chain(extra_protocol_defs),
+            package,
+        )
+    }
+}
+
 /// Builds the `external_protocols` map [`expand_module`] takes from protocol
 /// definitions in precedence order: the first definition of a name wins
 /// (project before dependencies), matching `ProtocolRegistry::add_pre_loaded`,

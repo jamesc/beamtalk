@@ -287,7 +287,10 @@ fn collect_dep_class_infos(
     PARSE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     let mut resolved = Vec::new();
-    let mut resolved_protocol_defs = Vec::new();
+    // Trait users and provision-bearing protocols (ADR 0127 §10a; BT-3591),
+    // flattened once every protocol of the dependency is known (BT-3673).
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
     let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
@@ -303,15 +306,13 @@ fn collect_dep_class_infos(
         let (module, _parse_diags) = parse(tokens);
         resolved
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
-        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
-        // BT-3591) — see this function's own doc.
-        resolved_protocol_defs.extend(
-            module
-                .protocols
-                .into_iter()
-                .filter(|p| !p.provided_methods.is_empty()),
-        );
+        trait_users.add(&module);
     }
+
+    // A class `uses:`-ing a trait declared in another file of the dependency
+    // must export its provided methods, as `beamtalk build` does for it.
+    trait_users.flatten(&mut resolved, std::iter::empty(), None);
+    let resolved_protocol_defs = trait_users.protocol_defs().to_vec();
 
     class_infos.extend(resolved.iter().cloned());
     protocol_defs.extend(resolved_protocol_defs.iter().cloned());
@@ -391,6 +392,45 @@ mod tests {
         assert!(
             infos.iter().any(|c| c.name == "HTTPServer"),
             "expected HTTPServer in resolved class infos, got {infos:?}"
+        );
+    }
+
+    /// BT-3673: the offline dependency scan flattens a trait declared in one
+    /// of the dependency's files into the `ClassInfo` of its user in another,
+    /// so a consumer's typed call to the provided method does not report DNU.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_class_infos_flatten_cross_file_trait_provisions() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        let dep_src = tmp.path().join("_build/deps/http/src");
+        write(
+            dep_src.join("tagged.bt").as_path(),
+            "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+        );
+        write(
+            dep_src.join("widget.bt").as_path(),
+            "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n",
+        );
+
+        let (_, infos, _) = resolve_dependency_class_infos(root);
+        let widget = infos
+            .iter()
+            .find(|c| c.name == "Widget")
+            .expect("Widget resolved from the dependency checkout");
+        assert!(
+            widget.methods.iter().any(|m| m.selector == "tag"),
+            "Widget must carry Tagged's provided `tag`: {:?}",
+            widget
+                .methods
+                .iter()
+                .map(|m| &m.selector)
+                .collect::<Vec<_>>()
         );
     }
 

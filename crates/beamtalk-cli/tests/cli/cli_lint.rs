@@ -496,3 +496,89 @@ fn lint_missing_path_exits_nonzero() {
         .failure()
         .stderr(predicates::str::is_match("does not exist|not found").unwrap());
 }
+
+/// BT-3673: a typed call to a trait-provided method on a class whose `uses:`
+/// trait lives in another file must not report "does not understand" from
+/// `beamtalk lint` (it already doesn't from `build`). The `bogus` call is the
+/// non-vacuous control: DNU reporting is live, only `tag` is provided.
+#[test]
+fn lint_resolves_cross_file_trait_provided_method_bt_3673() {
+    let project = cli_common::fixture_project();
+    cli_common::write_cross_file_trait_sources(&project.path().join("src"));
+    std::fs::write(
+        project.path().join("src/Caller.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Caller\n\
+         \x20\x20describe: w :: Widget -> String => w tag\n\
+         \x20\x20broken: w :: Widget => w bogus\n",
+    )
+    .unwrap();
+
+    let output = cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not understand 'bogus'"),
+        "control: `bogus` must be reported as DNU, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("does not understand 'tag'"),
+        "provided method `tag` must resolve on a cross-file trait user, got:\n{stderr}"
+    );
+}
+
+/// BT-3673: a path dependency whose own classes use a cross-file trait must
+/// compile (its multi-file compile now sees sibling-file protocols) and be
+/// consumable: `beamtalk lint` and `beamtalk build` of the consumer succeed
+/// and report no unknown protocol / DNU for a provided method. (A package
+/// with dependencies suppresses DNU hints by design, so the exported
+/// `ClassInfo` itself is asserted by `build_dep_class_index_flattens_*`.)
+#[test]
+fn consumer_of_dependency_with_cross_file_trait_compiles_bt_3673() {
+    let root = tempfile::tempdir().unwrap();
+    let dep = root.path().join("producer");
+    cli_common::write_cross_file_trait_sources(&dep.join("src"));
+    std::fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let consumer = root.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nproducer = { path = \"../producer\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer.join("src/Caller.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Caller\n\
+         \x20\x20describe: w :: Widget -> String => w tag\n",
+    )
+    .unwrap();
+
+    for cmd in ["lint", "build"] {
+        let output = cli_common::beamtalk()
+            .current_dir(&consumer)
+            .arg(cmd)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success()
+                && !stderr.contains("unknown protocol")
+                && !stderr.contains("does not understand"),
+            "{cmd}: dependency with a cross-file trait must compile and resolve `tag`, got:\n{stderr}"
+        );
+    }
+}
