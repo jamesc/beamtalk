@@ -287,10 +287,10 @@ fn collect_dep_class_infos(
     PARSE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     let mut resolved = Vec::new();
-    let mut resolved_protocol_defs = Vec::new();
-    // Modules with `uses:` lines, flattened once every protocol of the
-    // dependency is known (BT-3673).
-    let mut trait_user_modules = Vec::new();
+    // Trait users and provision-bearing protocols (ADR 0127 §10a; BT-3591),
+    // flattened once every protocol of the dependency is known (BT-3673).
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
     let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
@@ -306,27 +306,13 @@ fn collect_dep_class_infos(
         let (module, _parse_diags) = parse(tokens);
         resolved
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
-        if module.classes.iter().any(|c| !c.uses.is_empty()) {
-            trait_user_modules.push(module.clone());
-        }
-        // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
-        // BT-3591) — see this function's own doc.
-        resolved_protocol_defs.extend(
-            module
-                .protocols
-                .into_iter()
-                .filter(|p| !p.provided_methods.is_empty()),
-        );
+        trait_users.add(&module);
     }
 
     // A class `uses:`-ing a trait declared in another file of the dependency
     // must export its provided methods, as `beamtalk build` does for it.
-    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
-        &mut resolved,
-        &trait_user_modules,
-        resolved_protocol_defs.iter().cloned(),
-        None,
-    );
+    trait_users.flatten(&mut resolved, std::iter::empty(), None);
+    let resolved_protocol_defs = trait_users.protocol_defs().to_vec();
 
     class_infos.extend(resolved.iter().cloned());
     protocol_defs.extend(resolved_protocol_defs.iter().cloned());

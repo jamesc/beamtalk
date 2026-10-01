@@ -69,17 +69,13 @@ pub fn run(
 
     // Flatten cross-file trait provisions into the infos (BT-3673), as
     // `build` does, so coverage doesn't count a provided method as untyped.
-    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
-        &mut all_class_infos,
-        parsed_files.iter().map(|(_, _, m)| m),
-        parsed_files.iter().flat_map(|(_, _, m)| {
-            m.protocols
-                .iter()
-                .filter(|p| !p.provided_methods.is_empty())
-                .cloned()
-        }),
-        None,
-    );
+    // Same-package protocols only: type-coverage loads no dependency protocols.
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+    for (_, _, module) in &parsed_files {
+        trait_users.add(module);
+    }
+    trait_users.flatten(&mut all_class_infos, std::iter::empty(), None);
 
     // Pass 2: Run type inference per file and compute coverage.
     let mut report = CoverageReport {

@@ -557,8 +557,9 @@ flattening implementation):
   `lint`/`diagnostic_summary`, `beamtalk type-coverage`, a path dependency's
   own compile and the `class_infos` it exports, and the offline dependency scan
   MCP uses (`dependency_classes.rs`): **parity**, flattened. For the project's
-  own surfaces (`build`, `test`, `lint`, MCP, `type-coverage`) protocols resolve
-  project-first, then dependencies.
+  own surfaces (`build`, `test`, `lint`, MCP) protocols resolve project-first,
+  then dependencies; `type-coverage` resolves same-package protocols only (it
+  loads no dependency protocols).
 - A path dependency's own multi-file compile now also pre-loads its sibling
   files' protocols, so a cross-file `uses:` inside a dependency compiles.
 - **Gap (BT-3678):** a dependency's compile, its exported `class_infos`

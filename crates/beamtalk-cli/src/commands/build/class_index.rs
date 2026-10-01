@@ -367,19 +367,12 @@ pub(crate) fn flatten_package_class_infos(
 ) {
     let mut files: Vec<&Utf8PathBuf> = cached_asts.keys().collect();
     files.sort();
-    let protocol_defs: Vec<_> = files
-        .iter()
-        .flat_map(|f| cached_asts[*f].module.protocols.iter())
-        .filter(|p| !p.provided_methods.is_empty())
-        .cloned()
-        .chain(extra_protocol_defs)
-        .collect();
-    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
-        class_infos,
-        files.iter().map(|f| &cached_asts[*f].module),
-        protocol_defs,
-        Some(pkg_name),
-    );
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+    for file in files {
+        trait_users.add(&cached_asts[file].module);
+    }
+    trait_users.flatten(class_infos, extra_protocol_defs, Some(pkg_name));
 }
 
 /// Check that no dependency exports classes with stdlib-reserved names.

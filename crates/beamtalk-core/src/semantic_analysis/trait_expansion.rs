@@ -268,6 +268,12 @@ impl TraitUserCollector {
         );
     }
 
+    /// The provision-bearing protocol ASTs collected so far, in `add` order.
+    #[must_use]
+    pub fn protocol_defs(&self) -> &[ProtocolDefinition] {
+        &self.protocol_defs
+    }
+
     /// Flattens the collected trait users into `all_class_infos` with
     /// [`flatten_trait_user_class_infos`], resolving protocols from this
     /// collection first, then `extra_protocol_defs` (e.g. dependencies').
