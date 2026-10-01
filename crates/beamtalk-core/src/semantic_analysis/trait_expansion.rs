@@ -159,6 +159,58 @@ pub fn expand_module(
     (diagnostics, origins)
 }
 
+/// Extracts `ClassInfo` for every class of `module` with its `uses:` lines
+/// flattened in (ADR 0127 §3) — the cross-file counterpart of what
+/// [`ClassHierarchy::build`] sees for the module being analysed.
+///
+/// [`ClassHierarchy::extract_class_infos`] reads only the class's own body, so
+/// a class that `uses:` a trait declared in another file would be injected into
+/// every *other* file's analysis without its provided methods, and a typed call
+/// to one would report "does not understand" although codegen flattens it in
+/// (BT-3668). This runs the same [`expand_module`] pass on a clone and stamps
+/// each flattened method's [`MethodInfo::origin`] like [`apply_origins`], so the
+/// two views cannot disagree. A module with no `uses:` line is extracted as-is.
+///
+/// Diagnostics of the expansion are dropped: the module's own compilation
+/// reports them.
+///
+/// [`MethodInfo::origin`]: crate::semantic_analysis::class_hierarchy::MethodInfo::origin
+#[must_use]
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn extract_flattened_class_infos(
+    module: &Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+) -> Vec<ClassInfo> {
+    if !module.classes.iter().any(|c| !c.uses.is_empty()) {
+        return ClassHierarchy::extract_class_infos(module);
+    }
+    let mut flattened = module.clone();
+    let (_diagnostics, origins) = expand_module(&mut flattened, external_protocols);
+    let mut infos = ClassHierarchy::extract_class_infos(&flattened);
+    for ((class_name, selector), protocol_name) in &origins {
+        if let Some(info) = infos.iter_mut().find(|i| &i.name == class_name) {
+            stamp_origin(info, selector, protocol_name);
+        }
+    }
+    infos
+}
+
+/// Builds the `external_protocols` map [`expand_module`] takes from protocol
+/// definitions in precedence order: the first definition of a name wins
+/// (project before dependencies), matching `ProtocolRegistry::add_pre_loaded`,
+/// so the registry and the flattener agree on which same-named protocol a
+/// `uses:` line resolves to.
+#[must_use]
+pub fn first_wins_protocol_map(
+    defs: impl IntoIterator<Item = ProtocolDefinition>,
+) -> HashMap<EcoString, ProtocolDefinition> {
+    let mut map = HashMap::new();
+    for def in defs {
+        map.entry(def.name.name.clone()).or_insert(def);
+    }
+    map
+}
+
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s
 /// `MethodInfo` entries, once it has been built from the same (already
 /// flattened) module.
@@ -173,14 +225,19 @@ pub fn apply_origins(hierarchy: &mut ClassHierarchy, origins: &OriginMap) {
     }
     for ((class_name, selector), protocol_name) in origins {
         if let Some(class_info) = hierarchy.classes_mut().get_mut(class_name.as_str()) {
-            if let Some(method) = class_info
-                .methods
-                .iter_mut()
-                .find(|m| &m.selector == selector)
-            {
-                method.origin = Some(protocol_name.clone());
-            }
+            stamp_origin(class_info, selector, protocol_name);
         }
+    }
+}
+
+/// Stamps `MethodInfo::origin` on `class_info`'s instance method `selector`.
+fn stamp_origin(class_info: &mut ClassInfo, selector: &EcoString, protocol_name: &EcoString) {
+    if let Some(method) = class_info
+        .methods
+        .iter_mut()
+        .find(|m| &m.selector == selector)
+    {
+        method.origin = Some(protocol_name.clone());
     }
 }
 

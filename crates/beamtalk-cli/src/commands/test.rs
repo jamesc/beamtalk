@@ -301,6 +301,7 @@ fn build_fixture_class_indexes(
     let mut protocol_infos = Vec::new();
     let mut alias_infos = Vec::new();
     let mut protocol_defs = FixtureProtocolDefs::default();
+    let mut parsed_modules = Vec::new();
 
     for file in fixture_files {
         let module_name = fixture_module_name(file)?;
@@ -309,10 +310,6 @@ fn build_fixture_class_indexes(
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-
-        // Extract full ClassInfo for validator/type checker resolution.
-        class_infos
-            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
 
         // Extract ProtocolInfo so fixture-defined protocol names are
         // recognised by the unresolved-class validator when compiling test files.
@@ -355,6 +352,25 @@ fn build_fixture_class_indexes(
                 superclass_index.insert(class_name, superclass_name.to_string());
             }
         }
+        parsed_modules.push(module);
+    }
+
+    // Extract full ClassInfo for validator/type checker resolution. Done
+    // after every fixture has been scanned so a `uses:` whose trait is
+    // declared in a *different* fixture is flattened into its class's info,
+    // exactly as codegen flattens it (BT-3668) — otherwise a typed call to a
+    // provided method on that class reports "does not understand".
+    let external_protocols =
+        beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+            protocol_defs.defs.iter().cloned(),
+        );
+    for module in &parsed_modules {
+        class_infos.extend(
+            beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos(
+                module,
+                &external_protocols,
+            ),
+        );
     }
 
     Ok((

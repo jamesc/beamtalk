@@ -193,7 +193,7 @@ pub(crate) fn build_class_index(
 
     // Single unified collection of all ClassInfo from all sources.
     // To add a new .bt source location, add its ClassInfo slice here.
-    let all_class_infos = collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
+    let mut all_class_infos = collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
 
     // ADR 0070 Phase 3: Eagerly check stdlib reservation violations.
     // Dependencies must not export classes with stdlib-reserved names.
@@ -255,6 +255,22 @@ pub(crate) fn build_class_index(
             ),
         };
 
+    // Pass 1's per-file `ClassInfo` (incrementally cached) holds only each
+    // class's own body. A class that `uses:` a trait from another file must
+    // reach every other file's analysis with the trait's provided methods
+    // flattened in, as codegen flattens them (BT-3668). Only manifest builds
+    // have Pass 1 infos (and `file_protocol_uses`) to rewrite; a manifest-less
+    // build — including `--stdlib-mode` — is a no-op here.
+    if let Some(pkg) = package_identity(pkg_manifest, options.stdlib_mode) {
+        flatten_trait_user_class_infos(
+            &mut all_class_infos,
+            &file_protocol_uses,
+            &cached_asts,
+            &all_protocol_defs,
+            pkg,
+        );
+    }
+
     Ok(ClassIndexResult {
         class_module_index,
         class_superclass_index,
@@ -270,6 +286,82 @@ pub(crate) fn build_class_index(
         source_hashes,
         file_protocol_uses,
     })
+}
+
+/// Replaces, in `all_class_infos`, the `ClassInfo` of every class declared in a
+/// project file that has `uses:` lines with one that includes the flattened
+/// trait provisions (BT-3668).
+///
+/// `file_protocol_uses` (Pass 1) names the files with `uses:` lines, so only
+/// those are re-parsed; the flattening itself is
+/// [`beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos`],
+/// the same pass analysis and codegen run. Entries are matched by class name
+/// within `pkg_name`, leaving a same-named dependency class alone.
+pub(crate) fn flatten_trait_user_class_infos(
+    all_class_infos: &mut [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    file_protocol_uses: &HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
+    cached_asts: &HashMap<Utf8PathBuf, CachedAst>,
+    protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
+    pkg_name: &str,
+) {
+    let external_protocols =
+        beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+            protocol_defs.iter().cloned(),
+        );
+    let mut user_files: Vec<&Utf8PathBuf> = file_protocol_uses
+        .iter()
+        .filter(|(_, uses)| !uses.is_empty())
+        .map(|(file, _)| file)
+        .collect();
+    user_files.sort();
+    for file in user_files {
+        // Pass 1 already parsed every changed file; only a cache-fresh file
+        // has no `cached_asts` entry and is re-read here.
+        let parsed;
+        let module = if let Some(cached) = cached_asts.get(file) {
+            &cached.module
+        } else {
+            let source = match fs::read_to_string(file) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        file = %file,
+                        error = %e,
+                        "Cannot read source file to flatten trait provisions; typed calls to its provided methods may report does-not-understand"
+                    );
+                    continue;
+                }
+            };
+            parsed = beamtalk_core::source_analysis::parse(
+                beamtalk_core::source_analysis::lex_with_eof(&source),
+            )
+            .0;
+            &parsed
+        };
+        let mut flattened =
+            beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos(
+                module,
+                &external_protocols,
+            );
+        beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
+            &mut flattened,
+            pkg_name,
+        );
+        for info in flattened {
+            // Last match: `module_index` is last-wins for a class name
+            // duplicated across files of the package.
+            if let Some(slot) = all_class_infos
+                .iter_mut()
+                .rev()
+                .find(|c| c.name == info.name && c.package.as_deref() == Some(pkg_name))
+            {
+                // Keep Pass 1's completeness marker for a file with parse errors.
+                let surface_incomplete = slot.surface_incomplete;
+                *slot = info;
+                slot.surface_incomplete = surface_incomplete;
+            }
+        }
+    }
 }
 
 /// Check that no dependency exports classes with stdlib-reserved names.
