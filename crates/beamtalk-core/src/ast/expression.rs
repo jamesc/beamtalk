@@ -687,6 +687,18 @@ impl MessageSelector {
     pub fn well_known(&self) -> Option<super::well_known::WellKnownSelector> {
         super::well_known::WellKnownSelector::from_selector(self)
     }
+
+    /// Whether this selector evaluates a block: the `value` family
+    /// ([`WellKnownSelector::is_block_value`](super::well_known::WellKnownSelector::is_block_value))
+    /// or `valueWithArguments:`. `valueWithArguments:` has no
+    /// `WellKnownSelector` variant, so it is named here, once, for every caller
+    /// that needs "this send invokes a block".
+    #[must_use]
+    pub fn is_block_invocation(&self) -> bool {
+        self.well_known()
+            .is_some_and(super::well_known::WellKnownSelector::is_block_value)
+            || self.name() == "valueWithArguments:"
+    }
 }
 
 /// A keyword part in a keyword message.

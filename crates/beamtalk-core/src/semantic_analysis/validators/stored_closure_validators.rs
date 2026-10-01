@@ -23,17 +23,27 @@
 //! The compiler already rejects the analogous `self.field :=` inside a stored
 //! closure (`block_analyzer`). Class-variable writes here go through a
 //! *send*, so whether the write happens is only known at run time (a subclass
-//! override may write); this pass therefore warns rather than errors, and
-//! only when the send may write a class variable by the same rule the
-//! codegen gates use ([`compute_class_var_mutating_selectors`]) extended with
-//! the possibility of a subclass override.
+//! override may write); this pass therefore warns rather than errors.
+//!
+//! A send "may write" by [`ClassCtx::may_write_class_var`]: a method this class
+//! defines is judged by the codegen gates' own rule
+//! ([`compute_class_var_mutating_selectors`], reused, not copied) and, for a
+//! `self` send, by whether a subclass may override it; a user-defined method
+//! this class only inherits is assumed to write, which is the same "assume the
+//! worst for a selector the class does not define" call that rule makes.
 //!
 //! False positives are kept low: only classes that declare or inherit a class
 //! variable are checked, and only blocks that make a class-side
 //! `self`/own-class send to a user-defined (non-stdlib) class method are
 //! considered; `[self foo] value`, `collect:`/`do:` and friends (blocks
 //! invoked by the statement that builds them) are never flagged, and neither
-//! is a stored block that is never invoked by a later statement.
+//! is a stored block that is never invoked by a later statement, or one that
+//! is rebound before it is invoked.
+//!
+//! Known gaps (false negatives): a stored block passed to a stdlib
+//! higher-order method (`items do: b`), or invoked after a conditional rebind,
+//! is not tracked; a stored block passed by name to a user-defined class-side
+//! higher-order method is.
 
 use crate::ast::{Block, ClassDefinition, Expression, ExpressionStatement, MethodKind, Module};
 use crate::ast_walker::walk_expression;
@@ -41,16 +51,6 @@ use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::compute_class_var_mutating_selectors;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use std::collections::HashSet;
-
-/// Selectors that invoke a block (`value`, `value:`, … `valueWithArguments:`).
-const BLOCK_INVOCATION_SELECTORS: &[&str] = &[
-    "value",
-    "value:",
-    "value:value:",
-    "value:value:value:",
-    "value:value:value:value:",
-    "valueWithArguments:",
-];
 
 /// Warns about stored closures / user-HOM block arguments whose class-side
 /// self-send class-variable write is not kept (see the module docs).
@@ -106,16 +106,25 @@ struct ClassCtx<'a> {
 }
 
 impl ClassCtx<'_> {
-    /// Whether a class-side send of `selector` to `self` (or the class's own
-    /// name) may write a class variable that the surrounding scope cannot keep.
+    /// Whether a class-side send of `selector` may write a class variable that
+    /// the surrounding scope cannot keep. `via_class_reference` is true for an
+    /// explicit own-class receiver (`Counter foo`), which binds `Counter`'s
+    /// method directly, so no subclass override of `foo` can run (BT-3666);
+    /// `self foo` late-binds.
     ///
     /// Only user-defined class methods count (a stdlib class method is never a
     /// class-variable writer of the user's class, and an unresolvable selector
-    /// is not guessed at). A method of this class counts when it is not
-    /// provably free of class-variable mutation ([`compute_class_var_mutating_selectors`])
-    /// or when a subclass may override it (neither the class nor the method is
-    /// sealed): a subclass override may write — the very case ADR 0110 covers.
-    fn may_write_class_var(&self, selector: &str) -> bool {
+    /// is not guessed at).
+    ///
+    /// - A method this class defines counts when
+    ///   [`compute_class_var_mutating_selectors`] cannot prove it free of
+    ///   class-variable mutation, or, for a `self` send, when a subclass may
+    ///   override it (neither the class nor the method is sealed): an override
+    ///   may write, the very case ADR 0110 covers.
+    /// - A user-defined method this class only inherits counts unconditionally,
+    ///   whatever the sealing: that rule's "not defined locally, so assume the
+    ///   worst" call (the class's own mutating set says nothing about it).
+    fn may_write_class_var(&self, selector: &str, via_class_reference: bool) -> bool {
         let class_name = self.class.name.name.as_str();
         let Some(method) = self.hierarchy.find_class_method(class_name, selector) else {
             return false;
@@ -123,24 +132,35 @@ impl ClassCtx<'_> {
         if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
             return false;
         }
-        let overridable = !self.class.is_sealed && !method.is_sealed;
-        if method.defined_in.as_str() == class_name {
-            overridable || self.mutating.contains(selector)
-        } else {
-            overridable
+        if method.defined_in.as_str() != class_name {
+            return true;
+        }
+        let overridable = !via_class_reference && !self.class.is_sealed && !method.is_sealed;
+        overridable || self.mutating.contains(selector)
+    }
+
+    /// How `receiver` reaches this class's own class-side methods:
+    /// `Some(false)` for `self`, `Some(true)` for the class's own name (an
+    /// explicit reference), `None` for anything else.
+    fn own_class_receiver(&self, receiver: &Expression) -> Option<bool> {
+        match receiver {
+            Expression::Identifier(id) if id.name == "self" => Some(false),
+            Expression::ClassReference { name, package, .. }
+                if package.is_none() && name.name == self.class.name.name =>
+            {
+                Some(true)
+            }
+            _ => None,
         }
     }
 
-    /// Whether `expr` is a class-side self-send receiver: `self`, or this
-    /// class's own name (which reaches the same call).
-    fn is_own_class_receiver(&self, receiver: &Expression) -> bool {
-        match receiver {
-            Expression::Identifier(id) => id.name == "self",
-            Expression::ClassReference { name, package, .. } => {
-                package.is_none() && name.name == self.class.name.name
-            }
-            _ => false,
-        }
+    /// Whether `selector` names a user-defined (non-stdlib) class-side method
+    /// of this class or an ancestor: a candidate user-defined higher-order
+    /// method.
+    fn is_user_defined_class_method(&self, selector: &str) -> bool {
+        self.hierarchy
+            .find_class_method(self.class.name.name.as_str(), selector)
+            .is_some_and(|m| !ClassHierarchy::is_builtin_class(m.defined_in.as_str()))
     }
 
     /// The first selector sent to `self`/the own class inside `block` (nested
@@ -157,7 +177,10 @@ impl ClassCtx<'_> {
                 } = e
                 {
                     let name = selector.name();
-                    if self.is_own_class_receiver(receiver) && self.may_write_class_var(&name) {
+                    if self
+                        .own_class_receiver(receiver)
+                        .is_some_and(|by_ref| self.may_write_class_var(&name, by_ref))
+                    {
                         found = Some(name.to_string());
                     }
                 }
@@ -182,7 +205,7 @@ fn check_statement_list(
                 (target.as_ref(), value.as_ref())
             {
                 if let Some(selector) = ctx.first_may_write_send(block) {
-                    if let Some(call_span) = later_invocation(&stmts[i + 1..], &local.name) {
+                    if let Some(call_span) = later_invocation(&stmts[i + 1..], &local.name, ctx) {
                         diagnostics.push(stored_closure_diagnostic(
                             &local.name,
                             &selector,
@@ -215,15 +238,11 @@ fn check_hom_arguments(
             else {
                 return;
             };
-            if !ctx.is_own_class_receiver(receiver) {
+            if ctx.own_class_receiver(receiver).is_none() {
                 return;
             }
             let hom = selector.name();
-            let class_name = ctx.class.name.name.as_str();
-            let Some(method) = ctx.hierarchy.find_class_method(class_name, &hom) else {
-                return;
-            };
-            if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
+            if !ctx.is_user_defined_class_method(&hom) {
                 return;
             }
             for arg in arguments {
@@ -238,36 +257,50 @@ fn check_hom_arguments(
 }
 
 /// The span of the first statement of `later` that invokes the local `name`
-/// (`name value`, `name value: x`, …), if any.
+/// (`name value`, `name value: x`, ...) or hands it to a user-defined class-side
+/// higher-order method (`self section: name`), if any. The search stops at a
+/// statement that rebinds `name` (`name := ...`) without using it, since later
+/// invocations then reach a different block.
 fn later_invocation(
     later: &[ExpressionStatement],
     name: &str,
+    ctx: &ClassCtx<'_>,
 ) -> Option<crate::source_analysis::Span> {
-    let mut found = None;
+    let is_local = |x: &Expression| matches!(x, Expression::Identifier(id) if id.name == name);
     for stmt in later {
+        let mut found = None;
         walk_expression(&stmt.expression, &mut |e| {
             if found.is_some() {
                 return;
             }
-            if let Expression::MessageSend {
+            let Expression::MessageSend {
                 receiver,
                 selector,
+                arguments,
                 span,
                 ..
             } = e
-            {
-                let is_local =
-                    matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == name);
-                if is_local && BLOCK_INVOCATION_SELECTORS.contains(&selector.name().as_str()) {
-                    found = Some(*span);
-                }
+            else {
+                return;
+            };
+            let invoked = is_local(receiver) && selector.is_block_invocation();
+            let handed_to_hom = ctx.own_class_receiver(receiver).is_some()
+                && ctx.is_user_defined_class_method(&selector.name())
+                && arguments.iter().any(is_local);
+            if invoked || handed_to_hom {
+                found = Some(*span);
             }
         });
         if found.is_some() {
-            break;
+            return found;
+        }
+        if let Expression::Assignment { target, .. } = &stmt.expression {
+            if is_local(target) {
+                return None;
+            }
         }
     }
-    found
+    None
 }
 
 fn stored_closure_diagnostic(
@@ -282,7 +315,7 @@ fn stored_closure_diagnostic(
              variable, but it is invoked by a later statement: that write (and any read of a \
              class variable it relies on) is not kept\n\
              \n\
-             = help: invoke the block in the statement that builds it: `[self {selector}] value`\n\
+             = help: invoke the block in the statement that builds it (`[...] value`)\n\
              = help: or have the method return the value and write the class variable from the \
              method body"
         ),

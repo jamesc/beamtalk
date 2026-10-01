@@ -241,6 +241,20 @@ impl WellKnownSelector {
         }
     }
 
+    /// Whether this is one of the block-evaluation selectors a `Block` actually
+    /// answers: `value`, `value:`, `value:value:`, `value:value:value:` (there is
+    /// no four-argument `value:value:value:value:` on `Block`). The one place
+    /// that family is listed; see also
+    /// [`MessageSelector::is_block_invocation`](super::MessageSelector::is_block_invocation),
+    /// which adds `valueWithArguments:`.
+    #[must_use]
+    pub const fn is_block_value(self) -> bool {
+        matches!(
+            self,
+            Self::Value | Self::ValueColon | Self::ValueValue | Self::ValueValueValue
+        )
+    }
+
     /// The expected number of arguments for this selector.
     ///
     /// Equivalent to the arity that a parser-produced [`MessageSelector`] would

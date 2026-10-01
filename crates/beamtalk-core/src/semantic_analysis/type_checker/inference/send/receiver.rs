@@ -831,15 +831,9 @@ impl TypeChecker {
             // The convention is that the last type arg is always the return type.
             if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block)
                 && !type_args.is_empty()
-                && matches!(
-                    selector.well_known(),
-                    Some(
-                        WellKnownSelector::Value
-                            | WellKnownSelector::ValueColon
-                            | WellKnownSelector::ValueValue
-                            | WellKnownSelector::ValueValueValue
-                    )
-                )
+                && selector
+                    .well_known()
+                    .is_some_and(WellKnownSelector::is_block_value)
             {
                 return type_args.last().unwrap().clone();
             }

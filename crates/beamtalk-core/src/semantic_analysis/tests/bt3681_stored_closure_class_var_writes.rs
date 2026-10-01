@@ -214,6 +214,125 @@ fn block_passed_to_stdlib_hom_or_without_a_class_send_is_not_flagged() {
 }
 
 #[test]
+fn sealed_subclass_inheriting_a_mutating_selector_warns() {
+    let diags = advisories(
+        "Object subclass: Base
+  classState: n = 0
+
+  class bump -> Integer => self.n := self.n + 1
+
+sealed Base subclass: Leaf
+  class run -> Integer =>
+    b := [self bump]
+    b value
+    0
+",
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+}
+
+#[test]
+fn open_subclass_inheriting_a_class_sealed_mutating_selector_warns() {
+    let diags = advisories(
+        "Object subclass: Base
+  classState: n = 0
+
+  class sealed bump -> Integer => self.n := self.n + 1
+
+Base subclass: Child
+  class run -> Integer =>
+    b := [self bump]
+    b value
+    0
+",
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+}
+
+#[test]
+fn explicit_own_class_reference_binds_directly_so_only_mutating_selectors_warn() {
+    let pure = advisories(&open(
+        "  class run -> Integer =>
+    b := [Counter pure]
+    b value
+    0
+",
+    ));
+    assert!(
+        pure.is_empty(),
+        "`Counter pure` cannot be overridden and is pure: {pure:?}"
+    );
+    let writing = advisories(&open(
+        "  class run -> Integer =>
+    b := [Counter bump]
+    b value
+    0
+",
+    ));
+    assert_eq!(writing.len(), 1, "got: {writing:?}");
+}
+
+#[test]
+fn rebinding_the_local_before_invoking_it_is_not_flagged() {
+    let diags = advisories(&open(
+        "  class run -> Integer =>
+    b := [self bump]
+    b := [0]
+    b value
+",
+    ));
+    assert!(diags.is_empty(), "got: {diags:?}");
+}
+
+#[test]
+fn stored_closure_handed_to_a_user_defined_hom_by_name_warns() {
+    let diags = advisories(&open(
+        "  class run -> Integer =>
+    b := [self bump]
+    self section: b
+    0
+",
+    ));
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+}
+
+#[test]
+fn stored_closure_passed_to_a_stdlib_hom_is_a_documented_gap() {
+    // Not tracked (see the module docs): the check stays silent rather than
+    // guess how a stdlib higher-order method invokes the block.
+    let diags = advisories(&open(
+        "  class run -> Integer =>
+    b := [:x | self bump]
+    #(1, 2) do: b
+    0
+",
+    ));
+    assert!(diags.is_empty(), "got: {diags:?}");
+}
+
+#[test]
+fn keyword_selector_help_text_does_not_interpolate_the_selector() {
+    let diags = advisories(
+        "Object subclass: Counter
+  classState: n = 0
+
+  class bumpBy: k :: Integer -> Integer => self.n := self.n + k
+
+  class run -> Integer =>
+    b := [self bumpBy: 2]
+    b value
+    0
+",
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert!(
+        !diags[0].message.contains("[self bumpBy:]"),
+        "{}",
+        diags[0].message
+    );
+}
+
+#[test]
 fn hom_block_in_a_loop_body_is_reported_once() {
     let diags = advisories(&open(
         "  class run -> Integer =>
