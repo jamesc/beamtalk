@@ -604,6 +604,26 @@ pub(crate) fn incremental_build_class_module_index(
         super::build::build_class_module_index(&stale_files, source_root, pkg_name)?
     };
 
+    // A class a re-scanned file declares and a cache-fresh file declares too
+    // (a duplicate across files) is last-wins by path in a cold scan, but the
+    // merge below lets the stale file win. Re-scan everything then, so the
+    // winner (and `flatten_trait_user_class_infos`'s shadowing, BT-3679) is
+    // the same whatever the cache state.
+    if stale_module_index
+        .iter()
+        .any(|(class, module)| class_module_index.get(class).is_some_and(|m| m != module))
+    {
+        info!("Class declared in a stale and a cached file — re-scanning all files");
+        return incremental_build_class_module_index(
+            source_files,
+            source_root,
+            pkg_name,
+            build_dir,
+            manifest_path,
+            true,
+        );
+    }
+
     // Merge stale results
     class_module_index.extend(stale_module_index);
     class_superclass_index.extend(stale_superclass_index);
@@ -744,9 +764,8 @@ fn build_cache_entries(
         };
 
         // Compute the expected module name for this file
-        let module_name = match super::build::compute_relative_module(file, source_root) {
-            Ok(rel) => super::util::bt_qualified_module_name(pkg_name, &rel),
-            Err(_) => continue,
+        let Ok(module_name) = super::build::package_module_name(file, source_root, pkg_name) else {
+            continue;
         };
 
         // Collect classes that belong to this file's module via reverse index

@@ -195,6 +195,19 @@ pub fn extract_flattened_class_infos(
     infos
 }
 
+/// A module with `uses:` lines for [`flatten_trait_user_class_infos`], and
+/// the names of its classes that a *later* declaration of the same name
+/// overrides (BT-3679).
+#[derive(Debug, Clone, Copy)]
+pub struct TraitUserModule<'a> {
+    /// The module whose classes are flattened.
+    pub module: &'a Module,
+    /// Classes of `module` that another module redeclares and wins with.
+    /// Their `ClassInfo` slot belongs to that other module, so the
+    /// flattened info of `module` is not written into it.
+    pub shadowed: &'a HashSet<EcoString>,
+}
+
 /// Replaces, in `all_class_infos`, the `ClassInfo` of every class declared in
 /// one of `modules` that has `uses:` lines with the flattened one from
 /// [`extract_flattened_class_infos`] (BT-3673).
@@ -209,23 +222,25 @@ pub fn extract_flattened_class_infos(
 ///
 /// Entries are matched by class name and `package` (the stamp
 /// `ClassHierarchy::stamp_package_on_infos` put on them), so a same-named
-/// class of another package is left alone; the last match wins, as the
-/// class-module index is last-wins for a class duplicated across files. The
-/// replaced entry keeps its `surface_incomplete` marker. Modules without a
-/// `uses:` line are skipped.
+/// class of another package is left alone; the last match is the one that
+/// runs, as the class-module index is last-wins for a class duplicated across
+/// files. A class a module's [`TraitUserModule::shadowed`] names is skipped,
+/// so a trait user's provisions never land in the slot of the same-named class
+/// of another file (BT-3679). The replaced entry keeps its
+/// `surface_incomplete` marker. Modules without a `uses:` line are skipped.
 ///
 /// Returns the names of the classes whose `ClassInfo` was replaced (BT-3674),
 /// so a caller can hash exactly the cross-file surface that flattening
 /// contributes.
 pub fn flatten_trait_user_class_infos<'a>(
     all_class_infos: &mut [ClassInfo],
-    modules: impl IntoIterator<Item = &'a Module>,
+    modules: impl IntoIterator<Item = TraitUserModule<'a>>,
     protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
     package: Option<&str>,
 ) -> Vec<EcoString> {
     let mut flattened_names = Vec::new();
     let external_protocols = first_wins_protocol_map(protocol_defs);
-    for module in modules {
+    for TraitUserModule { module, shadowed } in modules {
         if !module.classes.iter().any(|c| !c.uses.is_empty()) {
             continue;
         }
@@ -234,6 +249,9 @@ pub fn flatten_trait_user_class_infos<'a>(
             ClassHierarchy::stamp_package_on_infos(&mut flattened, pkg);
         }
         for info in flattened {
+            if shadowed.contains(&info.name) {
+                continue;
+            }
             if let Some(slot) = all_class_infos
                 .iter_mut()
                 .rev()
@@ -249,23 +267,40 @@ pub fn flatten_trait_user_class_infos<'a>(
     flattened_names
 }
 
+/// One module seen by a [`TraitUserCollector`]: the classes it declares and,
+/// if any has a `uses:` line, the module itself (the only ones cloned).
+#[derive(Debug)]
+struct CollectedModule {
+    declared: Vec<EcoString>,
+    trait_user: Option<Module>,
+}
+
 /// Collects, while a caller walks a package's source files once, what
 /// [`flatten_trait_user_class_infos`] needs: the modules with `uses:` lines
-/// (the only ones cloned) and every provision-bearing protocol AST. Used by
-/// the lint surfaces, whose Pass 1 loops consume the parsed modules.
+/// and every provision-bearing protocol AST. Used by the lint surfaces, whose
+/// Pass 1 loops consume the parsed modules.
+///
+/// `add` must be called for *every* module, in the order its classes were
+/// appended to the `ClassInfo` slots being flattened, so a class a later
+/// module redeclares is recognised as shadowing the earlier one (BT-3679).
 #[derive(Debug, Default)]
 pub struct TraitUserCollector {
-    modules: Vec<Module>,
+    modules: Vec<CollectedModule>,
     protocol_defs: Vec<ProtocolDefinition>,
 }
 
 impl TraitUserCollector {
-    /// Records `module`'s provision-bearing protocols and, if any class has a
-    /// `uses:` line, the module itself.
+    /// Records `module`'s declared classes and provision-bearing protocols
+    /// and, if any class has a `uses:` line, the module itself.
     pub fn add(&mut self, module: &Module) {
-        if module.classes.iter().any(|c| !c.uses.is_empty()) {
-            self.modules.push(module.clone());
-        }
+        self.modules.push(CollectedModule {
+            declared: module.classes.iter().map(|c| c.name.name.clone()).collect(),
+            trait_user: module
+                .classes
+                .iter()
+                .any(|c| !c.uses.is_empty())
+                .then(|| module.clone()),
+        });
         self.protocol_defs.extend(
             module
                 .protocols
@@ -290,9 +325,32 @@ impl TraitUserCollector {
         extra_protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
         package: Option<&str>,
     ) -> Vec<EcoString> {
+        // A class is shadowed in a module if any later module declares it.
+        let mut redeclared_later: HashSet<EcoString> = HashSet::new();
+        let mut shadowed_sets = Vec::new();
+        for collected in self.modules.iter().rev() {
+            shadowed_sets.push(
+                collected
+                    .declared
+                    .iter()
+                    .filter(|name| redeclared_later.contains(*name))
+                    .cloned()
+                    .collect::<HashSet<EcoString>>(),
+            );
+            redeclared_later.extend(collected.declared.iter().cloned());
+        }
+        shadowed_sets.reverse();
         flatten_trait_user_class_infos(
             all_class_infos,
-            &self.modules,
+            self.modules
+                .iter()
+                .zip(&shadowed_sets)
+                .filter_map(|(collected, shadowed)| {
+                    collected
+                        .trait_user
+                        .as_ref()
+                        .map(|module| TraitUserModule { module, shadowed })
+                }),
             self.protocol_defs
                 .iter()
                 .cloned()
