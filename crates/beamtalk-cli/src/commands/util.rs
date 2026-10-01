@@ -119,6 +119,35 @@ pub(crate) fn protocol_content_hash(protocol: &beamtalk_core::ast::ProtocolDefin
     sha256_hex(beamtalk_core::unparse::unparse_module(&wrapper).as_bytes())
 }
 
+/// Hash of the cross-file class surface contributed by trait flattening
+/// (BT-3674): the `ClassInfo` of each class in `flattened_names` (the classes
+/// declared in files with `uses:` lines) within `pkg_name`, sorted by name.
+///
+/// A caller's type-check depends on these flattened surfaces, but its own
+/// source and the protocols *it* uses do not change when a provision in some
+/// other file is renamed — so `detect_changes` folds this into every file's
+/// cache key. `serde_json::to_value` yields key-sorted maps (the workspace
+/// does not enable `preserve_order`), so the `HashMap` fields of `ClassInfo`
+/// hash deterministically. Empty string when no class uses a protocol, which
+/// leaves every file's key untouched.
+#[must_use]
+pub(crate) fn class_surface_hash(
+    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    flattened_names: &[ecow::EcoString],
+    pkg_name: &str,
+) -> String {
+    if flattened_names.is_empty() {
+        return String::new();
+    }
+    let mut infos: Vec<_> = all_class_infos
+        .iter()
+        .filter(|c| c.package.as_deref() == Some(pkg_name) && flattened_names.contains(&c.name))
+        .collect();
+    infos.sort_by(|a, b| a.name.cmp(&b.name));
+    let value = serde_json::to_value(&infos).unwrap_or(serde_json::Value::Null);
+    sha256_hex(value.to_string().as_bytes())
+}
+
 /// [`content_hash_of`] for every file in `paths`, keyed by path string.
 ///
 /// A single build hashes each source file's content in more than
