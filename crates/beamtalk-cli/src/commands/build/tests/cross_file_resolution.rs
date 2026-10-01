@@ -950,12 +950,13 @@ fn flatten_trait_user_class_infos_is_independent_of_cache_state() {
 
 /// BT-3679: when a package declares `Widget` in two files, only the file that
 /// wins the class index gets its flattened `ClassInfo` written to the
-/// `Widget` slot — on a cold build and on a cache-fresh one. The earlier
+/// `Widget` slot — on a cold build, a cache-fresh one and incremental builds
+/// where only the earlier, or only the later, file changed. The earlier
 /// file's `uses: Tagged` must not leak into the later, trait-less `Widget`;
 /// when the later file also `uses:` the trait, the provisions stay.
 #[test]
 fn flatten_trait_user_class_infos_ignores_a_shadowed_same_named_class() {
-    let tag_in_last_widget = |later_uses_trait: bool| -> (bool, bool) {
+    let tag_in_last_widget = |later_uses_trait: bool| -> [bool; 4] {
         let temp = TempDir::new().unwrap();
         let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let src_path = project_path.join("src");
@@ -1001,17 +1002,34 @@ fn flatten_trait_user_class_infos_ignores_a_shadowed_same_named_class() {
         let cold = build_class_index(&env, &dep_ctx, &default_options(), true).unwrap();
         let warm = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
         assert!(warm.cached_asts.is_empty(), "second build is cache-fresh");
-        (has_tag(&cold), has_tag(&warm))
+
+        // Incremental: only the earlier file is stale, then only the later one.
+        // Pass 1 must pick the same winning `Widget` as the cold build.
+        let touch = |file: &str| {
+            let path = src_path.join(file);
+            let source = fs::read_to_string(&path).unwrap();
+            write_test_file(&path, &format!("{source}\n// touched\n"));
+        };
+        touch("widget_a.bt");
+        let only_a = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
+        touch("widget_b.bt");
+        let only_b = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
+        [
+            has_tag(&cold),
+            has_tag(&warm),
+            has_tag(&only_a),
+            has_tag(&only_b),
+        ]
     };
 
     assert_eq!(
         tag_in_last_widget(false),
-        (false, false),
+        [false; 4],
         "a later Widget without `uses:` is the real class: no `tag`"
     );
     assert_eq!(
         tag_in_last_widget(true),
-        (true, true),
+        [true; 4],
         "a later Widget that also uses Tagged carries `tag`"
     );
 }

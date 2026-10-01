@@ -371,7 +371,17 @@ pub(crate) fn flatten_trait_user_class_infos(
                 .get(*f)
                 .map(|c| &c.module)
                 .or_else(|| reparsed.get(*f))?;
-            let module_name = super::sources::package_module_name(f, source_root, pkg_name).ok()?;
+            let module_name = match super::sources::package_module_name(f, source_root, pkg_name) {
+                Ok(name) => name,
+                Err(e) => {
+                    warn!(
+                        file = %f,
+                        error = %e,
+                        "Cannot derive module name to flatten trait provisions; typed calls to its provided methods may report does-not-understand"
+                    );
+                    return None;
+                }
+            };
             let shadowed = module
                 .classes
                 .iter()
