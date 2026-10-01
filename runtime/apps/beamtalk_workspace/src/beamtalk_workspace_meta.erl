@@ -591,14 +591,27 @@ workspaces_base_dir() ->
 
 -doc """
 Remove leftover directories of anonymous foreground workspaces under `BaseDir`
-whose newest top-level entry is older than `MaxAgeSeconds` (BT-3672).
+(BT-3672). Returns the number of directories removed.
 
-Deliberately conservative, because the directory also holds other state
-(`workspace.log`, `cookie`, `port`, `node.info`, `changes/`): only directories
-whose name passes `is_foreground_id/1` are considered; a directory whose
-`port` file or any entry was touched within the window (i.e. a live or recent
-workspace) is kept; symlinks are never followed or removed. Best effort: all
-errors are swallowed. Returns the number of directories removed.
+A directory is removed only when ALL of these hold; anything inconclusive
+keeps it:
+
+1. its name passes `is_foreground_id/1` (strict shape);
+2. it is a real directory (symlinks are never followed or removed);
+3. it looks stale: the newest mtime among the directory, its top-level
+   entries (`workspace.log`, `cookie`, `port`, `changes/`, ...) and the
+   entries one level inside `changes/` (appends there do not bump the
+   `changes/` directory mtime) is older than `MaxAgeSeconds`;
+4. its owner is conclusively not running: no `port` file points at a TCP
+   port that accepts a connection on 127.0.0.1, and the OS pid embedded in
+   the id is gone (POSIX `kill -0` reports "No such process"). On other
+   platforms, or on any other outcome (EPERM, unparsable port file, probe
+   timeout, unreadable directory), the directory is kept.
+
+Known limit: a foreground workspace from another PID namespace or host that
+shares this home directory, bound to a non-loopback address and quiet for
+more than `MaxAgeSeconds`, is indistinguishable from a dead one. Errors are
+swallowed (best effort).
 """.
 -spec prune_stale_foreground_workspaces(file:filename(), non_neg_integer(), integer()) ->
     non_neg_integer().
@@ -606,27 +619,33 @@ prune_stale_foreground_workspaces(BaseDir, MaxAgeSeconds, NowSeconds) ->
     try file:list_dir(BaseDir) of
         {ok, Names} ->
             Cutoff = NowSeconds - MaxAgeSeconds,
-            length([
-                N
-             || N <- Names,
-                is_foreground_id(N),
-                prune_if_stale(filename:join(BaseDir, N), Cutoff)
-            ]);
+            lists:foldl(
+                fun(Name, Removed) ->
+                    case
+                        is_foreground_id(Name) andalso
+                            prune_if_stale(filename:join(BaseDir, Name), Name, Cutoff)
+                    of
+                        true -> Removed + 1;
+                        false -> Removed
+                    end
+                end,
+                0,
+                Names
+            );
         {error, _} ->
             0
     catch
         _:_ -> 0
     end.
 
--spec prune_if_stale(file:filename(), integer()) -> boolean().
-prune_if_stale(Dir, Cutoff) ->
+-spec prune_if_stale(file:filename(), file:filename(), integer()) -> boolean().
+prune_if_stale(Dir, Name, Cutoff) ->
     try
         case file:read_link_info(Dir, [{time, posix}]) of
             {ok, #file_info{type = directory, mtime = DirMtime}} ->
-                case newest_entry_mtime(Dir, DirMtime) < Cutoff of
-                    true -> file:del_dir_r(Dir) =:= ok;
-                    false -> false
-                end;
+                newest_mtime(Dir, DirMtime) < Cutoff andalso
+                    owner_conclusively_dead(Dir, Name) andalso
+                    file:del_dir_r(Dir) =:= ok;
             _ ->
                 false
         end
@@ -634,13 +653,38 @@ prune_if_stale(Dir, Cutoff) ->
         _:_ -> false
     end.
 
-newest_entry_mtime(Dir, DirMtime) ->
+%% Newest mtime of Dir, its entries, and the entries one level inside any
+%% subdirectory (`changes/`). Unreadable => "now" so we never delete it.
+-spec newest_mtime(file:filename(), integer()) -> integer().
+newest_mtime(Dir, DirMtime) ->
+    case file:list_dir(Dir) of
+        {ok, Entries} ->
+            lists:foldl(
+                fun(E, Acc) ->
+                    Path = filename:join(Dir, E),
+                    case file:read_link_info(Path, [{time, posix}]) of
+                        {ok, #file_info{type = directory, mtime = M}} ->
+                            max(Acc, newest_child_mtime(Path, M));
+                        {ok, #file_info{mtime = M}} ->
+                            max(Acc, M);
+                        _ ->
+                            Acc
+                    end
+                end,
+                DirMtime,
+                Entries
+            );
+        {error, _} ->
+            erlang:system_time(second)
+    end.
+
+newest_child_mtime(Dir, DirMtime) ->
     case file:list_dir(Dir) of
         {ok, Entries} ->
             lists:foldl(
                 fun(E, Acc) ->
                     case file:read_link_info(filename:join(Dir, E), [{time, posix}]) of
-                        {ok, #file_info{mtime = M}} -> max(M, Acc);
+                        {ok, #file_info{mtime = M}} -> max(Acc, M);
                         _ -> Acc
                     end
                 end,
@@ -648,8 +692,56 @@ newest_entry_mtime(Dir, DirMtime) ->
                 Entries
             );
         {error, _} ->
-            %% Unreadable: treat as fresh so we never delete what we can't inspect.
             erlang:system_time(second)
+    end.
+
+%% True only when no sign of life is found AND the embedded pid is provably
+%% gone. See prune_stale_foreground_workspaces/3 item 4.
+-spec owner_conclusively_dead(file:filename(), file:filename()) -> boolean().
+owner_conclusively_dead(Dir, Name) ->
+    port_file_says_dead(filename:join(Dir, "port")) andalso pid_is_gone(Name).
+
+%% Port file written by beamtalk_repl_server:write_port_file/3 (`PORT\nNONCE`).
+%% Absent file => no evidence of life; present => must be a refused connection.
+-spec port_file_says_dead(file:filename()) -> boolean().
+port_file_says_dead(PortFile) ->
+    case file:read_file(PortFile) of
+        {error, enoent} ->
+            true;
+        {ok, Bin} ->
+            [First | _] = binary:split(Bin, <<"\n">>),
+            try binary_to_integer(string:trim(First)) of
+                Port when Port > 0, Port < 65536 ->
+                    case gen_tcp:connect({127, 0, 0, 1}, Port, [], 500) of
+                        {ok, Sock} ->
+                            _ = gen_tcp:close(Sock),
+                            false;
+                        {error, econnrefused} ->
+                            true;
+                        {error, _} ->
+                            false
+                    end;
+                _ ->
+                    false
+            catch
+                _:_ -> false
+            end;
+        {error, _} ->
+            false
+    end.
+
+%% The id embeds the OS pid of the creating VM (digits only, validated by
+%% is_foreground_id/1, so safe to interpolate). POSIX only; pid reuse can only
+%% cause a false "alive", which is the safe direction.
+-spec pid_is_gone(file:filename()) -> boolean().
+pid_is_gone(Name) ->
+    case os:type() of
+        {unix, _} ->
+            [<<"foreground">>, Pid | _] = binary:split(iolist_to_binary(Name), <<"_">>, [global]),
+            Out = os:cmd("kill -0 " ++ binary_to_list(Pid) ++ " 2>&1"),
+            string:find(Out, "No such process") =/= nomatch;
+        _ ->
+            false
     end.
 
 %%% gen_server callbacks

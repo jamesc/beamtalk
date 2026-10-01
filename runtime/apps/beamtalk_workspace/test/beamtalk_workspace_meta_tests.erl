@@ -596,41 +596,84 @@ named_workspace_still_persists_metadata_test() ->
         _ = file:del_dir(MetaDir)
     end.
 
-prune_stale_foreground_workspaces_test() ->
-    %% BT-3672: only stale, strictly-shaped foreground dirs are removed.
+prune_stale_foreground_workspaces_test_() ->
+    %% BT-3672: only stale, strictly-shaped foreground dirs with a provably
+    %% dead owner are removed. Needs POSIX `kill -0` for the dead-pid proof.
+    case os:type() of
+        {unix, _} -> {"prune", fun prune_cases/0};
+        _ -> []
+    end.
+
+prune_cases() ->
     Base = filename:join("bt_test_3672_prune", integer_to_list(erlang:unique_integer([positive]))),
     Now = erlang:system_time(second),
-    Stale = <<"foreground_1_2_3">>,
-    Fresh = <<"foreground_4_5_6">>,
-    Named = <<"foreground_demo">>,
-    Other = <<"named_ws_1">>,
+    Week = 7 * 24 * 3600,
+    %% pid 2147483000 exceeds any kernel pid_max, so `kill -0` => No such process.
+    DeadPid = "2147483000",
+    Id = fun(Pid, N) -> "foreground_" ++ Pid ++ "_" ++ N ++ "_1" end,
+    %% Back-date Path (and its parent dir, whose mtime a new entry bumps).
+    Backdate = fun(Path) ->
+        T = calendar:system_time_to_local_time(Now - 2 * Week, second),
+        ok = file:write_file_info(Path, #file_info{mtime = T, atime = T}),
+        ok = file:write_file_info(filename:dirname(Path), #file_info{mtime = T, atime = T})
+    end,
     Mk = fun(Name, Age) ->
-        Dir = filename:join(Base, binary_to_list(Name)),
-        ok = filelib:ensure_path(Dir),
+        Dir = filename:join(Base, Name),
+        ok = filelib:ensure_path(filename:join(Dir, "changes")),
+        T = calendar:system_time_to_local_time(Now - Age, second),
+        FI = #file_info{mtime = T, atime = T},
         File = filename:join(Dir, "workspace.log"),
         ok = file:write_file(File, <<"x">>),
-        T = calendar:system_time_to_local_time(Now - Age, second),
-        ok = file:write_file_info(File, #file_info{mtime = T, atime = T}),
-        ok = file:write_file_info(Dir, #file_info{mtime = T, atime = T}),
+        ok = file:write_file_info(File, FI),
+        ok = file:write_file_info(filename:join(Dir, "changes"), FI),
+        ok = file:write_file_info(Dir, FI),
         Dir
     end,
-    Week = 7 * 24 * 3600,
-    StaleDir = Mk(Stale, 2 * Week),
-    FreshDir = Mk(Fresh, 60),
-    NamedDir = Mk(Named, 2 * Week),
-    OtherDir = Mk(Other, 2 * Week),
+    Stale = Mk(Id(DeadPid, "1"), 2 * Week),
+    Fresh = Mk(Id(DeadPid, "2"), 60),
+    NamedDir = Mk("foreground_demo", 2 * Week),
+    OtherDir = Mk("named_ws_1", 2 * Week),
+    %% Quiet >7d but the owner pid is alive (this VM).
+    AlivePid = Mk(Id(os:getpid(), "3"), 2 * Week),
+    %% Quiet changes/ dir but a fresh append inside it.
+    ChangesBusy = Mk(Id(DeadPid, "4"), 2 * Week),
+    ok = file:write_file(filename:join([ChangesBusy, "changes", "changes.jsonl"]), <<"{}">>),
+    %% Dead pid but a port file pointing at a live listener.
+    {ok, L} = gen_tcp:listen(0, [{ip, {127, 0, 0, 1}}]),
+    {ok, LivePort} = inet:port(L),
+    PortLive = Mk(Id(DeadPid, "5"), 2 * Week),
+    ok = file:write_file(
+        filename:join(PortLive, "port"), [integer_to_list(LivePort), "\nnonce"]
+    ),
+    Backdate(filename:join(PortLive, "port")),
+    %% Dead pid, port file pointing at a closed port => dead.
+    {ok, L2} = gen_tcp:listen(0, [{ip, {127, 0, 0, 1}}]),
+    {ok, ClosedPort} = inet:port(L2),
+    ok = gen_tcp:close(L2),
+    PortDead = Mk(Id(DeadPid, "6"), 2 * Week),
+    ok = file:write_file(
+        filename:join(PortDead, "port"), [integer_to_list(ClosedPort), "\nnonce"]
+    ),
+    Backdate(filename:join(PortDead, "port")),
+    %% Dead pid, garbage port file => inconclusive => kept.
+    PortGarbage = Mk(Id(DeadPid, "7"), 2 * Week),
+    ok = file:write_file(filename:join(PortGarbage, "port"), <<"not-a-port">>),
+    Backdate(filename:join(PortGarbage, "port")),
     try
-        ?assertEqual(1, beamtalk_workspace_meta:prune_stale_foreground_workspaces(Base, Week, Now)),
-        ?assertNot(filelib:is_dir(StaleDir)),
-        ?assert(filelib:is_dir(FreshDir)),
-        ?assert(filelib:is_dir(NamedDir)),
-        ?assert(filelib:is_dir(OtherDir)),
+        ?assertEqual(2, beamtalk_workspace_meta:prune_stale_foreground_workspaces(Base, Week, Now)),
+        ?assertNot(filelib:is_dir(Stale)),
+        ?assertNot(filelib:is_dir(PortDead)),
+        [
+            ?assert(filelib:is_dir(D))
+         || D <- [Fresh, NamedDir, OtherDir, AlivePid, ChangesBusy, PortLive, PortGarbage]
+        ],
         %% Missing base dir is a no-op.
         ?assertEqual(
             0,
             beamtalk_workspace_meta:prune_stale_foreground_workspaces("bt_no_such_dir", Week, Now)
         )
     after
+        _ = gen_tcp:close(L),
         _ = file:del_dir_r("bt_test_3672_prune")
     end.
 
