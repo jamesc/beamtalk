@@ -1,0 +1,378 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3690: a class-side send whose callee answers a plain value (not a
+// `{class_var_result, _, _}` pair) does not commit the class variables again.
+// This fixture pins every shape that rule could break: plain sends interleaved
+// with writing sends inside loops, nested arms, raised scopes, handler arms,
+// closures and a late-bound send that a subclass override turns into a write.
+// See self_send_plain_reply_test.bt. SsoPlainSealed is the sealed twin.
+
+Object subclass: SsoPlainBase
+  classState: n = 0
+
+  class n -> Integer => self.n
+
+  class resetN -> Integer => self.n := 0
+
+  // Always writes.
+  class bump -> Integer => self.n := self.n + 1
+
+  class bumpBy: k :: Integer -> Integer => self.n := self.n + k
+
+  // Never writes (plain reply). Open: a subclass may override it.
+  class plain -> Integer => 0
+
+  class plainWith: k :: Integer -> Integer => k
+
+  // Plain reply that READS the class variable.
+  class reader -> Integer => self.n
+
+  // The base answers plain; SsoPlainSub overrides it to write.
+  class foo -> Integer => 0
+
+  // --- loops and arms -----------------------------------------------------
+  class armsDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        i =:= 2 ifTrue: [self plain]
+        i =:= 3 ifTrue: [self plain]
+      ]
+    self.n
+
+  class armsToDo -> Integer =>
+    self.n := 0
+    seen := 0
+    1
+      to: 3
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        i =:= 2 ifTrue: [self plain]
+        i =:= 3 ifTrue: [self plain]
+      ]
+    self.n
+
+  class armsTimesRepeat -> Integer =>
+    self.n := 0
+    seen := 0
+    3
+      timesRepeat: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self bump]
+        seen =:= 2 ifTrue: [self plain]
+        seen =:= 3 ifTrue: [self plain]
+      ]
+    self.n
+
+  class deepArms -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i > 0
+          ifTrue: [
+            i =:= 1 ifTrue: [i < 5 ifTrue: [self bump]]
+            i =:= 2 ifTrue: [self plain]
+            i =:= 3 ifTrue: [i > 9 ifTrue: [self bump] ifFalse: [self plain]]
+          ]
+      ]
+    self.n
+
+  class plainThenWriteInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        self plain
+        self bump
+      ]
+    self.n
+
+  class writeThenPlainInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        self bump
+        self plain
+      ]
+    self.n
+
+  class argsInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        self bumpBy: i
+        self plainWith: i
+      ]
+    self.n
+
+  class injectLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :i |
+        seen := seen + 1
+        self bump
+        self plain
+        a + i
+      ]
+    self.n
+
+  // A plain reader sees every earlier write of the scope.
+  class readerSeesWrites -> List =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      collect: [:i |
+        seen := seen + 1
+        self bump
+        self reader
+      ]
+
+  // The skipped arm of a later iteration must not roll the earlier write back.
+  class readerAfterArm -> List =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      collect: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        self reader
+      ]
+
+  // --- raised scopes, handlers, ensure -----------------------------------
+  class raisedThenPlainSend -> Integer =>
+    self.n := 0
+    [
+      self bump
+      self plain
+      1 / 0
+    ] on: Error do: [:e | nil]
+    self plain
+    self.n
+
+  class raisedIterationInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        [
+          self bump
+          1 / 0
+        ] on: Error do: [:e | nil]
+        self plain
+      ]
+    self.n
+
+  // Only the iteration that completed (i = 2) keeps its write.
+  class raisedIterationBetweenKept -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 2
+          ifTrue: [self bump]
+          ifFalse: [
+            [
+              self bump
+              1 / 0
+            ] on: Error do: [:e | nil]
+          ]
+        self plain
+      ]
+    self.n
+
+  class handlerArm -> Integer =>
+    self.n := 0
+    [1 / 0]
+      on: Error
+      do: [:e |
+        self bump
+        self plain
+      ]
+    self plain
+    self.n
+
+  class ensureBody -> Integer =>
+    self.n := 0
+    [
+      self bump
+      self plain
+    ] ensure: [self plain]
+    self.n
+
+  class tryDoKeeps -> Integer =>
+    self.n := 0
+    Result
+      tryDo: [
+        self bump
+        self plain
+      ]
+    self.n
+
+  // --- late-bound `foo`: plain here, a write in SsoPlainSub ---------------
+  class fooArms -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self foo]
+        i =:= 2 ifTrue: [self plain]
+        i =:= 3 ifTrue: [self plain]
+      ]
+    self.n
+
+  // Open class only: a late-bound send in nested bare blocks (a sealed class's
+  // writing selector is rejected there).
+  class fooNested -> Integer =>
+    self.n := 0
+    1
+      to: 2
+      do: [:i |
+        #(1, 2)
+          do: [:j |
+            j =:= 1 ifTrue: [self foo]
+            j =:= 2 ifTrue: [self plain]
+          ]
+      ]
+    self.n
+
+  class fooPlainFirst -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        self plain
+        self foo
+        self plain
+      ]
+    self.n
+
+  class fooReader -> List =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      collect: [:i |
+        seen := seen + 1
+        self foo
+        self reader
+      ]
+
+  // Open class only (nested bare blocks in a try body).
+  class fooRaised -> Integer =>
+    self.n := 0
+    [
+      #(1)
+        do: [:i |
+          self foo
+          self plain
+        ]
+      1 / 0
+    ] on: Error do: [:e | nil]
+    #(1) do: [:i | self plain]
+    self.n
+
+  class fooHandler -> Integer =>
+    self.n := 0
+    [1 / 0]
+      on: Error
+      do: [:e |
+        self foo
+        self plain
+      ]
+    self plain
+    self.n
+
+  // --- closures ----------------------------------------------------------
+
+  // A closure stored in a local and invoked by a later statement (ADR 0110
+  // known limit, BT-3681): a plain send inside it changes nothing.
+  @expect stored_closure "BT-3690: pins that a plain send in a stored closure changes nothing"
+  class storedPlain -> Integer =>
+    self.n := 0
+    b := [self plain]
+    self bump
+    b value
+    self plain
+    self.n
+
+  // The same limit with a writing send: the closure's write is not kept.
+  @expect stored_closure "BT-3690: pins the known limit of a stored closure"
+  class storedBump -> Integer =>
+    self.n := 0
+    b := [self bump]
+    b value
+    self plain
+    self.n
+
+  // A writing send after a stored closure's plain send is kept.
+  @expect stored_closure "BT-3690: pins that a plain send in a stored closure changes nothing"
+  class storedPlainThenWrite -> Integer =>
+    self.n := 0
+    b := [self plain]
+    b value
+    self bump
+    b value
+    self plain
+    self.n
+
+  // A closure invoked in the statement that builds it keeps its writes.
+  class sameStatementClosure -> Integer =>
+    self.n := 0
+    [
+      self bump
+      self plain
+    ] value
+    self plain
+    self.n
+
+  // --- a block handed to a user-defined class-side higher-order method -------
+  class section: aBlock :: Block -> Integer => aBlock value
+
+  // BT-3682 limit (unchanged by BT-3690): a block LITERAL passed to the HOM keeps
+  // the send's own commit, which overwrites the block's export, so the write is
+  // dropped.
+  @expect stored_closure "BT-3682: pins the known limit of a block literal passed to a HOM"
+  class viaSectionLiteralInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1)
+      do: [:x |
+        seen := seen + 1
+        self section: [self foo]
+      ]
+    self.n
+
+  // BT-3690 behaviour: the same block reaching the HOM BY NAME (here a block
+  // parameter, which the BT-3681 check does not track) is not a literal of the
+  // send, so the plain reply from `section:` skips the commit and the block's
+  // export into the scope survives: the write is KEPT (answers 1 for a
+  // subclass override or a sealed class; before BT-3690 it was dropped like the
+  // literal spelling above). An improvement, not a guarantee: the two
+  // spellings of the same call answer differently until BT-3682 merges the
+  // passed, returned and exported class variables.
+  class viaSectionParamInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1)
+      do: [:x |
+        seen := seen + 1
+        [:b | self section: b] value: [self foo]
+      ]
+    self.n

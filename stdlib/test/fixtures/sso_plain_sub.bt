@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3690: see sso_plain_base.bt. The override turns the base's plain `foo`
+// into a write, so inherited methods' late-bound `self foo` take the walk path
+// and answer a class-variable result.
+
+SsoPlainBase subclass: SsoPlainSub
+
+  class foo -> Integer => self bump

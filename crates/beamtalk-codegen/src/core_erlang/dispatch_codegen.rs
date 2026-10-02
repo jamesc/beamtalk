@@ -107,6 +107,15 @@ const HANDLERS: &[(&str, SendHandler)] = &[
     ),
 ];
 
+/// How a class-side send joins the innermost per-scope token (BT-3675), from
+/// [`CoreErlangGenerator::class_var_for_send`].
+pub(super) struct SendScope {
+    /// The Core Erlang variable of the innermost scope's token.
+    token: String,
+    /// Commit even a plain (non-`class_var_result`) reply (BT-3690).
+    commit_plain_reply: bool,
+}
+
 impl CoreErlangGenerator {
     /// Generates the `<{'error',..., _}>` case clauses shared by all
     /// self-dispatch call sites (`safe_dispatch`/`dispatch` error branches).
@@ -291,14 +300,29 @@ impl CoreErlangGenerator {
     /// its own late-bound send), as a real `ClassVars` `Bind` pushed onto
     /// `prelude` and `verify()`-checked, rather than rebinding the live name
     /// inside an opaque statement. The returned name is that fresh version.
+    ///
+    /// BT-3690: the returned [`SendScope`] also says whether the send must
+    /// commit a plain (non-`class_var_result`) reply. It must when an argument
+    /// builds a closure: the callee may invoke it, and the closure's own
+    /// export into the scope has to be overwritten by this send's commit
+    /// exactly as before (the ADR 0110 BT-3682 limit, pinned by tests). With no
+    /// block literal among the arguments, a plain reply left the class variables
+    /// as passed in; a closure reaching the callee by name (a block parameter,
+    /// say) may still export into the scope chain while the callee runs, which a
+    /// skipped commit now leaves in place instead of overwriting (pinned by
+    /// `SelfSendPlainReplyTest>>test*ViaSectionParamInLoop`).
     pub(super) fn class_var_for_send(
         &mut self,
         prelude: &mut Vec<ThreadedStmt>,
-    ) -> (String, Option<String>) {
+        arguments: &[Expression],
+    ) -> (String, Option<SendScope>) {
         let cv = self.current_class_var();
         let Some(token) = self.mark_innermost_scope_used() else {
             return (cv, None);
         };
+        let commit_plain_reply = arguments
+            .iter()
+            .any(beamtalk_core::ast_walker::expression_contains_block);
         let chain = self.class_var_scope_chain();
         let source_version = self.class_var_version();
         self.next_class_var();
@@ -326,7 +350,13 @@ impl CoreErlangGenerator {
             span,
         );
         prelude.push(bind);
-        (self.current_class_var(), Some(token))
+        (
+            self.current_class_var(),
+            Some(SendScope {
+                token,
+                commit_plain_reply,
+            }),
+        )
     }
 
     /// Wrap a class-method call that may return either a
@@ -356,18 +386,19 @@ impl CoreErlangGenerator {
     /// and the inherited-dispatch branch in
     /// [`generate_class_method_self_send`](Self::generate_class_method_self_send).
     ///
-    /// `scope_token` is the per-scope token (BT-3675) the call's returned
+    /// `scope` carries the per-scope token (BT-3675) the call's returned
     /// `ClassVars` are committed under, from [`Self::class_var_for_send`]:
     /// `Some` when the send is generated inside a scope that cannot thread the
     /// rebind out (a bare block, a loop body, a conditional arm, an
     /// `on:do:`/`ensure:` body, or a prelude closed into an opaque value).
     /// The commit follows the rebind, so it runs only after the callee
-    /// returned normally.
+    /// returned normally, and (BT-3690) for a plain reply only when
+    /// [`SendScope::commit_plain_reply`] says the send must.
     pub(super) fn emit_class_var_result_unwrap(
         &mut self,
         args_prelude: Vec<ThreadedStmt>,
         call_doc: Document<'static>,
-        scope_token: Option<String>,
+        scope: Option<SendScope>,
     ) -> ThreadedValue {
         let call_result = self.fresh_temp_var("CMR");
         let cv = self.current_class_var();
@@ -474,11 +505,23 @@ impl CoreErlangGenerator {
         let mut prelude = args_prelude;
         prelude.push(ThreadedStmt::Statement(call_stmt_doc, span));
         prelude.push(bind);
-        if let Some(token) = scope_token {
-            prelude.push(ThreadedStmt::Statement(
-                Self::class_var_scope_commit_doc(&token, &self.current_class_var()),
-                span,
-            ));
+        if let Some(SendScope {
+            token,
+            commit_plain_reply,
+        }) = scope
+        {
+            let commit = if commit_plain_reply {
+                Self::class_var_scope_commit_doc(&token, &self.current_class_var())
+            } else {
+                let written_value = self.fresh_temp_var("CW");
+                Self::class_var_scope_commit_if_written_doc(
+                    &token,
+                    &self.current_class_var(),
+                    &call_result,
+                    &written_value,
+                )
+            };
+            prelude.push(ThreadedStmt::Statement(commit, span));
         }
         prelude.push(ThreadedStmt::Statement(unwrap_stmt_doc, span));
         ThreadedValue {
@@ -1555,7 +1598,7 @@ impl CoreErlangGenerator {
                 });
             }
             let (mut args_preamble, args_doc) = self.thread_args(arguments)?;
-            let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
+            let (cv, scope) = self.class_var_for_send(&mut args_preamble, arguments);
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch_local'(",
                 leaf::atom(builder_class),
@@ -1567,7 +1610,7 @@ impl CoreErlangGenerator {
                 args_doc,
                 "])"
             ];
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope));
         }
 
         // BT-3666: a class-side self-send to a selector this class defines is
@@ -1603,10 +1646,10 @@ impl CoreErlangGenerator {
                 && !self
                     .class_var_mutating_selectors()
                     .contains(selector_atom.as_str());
-            let (cv, scope_token) = if pure_sealed_send {
+            let (cv, scope) = if pure_sealed_send {
                 (self.current_class_var(), None)
             } else {
-                self.class_var_for_send(&mut args_preamble)
+                self.class_var_for_send(&mut args_preamble, arguments)
             };
             let call_doc = Self::class_direct_call_doc(
                 &self.module_name,
@@ -1632,7 +1675,7 @@ impl CoreErlangGenerator {
                 return Ok(self.emit_pure_class_self_send_unwrap(args_preamble, call_doc));
             }
             // NOTE: prelude is OPEN — caller splices or open-scope-converts it.
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope));
         }
         if defines_selector {
             // Bind every argument once, before the guarded `case`: the doc is
@@ -1641,7 +1684,7 @@ impl CoreErlangGenerator {
             // level (2^depth code growth).
             let (mut args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
             let args_doc = Self::join_docs_with_commas(arg_refs);
-            let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
+            let (cv, scope) = self.class_var_for_send(&mut args_preamble, arguments);
             // Fast path: when the receiving class IS this class (its metaclass
             // tag is a compile-time constant) and nothing shadows the compiled
             // method (no class-side extension, no runtime-installed
@@ -1676,7 +1719,7 @@ impl CoreErlangGenerator {
             // Late-bound: a subclass override may write a class variable even
             // when this class's own `selector` never does, so the purity
             // shortcut is unsound here. Always rebind the returned ClassVars.
-            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token));
+            return Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope));
         }
         // Auto-generated keyword constructor for Value subclass: classes.
         // `ClassName slot: value` inside a class method routes here when the selector
@@ -1807,12 +1850,12 @@ impl CoreErlangGenerator {
         }
 
         let (mut args_preamble, args_doc) = self.thread_args(arguments)?;
-        let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
+        let (cv, scope) = self.class_var_for_send(&mut args_preamble, arguments);
         let call_doc = Self::class_self_send_call_doc(&selector_atom, &cv, args_doc);
         // NOTE: prelude stays real `ThreadedStmt`s here — the caller splices
         // it into its own frame or closes it (matches the local-class-method
         // branch above).
-        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token))
+        Ok(self.emit_class_var_result_unwrap(args_preamble, call_doc, scope))
     }
 
     /// Direct call `class_<sel>(ClassSelf, ClassVars, Args...)` into this
@@ -2832,7 +2875,7 @@ impl CoreErlangGenerator {
         // instance path below.
         if let Some(builder_class) = self.builder_class_method_class() {
             let (mut args_preamble, args_doc) = self.thread_args(arguments)?;
-            let (cv, scope_token) = self.class_var_for_send(&mut args_preamble);
+            let (cv, scope) = self.class_var_for_send(&mut args_preamble, arguments);
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
                 leaf::atom(builder_class),
@@ -2847,7 +2890,7 @@ impl CoreErlangGenerator {
             // ADR 0118 phase 5b: reached through ordinary
             // `generate_expression` — close the producer's prelude inline.
             // `super` binds statically to the superclass: not late-bound.
-            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc, scope_token);
+            let tv = self.emit_class_var_result_unwrap(args_preamble, call_doc, scope);
             return Ok(self.close_threaded_value_doc(tv));
         }
 

@@ -38,6 +38,28 @@ shadow_flag_test_() ->
             ok = beamtalk_extensions:init(),
             ?assert(beamtalk_class_shadow_flags:is_ready())
         end},
+        {"direct_call_ok/2 is the readiness flag and neither shadow flag (BT-3690)", fun() ->
+            Tag = 'Bt3690Truth class',
+            Name = 'Bt3690Truth',
+            ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+            try
+                ok = beamtalk_class_shadow_flags:set(extension, Tag),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                ok = beamtalk_class_shadow_flags:clear(extension, Tag),
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                ok = beamtalk_class_shadow_flags:set(runtime_fun, Name),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                ok = beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                _ = persistent_term:erase(beamtalk_class_shadow_ready),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
+            after
+                beamtalk_class_shadow_flags:clear(extension, Tag),
+                beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+                beamtalk_class_shadow_flags:mark_ready()
+            end,
+            ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
+        end},
         {"unregistering the last class-side extension restores the fast path", fun() ->
             Sel = bt3669_ext_restore,
             ?assert(direct('Object class', 'Object', Sel)),

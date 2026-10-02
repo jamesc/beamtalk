@@ -48,11 +48,16 @@ actual transitions write (set when unset, erase when set); both are rare
     clear/2,
     is_set/2,
     is_shadowed/2,
+    direct_call_ok/2,
     mark_ready/0,
     is_ready/0
 ]).
 
 -define(READY_KEY, beamtalk_class_shadow_ready).
+
+%% BT-3690: the send-path guard (`direct_call_ok/2`) is hot; inlining keeps it one
+%% function with three `persistent_term` reads and no intermediate calls.
+-compile({inline, [key/2, is_set/2, is_shadowed/2, is_ready/0]}).
 
 -type kind() :: extension | runtime_fun.
 -export_type([kind/0]).
@@ -93,6 +98,17 @@ on `ClassName` may shadow a compiled class method.
 -spec is_shadowed(atom(), atom()) -> boolean().
 is_shadowed(ClassTag, ClassName) ->
     is_set(extension, ClassTag) orelse is_set(runtime_fun, ClassName).
+
+-doc """
+BT-3690: the guard of the compiled class-side self-send fast path: the registry
+is initialised (`is_ready/0`) and nothing shadows the compiled method
+(`is_shadowed/2`). The shadow flags are read first: an unset flag is a missing
+`persistent_term` key, which is cheaper to look up than the present readiness
+flag, and the answer is the same whichever order the three reads run in.
+""".
+-spec direct_call_ok(atom(), atom()) -> boolean().
+direct_call_ok(ClassTag, ClassName) ->
+    not is_shadowed(ClassTag, ClassName) andalso is_ready().
 
 -doc """
 Mark the flags authoritative: the extension registry exists, so an unset

@@ -290,9 +290,8 @@ class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
             %% Extension registry not initialised yet (early bootstrap) declines:
             %% the walk is always a correct answer. The shadow flags (BT-3669)
             %% and their readiness flag (BT-3676) are persistent_term reads,
-            %% no ETS.
-            beamtalk_class_shadow_flags:is_ready() andalso
-                not beamtalk_class_shadow_flags:is_shadowed(Tag, ClassName)
+            %% no ETS; BT-3690 folds the three reads into one inlined function.
+            beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName)
     end;
 class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.

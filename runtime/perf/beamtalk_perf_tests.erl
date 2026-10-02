@@ -23,6 +23,10 @@ Tests output parseable results in the format:
 -define(ITERATIONS, 1000).
 %% Number of warmup iterations (discarded)
 -define(WARMUP, 100).
+%% Initial heap (words) of the process `run_paired_benchmark/4` times in. A fixed
+%% size makes the GC behaviour of the allocating variant independent of the
+%% caller's heap history (BT-3690).
+-define(PAIRED_MIN_HEAP_WORDS, 1000000).
 %% The CLI-driven self-send benchmark kills its process after this long. It
 %% must stay below the EUnit budget or the kill-on-timeout can never fire
 %% (EUnit would abort the test first). Budget: the in-VM benchmarks finish in
@@ -73,6 +77,34 @@ run_benchmark(Fun, Iterations, Warmup) ->
         {Time, _Result} = timer:tc(Fun),
         Time
     end, lists:seq(1, Iterations)).
+
+-doc """
+BT-3690: time two functions alternately (A, B, A, B, ...) in one fresh process,
+returning the microsecond timings of each. Both see the same heap, GC and
+scheduler conditions, which timing them back to back in the long-lived caller
+does not guarantee (see the nested list-op benchmark).
+""".
+-spec run_paired_benchmark(fun(() -> term()), fun(() -> term()), pos_integer(), non_neg_integer()) ->
+    {[non_neg_integer()], [non_neg_integer()]}.
+run_paired_benchmark(FunA, FunB, Iterations, Warmup) ->
+    Parent = self(),
+    Ref = make_ref(),
+    {Worker, MonRef} = spawn_opt(fun() ->
+        lists:foreach(fun(_) -> FunA(), FunB() end, lists:seq(1, Warmup)),
+        Pairs = lists:map(fun(_) ->
+            {TimeA, _} = timer:tc(FunA),
+            {TimeB, _} = timer:tc(FunB),
+            {TimeA, TimeB}
+        end, lists:seq(1, Iterations)),
+        Parent ! {Ref, lists:unzip(Pairs)}
+    end, [monitor, {min_heap_size, ?PAIRED_MIN_HEAP_WORDS}]),
+    receive
+        {Ref, Result} ->
+            erlang:demonitor(MonRef, [flush]),
+            Result;
+        {'DOWN', MonRef, process, Worker, Reason} ->
+            error({paired_benchmark_failed, Reason})
+    end.
 
 -doc "Calculate statistics from a list of timings.".
 -spec stats([non_neg_integer()]) -> #{median := number(), mean := number(),
@@ -709,12 +741,20 @@ bench_block_threading() ->
     OuterN = 10,
     NestedIterations = 100,
     NestedWarmup = 10,
-    NestedStateAccTimings = run_benchmark(fun() ->
-        bench_block_threading:nested_stateacc_list_op(OuterN, List)
-    end, NestedIterations, NestedWarmup),
-    NestedTupleTimings = run_benchmark(fun() ->
-        bench_block_threading:nested_tuple_list_op(OuterN, List)
-    end, NestedIterations, NestedWarmup),
+    %% BT-3690: the ratio ranged 1.34x-1.88x on an unchanged tree. The StateAcc
+    %% variant allocates a map per element, so its time follows the GC conditions
+    %% of the measuring process (its median was 1.56 ms in the long-lived EUnit
+    %% process after the earlier benchmarks and 3.0 ms in a fresh one; the tuple
+    %% variant stayed at ~1.1 ms either way). Both variants are therefore timed
+    %% alternately (A, B, A, B, ...) in one fresh process with a fixed initial
+    %% heap, so they see the same conditions on every run: 1.83x-1.90x over 4 full
+    %% runs, against the unchanged 1.5x threshold.
+    {NestedStateAccTimings, NestedTupleTimings} = run_paired_benchmark(
+        fun() -> bench_block_threading:nested_stateacc_list_op(OuterN, List) end,
+        fun() -> bench_block_threading:nested_tuple_list_op(OuterN, List) end,
+        NestedIterations,
+        NestedWarmup
+    ),
 
     NestedStateAccStats = stats(NestedStateAccTimings),
     NestedTupleStats = stats(NestedTupleTimings),

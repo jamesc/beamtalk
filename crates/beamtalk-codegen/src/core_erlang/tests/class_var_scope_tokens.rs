@@ -289,6 +289,63 @@ fn nested_scope_refresh_falls_back_to_the_enclosing_scopes_commit() {
     );
 }
 
+/// How many commits of a send's reply are conditional on a
+/// `{'class_var_result', _, _}` reply (BT-3690).
+fn conditional_send_commits(code: &str) -> usize {
+    code.matches("of <{'class_var_result', _CW").count()
+}
+
+#[test]
+fn confined_send_commits_only_a_class_var_result_reply() {
+    // BT-3690: a plain reply means the callee left the class variables as they
+    // were passed in, so the send's commit is made only inside the
+    // `class_var_result` arm. Both late-bound sends of the loop body qualify.
+    let src = "Object subclass: ScopeTokenPlain
+  classState: n = 0
+
+  class foo => 0
+
+  class twice => #(1, 2) do: [:x |
+    self foo
+    self foo
+  ]
+";
+    let code = compile("bt@scopetokenplain", src);
+    assert_eq!(
+        conditional_send_commits(&code),
+        2,
+        "each confined send commits only a class_var_result reply. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_var_scope_read'(ClassSelf, [_CVTok"),
+        "the pre-call sync is unchanged (a plain reader still sees the scope's writes). Got:\n{code}"
+    );
+}
+
+#[test]
+fn confined_send_with_a_block_argument_keeps_committing_a_plain_reply() {
+    // BT-3690: a block built in the send's arguments may be invoked by the
+    // callee and export its writes into the scope; the send's own commit has
+    // to overwrite that export exactly as before (the pinned ADR 0110 / BT-3682
+    // limit), so only the argument-free send is conditional.
+    let src = "Object subclass: ScopeTokenHom
+  classState: n = 0
+
+  class foo => 0
+
+  class section: aBlock :: Block => aBlock value
+
+  class viaLoop => #(1) do: [:x | self section: [self foo]]
+";
+    let code = compile("bt@scopetokenhom", src);
+    assert_eq!(
+        conditional_send_commits(&code),
+        1,
+        "only the block-free `self foo` commits conditionally; the HOM send keeps \
+         its unconditional commit. Got:\n{code}"
+    );
+}
+
 #[test]
 fn runtime_exports_every_helper_codegen_calls() {
     let erl_path =
