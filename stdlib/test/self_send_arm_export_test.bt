@@ -1,0 +1,65 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3691: a class-variable write exported from a conditional arm of a loop body
+// must survive a body whose other sends are provably pure (a sealed class's pure
+// send takes no scope token and mints no `ClassVars` version). The same shapes
+// run against the sealed class (SsoArmExportSealed) and its open twin
+// (SsoArmExportOpen), which must agree. See fixtures/sso_arm_export_sealed.bt.
+
+TestCase subclass: SelfSendArmExportTest
+
+  // --- sealed class ---
+  testSealedArmsSelect => self assert: SsoArmExportSealed armsSelect equals: 13
+
+  testSealedArmsInject => self assert: SsoArmExportSealed armsInject equals: 1
+
+  testSealedArmsCollectReader =>
+    self assert: SsoArmExportSealed armsCollectReader equals: #(0, 1, 1)
+
+  testSealedReaderSumToDo =>
+    self assert: SsoArmExportSealed readerSumToDo equals: 31
+
+  testSealedReaderSumTimesRepeat =>
+    self assert: SsoArmExportSealed readerSumTimesRepeat equals: 31
+
+  testSealedReaderSumDo =>
+    self assert: SsoArmExportSealed readerSumDo equals: 31
+
+  testSealedReaderSumWhile =>
+    self assert: SsoArmExportSealed readerSumWhile equals: 31
+
+  testSealedElseArmDo => self assert: SsoArmExportSealed elseArmDo equals: 2
+
+  testSealedNestedArmsDo =>
+    self assert: SsoArmExportSealed nestedArmsDo equals: 2
+
+  testSealedLoopInArm => self assert: SsoArmExportSealed loopInArm equals: 2
+
+  testSealedRaisedAfterArmExport =>
+    self assert: SsoArmExportSealed raisedAfterArmExport equals: 1
+
+  testSealedHandlerArmInLoop =>
+    self assert: SsoArmExportSealed handlerArmInLoop equals: 2
+
+  // --- open class ---
+  testOpenArmsSelect => self assert: SsoArmExportOpen armsSelect equals: 13
+
+  testOpenArmsInject => self assert: SsoArmExportOpen armsInject equals: 1
+
+  testOpenArmsCollectReader =>
+    self assert: SsoArmExportOpen armsCollectReader equals: #(0, 1, 1)
+
+  testOpenReaderSumDo => self assert: SsoArmExportOpen readerSumDo equals: 31
+
+  testOpenElseArmDo => self assert: SsoArmExportOpen elseArmDo equals: 2
+
+  testOpenNestedArmsDo => self assert: SsoArmExportOpen nestedArmsDo equals: 2
+
+  testOpenLoopInArm => self assert: SsoArmExportOpen loopInArm equals: 2
+
+  testOpenRaisedAfterArmExport =>
+    self assert: SsoArmExportOpen raisedAfterArmExport equals: 1
+
+  testOpenHandlerArmInLoop =>
+    self assert: SsoArmExportOpen handlerArmInLoop equals: 2

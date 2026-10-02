@@ -346,6 +346,112 @@ fn confined_send_with_a_block_argument_keeps_committing_a_plain_reply() {
     );
 }
 
+/// The text of the fold-body lambda (`fun (I, _AccCV…) -> … `) of the first
+/// `lists:foldl` in `method`'s generated code.
+fn fold_lambda<'a>(code: &'a str, method: &str) -> &'a str {
+    let body = code
+        .split(&format!("'{method}'/2 = "))
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .unwrap_or_else(|| panic!("{method} present"));
+    let start = body.find("fun (I, _AccCV").expect("fold lambda present");
+    let end = body
+        .find("call 'lists':'foldl'(")
+        .expect("foldl call present");
+    &body[start..end]
+}
+
+const SEALED_ARMS: &str = "sealed Object subclass: ScopeTokenSealedArms
+  classState: n = 0
+
+  class bump => self.n := self.n + 1
+
+  class plain => 0
+
+  class reader => self.n
+
+  class armsDo =>
+    seen := 0
+    #(1, 2, 3) do: [:i |
+      seen := seen + 1
+      i =:= 1 ifTrue: [self bump]
+      self plain
+    ]
+    self.n
+
+  class readerAfterArm =>
+    seen := 0
+    #(1, 2, 3) collect: [:i |
+      seen := seen + 1
+      i =:= 1 ifTrue: [self bump]
+      self reader
+    ]
+";
+
+#[test]
+fn sealed_fold_body_syncs_from_the_scope_before_carrying_class_vars_out() {
+    // BT-3691: the arm's write is exported into the loop scope's token only; the
+    // sealed pure `self plain` mints no version. The accumulator's trailing
+    // `ClassVars` must therefore be re-synced from the scope's commit at the end
+    // of the body, or the fold's stale version is committed over the newer entry.
+    let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
+    let lambda = fold_lambda(&code, "class_armsDo");
+    let sync = "'class_var_scope_read'(ClassSelf, [_CVTok";
+    let last_sync = lambda
+        .rfind(sync)
+        .unwrap_or_else(|| panic!("the body must sync at its end. Got:\n{lambda}"));
+    let last_export = lambda
+        .rfind("'class_var_scope_export'")
+        .expect("the arm exports its commit");
+    assert!(
+        last_sync > last_export,
+        "the end-of-iteration sync must follow the arm's export. Got:\n{lambda}"
+    );
+    // The accumulator carries the version that sync bound.
+    let bound = lambda[..last_sync]
+        .rsplit("let ")
+        .next()
+        .and_then(|l| l.split(" = ").next())
+        .expect("sync binds a version");
+    assert!(
+        bound.starts_with("ClassVars")
+            && lambda.contains(&format!(", {bound}}} in let _RawFoldCV")),
+        "the fold accumulator must carry the synced version `{bound}`. Got:\n{lambda}"
+    );
+}
+
+#[test]
+fn sealed_pure_reader_after_a_scope_commit_syncs_before_the_call() {
+    // BT-3691: a sealed send that never writes still READS the class variables,
+    // so once the scope holds a commit it must sync from it before the call.
+    let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
+    let lambda = fold_lambda(&code, "class_readerAfterArm");
+    let call = lambda
+        .find("'class_reader'(ClassSelf, ")
+        .expect("the reader is called directly");
+    assert!(
+        lambda[call..].starts_with(
+            "'class_reader'(ClassSelf, call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf, [_CVTok"
+        ),
+        "the reader must be passed the scope's newest commit. Got:\n{lambda}"
+    );
+    assert!(
+        lambda[..call].contains("'class_var_scope_export'"),
+        "the arm exports before the reader. Got:\n{lambda}"
+    );
+    assert!(
+        !lambda[call..].contains("'class_var_scope_commit'"),
+        "a pure reply commits nothing after the reader. Got:\n{}",
+        &lambda[call..]
+    );
+}
+
+#[test]
+fn sealed_arm_export_loop_compiles_through_erlc() {
+    let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
+    crate::core_erlang::tests::assert_compiles_through_erlc("bt@scopetokensealedarms", &code);
+}
+
 #[test]
 fn runtime_exports_every_helper_codegen_calls() {
     let erl_path =

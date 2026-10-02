@@ -648,6 +648,17 @@ impl CoreErlangGenerator {
         self.commit_to_innermost_scope_doc(&live)
     }
 
+    /// Whether any open scope token has had something committed under it (a
+    /// send, a write, or a closure/arm export): the lexical `ClassVars` may
+    /// then be older than the newest commit of the scope chain. `false`
+    /// outside any scope and while every open token is still unused, where the
+    /// lexical version is current.
+    pub(in crate::core_erlang) fn any_class_var_scope_used(&self) -> bool {
+        self.class_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.class_var_scope_tokens.iter().any(|token| token.used))
+    }
+
     /// Marks the innermost open scope token used and returns its name.
     pub(in crate::core_erlang) fn mark_innermost_scope_used(&mut self) -> Option<String> {
         let ctx = self.class_context.as_mut()?;

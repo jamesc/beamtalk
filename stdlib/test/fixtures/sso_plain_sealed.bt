@@ -314,9 +314,10 @@ sealed Object subclass: SsoPlainSealed
   // --- a block handed to a user-defined class-side higher-order method -------
   class section: aBlock :: Block -> Integer => aBlock value
 
-  // BT-3682 limit (unchanged by BT-3690): a block LITERAL passed to the HOM keeps
-  // the send's own commit, which overwrites the block's export, so the write is
-  // dropped.
+  // BT-3682 limit in the open twin (a block LITERAL passed to the HOM keeps the
+  // send's own commit, which overwrites the block's export). Here `section:` is
+  // provably pure and never commits, so since BT-3691 the block's export
+  // survives (answers 1); the warning is still the static BT-3681 check.
   @expect stored_closure "BT-3682: pins the known limit of a block literal passed to a HOM"
   class viaSectionLiteralInLoop -> Integer =>
     self.n := 0

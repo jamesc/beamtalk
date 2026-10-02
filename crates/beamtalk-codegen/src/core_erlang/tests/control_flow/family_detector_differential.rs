@@ -96,6 +96,31 @@ fn expected_mismatches() -> Vec<Mismatch> {
             line: 72,
             shape: "letrec",
         },
+        // BT-3691: `readerSumToDo` (line 70), `readerSumTimesRepeat` (line 82) and
+        // `readerSumWhile` (line 106) of the sealed arm-export fixture: a
+        // class's own writing `self bump` nested in an `ifTrue:` arm of a
+        // `to:do:` / `timesRepeat:` / `whileTrue:` body, exactly the BT-3690
+        // `armsToDo` / `armsTimesRepeat` shape below. The loop's own carry-out
+        // cannot thread a mutation nested in an arm; the write is recovered
+        // from the per-scope commit tokens (BT-3675) and the pure reader after
+        // the arm reads the scope's newest commit; pinned by
+        // `SelfSendArmExportTest>>testSealedReaderSum{ToDo,TimesRepeat,While}`.
+        // (`readerSumDo` is a `do:` fold: its old detector already agrees.)
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 70,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 82,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 106,
+            shape: "letrec",
+        },
         // BT-3690: the same shape in the plain-reply fixture and its sealed twin
         // (`armsToDo` at line 52, `armsTimesRepeat` at line 64): a class's own
         // `self bump` nested in a conditional arm of a `to:do:` /

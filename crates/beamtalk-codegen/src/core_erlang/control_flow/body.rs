@@ -1521,6 +1521,9 @@ impl CoreErlangGenerator {
         // every other migrated site — this is the per-iteration counterpart
         // of `ThreadingPlan::foldl_call_doc`'s own initial-accumulator wrap.
         if !plan.threaded_families().as_slice().is_empty() {
+            // BT-3691: bring the lexical version up to the scope's newest
+            // commit before it is carried out in the accumulator.
+            let tail_sync = self.fold_body_class_var_tail_sync(frame);
             let cv_version = self.class_var_version();
             // record this closure's peak class-var version (BEFORE
             // `with_branch_context`'s guard restores it on drop, right after
@@ -1558,6 +1561,7 @@ impl CoreErlangGenerator {
                     &ctx,
                 )
             };
+            stmts.extend(tail_sync);
             stmts.push(ThreadedStmt::Statement(wrapped, tail_span));
         }
         Ok(stmts)

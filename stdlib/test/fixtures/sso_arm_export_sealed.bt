@@ -1,0 +1,197 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3691: a class-variable write made inside a conditional arm of a loop body
+// is exported into the loop's scope token only (the arm cannot thread a rebind
+// out lexically). In a sealed class a provably pure send takes no scope token
+// and mints no `ClassVars` version, so a body whose other sends are pure
+// carried the stale entry version in the fold's accumulator, and the scope's
+// commit after the fold overwrote the arm's newer entry. Every shape that
+// recency rule could break: an arm export beside pure sends,
+// every threaded loop and fold family, raised scopes, nested loops and arms.
+// See self_send_arm_export_test.bt. SsoArmExportOpen is the open twin.
+
+sealed Object subclass: SsoArmExportSealed
+  classState: n = 0
+
+  class n -> Integer => self.n
+
+  // Always writes.
+  class bump -> Integer => self.n := self.n + 1
+
+  // Never writes (plain reply).
+  class plain -> Integer => 0
+
+  // Plain reply that READS the class variable.
+  class reader -> Integer => self.n
+
+  // --- every loop and fold family -----------------------------------------
+  class armsSelect -> Integer =>
+    self.n := 0
+    seen := 0
+    r := #(1, 2, 3)
+      select: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        self plain =:= 0
+      ]
+    self.n * 10 + r size
+
+  class armsInject -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :i |
+        seen := seen + 1
+        i =:= 2 ifTrue: [self bump]
+        self plain
+        a + i
+      ]
+    self.n
+
+  class armsCollectReader -> List =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      collect: [:i |
+        seen := seen + 1
+        i =:= 2 ifTrue: [self bump]
+        self reader
+      ]
+
+  // The reader runs in the same iteration as the arm and after it.
+  class readerSumToDo -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    1
+      to: 3
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  class readerSumTimesRepeat -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    3
+      timesRepeat: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  class readerSumDo -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  class readerSumWhile -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    [seen < 3]
+      whileTrue: [
+        seen := seen + 1
+        seen =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  // --- arms -----------------------------------------------------------------
+
+  // The write is in the else arm; the other arm is pure.
+  class elseArmDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 2 ifTrue: [self plain] ifFalse: [self bump]
+      ]
+    self.n
+
+  // Writes at two nesting depths of arms, pure sends around them.
+  class nestedArmsDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i > 0
+          ifTrue: [
+            i =:= 1 ifTrue: [self bump]
+            i =:= 2 ifTrue: [i < 5 ifTrue: [self bump] ifFalse: [self plain]]
+            self plain
+          ]
+      ]
+    self.n
+
+  // An inner loop with arms inside an outer loop with arms.
+  // An inner loop that runs zero times must not roll an outer commit back.
+  // The loop itself sits in an arm of the method.
+  class loopInArm -> Integer =>
+    self.n := 1
+    seen := 0
+    self.n > 0
+      ifTrue: [
+        #(1, 2, 3)
+          do: [:i |
+            seen := seen + 1
+            i =:= 1 ifTrue: [self bump]
+            self plain
+          ]
+      ]
+    self.n
+
+  // --- raised scopes --------------------------------------------------------
+
+  // An iteration raises inside its own handler after an earlier iteration
+  // exported from an arm: that export is kept, the raised one is not.
+  class raisedAfterArmExport -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        i =:= 3
+          ifTrue: [
+            [
+              self bump
+              1 / 0
+            ] on: Error do: [:e | nil]
+          ]
+        self plain
+      ]
+    self.n
+
+  // The whole loop raises out of a handler scope: every write of the loop
+  // reverts to the value before it.
+  // The handler's own write after the loop raised is kept.
+  // The loop completes inside the protected body.
+
+  // The arm export is followed by a handler arm that writes.
+  class handlerArmInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        i =:= 2 ifTrue: [[1 / 0] on: Error do: [:e | self bump]]
+        self plain
+      ]
+    self.n
