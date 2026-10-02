@@ -21,6 +21,13 @@
     "rust": "unix"
   },
   {
+    "name": "USERPROFILE only (native Windows) resolves to <profile>/.beamtalk",
+    "env": {"USERPROFILE": "/fx/profile"},
+    "root": "/fx/profile/.beamtalk",
+    "workspaces": "/fx/profile/.beamtalk/workspaces",
+    "rust": "never"
+  },
+  {
     "name": "no home and no override resolves to nothing (no cache-dir fallback)",
     "env": {},
     "root": null,

@@ -1507,6 +1507,7 @@ init(Config) ->
     beamtalk_logging_config:set_domain(runtime),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
     ChangesDir = changes_dir(WorkspaceId),
+    warn_if_persistence_skipped(WorkspaceId, ChangesDir),
     ensure_ets(),
     State0 = #state{
         changes_dir = ChangesDir,
@@ -2019,6 +2020,19 @@ changes_dir(WorkspaceId) when is_binary(WorkspaceId) ->
         undefined -> undefined;
         WsDir -> filename:join(WsDir, "changes")
     end.
+
+%% BT-3685: a durable (non-run-mode) workspace whose home dir cannot be resolved
+%% silently loses persistence; say so once at start-up (run mode is intentional).
+-spec warn_if_persistence_skipped(binary() | undefined, string() | undefined) -> ok.
+warn_if_persistence_skipped(WorkspaceId, undefined) when is_binary(WorkspaceId) ->
+    ?LOG_WARNING(
+        "No home directory; skipping ChangeLog persistence for workspace ~p",
+        [WorkspaceId],
+        #{domain => [beamtalk, runtime]}
+    ),
+    ok;
+warn_if_persistence_skipped(_WorkspaceId, _ChangesDir) ->
+    ok.
 
 -spec log_path(string() | undefined) -> string() | undefined.
 log_path(undefined) -> undefined;
