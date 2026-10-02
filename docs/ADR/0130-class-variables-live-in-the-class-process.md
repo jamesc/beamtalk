@@ -100,7 +100,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     end.
 ```
 
-`restore/2` puts back the value that was there on entry (`undefined` erases), the discipline `beamtalk_actor:restore_dispatch_pdict/1` already follows. Re-entry of `invoke_class_method/7` for the same class inside one invocation is not expected (the class process cannot `gen_server:call` itself, and self-sends bypass `invoke_class_method/7`), but restoring rather than erasing makes a nested invocation harmless instead of a lost outer map.
+`restore/2` puts back the value that was there on entry (`undefined` erases), the discipline `beamtalk_actor:restore_dispatch_pdict/1` already follows. Re-entry of `invoke_class_method/7` for the same class inside one invocation is not expected (the class process cannot `gen_server:call` itself, and self-sends bypass `invoke_class_method/7`), but restoring rather than erasing means the outer invocation's map survives a nested one.
 
 Between invocations nothing changes: the `gen_server` state holds the map and the ETS snapshot mirrors it.
 
@@ -148,7 +148,7 @@ A block that runs in another process cannot reach its home class's variables: th
                          "or return the value and assign it in Counter's own method.">>}
 ```
 
-The same applies to `performLocally:withArguments:`. Today `beamtalk_object_class:local_call/3` calls the method with `ClassSelf = nil` and an empty map, so a class-variable read fails with a raw `badkey`. Under this ADR `local_call/3` builds a real `ClassSelf` carrying the class's registered pid, so the helpers raise `class_state_unreachable` in any other process and read the live map when the caller is the class process itself. The helpers never accept `nil`: a `nil` receiver is an internal error, not a reachable-state question.
+The same applies to `performLocally:withArguments:`. Today `beamtalk_object_class:local_call/3` calls the method with `ClassSelf = nil` and an empty map, so a class-variable read fails with a raw `badkey`. Under this ADR `local_call/3` builds a real `ClassSelf` carrying the class's registered pid, and the helpers decide by process and by key: in any other process they raise `class_state_unreachable`; in the class process during an invocation they read and write the live map, so a `performLocally:` reached from inside one of the class's own methods persists its writes (today they are discarded, and `local_call/3`'s doc contract changes to say so); in the class process with no invocation in progress (a reload hook, for example) the key is absent and they raise `class_state_unreachable` with a hint that no class-method invocation is running. The helpers never accept `nil`: a `nil` receiver is an internal error, not a reachable-state question.
 
 Where the compiler can see the case, it warns instead of waiting for run time: a block literal that reads or writes class variables, passed directly as an argument to a class-side send whose receiver is statically another class that has class state or whose method is not `class sealed`, gets a `class-state-abroad` warning at the block. This is a lint, not a guarantee; a block passed through a variable or an instance method is only caught at run time.
 
@@ -244,9 +244,9 @@ Today this answers 0 (run on `main` at `14799bd`): the write made before the cau
 
 **Smalltalk developer.** This is the Pharo model. The template-method pattern works with class-side state in every position, and refactoring a write into a helper method no longer changes whether it survives. The one difference from Pharo is that an error escaping a class method discards that call's writes, which is a strict improvement they will rarely notice.
 
-**Erlang/BEAM developer.** The generated code is simpler: a class method is a plain function of `ClassSelf` and its arguments, and `self foo` is a plain call. The process dictionary is used inside one `gen_server` callback and erased in `after`, the same discipline as `'$bt_actor_state'`. An Erlang-implemented class method can read and write class variables through `beamtalk_class_vars` instead of producing `class_var_result` tuples.
+**Erlang/BEAM developer.** The generated code is simpler: a class method is a plain function of `ClassSelf` and its arguments, and `self foo` is a plain call. The process dictionary is used inside one `gen_server` callback and restored to its previous value in `after`, the same discipline as `'$bt_actor_state'`. An Erlang-implemented class method can read and write class variables through `beamtalk_class_vars` instead of producing `class_var_result` tuples.
 
-**Production operator.** The class variables are inspectable mid-call with `erlang:process_info(Pid, dictionary)` and between calls with `sys:get_state/1`, as today. Open class-side self-sends should return to about the pre-BT-3666 cost, to be measured in Phase 0. A hot upgrade needs a calling-convention version check (see Implementation).
+**Production operator.** The class variables are inspectable mid-call with `erlang:process_info(Pid, dictionary)` and between calls with `sys:get_state/1`, as today. Open class-side self-sends should return to about the pre-BT-3666 cost, to be measured in Phase 0. A module compiled with the older calling convention is refused at load with `abi_mismatch`, and upgrading across this release needs a node restart (see Implementation).
 
 **Tooling developer.** The LSP and type checker are unaffected: class-variable reads and writes keep the same AST and types. A whole class of codegen diagnostics disappears. The new runtime error is the only new user-facing message.
 
@@ -375,7 +375,7 @@ Effort: L overall. Phase 0 gates the rest.
 - Construct `ClassSelf` with the class's registered pid on every path.
 - Implement `class_state_unreachable`.
 - Record the calling convention as a `class_var_abi` entry in `__beamtalk_meta/0`, and make the loader (`beamtalk_object_class` registration and the hot-reload path) refuse a module whose ABI differs from the running runtime's with a structured `abi_mismatch` error that names the module and says to recompile. There is no dual-ABI window: an old-ABI caller direct-calls `class_<sel>(ClassSelf, ClassVars, ...)` on whatever module defines the method, so an old module and a new module in one hierarchy cannot be bridged at the call site, and bridging only at the runtime dispatch boundary would reintroduce the two-representations reconciliation this ADR removes. The upgrade across this release is a whole-node restart, which is the only upgrade `beamtalk release` v1 supports anyway (ADR 0125 §2.1); when the relup phase lands, `class_var_abi` is part of the `__beamtalk_meta/0` record its appup derivation diffs (ADR 0125 §2.2), so a change to it marks the release as restart-only. A package compiled by an older compiler is refused at load until it is recompiled.
-- Update `beamtalk_object_class:local_call/3` (`performLocally:withArguments:`) to build a `ClassSelf` with the class's registered pid and to call the new convention.
+- Update `beamtalk_object_class:local_call/3` (`performLocally:withArguments:`) to build a `ClassSelf` with the class's registered pid, call the new convention, and change its doc contract from "class-variable mutations are discarded" to the §5 rule (persist inside an invocation in the class process, raise elsewhere); update the `performLocally:` paragraph of `docs/beamtalk-language-features.md` to match.
 
 **Phase 3: codegen (L).**
 - Emit the §2 calls and the §3 convention, and add the `class-state-abroad` lint (update `docs/development/surface-parity.md` for the new diagnostic).
