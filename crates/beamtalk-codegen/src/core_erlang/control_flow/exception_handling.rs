@@ -1515,8 +1515,11 @@ impl CoreErlangGenerator {
         // result slot when the arm completes — never when it raises.
         let arm_region = self.open_arm_region();
 
-        for (i, stmt) in body.body.iter().enumerate() {
-            let expr = &stmt.expression;
+        // BT-3687: `@expect` directives are compile-time-only annotations with no
+        // runtime value; lowering one as a statement would emit `let _ =  in`.
+        // `collect_body_exprs` is the canonical directive filter.
+        let body_exprs = super::super::util::collect_body_exprs(&body.body);
+        for (i, &expr) in body_exprs.iter().enumerate() {
             let span = expr.span();
             if i > 0 {
                 // Rule 2: the literal space `generate_exception_body_with_threading_inner`
@@ -1526,7 +1529,7 @@ impl CoreErlangGenerator {
                 // multi-entry decomposition.
                 stmts.push(ThreadedStmt::Statement(Document::Str(" "), span));
             }
-            let is_last = i == body.body.len() - 1;
+            let is_last = i == body_exprs.len() - 1;
             // BT-3675: this statement is its own class-variable scope; see the
             // refresh after its lowering below.
             let cv_mark = self.class_var_scope_mark();
