@@ -44,9 +44,10 @@ mod stubs;
 // `deps/path.rs` keep working unchanged.
 pub(crate) use changes::{BuildGraphEdges, clean_stale_artifacts, detect_changes};
 pub(crate) use class_index::{
-    CachedAst, build_class_index, build_class_module_index, collect_all_alias_infos,
-    collect_all_class_infos, collect_project_alias_infos, collect_sibling_src_alias_infos,
-    flatten_package_class_infos, package_trait_users,
+    CachedAst, FileIndex, Pass1Index, build_class_index, build_class_module_index,
+    collect_all_alias_infos, collect_all_class_infos, collect_project_alias_infos,
+    collect_sibling_src_alias_infos, flatten_package_class_infos, package_trait_users,
+    scan_source_file,
 };
 pub(crate) use environment::{
     BuildEnvironment, DependencyContext, package_identity, resolve_and_validate_dependencies,
@@ -60,7 +61,7 @@ pub(crate) use outputs::{
 pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_dir};
 pub(crate) use sources::{
     collect_project_source_files, compile_file, compile_to_beam, compute_file_module_pairs,
-    compute_relative_module, package_module_name,
+    compute_relative_module,
 };
 pub(crate) use stubs::{
     distribution_stubs_dir, extract_type_specs, load_dependency_stub_registries,

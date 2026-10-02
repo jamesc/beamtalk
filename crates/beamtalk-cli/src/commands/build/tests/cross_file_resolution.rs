@@ -1033,3 +1033,156 @@ fn flatten_trait_user_class_infos_ignores_a_shadowed_same_named_class() {
         "a later Widget that also uses Tagged carries `tag`"
     );
 }
+
+// ── Pass 1 with a class duplicated across files (BT-3686) ───────────────
+
+/// A package declaring `Widget` in `widget_a.bt` and `widget_b.bt` (`b` wins in
+/// a cold build), each flattening the cross-file trait `Tagged`.
+fn duplicate_widget_project() -> (TempDir, Utf8PathBuf) {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_path = project_path.join("src");
+    fs::create_dir_all(&src_path).unwrap();
+    write_test_file(
+        &project_path.join("beamtalk.toml"),
+        "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\n",
+    );
+    write_test_file(
+        &src_path.join("tagged.bt"),
+        "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+    );
+    write_test_file(
+        &src_path.join("widget_a.bt"),
+        "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"a\"\n  fromA => 1\n",
+    );
+    write_test_file(
+        &src_path.join("widget_b.bt"),
+        "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"b\"\n  fromB => 2\n",
+    );
+    (temp, project_path)
+}
+
+/// Everything Pass 1 hands the rest of the build, in a comparable shape.
+#[derive(Debug, PartialEq)]
+struct Pass1Snapshot {
+    class_module_index: std::collections::BTreeMap<String, String>,
+    class_superclass_index: std::collections::BTreeMap<String, String>,
+    all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    trait_surface_hash: String,
+}
+
+/// Pass 1 over `project_path` as it is on disk now: incrementally (`force`
+/// `false`, using whatever cache an earlier build left) or from scratch.
+fn pass1_snapshot(project_path: &Utf8Path, force: bool) -> Pass1Snapshot {
+    let env = setup_build_environment(project_path.as_str()).unwrap();
+    let dep_ctx = DependencyContext {
+        resolved_deps: Vec::new(),
+        has_native_deps: false,
+    };
+    let index = build_class_index(&env, &dep_ctx, &default_options(), force).unwrap();
+    Pass1Snapshot {
+        class_module_index: index.class_module_index.into_iter().collect(),
+        class_superclass_index: index.class_superclass_index.into_iter().collect(),
+        all_class_infos: index.all_class_infos,
+        trait_surface_hash: index.trait_surface_hash,
+    }
+}
+
+fn widget_selectors(snapshot: &Pass1Snapshot) -> Vec<String> {
+    let widget = snapshot
+        .all_class_infos
+        .iter()
+        .rev()
+        .find(|c| c.name == "Widget")
+        .expect("Widget is indexed");
+    let mut selectors: Vec<String> = widget
+        .methods
+        .iter()
+        .map(|m| m.selector.to_string())
+        .filter(|s| s.starts_with("from"))
+        .collect();
+    selectors.sort();
+    selectors
+}
+
+/// A cache-fresh incremental Pass 1 equals a cold one for a duplicated class:
+/// both declarations are indexed, the later file wins.
+#[test]
+fn incremental_pass1_equals_cold_for_a_duplicated_class() {
+    let (_temp, project) = duplicate_widget_project();
+    pass1_snapshot(&project, true);
+
+    let warm = pass1_snapshot(&project, false);
+    let cold = pass1_snapshot(&project, true);
+
+    assert_eq!(warm, cold);
+    assert_eq!(
+        warm.class_module_index.get("Widget").map(String::as_str),
+        Some("bt@test_pkg@widget_b")
+    );
+    assert_eq!(widget_selectors(&warm), ["fromB"]);
+}
+
+/// BT-3686: the winning file of a duplicated class is edited to drop it. The
+/// class must then resolve to the remaining declaration, as in a cold build.
+#[test]
+fn incremental_pass1_resolves_a_duplicated_class_when_the_winner_drops_it() {
+    let (_temp, project) = duplicate_widget_project();
+    pass1_snapshot(&project, true);
+    write_test_file(
+        &project.join("src/widget_b.bt"),
+        "Object subclass: Gadget\n  name -> String => \"b\"\n",
+    );
+
+    let incremental = pass1_snapshot(&project, false);
+    let cold = pass1_snapshot(&project, true);
+
+    assert_eq!(
+        incremental
+            .class_module_index
+            .get("Widget")
+            .map(String::as_str),
+        Some("bt@test_pkg@widget_a"),
+        "Widget must resolve to widget_a once widget_b stops declaring it"
+    );
+    assert_eq!(widget_selectors(&incremental), ["fromA"]);
+    assert_eq!(incremental, cold);
+}
+
+/// BT-3686: the winning file of a duplicated class is deleted.
+#[test]
+fn incremental_pass1_resolves_a_duplicated_class_when_the_winner_is_deleted() {
+    let (_temp, project) = duplicate_widget_project();
+    pass1_snapshot(&project, true);
+    fs::remove_file(project.join("src/widget_b.bt")).unwrap();
+
+    let incremental = pass1_snapshot(&project, false);
+    let cold = pass1_snapshot(&project, true);
+
+    assert_eq!(
+        incremental
+            .class_module_index
+            .get("Widget")
+            .map(String::as_str),
+        Some("bt@test_pkg@widget_a"),
+        "Widget must resolve to widget_a once widget_b is deleted"
+    );
+    assert_eq!(widget_selectors(&incremental), ["fromA"]);
+    assert_eq!(incremental, cold);
+}
+
+/// The loser of a duplicated class is edited while the winner stays cache-fresh.
+#[test]
+fn incremental_pass1_equals_cold_when_only_the_losing_duplicate_changes() {
+    let (_temp, project) = duplicate_widget_project();
+    pass1_snapshot(&project, true);
+    write_test_file(
+        &project.join("src/widget_a.bt"),
+        "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"a\"\n  fromA => 10\n",
+    );
+
+    let incremental = pass1_snapshot(&project, false);
+    let cold = pass1_snapshot(&project, true);
+
+    assert_eq!(incremental, cold);
+}

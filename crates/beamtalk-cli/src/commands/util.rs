@@ -214,7 +214,7 @@ fn surface_hash_of(value: serde_json::Result<serde_json::Value>) -> String {
 ///
 /// A single build hashes each source file's content in more than
 /// one place — Pass 1's staleness check and cache-entry rebuild
-/// (`build_cache::partition_files` / `build_cache::build_cache_entries`),
+/// (`build_cache::partition_files` / the entries `incremental_build_class_module_index` writes),
 /// and Pass 2's `.beam` staleness check (`detect_changes`). Computing every
 /// file's hash once here and threading the map through those call sites
 /// (rather than each calling [`content_hash_of`] independently) keeps a

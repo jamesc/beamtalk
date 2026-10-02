@@ -479,6 +479,178 @@ fn check_stdlib_reservations(
     Ok(())
 }
 
+/// What one source file contributes to Pass 1: every class it declares (not
+/// only the ones that end up winning a cross-file duplicate), as persisted per
+/// file in the incremental Pass 1 cache (`build_cache.rs`).
+///
+/// Keeping the losing declarations is what lets [`Pass1Index::add_file`] pick a
+/// duplicated class's winner from the files' order alone, the same way whatever
+/// the cache state: if the winning file later drops the class or is deleted, the
+/// remaining declaration is still known (BT-3686).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FileIndex {
+    /// Classes declared in the file, mapped to its compiled module name.
+    pub(crate) class_module_index: HashMap<String, String>,
+    /// Direct superclass of each declared class that has an explicit one.
+    pub(crate) class_superclass_index: HashMap<String, String>,
+    /// Full `ClassInfo` of each declared class, package-stamped.
+    pub(crate) class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Standalone extension definitions in the file, keyed by `(class, side, selector)`.
+    #[serde(default)]
+    pub(crate) extensions: Vec<(
+        beamtalk_core::compilation::extension_index::ExtensionKey,
+        Vec<beamtalk_core::compilation::extension_index::ExtensionLocation>,
+    )>,
+}
+
+/// A freshly scanned source file: its [`FileIndex`] and parsed AST.
+pub(crate) struct ScannedFile {
+    pub(crate) index: FileIndex,
+    pub(crate) ast: CachedAst,
+}
+
+/// The package-wide Pass 1 indexes, folded from per-file [`FileIndex`]es in the
+/// order of the package's source files. A clean scan and an incremental one
+/// (which takes some files' [`FileIndex`] from the cache) both build it with
+/// [`Self::add_file`], so they cannot disagree about a class declared in several
+/// files: the last file in order wins.
+#[derive(Default)]
+pub(crate) struct Pass1Index {
+    pub(crate) class_module_index: HashMap<String, String>,
+    pub(crate) class_superclass_index: HashMap<String, String>,
+    pub(crate) all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pub(crate) extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
+}
+
+impl Pass1Index {
+    /// Adds the next source file's contribution.
+    pub(crate) fn add_file(&mut self, file: &FileIndex) {
+        self.all_class_infos
+            .extend(file.class_infos.iter().cloned());
+        // Collect standalone extension definitions (`ClassName >> selector =>
+        // ...`) project-wide so Pass 2 can register them into every file's class
+        // hierarchy — a same-project cross-file extension then resolves instead
+        // of producing a false `Dnu` hint (ADR 0066 / ADR 0100 Rule 2 WS1).
+        self.extension_index
+            .add_entries(file.extensions.iter().cloned());
+        for (class_name, module_name) in &file.class_module_index {
+            if let Some(existing) = self.class_module_index.get(class_name) {
+                if existing != module_name {
+                    eprintln!(
+                        "Warning: class '{class_name}' is defined in both '{existing}' and \
+                         '{module_name}'; using '{module_name}' for cross-file dispatch"
+                    );
+                }
+            }
+            self.class_module_index
+                .insert(class_name.clone(), module_name.clone());
+            // Record direct superclass for cross-file hierarchy resolution.
+            // When a duplicate class overwrites a prior entry, keep the superclass
+            // index consistent by removing any stale mapping if the new definition
+            // has no explicit superclass.
+            match file.class_superclass_index.get(class_name) {
+                Some(superclass) => {
+                    self.class_superclass_index
+                        .insert(class_name.clone(), superclass.clone());
+                }
+                None => {
+                    self.class_superclass_index.remove(class_name);
+                }
+            }
+        }
+    }
+}
+
+/// Reads, parses and indexes one source file for Pass 1. `Ok(None)` when it
+/// cannot be read: its classes are then skipped.
+pub(crate) fn scan_source_file(
+    file: &Utf8Path,
+    source_root: Option<&Utf8Path>,
+    pkg_name: &str,
+) -> Result<Option<ScannedFile>> {
+    let module_name = super::sources::package_module_name(file, source_root, pkg_name)?;
+
+    let source = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                file = %file,
+                error = %e,
+                "Cannot read source file during index pass; class resolution from this file will be skipped"
+            );
+            return Ok(None);
+        }
+    };
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    if !diagnostics.is_empty() {
+        warn!(
+            file = %file,
+            diagnostic_count = diagnostics.len(),
+            "Source file has parse errors during index pass; class resolution from this file may be incomplete"
+        );
+    }
+
+    // Extract full ClassInfo for cross-file hierarchy resolution.
+    //
+    // A file with parse *errors* may have an under-recovered
+    // method surface (error recovery can drop method definitions), so its
+    // classes are marked `surface_incomplete`. The receiver-knowledge
+    // classifier downgrades receivers whose superclass chain contains a
+    // marked class to `Open`, preventing false unresolved-selector hints
+    // against a surface Pass 1 never fully saw.
+    let has_parse_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    let mut class_infos =
+        beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
+    if has_parse_errors {
+        for info in &mut class_infos {
+            info.surface_incomplete = true;
+        }
+    }
+    // Stamp the package now, while each file's classes are still
+    // isolated — `analyse_full`'s `stamp_package` only reaches classes
+    // built from the *current* module's own AST, never the cross-file
+    // `ClassInfo` this Pass 1 index injects into every other file's
+    // compilation. Without this, E0401/E0402 treat a same-package class
+    // from a sibling file as package-less and never flag it as a leak.
+    beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
+        &mut class_infos,
+        pkg_name,
+    );
+
+    let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+    extensions.add_module(&module, file.as_std_path());
+
+    let mut class_module_index = HashMap::new();
+    let mut class_superclass_index = HashMap::new();
+    for class in &module.classes {
+        let class_name = class.name.name.to_string();
+        class_module_index.insert(class_name.clone(), module_name.clone());
+        // The last declaration in the file decides, as in the package-wide fold.
+        if let Some(ref superclass) = class.superclass {
+            class_superclass_index.insert(class_name, superclass.name.to_string());
+        } else {
+            class_superclass_index.remove(&class_name);
+        }
+    }
+
+    Ok(Some(ScannedFile {
+        index: FileIndex {
+            class_module_index,
+            class_superclass_index,
+            class_infos,
+            extensions: extensions.entries_for_file(file.as_std_path()),
+        },
+        ast: CachedAst {
+            source,
+            module,
+            diagnostics,
+        },
+    }))
+}
+
 /// Build class indexes from a set of source files.
 ///
 /// Returns four items:
@@ -504,111 +676,23 @@ pub(crate) fn build_class_module_index(
     beamtalk_core::compilation::extension_index::ExtensionIndex,
     HashMap<Utf8PathBuf, CachedAst>,
 )> {
-    let mut module_index = HashMap::new();
-    let mut superclass_index = HashMap::new();
-    let mut all_class_infos = Vec::new();
-    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+    let mut index = Pass1Index::default();
     let mut cached_asts: HashMap<Utf8PathBuf, CachedAst> = HashMap::new();
 
     for file in source_files {
-        let module_name = super::sources::package_module_name(file, source_root, pkg_name)?;
-
-        let source = match fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(
-                    file = %file,
-                    error = %e,
-                    "Cannot read source file during index pass; class resolution from this file will be skipped"
-                );
-                continue;
-            }
+        let Some(scanned) = scan_source_file(file, source_root, pkg_name)? else {
+            continue;
         };
-        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-        let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-        if !diagnostics.is_empty() {
-            warn!(
-                file = %file,
-                diagnostic_count = diagnostics.len(),
-                "Source file has parse errors during index pass; class resolution from this file may be incomplete"
-            );
-        }
-
-        // Extract full ClassInfo for cross-file hierarchy resolution.
-        //
-        // A file with parse *errors* may have an under-recovered
-        // method surface (error recovery can drop method definitions), so its
-        // classes are marked `surface_incomplete`. The receiver-knowledge
-        // classifier downgrades receivers whose superclass chain contains a
-        // marked class to `Open`, preventing false unresolved-selector hints
-        // against a surface Pass 1 never fully saw.
-        let has_parse_errors = diagnostics
-            .iter()
-            .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
-        let mut class_infos =
-            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
-        if has_parse_errors {
-            for info in &mut class_infos {
-                info.surface_incomplete = true;
-            }
-        }
-        // Stamp the package now, while each file's classes are still
-        // isolated — `analyse_full`'s `stamp_package` only reaches classes
-        // built from the *current* module's own AST, never the cross-file
-        // `ClassInfo` this Pass 1 index injects into every other file's
-        // compilation. Without this, E0401/E0402 treat a same-package class
-        // from a sibling file as package-less and never flag it as a leak.
-        beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
-            &mut class_infos,
-            pkg_name,
-        );
-        all_class_infos.extend(class_infos);
-
-        // Collect standalone extension definitions
-        // (`ClassName >> selector => ...`) project-wide so Pass 2 can
-        // register them into every file's class hierarchy — a same-project
-        // cross-file extension then resolves instead of producing a false
-        // `Dnu` hint (ADR 0066 / ADR 0100 Rule 2 WS1).
-        extension_index.add_module(&module, file.as_std_path());
-
-        for class in &module.classes {
-            let class_name = class.name.name.to_string();
-            if let Some(existing) = module_index.get(&class_name) {
-                if existing != &module_name {
-                    eprintln!(
-                        "Warning: class '{class_name}' is defined in both '{existing}' and \
-                         '{module_name}'; using '{module_name}' for cross-file dispatch"
-                    );
-                }
-            }
-            module_index.insert(class_name.clone(), module_name.clone());
-            // Record direct superclass for cross-file hierarchy resolution.
-            // When a duplicate class overwrites a prior entry, keep the superclass
-            // index consistent by removing any stale mapping if the new definition
-            // has no explicit superclass.
-            if let Some(ref superclass) = class.superclass {
-                superclass_index.insert(class_name.clone(), superclass.name.to_string());
-            } else {
-                superclass_index.remove(&class_name);
-            }
-        }
-
+        index.add_file(&scanned.index);
         // Cache the parsed AST so Pass 2 doesn't re-read/re-parse.
-        cached_asts.insert(
-            file.clone(),
-            CachedAst {
-                source,
-                module,
-                diagnostics,
-            },
-        );
+        cached_asts.insert(file.clone(), scanned.ast);
     }
 
     Ok((
-        module_index,
-        superclass_index,
-        all_class_infos,
-        extension_index,
+        index.class_module_index,
+        index.class_superclass_index,
+        index.all_class_infos,
+        index.extension_index,
         cached_asts,
     ))
 }
