@@ -17,7 +17,9 @@
 //! Rust resolver cannot be forced into "no home" portably because `dirs`
 //! falls back to the passwd database — Rust surfaces that case as an error
 //! from `workspaces_base_dir`, and Erlang as `undefined`; neither invents a
-//! fallback directory).
+//! fallback directory). The `USERPROFILE`-only row is also `never`: Erlang
+//! reads that env var, but Rust `dirs::home_dir()` on Windows asks the OS
+//! (known-folder API) and ignores it, and on Unix it ignores it too.
 
 use std::path::{Path, PathBuf};
 

@@ -19,6 +19,9 @@ Covers:
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% logger handler callback (BT-3685 capture handler)
+-export([log/2]).
+
 %%====================================================================
 %% Fixtures
 %%====================================================================
@@ -1458,6 +1461,8 @@ size_returns_zero_when_table_absent() ->
 run_mode_test_() ->
     {setup, fun() -> ok end, fun(_) -> ok end, [
         fun run_mode_is_memory_only/0,
+        fun run_mode_does_not_warn/0,
+        fun no_home_warns_once_and_stays_memory_only/0,
         fun run_mode_read_source_body_no_workspace/0
     ]}.
 
@@ -1485,6 +1490,80 @@ run_mode_is_memory_only() ->
     after
         stop(Pid)
     end.
+
+%% BT-3685: a durable workspace id with no resolvable home dir silently turned
+%% persistence off. It now logs exactly one warning at start-up.
+no_home_warns_once_and_stays_memory_only() ->
+    WsId = <<"test-ws-nohome-", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
+    Saved = [{V, os:getenv(V)} || V <- ["BEAMTALK_HOME", "HOME", "USERPROFILE"]],
+    [os:unsetenv(V) || {V, _} <- Saved],
+    try
+        Events = capture_warnings(fun() ->
+            {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
+            try
+                {ok, _} = beamtalk_workspace_changelog:append(
+                    durable_input(<<"Counter">>, <<"inc">>)
+                ),
+                ?assertEqual(undefined, beamtalk_workspace_changelog:changes_dir(WsId)),
+                ?assertEqual(1, beamtalk_workspace_changelog:size())
+            after
+                stop(Pid)
+            end
+        end),
+        ?assertMatch([_], Events),
+        [#{msg := Msg, meta := Meta}] = Events,
+        ?assertEqual([beamtalk, runtime], maps:get(domain, Meta)),
+        Text = unicode:characters_to_binary(format_msg(Msg)),
+        ?assertNotEqual(nomatch, binary:match(Text, <<"No home directory">>)),
+        ?assertNotEqual(nomatch, binary:match(Text, WsId))
+    after
+        lists:foreach(
+            fun
+                ({V, false}) -> os:unsetenv(V);
+                ({V, Val}) -> os:putenv(V, Val)
+            end,
+            Saved
+        )
+    end.
+
+run_mode_does_not_warn() ->
+    Events = capture_warnings(fun() ->
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => undefined}),
+        stop(Pid)
+    end),
+    ?assertEqual([], Events).
+
+%% Capture warning-level events logged while Fun runs (handler callback below).
+capture_warnings(Fun) ->
+    Id = beamtalk_changelog_capture,
+    %% The test sys.config sets the primary level to error, which would drop
+    %% warnings before they reach any handler.
+    #{level := OrigLevel} = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, warning),
+    _ = logger:remove_handler(Id),
+    ok = logger:add_handler(Id, ?MODULE, #{config => #{parent => self()}, level => warning}),
+    try
+        Fun(),
+        collect_events([])
+    after
+        _ = logger:remove_handler(Id),
+        ok = logger:set_primary_config(level, OrigLevel)
+    end.
+
+collect_events(Acc) ->
+    receive
+        {captured_log, Event} -> collect_events([Event | Acc])
+    after 200 -> lists:reverse(Acc)
+    end.
+
+format_msg({string, S}) -> S;
+format_msg({report, R}) -> io_lib:format("~p", [R]);
+format_msg({Fmt, Args}) -> io_lib:format(Fmt, Args).
+
+%% logger handler callback
+log(Event, #{config := #{parent := Parent}}) ->
+    Parent ! {captured_log, Event},
+    ok.
 
 %%====================================================================
 %% Helpers
