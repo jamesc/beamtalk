@@ -680,6 +680,63 @@ All Core Erlang codegen MUST use `Document` / `docvec!` API. Never use `format!(
 
 State threading — actor/instance `State`, class-var `ClassVars`, value-type `Self`, loop-local threading, and non-local-return (NLR) relay across loops, conditionals, exception handling (`on:do:`/`ensure:`), list-op accumulators, gen_server actor-state routing, class-var shadow-writes (ADR 0110), and Tier 2 stateful-block bodies — now lowers through `crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`'s `ThreadedIr` type **as the emission input** (the real `Bind`/`Threaded`/`NlrCatch`/`Return` nodes built for a construct's mutation sequence are what `verify()` checks and `render()` turns into the `Document` emitted — not a side-channel fixture checked alongside a separately hand-rolled `Document`), and is checked by its `verify()` pass. General expression codegen stays AST-directed and unaffected. When touching any of these constructs, build the matching `ThreadedIr` fragment and call `verify()` (via the shared `report_threaded_ir_verify_errors` helper in `control_flow/mod.rs`) rather than adding a new ad-hoc `debug_assert!` — see [docs/development/debugging.md](../development/debugging.md#threadedir-verifier-adr-0111-bt-3129-bt-3165) for the `VerifyError` variants and `just verify-threaded-ir` for the CI gate that runs `verify()` over the full stdlib/bootstrap-test corpus.
 
+#### A state-threading fix is general or it is not a fix
+
+The BT-3666 → BT-3696 chain (late-bound class-side self-sends, 2026-09-30 to
+2026-10-02) is the cautionary case: every fix passed its repro and `verify()`,
+landed, and the next control-flow shape broke, because each fix added a
+site-specific reconciliation step (a pre-call sync, a post-scope refresh, a
+scope token, a three-way merge) instead of changing what the scope's lowering
+guarantees. When a change touches any state-threading lowering —
+`threaded_ir/`, `generator/version.rs`, `control_flow/*`, `gen_server/methods.rs`,
+`exception_handling.rs`, or the class-var paths of `dispatch_codegen.rs` — the
+PR must show all of the following, and a reviewer should reject it if any is
+missing:
+
+1. **The invariant, stated for every scope kind.** Write, in the PR and in the
+   governing ADR's amendment, what the change guarantees about the versioned
+   variable (`State`, `ClassVars`, `Self`) after each of: a top-level
+   statement, a conditional arm, a `Letrec` loop body
+   (`whileTrue:`/`timesRepeat:`/`to:do:`), a `Foldl` loop body
+   (`do:`/`collect:`/`inject:into:`/…), an `on:do:`/`ensure:` arm, a bare
+   block, a stored closure invoked later, and an NLR boundary. If the
+   invariant cannot be stated for one of them, the fix is shape-specific and
+   is not mergeable as a fix; file the general design instead.
+2. **Fixed at the node, not the shape.** The change lives in the lowering of
+   the `ThreadedIr` node that owns the scope (`ConditionalLoop`, the merged
+   fold `Threaded` node, the arm, `NlrCatch`), so every construct of that
+   kind gets it. A new per-call-site sync, refresh, commit, or merge, or a
+   new runtime reconciliation mechanism (a process-dictionary key, a token,
+   a shadow), needs an ADR amendment that names the single source of truth
+   it serves, and is not acceptable as a bug fix on its own.
+3. **The verifier catches the original bug.** `verify()` passing is
+   necessary, not sufficient. If the bug being fixed reached `main` without a
+   `VerifyError`, add the variant or strengthen the check so it fails on the
+   repro *before* the fix, and keep that as the regression test. A bug the
+   verifier cannot express (right Core Erlang, wrong value) needs an
+   execution-level property instead (point 4).
+4. **Proved over a generated corpus, not the repro.** Extend `arb_program`
+   (`crates/beamtalk-core/src/test_helpers.rs`, the proptest program
+   generator) so it produces the shape family in question — today it
+   generates only an instance method of sends, `ifTrue:ifFalse:` and
+   self-invoking blocks, no class state, loops, `on:do:` or late-bound
+   sends — and run the generated programs through debug codegen (verifier
+   on), `erlc`, and execution against an oracle (for class-variable
+   semantics: the direct-write spelling, the sealed spelling and the
+   late-bound spelling of one program must agree). Cite the run in the PR.
+   A differential run against `main` only shows the PR changed nothing; it
+   cannot find a pre-existing bug, so it does not satisfy this point.
+5. **Known-wrong pins are debts, not documentation.** A test that pins a
+   known-wrong answer is marked `PIN-BUG BT-NNNN` and cites an open issue;
+   a fix in the area flips every pin for that issue rather than adding a
+   sibling. Never add a "known limit" to an ADR without both a compile-time
+   diagnostic for the shape and a `PIN-BUG` test.
+6. **Measured on the self-send path.** Anything on the class-side or actor
+   self-send path reports `runtime/perf/self_send_bench` before and after,
+   interleaved rounds, with the method from `docs/development/benchmarks.md`.
+   An issue whose acceptance criterion is a target number is not closed by
+   a merged PR that does not meet it; record the gap in a follow-up issue.
+
 ### Clippy Discipline
 
 Never suppress clippy warnings without a comment explaining why. Split long functions, remove dead code, fix return types. Goal: under 30 suppressions codebase-wide.
