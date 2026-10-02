@@ -306,8 +306,11 @@ impl CoreErlangGenerator {
     /// builds a closure: the callee may invoke it, and the closure's own
     /// export into the scope has to be overwritten by this send's commit
     /// exactly as before (the ADR 0110 BT-3682 limit, pinned by tests). With no
-    /// block literal among the arguments nothing can reach the scope while the
-    /// callee runs, so a plain reply left the class variables as passed in.
+    /// block literal among the arguments, a plain reply left the class variables
+    /// as passed in; a closure reaching the callee by name (a block parameter,
+    /// say) may still export into the scope chain while the callee runs, which a
+    /// skipped commit now leaves in place instead of overwriting (pinned by
+    /// `SelfSendPlainReplyTest>>test*ViaSectionParamInLoop`).
     pub(super) fn class_var_for_send(
         &mut self,
         prelude: &mut Vec<ThreadedStmt>,

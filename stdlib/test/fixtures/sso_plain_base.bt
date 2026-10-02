@@ -341,3 +341,38 @@ Object subclass: SsoPlainBase
     ] value
     self plain
     self.n
+
+  // --- a block handed to a user-defined class-side higher-order method -------
+  class section: aBlock :: Block -> Integer => aBlock value
+
+  // BT-3682 limit (unchanged by BT-3690): a block LITERAL passed to the HOM keeps
+  // the send's own commit, which overwrites the block's export, so the write is
+  // dropped.
+  @expect stored_closure "BT-3682: pins the known limit of a block literal passed to a HOM"
+  class viaSectionLiteralInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1)
+      do: [:x |
+        seen := seen + 1
+        self section: [self foo]
+      ]
+    self.n
+
+  // BT-3690 behaviour: the same block reaching the HOM BY NAME (here a block
+  // parameter, which the BT-3681 check does not track) is not a literal of the
+  // send, so the plain reply from `section:` skips the commit and the block's
+  // export into the scope survives: the write is KEPT (answers 1 for a
+  // subclass override or a sealed class; before BT-3690 it was dropped like the
+  // literal spelling above). An improvement, not a guarantee: the two
+  // spellings of the same call answer differently until BT-3682 merges the
+  // passed, returned and exported class variables.
+  class viaSectionParamInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1)
+      do: [:x |
+        seen := seen + 1
+        [:b | self section: b] value: [self foo]
+      ]
+    self.n

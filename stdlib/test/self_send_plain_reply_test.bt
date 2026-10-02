@@ -67,6 +67,20 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testBaseFooHandler => self assert: SsoPlainBase fooHandler equals: 0
 
+  // BT-3682 limit, unchanged by BT-3690: a block LITERAL passed to a user-defined
+  // class-side HOM keeps the send's commit, which overwrites the block's export,
+  // so its write is dropped (0 everywhere).
+  testBaseViaSectionLiteralInLoop =>
+    self assert: SsoPlainBase viaSectionLiteralInLoop equals: 0
+
+  // BT-3690: the same block reaching the HOM BY NAME is not a literal of the send, so
+  // the plain reply skips the commit and the export survives: the write is KEPT
+  // (1 for the overriding subclass and the sealed class; 0 for the base class, whose
+  // `foo` does not write). Before BT-3690 this answered 0 like the literal spelling:
+  // an improvement, not a guarantee (BT-3682 will make both spellings agree).
+  testBaseViaSectionParamInLoop =>
+    self assert: SsoPlainBase viaSectionParamInLoop equals: 0
+
   testBaseFooNested => self assert: SsoPlainBase fooNested equals: 0
 
   testBaseFooRaised => self assert: SsoPlainBase fooRaised equals: 0
@@ -129,6 +143,20 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSubFooHandler => self assert: SsoPlainSub fooHandler equals: 1
 
+  // BT-3682 limit, unchanged by BT-3690: a block LITERAL passed to a user-defined
+  // class-side HOM keeps the send's commit, which overwrites the block's export,
+  // so its write is dropped (0 everywhere).
+  testSubViaSectionLiteralInLoop =>
+    self assert: SsoPlainSub viaSectionLiteralInLoop equals: 0
+
+  // BT-3690: the same block reaching the HOM BY NAME is not a literal of the send, so
+  // the plain reply skips the commit and the export survives: the write is KEPT
+  // (1 for the overriding subclass and the sealed class; 0 for the base class, whose
+  // `foo` does not write). Before BT-3690 this answered 0 like the literal spelling:
+  // an improvement, not a guarantee (BT-3682 will make both spellings agree).
+  testSubViaSectionParamInLoop =>
+    self assert: SsoPlainSub viaSectionParamInLoop equals: 1
+
   testSubFooNested => self assert: SsoPlainSub fooNested equals: 2
 
   testSubFooRaised => self assert: SsoPlainSub fooRaised equals: 0
@@ -182,6 +210,20 @@ TestCase subclass: SelfSendPlainReplyTest
     self assert: SsoPlainSealed fooReader equals: #(1, 2, 3)
 
   testSealedFooHandler => self assert: SsoPlainSealed fooHandler equals: 1
+
+  // BT-3682 limit, unchanged by BT-3690: a block LITERAL passed to a user-defined
+  // class-side HOM keeps the send's commit, which overwrites the block's export,
+  // so its write is dropped (0 everywhere).
+  testSealedViaSectionLiteralInLoop =>
+    self assert: SsoPlainSealed viaSectionLiteralInLoop equals: 0
+
+  // BT-3690: the same block reaching the HOM BY NAME is not a literal of the send, so
+  // the plain reply skips the commit and the export survives: the write is KEPT
+  // (1 for the overriding subclass and the sealed class; 0 for the base class, whose
+  // `foo` does not write). Before BT-3690 this answered 0 like the literal spelling:
+  // an improvement, not a guarantee (BT-3682 will make both spellings agree).
+  testSealedViaSectionParamInLoop =>
+    self assert: SsoPlainSealed viaSectionParamInLoop equals: 1
 
   // PIN-BUG BT-3691: sealed class, a writing arm plus provably pure arms in a threaded loop
   // loses the write on main as well (not caused by BT-3690). Each pins a KNOWN-WRONG answer
