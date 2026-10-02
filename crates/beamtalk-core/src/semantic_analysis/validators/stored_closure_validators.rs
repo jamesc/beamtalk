@@ -205,12 +205,12 @@ fn check_statement_list(
                 (target.as_ref(), value.as_ref())
             {
                 if let Some(selector) = ctx.first_may_write_send(block) {
-                    if let Some(call_span) = later_invocation(&stmts[i + 1..], &local.name, ctx) {
+                    if let Some(later) = later_use(&stmts[i + 1..], &local.name, ctx) {
                         diagnostics.push(stored_closure_diagnostic(
                             &local.name,
                             &selector,
                             block,
-                            call_span,
+                            &later,
                         ));
                     }
                 }
@@ -256,16 +256,22 @@ fn check_hom_arguments(
     }
 }
 
-/// The span of the first statement of `later` that invokes the local `name`
-/// (`name value`, `name value: x`, ...) or hands it to a user-defined class-side
-/// higher-order method (`self section: name`), if any. The search stops at a
-/// statement that rebinds `name` (`name := ...`) without using it, since later
+/// How a later statement uses a stored closure.
+enum LaterUse {
+    /// `name value`, `name value: x`, ...: the closure is invoked there.
+    Invoked(crate::source_analysis::Span),
+    /// `self section: name`: the closure is handed to a user-defined class-side
+    /// higher-order method (named here). The compiler cannot see whether that
+    /// method ever invokes it, only that the write is lost if it does.
+    PassedTo(crate::source_analysis::Span, String),
+}
+
+/// The first use, by a statement of `later`, of the local `name`: invoked
+/// (`name value`, `name value: x`, ...) or handed to a user-defined class-side
+/// higher-order method (`self section: name`). The search stops at a statement
+/// that rebinds `name` (`name := ...`) without using it, since later
 /// invocations then reach a different block.
-fn later_invocation(
-    later: &[ExpressionStatement],
-    name: &str,
-    ctx: &ClassCtx<'_>,
-) -> Option<crate::source_analysis::Span> {
+fn later_use(later: &[ExpressionStatement], name: &str, ctx: &ClassCtx<'_>) -> Option<LaterUse> {
     let is_local = |x: &Expression| matches!(x, Expression::Identifier(id) if id.name == name);
     for stmt in later {
         let mut found = None;
@@ -283,12 +289,13 @@ fn later_invocation(
             else {
                 return;
             };
-            let invoked = is_local(receiver) && selector.is_block_invocation();
-            let handed_to_hom = ctx.own_class_receiver(receiver).is_some()
+            if is_local(receiver) && selector.is_block_invocation() {
+                found = Some(LaterUse::Invoked(*span));
+            } else if ctx.own_class_receiver(receiver).is_some()
                 && ctx.is_user_defined_class_method(&selector.name())
-                && arguments.iter().any(is_local);
-            if invoked || handed_to_hom {
-                found = Some(*span);
+                && arguments.iter().any(is_local)
+            {
+                found = Some(LaterUse::PassedTo(*span, selector.name().to_string()));
             }
         });
         if found.is_some() {
@@ -307,12 +314,24 @@ fn stored_closure_diagnostic(
     local: &str,
     selector: &str,
     block: &Block,
-    call_span: crate::source_analysis::Span,
+    later: &LaterUse,
 ) -> Diagnostic {
+    let (use_clause, note, note_span) = match later {
+        LaterUse::Invoked(span) => (
+            "it is invoked by a later statement".to_string(),
+            "the closure is invoked here".to_string(),
+            *span,
+        ),
+        LaterUse::PassedTo(span, hom) => (
+            format!("a later statement passes it to class-side '{hom}', which may invoke it"),
+            format!("the closure is passed to class-side '{hom}' here"),
+            *span,
+        ),
+    };
     Diagnostic::warning(
         format!(
             "stored closure '{local}' sends class-side '{selector}', which may write a class \
-             variable, but it is invoked by a later statement: that write (and any read of a \
+             variable, but {use_clause}: that write (and any read of a \
              class variable it relies on) is not kept\n\
              \n\
              = help: invoke the block in the statement that builds it (`[...] value`)\n\
@@ -325,7 +344,7 @@ fn stored_closure_diagnostic(
         "Invoke the block in the statement that builds it, or return the value and write the \
          class variable from the method body (ADR 0110)",
     )
-    .with_note("the closure is invoked here", Some(call_span))
+    .with_note(note, Some(note_span))
     .with_category(DiagnosticCategory::StoredClosure)
 }
 

@@ -99,17 +99,9 @@ impl CoreErlangGenerator {
             receiver, selector, ..
         } = expr
         {
-            let is_value_selector = match selector {
-                beamtalk_core::ast::MessageSelector::Unary(name) => name == "value",
-                beamtalk_core::ast::MessageSelector::Keyword(parts) => {
-                    let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                    matches!(
-                        sel.as_str(),
-                        "value:" | "value:value:" | "value:value:value:"
-                    )
-                }
-                beamtalk_core::ast::MessageSelector::Binary(_) => false,
-            };
+            let is_value_selector = selector
+                .well_known()
+                .is_some_and(beamtalk_core::ast::well_known::WellKnownSelector::is_block_value);
             if is_value_selector {
                 if let Expression::Block(block) = receiver.as_ref() {
                     let mutations = Self::captured_mutations_for_block(block);

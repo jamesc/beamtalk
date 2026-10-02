@@ -458,15 +458,9 @@ impl CoreErlangGenerator {
     /// Tier 2 block value be invoked without escaping to a call site that
     /// doesn't know to thread state through it.
     fn is_safe_value_family_selector(selector: &MessageSelector) -> bool {
-        matches!(
-            selector.well_known(),
-            Some(
-                WellKnownSelector::Value
-                    | WellKnownSelector::ValueColon
-                    | WellKnownSelector::ValueValue
-                    | WellKnownSelector::ValueValueValue
-            )
-        )
+        selector
+            .well_known()
+            .is_some_and(WellKnownSelector::is_block_value)
     }
 
     /// Scans `expr` for references to `var_name`, returning
@@ -3290,21 +3284,7 @@ impl CoreErlangGenerator {
             receiver, selector, ..
         } = expr
         {
-            let (is_positional_value_selector, is_value_with_arguments) = match selector {
-                beamtalk_core::ast::MessageSelector::Unary(name) => (name == "value", false),
-                beamtalk_core::ast::MessageSelector::Keyword(parts) => {
-                    let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                    (
-                        matches!(
-                            selector_name.as_str(),
-                            "value:" | "value:value:" | "value:value:value:"
-                        ),
-                        selector_name == "valueWithArguments:",
-                    )
-                }
-                beamtalk_core::ast::MessageSelector::Binary(_) => (false, false),
-            };
-            if is_positional_value_selector || is_value_with_arguments {
+            if selector.is_block_invocation() {
                 // Tier 2 block parameter (variable holding a stateful block)
                 // Or a local variable this method itself assigned a Tier 2
                 // block literal to earlier in its own body (tier2_local_vars).
@@ -3334,7 +3314,7 @@ impl CoreErlangGenerator {
             // binds `arguments` directly to the block's own parameters, which
             // doesn't hold for valueWithArguments: (a single runtime list, not
             // per-parameter positional args). Not a motivating shape here.
-            if is_positional_value_selector {
+            if Self::is_safe_value_family_selector(selector) {
                 // Inline block literal with captured mutations
                 // (e.g. [errors := errors add: #foo] value)
                 // Only in Actor/REPL context — ValueType inlines as plain value (no tuple).

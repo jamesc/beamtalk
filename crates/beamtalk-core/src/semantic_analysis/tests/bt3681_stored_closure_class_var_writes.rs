@@ -294,6 +294,19 @@ fn stored_closure_handed_to_a_user_defined_hom_by_name_warns() {
 ",
     ));
     assert_eq!(diags.len(), 1, "got: {diags:?}");
+    // The compiler cannot see that `section:` invokes the block, so the text
+    // must not claim it is invoked.
+    let d = &diags[0];
+    assert!(
+        d.message.contains("passes it to class-side 'section:'"),
+        "{}",
+        d.message
+    );
+    assert!(!d.message.contains("it is invoked"), "{}", d.message);
+    assert_eq!(
+        d.notes[0].message.as_str(),
+        "the closure is passed to class-side 'section:' here"
+    );
 }
 
 #[test]
