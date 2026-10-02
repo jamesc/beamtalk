@@ -1,7 +1,7 @@
 # ADR 0130: Class Variables Live in the Class Process During an Invocation
 
 ## Status
-Proposed (2026-10-02)
+Accepted (2026-10-02)
 
 Supersedes ADR 0110 (Class-Variable Shadow Write-Through for Foreign NLR Relay) when implemented. Amends ADR 0013 §1 (class-variable storage), ADR 0084 (ClassBuilder class-method fun arity), ADR 0111 and ADR 0122 (removes the `ClassVars` threading family and slot family).
 
@@ -452,6 +452,12 @@ Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`
 
 1. **Actor state.** Caught errors now agree across both kinds of state. Should actor state also move to a single home, so that stored closures and blocks given to higher-order methods behave the same for actors as §5 makes them for classes (BT-3580 is the actor twin of this bug class)? That needs its own ADR.
 2. **Verifier visibility in release builds.** `report_threaded_ir_verify_errors` records an `internal:` error diagnostic in release builds, but BT-3693 reports that the release CLI printed none. Phase 1's property test must fail on that diagnostic, and the CLI path should be checked.
+
+## Implementation Tracking
+
+**Epic:** BT-3701
+**Issues:** BT-3702, BT-3703 (Phase 0); BT-3704, BT-3705 (Phase 1); BT-3706, BT-3707, BT-3708 (Phase 2); BT-3709, BT-3710, BT-3711, BT-3712, BT-3713 (Phase 3); BT-3714, BT-3715 (Phase 4)
+**Status:** Planned
 
 ## References
 
