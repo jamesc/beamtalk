@@ -510,7 +510,7 @@ mod tests {
     /// A block inside the RHS of a destructure assignment can shadow an outer variable.
     #[test]
     fn destructure_rhs_block_can_shadow_outer_var() {
-        let diags = lint("x := 1.\n{y} := someMethod: [:x | x + 1]");
+        let diags = lint("x := 1.\n{y} := items collect: [:x | x + 1]");
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
     }
