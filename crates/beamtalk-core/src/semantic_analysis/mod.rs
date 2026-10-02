@@ -646,8 +646,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
         let mut owned = module.clone();
-        let (expansion_diags, origins) =
-            trait_expansion::expand_module(&mut owned, &external_protocols);
+        let (expansion_diags, origins) = trait_expansion::expand_module_in_package(
+            &mut owned,
+            &external_protocols,
+            current_package,
+        );
         result.diagnostics.extend(expansion_diags);
         trait_origins = origins;
         expanded_module_storage = owned;
@@ -811,6 +814,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &result.class_hierarchy,
             &result.protocol_registry,
             &external_protocols,
+            current_package,
         ));
     // Carried for `lowering::lower_module_for_codegen` — see this field's
     // own doc. No further use of the local `external_protocols` binding

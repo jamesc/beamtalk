@@ -249,6 +249,7 @@ fn execute_build_passes(
     let protocol_hashes = crate::commands::util::protocol_hashes(
         &index.all_protocol_defs,
         index.file_protocol_uses.values().flatten(),
+        environment::package_identity(env.pkg_manifest(), options.stdlib_mode),
     );
     let file_protocol_uses = index.file_protocol_uses.clone();
 

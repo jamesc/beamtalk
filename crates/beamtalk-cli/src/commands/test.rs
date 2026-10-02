@@ -369,6 +369,8 @@ fn build_fixture_class_indexes(
             beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos(
                 module,
                 &external_protocols,
+                // Fixtures and test files have no package identity.
+                None,
             ),
         );
     }

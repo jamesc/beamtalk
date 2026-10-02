@@ -445,8 +445,15 @@ impl ProjectIndex {
     pub fn update_file_protocol_defs(
         &mut self,
         file: Utf8PathBuf,
-        protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+        mut protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     ) {
+        // A dependency's protocols are stamped with its package, so a qualified
+        // `uses: dep@Name` resolves to them (BT-3684); a project file's stay
+        // unstamped (the current package's).
+        let dependency = dependency_package_for_path(&file);
+        for def in &mut protocol_defs {
+            def.package.clone_from(&dependency);
+        }
         if protocol_defs.is_empty() {
             self.file_protocol_defs.remove(&file);
         } else {

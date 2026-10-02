@@ -426,6 +426,7 @@ fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
         let hashes = crate::commands::util::protocol_hashes(
             &defs,
             pass1.file_protocol_uses.values().flatten(),
+            Some("my_app"),
         );
         let changes = detect_changes(
             &source_files,
@@ -808,6 +809,7 @@ fn detect_and_record(project: &Utf8Path) -> (Vec<String>, Vec<String>) {
     let protocol_hashes = crate::commands::util::protocol_hashes(
         &index.all_protocol_defs,
         index.file_protocol_uses.values().flatten(),
+        None,
     );
     let pairs = compute_file_module_pairs(&env).unwrap();
     fs::create_dir_all(&env.build_dir).unwrap();

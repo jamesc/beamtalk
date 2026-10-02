@@ -814,6 +814,7 @@ fn analyse(source: &str) -> Vec<Diagnostic> {
         &hierarchy,
         &registry,
         &HashMap::new(),
+        None,
     ));
     diagnostics
 }
@@ -1636,7 +1637,7 @@ fn check_after_hierarchy_validates_against_the_protocol_the_qualifier_names() {
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let registry = ProtocolRegistry::default();
 
-    let diagnostics = check_after_hierarchy(&module, &hierarchy, &registry, &external);
+    let diagnostics = check_after_hierarchy(&module, &hierarchy, &registry, &external, None);
 
     assert!(
         diagnostics
@@ -1644,4 +1645,91 @@ fn check_after_hierarchy_validates_against_the_protocol_the_qualifier_names() {
             .all(|d| !d.message.contains("does not provide")),
         "excluding `bTag` names a provision of pkg_b's Retryable: {diagnostics:?}"
     );
+}
+
+// ── a qualifier must name the current package to reach its protocols ────
+
+const OWN_PARSER: &str = "Protocol define: Parser
+  raw -> String
+
+  describe -> String => \"parses \" ++ self raw
+
+Object subclass: Lenient
+  uses: {qualifier}Parser
+  raw -> String => \"x\"";
+
+fn expand_in_package(
+    qualifier: &str,
+    external: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> (Module, Vec<Diagnostic>) {
+    let mut module = parse_source(&OWN_PARSER.replace("{qualifier}", qualifier));
+    let (diagnostics, _origins) = expand_module_in_package(&mut module, external, current_package);
+    (module, diagnostics)
+}
+
+fn no_source_diagnostic(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics.iter().any(|d| {
+        d.message
+            .contains("no source available for protocol `Parser`")
+    })
+}
+
+#[test]
+fn qualifier_naming_the_current_package_resolves_its_own_protocol() {
+    let (module, diagnostics) = expand_in_package("my_app@", &HashMap::new(), Some("my_app"));
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn mistyped_qualifier_does_not_resolve_the_current_packages_protocol() {
+    let (module, diagnostics) = expand_in_package("jsno@", &HashMap::new(), Some("my_app"));
+
+    assert!(no_source_diagnostic(&diagnostics), "{diagnostics:?}");
+    assert!(!provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn qualifier_of_a_dependency_without_provisions_does_not_resolve_the_current_packages_protocol() {
+    // `pkg_b` declares a requirement-only `Parser`, which is never carried
+    // (`provision_bearing_protocols` drops it); `my_app` has its own, provision-
+    // bearing one. `uses: pkg_b@Parser` names a different protocol.
+    let (module, diagnostics) = expand_in_package("pkg_b@", &HashMap::new(), Some("my_app"));
+
+    assert!(no_source_diagnostic(&diagnostics), "{diagnostics:?}");
+    assert!(!provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn qualifier_resolves_against_a_sibling_files_protocol_of_the_current_package() {
+    // The protocol lives in another file of the same package, carried unstamped.
+    let mut module = parse_source(
+        "Object subclass: Lenient
+  uses: my_app@Parser
+  raw -> String => \"x\"",
+    );
+    let sibling = parse_protocol_def(
+        "Protocol define: Parser
+  raw -> String
+
+  describe -> String => \"parses \" ++ self raw",
+    );
+    let external = first_wins_protocol_map([sibling]);
+
+    let (diagnostics, _origins) = expand_module_in_package(&mut module, &external, Some("my_app"));
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn qualifier_resolves_any_unstamped_protocol_when_the_package_is_unknown() {
+    // No package identity (a REPL or script session): the stricter rule has
+    // nothing to compare the qualifier with.
+    let (module, diagnostics) = expand_in_package("json@", &HashMap::new(), None);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
 }

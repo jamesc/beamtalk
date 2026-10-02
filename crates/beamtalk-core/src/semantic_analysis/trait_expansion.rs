@@ -129,6 +129,22 @@ pub fn expand_module(
     module: &mut Module,
     external_protocols: &HashMap<EcoString, ProtocolDefinition>,
 ) -> (Vec<Diagnostic>, OriginMap) {
+    expand_module_in_package(module, external_protocols, None)
+}
+
+/// [`expand_module`] for a module compiled as part of package
+/// `current_package`, when that is known (BT-3684): a qualified
+/// `uses: pkg@Name` then resolves in `pkg`'s protocols, or — only when `pkg` *is*
+/// `current_package` — in the current package's own (unstamped) ones; any other
+/// qualifier without a protocol of that package is an unresolved `uses:`. With
+/// `current_package` `None` (no package identity: a REPL or script session, a
+/// manifest-less build) an unstamped protocol answers any qualifier, as before.
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn expand_module_in_package(
+    module: &mut Module,
+    external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> (Vec<Diagnostic>, OriginMap) {
     let mut diagnostics = Vec::new();
     let mut origins = OriginMap::new();
 
@@ -140,7 +156,7 @@ pub fn expand_module(
     // provisions never change while flattening its users, and borrowing
     // `module.protocols` for the whole loop while also mutating
     // `module.classes` would need this same split regardless.
-    let protocols = protocol_lookup(&module.protocols, external_protocols);
+    let protocols = ProtocolLookup::new(&module.protocols, external_protocols, current_package);
 
     for class in &mut module.classes {
         if class.uses.is_empty() {
@@ -173,12 +189,14 @@ pub fn expand_module(
 pub fn extract_flattened_class_infos(
     module: &Module,
     external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
 ) -> Vec<ClassInfo> {
     if !module.classes.iter().any(|c| !c.uses.is_empty()) {
         return ClassHierarchy::extract_class_infos(module);
     }
     let mut flattened = module.clone();
-    let (_diagnostics, origins) = expand_module(&mut flattened, external_protocols);
+    let (_diagnostics, origins) =
+        expand_module_in_package(&mut flattened, external_protocols, current_package);
     let mut infos = ClassHierarchy::extract_class_infos(&flattened);
     for ((class_name, selector), protocol_name) in &origins {
         if let Some(info) = infos.iter_mut().find(|i| &i.name == class_name) {
@@ -237,7 +255,7 @@ pub fn flatten_trait_user_class_infos<'a>(
         if !module.classes.iter().any(|c| !c.uses.is_empty()) {
             continue;
         }
-        let mut flattened = extract_flattened_class_infos(module, &external_protocols);
+        let mut flattened = extract_flattened_class_infos(module, &external_protocols, package);
         if let Some(pkg) = package {
             ClassHierarchy::stamp_package_on_infos(&mut flattened, pkg);
         }
@@ -432,26 +450,47 @@ pub fn first_wins_protocol_map(
 }
 
 /// Every protocol a module's `uses:` lines may resolve to, keyed as
-/// [`first_wins_protocol_map`] keys them.
-type ProtocolLookup<'a> = HashMap<EcoString, &'a ProtocolDefinition>;
+/// [`first_wins_protocol_map`] keys them, plus the package being compiled when
+/// known — what a qualified `uses:` needs to resolve (BT-3684).
+struct ProtocolLookup<'a> {
+    protocols: HashMap<EcoString, &'a ProtocolDefinition>,
+    current_package: Option<&'a str>,
+}
 
-/// Merges `external_protocols` with the current module's own protocols
-/// (`module.protocols`, taken as a slice so the caller can keep mutating the
-/// module's classes), which win a name clash (current-file wins, per
-/// [`expand_module`]'s doc).
-fn protocol_lookup<'a>(
-    module_protocols: &'a [ProtocolDefinition],
-    external_protocols: &'a HashMap<EcoString, ProtocolDefinition>,
-) -> ProtocolLookup<'a> {
-    // `external_protocols` is inserted first so the current module's own
-    // `module.protocols` entries — inserted second under the same bare key —
-    // overwrite any same-named external entry.
-    let mut protocols: ProtocolLookup<'a> = external_protocols
-        .iter()
-        .map(|(key, def)| (key.clone(), def))
-        .collect();
-    protocols.extend(module_protocols.iter().map(|p| (p.name.name.clone(), p)));
-    protocols
+impl<'a> ProtocolLookup<'a> {
+    /// Merges `external_protocols` with the current module's own protocols
+    /// (`module.protocols`, taken as a slice so the caller can keep mutating the
+    /// module's classes), which win a name clash (current-file wins, per
+    /// [`expand_module`]'s doc).
+    fn new(
+        module_protocols: &'a [ProtocolDefinition],
+        external_protocols: &'a HashMap<EcoString, ProtocolDefinition>,
+        current_package: Option<&'a str>,
+    ) -> Self {
+        // `external_protocols` is inserted first so the current module's own
+        // `module.protocols` entries — inserted second under the same bare key —
+        // overwrite any same-named external entry.
+        let mut protocols: HashMap<EcoString, &'a ProtocolDefinition> = external_protocols
+            .iter()
+            .map(|(key, def)| (key.clone(), def))
+            .collect();
+        protocols.extend(module_protocols.iter().map(|p| (p.name.name.clone(), p)));
+        Self {
+            protocols,
+            current_package,
+        }
+    }
+
+    /// Resolves the protocol a `uses:` line names.
+    fn resolve(&self, use_: &ProtocolUse) -> Option<&'a ProtocolDefinition> {
+        resolve_protocol_entry(
+            &self.protocols,
+            &protocol_use_key(use_),
+            self.current_package,
+            |p| p.package.is_none(),
+        )
+        .copied()
+    }
 }
 
 /// The one rule by which a [`protocol_use_key`] finds its protocol in a map
@@ -459,40 +498,45 @@ fn protocol_lookup<'a>(
 ///
 /// A bare `Name` takes the first definition of `Name`. A qualified `pkg@Name`
 /// takes `pkg`'s own `Name` and never another package's (BT-3684). A protocol
-/// with no [`ProtocolDefinition::package`] belongs to the package being
-/// compiled — this module's or a sibling file's — so it also answers a
-/// qualifier, which may name the current package (`is_current_package` says
-/// whether an entry is unstamped). Shared by the flattener and the build's
+/// with no [`ProtocolDefinition::package`] (`is_current_package` says whether an
+/// entry is unstamped) belongs to the package being compiled — this module's or a
+/// sibling file's — so it answers a qualifier only if that qualifier names
+/// `current_package`; when the package is unknown (`None`), any qualifier. A
+/// typo'd qualifier, or a dependency whose `Name` has no provisions (and so is
+/// not carried at all), therefore never lands on the current package's
+/// same-named protocol. Shared by the flattener and the build's
 /// incremental-key hashing, so both follow the same protocol.
 fn resolve_protocol_entry<'a, T>(
     protocols: &'a HashMap<EcoString, T>,
     key: &str,
+    current_package: Option<&str>,
     is_current_package: impl Fn(&T) -> bool,
 ) -> Option<&'a T> {
     let named = protocols.get(key);
-    let Some((_, name)) = key.split_once('@') else {
+    let Some((qualifier, name)) = key.split_once('@') else {
         return named;
     };
-    named.or_else(|| protocols.get(name).filter(|p| is_current_package(p)))
+    named.or_else(|| {
+        if current_package.is_some_and(|current| current != qualifier) {
+            return None;
+        }
+        protocols.get(name).filter(|p| is_current_package(p))
+    })
 }
 
-/// Resolves a [`protocol_use_key`] in a [`first_wins_protocol_map`]; see
-/// [`resolve_protocol_entry`] for the rule.
+/// Resolves a [`protocol_use_key`] in a [`first_wins_protocol_map`] for a
+/// package compiled as `current_package`; see [`resolve_protocol_entry`] for
+/// the rule.
 #[must_use]
 #[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
 pub fn resolve_protocol_key<'a>(
     external_protocols: &'a HashMap<EcoString, ProtocolDefinition>,
     key: &str,
+    current_package: Option<&str>,
 ) -> Option<&'a ProtocolDefinition> {
-    resolve_protocol_entry(external_protocols, key, |p| p.package.is_none())
-}
-
-/// Resolves the protocol a `uses:` line names within `protocols`.
-fn resolve_used_protocol<'a>(
-    protocols: &ProtocolLookup<'a>,
-    use_: &ProtocolUse,
-) -> Option<&'a ProtocolDefinition> {
-    resolve_protocol_entry(protocols, &protocol_use_key(use_), |p| p.package.is_none()).copied()
+    resolve_protocol_entry(external_protocols, key, current_package, |p| {
+        p.package.is_none()
+    })
 }
 
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s
@@ -648,7 +692,7 @@ fn expand_class(
         // dependency's protocol AST — BT-3591, module doc); a qualified
         // `uses: json@Parser` resolves against `json`'s protocols only
         // (BT-3684).
-        let Some(protocol) = resolve_used_protocol(protocols, use_) else {
+        let Some(protocol) = protocols.resolve(use_) else {
             diagnostics.push(missing_protocol_diagnostic(use_));
             continue;
         };
@@ -1226,8 +1270,8 @@ const OVERRIDE_ALLOWLIST_ROOTS: &[&str] = &["Object", "Value"];
 /// superclass-chain walk) and protocol-side checks (`all_conformance_selectors`,
 /// which needs the registry for `extending:` transitivity) depend on it.
 ///
-/// `external_protocols` must be the same map [`expand_module`] flattened
-/// `module` against (BT-3591) — a class-side check for a `uses:` line that
+/// `external_protocols` and `current_package` must be those [`expand_module_in_package`]
+/// flattened `module` against (BT-3591) — a class-side check for a `uses:` line that
 /// resolved cross-file/cross-package during expansion needs the same
 /// protocol definition to check requirements, `excluding:`/`overriding:`
 /// names, and dropped-provision override compatibility against.
@@ -1237,6 +1281,7 @@ pub fn check_after_hierarchy(
     hierarchy: &ClassHierarchy,
     protocol_registry: &ProtocolRegistry,
     external_protocols: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -1245,7 +1290,7 @@ pub fn check_after_hierarchy(
     }
 
     if module.classes.iter().any(|c| !c.uses.is_empty()) {
-        let protocols = protocol_lookup(&module.protocols, external_protocols);
+        let protocols = ProtocolLookup::new(&module.protocols, external_protocols, current_package);
         for class in &module.classes {
             if class.uses.is_empty() {
                 continue;
@@ -1474,7 +1519,7 @@ fn check_class_trait_usage(
         // here is the same current-module-plus-external merge) — an
         // unresolvable `uses:` was already diagnosed by `expand_module`
         // (Phase -1); nothing further to check here.
-        let Some(protocol) = resolve_used_protocol(protocols, use_) else {
+        let Some(protocol) = protocols.resolve(use_) else {
             continue;
         };
 

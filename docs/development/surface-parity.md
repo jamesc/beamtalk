@@ -580,10 +580,20 @@ flattening implementation):
   keys (`protocol_use_key`), so editing `pkg`'s protocol rebuilds the file that
   names it and editing another package's same-named one does not.
   `ProtocolRegistry::add_pre_loaded` (conformance, a protocol *type* by bare
-  name) stays first-wins by bare name: a bare protocol type name has no
-  package qualifier to resolve by. LSP / `ProjectIndex` carry unstamped
-  dependency protocol ASTs, so there a qualified `uses:` still falls back to
-  the first same-named definition (not changed by BT-3684).
+  name) stays first-wins by bare name: a bare protocol type name has no package
+  qualifier to resolve by.
+- A protocol with no package stamp belongs to the package being compiled, so it
+  answers a qualifier only if that qualifier *is* the current package
+  (`trait_expansion::resolve_protocol_key` / `expand_module_in_package`, one rule
+  shared by the flattener, `check_after_hierarchy` and the build's
+  `protocol_hashes`). A mistyped qualifier, or one naming a dependency whose
+  protocol has no provisions (never carried), is "no source available" rather
+  than silently flattening the project's same-named protocol. Where the package
+  is unknown (REPL/script sessions, `beamtalk test` fixtures, offline MCP scan,
+  codegen's re-flattening in `lower_module_for_codegen`, which only runs on
+  analysis-accepted code) an unstamped protocol answers any qualifier, as
+  before. LSP / `ProjectIndex` stamp a dependency file's protocols from its
+  `_build/deps/<name>/` path.
 - MCP `lint`/`diagnostic_summary` flatten the infos with the package's
   provision-bearing protocols, but still do not pass same-package protocol
   ASTs to the per-file analysis (pre-existing gap noted in
