@@ -132,6 +132,18 @@ pub fn expand_module(
     expand_module_in_package(module, external_protocols, None)
 }
 
+/// The package a compile reports as `current_package`, when it is a real one:
+/// `None` for the language service's placeholder
+/// ([`CURRENT_PROJECT_PACKAGE_MARKER`](crate::semantic_analysis::CURRENT_PROJECT_PACKAGE_MARKER),
+/// a file under no known workspace root), which names no package a qualifier
+/// could be compared with. The one place callers apply that rule before passing
+/// a package to [`expand_module_in_package`] and [`check_after_hierarchy`].
+#[must_use]
+pub fn known_package(current_package: Option<&str>) -> Option<&str> {
+    current_package
+        .filter(|package| *package != crate::semantic_analysis::CURRENT_PROJECT_PACKAGE_MARKER)
+}
+
 /// [`expand_module`] for a module compiled as part of package
 /// `current_package`, when that is known (BT-3684): a qualified
 /// `uses: pkg@Name` then resolves in `pkg`'s protocols, or — only when `pkg` *is*

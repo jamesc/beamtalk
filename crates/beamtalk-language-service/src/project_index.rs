@@ -60,27 +60,11 @@ pub(crate) fn build_hierarchy_with_trait_origins(
     (result, diags)
 }
 
-/// Package stamp used for a same-project (non-dependency, non-stdlib) file
-/// under no known workspace root's `AliasInfo.package`.
-///
-/// The language service has no manifest parser of its own — parsing
-/// `beamtalk.toml` is deliberately `beamtalk-lsp`'s concern, not
-/// `beamtalk-core`'s (mirrors why `beamtalk-lsp/src/server/config.rs`'s
-/// dependency preload is filesystem-driven rather than manifest-driven —
-/// see that module's `dependency_src_dirs` doc). `beamtalk-lsp` reads each workspace
-/// root's real `beamtalk.toml` `[package] name` and passes it in via
-/// [`ProjectIndex::set_root_packages`] — [`Self::package_for_alias_stamping`]
-/// consults that map first, so two distinct real packages opened as sibling
-/// workspace roots get distinct stamps instead of colliding. This fixed
-/// marker is only the fallback for a file under no registered root (a
-/// REPL/script file, or a workspace with no `[package] name` set) — not a
-/// real package name, but stable and consistent within one [`ProjectIndex`],
-/// which is all [`AliasRegistry::add_pre_loaded`]'s internal/cross-package
-/// exclusion needs to tell a same-project alias apart from a dependency's.
-/// `$` is not a valid character in a Hex/`beamtalk.toml` package name, so
-/// this can never collide with a real dependency's directory-derived stamp
-/// (see [`dependency_package_for_path`]) or a real root package name.
-const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
+// `CURRENT_PROJECT_PACKAGE_MARKER` — the package stamp used for a same-project
+// (non-dependency, non-stdlib) file under no known workspace root — is defined
+// in `beamtalk-core` (it is also how trait resolution recognises a package that
+// is not really known, BT-3684); see its doc.
+use beamtalk_core::semantic_analysis::CURRENT_PROJECT_PACKAGE_MARKER;
 
 /// Package stamp for a stdlib file's `AliasInfo.package`, mirroring the CLI
 /// build pipeline's convention (`build_stdlib.rs`'s `generate_app_file`,

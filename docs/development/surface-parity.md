@@ -593,7 +593,11 @@ flattening implementation):
   codegen's re-flattening in `lower_module_for_codegen`, which only runs on
   analysis-accepted code) an unstamped protocol answers any qualifier, as
   before. LSP / `ProjectIndex` stamp a dependency file's protocols from its
-  `_build/deps/<name>/` path.
+  `_build/deps/<name>/` path, and its `$project` placeholder `current_package`
+  (a file under no registered workspace root, e.g. a manifest-less workspace or
+  a `didOpen` racing the root-package load) counts as an unknown package
+  (`trait_expansion::known_package`), so `uses: my_app@Parser` of the project's
+  own protocol is accepted there exactly as `beamtalk build` accepts it.
 - MCP `lint`/`diagnostic_summary` flatten the infos with the package's
   provision-bearing protocols, but still do not pass same-package protocol
   ASTs to the per-file analysis (pre-existing gap noted in
