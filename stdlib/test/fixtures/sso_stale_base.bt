@@ -125,12 +125,14 @@ Object subclass: SsoStaleBase
   // BT-3675 known limit: a closure stored in a local and invoked by a LATER
   // statement exports into the scope of the statement that built it, which
   // was already refreshed, so its writes are not kept (ADR 0110).
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class deferred -> Integer =>
     b := [self foo]
     b value
     self noop
     self.hits
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class deferredInArm -> Integer =>
     [
       b := [self foo]
@@ -140,6 +142,7 @@ Object subclass: SsoStaleBase
     ] on: Error do: [:e | nil]
     self.hits
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class deferredTwice -> Integer =>
     b := [self foo]
     b value
@@ -148,6 +151,7 @@ Object subclass: SsoStaleBase
     self.hits
 
   // The closure's write is lost, but a writing send in the same body is kept.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class deferredThenSend -> Integer =>
     b := [self foo]
     b value
@@ -155,6 +159,7 @@ Object subclass: SsoStaleBase
     self.hits
 
   // The stored closure also holds statements of its own.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class deferredWithStatements -> Integer =>
     b := [
       x := self noop
@@ -175,24 +180,29 @@ Object subclass: SsoStaleBase
     self.hits := self.hits + 1
     aBlock value
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class viaTimedNoWrite -> Integer =>
     self timed: [self noop]
     self.hits
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class viaTimedWriting -> Integer =>
     self timed: [self foo]
     self.hits
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class viaSection -> Integer =>
     self section: [self foo]
     self.hits
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class viaSectionThenSend -> Integer =>
     self section: [self foo]
     self noop
     self.hits
 
   // Stored closure with an own-class (non-override) mutating selector.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class storedBump -> Integer =>
     b := [self bump]
     b value
@@ -204,6 +214,7 @@ Object subclass: SsoStaleBase
   // chain after that statement's refresh consumed it.
   class nextId -> Integer => self bump
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class staleAfterRaise -> Integer =>
     b := [self nextId]
     [
@@ -213,6 +224,7 @@ Object subclass: SsoStaleBase
     id := b value
     id
 
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class staleAfterBump -> Integer =>
     b := [self nextId]
     b value
@@ -222,6 +234,7 @@ Object subclass: SsoStaleBase
 
   // The same HOM limit inside a confined scope (a loop body). A HOM that writes
   // a class variable itself is a compile error inside a bare block.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class viaSectionInLoop -> Integer =>
     #(1) do: [:x | self section: [self foo]]
     self.hits

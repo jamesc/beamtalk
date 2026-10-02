@@ -976,6 +976,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
+    // BT-3681 (ADR 0110): a stored closure invoked by a later statement, or a
+    // block passed to a user-defined class-side HOM, whose class-side self-send
+    // class-variable write is not kept.
+    validators::check_stored_closure_class_var_writes(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     validators::check_value_slot_assignment(
         module,
         &result.class_hierarchy,
