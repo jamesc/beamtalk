@@ -170,6 +170,7 @@ mod class_var_scope_tokens;
 mod class_var_shadow_contract;
 mod control_flow;
 mod dispatch;
+mod expect_directive_statement;
 mod expressions;
 mod gen_server;
 mod late_reconcile_conformance;
