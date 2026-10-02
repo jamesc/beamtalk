@@ -29,8 +29,9 @@
 //! by a class of this module is judged by the codegen gates' own rule
 //! ([`compute_class_var_mutating_selectors`], reused, not copied) run on the
 //! *defining* class (so a pure `class sealed` method inherited from a parent in
-//! the same module is not flagged) and, for a `self` send, by whether a
-//! subclass may override it; a user-defined method whose defining class's body
+//! the same module is not flagged, unless it makes a `self` send, which
+//! late-binds to the receiving class's overrides) and, for a `self` send, by
+//! whether a subclass may override it; a user-defined method whose defining class's body
 //! is not visible here (a parent in another file or package, or a method added
 //! by a standalone `Foo class >> bar` definition) is assumed to write, which is
 //! the same "assume the worst for a selector the class does not define" call
@@ -66,9 +67,11 @@
 use crate::ast::{Block, ClassDefinition, Expression, ExpressionStatement, MethodKind, Module};
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::ClassHierarchy;
-use crate::semantic_analysis::block_facts::compute_class_var_mutating_selectors;
+use crate::semantic_analysis::block_facts::{
+    analyze_method_body, compute_class_var_mutating_selectors,
+};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
-use crate::state_threading_selectors::opaque_fold_callable_arg;
+use crate::state_threading_selectors::{is_opaque_callable_hom_send, opaque_fold_callable_arg};
 use std::collections::{HashMap, HashSet};
 
 /// A class defined in the module being validated, with the class-variable
@@ -86,6 +89,23 @@ impl ModuleClass<'_> {
             .class_methods
             .iter()
             .any(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
+    }
+
+    /// Whether the body of the class method `selector` makes any `self` send.
+    /// A `self` send late-binds to the *receiving* class, whose override (in a
+    /// subclass of this one) may write even though this class's own body is
+    /// pure, so the defining class's mutating set cannot vouch for such a
+    /// method when it is reached from a subclass.
+    fn makes_self_send(&self, selector: &str) -> bool {
+        self.class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
+            .any(|m| {
+                !analyze_method_body(&m.parameters, &m.body)
+                    .self_send_selectors
+                    .is_empty()
+            })
     }
 }
 
@@ -212,7 +232,10 @@ impl ClassCtx<'_> {
     ///   run on the class that defines it, cannot prove it free of
     ///   class-variable mutation. That needs the defining class's body: when it
     ///   is not in this module (or the method comes from a standalone
-    ///   definition), the call is "not defined here, assume the worst".
+    ///   definition), the call is "not defined here, assume the worst". A
+    ///   method inherited from an ancestor that makes any `self` send is also
+    ///   assumed to write: that send late-binds to the receiving class, whose
+    ///   override the ancestor's body cannot see.
     fn may_write_class_var(&self, selector: &str, via_class_reference: bool) -> bool {
         let Some(method) = self.hierarchy.find_class_method(self.class_name, selector) else {
             return false;
@@ -224,8 +247,12 @@ impl ClassCtx<'_> {
         if overridable {
             return true;
         }
+        let inherited = method.defined_in.as_str() != self.class_name;
         match self.module_classes.get(method.defined_in.as_str()) {
-            Some(defining) if defining.defines(selector) => defining.mutating.contains(selector),
+            Some(defining) if defining.defines(selector) => {
+                defining.mutating.contains(selector)
+                    || (inherited && defining.makes_self_send(selector))
+            }
             _ => true,
         }
     }
@@ -429,9 +456,14 @@ fn later_use(later: &[ExpressionStatement], name: &str, ctx: &ClassCtx<'_>) -> O
                 && arguments.iter().any(is_local)
             {
                 found = Some(LaterUse::PassedTo(*span, sel.to_string()));
-            } else if opaque_fold_callable_arg(&sel, arguments)
-                .is_some_and(|callable| is_local(callable.unwrap_parens()))
+            } else if is_opaque_callable_hom_send(e)
+                && opaque_fold_callable_arg(&sel, arguments)
+                    .is_some_and(|callable| is_local(callable.unwrap_parens()))
             {
+                // `is_opaque_callable_hom_send` also excludes `self`/`super`
+                // receivers: those dispatch to a (possibly user-defined)
+                // method, not the collection HOM, so "which invokes it" would
+                // be a guess.
                 found = Some(LaterUse::PassedToCollection(*span, sel.to_string()));
             }
         });

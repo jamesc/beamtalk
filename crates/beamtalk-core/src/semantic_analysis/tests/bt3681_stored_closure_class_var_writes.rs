@@ -458,6 +458,82 @@ NoState class >> run -> Integer =>
 }
 
 #[test]
+fn inherited_pure_looking_method_that_self_sends_still_warns() {
+    // BT-3688 review: `pure` is `class sealed` and its own body writes nothing,
+    // but its `self helper` late-binds to the receiving class, whose override
+    // writes. Judging it by the defining class's mutating set alone would miss
+    // that, so an inherited method that makes any `self` send stays flagged.
+    let base = "Object subclass: Base
+  class sealed pure -> Integer => self helper
+
+  class sealed nested -> Integer => #(1) inject: 0 into: [:a :x | self helper]
+
+  class helper -> Integer => 0
+
+";
+    for (kind, leaf) in [
+        ("sealed", "sealed Base subclass: Leaf"),
+        ("open", "Base subclass: Leaf"),
+    ] {
+        for call in ["pure", "nested"] {
+            let diags = advisories(&format!(
+                "{base}{leaf}
+  classState: n = 0
+
+  class helper -> Integer => self.n := self.n + 1
+
+  class run -> Integer =>
+    b := [self {call}]
+    b value
+    0
+"
+            ));
+            assert_eq!(diags.len(), 1, "{kind} Leaf, {call}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn collection_hom_check_skips_self_and_super_receivers() {
+    // BT-3688 review: `super do: b` / `self do: b` reach a (possibly
+    // user-defined) method, not the collection HOM, so the definite
+    // "which invokes it" claim must not be made for them.
+    let header = "Object subclass: Base
+  classState: n = 0
+
+  class bump -> Integer => self.n := self.n + 1
+
+  class do: aBlock :: Block -> Integer => aBlock value: 1
+
+";
+    let via_super = advisories(&format!(
+        "{header}Base subclass: Child
+  class run -> Integer =>
+    b := [:x | self bump]
+    super do: b
+    0
+"
+    ));
+    assert!(via_super.is_empty(), "got: {via_super:?}");
+    // `self do: b` resolves to the user-defined class-side `do:`, which keeps
+    // the hedged user-HOM wording rather than the collection one.
+    let via_self = advisories(&format!(
+        "{header}Base subclass: Child
+  class run -> Integer =>
+    b := [:x | self bump]
+    self do: b
+    0
+"
+    ));
+    assert_eq!(via_self.len(), 1, "got: {via_self:?}");
+    assert!(
+        via_self[0].message.contains("which may invoke it"),
+        "{}",
+        via_self[0].message
+    );
+}
+
+#[test]
 fn pure_class_sealed_method_inherited_from_a_module_parent_is_not_flagged() {
     // BT-3688: the parent is in this module, so its body is visible; a pure
     // `class sealed` method cannot be overridden and writes nothing.
