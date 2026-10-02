@@ -151,9 +151,10 @@ A block that runs outside its home invocation cannot reach the live class variab
 #beamtalk_error{kind = class_state_unreachable, class = 'Counter', selector = bump,
                 message = <<"Counter's class variable n cannot be written from this process">>,
                 details = #{class_variable => n},
-                hint = <<"A block that writes Counter's class variables ran outside a Counter class "
+                hint = <<"A block that writes Counter's class variables ran outside any Counter class "
                          "method (it was passed to another class's class method or an actor, or "
-                         "stored or returned and run later). A block can read Counter's class "
+                         "stored or returned and run later outside Counter's own methods). A block "
+                         "can read Counter's class "
                          "variables anywhere, as the values they had when the block was made, but "
                          "can only write them from Counter's own method: return the value and "
                          "assign it there.">>}
