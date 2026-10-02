@@ -454,27 +454,45 @@ fn protocol_lookup<'a>(
     protocols
 }
 
-/// Resolves the protocol a `uses:` line names (ADR 0127 §3).
+/// The one rule by which a [`protocol_use_key`] finds its protocol in a map
+/// keyed as [`first_wins_protocol_map`] keys it (ADR 0127 §3).
 ///
-/// A bare `uses: Name` takes the first definition of `Name`. A qualified
-/// `uses: pkg@Name` takes `pkg`'s own `Name` and never another package's
-/// (BT-3684). A protocol with no [`ProtocolDefinition::package`] belongs to the
-/// package being compiled — this module's or a sibling file's — so it also
-/// answers a qualifier, which may name the current package.
+/// A bare `Name` takes the first definition of `Name`. A qualified `pkg@Name`
+/// takes `pkg`'s own `Name` and never another package's (BT-3684). A protocol
+/// with no [`ProtocolDefinition::package`] belongs to the package being
+/// compiled — this module's or a sibling file's — so it also answers a
+/// qualifier, which may name the current package (`is_current_package` says
+/// whether an entry is unstamped). Shared by the flattener and the build's
+/// incremental-key hashing, so both follow the same protocol.
+fn resolve_protocol_entry<'a, T>(
+    protocols: &'a HashMap<EcoString, T>,
+    key: &str,
+    is_current_package: impl Fn(&T) -> bool,
+) -> Option<&'a T> {
+    let named = protocols.get(key);
+    let Some((_, name)) = key.split_once('@') else {
+        return named;
+    };
+    named.or_else(|| protocols.get(name).filter(|p| is_current_package(p)))
+}
+
+/// Resolves a [`protocol_use_key`] in a [`first_wins_protocol_map`]; see
+/// [`resolve_protocol_entry`] for the rule.
+#[must_use]
+#[allow(clippy::implicit_hasher)] // concrete HashMap, like `expand_module`'s `external_protocols`
+pub fn resolve_protocol_key<'a>(
+    external_protocols: &'a HashMap<EcoString, ProtocolDefinition>,
+    key: &str,
+) -> Option<&'a ProtocolDefinition> {
+    resolve_protocol_entry(external_protocols, key, |p| p.package.is_none())
+}
+
+/// Resolves the protocol a `uses:` line names within `protocols`.
 fn resolve_used_protocol<'a>(
     protocols: &ProtocolLookup<'a>,
     use_: &ProtocolUse,
 ) -> Option<&'a ProtocolDefinition> {
-    let named = protocols.get(&protocol_use_key(use_)).copied();
-    if use_.package.is_none() {
-        return named;
-    }
-    named.or_else(|| {
-        protocols
-            .get(&use_.protocol.name)
-            .copied()
-            .filter(|p| p.package.is_none())
-    })
+    resolve_protocol_entry(protocols, &protocol_use_key(use_), |p| p.package.is_none()).copied()
 }
 
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s

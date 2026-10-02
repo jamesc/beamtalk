@@ -356,8 +356,10 @@ fn test_incremental_pass1_persists_protocol_uses_for_a_cache_fresh_file() {
 
 /// BT-3684: a package-qualified `uses: pkg_b@Retryable` is keyed by `pkg_b`'s
 /// protocol: editing it rebuilds the user, editing an unrelated dependency's
-/// same-named protocol does not — and a bare `uses: Retryable` follows the
-/// first definition, as `trait_expansion` resolves it.
+/// same-named protocol does not — a bare `uses: Retryable` follows the first
+/// definition, and a qualifier naming the *current* package (`uses: my_app@Greetable`,
+/// whose project protocol carries no package stamp) follows the project's own
+/// protocol, all as `trait_expansion` resolves them.
 #[test]
 fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
     let temp = TempDir::new().unwrap();
@@ -373,9 +375,12 @@ fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
     );
     let bare = src_dir.join("bare.bt");
     write_test_file(&bare, "Object subclass: Bare\n  uses: Retryable\n");
+    let own = src_dir.join("own.bt");
+    write_test_file(&own, "Object subclass: Own\n  uses: my_app@Greetable\n");
     write_test_file(&build_dir.join("bt@qualified.beam"), "BEAM");
     write_test_file(&build_dir.join("bt@bare.beam"), "BEAM");
-    let source_files = vec![qualified.clone(), bare.clone()];
+    write_test_file(&build_dir.join("bt@own.beam"), "BEAM");
+    let source_files = vec![qualified.clone(), bare.clone(), own.clone()];
     let pairs = make_pairs(&source_files, &build_dir);
 
     // The `uses:` keys come from Pass 1, exactly as a build records them.
@@ -396,22 +401,32 @@ fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
         pass1.file_protocol_uses.get(&bare),
         Some(&vec![ecow::EcoString::from("Retryable")])
     );
-    let retryable = |package: &str, selector: &str| {
+    assert_eq!(
+        pass1.file_protocol_uses.get(&own),
+        Some(&vec![ecow::EcoString::from("my_app@Greetable")])
+    );
+    let protocol = |package: Option<&str>, name: &str, selector: &str, body: &str| {
         let source = format!(
-            "Protocol define: Retryable\n  name -> String\n\n  {selector} -> String => self name\n"
+            "Protocol define: {name}\n  name -> String\n\n  {selector} -> String => {body}\n"
         );
         let (module, _) = beamtalk_core::source_analysis::parse(
             beamtalk_core::source_analysis::lex_with_eof(&source),
         );
         let mut def = module.protocols[0].clone();
-        def.package = Some(package.into());
+        def.package = package.map(Into::into);
         def
     };
-    let build = |force: bool, a_selector: &str, b_selector: &str| {
-        let hashes = crate::commands::util::protocol_hashes(&[
-            retryable("pkg_a", a_selector),
-            retryable("pkg_b", b_selector),
-        ]);
+    let build = |force: bool, a_selector: &str, b_selector: &str, greet_body: &str| {
+        // The project's own protocol is unstamped; dependencies' are stamped.
+        let defs = [
+            protocol(None, "Greetable", "greet", greet_body),
+            protocol(Some("pkg_a"), "Retryable", a_selector, "self name"),
+            protocol(Some("pkg_b"), "Retryable", b_selector, "self name"),
+        ];
+        let hashes = crate::commands::util::protocol_hashes(
+            &defs,
+            pass1.file_protocol_uses.values().flatten(),
+        );
         let changes = detect_changes(
             &source_files,
             &build_dir,
@@ -428,9 +443,9 @@ fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
         changes
     };
 
-    build(true, "aTag", "bTag");
+    build(true, "aTag", "bTag", "\"hi\"");
 
-    let unrelated_edit = build(false, "aTag2", "bTag");
+    let unrelated_edit = build(false, "aTag2", "bTag", "\"hi\"");
     assert_eq!(
         unrelated_edit.changed_files,
         vec![bare.clone()],
@@ -438,11 +453,21 @@ fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
          not the file that names pkg_b's"
     );
 
-    let named_edit = build(false, "aTag2", "bTag2");
+    let named_edit = build(false, "aTag2", "bTag2", "\"hi\"");
     assert_eq!(
         named_edit.changed_files,
         vec![qualified],
         "editing pkg_b's Retryable must rebuild the file that names it"
+    );
+
+    // Only the body of the project's own protocol changes: selectors and types,
+    // hence `trait_surface_hash`, stay put, so the self-qualified user is
+    // rebuilt through its protocol hash alone.
+    let own_edit = build(false, "aTag2", "bTag2", "\"hello\"");
+    assert_eq!(
+        own_edit.changed_files,
+        vec![own],
+        "editing the project's own protocol must rebuild a file that names it as `my_app@Greetable`"
     );
 }
 
@@ -780,7 +805,10 @@ fn detect_and_record(project: &Utf8Path) -> (Vec<String>, Vec<String>) {
         has_native_deps: false,
     };
     let index = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
-    let protocol_hashes = crate::commands::util::protocol_hashes(&index.all_protocol_defs);
+    let protocol_hashes = crate::commands::util::protocol_hashes(
+        &index.all_protocol_defs,
+        index.file_protocol_uses.values().flatten(),
+    );
     let pairs = compute_file_module_pairs(&env).unwrap();
     fs::create_dir_all(&env.build_dir).unwrap();
     let changes = detect_changes(

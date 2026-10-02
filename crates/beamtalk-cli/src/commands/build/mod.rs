@@ -246,7 +246,10 @@ fn execute_build_passes(
     // source file regardless of whether Pass 1 re-scanned it this build,
     // not just the ones in `index.cached_asts` (a cache-fresh file has no
     // `cached_asts` entry at all).
-    let protocol_hashes = crate::commands::util::protocol_hashes(&index.all_protocol_defs);
+    let protocol_hashes = crate::commands::util::protocol_hashes(
+        &index.all_protocol_defs,
+        index.file_protocol_uses.values().flatten(),
+    );
     let file_protocol_uses = index.file_protocol_uses.clone();
 
     // Per-file change detection — only recompile files whose source

@@ -119,19 +119,32 @@ pub(crate) fn protocol_content_hash(protocol: &beamtalk_core::ast::ProtocolDefin
     sha256_hex(beamtalk_core::unparse::unparse_module(&wrapper).as_bytes())
 }
 
-/// [`protocol_content_hash`] of every protocol in `defs` (project first, then
-/// dependencies), keyed as `trait_expansion` resolves a `uses:` line: the bare
-/// name — the first definition wins — and `pkg@Name` for a protocol carried in
-/// from another package. A file's `uses:` keys
+/// [`protocol_content_hash`] of the protocol each of `used_keys` — a file's
+/// `uses:` keys
 /// ([`protocol_use_key`](beamtalk_core::semantic_analysis::trait_expansion::protocol_use_key))
-/// therefore find the hash of the protocol that is actually flattened (BT-3684).
+/// — flattens, keyed by that `uses:` key (BT-3684). The protocol is the one
+/// `trait_expansion` resolves the key to
+/// ([`resolve_protocol_key`](beamtalk_core::semantic_analysis::trait_expansion::resolve_protocol_key)
+/// over `defs`, project first, then dependencies), including a qualifier
+/// naming the current package, whose unstamped protocol has no `pkg@Name`
+/// entry of its own. A key that resolves to no provision-bearing protocol has
+/// nothing flattened in and gets no entry (an unknown or body-less protocol is
+/// diagnosed at compile time).
 #[must_use]
-pub(crate) fn protocol_hashes(
+pub(crate) fn protocol_hashes<'a>(
     defs: &[beamtalk_core::ast::ProtocolDefinition],
+    used_keys: impl IntoIterator<Item = &'a ecow::EcoString>,
 ) -> std::collections::HashMap<ecow::EcoString, String> {
-    beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(defs.iter().cloned())
+    use beamtalk_core::semantic_analysis::trait_expansion::{
+        first_wins_protocol_map, resolve_protocol_key,
+    };
+    let protocols = first_wins_protocol_map(defs.iter().cloned());
+    used_keys
         .into_iter()
-        .map(|(key, protocol)| (key, protocol_content_hash(&protocol)))
+        .filter_map(|key| {
+            let protocol = resolve_protocol_key(&protocols, key)?;
+            Some((key.clone(), protocol_content_hash(protocol)))
+        })
         .collect()
 }
 
