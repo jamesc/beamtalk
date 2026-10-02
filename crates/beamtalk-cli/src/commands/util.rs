@@ -112,11 +112,55 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 /// detecting a *semantic* change to what `uses:` would flatten in.
 #[must_use]
 pub(crate) fn protocol_content_hash(protocol: &beamtalk_core::ast::ProtocolDefinition) -> String {
+    #[cfg(test)]
+    PROTOCOL_HASHES_COMPUTED.with(|n| n.set(n.get() + 1));
     let wrapper = beamtalk_core::ast::Module {
         protocols: vec![protocol.clone()],
         ..beamtalk_core::ast::Module::new(Vec::new(), protocol.span)
     };
     sha256_hex(beamtalk_core::unparse::unparse_module(&wrapper).as_bytes())
+}
+
+// How many times `protocol_content_hash` ran on this thread, for tests that
+// check a protocol is hashed once however many files use it.
+#[cfg(test)]
+thread_local! {
+    static PROTOCOL_HASHES_COMPUTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// [`protocol_content_hash`] of the protocol each of `used_keys` — a file's
+/// `uses:` keys
+/// ([`protocol_use_key`](beamtalk_core::semantic_analysis::trait_expansion::protocol_use_key))
+/// — flattens, keyed by that `uses:` key (BT-3684). The protocol is the one
+/// `trait_expansion` resolves the key to
+/// ([`resolve_protocol_key`](beamtalk_core::semantic_analysis::trait_expansion::resolve_protocol_key)
+/// over `defs`, project first, then dependencies), including a qualifier
+/// naming the current package, whose unstamped protocol has no `pkg@Name`
+/// entry of its own. A key that resolves to no provision-bearing protocol has
+/// nothing flattened in and gets no entry (an unknown or body-less protocol is
+/// diagnosed at compile time). `current_package` is the package being built,
+/// which the resolution rule needs for a qualifier naming it. `used_keys`
+/// repeats a key once per file that uses it; each distinct key is hashed once.
+#[must_use]
+pub(crate) fn protocol_hashes<'a>(
+    defs: &[beamtalk_core::ast::ProtocolDefinition],
+    used_keys: impl IntoIterator<Item = &'a ecow::EcoString>,
+    current_package: Option<&str>,
+) -> std::collections::HashMap<ecow::EcoString, String> {
+    use beamtalk_core::semantic_analysis::trait_expansion::{
+        first_wins_protocol_map, resolve_protocol_key,
+    };
+    let protocols = first_wins_protocol_map(defs.iter().cloned());
+    used_keys
+        .into_iter()
+        .fold(std::collections::HashMap::new(), |mut hashes, key| {
+            if !hashes.contains_key(key) {
+                if let Some(protocol) = resolve_protocol_key(&protocols, key, current_package) {
+                    hashes.insert(key.clone(), protocol_content_hash(protocol));
+                }
+            }
+            hashes
+        })
 }
 
 /// Hash of the cross-file class surface contributed by trait flattening
@@ -309,6 +353,46 @@ pub fn find_files(path: &Utf8Path, extensions: &[&str]) -> Result<Vec<Utf8PathBu
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn protocol_hashes_hashes_a_protocol_used_by_many_files_once() {
+        let (module, _) =
+            beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(
+                "Protocol define: Greetable\n  name -> String\n\n  greet -> String => self name\n",
+            ));
+        let used: Vec<ecow::EcoString> = ["Greetable", "my_app@Greetable", "Greetable", "Unknown"]
+            .into_iter()
+            .cycle()
+            .take(40)
+            .map(Into::into)
+            .collect();
+        let before = PROTOCOL_HASHES_COMPUTED.with(std::cell::Cell::get);
+
+        let hashes = protocol_hashes(&module.protocols, &used, None);
+
+        let computed = PROTOCOL_HASHES_COMPUTED.with(std::cell::Cell::get) - before;
+        assert_eq!(computed, 2, "one hash per distinct resolvable key");
+        assert_eq!(hashes.len(), 2, "`Unknown` resolves to no protocol");
+        assert_eq!(hashes["Greetable"], hashes["my_app@Greetable"]);
+    }
+
+    #[test]
+    fn protocol_hashes_follows_the_flatteners_rule_for_a_qualifier_naming_another_package() {
+        let (module, _) =
+            beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(
+                "Protocol define: Greetable\n  name -> String\n\n  greet -> String => self name\n",
+            ));
+        let used: Vec<ecow::EcoString> =
+            vec!["my_app@Greetable".into(), "gretable@Greetable".into()];
+
+        let hashes = protocol_hashes(&module.protocols, &used, Some("my_app"));
+
+        assert!(hashes.contains_key("my_app@Greetable"));
+        assert!(
+            !hashes.contains_key("gretable@Greetable"),
+            "a qualifier naming another package must not hash the project's own protocol"
+        );
+    }
 
     #[test]
     fn surface_hash_of_error_is_not_constant_null_hash() {

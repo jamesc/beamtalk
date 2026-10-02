@@ -814,6 +814,7 @@ fn analyse(source: &str) -> Vec<Diagnostic> {
         &hierarchy,
         &registry,
         &HashMap::new(),
+        None,
     ));
     diagnostics
 }
@@ -1506,4 +1507,229 @@ fn flatten_keeps_provisions_when_the_later_same_named_class_also_uses_the_trait(
         selectors.contains(&"tag".to_string()),
         "both Widgets use Tagged: {selectors:?}"
     );
+}
+
+// ── package-qualified protocol resolution (BT-3684) ─────────────────────
+
+/// A provision-bearing `Retryable` stamped as carried in from `package`, whose
+/// single provision is named `selector` so the test can tell which one a
+/// `uses:` line flattened.
+fn carried_retryable(package: &str, selector: &str) -> ProtocolDefinition {
+    let mut def = parse_protocol_def(&format!(
+        "Protocol define: Retryable
+  name -> String
+
+  {selector} -> String => self name"
+    ));
+    def.package = Some(package.into());
+    def
+}
+
+fn provided_selectors(module: &Module, class: &str) -> Vec<String> {
+    find_class(module, class)
+        .methods
+        .iter()
+        .map(|m| m.selector.name().to_string())
+        .filter(|s| s != "name")
+        .collect()
+}
+
+#[test]
+fn package_qualified_uses_resolves_against_that_packages_protocol_only() {
+    // Two unrelated dependencies both declare `Retryable`; `pkg_a`'s comes first.
+    let external = first_wins_protocol_map([
+        carried_retryable("pkg_a", "aTag"),
+        carried_retryable("pkg_b", "bTag"),
+    ]);
+    let mut module = parse_source(
+        "Object subclass: Widget
+  uses: pkg_b@Retryable
+  name -> String => \"w\"",
+    );
+
+    let (diagnostics, origins) = expand_module(&mut module, &external);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(provided_selectors(&module, "Widget"), ["bTag"]);
+    assert_eq!(
+        origins.get(&(EcoString::from("Widget"), EcoString::from("bTag"))),
+        Some(&EcoString::from("Retryable"))
+    );
+}
+
+#[test]
+fn package_qualified_uses_resolves_each_package_independently() {
+    let external = first_wins_protocol_map([
+        carried_retryable("pkg_a", "aTag"),
+        carried_retryable("pkg_b", "bTag"),
+    ]);
+    let mut module = parse_source(
+        "Object subclass: FromA
+  uses: pkg_a@Retryable
+  name -> String => \"a\"
+
+Object subclass: FromB
+  uses: pkg_b@Retryable
+  name -> String => \"b\"",
+    );
+
+    let (diagnostics, _origins) = expand_module(&mut module, &external);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(provided_selectors(&module, "FromA"), ["aTag"]);
+    assert_eq!(provided_selectors(&module, "FromB"), ["bTag"]);
+}
+
+#[test]
+fn bare_uses_still_resolves_to_the_first_definition() {
+    let external = first_wins_protocol_map([
+        carried_retryable("pkg_a", "aTag"),
+        carried_retryable("pkg_b", "bTag"),
+    ]);
+    let mut module = parse_source(
+        "Object subclass: Widget
+  uses: Retryable
+  name -> String => \"w\"",
+    );
+
+    let (diagnostics, _origins) = expand_module(&mut module, &external);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(provided_selectors(&module, "Widget"), ["aTag"]);
+}
+
+#[test]
+fn package_qualified_uses_of_a_package_without_that_protocol_is_not_captured_by_another() {
+    // Only `pkg_a` declares `Retryable`: `pkg_b@Retryable` must not resolve to it.
+    let external = first_wins_protocol_map([carried_retryable("pkg_a", "aTag")]);
+    let mut module = parse_source(
+        "Object subclass: Widget
+  uses: pkg_b@Retryable
+  name -> String => \"w\"",
+    );
+
+    let (diagnostics, _origins) = expand_module(&mut module, &external);
+
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("no source available for protocol `Retryable`")),
+        "{diagnostics:?}"
+    );
+    assert!(provided_selectors(&module, "Widget").is_empty());
+}
+
+#[test]
+fn check_after_hierarchy_validates_against_the_protocol_the_qualifier_names() {
+    // `excluding:` a selector only `pkg_b`'s `Retryable` provides is valid
+    // there; checked against `pkg_a`'s it would be an unknown selector.
+    let external = first_wins_protocol_map([
+        carried_retryable("pkg_a", "aTag"),
+        carried_retryable("pkg_b", "bTag"),
+    ]);
+    let mut module = parse_source(
+        "Object subclass: Widget
+  uses: pkg_b@Retryable excluding: #(#bTag)
+  name -> String => \"w\"",
+    );
+    let (diagnostics, _origins) = expand_module(&mut module, &external);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let registry = ProtocolRegistry::default();
+
+    let diagnostics = check_after_hierarchy(&module, &hierarchy, &registry, &external, None);
+
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("does not provide")),
+        "excluding `bTag` names a provision of pkg_b's Retryable: {diagnostics:?}"
+    );
+}
+
+// ── a qualifier must name the current package to reach its protocols ────
+
+const OWN_PARSER: &str = "Protocol define: Parser
+  raw -> String
+
+  describe -> String => \"parses \" ++ self raw
+
+Object subclass: Lenient
+  uses: {qualifier}Parser
+  raw -> String => \"x\"";
+
+fn expand_in_package(
+    qualifier: &str,
+    external: &HashMap<EcoString, ProtocolDefinition>,
+    current_package: Option<&str>,
+) -> (Module, Vec<Diagnostic>) {
+    let mut module = parse_source(&OWN_PARSER.replace("{qualifier}", qualifier));
+    let (diagnostics, _origins) = expand_module_in_package(&mut module, external, current_package);
+    (module, diagnostics)
+}
+
+fn no_source_diagnostic(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics.iter().any(|d| {
+        d.message
+            .contains("no source available for protocol `Parser`")
+    })
+}
+
+#[test]
+fn qualifier_naming_the_current_package_resolves_its_own_protocol() {
+    let (module, diagnostics) = expand_in_package("my_app@", &HashMap::new(), Some("my_app"));
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn mistyped_qualifier_does_not_resolve_the_current_packages_protocol() {
+    let (module, diagnostics) = expand_in_package("jsno@", &HashMap::new(), Some("my_app"));
+
+    assert!(no_source_diagnostic(&diagnostics), "{diagnostics:?}");
+    assert!(!provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn qualifier_of_a_dependency_without_provisions_does_not_resolve_the_current_packages_protocol() {
+    // `pkg_b` declares a requirement-only `Parser`, which is never carried
+    // (`provision_bearing_protocols` drops it); `my_app` has its own, provision-
+    // bearing one. `uses: pkg_b@Parser` names a different protocol.
+    let (module, diagnostics) = expand_in_package("pkg_b@", &HashMap::new(), Some("my_app"));
+
+    assert!(no_source_diagnostic(&diagnostics), "{diagnostics:?}");
+    assert!(!provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn qualifier_resolves_against_a_sibling_files_protocol_of_the_current_package() {
+    // The protocol lives in another file of the same package, carried unstamped.
+    let mut module = parse_source(
+        "Object subclass: Lenient
+  uses: my_app@Parser
+  raw -> String => \"x\"",
+    );
+    let sibling = parse_protocol_def(
+        "Protocol define: Parser
+  raw -> String
+
+  describe -> String => \"parses \" ++ self raw",
+    );
+    let external = first_wins_protocol_map([sibling]);
+
+    let (diagnostics, _origins) = expand_module_in_package(&mut module, &external, Some("my_app"));
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
+}
+
+#[test]
+fn qualifier_resolves_any_unstamped_protocol_when_the_package_is_unknown() {
+    // No package identity (a REPL or script session): the stricter rule has
+    // nothing to compare the qualifier with.
+    let (module, diagnostics) = expand_in_package("json@", &HashMap::new(), None);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(provided_selectors(&module, "Lenient").contains(&"describe".to_string()));
 }

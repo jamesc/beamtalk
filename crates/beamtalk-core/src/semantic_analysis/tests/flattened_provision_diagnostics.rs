@@ -379,6 +379,7 @@ fn flattened_class_info_of_a_cross_file_trait_user_has_its_provisions() {
     let infos = crate::semantic_analysis::trait_expansion::extract_flattened_class_infos(
         &parse_ok(WIDGET),
         &tagged_defs(),
+        None,
     );
     let tag = infos[0]
         .methods
@@ -396,6 +397,7 @@ fn flattened_class_info_keeps_a_class_body_method_over_the_provision() {
     let infos = crate::semantic_analysis::trait_expansion::extract_flattened_class_infos(
         &parse_ok(widget),
         &tagged_defs(),
+        None,
     );
     let tags: Vec<_> = infos[0]
         .methods

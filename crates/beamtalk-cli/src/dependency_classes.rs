@@ -139,7 +139,7 @@ pub fn resolve_dependency_class_infos(
     let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();
-    let mut scanned: Vec<std::sync::Arc<ScannedDep>> = Vec::new();
+    let mut scanned: Vec<DiscoveredDep> = Vec::new();
 
     // BFS over the transitive dependency graph, matching
     // `discover_all_dep_roots`'s reachability: a queue of
@@ -179,39 +179,80 @@ pub fn resolve_dependency_class_infos(
                 continue;
             }
 
-            if let Some(scanned_dep) = scan_dep(&dep_root, &name) {
-                scanned.push(scanned_dep);
-            }
+            let scan = scan_dep(&dep_root, &name);
 
             // Queue this dependency's own dependencies for discovery,
             // reading whatever checkout is already on disk — still no
             // network I/O.
             let dep_manifest_path = dep_root.join("beamtalk.toml");
+            let mut dependencies = Vec::new();
             if let Ok(dep_parsed) = manifest::parse_manifest_full(&dep_manifest_path) {
+                dependencies = dep_parsed.dependencies.keys().cloned().collect();
                 if !dep_parsed.dependencies.is_empty() {
                     queue.push_back((dep_root, dep_parsed.dependencies));
                 }
             }
+
+            if let Some(scan) = scan {
+                scanned.push(DiscoveredDep {
+                    name,
+                    dependencies,
+                    scan,
+                });
+            }
         }
     }
 
-    // Flatten only now that every dependency's protocols are known: a
-    // dependency may `uses:` a trait of its own dependency, which BFS
-    // discovers after it (BT-3678). A dependency's own protocols win, then
-    // those of the others in discovery order.
-    for (index, dep) in scanned.iter().enumerate() {
-        let mut infos = dep.class_infos.clone();
-        let others = scanned
-            .iter()
-            .enumerate()
-            .filter(|(other, _)| *other != index)
-            .flat_map(|(_, other)| other.trait_users.protocol_defs().iter().cloned());
-        dep.trait_users.flatten(&mut infos, others, None);
+    // Flatten in the compile order of the graph compile, each dependency
+    // against its own protocols and then those of the dependencies before it
+    // (BT-3678), so the exports equal a cold build's (BT-3684).
+    let mut prior_protocol_defs: Vec<ProtocolDefinition> = Vec::new();
+    for dep in compile_order(scanned, &parsed.package.name) {
+        let mut infos = dep.scan.class_infos.clone();
+        dep.scan
+            .trait_users
+            .flatten(&mut infos, prior_protocol_defs.iter().cloned(), None);
         class_infos.extend(infos);
-        protocol_defs.extend(dep.trait_users.protocol_defs().iter().cloned());
+        let own_protocol_defs = dep.scan.trait_users.protocol_defs();
+        protocol_defs.extend(own_protocol_defs.iter().cloned());
+        prior_protocol_defs.extend(own_protocol_defs.iter().cloned());
     }
 
     (has_package_dependencies, class_infos, protocol_defs)
+}
+
+/// A dependency found on disk by [`resolve_dependency_class_infos`]'s walk.
+struct DiscoveredDep {
+    name: String,
+    /// Names of its own direct dependencies, from its `beamtalk.toml`.
+    dependencies: Vec<String>,
+    scan: std::sync::Arc<ScannedDep>,
+}
+
+/// `deps` in the order the graph compile (`beamtalk build`) compiles them
+/// ([`crate::dep_order::topological_order`]); in discovery order, with a
+/// warning, if the graph has a cycle. Dependencies named only as an edge —
+/// whose checkout is not on disk — are not part of it.
+fn compile_order(deps: Vec<DiscoveredDep>, root_name: &str) -> Vec<DiscoveredDep> {
+    let graph = deps
+        .iter()
+        .map(|dep| (dep.name.clone(), dep.dependencies.clone()))
+        .collect();
+    let order = match crate::dep_order::topological_order(&graph, root_name) {
+        Ok(order) => order,
+        Err(e) => {
+            warn!(error = %e, "Dependency graph is not orderable; flattening in discovery order");
+            return deps;
+        }
+    };
+    let mut by_name: HashMap<String, DiscoveredDep> = deps
+        .into_iter()
+        .map(|dep| (dep.name.clone(), dep))
+        .collect();
+    order
+        .iter()
+        .filter_map(|name| by_name.remove(name))
+        .collect()
 }
 
 /// Cheap staleness signal for a dependency's source tree: the
@@ -304,7 +345,9 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
     let mut class_infos = Vec::new();
     // Trait users and provision-bearing protocols (ADR 0127 §10a; BT-3591).
     let mut trait_users =
-        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::for_package(
+            dep_name,
+        );
     let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
