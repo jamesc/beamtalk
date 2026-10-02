@@ -96,29 +96,62 @@ fn expected_mismatches() -> Vec<Mismatch> {
             line: 72,
             shape: "letrec",
         },
-        // BT-3691: `readerSumToDo` (line 70), `readerSumTimesRepeat` (line 82) and
-        // `readerSumWhile` (line 106) of the sealed arm-export fixture: a
+        // BT-3691: nine loops of the sealed arm-export fixture, each a
         // class's own writing `self bump` nested in an `ifTrue:` arm of a
         // `to:do:` / `timesRepeat:` / `whileTrue:` body, exactly the BT-3690
-        // `armsToDo` / `armsTimesRepeat` shape below. The loop's own carry-out
-        // cannot thread a mutation nested in an arm; the write is recovered
-        // from the per-scope commit tokens (BT-3675) and the pure reader after
-        // the arm reads the scope's newest commit; pinned by
-        // `SelfSendArmExportTest>>testSealedReaderSum{ToDo,TimesRepeat,While}`.
-        // (`readerSumDo` is a `do:` fold: its old detector already agrees.)
+        // `armsToDo` / `armsTimesRepeat` shape below: `readerSumToDo` (line 74),
+        // `readerSumTimesRepeat` (86), `readerSumWhile` (110) and
+        // `readerFirst{ToDo,TimesRepeat,While}InArm` (335, 366, 396) /
+        // `readerFirst{ToDo,TimesRepeat,While}` (350, 380, 410). The loop's own
+        // carry-out cannot thread a mutation nested in an arm; the write is
+        // recovered from the per-scope commit tokens (BT-3675), and the pure
+        // reader before or after the arm reads the scope's newest commit.
+        // Pinned by `SelfSendArmExportTest>>testSealedReaderSum*` and
+        // `testSealedReaderFirst*`. (The `do:` variants are folds: their old
+        // detector already agrees.)
         Mismatch {
             file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 70,
+            line: 74,
             shape: "letrec",
         },
         Mismatch {
             file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 82,
+            line: 86,
             shape: "letrec",
         },
         Mismatch {
             file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 106,
+            line: 110,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 335,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 350,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 366,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 380,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 396,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line: 410,
             shape: "letrec",
         },
         // BT-3690: the same shape in the plain-reply fixture and its sealed twin

@@ -38,6 +38,14 @@ pub(in crate::core_erlang) struct ClassVarScopeToken {
     /// commit. It is what makes the scope emit its `make_ref()` binding and a
     /// refresh, so only code that must pay for the scope may set it.
     pub(in crate::core_erlang) used: bool,
+    /// How many enclosing loop bodies that can write a class variable were
+    /// entered while this token was open ([`CoreErlangGenerator::with_class_var_loop_body`]).
+    /// Such a token is bound once per entry of the scope, outside the loop, so a
+    /// commit made LATER in the body (an arm's export, a writing send) lands in it
+    /// before the code generated EARLIER in the body runs again in the next
+    /// iteration; at codegen time it can still be `used == false`. A read of
+    /// the chain must name it all the same.
+    pub(in crate::core_erlang) writer_loops: usize,
 }
 
 /// Handle for [`CoreErlangGenerator::class_var_scope_mark`]: the live
@@ -299,7 +307,11 @@ impl CoreErlangGenerator {
         let name = format!("_CVTok{}", ctx.class_var_scope_counter);
         let tokens = &mut ctx.class_var_scope_tokens;
         let depth = tokens.len();
-        tokens.push(ClassVarScopeToken { name, used: false });
+        tokens.push(ClassVarScopeToken {
+            name,
+            used: false,
+            writer_loops: 0,
+        });
         Some(depth)
     }
 
@@ -651,27 +663,63 @@ impl CoreErlangGenerator {
         self.commit_to_innermost_scope_doc(&live)
     }
 
-    /// The open tokens that some generated code has already referenced
-    /// (`used`: a confined send's sync or commit, a direct write's commit, a
-    /// closure/arm export or a refresh read it), innermost first, WITHOUT
-    /// marking anything used. Empty outside any scope and while every open
-    /// token is untouched.
+    /// Runs `f`, which generates the body of a threaded loop (`Foldl*` or
+    /// `Letrec`), with every token open now flagged as outliving the loop's
+    /// iterations when the body `may_write` a class variable. See
+    /// [`ClassVarScopeToken::writer_loops`].
+    pub(in crate::core_erlang) fn with_class_var_loop_body<T>(
+        &mut self,
+        may_write: bool,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let flagged = match self.class_context.as_mut() {
+            Some(ctx) if may_write => {
+                for token in &mut ctx.class_var_scope_tokens {
+                    token.writer_loops += 1;
+                }
+                ctx.class_var_scope_tokens.len()
+            }
+            _ => 0,
+        };
+        let result = f(self);
+        if let Some(ctx) = self.class_context.as_mut() {
+            for token in ctx.class_var_scope_tokens.iter_mut().take(flagged) {
+                token.writer_loops = token.writer_loops.saturating_sub(1);
+            }
+        }
+        result
+    }
+
+    /// The tokens a read of the scope chain must name, innermost first, for
+    /// code that must not make an untouched scope pay (a sealed pure send's
+    /// inline argument and a fold body's end-of-iteration sync, BT-3691):
     ///
-    /// A token still unused here has had nothing committed under it, so a read
-    /// of the chain loses nothing by leaving it out, and leaving it out keeps
-    /// the read from forcing that scope to emit its token binding and refresh
-    /// (what [`Self::class_var_scope_chain`] does to every token it names).
-    /// Used by the reads that must not make a scope pay: a sealed pure send's
-    /// inline argument and a fold body's end-of-iteration sync (BT-3691).
-    pub(in crate::core_erlang) fn used_class_var_scope_chain(&self) -> Vec<String> {
-        self.class_context.as_ref().map_or_else(Vec::new, |ctx| {
-            ctx.class_var_scope_tokens
-                .iter()
-                .rev()
-                .filter(|token| token.used)
-                .map(|token| token.name.clone())
-                .collect()
-        })
+    /// - every token some generated code has already referenced (`used`), and
+    /// - every token that outlives the iterations of an enclosing loop body
+    ///   that can write a class variable ([`ClassVarScopeToken::writer_loops`]),
+    ///   even when still unused: a write generated later in the body commits
+    ///   under it before the next iteration runs this read. These are marked
+    ///   used (they need their `make_ref()` binding), which costs nothing
+    ///   extra: the writer that makes them matter marks them anyway.
+    ///
+    /// A token that is neither was opened inside the current iteration (an arm
+    /// or closure region) and has had nothing committed under it yet, so
+    /// leaving it out loses nothing and keeps the scope from emitting a token
+    /// binding and a refresh. Empty outside any scope, and while nothing has
+    /// been referenced and no writing loop encloses the read.
+    pub(in crate::core_erlang) fn class_var_read_chain(&mut self) -> Vec<String> {
+        let Some(ctx) = self.class_context.as_mut() else {
+            return Vec::new();
+        };
+        ctx.class_var_scope_tokens
+            .iter_mut()
+            .rev()
+            .filter(|token| token.used || token.writer_loops > 0)
+            .map(|token| {
+                token.used = true;
+                token.name.clone()
+            })
+            .collect()
     }
 
     /// Marks the innermost open scope token used and returns its name.

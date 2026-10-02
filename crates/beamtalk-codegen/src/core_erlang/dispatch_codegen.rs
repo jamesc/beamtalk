@@ -394,16 +394,16 @@ impl CoreErlangGenerator {
     /// accumulator, and the scope's commit after the fold, would then carry the
     /// stale version over the newer entry.
     ///
-    /// The read names only the tokens already referenced
-    /// ([`Self::used_class_var_scope_chain`]), so it makes no other scope emit
-    /// a token binding or a refresh. `None` when no open token has been
-    /// referenced, or outside any scope: nothing can be newer than the lexical
-    /// version, and the body pays nothing.
+    /// The read names the tokens already referenced and those that outlive this
+    /// loop's iterations ([`Self::class_var_read_chain`]), so it makes no
+    /// scope opened inside the iteration emit a token binding or a refresh.
+    /// `None` when no such token exists, or outside any scope: nothing can be
+    /// newer than the lexical version, and the body pays nothing.
     pub(super) fn fold_body_class_var_tail_sync(
         &mut self,
         frame: super::threaded_ir::FrameId,
     ) -> Option<ThreadedStmt> {
-        let chain = self.used_class_var_scope_chain();
+        let chain = self.class_var_read_chain();
         if chain.is_empty() {
             return None;
         }
@@ -1707,14 +1707,15 @@ impl CoreErlangGenerator {
                 // scope where its rebind could not be threaded out lexically
                 // (a conditional arm, a block) lives only in the scope's
                 // commit. The call therefore receives the newest commit of the
-                // tokens already referenced, read inline as its argument:
-                // nothing is bound, no version minted, no token joins and none
-                // is marked used (a scope this send sits in pays nothing it did
-                // not pay before), since a pure reply changes nothing. With no
-                // token referenced yet the lexical version is current and the
-                // call is unchanged.
+                // referenced tokens and of those outliving an enclosing writing
+                // loop's iterations ([`Self::class_var_read_chain`]), read inline
+                // as its argument: nothing is bound, no version minted, no token
+                // joins, and no scope opened inside the iteration is marked used
+                // (an arm this send sits in pays nothing it did not pay before),
+                // since a pure reply changes nothing. With no such token the
+                // lexical version is current and the call is unchanged.
                 let cv = self.current_class_var();
-                let chain = self.used_class_var_scope_chain();
+                let chain = self.class_var_read_chain();
                 if chain.is_empty() {
                     (leaf::var(cv), None)
                 } else {

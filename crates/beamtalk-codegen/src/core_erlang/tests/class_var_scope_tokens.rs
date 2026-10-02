@@ -504,6 +504,64 @@ fn sealed_pure_send_in_an_untouched_arm_of_a_used_loop_pays_no_token_or_take() {
 }
 
 #[test]
+fn sealed_pure_reader_before_the_writing_arm_reads_the_loop_token() {
+    // BT-3691: the loop's token is bound once per loop entry, outside the loop,
+    // and the writing arm AFTER the reader commits into it before the reader runs
+    // again in the next iteration. At codegen time that token is still unused
+    // when the reader is generated, but a read that left it out would answer an
+    // older (or the stale lexical) version. A loop body that can write class
+    // variables therefore names the tokens that outlive its iterations.
+    for (loop_src, name) in [
+        ("1 to: 3 do: [:i |", "ToDo"),
+        ("3 timesRepeat: [", "TimesRepeat"),
+        ("#(1, 2, 3) do: [:i |", "Do"),
+    ] {
+        let src = format!(
+            "sealed Object subclass: ScopeTokenReaderFirst{name}
+  classState: n = 0
+
+  class bump => self.n := self.n + 1
+
+  class reader => self.n
+
+  class m =>
+    seen := 0
+    acc := 0
+    {loop_src}
+      seen := seen + 1
+      acc := acc + self reader
+      seen =:= 1 ifTrue: [self bump]
+    ]
+    acc
+"
+        );
+        let code = compile(&format!("bt@scopetokenreaderfirst{name}"), &src);
+        let method = code
+            .split("'class_m'/2 = ")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("class_m present");
+        let read_prefix = "'class_reader'(ClassSelf, call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf, [_CVTok";
+        let (_, after) = method
+            .split_once(read_prefix)
+            .unwrap_or_else(|| panic!("{name}: the reader reads the scope. Got:\n{method}"));
+        let loop_token = format!("_CVTok{}", after.split(']').next().expect("token list"));
+        assert!(
+            method.contains(&format!("let {loop_token} = call 'erlang':'make_ref'()")),
+            "{name}: the named token must be bound. Got:\n{method}"
+        );
+        if name != "Do" {
+            // (a `do:` fold's arm closure exports into a token of its own statement
+            // scope, which the body then refreshes into the loop's)
+            assert!(
+                method.contains(&format!(", {loop_token}) in")),
+                "{name}: the writing arm exports into the token the reader reads. Got:\n{method}"
+            );
+        }
+    }
+}
+
+#[test]
 fn sealed_arm_export_loop_compiles_through_erlc() {
     let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
     crate::core_erlang::tests::assert_compiles_through_erlc("bt@scopetokensealedarms", &code);

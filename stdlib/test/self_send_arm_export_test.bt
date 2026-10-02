@@ -59,6 +59,30 @@ TestCase subclass: SelfSendArmExportTest
   testSealedLoopInsideEnsure =>
     self assert: SsoArmExportSealed loopInsideEnsure equals: 1
 
+  testSealedReaderFirstDoInArm =>
+    self assert: SsoArmExportSealed readerFirstDoInArm equals: 22
+
+  testSealedReaderFirstDo =>
+    self assert: SsoArmExportSealed readerFirstDo equals: 21
+
+  testSealedReaderFirstToDoInArm =>
+    self assert: SsoArmExportSealed readerFirstToDoInArm equals: 22
+
+  testSealedReaderFirstToDo =>
+    self assert: SsoArmExportSealed readerFirstToDo equals: 21
+
+  testSealedReaderFirstTimesRepeatInArm =>
+    self assert: SsoArmExportSealed readerFirstTimesRepeatInArm equals: 22
+
+  testSealedReaderFirstTimesRepeat =>
+    self assert: SsoArmExportSealed readerFirstTimesRepeat equals: 21
+
+  testSealedReaderFirstWhileInArm =>
+    self assert: SsoArmExportSealed readerFirstWhileInArm equals: 22
+
+  testSealedReaderFirstWhile =>
+    self assert: SsoArmExportSealed readerFirstWhile equals: 21
+
   // --- open class ---
   testOpenArmsSelect => self assert: SsoArmExportOpen armsSelect equals: 13
 
@@ -97,3 +121,9 @@ TestCase subclass: SelfSendArmExportTest
 
   testOpenLoopInsideEnsure =>
     self assert: SsoArmExportOpen loopInsideEnsure equals: 1
+
+  testOpenReaderFirstDoInArm =>
+    self assert: SsoArmExportOpen readerFirstDoInArm equals: 22
+
+  testOpenReaderFirstDo =>
+    self assert: SsoArmExportOpen readerFirstDo equals: 21

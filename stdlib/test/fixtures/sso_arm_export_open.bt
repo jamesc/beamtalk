@@ -15,11 +15,15 @@
 
 Object subclass: SsoArmExportOpen
   classState: n = 0
+  classState: flag = 0
 
   class n -> Integer => self.n
 
   // Always writes.
   class bump -> Integer => self.n := self.n + 1
+
+  // Writes a second class variable.
+  class mark -> Integer => self.flag := self.flag + 1
 
   // Never writes (plain reply).
   class plain -> Integer => 0
@@ -245,3 +249,39 @@ Object subclass: SsoArmExportOpen
         self plain
       ]
     self.n
+
+  // --- the reader runs BEFORE the writing arm, so an earlier iteration's write
+  // reaches it only through the scope's commit (the answer is flag * 10 + n, flag
+  // counting the iterations whose reader saw the write). "InArm": the loop sits in
+  // an arm that already committed a write, so an OLDER entry sits under an outer
+  // token: reads 1, 2, 2 -> flag 2, n 2 -> 22. Without it: reads 0, 1, 1 -> flag 2,
+  // n 1 -> 21. A stale read answers 2 / 1.
+  class readerFirstDoInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        #(1, 2, 3)
+          do: [:i |
+            seen := seen + 1
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            i =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstDo -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        i =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n
