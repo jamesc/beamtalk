@@ -90,18 +90,19 @@ During a class-method invocation, a class's class variables live in exactly one 
 ```erlang
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
     Key = beamtalk_class_vars:key(ClassName),
-    Prev = put(Key, ClassVars),
+    beamtalk_class_vars:assert_absent(Key),      %% check first: a present key is a nested invocation
+    put(Key, ClassVars),
     try apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule) of
         test_spawn -> test_spawn;
         {ok, Result} -> {reply, {ok, Result}, get(Key)};
         {nlr_relay, Nlr, _ST} -> {reply, {error, Nlr}, get(Key)};   %% writes before a foreign ^ are kept
         {error, Error} -> {reply, {error, Error}, ClassVars}       %% escaping error: pre-call map
     after
-        beamtalk_class_vars:restore(Key, Prev)                      %% erase, or put back an outer value
+        erase(Key)
     end.
 ```
 
-`restore/2` puts back the value that was there on entry (`undefined` erases), the discipline `beamtalk_actor:restore_dispatch_pdict/1` already follows. **Invariant: the key is absent on entry.** Today nothing nests `invoke_class_method/7` for one class (it is reached only from the class's `handle_call`, own-class sends from inside raise `dispatch_error`, and `new`/`spawn` short-circuit through `handle_self_instantiation`). `invoke_class_method/7` asserts it with a structured internal error when `Prev` is not `undefined`, so a future refactor that makes nesting reachable fails loudly instead of returning an inner invocation's writes to nobody.
+**Invariant: the key is absent on entry**, checked before anything is installed. Today nothing nests `invoke_class_method/7` for one class (it is reached only from the class's `handle_call`, own-class sends from inside raise `dispatch_error`, and `new`/`spawn` short-circuit through `handle_self_instantiation`). `assert_absent/1` raises a structured internal error when the key is already present, before `put/2` runs, so a future refactor that makes nesting reachable fails loudly with the outer map intact instead of overwriting it; with the invariant checked first, `after` can simply erase. (`beamtalk_actor:restore_dispatch_pdict/1` saves and restores instead because actor self-dispatch does nest; class invocations must not.)
 
 Between invocations nothing changes: the `gen_server` state holds the map and the ETS snapshot mirrors it.
 
@@ -387,8 +388,8 @@ Effort: L overall. Phase 0 gates the rest.
 - Count class-variable accesses from a process other than the home class over the BUnit corpus and fixtures (no `stdlib/src` class declares `classState:`, so the stdlib itself cannot be the gate), the REPL-protocol cases and `test-package-compiler/cases`, by instrumenting the current runtime. Gate: every hit must be a supervisor-definition or `performLocally:` site covered by `with_snapshot/2`, or a test that pins today's silent loss; anything else is a user-visible breakage to document in Migration Path.
 
 **Phase 1: tests that pin the semantics (M, in parallel with Phase 2).**
-- A BUnit matrix, one fixture per (sealed, open, subclass override) × (top level, arm, letrec loop, fold loop, `on:do:` body, `on:do:` handler, `ensure:`, bare block, stored closure, block to a same-class higher-order method, block to another class's method, `performLocally:`), asserting the §4/§5 answers. This is the gate for Phase 3.
-- Extending `arb_program` to class state, loops, exception handling and late-bound sends, with the agreement oracle (sealed, open and override spellings of one program must agree), is filed as its own issue under the guideline in `docs/agents/expanded.md` § State-Threading Codegen; it is not on this ADR's critical path, since the bug class is removed by construction and the generator's lasting value is for the families that remain.
+- A BUnit matrix, one fixture per (sealed, open, subclass override) × (top level, arm, letrec loop, fold loop, `on:do:` body, `on:do:` handler, `ensure:`, bare block, stored closure, block to a same-class higher-order method, block to another class's method, `performLocally:`), asserting the §4/§5 answers. This is the gate for Phase 2.
+- Extend `arb_program` (`crates/beamtalk-core/src/test_helpers.rs`) to class state, loops, exception handling, stored closures and writing, plain and late-bound self-sends, with the agreement oracle: the sealed, open and subclass-override spellings of one program must answer the same, and must match a reference interpretation in which every write is immediate. Run it against `main` and record the failure rate. This is the gate for Phase 3, as the guideline in `docs/agents/expanded.md` § State-Threading Codegen requires of any change to these lowerings; removing a family by construction is not exempt, because the same deletion touches the `State` and `Self` families' lowerings in the same files, and the generator is what shows those still hold.
 
 **Phase 2: runtime (M).**
 - Install, read back and restore the map in `invoke_class_method/7`, `invoke_class_extension/7` and the metaclass path, with the absent-on-entry assertion; ADR 0084 builder funs run inside those and need only the arity change in `put_class_method/4`.
