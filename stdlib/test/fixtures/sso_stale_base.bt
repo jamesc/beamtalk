@@ -132,6 +132,15 @@ Object subclass: SsoStaleBase
     self noop
     self.hits
 
+  // BT-3688: the same limit when the stored closure is handed to a collection
+  // higher-order method by name instead of invoked directly.
+  @expect stored_closure "BT-3688: pins the known limit of a stored closure passed to a collection HOM"
+  class deferredViaDo -> Integer =>
+    b := [:x | self foo]
+    #(1) do: b
+    self noop
+    self.hits
+
   @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
   class deferredInArm -> Integer =>
     [

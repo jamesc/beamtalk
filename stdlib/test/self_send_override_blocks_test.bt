@@ -278,6 +278,12 @@ TestCase subclass: SelfSendOverrideBlocksTest
     SsoStaleSub deferred
     self assert: SsoStaleSub hits equals: 0
 
+  // Known limit BT-3688 (compile-time warning): a stored closure handed to a
+  // collection HOM by name loses its write too; the correct answer would be 1.
+  testStoredClosurePassedToCollectionHomLosesWrite =>
+    SsoStaleSub deferredViaDo
+    self assert: SsoStaleSub hits equals: 0
+
   // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
   testStoredClosureInvokedLaterInArmLosesWrite =>
     SsoStaleSub deferredInArm
