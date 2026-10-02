@@ -66,6 +66,30 @@ impl std::fmt::Display for Mismatch {
     }
 }
 
+/// BT-3691: nine loops of the sealed arm-export fixture, each a
+/// class's own writing `self bump` nested in an `ifTrue:` arm of a
+/// `to:do:` / `timesRepeat:` / `whileTrue:` body, exactly the BT-3690
+/// `armsToDo` / `armsTimesRepeat` shape below: `readerSumToDo` (line 74),
+/// `readerSumTimesRepeat` (86), `readerSumWhile` (110) and
+/// `readerFirst{ToDo,TimesRepeat,While}InArm` (335, 366, 396) /
+/// `readerFirst{ToDo,TimesRepeat,While}` (350, 380, 410). The loop's own
+/// carry-out cannot thread a mutation nested in an arm; the write is
+/// recovered from the per-scope commit tokens (BT-3675), and the pure
+/// reader before or after the arm reads the scope's newest commit.
+/// Pinned by `SelfSendArmExportTest>>testSealedReaderSum*` and
+/// `testSealedReaderFirst*`. (The `do:` variants are folds: their old
+/// detector already agrees.)
+fn sealed_arm_export_mismatches() -> Vec<Mismatch> {
+    [74, 86, 110, 335, 350, 366, 380, 396, 410]
+        .into_iter()
+        .map(|line| Mismatch {
+            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
+            line,
+            shape: "letrec",
+        })
+        .collect()
+}
+
 /// The reviewed, expected set of old/new mismatches over the whole corpus —
 /// see this file's own doc comment. A corpus change that removes one of
 /// these (e.g. the fixture is rewritten to avoid the nested self-send) is
@@ -75,7 +99,7 @@ impl std::fmt::Display for Mismatch {
 /// `reject_class_var_field_assignment`/`reject_unthreadable_value_self_field_write`)
 /// or added here as a reviewed, out-of-scope shape.
 fn expected_mismatches() -> Vec<Mismatch> {
-    vec![
+    let mut expected = vec![
         Mismatch {
             file: "stdlib/test/fixtures/class_var_sub_expr.bt".to_string(),
             line: 117,
@@ -94,64 +118,6 @@ fn expected_mismatches() -> Vec<Mismatch> {
         Mismatch {
             file: "stdlib/test/fixtures/sso_blocks_base.bt".to_string(),
             line: 72,
-            shape: "letrec",
-        },
-        // BT-3691: nine loops of the sealed arm-export fixture, each a
-        // class's own writing `self bump` nested in an `ifTrue:` arm of a
-        // `to:do:` / `timesRepeat:` / `whileTrue:` body, exactly the BT-3690
-        // `armsToDo` / `armsTimesRepeat` shape below: `readerSumToDo` (line 74),
-        // `readerSumTimesRepeat` (86), `readerSumWhile` (110) and
-        // `readerFirst{ToDo,TimesRepeat,While}InArm` (335, 366, 396) /
-        // `readerFirst{ToDo,TimesRepeat,While}` (350, 380, 410). The loop's own
-        // carry-out cannot thread a mutation nested in an arm; the write is
-        // recovered from the per-scope commit tokens (BT-3675), and the pure
-        // reader before or after the arm reads the scope's newest commit.
-        // Pinned by `SelfSendArmExportTest>>testSealedReaderSum*` and
-        // `testSealedReaderFirst*`. (The `do:` variants are folds: their old
-        // detector already agrees.)
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 74,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 86,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 110,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 335,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 350,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 366,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 380,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 396,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_arm_export_sealed.bt".to_string(),
-            line: 410,
             shape: "letrec",
         },
         // BT-3690: the same shape in the plain-reply fixture and its sealed twin
@@ -211,7 +177,9 @@ fn expected_mismatches() -> Vec<Mismatch> {
             line: 98,
             shape: "letrec",
         },
-    ]
+    ];
+    expected.extend(sealed_arm_export_mismatches());
+    expected
 }
 
 /// Recursively collects every `.bt`/`.btscript` file under `dir`.

@@ -188,7 +188,7 @@ impl CoreErlangGenerator {
         let unsafe_selectors = self.class_var_unsafe_self_send_selectors(analysis, block);
         if let Some(selector) = unsafe_selectors.first() {
             return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
-                selector: selector.to_string(),
+                selector: selector.clone(),
                 location: self.location_label(span),
             });
         }
