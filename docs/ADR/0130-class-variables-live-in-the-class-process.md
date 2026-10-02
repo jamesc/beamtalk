@@ -130,8 +130,6 @@ A class-variable write takes effect immediately, as in Smalltalk.
 - **An error that escapes the invocation** discards everything the invocation wrote: `invoke_class_method/7` replies with the pre-call map. Unchanged.
 - **A caught error does not undo writes.** `[self bumpThenFail] on: Error do: [:e | nil]` keeps the write that `bumpThenFail` made before it raised. This reverses the behaviour BT-3675 introduced and the language documentation now describes.
 - **A foreign non-local return** keeps the writes made before it. Unchanged, and now needs no special path.
-
-`Ids tryTake` below answers 0 today and 1 under this ADR (run on `main` at `14799bd`).
 - **An own non-local return** returns from the method; the writes are already in place. Unchanged.
 
 This is a deliberate semantic change, discussed under Alternatives (per-send rollback) and Migration Path.
@@ -216,11 +214,17 @@ Today this compiles without a warning and answers 0: the block runs in `Batch`'s
 ```beamtalk
 Object subclass: Ids
   classState: next = 0
-  class take => self.next := self.next + 1. self error: "boom"
-  class tryTake => [self take] on: Error do: [:e | nil]. self.next
+  class take =>
+    self.next := self.next + 1
+    self error: "boom"
+  class tryTake =>
+    [self take] on: Error do: [:e | nil]
+    self.next
 
-Ids tryTake        // => 1   (today: 0; the write made before the caught raise is kept)
+Ids tryTake        // => 1
 ```
+
+Today this answers 0 (run on `main` at `14799bd`): the write made before the caught raise is discarded. Under this ADR it is kept.
 
 ## Prior Art
 
