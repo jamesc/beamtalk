@@ -46,48 +46,46 @@
 //             `late state: proc :: Integer` with `getProc`/`setProc:`)
 
 TestCase subclass: LateSlotTest
+  field: a = nil
+
+  setUp => self.a := LateSlotInheritedSubActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   // === Inherited `late` slot — instance-level lifecycle, via a subclass
   // that declares no `late` field of its own ===
   testInheritedLateFieldHasFieldFalseBeforeAssign =>
-    a := LateSlotInheritedSubActor spawn
-    self deny: a hasProc
+    self deny: self.a hasProc
 
   testInheritedLateFieldReadBeforeAssignRaisesUninitializedStateError =>
-    a := LateSlotInheritedSubActor spawn
-    self should: [a getProc] raise: #uninitialized_state_error
+    self should: [self.a getProc] raise: #uninitialized_state_error
 
   testInheritedLateFieldReadBeforeAssignHintMentionsFieldAndType =>
-    a := LateSlotInheritedSubActor spawn
-    result := [a getProc] on: Exception do: [:e | e hint]
+    result := [self.a getProc] on: Exception do: [:e | e hint]
     self assert: (result includesSubstring: "proc")
     self assert: (result includesSubstring: "Integer")
     self assert: (result includesSubstring: "late")
 
   testInheritedLateFieldAssignThenReadAnswersTheValue =>
-    a := LateSlotInheritedSubActor spawn
-    a setProc: 9
-    self assert: a getProc equals: 9
-    self assert: a hasProc
+    self.a setProc: 9
+    self assert: self.a getProc equals: 9
+    self assert: self.a hasProc
 
   testInheritedLateFieldClearThenReadRaisesAgain =>
-    a := LateSlotInheritedSubActor spawn
-    a setProc: 9
-    a clearProc
-    self deny: a hasProc
-    self should: [a getProc] raise: #uninitialized_state_error
+    self.a setProc: 9
+    self.a clearProc
+    self deny: self.a hasProc
+    self should: [self.a getProc] raise: #uninitialized_state_error
 
   testInheritedLateFieldRelaunchAfterClearSucceeds =>
-    a := LateSlotInheritedSubActor spawn
-    a setProc: 1
-    a clearProc
-    a setProc: 2
-    self assert: a getProc equals: 2
+    self.a setProc: 1
+    self.a clearProc
+    self.a setProc: 2
+    self assert: self.a getProc equals: 2
 
   testInheritedLateFieldUnaffectedBySubclassAndBaseEagerFields =>
-    a := LateSlotInheritedSubActor spawn
-    self assert: a getCount equals: 0
-    self assert: a getExtra equals: 0
+    self assert: self.a getCount equals: 0
+    self assert: self.a getExtra equals: 0
 
   // === `spawnWith:` dependency injection of a `late` slot: a real value
   // counts as assigned immediately, with no lifecycle call ever made ===
