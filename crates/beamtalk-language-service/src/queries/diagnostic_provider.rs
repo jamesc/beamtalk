@@ -329,6 +329,48 @@ pub use beamtalk_core::compilation::diagnostics_policy::{
     compute_diagnostics_with_known_vars,
 };
 
+/// Shared post-analysis pipeline for lint surfaces (`beamtalk lint` and the MCP lint tool).
+///
+/// Given an already-constructed `AnalysisContext` (callers build this differently — the CLI
+/// and MCP each pass a different set of pre-loaded protocols, aliases, and extensions), this
+/// function runs the four shared steps that both surfaces need:
+///
+/// 1. `analyse_full` → filter results by `category.is_some()` → extend `diags`
+/// 2. `check_class_file_name_agreement` → extend `diags`
+/// 3. `apply_expect_directives` → suppress matching `@expect` annotations
+/// 4. `check_near_miss_dividers` → append near-miss section-divider diagnostics
+///
+/// Returns the `ClassHierarchy` from step 1 for callers that need it (e.g. MCP's type-coverage
+/// computation). Callers that don't need it can discard it.
+///
+/// `run_lint_passes` (from `beamtalk_lint`) is intentionally left to callers: `beamtalk-lint`
+/// is not a dependency of `beamtalk-language-service`, and both CLI and MCP call it
+/// themselves before building `AnalysisContext`.
+pub fn run_post_analysis_lint_pipeline(
+    module: &beamtalk_core::ast::Module,
+    source: &str,
+    analysis_ctx: beamtalk_core::semantic_analysis::AnalysisContext,
+    file_stem: Option<&str>,
+    diags: &mut Vec<beamtalk_core::source_analysis::Diagnostic>,
+) -> beamtalk_core::semantic_analysis::ClassHierarchy {
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
+    let class_hierarchy = analysis_result.class_hierarchy;
+    diags.extend(
+        analysis_result
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.category.is_some()),
+    );
+    diags.extend(
+        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
+            module, file_stem,
+        ),
+    );
+    apply_expect_directives(module, diags);
+    beamtalk_core::near_miss_divider::check_near_miss_dividers(source, diags);
+    class_hierarchy
+}
+
 /// Computes diagnostics with native type registry for FFI type warnings (ADR 0075).
 ///
 /// When `native_types` is `Some`, FFI calls get typed return inference and

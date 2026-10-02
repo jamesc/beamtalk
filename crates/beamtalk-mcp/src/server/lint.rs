@@ -121,37 +121,16 @@ pub(crate) fn run_module_analysis(
         .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
         .with_native_type_registry(native_type_registry)
         .with_is_stub_file(is_stub_file);
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
-    diags.extend(
-        analysis_result
-            .diagnostics
-            .into_iter()
-            .filter(|d| d.category.is_some()),
-    );
+    let class_hierarchy =
+        beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline(
+            module,
+            source,
+            analysis_ctx,
+            file_stem,
+            &mut diags,
+        );
 
-    // Validate the file name agrees with the class it declares —
-    // `analyse_full` doesn't run this check itself (see
-    // `check_class_file_name_agreement`'s doc), so it must be called
-    // explicitly here, mirroring `compute_project_diagnostics_with_analysis`.
-    diags.extend(
-        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
-            module, file_stem,
-        ),
-    );
-
-    beamtalk_language_service::queries::diagnostic_provider::apply_expect_directives(
-        module, &mut diags,
-    );
-
-    // Mirrors `compute_project_diagnostics_with_analysis`'s
-    // placement — appended after `apply_expect_directives` because a
-    // near-miss-divider comment's span (the comment's own line) can never
-    // be contained in any `@expect`-annotated declaration's target span, so
-    // running it through that pass first would be a no-op at best. See that
-    // function's own comment for the full reasoning.
-    beamtalk_core::near_miss_divider::check_near_miss_dividers(source, &mut diags);
-
-    (diags, analysis_result.class_hierarchy)
+    (diags, class_hierarchy)
 }
 
 /// Build the Erlang FFI native-type registry for `path`'s package,

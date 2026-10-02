@@ -96,12 +96,10 @@ fn collect_diagnostics(
         .collect();
     lint_diags.extend(beamtalk_lint::run_lint_passes(module));
 
-    // Run semantic analysis to collect all categorised diagnostics
-    // so that `@expect` directives can match them. Without this, `@expect type`
-    // annotations that suppress real type/DNU diagnostics during build would be
-    // reported as stale by lint. We include every diagnostic that has a category
-    // (Type, Dnu, Unused, etc.) — this keeps lint in sync with `category_matches`
-    // in diagnostic_provider.rs without manually mirroring its match arms.
+    // Run semantic analysis, apply @expect directives, and check near-miss
+    // section dividers. The shared helper performs all four steps:
+    // analyse_full (filtered by category.is_some()), check_class_file_name_agreement,
+    // apply_expect_directives, and check_near_miss_dividers.
     //
     // Pass cross-file class info so lint sees the same class hierarchy as build,
     // matching diagnostics for actor instantiation, type errors, etc.
@@ -130,38 +128,13 @@ fn collect_diagnostics(
         .with_native_type_registry(native_type_registry)
         .with_cross_file_extensions(cross_file_extensions)
         .with_is_stub_file(is_stub_file);
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
-    lint_diags.extend(
-        analysis_result
-            .diagnostics
-            .into_iter()
-            .filter(|d| d.category.is_some()),
-    );
-
-    // Validate the file name agrees with the class it declares —
-    // `analyse_full` doesn't run this check itself (see
-    // `check_class_file_name_agreement`'s doc), so it must be called
-    // explicitly here, mirroring `compute_project_diagnostics_with_analysis`.
-    lint_diags.extend(
-        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
-            module, file_stem,
-        ),
-    );
-
-    // Apply @expect directives to suppress matching lint diagnostics.
-    // Note: apply_expect_directives may inject Severity::Warning for stale
-    // @expect annotations, so we include those in the output.
-    beamtalk_language_service::queries::diagnostic_provider::apply_expect_directives(
+    beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline(
         module,
+        source,
+        analysis_ctx,
+        file_stem,
         &mut lint_diags,
     );
-
-    // Mirrors `compute_project_diagnostics_with_analysis`'s
-    // placement — appended after `apply_expect_directives` because a
-    // near-miss-divider comment's span (the comment's own line) can never
-    // be contained in any `@expect`-annotated declaration's target span, so
-    // running it through that pass first would be a no-op at best.
-    beamtalk_core::near_miss_divider::check_near_miss_dividers(source, &mut lint_diags);
 
     lint_diags
 }
