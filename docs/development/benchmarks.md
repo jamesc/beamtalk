@@ -912,3 +912,110 @@ vs an expanded tuple); it exercises no Beamtalk codegen or class dispatch. It
 is flaky near its threshold: over 4 (baseline) and 5 (main) runs the ratio
 ranged 1.34x to 1.88x, on both the pre-BT-3666 baseline and current main (the
 tuple variant is bimodal, ~730 us or ~930 us).
+
+### BT-3690: re-measurement, profile and what changed
+
+Same method as above (`cd runtime/perf/self_send_bench && beamtalk run SsbMain run`), idle 4-core VM
+(`uptime` load 1.6-1.9 is the benchmark's own BEAM; nothing else ran), 7 interleaved rounds per side
+and CLI profile, medians in ns/op with the min-max in brackets. The bench gained one case,
+`class_self_send_open_in_arm` (`1 to: n do: [:i | i > 0 ifTrue: [self foo]]`), so the arm refresh and
+BT-3683's extra read are measured. Baseline is `f12484e06` (parent of BT-3666 with the bench directory
+copied in), "main" is `bcb40b028`, "after" is BT-3690. The bench's `_build` is deleted before each
+side's first run (`beamtalk run` skips recompilation when only the compiler changed).
+
+| case | profile | baseline | main | after BT-3690 |
+|---|---|---|---|---|
+| class self-send, open (defining class) | debug | 115 [114-124] | 354 [341-452] | 215 [208-221] |
+| class self-send, open (defining class) | release | 119 [111-134] | 373 [326-401] | 216 [210-231] |
+| class self-send, open, in an `ifTrue:` arm | debug | 161 [154-167] | 572 [543-679] | 287 [275-358] |
+| class self-send, open, in an `ifTrue:` arm | release | 156 [153-178] | 567 [531-707] | 289 [274-303] |
+| class self-send, sealed | debug / release | 116 / 115 | 119 / 116 | 118 / 117 |
+| class self-send via a subclass receiver (walk) | debug / release | 127 / 128 (statically bound, ignores the override) | 1770 / 1800 | 1559 / 1545 |
+| actor self-send, open | debug / release | 99 / 99 | 122 / 123 | 121 / 125 |
+| actor self-send, sealed | debug / release | 76 / 83 | 89 / 86 | 85 / 84 |
+
+The "release" CLI changes only the Rust compiler; the generated code and the Erlang runtime are the same
+for both, so the two rows of a pair are two samples of the same thing (their spread is the noise floor).
+
+**BT-3683's extra scope read costs nothing measurable.** Debug, 7 interleaved rounds, `bcb40b028` vs its
+ancestor `8bb07e752` (before #4130): open send 364 [356-432] vs 369 [350-407], open send in an arm
+577 [536-651] vs 586 [540-619].
+
+**15% target: not met.** The defining-class open send is about 1.8x the baseline after the change
+(215 vs 117), down from about 3.1x. 41% less time than main for the plain send, 49% less in an arm.
+
+#### Profile of the per-send path
+
+Microbenchmarks in an `erl` shell against the real `beamtalk_class_dispatch` / `beamtalk_class_shadow_flags`
+modules (3-5 million iterations, loop overhead subtracted; the numbers are run-dependent by a few ns):
+
+| step of an open-class send in a loop | cost |
+|---|---|
+| `make_ref()` for the closure region's token | ~12 ns (28 ns with its map store) |
+| `class_var_scope_read/3` (pdict get + map lookup) | ~14 ns |
+| `class_self_direct_ok/4`: 3 `persistent_term` reads | ~75 ns (a present key ~21 ns, a missing key ~8 ns, a freshly built tuple key +9 ns) |
+| `class_var_scope_commit/3` (pdict get, map put, pdict put) | ~46 ns |
+| `class_var_scope_export/3` with an entry to move | ~85 ns (with no entry: ~15 ns) |
+| token + read + commit + export together | ~150-180 ns |
+| same without the commit (plain reply) | ~60 ns |
+| one pdict get + put of a one-key map | ~31 ns |
+
+The commit (and the export it feeds) was the largest piece: about 120 ns of the machinery. Changes the
+profile supports, all taken:
+
+1. **Commit only a reply that may have changed the class variables** (codegen, ADR 0110 amendment BT-3690).
+   Sends with a block literal argument keep the unconditional commit. Measured effect: ~360 to ~220 ns.
+2. **One inlined guard function** (`beamtalk_class_shadow_flags:direct_call_ok/2`): the shadow flags first (a
+   missing key is the cheap lookup), then readiness, with no intermediate calls. 79 to 58 ns in isolation.
+
+Not taken, with the reason:
+
+- *Merging the flag reads into one key.* The `extension` flag is written under a per-tag lock by arbitrary
+  processes and the `runtime_fun` flag by the class process; one combined key needs a common writer lock
+  (the `beamtalk_class_shadow_flags` moduledoc explains why they are separate). Readiness (BT-3676) is pinned
+  by `beamtalk_class_shadow_flags_tests`. Floor with three reads: ~55 ns, about a quarter of what is left.
+- *Skipping the token or the pre-call read for a callee known not to write or read class variables.* In the
+  guard-true branch the callee is statically `class_foo`, but the other branch (a subclass receiver) needs
+  both, the token is bound once per scope entry before the branch, and "does not read class variables" is a
+  new whole-class fixed point next to `compute_class_var_mutating_selectors`. It would save ~15 ns (read)
+  plus the export; not worth a new analysis in a path the lost-write bugs came from.
+- *`unique_integer()` instead of `make_ref()` for tokens:* ~8 ns, and it changes the token type everywhere.
+- *Per-token process-dictionary keys instead of one map:* slower (246 vs 179 ns).
+
+What remains per send (~100 ns over the baseline): guard ~55, token ~12-26, read ~14, export ~15, extra reply
+`case`s. Removing the guard needs a different invalidation scheme (a per-selector "overridden anywhere"
+flag, which would also speed up the subclass walk); removing the token needs the scope to be lazy. Both are
+design changes, not tuning.
+
+The subclass-receiver walk (`class_self_send_inherited_override`, ~1.5 us) is the cost of reaching an override
+(`class_self_send/4` hierarchy walk); it was ~1.7 us before, it improves only through the shared pieces.
+
+#### Actor open self-send
+
+Profile (isolated, `erl` shell with the compiled `ssb_open_actor`): an open actor's `self foo` compiles to
+`maps:get('__class_mod__', StateAcc, M)` + a dynamic call of `ClassMod:safe_dispatch('foo', [], StateAcc)`,
+whose body calls `beamtalk_actor:make_self(State)` (the actor's real state has no `$beamtalk_class` key, so
+`class_of/1` takes the `function_exported` + `Mod:class_name()` path), enters a `try`, calls `dispatch/4` and
+returns a `{reply, Result, State}` that the call site unpacks. Measured with the real (untagged) state:
+`make_self/1` ~55 ns, so about 45% of the ~125 ns send and the only piece worth a change; `dispatch/4` itself
+is ~10 ns. The sealed actor calls the method directly (~84 ns).
+
+A runtime-only change to `make_self` (read `__class_mod__` once, a `class_and_mod/1` helper) measured
+61 vs 77 ns when called inline in the microbenchmark but gave no difference through the generated code
+(122 vs 121 ns debug, 9 rounds), because the helper call and its tuple cost what the second lookup saved. It was
+not kept. The real saving is for the call site to pass the `Self` it already has (a `safe_dispatch/4`, ~50 ns
+or ~40% of the open actor send, getting it to about the sealed actor's cost), which touches every actor
+module's generated exports and the gen_server entry points, so it is left as a follow-up rather than done
+here. The +25% over the baseline (99 vs 122-125) is the BT-3666 late binding and is intentional.
+
+#### `NestedImprovementRatio >= 1.5`
+
+Reproduced: in a full `rebar3 eunit --dir=perf` run the ratio was 1.43x (StateAcc median 1557 us, tuple 1092 us),
+while a standalone `erl` run of the same two functions gave 1.78x (1975 / 1110 us), and a fresh process in the
+suite gave 2.72x (3017 / 1109 us). The tuple variant is stable (~1.1 ms); the StateAcc variant allocates a map
+per element and its time follows the GC conditions of the measuring process (a long-lived EUnit process with the
+heap of the earlier benchmarks vs a fresh one). The test timed the two variants back to back in that
+long-lived process, so the ratio depended on its heap history. It now times them alternately (A, B, A, B, ...)
+in one fresh process with a fixed `min_heap_size` (`run_paired_benchmark/4`). Over four full runs after the
+change the ratio was 1.83x, 1.89x, 1.90x and 1.86x against the unchanged 1.5x threshold. The threshold is not
+changed and the test is not skipped.

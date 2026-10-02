@@ -96,6 +96,34 @@ fn expected_mismatches() -> Vec<Mismatch> {
             line: 72,
             shape: "letrec",
         },
+        // BT-3690: the same shape in the plain-reply fixture and its sealed twin
+        // (`armsToDo` at line 52, `armsTimesRepeat` at line 64): a class's own
+        // `self bump` nested in a conditional arm of a `to:do:` /
+        // `timesRepeat:` body, next to arms that send a provably pure `self
+        // plain`. Both still compile, and the write is recovered from the
+        // per-scope commit tokens exactly as for the BT-3683 entries after it;
+        // pinned by `SelfSendPlainReplyTest>>test{Base,Sub,Sealed}ArmsToDo` /
+        // `...ArmsTimesRepeat`.
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
+            line: 52,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
+            line: 64,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
+            line: 52,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
+            line: 64,
+            shape: "letrec",
+        },
         // BT-3683: a class's own late-bound `self increment` nested in a
         // conditional arm of a `to:do:` / `timesRepeat:` body (`armsInToDo`,
         // `armsInTimesRepeat`, open and sealed). Same shape as the `whileTrue:`

@@ -16,6 +16,7 @@
 //! `beamtalk-cli`).
 
 use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
+use crate::ast_walker::expression_contains_block;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 use std::collections::BTreeMap;
@@ -911,26 +912,11 @@ fn collect_directives_from_exprs(
 }
 
 /// Returns `true` if `exprs` contains a block literal anywhere in its tree —
-/// see [`expression_contains_block`].
+/// see [`crate::ast_walker::expression_contains_block`].
 fn exprs_contain_block(exprs: &[ExpressionStatement]) -> bool {
     exprs
         .iter()
         .any(|stmt| expression_contains_block(&stmt.expression))
-}
-
-/// Returns `true` if `expr`'s tree contains an [`Expression::Block`] literal
-/// anywhere — the only shape `beamtalk-lint`'s `DeadBlockAssignmentPass`
-/// can apply to, used by [`expect_category_unchecked`] to
-/// tell a plausibly-lint-only `@expect dead_assignment` target apart from one
-/// `analyse_full`'s own match-arm check already covers.
-fn expression_contains_block(expr: &Expression) -> bool {
-    let mut found = false;
-    crate::ast_walker::walk_expression(expr, &mut |e| {
-        if matches!(e, Expression::Block(_)) {
-            found = true;
-        }
-    });
-    found
 }
 
 /// Recursively walks an expression tree to find nested `Block` bodies and

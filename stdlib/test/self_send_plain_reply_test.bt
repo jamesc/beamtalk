@@ -1,0 +1,197 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3690: a class-side send whose callee answers a plain value does not commit
+// the class variables again. Every shape that rule could break, for the open
+// class called directly (SsoPlainBase), the open class called through a
+// subclass whose override writes (SsoPlainSub: the late-bound walk) and the
+// sealed class (SsoPlainSealed). See fixtures/sso_plain_base.bt.
+
+TestCase subclass: SelfSendPlainReplyTest
+
+  // --- open class, receiver is the defining class (direct call) ---
+  testBaseArmsDo => self assert: SsoPlainBase armsDo equals: 1
+
+  testBaseArmsToDo => self assert: SsoPlainBase armsToDo equals: 1
+
+  testBaseArmsTimesRepeat => self assert: SsoPlainBase armsTimesRepeat equals: 1
+
+  testBaseDeepArms => self assert: SsoPlainBase deepArms equals: 1
+
+  testBasePlainThenWriteInLoop =>
+    self assert: SsoPlainBase plainThenWriteInLoop equals: 2
+
+  testBaseWriteThenPlainInLoop =>
+    self assert: SsoPlainBase writeThenPlainInLoop equals: 2
+
+  testBaseArgsInLoop => self assert: SsoPlainBase argsInLoop equals: 3
+
+  testBaseInjectLoop => self assert: SsoPlainBase injectLoop equals: 3
+
+  testBaseReaderSeesWrites =>
+    self assert: SsoPlainBase readerSeesWrites equals: #(1, 2, 3)
+
+  testBaseReaderAfterArm =>
+    self assert: SsoPlainBase readerAfterArm equals: #(1, 1, 1)
+
+  testBaseRaisedThenPlainSend =>
+    self assert: SsoPlainBase raisedThenPlainSend equals: 0
+
+  testBaseRaisedIterationInLoop =>
+    self assert: SsoPlainBase raisedIterationInLoop equals: 0
+
+  testBaseRaisedIterationBetweenKept =>
+    self assert: SsoPlainBase raisedIterationBetweenKept equals: 1
+
+  testBaseHandlerArm => self assert: SsoPlainBase handlerArm equals: 1
+
+  testBaseEnsureBody => self assert: SsoPlainBase ensureBody equals: 1
+
+  testBaseTryDoKeeps => self assert: SsoPlainBase tryDoKeeps equals: 1
+
+  testBaseStoredPlain => self assert: SsoPlainBase storedPlain equals: 1
+
+  testBaseStoredBump => self assert: SsoPlainBase storedBump equals: 0
+
+  testBaseStoredPlainThenWrite =>
+    self assert: SsoPlainBase storedPlainThenWrite equals: 1
+
+  testBaseSameStatementClosure =>
+    self assert: SsoPlainBase sameStatementClosure equals: 1
+
+  testBaseFooArms => self assert: SsoPlainBase fooArms equals: 0
+
+  testBaseFooPlainFirst => self assert: SsoPlainBase fooPlainFirst equals: 0
+
+  testBaseFooReader => self assert: SsoPlainBase fooReader equals: #(0, 0, 0)
+
+  testBaseFooHandler => self assert: SsoPlainBase fooHandler equals: 0
+
+  testBaseFooNested => self assert: SsoPlainBase fooNested equals: 0
+
+  testBaseFooRaised => self assert: SsoPlainBase fooRaised equals: 0
+
+  // --- open class, receiver is a subclass (late-bound walk) ---
+  testSubArmsDo => self assert: SsoPlainSub armsDo equals: 1
+
+  testSubArmsToDo => self assert: SsoPlainSub armsToDo equals: 1
+
+  testSubArmsTimesRepeat => self assert: SsoPlainSub armsTimesRepeat equals: 1
+
+  testSubDeepArms => self assert: SsoPlainSub deepArms equals: 1
+
+  testSubPlainThenWriteInLoop =>
+    self assert: SsoPlainSub plainThenWriteInLoop equals: 2
+
+  testSubWriteThenPlainInLoop =>
+    self assert: SsoPlainSub writeThenPlainInLoop equals: 2
+
+  testSubArgsInLoop => self assert: SsoPlainSub argsInLoop equals: 3
+
+  testSubInjectLoop => self assert: SsoPlainSub injectLoop equals: 3
+
+  testSubReaderSeesWrites =>
+    self assert: SsoPlainSub readerSeesWrites equals: #(1, 2, 3)
+
+  testSubReaderAfterArm =>
+    self assert: SsoPlainSub readerAfterArm equals: #(1, 1, 1)
+
+  testSubRaisedThenPlainSend =>
+    self assert: SsoPlainSub raisedThenPlainSend equals: 0
+
+  testSubRaisedIterationInLoop =>
+    self assert: SsoPlainSub raisedIterationInLoop equals: 0
+
+  testSubRaisedIterationBetweenKept =>
+    self assert: SsoPlainSub raisedIterationBetweenKept equals: 1
+
+  testSubHandlerArm => self assert: SsoPlainSub handlerArm equals: 1
+
+  testSubEnsureBody => self assert: SsoPlainSub ensureBody equals: 1
+
+  testSubTryDoKeeps => self assert: SsoPlainSub tryDoKeeps equals: 1
+
+  testSubStoredPlain => self assert: SsoPlainSub storedPlain equals: 1
+
+  testSubStoredBump => self assert: SsoPlainSub storedBump equals: 0
+
+  testSubStoredPlainThenWrite =>
+    self assert: SsoPlainSub storedPlainThenWrite equals: 1
+
+  testSubSameStatementClosure =>
+    self assert: SsoPlainSub sameStatementClosure equals: 1
+
+  testSubFooArms => self assert: SsoPlainSub fooArms equals: 1
+
+  testSubFooPlainFirst => self assert: SsoPlainSub fooPlainFirst equals: 2
+
+  testSubFooReader => self assert: SsoPlainSub fooReader equals: #(1, 2, 3)
+
+  testSubFooHandler => self assert: SsoPlainSub fooHandler equals: 1
+
+  testSubFooNested => self assert: SsoPlainSub fooNested equals: 2
+
+  testSubFooRaised => self assert: SsoPlainSub fooRaised equals: 0
+
+  // --- sealed class ---
+  testSealedArmsToDo => self assert: SsoPlainSealed armsToDo equals: 1
+
+  testSealedArmsTimesRepeat =>
+    self assert: SsoPlainSealed armsTimesRepeat equals: 1
+
+  testSealedDeepArms => self assert: SsoPlainSealed deepArms equals: 1
+
+  testSealedPlainThenWriteInLoop =>
+    self assert: SsoPlainSealed plainThenWriteInLoop equals: 2
+
+  testSealedWriteThenPlainInLoop =>
+    self assert: SsoPlainSealed writeThenPlainInLoop equals: 2
+
+  testSealedArgsInLoop => self assert: SsoPlainSealed argsInLoop equals: 3
+
+  testSealedInjectLoop => self assert: SsoPlainSealed injectLoop equals: 3
+
+  testSealedReaderSeesWrites =>
+    self assert: SsoPlainSealed readerSeesWrites equals: #(1, 2, 3)
+
+  testSealedRaisedThenPlainSend =>
+    self assert: SsoPlainSealed raisedThenPlainSend equals: 0
+
+  testSealedRaisedIterationInLoop =>
+    self assert: SsoPlainSealed raisedIterationInLoop equals: 0
+
+  testSealedHandlerArm => self assert: SsoPlainSealed handlerArm equals: 1
+
+  testSealedEnsureBody => self assert: SsoPlainSealed ensureBody equals: 1
+
+  testSealedTryDoKeeps => self assert: SsoPlainSealed tryDoKeeps equals: 1
+
+  testSealedStoredPlain => self assert: SsoPlainSealed storedPlain equals: 1
+
+  testSealedStoredBump => self assert: SsoPlainSealed storedBump equals: 0
+
+  testSealedStoredPlainThenWrite =>
+    self assert: SsoPlainSealed storedPlainThenWrite equals: 1
+
+  testSealedSameStatementClosure =>
+    self assert: SsoPlainSealed sameStatementClosure equals: 1
+
+  testSealedFooPlainFirst => self assert: SsoPlainSealed fooPlainFirst equals: 2
+
+  testSealedFooReader =>
+    self assert: SsoPlainSealed fooReader equals: #(1, 2, 3)
+
+  testSealedFooHandler => self assert: SsoPlainSealed fooHandler equals: 1
+
+  // PIN-BUG BT-3691: sealed class, a writing arm plus provably pure arms in a threaded loop
+  // loses the write on main as well (not caused by BT-3690). Each pins a KNOWN-WRONG answer
+  // (the correct one is in the name of the open-class test); the fix must flip these.
+  testSealedPinBugArmsDo => self assert: SsoPlainSealed armsDo equals: 0
+
+  testSealedPinBugReaderAfterArm =>
+    self assert: SsoPlainSealed readerAfterArm equals: #(0, 0, 0)
+
+  testSealedPinBugRaisedIterationBetweenKept =>
+    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 0
+
+  testSealedPinBugFooArms => self assert: SsoPlainSealed fooArms equals: 0
