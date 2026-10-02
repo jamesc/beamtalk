@@ -139,8 +139,6 @@ sealed Object subclass: SsoArmExportSealed
       ]
     self.n
 
-  // An inner loop with arms inside an outer loop with arms.
-  // An inner loop that runs zero times must not roll an outer commit back.
   // The loop itself sits in an arm of the method.
   class loopInArm -> Integer =>
     self.n := 1
@@ -178,10 +176,99 @@ sealed Object subclass: SsoArmExportSealed
       ]
     self.n
 
-  // The whole loop raises out of a handler scope: every write of the loop
+  // --- a fold in a callee: nesting, zero iterations, raised and protected loops ---
+  //
+  // The language rejects a loop nested in a loop of the same method body when
+  // the inner body sends a class-side message ("Cannot mutate ... inside a loop
+  // nested inside another loop"), and a loop whose arm closure sits in an
+  // `on:do:`/`ensure:` block ("Cannot send ... inside this block"). The shapes
+  // are reached through a callee instead: each callee has its own fold, whose
+  // end-of-body sync must hand a correct value back to the caller's scope.
+
+  // A fold that mutates: arms and pure sends, one write (iteration 2).
+  class innerRuns -> Integer =>
+    seen := 0
+    #(1, 2, 3)
+      do: [:j |
+        seen := seen + 1
+        j =:= 2 ifTrue: [self bump]
+        self plain
+      ]
+    0
+
+  // The same fold over an empty list: zero iterations.
+  class innerEmpty -> Integer =>
+    seen := 0
+    #()
+      do: [:j |
+        seen := seen + 1
+        j =:= 1 ifTrue: [self bump]
+        self plain
+      ]
+    0
+
+  // A fold that raises in its last iteration, after writing in its first.
+  class innerRaises -> Integer =>
+    seen := 0
+    #(1, 2, 3)
+      do: [:j |
+        seen := seen + 1
+        j =:= 1 ifTrue: [self bump]
+        j =:= 3 ifTrue: [1 / 0]
+        self plain
+      ]
+    0
+
+  // An inner fold with a write inside an outer fold with its own arm write:
+  // 1 (outer, i = 1) + one per inner run (2) = 3.
+  class nestedLoops -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        self innerRuns
+        self plain
+      ]
+    self.n
+
+  // A zero-iteration inner fold must not roll the outer arm's write back.
+  class emptyInnerLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        self innerEmpty
+        self plain
+      ]
+    self.n
+
+  // The whole fold raises out of a handler scope: every write of the fold
   // reverts to the value before it.
-  // The handler's own write after the loop raised is kept.
-  // The loop completes inside the protected body.
+  class loopRaisesOutOfHandler -> Integer =>
+    self.n := 5
+    [self innerRaises] on: Error do: [:e | nil]
+    self.n
+
+  // The handler's own write after the fold raised is kept on top of that.
+  class loopRaisesHandlerWrites -> Integer =>
+    self.n := 5
+    [self innerRaises] on: Error do: [:e | self bump]
+    self.n
+
+  // The fold completes inside the protected body: its write is kept.
+  class loopInsideHandlerBody -> Integer =>
+    self.n := 0
+    [self innerRuns] on: Error do: [:e | nil]
+    self.n
+
+  class loopInsideEnsure -> Integer =>
+    self.n := 0
+    [self innerRuns] ensure: [self plain]
+    self.n
 
   // The arm export is followed by a handler arm that writes.
   class handlerArmInLoop -> Integer =>

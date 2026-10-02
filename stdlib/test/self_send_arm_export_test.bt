@@ -42,6 +42,23 @@ TestCase subclass: SelfSendArmExportTest
   testSealedHandlerArmInLoop =>
     self assert: SsoArmExportSealed handlerArmInLoop equals: 2
 
+  testSealedNestedLoops => self assert: SsoArmExportSealed nestedLoops equals: 3
+
+  testSealedEmptyInnerLoop =>
+    self assert: SsoArmExportSealed emptyInnerLoop equals: 1
+
+  testSealedLoopRaisesOutOfHandler =>
+    self assert: SsoArmExportSealed loopRaisesOutOfHandler equals: 5
+
+  testSealedLoopRaisesHandlerWrites =>
+    self assert: SsoArmExportSealed loopRaisesHandlerWrites equals: 6
+
+  testSealedLoopInsideHandlerBody =>
+    self assert: SsoArmExportSealed loopInsideHandlerBody equals: 1
+
+  testSealedLoopInsideEnsure =>
+    self assert: SsoArmExportSealed loopInsideEnsure equals: 1
+
   // --- open class ---
   testOpenArmsSelect => self assert: SsoArmExportOpen armsSelect equals: 13
 
@@ -63,3 +80,20 @@ TestCase subclass: SelfSendArmExportTest
 
   testOpenHandlerArmInLoop =>
     self assert: SsoArmExportOpen handlerArmInLoop equals: 2
+
+  testOpenNestedLoops => self assert: SsoArmExportOpen nestedLoops equals: 3
+
+  testOpenEmptyInnerLoop =>
+    self assert: SsoArmExportOpen emptyInnerLoop equals: 1
+
+  testOpenLoopRaisesOutOfHandler =>
+    self assert: SsoArmExportOpen loopRaisesOutOfHandler equals: 5
+
+  testOpenLoopRaisesHandlerWrites =>
+    self assert: SsoArmExportOpen loopRaisesHandlerWrites equals: 6
+
+  testOpenLoopInsideHandlerBody =>
+    self assert: SsoArmExportOpen loopInsideHandlerBody equals: 1
+
+  testOpenLoopInsideEnsure =>
+    self assert: SsoArmExportOpen loopInsideEnsure equals: 1

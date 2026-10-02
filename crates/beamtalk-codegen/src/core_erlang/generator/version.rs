@@ -32,8 +32,11 @@ use beamtalk_cerl_doc::leaf;
 pub(in crate::core_erlang) struct ClassVarScopeToken {
     /// The Core Erlang variable the token is bound to.
     pub(in crate::core_erlang) name: String,
-    /// Whether any send (or nested scope refresh) committed under this token,
-    /// i.e. whether the scope needs its `make_ref()` binding and a refresh.
+    /// Whether any generated code has referenced this token: a commit under it
+    /// (a send, a direct write, a nested scope's refresh), an export into it, or
+    /// a read of it by a confined send's pre-call sync. Not necessarily a
+    /// commit. It is what makes the scope emit its `make_ref()` binding and a
+    /// refresh, so only code that must pay for the scope may set it.
     pub(in crate::core_erlang) used: bool,
 }
 
@@ -648,15 +651,27 @@ impl CoreErlangGenerator {
         self.commit_to_innermost_scope_doc(&live)
     }
 
-    /// Whether any open scope token has had something committed under it (a
-    /// send, a write, or a closure/arm export): the lexical `ClassVars` may
-    /// then be older than the newest commit of the scope chain. `false`
-    /// outside any scope and while every open token is still unused, where the
-    /// lexical version is current.
-    pub(in crate::core_erlang) fn any_class_var_scope_used(&self) -> bool {
-        self.class_context
-            .as_ref()
-            .is_some_and(|ctx| ctx.class_var_scope_tokens.iter().any(|token| token.used))
+    /// The open tokens that some generated code has already referenced
+    /// (`used`: a confined send's sync or commit, a direct write's commit, a
+    /// closure/arm export or a refresh read it), innermost first, WITHOUT
+    /// marking anything used. Empty outside any scope and while every open
+    /// token is untouched.
+    ///
+    /// A token still unused here has had nothing committed under it, so a read
+    /// of the chain loses nothing by leaving it out, and leaving it out keeps
+    /// the read from forcing that scope to emit its token binding and refresh
+    /// (what [`Self::class_var_scope_chain`] does to every token it names).
+    /// Used by the reads that must not make a scope pay: a sealed pure send's
+    /// inline argument and a fold body's end-of-iteration sync (BT-3691).
+    pub(in crate::core_erlang) fn used_class_var_scope_chain(&self) -> Vec<String> {
+        self.class_context.as_ref().map_or_else(Vec::new, |ctx| {
+            ctx.class_var_scope_tokens
+                .iter()
+                .rev()
+                .filter(|token| token.used)
+                .map(|token| token.name.clone())
+                .collect()
+        })
     }
 
     /// Marks the innermost open scope token used and returns its name.

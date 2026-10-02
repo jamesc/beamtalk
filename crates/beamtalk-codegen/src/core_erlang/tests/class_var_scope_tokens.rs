@@ -447,6 +447,63 @@ fn sealed_pure_reader_after_a_scope_commit_syncs_before_the_call() {
 }
 
 #[test]
+fn sealed_pure_send_in_an_untouched_arm_of_a_used_loop_pays_no_token_or_take() {
+    // BT-3691: the pure reader sits in an arm of its own, inside a loop whose
+    // token the other arm already uses. Its inline read names only the tokens
+    // already referenced, so the reader's arm binds no token of its own, exports
+    // nothing and needs no refresh: only the loop's token and the writing arm's
+    // closure token exist, and the loop is refreshed once.
+    let code = compile(
+        "bt@scopetokensealedpurearm",
+        "sealed Object subclass: ScopeTokenSealedPureArm
+  classState: n = 0
+
+  class bump => self.n := self.n + 1
+
+  class reader => self.n
+
+  class armsDo =>
+    seen := 0
+    #(1, 2, 3) do: [:i |
+      seen := seen + 1
+      i =:= 1 ifTrue: [self bump]
+      i =:= 2 ifTrue: [self reader]
+    ]
+    self.n
+",
+    );
+    let method = code
+        .split("'class_armsDo'/2 = ")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("class_armsDo present");
+    assert_eq!(
+        method.matches("call 'erlang':'make_ref'()").count(),
+        2,
+        "only the loop's token and the writing arm's closure token. Got:\n{method}"
+    );
+    assert_eq!(
+        method.matches("'class_var_scope_export'").count(),
+        1,
+        "only the writing arm exports. Got:\n{method}"
+    );
+    assert_eq!(
+        method.matches("'class_var_scope_take'").count(),
+        1,
+        "only the loop is refreshed. Got:\n{method}"
+    );
+    let read_prefix = "'class_reader'(ClassSelf, call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf, [";
+    let (_, after) = method
+        .split_once(read_prefix)
+        .unwrap_or_else(|| panic!("the reader reads the scope inline. Got:\n{method}"));
+    let tokens = after.split(']').next().expect("token list");
+    assert!(
+        !tokens.contains(','),
+        "the inline read names only the referenced loop token, got [{tokens}]. Got:\n{method}"
+    );
+}
+
+#[test]
 fn sealed_arm_export_loop_compiles_through_erlc() {
     let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
     crate::core_erlang::tests::assert_compiles_through_erlc("bt@scopetokensealedarms", &code);

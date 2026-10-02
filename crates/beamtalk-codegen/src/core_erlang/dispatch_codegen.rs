@@ -328,8 +328,12 @@ impl CoreErlangGenerator {
         } else {
             super::threaded_ir::FrameId::ROOT
         };
-        let bind = self
-            .class_var_scope_sync_bind(frame, "class-var pre-call sync from the scope's commit");
+        let chain = self.class_var_scope_chain();
+        let bind = self.class_var_scope_sync_bind(
+            frame,
+            &chain,
+            "class-var pre-call sync from the scope's commit",
+        );
         prelude.push(bind);
         (
             self.current_class_var(),
@@ -341,30 +345,32 @@ impl CoreErlangGenerator {
     }
 
     /// Mints a fresh `ClassVars` version bound from the newest commit of the
-    /// open scopes (the live version when none was made), as a real,
-    /// `verify()`-checked `Bind`: `ClassVarsN = class_var_scope_read(ClassSelf,
-    /// [<tokens, innermost first>], <live ClassVars>)`.
+    /// scopes named by `chain` (innermost first; the live version when none
+    /// holds one), as a real, `verify()`-checked `Bind`:
+    /// `ClassVarsN = class_var_scope_read(ClassSelf, [<chain>], <live ClassVars>)`.
     ///
     /// Shared by the pre-call sync of a confined class-side send
-    /// ([`Self::class_var_for_send`]) and the end-of-iteration sync of a fold
-    /// body ([`Self::fold_body_class_var_tail_sync`]): both bring the lexical
-    /// version up to the newest commit of the scope chain. Marks every open
-    /// token used (the read references them). The caller splices the returned
-    /// statement into the frame the version is minted in.
+    /// ([`Self::class_var_for_send`], which names every open token through
+    /// [`Self::class_var_scope_chain`] and so marks them all used) and the
+    /// end-of-iteration sync of a fold body
+    /// ([`Self::fold_body_class_var_tail_sync`], which names only the tokens
+    /// already referenced). Every token in `chain` must already be marked
+    /// used: an unused token never gets its `make_ref()` binding. The caller
+    /// splices the returned statement into the frame the version is minted in.
     pub(super) fn class_var_scope_sync_bind(
         &mut self,
         frame: super::threaded_ir::FrameId,
+        chain: &[String],
         context: &str,
     ) -> ThreadedStmt {
         let cv = self.current_class_var();
-        let chain = self.class_var_scope_chain();
         let source_version = self.class_var_version();
         self.next_class_var();
         let target_version = self.class_var_version();
         let span = beamtalk_core::source_analysis::Span::default();
         let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
             super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
-                Self::class_var_scope_read_doc(&chain, &cv),
+                Self::class_var_scope_read_doc(chain, &cv),
             )),
             false,
             frame,
@@ -378,25 +384,32 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3691: the end-of-iteration sync of a threaded fold body (`do:`,
-    /// `collect:`, `select:`, `inject:into:`, ...): when an open scope has had
-    /// anything committed under it, the body's lexical
-    /// `ClassVars` may be older than the scope's newest commit. A write made
-    /// where its rebind cannot be threaded out lexically (a conditional arm, a
-    /// block) is exported into the scope token only, and a body whose other
-    /// sends are provably pure (a sealed class's pure send takes no token and
-    /// mints no version) never re-syncs. The fold's accumulator, and the
-    /// scope's commit after the fold, would then carry the stale version over
-    /// the newer entry. `None` when nothing committed under any open
-    /// scope, or outside any scope: the lexical version is current.
+    /// `collect:`, `select:`, `inject:into:`, ...): when some open scope token
+    /// has been referenced (a send, a write or an export committed under it), the
+    /// body's lexical `ClassVars` may be older than the scope's newest commit. A
+    /// write made where its rebind cannot be threaded out lexically (a
+    /// conditional arm, a block) is exported into the scope token only, and a
+    /// body whose other sends are provably pure (a sealed class's pure send
+    /// takes no token and mints no version) never re-syncs. The fold's
+    /// accumulator, and the scope's commit after the fold, would then carry the
+    /// stale version over the newer entry.
+    ///
+    /// The read names only the tokens already referenced
+    /// ([`Self::used_class_var_scope_chain`]), so it makes no other scope emit
+    /// a token binding or a refresh. `None` when no open token has been
+    /// referenced, or outside any scope: nothing can be newer than the lexical
+    /// version, and the body pays nothing.
     pub(super) fn fold_body_class_var_tail_sync(
         &mut self,
         frame: super::threaded_ir::FrameId,
     ) -> Option<ThreadedStmt> {
-        if !self.any_class_var_scope_used() {
+        let chain = self.used_class_var_scope_chain();
+        if chain.is_empty() {
             return None;
         }
         Some(self.class_var_scope_sync_bind(
             frame,
+            &chain,
             "class-var end-of-iteration sync of a fold body from the scope's commit",
         ))
     }
@@ -1694,15 +1707,18 @@ impl CoreErlangGenerator {
                 // scope where its rebind could not be threaded out lexically
                 // (a conditional arm, a block) lives only in the scope's
                 // commit. The call therefore receives the newest commit of the
-                // open scopes, read inline as its argument: nothing is bound
-                // and no version minted, since a pure reply changes nothing.
-                // No token joins either, for the same reason.
+                // tokens already referenced, read inline as its argument:
+                // nothing is bound, no version minted, no token joins and none
+                // is marked used (a scope this send sits in pays nothing it did
+                // not pay before), since a pure reply changes nothing. With no
+                // token referenced yet the lexical version is current and the
+                // call is unchanged.
                 let cv = self.current_class_var();
-                if self.any_class_var_scope_used() {
-                    let chain = self.class_var_scope_chain();
-                    (Self::class_var_scope_read_doc(&chain, &cv), None)
-                } else {
+                let chain = self.used_class_var_scope_chain();
+                if chain.is_empty() {
                     (leaf::var(cv), None)
+                } else {
+                    (Self::class_var_scope_read_doc(&chain, &cv), None)
                 }
             } else {
                 let (cv, scope) = self.class_var_for_send(&mut args_preamble, arguments);
