@@ -598,6 +598,12 @@ flattening implementation):
   a `didOpen` racing the root-package load) counts as an unknown package
   (`trait_expansion::known_package`), so `uses: my_app@Parser` of the project's
   own protocol is accepted there exactly as `beamtalk build` accepts it.
+- `beamtalk build`'s incremental Pass 1 folds every file — cache-fresh or
+  re-scanned — into the package indexes in source order with the same
+  `Pass1Index::add_file` a clean scan uses, and its cache entry keeps *every*
+  class a file declares (BT-3686), so a class declared in two files resolves to
+  the same declaration, and yields the same `trait_surface_hash`, whatever the
+  cache state — including after the winning file drops the class or is deleted.
 - MCP `lint`/`diagnostic_summary` flatten the infos with the package's
   provision-bearing protocols, but still do not pass same-package protocol
   ASTs to the per-file analysis (pre-existing gap noted in
