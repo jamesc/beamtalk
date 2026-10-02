@@ -128,6 +128,8 @@ A class-variable write takes effect immediately, as in Smalltalk.
 - **An error that escapes the invocation** discards everything the invocation wrote: `invoke_class_method/7` replies with the pre-call map. Unchanged.
 - **A caught error does not undo writes.** `[self bumpThenFail] on: Error do: [:e | nil]` keeps the write that `bumpThenFail` made before it raised. This reverses the behaviour BT-3675 introduced and the language documentation now describes.
 - **A foreign non-local return** keeps the writes made before it. Unchanged, and now needs no special path.
+
+`Ids tryTake` below answers 0 today and 1 under this ADR (run on `main` at `14799bd`).
 - **An own non-local return** returns from the method; the writes are already in place. Unchanged.
 
 This is a deliberate semantic change, discussed under Alternatives (per-send rollback) and Migration Path.
@@ -177,20 +179,24 @@ Object subclass: Counter
     self.n
 
 Counter subclass: LoudCounter
+  classState: n = 0          // class variables are per class, not inherited (ADR 0013)
   class hook => self bump
 
 Counter run        // => 2
 LoudCounter run    // => 3
 ```
 
-On today's compiler (`main` at `14799bd`), this class does not compile: the loop body is rejected with "Cannot send 'bump' to self inside this block ... this block has no way to thread such a mutation back", and `b := [self hook]` gets the `stored-closure` warning. With the documented workaround (an unused local mutated in the loop body), it compiles and `LoudCounter run` answers 2, because the stored closure's write is dropped (pinned by `testStoredClosureInvokedLaterLosesWrite`).
+On today's compiler (`main` at `14799bd`), this class does not compile: the loop body is rejected with "Cannot send 'bump' to self inside this block ... this block has no way to thread such a mutation back", and `b := [self hook]` gets the `stored-closure` warning. With the documented workaround (an unused local mutated in the loop body), it compiles and `LoudCounter run` answers 2, because the stored closure's write is dropped (run on `main` at `14799bd`; the same shape is pinned by `testStoredClosureInvokedLaterLosesWrite`).
 
 ### Error examples
 
 ```beamtalk
 Object subclass: Tally
   classState: total = 0
-  class addAll: items => Batch each: items do: [:x | self.total := self.total + x]
+  class add: x => self.total := self.total + x
+  class addAll: items =>
+    Batch each: items do: [:x | self add: x]
+    self.total
 
 Object subclass: Batch
   classState: runs = 0
@@ -203,7 +209,7 @@ Tally addAll: #(1, 2)
 // => ERROR: class_state_unreachable: a block that reads or writes Tally's class variables ran in another process ...
 ```
 
-Today `Tally` does not compile ("Cannot assign to field 'total' inside this block"). Under this ADR it compiles, the `class-state-abroad` lint warns at the block, and the send raises when the block runs in `Batch`'s process.
+Today this compiles without a warning and answers 0: the block runs in `Batch`'s process, `self add: x` runs `Tally`'s method there against a copy of the map, and the writes are silently lost (run on `main` at `14799bd`; a direct `self.total := ...` in the block is instead rejected at compile time). Under this ADR the `class-state-abroad` lint warns at the block, and the send raises when the block runs in `Batch`'s process.
 
 ```beamtalk
 Object subclass: Ids
@@ -333,7 +339,7 @@ The five options are described with their steelmen above. In short:
 
 - **Two semantic changes are visible to users.** A caught error no longer undoes the writes made before it, and a class-variable access from a block running in another process now raises. Both change answers that tests pin today.
 - **Class variables and actor state now disagree** about a raising send that is caught: an actor rolls back the callee's writes, a class does not. Until actor state is revisited, the language has two rules.
-- **Every class-variable read costs a process-dictionary lookup** in addition to the map lookup, and every write a `put`. Expected to be a few nanoseconds; measured in Phase 0.
+- **Every class-variable write costs a process-dictionary round trip.** In an isolated microbenchmark (OTP on the CI container, 2M iterations, three runs) a read through `get/1` plus `maps:get/2` costs the same as `maps:get/2` on a threaded variable (10-13 ns either way, with or without the pid check), while a write through `get/1`, `maps:put/3` and `put/2` costs 52-76 ns against 10-12 ns for a threaded rebind. Reads are free; a write-heavy class method pays about 50 ns per write, which is what one scope token costs today per *send*. Phase 0 measures this through generated code.
 - **The process dictionary is a hidden channel.** Reading generated code no longer shows class-variable data flow, and a hand-written Erlang class method must use `beamtalk_class_vars` to see the current values.
 - **The calling convention changes.** Every compiled class method is recompiled, and a hot upgrade must not run old and new modules against each other (see Implementation).
 - **One class of mistake moves from compile time to run time.** Today a class-variable write in a block passed to another class's method is rejected by the compiler, as a side effect of rejecting every non-inlined block write. Under this ADR only the statically visible cases get the `class-state-abroad` lint; a block that reaches another process indirectly fails when it runs, with a structured error.
