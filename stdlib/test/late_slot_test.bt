@@ -54,8 +54,7 @@ TestCase subclass: LateSlotTest
 
   // === Inherited `late` slot — instance-level lifecycle, via a subclass
   // that declares no `late` field of its own ===
-  testInheritedLateFieldHasFieldFalseBeforeAssign =>
-    self deny: self.a hasProc
+  testInheritedLateFieldHasFieldFalseBeforeAssign => self deny: self.a hasProc
 
   testInheritedLateFieldReadBeforeAssignRaisesUninitializedStateError =>
     self should: [self.a getProc] raise: #uninitialized_state_error
