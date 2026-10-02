@@ -89,16 +89,18 @@ During a class-method invocation, a class's class variables live in exactly one 
 ```erlang
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
     Key = beamtalk_class_vars:key(ClassName),
-    put(Key, ClassVars),
+    Prev = put(Key, ClassVars),
     try apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule) of
         test_spawn -> test_spawn;
         {ok, Result} -> {reply, {ok, Result}, get(Key)};
         {nlr_relay, Nlr, _ST} -> {reply, {error, Nlr}, get(Key)};   %% writes before a foreign ^ are kept
         {error, Error} -> {reply, {error, Error}, ClassVars}       %% escaping error: pre-call map
     after
-        erase(Key)
+        beamtalk_class_vars:restore(Key, Prev)                      %% erase, or put back an outer value
     end.
 ```
+
+`restore/2` puts back the value that was there on entry (`undefined` erases), the discipline `beamtalk_actor:restore_dispatch_pdict/1` already follows. Re-entry of `invoke_class_method/7` for the same class inside one invocation is not expected (the class process cannot `gen_server:call` itself, and self-sends bypass `invoke_class_method/7`), but restoring rather than erasing makes a nested invocation harmless instead of a lost outer map.
 
 Between invocations nothing changes: the `gen_server` state holds the map and the ETS snapshot mirrors it.
 
@@ -148,7 +150,7 @@ A block that runs in another process cannot reach its home class's variables: th
                          "or return the value and assign it in Counter's own method.">>}
 ```
 
-The same applies to `performLocally:withArguments:`, which today fails with a raw `badkey` because it passes an empty map.
+The same applies to `performLocally:withArguments:`. Today `beamtalk_object_class:local_call/3` calls the method with `ClassSelf = nil` and an empty map, so a class-variable read fails with a raw `badkey`. Under this ADR `local_call/3` builds a real `ClassSelf` carrying the class's registered pid, so the helpers raise `class_state_unreachable` in any other process and read the live map when the caller is the class process itself. The helpers never accept `nil`: a `nil` receiver is an internal error, not a reachable-state question.
 
 Where the compiler can see the case, it warns instead of waiting for run time: a block literal that reads or writes class variables, passed directly as an argument to a class-side send whose receiver is statically another class that has class state or whose method is not `class sealed`, gets a `class-state-abroad` warning at the block. This is a lint, not a guarantee; a block passed through a variable or an instance method is only caught at run time.
 
@@ -341,7 +343,7 @@ The five options are described with their steelmen above. In short:
 - **Class variables and actor state now disagree** about a raising send that is caught: an actor rolls back the callee's writes, a class does not. Until actor state is revisited, the language has two rules.
 - **Every class-variable write costs a process-dictionary round trip.** In an isolated microbenchmark (OTP on the CI container, 2M iterations, three runs) a read through `get/1` plus `maps:get/2` costs the same as `maps:get/2` on a threaded variable (10-13 ns either way, with or without the pid check), while a write through `get/1`, `maps:put/3` and `put/2` costs 52-76 ns against 10-12 ns for a threaded rebind. Reads are free; a write-heavy class method pays about 50 ns per write, which is what one scope token costs today per *send*. Phase 0 measures this through generated code.
 - **The process dictionary is a hidden channel.** Reading generated code no longer shows class-variable data flow, and a hand-written Erlang class method must use `beamtalk_class_vars` to see the current values.
-- **The calling convention changes.** Every compiled class method is recompiled, and a hot upgrade must not run old and new modules against each other (see Implementation).
+- **The calling convention changes, and the change is not hot-upgradable.** Every compiled class method is recompiled, a module compiled by the previous compiler is refused at load with `abi_mismatch`, and the release that ships this needs a node restart (see Implementation).
 - **One class of mistake moves from compile time to run time.** Today a class-variable write in a block passed to another class's method is rejected by the compiler, as a side effect of rejecting every non-inlined block write. Under this ADR only the statically visible cases get the `class-state-abroad` lint; a block that reaches another process indirectly fails when it runs, with a structured error.
 
 ### Neutral
@@ -368,7 +370,8 @@ Effort: L overall. Phase 0 gates the rest.
 - Install, read back and erase the map in `invoke_class_method/7`, `invoke_class_extension/7`, the metaclass path and ADR 0084 builder funs.
 - Construct `ClassSelf` with the class's registered pid on every path.
 - Implement `class_state_unreachable`.
-- Support both calling conventions for one release, selected by a `class_var_abi` entry in `__beamtalk_meta/0`, so a hot upgrade never calls a new-convention module with an old one's arguments.
+- Record the calling convention as a `class_var_abi` entry in `__beamtalk_meta/0`, and make the loader (`beamtalk_object_class` registration and the hot-reload path) refuse a module whose ABI differs from the running runtime's with a structured `abi_mismatch` error that names the module and says to recompile. There is no dual-ABI window: an old-ABI caller direct-calls `class_<sel>(ClassSelf, ClassVars, ...)` on whatever module defines the method, so an old module and a new module in one hierarchy cannot be bridged at the call site, and bridging only at the runtime dispatch boundary would reintroduce the two-representations reconciliation this ADR removes. The upgrade across this release is a whole-node restart, which is the only upgrade `beamtalk release` v1 supports anyway (ADR 0125 §2.1); when the relup phase lands, `class_var_abi` is part of the `__beamtalk_meta/0` record its appup derivation diffs (ADR 0125 §2.2), so a change to it marks the release as restart-only. A package compiled by an older compiler is refused at load until it is recompiled.
+- Update `beamtalk_object_class:local_call/3` (`performLocally:withArguments:`) to build a `ClassSelf` with the class's registered pid and to call the new convention.
 
 **Phase 3: codegen (L).**
 - Emit the §2 calls and the §3 convention, and add the `class-state-abroad` lint (update `docs/development/surface-parity.md` for the new diagnostic).
@@ -378,7 +381,6 @@ Effort: L overall. Phase 0 gates the rest.
 
 **Phase 4: docs and cleanup (S).**
 - Mark ADR 0110 Superseded, amend ADR 0013 §1 and ADR 0111, rewrite the class-variable parts of `docs/beamtalk-language-features.md`, `docs/development/debugging.md` and `docs/development/benchmarks.md`.
-- Drop the dual calling convention after one release.
 
 Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`, new `beamtalk_class_vars`), codegen (`core_erlang` class-method, dispatch, control-flow, block and exception lowering, `threaded_ir`), semantic analysis (stored-closure validator), docs. Parser, AST, type checker, LSP and REPL are unaffected.
 
@@ -387,7 +389,7 @@ Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`
 - **Programs that relied on a caught error undoing a write** will see the write kept. About 30 BUnit tests in `self_send_override_blocks_test.bt`, `self_send_plain_reply_test.bt` and `class_var_nlr_shadow_test.bt` assert how writes interact with a caught raise, and most of them change their expected answer: for example `testCaughtThenSend`, `testOwnTryBodyRaiseThenSend`, `testOpenArmsRaisedIterationDiscarded` and the sealed twins. Two pinned known-wrong tests move to this ADR's answer rather than the one their comments call correct: `testSealedPinBugRaisedIterationBetweenKept` (`raisedIterationBetweenKept`) answers 3, because the raised iterations' writes are kept, where its comment says 1; and `testStoredClosureReadsRevertedValueAfterCaughtRaise` keeps its current answer of 2, which becomes the correct one. The language documentation's statement that "a write made by a callee that raised is never kept, even when the raise was caught" is replaced. To keep the old behaviour in user code, assign after the protected block succeeds.
 - **Programs that passed a block touching class variables to another class's class method, an actor, or `performLocally:`** will get `class_state_unreachable` instead of a stale read or a lost write. Fix: read into a local before passing the block, or return the value and assign it in the home class's method.
 - **Programs that worked around the old limits** (an unused local added to thread a loop body, `@expect stored_closure`) keep working; the workaround becomes unnecessary and `@expect stored_closure` becomes an unused-expectation warning to remove.
-- **Hot upgrades** across the release that changes the calling convention go through the dual-convention support in Phase 2.
+- **Hot upgrades** across the release that changes the calling convention are not supported: the node restarts, and every package is recompiled. A module from an older compiler is refused at load with an `abi_mismatch` error that names it.
 
 ## Open Questions
 
