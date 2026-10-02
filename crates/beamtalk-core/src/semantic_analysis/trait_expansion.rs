@@ -136,18 +136,11 @@ pub fn expand_module(
         return (diagnostics, origins);
     }
 
-    // Look up protocols by name once, before mutating any class — a
-    // protocol's provisions never change while flattening its users, and
-    // borrowing `module.protocols` for the whole loop while also mutating
+    // Look up protocols once, before mutating any class — a protocol's
+    // provisions never change while flattening its users, and borrowing
+    // `module.protocols` for the whole loop while also mutating
     // `module.classes` would need this same split regardless.
-    //
-    // `external_protocols` is inserted first so the current module's own
-    // `module.protocols` entries — inserted second into the same `HashMap`
-    // — overwrite any same-named external entry (current-file wins, per
-    // this function's own doc).
-    let mut protocols: HashMap<&EcoString, &ProtocolDefinition> =
-        external_protocols.iter().collect();
-    protocols.extend(module.protocols.iter().map(|p| (&p.name.name, p)));
+    let protocols = protocol_lookup(&module.protocols, external_protocols);
 
     for class in &mut module.classes {
         if class.uses.is_empty() {
@@ -287,9 +280,23 @@ struct CollectedModule {
 pub struct TraitUserCollector {
     modules: Vec<CollectedModule>,
     protocol_defs: Vec<ProtocolDefinition>,
+    /// The package the collected protocols are stamped as declared in; `None`
+    /// for the package being compiled ([`ProtocolDefinition::package`]).
+    package: Option<EcoString>,
 }
 
 impl TraitUserCollector {
+    /// A collector for the files of dependency `package`, whose protocols are
+    /// stamped with it so a `uses: package@Name` elsewhere resolves to them
+    /// (BT-3684). [`Self::default`] collects the package being compiled.
+    #[must_use]
+    pub fn for_package(package: &str) -> Self {
+        Self {
+            package: Some(package.into()),
+            ..Self::default()
+        }
+    }
+
     /// Records `module`'s declared classes and provision-bearing protocols
     /// and, if any class has a `uses:` line, the module itself.
     pub fn add(&mut self, module: &Module) {
@@ -301,13 +308,8 @@ impl TraitUserCollector {
                 .any(|c| !c.uses.is_empty())
                 .then(|| module.clone()),
         });
-        self.protocol_defs.extend(
-            module
-                .protocols
-                .iter()
-                .filter(|p| !p.provided_methods.is_empty())
-                .cloned(),
-        );
+        self.protocol_defs
+            .extend(provision_bearing_protocols(module, self.package.as_deref()));
     }
 
     /// The provision-bearing protocol ASTs collected so far, in `add` order.
@@ -360,20 +362,119 @@ impl TraitUserCollector {
     }
 }
 
+/// Key under which a protocol carried in from another package is registered
+/// for a package-qualified `uses: package@name` (BT-3684). `@` cannot occur in
+/// an identifier, so it never collides with a bare protocol name.
+#[must_use]
+pub fn qualified_protocol_key(package: &str, name: &str) -> EcoString {
+    EcoString::from(format!("{package}@{name}"))
+}
+
+/// The key a `uses:` line resolves through in the map
+/// [`first_wins_protocol_map`] builds: the qualified key for `uses: pkg@Name`,
+/// the bare name otherwise. The one place the incremental-build hash
+/// (`file_protocol_uses`, `protocol_hashes`) and the flattener agree on which
+/// protocol a `uses:` names.
+#[must_use]
+pub fn protocol_use_key(use_: &ProtocolUse) -> EcoString {
+    match &use_.package {
+        Some(package) => qualified_protocol_key(&package.name, &use_.protocol.name),
+        None => use_.protocol.name.clone(),
+    }
+}
+
+/// The provision-bearing protocols of `module` (those with at least one
+/// provided method — the only ones flattening needs the AST of), stamped as
+/// declared in `package` when it is not the package being compiled
+/// ([`ProtocolDefinition::package`]).
+#[must_use]
+pub fn provision_bearing_protocols(
+    module: &Module,
+    package: Option<&str>,
+) -> Vec<ProtocolDefinition> {
+    module
+        .protocols
+        .iter()
+        .filter(|p| !p.provided_methods.is_empty())
+        .map(|p| {
+            let mut def = p.clone();
+            def.package = package.map(EcoString::from);
+            def
+        })
+        .collect()
+}
+
 /// Builds the `external_protocols` map [`expand_module`] takes from protocol
 /// definitions in precedence order: the first definition of a name wins
 /// (project before dependencies), matching `ProtocolRegistry::add_pre_loaded`,
-/// so the registry and the flattener agree on which same-named protocol a
+/// so the registry and the flattener agree on which same-named protocol a bare
 /// `uses:` line resolves to.
+///
+/// A definition stamped with a [`ProtocolDefinition::package`] is additionally
+/// registered, first definition winning, under [`qualified_protocol_key`] — so
+/// `uses: pkg_b@Retryable` resolves to `pkg_b`'s protocol even when an earlier
+/// dependency declares a `Retryable` too (BT-3684). The map therefore holds up
+/// to two entries per carried protocol: resolve through [`protocol_use_key`],
+/// and do not iterate it as a list of protocols.
 #[must_use]
 pub fn first_wins_protocol_map(
     defs: impl IntoIterator<Item = ProtocolDefinition>,
 ) -> HashMap<EcoString, ProtocolDefinition> {
     let mut map = HashMap::new();
     for def in defs {
+        if let Some(package) = &def.package {
+            map.entry(qualified_protocol_key(package, &def.name.name))
+                .or_insert_with(|| def.clone());
+        }
         map.entry(def.name.name.clone()).or_insert(def);
     }
     map
+}
+
+/// Every protocol a module's `uses:` lines may resolve to, keyed as
+/// [`first_wins_protocol_map`] keys them.
+type ProtocolLookup<'a> = HashMap<EcoString, &'a ProtocolDefinition>;
+
+/// Merges `external_protocols` with the current module's own protocols
+/// (`module.protocols`, taken as a slice so the caller can keep mutating the
+/// module's classes), which win a name clash (current-file wins, per
+/// [`expand_module`]'s doc).
+fn protocol_lookup<'a>(
+    module_protocols: &'a [ProtocolDefinition],
+    external_protocols: &'a HashMap<EcoString, ProtocolDefinition>,
+) -> ProtocolLookup<'a> {
+    // `external_protocols` is inserted first so the current module's own
+    // `module.protocols` entries — inserted second under the same bare key —
+    // overwrite any same-named external entry.
+    let mut protocols: ProtocolLookup<'a> = external_protocols
+        .iter()
+        .map(|(key, def)| (key.clone(), def))
+        .collect();
+    protocols.extend(module_protocols.iter().map(|p| (p.name.name.clone(), p)));
+    protocols
+}
+
+/// Resolves the protocol a `uses:` line names (ADR 0127 §3).
+///
+/// A bare `uses: Name` takes the first definition of `Name`. A qualified
+/// `uses: pkg@Name` takes `pkg`'s own `Name` and never another package's
+/// (BT-3684). A protocol with no [`ProtocolDefinition::package`] belongs to the
+/// package being compiled — this module's or a sibling file's — so it also
+/// answers a qualifier, which may name the current package.
+fn resolve_used_protocol<'a>(
+    protocols: &ProtocolLookup<'a>,
+    use_: &ProtocolUse,
+) -> Option<&'a ProtocolDefinition> {
+    let named = protocols.get(&protocol_use_key(use_)).copied();
+    if use_.package.is_none() {
+        return named;
+    }
+    named.or_else(|| {
+        protocols
+            .get(&use_.protocol.name)
+            .copied()
+            .filter(|p| p.package.is_none())
+    })
 }
 
 /// Applies an [`OriginMap`] returned by [`expand_module`] to `hierarchy`'s
@@ -437,8 +538,14 @@ pub fn resolve_provision_names(
     classes: &[ClassInfo],
     current_package: Option<&str>,
 ) {
-    for (name, protocol) in protocols.iter_mut() {
-        let Some(package) = sources.get(name).and_then(|s| s.package.as_ref()) else {
+    for protocol in protocols.values_mut() {
+        // The stamp on the definition is authoritative: `sources` is keyed by
+        // bare name, so it cannot tell two same-named protocols apart.
+        let Some(package) = protocol.package.clone().or_else(|| {
+            sources
+                .get(&protocol.name.name)
+                .and_then(|s| s.package.clone())
+        }) else {
             continue;
         };
         if current_package == Some(package.as_str()) {
@@ -446,7 +553,7 @@ pub fn resolve_provision_names(
         }
         let in_package: HashSet<&EcoString> = classes
             .iter()
-            .filter(|c| c.package.as_ref() == Some(package))
+            .filter(|c| c.package.as_ref() == Some(&package))
             .map(|c| &c.name)
             .collect();
         if in_package.is_empty() {
@@ -482,7 +589,7 @@ struct MergedProvision {
 /// Flattens every `uses:` line of a single `class` (ADR 0127 §3 steps 1–4, 6).
 fn expand_class(
     class: &mut ClassDefinition,
-    protocols: &HashMap<&EcoString, &ProtocolDefinition>,
+    protocols: &ProtocolLookup<'_>,
     diagnostics: &mut Vec<Diagnostic>,
     origins: &mut OriginMap,
 ) {
@@ -520,13 +627,10 @@ fn expand_class(
     for use_ in &class.uses {
         // `protocols` already merges the current module's own protocols with
         // every externally-carried one (same-package other file, or a
-        // dependency's protocol AST — BT-3591, module doc), so a bare-name
-        // lookup resolves either kind identically regardless of whether
-        // `use_` itself is package-qualified (`uses: json@Parser`) — the
-        // qualifier only matters for the *diagnostic* below when resolution
-        // fails.
-        let protocol = protocols.get(&use_.protocol.name).copied();
-        let Some(protocol) = protocol else {
+        // dependency's protocol AST — BT-3591, module doc); a qualified
+        // `uses: json@Parser` resolves against `json`'s protocols only
+        // (BT-3684).
+        let Some(protocol) = resolve_used_protocol(protocols, use_) else {
             diagnostics.push(missing_protocol_diagnostic(use_));
             continue;
         };
@@ -1123,9 +1227,7 @@ pub fn check_after_hierarchy(
     }
 
     if module.classes.iter().any(|c| !c.uses.is_empty()) {
-        let mut protocols: HashMap<&EcoString, &ProtocolDefinition> =
-            external_protocols.iter().collect();
-        protocols.extend(module.protocols.iter().map(|p| (&p.name.name, p)));
+        let protocols = protocol_lookup(&module.protocols, external_protocols);
         for class in &module.classes {
             if class.uses.is_empty() {
                 continue;
@@ -1332,7 +1434,7 @@ fn format_required_signature(sig: &ProtocolMethodSignature) -> String {
 /// that has at least one `uses:` line.
 fn check_class_trait_usage(
     class: &ClassDefinition,
-    protocols: &HashMap<&EcoString, &ProtocolDefinition>,
+    protocols: &ProtocolLookup<'_>,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -1354,8 +1456,7 @@ fn check_class_trait_usage(
         // here is the same current-module-plus-external merge) — an
         // unresolvable `uses:` was already diagnosed by `expand_module`
         // (Phase -1); nothing further to check here.
-        let protocol = protocols.get(&use_.protocol.name).copied();
-        let Some(protocol) = protocol else {
+        let Some(protocol) = resolve_used_protocol(protocols, use_) else {
             continue;
         };
 

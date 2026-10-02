@@ -12,6 +12,8 @@
 //!   resolution shared with `beamtalk-mcp`
 //! - [`native_type_specs`] — Erlang FFI type-spec extraction shared with
 //!   `beamtalk-mcp`
+//! - [`dep_order`] — compilation order of the dependency graph, shared by the
+//!   graph compile, the fresh-deps fast path and the offline dependency scan
 //! - [`otp_support`] — OTP version support window (ADR 0125 §3.1), the
 //!   single reader of `otp-support.toml`
 //! - [`path_util`] — shared `normalize_path` utility (filesystem-free `.`/`..` resolution)
@@ -21,6 +23,7 @@
 //!   shared with `tests/repl_protocol.rs`
 
 pub mod build_layout;
+pub mod dep_order;
 pub mod dependency_classes;
 pub mod erlc;
 pub mod manifest;

@@ -354,6 +354,98 @@ fn test_incremental_pass1_persists_protocol_uses_for_a_cache_fresh_file() {
     );
 }
 
+/// BT-3684: a package-qualified `uses: pkg_b@Retryable` is keyed by `pkg_b`'s
+/// protocol: editing it rebuilds the user, editing an unrelated dependency's
+/// same-named protocol does not — and a bare `uses: Retryable` follows the
+/// first definition, as `trait_expansion` resolves it.
+#[test]
+fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
+    let temp = TempDir::new().unwrap();
+    let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_dir = project.join("src");
+    let build_dir = project.join("build");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::create_dir_all(&build_dir).unwrap();
+    let qualified = src_dir.join("qualified.bt");
+    write_test_file(
+        &qualified,
+        "Object subclass: Qualified\n  uses: pkg_b@Retryable\n",
+    );
+    let bare = src_dir.join("bare.bt");
+    write_test_file(&bare, "Object subclass: Bare\n  uses: Retryable\n");
+    write_test_file(&build_dir.join("bt@qualified.beam"), "BEAM");
+    write_test_file(&build_dir.join("bt@bare.beam"), "BEAM");
+    let source_files = vec![qualified.clone(), bare.clone()];
+    let pairs = make_pairs(&source_files, &build_dir);
+
+    // The `uses:` keys come from Pass 1, exactly as a build records them.
+    let pass1 = super::super::super::build_cache::incremental_build_class_module_index(
+        &source_files,
+        Some(&src_dir),
+        "pkg",
+        &build_dir,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        pass1.file_protocol_uses.get(&qualified),
+        Some(&vec![ecow::EcoString::from("pkg_b@Retryable")])
+    );
+    assert_eq!(
+        pass1.file_protocol_uses.get(&bare),
+        Some(&vec![ecow::EcoString::from("Retryable")])
+    );
+    let retryable = |package: &str, selector: &str| {
+        let source = format!(
+            "Protocol define: Retryable\n  name -> String\n\n  {selector} -> String => self name\n"
+        );
+        let (module, _) = beamtalk_core::source_analysis::parse(
+            beamtalk_core::source_analysis::lex_with_eof(&source),
+        );
+        let mut def = module.protocols[0].clone();
+        def.package = Some(package.into());
+        def
+    };
+    let build = |force: bool, a_selector: &str, b_selector: &str| {
+        let hashes = crate::commands::util::protocol_hashes(&[
+            retryable("pkg_a", a_selector),
+            retryable("pkg_b", b_selector),
+        ]);
+        let changes = detect_changes(
+            &source_files,
+            &build_dir,
+            &pairs,
+            force,
+            &HashMap::new(),
+            &BuildGraphEdges {
+                file_protocol_uses: pass1.file_protocol_uses.clone(),
+                protocol_hashes: hashes,
+                ..BuildGraphEdges::default()
+            },
+        );
+        super::super::super::build_cache::save_beam_hash_cache(&build_dir, &changes.source_hashes);
+        changes
+    };
+
+    build(true, "aTag", "bTag");
+
+    let unrelated_edit = build(false, "aTag2", "bTag");
+    assert_eq!(
+        unrelated_edit.changed_files,
+        vec![bare.clone()],
+        "editing pkg_a's Retryable rebuilds only the bare user (first definition), \
+         not the file that names pkg_b's"
+    );
+
+    let named_edit = build(false, "aTag2", "bTag2");
+    assert_eq!(
+        named_edit.changed_files,
+        vec![qualified],
+        "editing pkg_b's Retryable must rebuild the file that names it"
+    );
+}
+
 #[test]
 fn test_detect_changes_source_modified() {
     let temp = TempDir::new().unwrap();
@@ -688,16 +780,7 @@ fn detect_and_record(project: &Utf8Path) -> (Vec<String>, Vec<String>) {
         has_native_deps: false,
     };
     let index = build_class_index(&env, &dep_ctx, &default_options(), false).unwrap();
-    let protocol_hashes: HashMap<ecow::EcoString, String> = index
-        .all_protocol_defs
-        .iter()
-        .map(|p| {
-            (
-                p.name.name.clone(),
-                crate::commands::util::protocol_content_hash(p),
-            )
-        })
-        .collect();
+    let protocol_hashes = crate::commands::util::protocol_hashes(&index.all_protocol_defs);
     let pairs = compute_file_module_pairs(&env).unwrap();
     fs::create_dir_all(&env.build_dir).unwrap();
     let changes = detect_changes(

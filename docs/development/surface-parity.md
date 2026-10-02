@@ -565,10 +565,25 @@ flattening implementation):
 - A dependency's compile, its exported `class_infos` (`build_dep_class_index`)
   and the offline dependency scan also resolve the protocols of the *other*
   dependencies (BT-3678): the dependency's own protocols first, then those of
-  dependencies compiled before it (graph compile) or, where there is no
-  topological order (fresh-deps fast path, offline scan), every other
-  dependency's in discovery order. So B's `uses: a@Retryable` of its own
-  dependency A is flattened on every surface.
+  the dependencies compiled before it. **All three paths walk the graph in the
+  same compile order** (`beamtalk_cli::dep_order::topological_order`, BT-3684),
+  so a cold build, the fresh-deps fast path and the offline scan export
+  identical flattened `class_infos` (the offline scan leaves
+  `ClassInfo::package` unstamped, so it matches by trait-provided surface). So
+  B's `uses: a@Retryable` of its own dependency A is flattened on every surface.
+- A package-qualified `uses: pkg@Name` resolves against `pkg`'s protocols only
+  (BT-3684): carried dependency protocol ASTs are stamped with their package
+  (`ProtocolDefinition::package`) and registered under `pkg@Name` in
+  `first_wins_protocol_map`, so a same-named protocol of an earlier dependency
+  cannot capture it. A bare `uses: Name` still takes the first definition. The
+  build's incremental-key `file_protocol_uses`/`protocol_hashes` use the same
+  keys (`protocol_use_key`), so editing `pkg`'s protocol rebuilds the file that
+  names it and editing another package's same-named one does not.
+  `ProtocolRegistry::add_pre_loaded` (conformance, a protocol *type* by bare
+  name) stays first-wins by bare name: a bare protocol type name has no
+  package qualifier to resolve by. LSP / `ProjectIndex` carry unstamped
+  dependency protocol ASTs, so there a qualified `uses:` still falls back to
+  the first same-named definition (not changed by BT-3684).
 - MCP `lint`/`diagnostic_summary` flatten the infos with the package's
   provision-bearing protocols, but still do not pass same-package protocol
   ASTs to the per-file analysis (pre-existing gap noted in

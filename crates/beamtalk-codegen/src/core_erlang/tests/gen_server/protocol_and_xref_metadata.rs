@@ -27,6 +27,7 @@ fn protocol_only_module_generates_register_class() {
             }],
             class_method_signatures: vec![],
             provided_methods: vec![],
+            package: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: Span::new(0, 0),

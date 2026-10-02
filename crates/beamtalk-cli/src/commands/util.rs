@@ -119,6 +119,22 @@ pub(crate) fn protocol_content_hash(protocol: &beamtalk_core::ast::ProtocolDefin
     sha256_hex(beamtalk_core::unparse::unparse_module(&wrapper).as_bytes())
 }
 
+/// [`protocol_content_hash`] of every protocol in `defs` (project first, then
+/// dependencies), keyed as `trait_expansion` resolves a `uses:` line: the bare
+/// name — the first definition wins — and `pkg@Name` for a protocol carried in
+/// from another package. A file's `uses:` keys
+/// ([`protocol_use_key`](beamtalk_core::semantic_analysis::trait_expansion::protocol_use_key))
+/// therefore find the hash of the protocol that is actually flattened (BT-3684).
+#[must_use]
+pub(crate) fn protocol_hashes(
+    defs: &[beamtalk_core::ast::ProtocolDefinition],
+) -> std::collections::HashMap<ecow::EcoString, String> {
+    beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(defs.iter().cloned())
+        .into_iter()
+        .map(|(key, protocol)| (key, protocol_content_hash(&protocol)))
+        .collect()
+}
+
 /// Hash of the cross-file class surface contributed by trait flattening
 /// (BT-3674): the `ClassInfo` of each class in `flattened_names` (the classes
 /// declared in files with `uses:` lines) within `pkg_name`, sorted by name.

@@ -54,7 +54,10 @@ const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 /// (rather than relying on `#[serde(default)]`) so every project gets one
 /// clean rebuild that populates it, instead of silently treating every
 /// already-cached file as using no protocols until it next goes stale.
-const CACHE_VERSION: u32 = 4;
+/// v5: `protocol_uses` entries are `protocol_use_key`s — `pkg@Name` for a
+/// package-qualified `uses:` — so a qualified use is hashed against the
+/// protocol of that package, not of a same-named one (BT-3684).
+const CACHE_VERSION: u32 = 5;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///
@@ -439,8 +442,10 @@ pub(crate) fn save_diagnostics_cache(
     );
 }
 
-/// Derive each cached file's `uses:` protocol names from its freshly-parsed
-/// AST (ADR 0127 §10a; BT-3591). Shared by both the force-rebuild path
+/// Derive each cached file's `uses:` protocol keys
+/// ([`trait_expansion::protocol_use_key`](beamtalk_core::semantic_analysis::trait_expansion::protocol_use_key):
+/// `pkg@Name` for a qualified use, the bare name otherwise) from its
+/// freshly-parsed AST (ADR 0127 §10a; BT-3591). Shared by both the force-rebuild path
 /// (every file passes through here) and the incremental path's stale-file
 /// re-scan — a fresh (cache-hit) file's uses instead come straight from its
 /// persisted `CacheEntry.protocol_uses`, never re-derived.
@@ -454,7 +459,11 @@ fn protocol_uses_from_cached_asts(
                 .module
                 .classes
                 .iter()
-                .flat_map(|c| c.uses.iter().map(|u| u.protocol.name.clone()))
+                .flat_map(|c| {
+                    c.uses
+                        .iter()
+                        .map(beamtalk_core::semantic_analysis::trait_expansion::protocol_use_key)
+                })
                 .collect();
             (file.clone(), uses)
         })

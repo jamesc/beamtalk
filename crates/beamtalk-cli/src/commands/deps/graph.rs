@@ -13,7 +13,7 @@
 use beamtalk_core::compilation::{DependencySource, GitReference};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, Result};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use tracing::{debug, info};
 
 use crate::commands::manifest::{self, ParsedManifest};
@@ -523,82 +523,21 @@ fn discover_single_dep(
     Ok(())
 }
 
-/// Perform a topological sort of the dependency graph using Kahn's algorithm.
-///
-/// Returns package names in compilation order (leaves first, root's direct deps last).
-/// The root package itself is NOT included in the output.
+/// Orders the discovered dependency graph for compilation (leaves first, root's
+/// direct deps last), via [`beamtalk_cli::dep_order::topological_order`] — the
+/// order the fresh-deps and offline paths reproduce. The root package itself is
+/// NOT included in the output.
 ///
 /// # Errors
 ///
 /// Returns an error if a cycle is detected (should not happen if `discover_deps`
 /// already checked, but this is a safety net).
 fn topological_sort(graph: &BTreeMap<String, DepNode>, root_name: &str) -> Result<Vec<String>> {
-    // Build in-degree map: count how many deps each node has within the graph
-    let mut in_degree: HashMap<String, usize> = HashMap::new();
-    let mut reverse_edges: HashMap<String, Vec<String>> = HashMap::new();
-
-    // Initialize all nodes with zero in-degree
-    for name in graph.keys() {
-        in_degree.insert(name.clone(), 0);
-    }
-
-    // Count edges: for each node, increment in-degree for each of its deps that is in the graph
-    for (name, node) in graph {
-        for dep in &node.deps {
-            if graph.contains_key(dep) && dep != root_name {
-                *in_degree.get_mut(name).unwrap() += 1;
-                reverse_edges
-                    .entry(dep.clone())
-                    .or_default()
-                    .push(name.clone());
-            }
-        }
-    }
-
-    // Kahn's algorithm: start with nodes that have no dependencies within the graph
-    let mut queue: Vec<String> = in_degree
+    let dependencies = graph
         .iter()
-        .filter(|(_, deg)| **deg == 0)
-        .map(|(name, _)| name.clone())
+        .map(|(name, node)| (name.clone(), node.deps.clone()))
         .collect();
-    queue.sort(); // deterministic order
-
-    let mut result = Vec::new();
-
-    while let Some(node_name) = queue.pop() {
-        result.push(node_name.clone());
-
-        if let Some(dependents) = reverse_edges.get(&node_name) {
-            for dependent in dependents {
-                if let Some(deg) = in_degree.get_mut(dependent) {
-                    *deg -= 1;
-                    if *deg == 0 {
-                        queue.push(dependent.clone());
-                        queue.sort(); // keep deterministic
-                    }
-                }
-            }
-        }
-    }
-
-    // Safety net: check for remaining nodes with non-zero in-degree (cycles)
-    let remaining: Vec<&String> = in_degree
-        .iter()
-        .filter(|(_, deg)| **deg > 0)
-        .map(|(name, _)| name)
-        .collect();
-
-    if !remaining.is_empty() {
-        let mut cycle_names: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
-        cycle_names.sort_unstable();
-        miette::bail!(
-            "Circular dependency detected among: {}\n  \
-             These packages form a dependency cycle and cannot be compiled.",
-            cycle_names.join(", ")
-        );
-    }
-
-    Ok(result)
+    beamtalk_cli::dep_order::topological_order(&dependencies, root_name)
 }
 
 #[cfg(test)]

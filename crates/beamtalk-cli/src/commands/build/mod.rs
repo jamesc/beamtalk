@@ -246,16 +246,7 @@ fn execute_build_passes(
     // source file regardless of whether Pass 1 re-scanned it this build,
     // not just the ones in `index.cached_asts` (a cache-fresh file has no
     // `cached_asts` entry at all).
-    let protocol_hashes: HashMap<ecow::EcoString, String> = index
-        .all_protocol_defs
-        .iter()
-        .map(|p| {
-            (
-                p.name.name.clone(),
-                crate::commands::util::protocol_content_hash(p),
-            )
-        })
-        .collect();
+    let protocol_hashes = crate::commands::util::protocol_hashes(&index.all_protocol_defs);
     let file_protocol_uses = index.file_protocol_uses.clone();
 
     // Per-file change detection — only recompile files whose source

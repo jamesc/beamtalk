@@ -736,13 +736,13 @@ fn extract_dep_protocol_alias_metadata(
             ),
         );
         // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
-        // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc.
+        // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc — stamped
+        // with this dependency so `uses: dep@Name` resolves to them (BT-3684).
         protocol_defs.extend(
-            module
-                .protocols
-                .iter()
-                .filter(|p| !p.provided_methods.is_empty())
-                .cloned(),
+            beamtalk_core::semantic_analysis::trait_expansion::provision_bearing_protocols(
+                module,
+                Some(dep_name),
+            ),
         );
         let mut infos =
             beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
@@ -764,7 +764,7 @@ fn extract_dep_protocol_alias_metadata(
 
 /// A dependency's source scan before cross-file trait flattening: its class
 /// indexes plus the trait users and protocols to flatten them with.
-pub(crate) struct DepIndexScan {
+struct DepIndexScan {
     class_module_index: HashMap<String, String>,
     class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
@@ -783,11 +783,6 @@ pub(crate) type DepIndexExports = (
 );
 
 impl DepIndexScan {
-    /// The dependency's own provision-bearing protocol ASTs.
-    pub(crate) fn protocol_defs(&self) -> &[beamtalk_core::ast::ProtocolDefinition] {
-        &self.metadata.protocol_defs
-    }
-
     /// Flattens cross-file trait provisions (BT-3673) into the exported
     /// `ClassInfo`s, against the dependency's own protocols and then
     /// `extra_protocol_defs` — those of the dependencies it may `uses:`
@@ -817,7 +812,7 @@ impl DepIndexScan {
 
 /// [`DepIndexScan::into_exports`], or empty exports for a dependency without
 /// source files.
-pub(crate) fn exports_or_empty(
+fn exports_or_empty(
     scan: Option<DepIndexScan>,
     extra_protocol_defs: impl IntoIterator<Item = beamtalk_core::ast::ProtocolDefinition>,
 ) -> DepIndexExports {
@@ -838,7 +833,7 @@ pub(crate) fn exports_or_empty(
 
 /// Scans a dependency's sources without compiling or flattening; see
 /// [`build_dep_class_index`]. `Ok(None)` when it has no source files.
-pub(crate) fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Option<DepIndexScan>> {
+fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Option<DepIndexScan>> {
     // `stubs/` is excluded (ADR 0075) — it's type-only and never
     // compiled.
     let src_dir = dep_root.join("src");
@@ -863,7 +858,7 @@ pub(crate) fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Opti
     Ok(Some(DepIndexScan {
         class_module_index,
         class_infos,
-        trait_users: crate::commands::build::package_trait_users(&cached_asts),
+        trait_users: crate::commands::build::package_trait_users(&cached_asts, Some(dep_name)),
         metadata: extract_dep_protocol_alias_metadata(&cached_asts, dep_name),
         dep_name: dep_name.to_string(),
     }))
@@ -880,9 +875,10 @@ pub(crate) fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Opti
 /// already-parsed ASTs rather than re-lexing/re-parsing the dependency's
 /// source files a second and third time.
 ///
-/// `prior_deps` are the dependencies this one may `uses:` traits of; the
-/// exported `class_infos` carry their provisions too (BT-3678). A caller
-/// without a topological order uses [`scan_dep_index`] directly.
+/// `prior_deps` are the dependencies this one may `uses:` traits of — those
+/// compiled before it, in compile order; the exported `class_infos` carry their
+/// provisions too (BT-3678). The graph compile and the fresh-deps fast path both
+/// call this, so they export identical `class_infos` (BT-3684).
 pub(crate) fn build_dep_class_index(
     dep_root: &Utf8Path,
     dep_name: &str,
