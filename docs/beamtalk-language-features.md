@@ -7064,7 +7064,7 @@ Declaration-level `@expect` supports the same categories, combined-category list
 
 **Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression or declaration), the compiler emits a warning to prevent directives from silently becoming out of date.
 
-`@expect` works inside method bodies, inside block bodies (e.g., `ifTrue: [...]`, `collect: [...]`, `whileTrue: [...]`), on declarations in class definitions, and at module scope (BT-2010).
+`@expect` works inside method bodies, inside block bodies (e.g., `ifTrue: [...]`, `collect: [...]`, `whileTrue: [...]`), on declarations in class definitions, inside `Protocol define:` bodies (above a provided method, to suppress a provision diagnostic published in the protocol file — `beamtalk build` and `beamtalk lint` only; BT-3671), and at module scope (BT-2010).
 
 **Where `@expect` is evaluated (BT-2851):** `@expect` directives are matched and applied by a single function, `apply_expect_directives`, called at the end of both diagnostic pipelines:
 
