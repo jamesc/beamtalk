@@ -126,16 +126,18 @@ The compiled calling convention becomes `class_<sel>(ClassSelf, Args...)`, retur
 
 Codegen no longer has a `ClassVars` threading family. Loops, folds, arms, handler arms, blocks and stored closures need nothing for class variables, because a write is a `put` wherever it happens.
 
-### 4. Error semantics: writes take effect when they are made
+### 4. Error semantics: a boundary discards what happened inside it
 
-A class-variable write takes effect immediately, as in Smalltalk.
+A class-variable write takes effect when it is made, and an error that crosses a boundary discards every write made inside that boundary. There are two kinds of boundary, and the rule is the same at both. This is Erlang's `try` semantics applied to class variables: a `try` yields only its body's value, never the body's bindings, so state threaded through a body that raises is gone, and an error that escapes the callback leaves the `gen_server`'s state as it was.
 
-- **An error that escapes the invocation** discards everything the invocation wrote: `invoke_class_method/7` replies with the pre-call map. Unchanged.
-- **A caught error does not undo writes.** `[self bumpThenFail] on: Error do: [:e | nil]` keeps the write that `bumpThenFail` made before it raised. This reverses the behaviour BT-3675 introduced and the language documentation now describes.
-- **A foreign non-local return** keeps the writes made before it. Unchanged, and now needs no special path.
-- **An own non-local return** returns from the method; the writes are already in place. Unchanged.
+- **The invocation boundary.** An error that escapes the invocation discards everything the invocation wrote: `invoke_class_method/7` replies with the pre-call map. Unchanged.
+- **The catch boundary.** A protected region (`on:do:`'s protected block, and every runtime catcher that runs Beamtalk blocks, such as `Result tryDo:` and the exception handler) snapshots the map on entry and restores it when an error crosses its catch, before the handler runs. So `[self bumpThenFail] on: Error do: [:e | nil]` discards the write `bumpThenFail` made before it raised, and a write made *before* entering the protected block is kept. This is the behaviour BT-3675 established and the language documentation describes, now as one rule at one kind of place instead of a property of each send.
+- **A non-local return** is not an error. A `^` passing through a protected region keeps the writes made before it, foreign or own, and needs no special path.
+- **`ensure:`** is not a boundary. It does not catch, so an error passes through to the next boundary and the cleanup block's own writes go with it.
 
-This is a deliberate semantic change, discussed under Alternatives (per-send rollback) and Migration Path. It has one asymmetry that must be named: **the external send is the transaction boundary; the method body is not.** `[X failingBump] on: Error do: [:e | nil]` evaluated outside `X`'s process (the REPL, an actor) rolls the write back, because `X failingBump` is a `gen_server` call whose error reply carries the pre-call map; the same expression inside one of `X`'s class methods keeps it, because `self failingBump` is an in-process call. Today both revert. An `ensure:` cleanup write made while an error escapes the invocation is discarded with everything else, as today.
+The mechanism is one runtime helper, `beamtalk_class_vars:protect(ClassSelf, Fun)`: `Snap = get(Key)`, run `Fun`, and on an exception that is not a `$bt_nlr` throw, `put(Key, Snap)` and re-raise. The map is immutable, so the snapshot is a pointer and the restore is one `put`. Codegen wraps `on:do:`'s protected block in it; the runtime's own catchers use it; a hand-written Erlang catcher that runs Beamtalk blocks must use it (the FFI rule in `docs/development/erlang-guidelines.md`). Because the snapshot is taken from the live map and restored into it, there is still one home; the snapshot is scoped to the region and never read by anything else.
+
+What this means for the two places that catch today: outside the class process, `[X failingBump] on: Error do: [:e | nil]` restores because the `gen_server` reply carries the pre-call map; inside one of `X`'s class methods, the same expression restores because the protected region does. Both revert, as today, and actor state (whose `safe_dispatch/3` returns the pre-call state on error) behaves the same way. The alternative of letting writes survive a caught error, as Pharo does, is discussed under Alternatives.
 
 ### 5. A block reads and writes its home class's variables only at home
 
@@ -225,20 +227,20 @@ Object subclass: Ids
     [self take] on: Error do: [:e | nil]
     self.next
 
-Ids tryTake        // => 1
+Ids tryTake        // => 0
 ```
 
-Today this answers 0 (run on `main` at `14799bd`): the write made before the caught raise is discarded. Under this ADR it is kept.
+The write made inside the protected block is discarded when the error crosses the catch, so `tryTake` answers 0 today (run on `main` at `14799bd`) and under this ADR. Had `take` written before entering the block, that write would be kept: boundaries discard what happened inside them and nothing else.
 
 ## Prior Art
 
-**Pharo / Squeak / GNU Smalltalk.** A class variable or class-instance variable is a slot of a shared object. Assignment takes effect immediately and nothing is rolled back by an exception, caught or not. This ADR adopts that for writes inside an invocation. It keeps Beamtalk's one difference: an error that escapes the whole class-method call discards its writes, because the class is a `gen_server` and the reply is a transaction boundary.
+**Pharo / Squeak / GNU Smalltalk.** A class variable or class-instance variable is a slot of a shared object. Assignment takes effect immediately and nothing is rolled back by an exception, caught or not. This ADR adopts the single mutable home and the immediacy of writes, and rejects the "nothing is rolled back" half (see Alternatives): Beamtalk's class is a `gen_server`, and a `gen_server` has boundaries that Smalltalk's image does not.
 
-**Erlang/OTP.** A `gen_server` callback's new state takes effect only when the callback returns, so an escaping error leaves the state unchanged; that is the boundary this ADR keeps. Inside a callback, the process dictionary is the idiomatic process-local mutable store for data a call chain needs without threading it (`$ancestors`, `logger` metadata, `rand` seeds). This ADR uses it the same way, scoped to one callback and erased in `after`.
+**Erlang/OTP.** A `gen_server` has no rollback mechanism; state is a value threaded through the callback, and "rollback" is continuing with the value you had. That gives two boundaries, and both discard what happened inside them: `try` yields only its body's value, so the idiom `try Body catch _ -> {reply, {error, R}, State}` discards the body's updates for free, and an escaping exception discards the whole callback's (by killing the process). §4 is those two boundaries applied to class variables, with the softer "reply with the pre-call map" standing in for the crash. Inside a callback, the process dictionary is the idiomatic process-local store for data a call chain needs without threading it (`$ancestors`, `logger` metadata, `rand` seeds); this ADR uses it the same way, scoped to one callback and erased in `after`. Mnesia's transaction store is the precedent for "a process-dictionary home with a restore at a boundary".
 
-**Beamtalk actors.** Actors already hold `'$bt_actor_state'` in the process dictionary during a call for re-entrant self-dispatch. Actor state is still threaded functionally, and an actor self-send that raises returns the pre-call state (`safe_dispatch/3`'s error arm), so actors roll back a raising send's writes. Class variables will not. See Consequences.
+**Beamtalk actors.** Actors already hold `'$bt_actor_state'` in the process dictionary during a call for re-entrant self-dispatch, and an actor self-send that raises returns the pre-call state (`safe_dispatch/3`'s error arm), so an actor's `on:do:` continues with the state from before the protected block. §4 gives class variables the same behaviour, so the two kinds of mutable state agree on what a caught error does.
 
-**Ruby and Kotlin.** Ruby class instance variables and Kotlin companion-object fields are plain mutable fields. Writes are immediate and survive caught exceptions.
+**Ruby and Kotlin.** Ruby class instance variables and Kotlin companion-object fields are plain mutable fields. Writes are immediate and survive caught exceptions, the Smalltalk half this ADR does not adopt.
 
 **Clojure refs and Haskell STM.** Transactional memory gives each transaction a consistent snapshot and discards a failed transaction's writes. That is the model the current token design approximates per scope. It is rejected as a model for class variables because class methods run serially in one process, so there is no concurrency for transactions to resolve, only error rollback, and the escaping-error case already has a boundary.
 
@@ -246,7 +248,7 @@ Today this answers 0 (run on `main` at `14799bd`): the write made before the cau
 
 **Newcomer.** Class variables behave like variables: a write is visible to the next line, inside a loop, inside a block and after a helper method returns. The stored-closure warning and the "give the loop body a local to thread alongside the class variable" advice disappear. The new error appears only when a block is carried to another process, and its hint says what to do.
 
-**Smalltalk developer.** This is the Pharo model. The template-method pattern works with class-side state in every position, and refactoring a write into a helper method no longer changes whether it survives. The one difference from Pharo is that an error escaping a class method discards that call's writes, which is a strict improvement they will rarely notice.
+**Smalltalk developer.** Reads and writes are the Pharo model: the template-method pattern works with class-side state in every position, and refactoring a write into a helper method no longer changes whether it survives. The one difference from Pharo is that an error crossing a catch or escaping the call discards the writes made inside it, which is the behaviour the language has documented since BT-3675 and the one they will expect from a language whose classes are processes.
 
 **Erlang/BEAM developer.** The generated code is simpler: a class method is a plain function of `ClassSelf` and its arguments, and `self foo` is a plain call. The process dictionary is used inside one `gen_server` callback, checked absent on entry and erased in `after`; the actor's `'$bt_actor_state'` saves and restores instead because actor self-dispatch nests. An Erlang-implemented class method can read and write class variables through `beamtalk_class_vars` instead of producing `class_var_result` tuples.
 
@@ -284,31 +286,31 @@ Treat a class method's class variables exactly like an actor's `State`: every st
 
 ### Alternative C: One home, plus per-send rollback
 
-Adopt §1 to §3 and §5, but keep BT-3675's semantics: each class-side send snapshots the map before the call and restores it if the callee raises (non-local returns pass through without restoring), and `on:do:` in a class method snapshots at entry and restores before running the handler.
+Adopt §1 to §3 and §5, but make the *send* the boundary: each class-side send snapshots the map before the call and restores it if the callee raises.
 
 | Cohort | Strongest argument |
 |---|---|
-| Newcomer | "No existing answer changes. My tests stay green." |
-| Smalltalk purist | "A failed message leaves no trace. That is cleaner than Pharo." |
+| Newcomer | "A failed message leaves no trace, wherever I catch it." |
+| Smalltalk purist | "Message sends are the unit of meaning; a send that fails should be as if it never happened." |
 | BEAM veteran | "A `try` around a call is a few nanoseconds. The snapshot is one `get`." |
-| Operator | "Class variables and actor state agree on what a raising send does." |
-| Language designer | "It is still local and compositional: the rule lives at two constructs, not at every scope." |
+| Operator | "It is the most conservative: no answer changes." |
+| Language designer | "It is local to the send, not to the construct that catches." |
 
-**Why not.** Three costs. (a) Per-send rollback has to be emitted by codegen at every class-side self-send, direct call and hierarchy walk alike, which is exactly the layer this ADR deletes; the runtime cannot do it, since self-sends never pass through `invoke_class_method/7`. (b) The snapshot is a second representation of the map again, with the non-local-return pass-through recency question reintroduced: a `^` through a rolled-back frame must decide which copy wins. (c) The rule only holds where Beamtalk code catches: a write made directly inside a block and followed by a raise that `Result tryDo:` (a native-backed sealed value whose catch is outside any Beamtalk lowering), an Erlang `catch`, or any other catcher swallows is kept, while the same write moved into a helper method is rolled back, so the outcome depends on whether a write sits in a method or a block.
+**Why not.** Three costs. (a) Per-send rollback has to be emitted by codegen at every class-side self-send, direct call and hierarchy walk alike, which is exactly the layer this ADR deletes; the runtime cannot do it, since self-sends never pass through `invoke_class_method/7`. (b) The snapshot is a second representation of the map at every send, with the non-local-return pass-through recency question reintroduced at each. (c) Erlang has no send boundary; its boundaries are `try` and the callback, and a rule that restores at sends but not at catches makes a write in a block followed by a caught raise behave differently from the same write in a helper method.
 
-### Alternative C′: one home, plus rollback at `on:do:` handler entry only
+### Alternative S: Smalltalk semantics, writes survive a caught error
 
-Snapshot the map when an `on:do:` inside a class method enters its protected block, and restore it before running the handler. No per-send rollback.
+Adopt §1 to §3 and §5, with no catch boundary: a write takes effect when made and only an error that escapes the invocation discards it.
 
 | Cohort | Strongest argument |
 |---|---|
-| Newcomer | "`on:do:` is where I expect a failed attempt to be undone. That is the one place that matters." |
-| Smalltalk purist | "It is explicit and local: the construct that catches is the construct that restores." |
-| BEAM veteran | "Two codegen sites, one `get` and one `put`. No second representation outside the handler construct." |
-| Operator | "Actor and class state agree for the common `on:do:` case, and the inside/outside-process asymmetry in §4 disappears for it." |
-| Language designer | "It removes the method-versus-block inconsistency of C, because the rule is attached to the catcher, not the write." |
+| Newcomer | "A variable is a variable. If I wrote it, it is written." |
+| Smalltalk purist | "This is exactly Pharo. Rollback is a database idea, not a Smalltalk one." |
+| BEAM veteran | "No snapshot, no restore, no helper. The cheapest possible implementation." |
+| Operator | "One fewer mechanism to reason about in an incident." |
+| Language designer | "Fewest rules: one home, one invocation boundary, nothing else." |
 
-**Why not, by default.** It keeps writes swallowed by `Result tryDo:`, `ensure:` cleanup paths, Erlang catchers and handlers written in another class, so "a caught error undoes writes" is still only true for one construct, and the §4 asymmetry remains for every other catcher. It is small (two codegen sites) and compositional, which is why Open Question 1 is between this ADR's §4 and C′, not between §4 and C.
+**Why not.** It is the one option that does not fit the platform. Erlang's `try` discards the protected body's state by construction, and actor state already behaves that way through `safe_dispatch/3`, so S would make class variables the only state in the language that survives a caught error. It also creates an inside/outside asymmetry: the same `[X failingBump] on: Error do: [...]` rolls back outside `X`'s process (the `gen_server` reply carries the pre-call map) and keeps the write inside one of `X`'s class methods. And it changes the answer of about 30 existing tests that pin discard-on-caught-raise. The steelman's cost argument is real but small: the catch boundary costs one `get` on entry and one `put` on the error path.
 
 ### Alternative D: ETS-backed class variables (ADR 0013's deferred option)
 
@@ -337,16 +339,16 @@ Adopt this ADR, but let a block running in another process *read* the class vari
 ### Tension points
 
 - BEAM veterans prefer B (no process dictionary, everything in the verifier); Smalltalk developers and newcomers prefer this ADR (Pharo semantics, no limits). The deciding fact is that B keeps the per-scope "newest value" obligation that has failed repeatedly.
-- Operators and anyone with existing tests prefer C or C′ (fewer answer changes). C's cost is a second representation and a rule that depends on whether a write is in a method or a block; C′'s cost is that only one catcher restores.
+- Smalltalk purists and language designers who weigh rule count prefer S (Pharo semantics, no boundary inside the call); BEAM veterans and operators prefer the chosen catch boundary, which is Erlang's `try` and what actors already do. The deciding facts are platform fit and consistency with actor state.
 
 ## Alternatives Considered
 
-The five options are described with their steelmen above. In short:
+The six options are described with their steelmen above. In short:
 
 - **A, status quo:** rejected; it does not converge, and the verifier cannot detect the failure mode.
 - **B, thread class variables on the ADR 0041 protocol:** rejected for class variables; recorded as a question for actor state.
-- **C, one home plus per-send rollback:** rejected; it re-creates a second representation in the layer being deleted.
-- **C′, rollback at `on:do:` handler entry only:** not chosen by default; the main open question.
+- **C, one home plus per-send rollback:** rejected; it re-creates a second representation in the layer being deleted, at a boundary Erlang does not have.
+- **S, Smalltalk semantics (writes survive a caught error):** rejected; it does not fit Erlang's `try`, disagrees with actor state, and creates an inside/outside-process asymmetry.
 - **D, ETS-backed:** out of scope; changes concurrency semantics.
 - **E, snapshot reads from other processes:** fallback if Phase 0 shows cross-process reads are common.
 
@@ -355,16 +357,16 @@ The five options are described with their steelmen above. In short:
 ### Positive
 
 - The bug class goes away by construction: there is one value, so there is nothing to merge and no newest copy to choose. Every scope kind, including stored closures and blocks passed to higher-order methods, sees the same variable.
-- 19 of the 21 known-wrong pinned tests flip to the answer the documentation calls correct. The other two involve a caught raise and take this ADR's answer instead (see Migration Path). The BT-3681 warning, the stored-closure limits and four compile-time errors are removed.
+- Every one of the 21 known-wrong pinned tests flips to the answer the documentation calls correct, including the two that involve a caught raise. The BT-3681 warning, the stored-closure limits and four compile-time errors are removed.
+- Class variables and actor state agree on what a caught error does: a protected region's writes are discarded when an error crosses its catch, at both levels of state.
 - Several thousand lines of codegen and verifier code and about 170 runtime lines are deleted. The `ThreadedIr` loses its most complex family.
 - An open class-side self-send loses its per-send token, scope read, export, commits and reply unwrapping. It should return to about the pre-BT-3666 cost; Phase 0 measures it.
 - Silent data loss for blocks run in other processes becomes a structured error with a hint.
 
 ### Negative
 
-- **Two semantic changes are visible to users.** A caught error no longer undoes the writes made before it, and a class-variable access from a block running in another process now raises. Both change answers that tests pin today.
-- **Class variables and actor state now disagree** about a raising send that is caught: an actor rolls back the callee's writes, a class does not. Until actor state is revisited, the language has two rules.
-- **Inside and outside the class process disagree** about a caught error (§4): the external send is the transaction boundary, the method body is not. Today both revert.
+- **One semantic change is visible to users.** A class-variable access from a block running in another process now raises. Caught-error behaviour is unchanged in substance, but its mechanism moves from every send to the catch boundary, so a write made inside a protected block through an *instance-side* path that today escapes the token design (a stored closure, a block given to a higher-order method) is now discarded like every other write in the region.
+- **Every protected region costs a snapshot and, on the error path, a restore**, and every runtime or FFI catcher that runs Beamtalk blocks must use `protect/2` or it keeps writes it should discard. The in-tree catchers are enumerated in Phase 2; a hand-written one is an FFI rule, not something the compiler can check.
 - **Every class-variable write costs a process-dictionary round trip, and straight-line reads pay a remote call where today they pay nothing.** In an isolated microbenchmark (OTP on the CI container, 2M iterations, three runs) a read through `get/1` plus `maps:get/2` costs the same as `maps:get/2` on a threaded variable (10-13 ns either way, with or without the pid check), while a write through `get/1`, `maps:put/3` and `put/2` costs 52-76 ns against 10-12 ns for a threaded rebind. In isolation reads are free and a write costs about 50 ns, which is what one scope token costs today per *send*; through generated code a helper call adds a remote call per access, which is why Phase 0 gates the read/write loop separately and pre-authorises inlining.
 - **The process dictionary is a hidden channel.** Reading generated code no longer shows class-variable data flow, and a hand-written Erlang class method must use `beamtalk_class_vars` to see the current values.
 - **The calling convention changes, and the change is not hot-upgradable.** Every compiled class method is recompiled, a module compiled by the previous compiler is refused at load with `abi_mismatch`, and the release that ships this needs a node restart (see Implementation).
@@ -393,11 +395,11 @@ Effort: L overall. Phase 0 gates the rest.
 
 **Phase 2: runtime (M).** Lands in the same release as Phase 3: the runtime side is inert until codegen emits the §2 calls, and the ABI gate cannot be switched on before codegen produces the new convention, so it is the last item of Phase 3.
 - Install, read back and erase the map in `invoke_class_method/7`, `invoke_class_extension/7` and the metaclass path, with the absent-on-entry assertion first; ADR 0084 builder funs run inside those and need only the arity change in `put_class_method/4`.
-- Implement `get/get_late/put/clear/has`, `with_snapshot/2`, `class_state_unreachable` and `class_state_read_only`; wrap the three supervisor-definition sites and `local_call/3` in `with_snapshot/2`.
+- Implement `get/get_late/put/clear/has`, `with_snapshot/2`, `protect/2`, `class_state_unreachable` and `class_state_read_only`; wrap the three supervisor-definition sites and `local_call/3` in `with_snapshot/2`; wrap every runtime catcher that runs Beamtalk blocks in `protect/2` (`Result tryDo:`'s native implementation, `beamtalk_exception_handler`, and any other `catch` in `beamtalk_runtime`/`beamtalk_stdlib` that invokes a block argument; the 44 runtime modules with a `catch` that BT-3675 counted are the audit list), with an EUnit test per site that a write inside the protected block is discarded and a write before it is kept.
 - Change `local_call/3`'s doc contract from "class-variable mutations are discarded" to the §5 snapshot rule, and update the `performLocally:` paragraph of `docs/beamtalk-language-features.md` to match.
 
 **Phase 3: codegen (L).**
-- Emit the §2 calls and the §3 convention, and add the `class-state-abroad` lint (update `docs/development/surface-parity.md` for the new diagnostic).
+- Emit the §2 calls and the §3 convention, wrap `on:do:`'s protected block in `protect/2` in class-method context, and add the `class-state-abroad` lint (update `docs/development/surface-parity.md` for the new diagnostic).
 - Delete everything in §6 and the tests that pin the deleted machinery (`class_var_scope_tokens.rs`, `class_var_shadow_contract.rs`, `class_var_shadow_writes.rs`, the `ClassVars` parts of `class_var_bind.rs`). Regenerate the affected snapshots.
 - Flip every `PIN-BUG` test to the correct answer: the existing `BT-3682` and `BT-3691` pins, the stored-closure and section-literal limits, and the Phase 1 matrix pins that cite this ADR's implementation issue. Close BT-3682, BT-3691, BT-3693, BT-3694 and BT-3696 against those tests.
 - `just verify-threaded-ir`, `just test` and the Phase 1 matrix must pass.
@@ -410,7 +412,7 @@ Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`
 
 ## Migration Path
 
-- **Programs that relied on a caught error undoing a write** will see the write kept. About 30 BUnit tests in `self_send_override_blocks_test.bt`, `self_send_plain_reply_test.bt` and `class_var_nlr_shadow_test.bt` assert how writes interact with a caught raise, and most of them change their expected answer: for example `testCaughtThenSend`, `testOwnTryBodyRaiseThenSend`, `testOpenArmsRaisedIterationDiscarded` and the sealed twins. Two pinned known-wrong tests move to this ADR's answer rather than the one their comments call correct: `testSealedPinBugRaisedIterationBetweenKept` (`raisedIterationBetweenKept`) answers 3, because the raised iterations' writes are kept, where its comment says 1; and `testStoredClosureReadsRevertedValueAfterCaughtRaise` keeps its current answer of 2, which becomes the correct one. The language documentation's statement that "a write made by a callee that raised is never kept, even when the raise was caught" is replaced. To keep the old behaviour in user code, assign after the protected block succeeds.
+- **Caught-error behaviour keeps its documented meaning.** The language documentation's statement that "a write made by a callee that raised is never kept, even when the raise was caught" stays true, now as a property of the protected region rather than of each send. The roughly 30 BUnit tests in `self_send_override_blocks_test.bt`, `self_send_plain_reply_test.bt` and `class_var_nlr_shadow_test.bt` that pin discard-on-caught-raise keep their answers, and the two known-wrong pins that involve a caught raise (`testStoredClosureReadsRevertedValueAfterCaughtRaise`, `testSealedPinBugRaisedIterationBetweenKept`) flip to the answers their comments call correct. The only observable difference is in shapes the token design could not cover: a write inside a protected block made through a stored closure or a block given to a higher-order method is now discarded with the rest of the region instead of being resurrected or lost.
 - **Programs that passed a block touching class variables to another class's class method or an actor** will get `class_state_unreachable` instead of a stale read or a lost write. Fix: read into a local before passing the block, or return the value and assign it in the home class's method.
 - **Supervisor definitions and `performLocally:` keep reading** what they read today (the snapshot as of the last completed invocation). A class-variable write from `class children` or through `performLocally:` outside the class process, silently discarded today, now raises `class_state_read_only`.
 - **Programs that worked around the old limits** (an unused local added to thread a loop body, `@expect stored_closure`) keep working; the workaround becomes unnecessary and `@expect stored_closure` becomes an unused-expectation warning to remove.
@@ -418,10 +420,9 @@ Affected components: runtime (`beamtalk_class_dispatch`, `beamtalk_object_class`
 
 ## Open Questions
 
-1. **Caught-error semantics.** This ADR proposes Smalltalk semantics (§4), with the inside/outside-process asymmetry named there. Alternative C′ restores at `on:do:` handler entry only, which removes that asymmetry for the common case at the cost of restoring for one catcher only. Which does the project want?
-2. **Cross-process reads.** This ADR proposes an error. Alternative E keeps snapshot reads. Phase 0's count decides unless the project has a preference.
-3. **Actor state.** Should actor state get the same treatment, so that both kinds of mutable state agree on caught errors and on stored closures? That needs its own ADR.
-4. **Verifier visibility in release builds.** `report_threaded_ir_verify_errors` records an `internal:` error diagnostic in release builds, but BT-3693 reports that the release CLI printed none. Phase 1's property test must fail on that diagnostic, and the CLI path should be checked.
+1. **Cross-process reads.** This ADR proposes an error. Alternative E keeps snapshot reads. Phase 0's count decides unless the project has a preference.
+2. **Actor state.** Caught errors now agree across both kinds of state. Should actor state also move to a single home, so that stored closures and blocks given to higher-order methods behave the same for actors as §5 makes them for classes (BT-3580 is the actor twin of this bug class)? That needs its own ADR.
+3. **Verifier visibility in release builds.** `report_threaded_ir_verify_errors` records an `internal:` error diagnostic in release builds, but BT-3693 reports that the release CLI printed none. Phase 1's property test must fail on that diagnostic, and the CLI path should be checked.
 
 ## References
 
