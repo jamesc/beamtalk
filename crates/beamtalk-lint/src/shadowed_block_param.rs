@@ -448,4 +448,70 @@ mod tests {
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
     }
+
+    // ── Cascade ───────────────────────────────────────────────────────────────
+
+    /// Block argument in a cascade message shadows an outer variable.
+    #[test]
+    fn cascade_block_arg_shadows_outer_var() {
+        let diags = lint("x := 1.\nobj foo; bar: [:x | x + 1]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`x`"));
+    }
+
+    /// Block argument in a cascade message with no shadowing — no warning.
+    #[test]
+    fn cascade_block_arg_no_shadow_no_warn() {
+        let diags = lint("x := 1.\nobj foo; bar: [:y | y + 1]");
+        assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
+    }
+
+    // ── DestructureAssignment ─────────────────────────────────────────────────
+
+    /// Block parameter shadows a variable bound by tuple destructuring.
+    #[test]
+    fn tuple_destructure_var_shadowed_by_block_param() {
+        let diags = lint("{x, y} := pair.\nitems do: [:x | x + 1]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`x`"));
+    }
+
+    /// Both tuple-destructured variables are in scope for later blocks.
+    #[test]
+    fn tuple_destructure_both_vars_visible_to_later_block() {
+        let diags = lint("{x, y} := pair.\nitems do: [:x :y | x + y]");
+        assert_eq!(diags.len(), 2, "Expected 2 lints (x and y), got: {diags:?}");
+    }
+
+    /// Block parameter shadows a variable bound by list-syntax destructuring (#(a, b) := …).
+    #[test]
+    fn list_destructure_var_shadowed_by_block_param() {
+        let diags = lint("#(a, b) := pair.\nitems do: [:a | a + 1]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`a`"));
+    }
+
+    /// Block parameter shadows a variable bound by array destructuring (#[a, b] := …).
+    #[test]
+    fn array_destructure_var_shadowed_by_block_param() {
+        let diags = lint("#[a, b] := arr.\nitems do: [:a | a + 1]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`a`"));
+    }
+
+    /// Block parameter shadows a variable bound by map destructuring.
+    #[test]
+    fn map_destructure_var_shadowed_by_block_param() {
+        let diags = lint("#{#key => v} := map.\nitems do: [:v | v + 1]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`v`"));
+    }
+
+    /// A block inside the RHS of a destructure assignment can shadow an outer variable.
+    #[test]
+    fn destructure_rhs_block_can_shadow_outer_var() {
+        let diags = lint("x := 1.\n{y} := items collect: [:x | x + 1]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`x`"));
+    }
 }
