@@ -87,8 +87,6 @@ pub mod test_support {
     /// For robustness property tests that deliberately supply arbitrary or
     /// invalid input — the test verifies that codegen does not panic, not that
     /// the source is well-formed.
-    ///
-    /// Shared test helper for tests that deliberately ignore parse diagnostics.
     pub fn parse_source(source: &str) -> Module {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
