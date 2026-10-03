@@ -110,13 +110,7 @@ pub(super) fn assign(name: &str, value: Expression) -> Expression {
     }
 }
 
-// Helper: lex + parse a source string into a Module.
-pub(super) fn parse_source(source: &str) -> Module {
-    use crate::source_analysis::{lex_with_eof, parse};
-    let tokens = lex_with_eof(source);
-    let (module, _) = parse(tokens);
-    module
-}
+pub(super) use crate::test_helpers::test_support::parse_source;
 
 // Helper: run the full diagnostic pipeline (type check + @expect suppression).
 // Suppression is owned by `apply_expect_directives` in diagnostic_provider —

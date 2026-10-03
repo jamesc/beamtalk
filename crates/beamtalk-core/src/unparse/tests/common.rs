@@ -14,13 +14,7 @@ pub(super) fn span() -> Span {
     Span::new(0, 0)
 }
 
-// Helper: lex + parse a source string into a Module.
-pub(super) fn parse_source(source: &str) -> crate::ast::Module {
-    use crate::source_analysis::{lex_with_eof, parse};
-    let tokens = lex_with_eof(source);
-    let (module, _) = parse(tokens);
-    module
-}
+pub(super) use crate::test_helpers::test_support::parse_source;
 
 /// Assert that `source` round-trips through parse→unparse and that the
 /// second pass is idempotent: `unparse(parse(unparse(parse(source)))) ==

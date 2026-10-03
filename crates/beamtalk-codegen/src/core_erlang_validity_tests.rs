@@ -20,6 +20,7 @@ use proptest::prelude::*;
 
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_core::test_helpers::test_support::parse_source;
 
 // ============================================================================
 // Generators
@@ -83,16 +84,6 @@ fn near_valid_beamtalk() -> impl Strategy<Value = String> {
         // Multiple fragments
         (valid_fragment(), valid_fragment()).prop_map(|(a, b)| format!("{a}\n{b}")),
     ]
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-fn parse_source(source: &str) -> beamtalk_core::ast::Module {
-    let tokens = lex_with_eof(source);
-    let (module, _) = parse(tokens);
-    module
 }
 
 // `has_balanced_delimiters`/`FORMAT_ARTIFACT_PATTERNS` live in
