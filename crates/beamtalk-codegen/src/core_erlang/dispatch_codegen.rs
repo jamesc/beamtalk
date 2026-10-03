@@ -323,31 +323,16 @@ impl CoreErlangGenerator {
         let commit_plain_reply = arguments
             .iter()
             .any(beamtalk_core::ast_walker::expression_contains_block);
-        let chain = self.class_var_scope_chain();
-        let source_version = self.class_var_version();
-        self.next_class_var();
-        let target_version = self.class_var_version();
         let frame = if self.in_loop_body {
             self.current_branch_frame()
         } else {
             super::threaded_ir::FrameId::ROOT
         };
-        let span = beamtalk_core::source_analysis::Span::default();
-        let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
-            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
-                Self::class_var_scope_read_doc(&chain, &cv),
-            )),
-            false,
+        let chain = self.class_var_scope_chain();
+        let bind = self.class_var_scope_sync_bind(
             frame,
-            false,
-            source_version,
-            target_version,
-            span,
-        );
-        self.report_threaded_ir_verify_errors(
-            &errors,
+            &chain,
             "class-var pre-call sync from the scope's commit",
-            span,
         );
         prelude.push(bind);
         (
@@ -357,6 +342,76 @@ impl CoreErlangGenerator {
                 commit_plain_reply,
             }),
         )
+    }
+
+    /// Mints a fresh `ClassVars` version bound from the newest commit of the
+    /// scopes named by `chain` (innermost first; the live version when none
+    /// holds one), as a real, `verify()`-checked `Bind`:
+    /// `ClassVarsN = class_var_scope_read(ClassSelf, [<chain>], <live ClassVars>)`.
+    ///
+    /// Shared by the pre-call sync of a confined class-side send
+    /// ([`Self::class_var_for_send`], which names every open token through
+    /// [`Self::class_var_scope_chain`] and so marks them all used) and the
+    /// end-of-iteration sync of a fold body
+    /// ([`Self::fold_body_class_var_tail_sync`], which names only the tokens
+    /// already referenced). Every token in `chain` must already be marked
+    /// used: an unused token never gets its `make_ref()` binding. The caller
+    /// splices the returned statement into the frame the version is minted in.
+    pub(super) fn class_var_scope_sync_bind(
+        &mut self,
+        frame: super::threaded_ir::FrameId,
+        chain: &[String],
+        context: &str,
+    ) -> ThreadedStmt {
+        let cv = self.current_class_var();
+        let source_version = self.class_var_version();
+        self.next_class_var();
+        let target_version = self.class_var_version();
+        let span = beamtalk_core::source_analysis::Span::default();
+        let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
+            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
+                Self::class_var_scope_read_doc(chain, &cv),
+            )),
+            false,
+            frame,
+            false,
+            source_version,
+            target_version,
+            span,
+        );
+        self.report_threaded_ir_verify_errors(&errors, context, span);
+        bind
+    }
+
+    /// BT-3691: the end-of-iteration sync of a threaded fold body (`do:`,
+    /// `collect:`, `select:`, `inject:into:`, ...): when some open scope token
+    /// has been referenced (a send, a write or an export committed under it), the
+    /// body's lexical `ClassVars` may be older than the scope's newest commit. A
+    /// write made where its rebind cannot be threaded out lexically (a
+    /// conditional arm, a block) is exported into the scope token only, and a
+    /// body whose other sends are provably pure (a sealed class's pure send
+    /// takes no token and mints no version) never re-syncs. The fold's
+    /// accumulator, and the scope's commit after the fold, would then carry the
+    /// stale version over the newer entry.
+    ///
+    /// The read names the tokens already referenced and those that outlive this
+    /// loop's iterations ([`Self::class_var_read_chain`]), so it makes no
+    /// scope opened inside the iteration emit a token binding or a refresh.
+    /// `None` when no such token exists, or outside any scope: nothing can be
+    /// newer than the lexical version, and the body pays nothing.
+    pub(super) fn fold_body_class_var_tail_sync(
+        &mut self,
+        frame: super::threaded_ir::FrameId,
+    ) -> Option<ThreadedStmt> {
+        let chain = self.class_var_read_chain();
+        if chain.is_empty() {
+            return None;
+        }
+        Some(self.class_var_scope_sync_bind(
+            frame,
+            &chain,
+            "class-var end-of-iteration sync of a fold body from the scope's commit",
+        ))
     }
 
     /// Wrap a class-method call that may return either a
@@ -1646,15 +1701,34 @@ impl CoreErlangGenerator {
                 && !self
                     .class_var_mutating_selectors()
                     .contains(selector_atom.as_str());
-            let (cv, scope) = if pure_sealed_send {
-                (self.current_class_var(), None)
+            let (cv_doc, scope) = if pure_sealed_send {
+                // BT-3691: the callee neither writes nor commits, but it may
+                // READ the class variables, and a write made earlier in this
+                // scope where its rebind could not be threaded out lexically
+                // (a conditional arm, a block) lives only in the scope's
+                // commit. The call therefore receives the newest commit of the
+                // referenced tokens and of those outliving an enclosing writing
+                // loop's iterations ([`Self::class_var_read_chain`]), read inline
+                // as its argument: nothing is bound, no version minted, no token
+                // joins, and no scope opened inside the iteration is marked used
+                // (an arm this send sits in pays nothing it did not pay before),
+                // since a pure reply changes nothing. With no such token the
+                // lexical version is current and the call is unchanged.
+                let cv = self.current_class_var();
+                let chain = self.class_var_read_chain();
+                if chain.is_empty() {
+                    (leaf::var(cv), None)
+                } else {
+                    (Self::class_var_scope_read_doc(&chain, &cv), None)
+                }
             } else {
-                self.class_var_for_send(&mut args_preamble, arguments)
+                let (cv, scope) = self.class_var_for_send(&mut args_preamble, arguments);
+                (leaf::var(cv), scope)
             };
             let call_doc = Self::class_direct_call_doc(
                 &self.module_name,
                 &selector_atom,
-                &cv,
+                cv_doc,
                 args_doc,
                 !arguments.is_empty(),
             );
@@ -1696,7 +1770,7 @@ impl CoreErlangGenerator {
             let direct_doc = Self::class_direct_call_doc(
                 &self.module_name,
                 &selector_atom,
-                &cv,
+                leaf::var(cv.clone()),
                 args_doc,
                 !arguments.is_empty(),
             );
@@ -1864,7 +1938,7 @@ impl CoreErlangGenerator {
     fn class_direct_call_doc(
         module: &str,
         selector_atom: &str,
-        class_vars: &str,
+        class_vars: Document<'static>,
         args_doc: Document<'static>,
         has_args: bool,
     ) -> Document<'static> {
@@ -1876,7 +1950,7 @@ impl CoreErlangGenerator {
             ":",
             leaf::atom(safe_fn),
             "(ClassSelf, ",
-            leaf::var(class_vars.to_string()),
+            class_vars,
             comma,
             args_doc,
             ")"

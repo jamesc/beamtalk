@@ -211,11 +211,13 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSealedFooHandler => self assert: SsoPlainSealed fooHandler equals: 1
 
-  // BT-3682 limit, unchanged by BT-3690: a block LITERAL passed to a user-defined
-  // class-side HOM keeps the send's commit, which overwrites the block's export,
-  // so its write is dropped (0 everywhere).
+  // BT-3682 limit for the OPEN classes above (the send's commit overwrites the
+  // block's export, so the write is dropped). BT-3691 changed the SEALED answer: the
+  // sealed `section:` is provably pure, so it never commits, the block's export
+  // survives, and the fold body now syncs from it before carrying `ClassVars` out.
+  // The write is kept (1), the same answer the by-name spelling gives.
   testSealedViaSectionLiteralInLoop =>
-    self assert: SsoPlainSealed viaSectionLiteralInLoop equals: 0
+    self assert: SsoPlainSealed viaSectionLiteralInLoop equals: 1
 
   // BT-3690: the same block reaching the HOM BY NAME is not a literal of the send, so
   // the plain reply skips the commit and the export survives: the write is KEPT
@@ -225,15 +227,14 @@ TestCase subclass: SelfSendPlainReplyTest
   testSealedViaSectionParamInLoop =>
     self assert: SsoPlainSealed viaSectionParamInLoop equals: 1
 
-  // PIN-BUG BT-3691: sealed class, a writing arm plus provably pure arms in a threaded loop
-  // loses the write on main as well (not caused by BT-3690). Each pins a KNOWN-WRONG answer
-  // (the correct one is in the name of the open-class test); the fix must flip these.
-  testSealedPinBugArmsDo => self assert: SsoPlainSealed armsDo equals: 0
+  // BT-3691: a writing arm plus provably pure arms in a threaded loop of a sealed
+  // class keeps the write (it answered the stale entry value before the fix).
+  testSealedArmsDo => self assert: SsoPlainSealed armsDo equals: 1
 
-  testSealedPinBugReaderAfterArm =>
-    self assert: SsoPlainSealed readerAfterArm equals: #(0, 0, 0)
+  testSealedReaderAfterArm =>
+    self assert: SsoPlainSealed readerAfterArm equals: #(1, 1, 1)
 
-  testSealedPinBugRaisedIterationBetweenKept =>
-    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 0
+  testSealedRaisedIterationBetweenKept =>
+    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 1
 
-  testSealedPinBugFooArms => self assert: SsoPlainSealed fooArms equals: 0
+  testSealedFooArms => self assert: SsoPlainSealed fooArms equals: 1

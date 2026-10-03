@@ -99,54 +99,63 @@ impl CoreErlangGenerator {
             ThreadingMode::StateAcc(plan.fallback_reason.clone())
         };
 
-        self.with_branch_context(|this| {
-            let frame = this.current_branch_frame();
-            // ADR 0111 Addendum 9, Question 1: read fresh from live generator
-            // state at construction time — see `ThreadedStmt::Threaded`'s own
-            // doc comment.
-            let shadow_write_eligible = this.block_depth == 0;
-            let mut stmts = unpack_stmts;
-            stmts.extend(this.lower_foldl_body(body, plan, kind, frame)?);
-            let final_state_version = this.state_version();
-            let node = ThreadedStmt::Threaded {
-                mode: mode.clone(),
-                frame,
-                shadow_write_eligible,
-                body: stmts,
-                produces: Vec::new(),
-                span,
-            };
-            // ADR 0111 Addendum 4 technique (`backfill_opaque_version_gaps`,
-            // generalized off `FrameId::ROOT` for this non-ROOT frame):
-            // a self-send, Tier 2 call, or inline-conditional-with-
-            // mutations statement bumps `next_state_var()` inside its own
-            // opaque `Statement` text (no real `Bind` for that step) — a
-            // following real `Bind` (e.g. a field assignment) reading that
-            // already-advanced `state_version()` as its `source` would
-            // otherwise fail `UnboundVersion`/`NonLinearVersion` against a
-            // version this body's own IR never produced. Verification-fixture
-            // only, built from a CLONE of `node`'s own body — `render` below
-            // still renders the untouched real `node`.
-            let ThreadedStmt::Threaded {
-                body: real_body, ..
-            } = &node
-            else {
-                unreachable!("node is always a Threaded node, constructed just above")
-            };
-            let backfilled_body = threaded_ir::backfill_opaque_version_gaps(real_body, frame);
-            let fixture = ThreadedStmt::Threaded {
-                mode,
-                frame,
-                shadow_write_eligible,
-                body: backfilled_body,
-                produces: Vec::new(),
-                span,
-            };
-            let errors = threaded_ir::verify(std::slice::from_ref(&fixture));
-            this.report_threaded_ir_verify_errors(&errors, "foldl body mode/shape mismatch", span);
-            let mut ctx = threaded_ir::RenderCtx::new(this);
-            let doc = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);
-            Ok((doc, final_state_version))
+        // BT-3691: a writing body's open tokens outlive its iterations (see
+        // `ClassVarScopeToken::writer_loops`).
+        let may_write = self.block_may_write_class_vars(body);
+        self.with_class_var_loop_body(may_write, |this| {
+            this.with_branch_context(|this| {
+                let frame = this.current_branch_frame();
+                // ADR 0111 Addendum 9, Question 1: read fresh from live generator
+                // state at construction time — see `ThreadedStmt::Threaded`'s own
+                // doc comment.
+                let shadow_write_eligible = this.block_depth == 0;
+                let mut stmts = unpack_stmts;
+                stmts.extend(this.lower_foldl_body(body, plan, kind, frame)?);
+                let final_state_version = this.state_version();
+                let node = ThreadedStmt::Threaded {
+                    mode: mode.clone(),
+                    frame,
+                    shadow_write_eligible,
+                    body: stmts,
+                    produces: Vec::new(),
+                    span,
+                };
+                // ADR 0111 Addendum 4 technique (`backfill_opaque_version_gaps`,
+                // generalized off `FrameId::ROOT` for this non-ROOT frame):
+                // a self-send, Tier 2 call, or inline-conditional-with-
+                // mutations statement bumps `next_state_var()` inside its own
+                // opaque `Statement` text (no real `Bind` for that step) — a
+                // following real `Bind` (e.g. a field assignment) reading that
+                // already-advanced `state_version()` as its `source` would
+                // otherwise fail `UnboundVersion`/`NonLinearVersion` against a
+                // version this body's own IR never produced. Verification-fixture
+                // only, built from a CLONE of `node`'s own body — `render` below
+                // still renders the untouched real `node`.
+                let ThreadedStmt::Threaded {
+                    body: real_body, ..
+                } = &node
+                else {
+                    unreachable!("node is always a Threaded node, constructed just above")
+                };
+                let backfilled_body = threaded_ir::backfill_opaque_version_gaps(real_body, frame);
+                let fixture = ThreadedStmt::Threaded {
+                    mode,
+                    frame,
+                    shadow_write_eligible,
+                    body: backfilled_body,
+                    produces: Vec::new(),
+                    span,
+                };
+                let errors = threaded_ir::verify(std::slice::from_ref(&fixture));
+                this.report_threaded_ir_verify_errors(
+                    &errors,
+                    "foldl body mode/shape mismatch",
+                    span,
+                );
+                let mut ctx = threaded_ir::RenderCtx::new(this);
+                let doc = threaded_ir::render(std::slice::from_ref(&node), &mut ctx);
+                Ok((doc, final_state_version))
+            })
         })
     }
 
@@ -167,11 +176,14 @@ impl CoreErlangGenerator {
         body: &Block,
         plan: &ThreadingPlan,
     ) -> Result<(Vec<ThreadedStmt>, FrameId)> {
-        self.with_branch_context(|this| {
-            this.loop_mode.threading_families = plan.threaded_families().clone();
-            let frame = this.current_branch_frame();
-            let result = this.lower_letrec_body(body, plan, frame);
-            result.map(|stmts| (stmts, frame))
+        let may_write = self.block_may_write_class_vars(body);
+        self.with_class_var_loop_body(may_write, |this| {
+            this.with_branch_context(|this| {
+                this.loop_mode.threading_families = plan.threaded_families().clone();
+                let frame = this.current_branch_frame();
+                let result = this.lower_letrec_body(body, plan, frame);
+                result.map(|stmts| (stmts, frame))
+            })
         })
     }
 
@@ -1521,6 +1533,9 @@ impl CoreErlangGenerator {
         // every other migrated site — this is the per-iteration counterpart
         // of `ThreadingPlan::foldl_call_doc`'s own initial-accumulator wrap.
         if !plan.threaded_families().as_slice().is_empty() {
+            // BT-3691: bring the lexical version up to the scope's newest
+            // commit before it is carried out in the accumulator.
+            let tail_sync = self.fold_body_class_var_tail_sync(frame);
             let cv_version = self.class_var_version();
             // record this closure's peak class-var version (BEFORE
             // `with_branch_context`'s guard restores it on drop, right after
@@ -1558,6 +1573,7 @@ impl CoreErlangGenerator {
                     &ctx,
                 )
             };
+            stmts.extend(tail_sync);
             stmts.push(ThreadedStmt::Statement(wrapped, tail_span));
         }
         Ok(stmts)

@@ -1,0 +1,287 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3691: a class-variable write made inside a conditional arm of a loop body
+// is exported into the loop's scope token only (the arm cannot thread a rebind
+// out lexically). In a sealed class a provably pure send takes no scope token
+// and mints no `ClassVars` version, so a body whose other sends are pure
+// carried the stale entry version in the fold's accumulator, and the scope's
+// commit after the fold overwrote the arm's newer entry. Every shape that
+// recency rule could break: an arm export beside pure sends,
+// every threaded loop and fold family, raised scopes, nested loops and arms.
+// See self_send_arm_export_test.bt. SsoArmExportSealed is the sealed twin (it
+// also runs the readerSum{ToDo,TimesRepeat,While} loops, which crash the
+// ThreadedIr verifier in an open class on main: BT-3693).
+
+Object subclass: SsoArmExportOpen
+  classState: n = 0
+  classState: flag = 0
+
+  class n -> Integer => self.n
+
+  // Always writes.
+  class bump -> Integer => self.n := self.n + 1
+
+  // Writes a second class variable.
+  class mark -> Integer => self.flag := self.flag + 1
+
+  // Never writes (plain reply).
+  class plain -> Integer => 0
+
+  // Plain reply that READS the class variable.
+  class reader -> Integer => self.n
+
+  // --- every loop and fold family -----------------------------------------
+  class armsSelect -> Integer =>
+    self.n := 0
+    seen := 0
+    r := #(1, 2, 3)
+      select: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        self plain =:= 0
+      ]
+    self.n * 10 + r size
+
+  class armsInject -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :i |
+        seen := seen + 1
+        i =:= 2 ifTrue: [self bump]
+        self plain
+        a + i
+      ]
+    self.n
+
+  class armsCollectReader -> List =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      collect: [:i |
+        seen := seen + 1
+        i =:= 2 ifTrue: [self bump]
+        self reader
+      ]
+
+  // The reader runs in the same iteration as the arm and after it.
+  class readerSumDo -> Integer =>
+    self.n := 0
+    seen := 0
+    acc := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        acc := acc + self reader
+      ]
+    acc * 10 + self.n
+
+  // The write is in the else arm; the other arm is pure.
+  class elseArmDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 2 ifTrue: [self plain] ifFalse: [self bump]
+      ]
+    self.n
+
+  // Writes at two nesting depths of arms, pure sends around them.
+  class nestedArmsDo -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i > 0
+          ifTrue: [
+            i =:= 1 ifTrue: [self bump]
+            i =:= 2 ifTrue: [i < 5 ifTrue: [self bump] ifFalse: [self plain]]
+            self plain
+          ]
+      ]
+    self.n
+
+  // The loop itself sits in an arm of the method.
+  class loopInArm -> Integer =>
+    self.n := 1
+    seen := 0
+    self.n > 0
+      ifTrue: [
+        #(1, 2, 3)
+          do: [:i |
+            seen := seen + 1
+            i =:= 1 ifTrue: [self bump]
+            self plain
+          ]
+      ]
+    self.n
+
+  // --- raised scopes --------------------------------------------------------
+
+  // An iteration raises inside its own handler after an earlier iteration
+  // exported from an arm: that export is kept, the raised one is not.
+  class raisedAfterArmExport -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        i =:= 3
+          ifTrue: [
+            [
+              self bump
+              1 / 0
+            ] on: Error do: [:e | nil]
+          ]
+        self plain
+      ]
+    self.n
+
+  // --- a fold in a callee: nesting, zero iterations, raised and protected loops ---
+  //
+  // The language rejects a loop nested in a loop of the same method body when
+  // the inner body sends a class-side message ("Cannot mutate ... inside a loop
+  // nested inside another loop"), and a loop whose arm closure sits in an
+  // `on:do:`/`ensure:` block ("Cannot send ... inside this block"). The shapes
+  // are reached through a callee instead: each callee has its own fold, whose
+  // end-of-body sync must hand a correct value back to the caller's scope.
+
+  // A fold that mutates: arms and pure sends, one write (iteration 2).
+  class innerRuns -> Integer =>
+    seen := 0
+    #(1, 2, 3)
+      do: [:j |
+        seen := seen + 1
+        j =:= 2 ifTrue: [self bump]
+        self plain
+      ]
+    0
+
+  // The same fold over an empty list: zero iterations.
+  class innerEmpty -> Integer =>
+    seen := 0
+    #()
+      do: [:j |
+        seen := seen + 1
+        j =:= 1 ifTrue: [self bump]
+        self plain
+      ]
+    0
+
+  // A fold that raises in its last iteration, after writing in its first.
+  class innerRaises -> Integer =>
+    seen := 0
+    #(1, 2, 3)
+      do: [:j |
+        seen := seen + 1
+        j =:= 1 ifTrue: [self bump]
+        j =:= 3 ifTrue: [1 / 0]
+        self plain
+      ]
+    0
+
+  // An inner fold with a write inside an outer fold with its own arm write:
+  // 1 (outer, i = 1) + one per inner run (2) = 3.
+  class nestedLoops -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        self innerRuns
+        self plain
+      ]
+    self.n
+
+  // A zero-iteration inner fold must not roll the outer arm's write back.
+  class emptyInnerLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        self innerEmpty
+        self plain
+      ]
+    self.n
+
+  // The whole fold raises out of a handler scope: every write of the fold
+  // reverts to the value before it.
+  class loopRaisesOutOfHandler -> Integer =>
+    self.n := 5
+    [self innerRaises] on: Error do: [:e | nil]
+    self.n
+
+  // The handler's own write after the fold raised is kept on top of that.
+  class loopRaisesHandlerWrites -> Integer =>
+    self.n := 5
+    [self innerRaises] on: Error do: [:e | self bump]
+    self.n
+
+  // The fold completes inside the protected body: its write is kept.
+  class loopInsideHandlerBody -> Integer =>
+    self.n := 0
+    [self innerRuns] on: Error do: [:e | nil]
+    self.n
+
+  class loopInsideEnsure -> Integer =>
+    self.n := 0
+    [self innerRuns] ensure: [self plain]
+    self.n
+
+  // The arm export is followed by a handler arm that writes.
+  class handlerArmInLoop -> Integer =>
+    self.n := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        i =:= 1 ifTrue: [self bump]
+        i =:= 2 ifTrue: [[1 / 0] on: Error do: [:e | self bump]]
+        self plain
+      ]
+    self.n
+
+  // --- the reader runs BEFORE the writing arm, so an earlier iteration's write
+  // reaches it only through the scope's commit (the answer is flag * 10 + n, flag
+  // counting the iterations whose reader saw the write). "InArm": the loop sits in
+  // an arm that already committed a write, so an OLDER entry sits under an outer
+  // token: reads 1, 2, 2 -> flag 2, n 2 -> 22. Without it: reads 0, 1, 1 -> flag 2,
+  // n 1 -> 21. A stale read answers 2 / 1.
+  class readerFirstDoInArm -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    self.n >= 0
+      ifTrue: [
+        self bump
+        #(1, 2, 3)
+          do: [:i |
+            seen := seen + 1
+            v := self reader
+            v > 1 ifTrue: [self mark]
+            i =:= 1 ifTrue: [self bump]
+          ]
+      ]
+    self.flag * 10 + self.n
+
+  class readerFirstDo -> Integer =>
+    self.n := 0
+    self.flag := 0
+    seen := 0
+    #(1, 2, 3)
+      do: [:i |
+        seen := seen + 1
+        v := self reader
+        v > 0 ifTrue: [self mark]
+        i =:= 1 ifTrue: [self bump]
+      ]
+    self.flag * 10 + self.n

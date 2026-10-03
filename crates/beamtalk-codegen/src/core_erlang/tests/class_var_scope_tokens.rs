@@ -346,6 +346,227 @@ fn confined_send_with_a_block_argument_keeps_committing_a_plain_reply() {
     );
 }
 
+/// The text of the fold-body lambda (`fun (I, _AccCV…) -> … `) of the first
+/// `lists:foldl` in `method`'s generated code.
+fn fold_lambda<'a>(code: &'a str, method: &str) -> &'a str {
+    let body = code
+        .split(&format!("'{method}'/2 = "))
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .unwrap_or_else(|| panic!("{method} present"));
+    let start = body.find("fun (I, _AccCV").expect("fold lambda present");
+    let end = body
+        .find("call 'lists':'foldl'(")
+        .expect("foldl call present");
+    &body[start..end]
+}
+
+const SEALED_ARMS: &str = "sealed Object subclass: ScopeTokenSealedArms
+  classState: n = 0
+
+  class bump => self.n := self.n + 1
+
+  class plain => 0
+
+  class reader => self.n
+
+  class armsDo =>
+    seen := 0
+    #(1, 2, 3) do: [:i |
+      seen := seen + 1
+      i =:= 1 ifTrue: [self bump]
+      self plain
+    ]
+    self.n
+
+  class readerAfterArm =>
+    seen := 0
+    #(1, 2, 3) collect: [:i |
+      seen := seen + 1
+      i =:= 1 ifTrue: [self bump]
+      self reader
+    ]
+";
+
+#[test]
+fn sealed_fold_body_syncs_from_the_scope_before_carrying_class_vars_out() {
+    // BT-3691: the arm's write is exported into the loop scope's token only; the
+    // sealed pure `self plain` mints no version. The accumulator's trailing
+    // `ClassVars` must therefore be re-synced from the scope's commit at the end
+    // of the body, or the fold's stale version is committed over the newer entry.
+    let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
+    let lambda = fold_lambda(&code, "class_armsDo");
+    let sync = "'class_var_scope_read'(ClassSelf, [_CVTok";
+    let last_sync = lambda
+        .rfind(sync)
+        .unwrap_or_else(|| panic!("the body must sync at its end. Got:\n{lambda}"));
+    let last_export = lambda
+        .rfind("'class_var_scope_export'")
+        .expect("the arm exports its commit");
+    assert!(
+        last_sync > last_export,
+        "the end-of-iteration sync must follow the arm's export. Got:\n{lambda}"
+    );
+    // The accumulator carries the version that sync bound.
+    let bound = lambda[..last_sync]
+        .rsplit("let ")
+        .next()
+        .and_then(|l| l.split(" = ").next())
+        .expect("sync binds a version");
+    assert!(
+        bound.starts_with("ClassVars")
+            && lambda.contains(&format!(", {bound}}} in let _RawFoldCV")),
+        "the fold accumulator must carry the synced version `{bound}`. Got:\n{lambda}"
+    );
+}
+
+#[test]
+fn sealed_pure_reader_after_a_scope_commit_syncs_before_the_call() {
+    // BT-3691: a sealed send that never writes still READS the class variables,
+    // so once the scope holds a commit it must sync from it before the call.
+    let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
+    let lambda = fold_lambda(&code, "class_readerAfterArm");
+    let call = lambda
+        .find("'class_reader'(ClassSelf, ")
+        .expect("the reader is called directly");
+    assert!(
+        lambda[call..].starts_with(
+            "'class_reader'(ClassSelf, call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf, [_CVTok"
+        ),
+        "the reader must be passed the scope's newest commit. Got:\n{lambda}"
+    );
+    assert!(
+        lambda[..call].contains("'class_var_scope_export'"),
+        "the arm exports before the reader. Got:\n{lambda}"
+    );
+    assert!(
+        !lambda[call..].contains("'class_var_scope_commit'"),
+        "a pure reply commits nothing after the reader. Got:\n{}",
+        &lambda[call..]
+    );
+}
+
+#[test]
+fn sealed_pure_send_in_an_untouched_arm_of_a_used_loop_pays_no_token_or_take() {
+    // BT-3691: the pure reader sits in an arm of its own, inside a loop whose
+    // token the other arm already uses. Its inline read names only the tokens
+    // already referenced, so the reader's arm binds no token of its own, exports
+    // nothing and needs no refresh: only the loop's token and the writing arm's
+    // closure token exist, and the loop is refreshed once.
+    let code = compile(
+        "bt@scopetokensealedpurearm",
+        "sealed Object subclass: ScopeTokenSealedPureArm
+  classState: n = 0
+
+  class bump => self.n := self.n + 1
+
+  class reader => self.n
+
+  class armsDo =>
+    seen := 0
+    #(1, 2, 3) do: [:i |
+      seen := seen + 1
+      i =:= 1 ifTrue: [self bump]
+      i =:= 2 ifTrue: [self reader]
+    ]
+    self.n
+",
+    );
+    let method = code
+        .split("'class_armsDo'/2 = ")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("class_armsDo present");
+    assert_eq!(
+        method.matches("call 'erlang':'make_ref'()").count(),
+        2,
+        "only the loop's token and the writing arm's closure token. Got:\n{method}"
+    );
+    assert_eq!(
+        method.matches("'class_var_scope_export'").count(),
+        1,
+        "only the writing arm exports. Got:\n{method}"
+    );
+    assert_eq!(
+        method.matches("'class_var_scope_take'").count(),
+        1,
+        "only the loop is refreshed. Got:\n{method}"
+    );
+    let read_prefix = "'class_reader'(ClassSelf, call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf, [";
+    let (_, after) = method
+        .split_once(read_prefix)
+        .unwrap_or_else(|| panic!("the reader reads the scope inline. Got:\n{method}"));
+    let tokens = after.split(']').next().expect("token list");
+    assert!(
+        !tokens.contains(','),
+        "the inline read names only the referenced loop token, got [{tokens}]. Got:\n{method}"
+    );
+}
+
+#[test]
+fn sealed_pure_reader_before_the_writing_arm_reads_the_loop_token() {
+    // BT-3691: the loop's token is bound once per loop entry, outside the loop,
+    // and the writing arm AFTER the reader commits into it before the reader runs
+    // again in the next iteration. At codegen time that token is still unused
+    // when the reader is generated, but a read that left it out would answer an
+    // older (or the stale lexical) version. A loop body that can write class
+    // variables therefore names the tokens that outlive its iterations.
+    for (loop_src, name) in [
+        ("1 to: 3 do: [:i |", "ToDo"),
+        ("3 timesRepeat: [", "TimesRepeat"),
+        ("#(1, 2, 3) do: [:i |", "Do"),
+    ] {
+        let src = format!(
+            "sealed Object subclass: ScopeTokenReaderFirst{name}
+  classState: n = 0
+
+  class bump => self.n := self.n + 1
+
+  class reader => self.n
+
+  class m =>
+    seen := 0
+    acc := 0
+    {loop_src}
+      seen := seen + 1
+      acc := acc + self reader
+      seen =:= 1 ifTrue: [self bump]
+    ]
+    acc
+"
+        );
+        let code = compile(&format!("bt@scopetokenreaderfirst{name}"), &src);
+        let method = code
+            .split("'class_m'/2 = ")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("class_m present");
+        let read_prefix = "'class_reader'(ClassSelf, call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf, [_CVTok";
+        let (_, after) = method
+            .split_once(read_prefix)
+            .unwrap_or_else(|| panic!("{name}: the reader reads the scope. Got:\n{method}"));
+        let loop_token = format!("_CVTok{}", after.split(']').next().expect("token list"));
+        assert!(
+            method.contains(&format!("let {loop_token} = call 'erlang':'make_ref'()")),
+            "{name}: the named token must be bound. Got:\n{method}"
+        );
+        if name != "Do" {
+            // (a `do:` fold's arm closure exports into a token of its own statement
+            // scope, which the body then refreshes into the loop's)
+            assert!(
+                method.contains(&format!(", {loop_token}) in")),
+                "{name}: the writing arm exports into the token the reader reads. Got:\n{method}"
+            );
+        }
+    }
+}
+
+#[test]
+fn sealed_arm_export_loop_compiles_through_erlc() {
+    let code = compile("bt@scopetokensealedarms", SEALED_ARMS);
+    crate::core_erlang::tests::assert_compiles_through_erlc("bt@scopetokensealedarms", &code);
+}
+
 #[test]
 fn runtime_exports_every_helper_codegen_calls() {
     let erl_path =

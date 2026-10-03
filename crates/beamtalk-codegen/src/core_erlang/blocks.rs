@@ -185,31 +185,64 @@ impl CoreErlangGenerator {
         if !self.in_class_method() || self.class_var_names().is_empty() {
             return Ok(());
         }
+        let unsafe_selectors = self.class_var_unsafe_self_send_selectors(analysis, block);
+        if let Some(selector) = unsafe_selectors.first() {
+            return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
+                selector: selector.clone(),
+                location: self.location_label(span),
+            });
+        }
+        Ok(())
+    }
+
+    /// The same-class selectors sent anywhere in `block` (spelled `self foo` or
+    /// `ClassName foo`) whose target is not provably free of class-variable
+    /// mutation: a selector in `class_var_mutating_selectors`, or one this class
+    /// does not define (inherited or unresolvable, assume the worst). Sorted.
+    ///
+    /// The single rule behind [`Self::check_no_unsafe_class_method_self_sends`]
+    /// and [`Self::block_may_write_class_vars`].
+    fn class_var_unsafe_self_send_selectors(
+        &self,
+        analysis: &crate::core_erlang::block_analysis::BlockMutationAnalysis,
+        block: &Block,
+    ) -> Vec<String> {
         let same_class_reference_sends =
             crate::core_erlang::block_analysis::same_class_reference_send_selectors(
                 &block.body,
                 &self.class_name(),
             );
-        let mut unsafe_selectors: Vec<&str> = analysis
+        let mut unsafe_selectors: Vec<String> = analysis
             .self_send_selectors
             .iter()
-            .map(String::as_str)
-            .chain(same_class_reference_sends.iter().map(String::as_str))
+            .chain(same_class_reference_sends.iter())
             .filter(|sel| {
                 self.class_var_mutating_selectors().contains(*sel)
                     || !self.class_method_selectors().contains(*sel)
             })
+            .cloned()
             .collect();
-        if let Some(selector) = {
-            unsafe_selectors.sort_unstable();
-            unsafe_selectors.into_iter().next()
-        } {
-            return Err(CodeGenError::ClassMethodSelfSendInUnthreadedBlock {
-                selector: selector.to_string(),
-                location: self.location_label(span),
-            });
+        unsafe_selectors.sort_unstable();
+        unsafe_selectors
+    }
+
+    /// Whether the body `block` of a threaded loop can write a class variable:
+    /// it assigns one, or sends a same-class selector that is not provably
+    /// pure ([`Self::class_var_unsafe_self_send_selectors`]), anywhere in it
+    /// including nested arms and blocks. A loop body that cannot pays no
+    /// scope-chain cost for its pure sends (BT-3691).
+    pub(super) fn block_may_write_class_vars(&self, block: &Block) -> bool {
+        if !self.in_class_method() || self.class_var_names().is_empty() {
+            return false;
         }
-        Ok(())
+        let analysis = crate::core_erlang::block_analysis::analyze_block(block);
+        analysis
+            .field_writes
+            .iter()
+            .any(|field| self.class_var_names().contains(field))
+            || !self
+                .class_var_unsafe_self_send_selectors(&analysis, block)
+                .is_empty()
     }
 
     // ADR 0118 §Decision 5 follow-up — design decision, not yet
