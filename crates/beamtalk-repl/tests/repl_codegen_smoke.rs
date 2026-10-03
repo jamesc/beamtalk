@@ -19,7 +19,7 @@
 
 use beamtalk_core::ast::*;
 use beamtalk_core::source_analysis::Span;
-use beamtalk_core::test_helpers::test_support::{bare, parse_ok};
+use beamtalk_core::test_helpers::test_support::{bare, parse_ok, parse_source};
 use beamtalk_repl::codegen::{
     generate_repl_expression, generate_repl_expressions, generate_repl_expressions_with_index,
     generate_test_expression,
@@ -358,8 +358,7 @@ fn test_repl_multi_stmt_times_repeat_intermediate() {
     // The loop is in intermediate (non-last) position — its StateAcc must be threaded
     // to the final `x` lookup, not discarded.
     let src = "x := 1. 5 timesRepeat: [x := x + 1]. x";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let module = parse_source(src);
     let code = generate_repl_expressions(
         &module
             .expressions
@@ -406,8 +405,7 @@ fn test_repl_multi_stmt_while_true_intermediate() {
     // `x := 0. [x < 3] whileTrue: [x := x + 1]. x` — whileTrue: in intermediate
     // position must thread its StateAcc so the final `x` lookup sees the updated value.
     let src = "x := 0. [x < 3] whileTrue: [x := x + 1]. x";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let module = parse_source(src);
     let code = generate_repl_expressions(
         &module
             .expressions
@@ -448,8 +446,7 @@ fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
     // `count := 0. 3 timesRepeat: [count := count + 1]. count` generates state chain:
     //   State → State1 (from assignment) → State2 (from loop StateAcc) → {Result, State2}
     let src = "count := 0. 3 timesRepeat: [count := count + 1]. count";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let module = parse_source(src);
     let code = generate_repl_expressions(
         &module
             .expressions
@@ -1067,8 +1064,7 @@ fn test_generate_repl_list_reject() {
     // The wrapper fun must be bound via `let` — not inlined in the call args,
     // because Core Erlang lambdas don't use `end` and can't be inlined in calls.
     let src = "#(1, 2, 3, 4, 5) reject: [:x | x > 2]";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let module = parse_source(src);
     let expr = &module.expressions[0].expression;
     let code = generate_repl_expression(expr, "test_reject_repl").expect("codegen should work");
 
@@ -1403,8 +1399,7 @@ fn test_repl_expression_spawn_uses_class_module_index() {
     // so the generated code calls 'bt@getting_started@counter':'spawn'()
     // instead of the heuristic fallback 'bt@counter':'spawn'().
     let src = "Counter spawn";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let module = parse_source(src);
     let expressions: Vec<_> = module
         .expressions
         .iter()
@@ -1436,8 +1431,7 @@ fn test_repl_expression_spawn_uses_class_module_index() {
 fn test_repl_expression_spawn_without_index_uses_heuristic() {
     // Without class_module_index, spawn falls back to the heuristic bt@ prefix.
     let src = "Counter spawn";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let module = parse_source(src);
     let expressions: Vec<_> = module
         .expressions
         .iter()
@@ -1459,8 +1453,7 @@ fn test_repl_expression_spawn_without_index_uses_heuristic() {
 fn test_repl_expression_spawn_with_args_uses_class_module_index() {
     // `Counter spawnWith: #{ value: 10 }` must also use class_module_index.
     let src = "Counter spawnWith: #{ value: 10 }";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let module = parse_source(src);
     let expressions: Vec<_> = module
         .expressions
         .iter()
