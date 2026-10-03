@@ -156,6 +156,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0127](0127-traits-for-behavioural-reuse.md) | Traits — Protocols with Provided Methods, Flattened into Users | Accepted | 2026-09-23 |
 | [0128](0128-opaque-callable-fold-threading-for-collection-homs.md) | Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs | Proposed | 2026-09-23 |
 | [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Accepted | 2026-09-25 |
+| [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Accepted | 2026-10-02 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
