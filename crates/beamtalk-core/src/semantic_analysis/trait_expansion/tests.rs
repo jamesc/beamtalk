@@ -6,9 +6,9 @@
 use super::*;
 use crate::source_analysis::Severity;
 
-/// Lex + parse a source string into a `Module` (mirrors the same helper in
-/// every other `semantic_analysis` test module, e.g.
-/// `type_checker::tests::common::parse_source`).
+/// Lex + parse a source string into a `Module`, asserting zero diagnostics
+/// (Lint included). Stricter than `test_support::parse_ok`, which ignores
+/// Lint; kept local because fixture sources here must be completely clean.
 fn parse_source(source: &str) -> Module {
     use crate::source_analysis::{lex_with_eof, parse};
     let tokens = lex_with_eof(source);

@@ -88,9 +88,7 @@ pub mod test_support {
     /// invalid input — the test verifies that codegen does not panic, not that
     /// the source is well-formed.
     ///
-    /// Used by property tests and scenario-driven tests across
-    /// `beamtalk-codegen`, `beamtalk-repl`, `beamtalk-language-service`,
-    /// and `beamtalk-core`'s own `unparse` and `type_checker` suites.
+    /// Shared test helper for tests that deliberately ignore parse diagnostics.
     pub fn parse_source(source: &str) -> Module {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
