@@ -60,6 +60,42 @@ pub mod test_support {
         module
     }
 
+    /// Parses `source` and returns the [`Module`] AST, asserting that there are
+    /// no Error or Warning diagnostics. Lint diagnostics are ignored (they do
+    /// not block compilation).
+    ///
+    /// Shared across `beamtalk-core`'s parser tests and dependent crates'
+    /// integration tests (e.g. `beamtalk-repl/tests/repl_codegen_smoke.rs`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `source` produces any Error or Warning diagnostics.
+    pub fn parse_ok(source: &str) -> Module {
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let non_lint: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity != Severity::Lint)
+            .collect();
+        assert!(non_lint.is_empty(), "Expected no errors, got: {non_lint:?}");
+        module
+    }
+
+    /// Parses `source` and returns the [`Module`] AST, discarding all
+    /// diagnostics without assertion.
+    ///
+    /// For robustness property tests that deliberately supply arbitrary or
+    /// invalid input — the test verifies that codegen does not panic, not that
+    /// the source is well-formed.
+    ///
+    /// Shared across `beamtalk-codegen` and `beamtalk-repl` property tests
+    /// (both `tests/codegen_property_tests.rs` files).
+    pub fn parse_source(source: &str) -> Module {
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        module
+    }
+
     /// Asserts that `output` contains `fragment`, panicking with a clear diff
     /// message on failure.
     ///

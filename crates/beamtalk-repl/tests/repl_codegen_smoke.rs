@@ -18,34 +18,12 @@
 //! that exercises `codegen`'s internals directly.
 
 use beamtalk_core::ast::*;
-use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
+use beamtalk_core::source_analysis::Span;
+use beamtalk_core::test_helpers::test_support::{bare, parse_ok};
 use beamtalk_repl::codegen::{
     generate_repl_expression, generate_repl_expressions, generate_repl_expressions_with_index,
     generate_test_expression,
 };
-
-/// Wraps `ExpressionStatement::bare` -- mirrors
-/// `codegen::core_erlang::tests::bare` in the source these tests were
-/// extracted from, kept as a local shim so the extracted bodies below are
-/// otherwise unmodified copies of the original test code.
-fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
-}
-
-/// Parses `source` and asserts there are no error/warning diagnostics
-/// (lint diagnostics are ignored). Mirrors
-/// `source_analysis::parser::tests::parse_ok` in the source these tests
-/// were extracted from.
-fn parse_ok(source: &str) -> Module {
-    let tokens = lex_with_eof(source);
-    let (module, diagnostics) = parse(tokens);
-    let non_lint: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity != Severity::Lint)
-        .collect();
-    assert!(non_lint.is_empty(), "Expected no errors, got: {non_lint:?}");
-    module
-}
 
 // ---- extracted from crates/beamtalk-core/src/codegen/core_erlang/tests/gen_server.rs:72-97 ----
 

@@ -10,19 +10,10 @@ use crate::ast::{DeclaredKeyword, Identifier, MessageSelector, TypeAnnotation};
 use crate::source_analysis::Span;
 use crate::source_analysis::lex_with_eof;
 
-/// Helper to parse a string and check for errors.
-///
-/// Passes if there are no Error or Warning diagnostics. Lint diagnostics
-/// are ignored here since they do not block compilation.
+/// Delegates to `test_helpers::test_support::parse_ok` — the shared
+/// implementation (see `crates/beamtalk-core/src/test_helpers.rs`).
 fn parse_ok(source: &str) -> Module {
-    let tokens = lex_with_eof(source);
-    let (module, diagnostics) = parse(tokens);
-    let non_lint: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity != Severity::Lint)
-        .collect();
-    assert!(non_lint.is_empty(), "Expected no errors, got: {non_lint:?}");
-    module
+    crate::test_helpers::test_support::parse_ok(source)
 }
 
 /// Helper to parse a string expecting errors.
