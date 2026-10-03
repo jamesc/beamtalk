@@ -9,12 +9,7 @@ use super::*;
 use crate::ast::{DeclaredKeyword, Identifier, MessageSelector, TypeAnnotation};
 use crate::source_analysis::Span;
 use crate::source_analysis::lex_with_eof;
-
-/// Delegates to `test_helpers::test_support::parse_ok` — the shared
-/// implementation (see `crates/beamtalk-core/src/test_helpers.rs`).
-fn parse_ok(source: &str) -> Module {
-    crate::test_helpers::test_support::parse_ok(source)
-}
+use crate::test_helpers::test_support::parse_ok;
 
 /// Helper to parse a string expecting errors.
 fn parse_err(source: &str) -> Vec<Diagnostic> {
