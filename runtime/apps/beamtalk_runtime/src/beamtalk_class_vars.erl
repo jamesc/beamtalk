@@ -307,17 +307,7 @@ with_snapshot(ClassSelf, Fun) ->
 %% internal error.
 -spec class_name(term()) -> atom().
 class_name(#beamtalk_object{class = Tag}) when is_atom(Tag), Tag =/= nil ->
-    TagBin = atom_to_binary(Tag, utf8),
-    case beamtalk_class_registry:class_display_name(TagBin) of
-        TagBin ->
-            nil_receiver();
-        Base ->
-            try
-                binary_to_existing_atom(Base, utf8)
-            catch
-                error:badarg -> nil_receiver()
-            end
-    end;
+    tag_to_name(Tag);
 class_name(_) ->
     nil_receiver().
 
@@ -328,10 +318,21 @@ class_name(_) ->
 self_key(#beamtalk_object{class = Tag}) ->
     ?BT_CLASS_VARS_KEY(Tag).
 
-%% The class name a metaclass tag (`'Name class'`) names.
+%% The class name a metaclass tag (`'Name class'`) names; a non-class tag
+%% raises the nil-receiver internal error.
 -spec tag_to_name(atom()) -> atom().
 tag_to_name(Tag) ->
-    class_name(#beamtalk_object{class = Tag, class_mod = undefined, pid = undefined}).
+    TagBin = atom_to_binary(Tag, utf8),
+    case beamtalk_class_registry:class_display_name(TagBin) of
+        TagBin ->
+            nil_receiver();
+        Base ->
+            try
+                binary_to_existing_atom(Base, utf8)
+            catch
+                error:badarg -> nil_receiver()
+            end
+    end.
 
 -spec current_map(atom(), key(), atom()) -> map().
 current_map(Class, Key, Name) ->
