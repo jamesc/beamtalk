@@ -310,10 +310,11 @@ fn class_var_reads(block: &Block, vars: &HashSet<String>) -> Vec<String> {
 }
 
 fn line_of(source: &str, offset: u32) -> usize {
-    let end = (offset as usize).min(source.len());
-    source.as_bytes()[..end]
-        .iter()
-        .filter(|b| **b == b'\n')
+    let end = offset as usize;
+    source
+        .char_indices()
+        .take_while(|(i, _)| *i < end)
+        .filter(|(_, c)| *c == '\n')
         .count()
         + 1
 }
