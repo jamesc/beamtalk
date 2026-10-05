@@ -73,7 +73,7 @@ direct_dispatch_test_() ->
                 direct_class_methods => #{testSelf => class_testSelf}
             }),
             try
-                %% class_testSelf/3 does not exist: the direct path must decline
+                %% class_testSelf/2 does not exist: the direct path must decline
                 %% and leave the error to the gen_server path.
                 ?assertEqual(
                     error, beamtalk_class_dispatch:lookup_direct_call(Pid, testSelf, [1])

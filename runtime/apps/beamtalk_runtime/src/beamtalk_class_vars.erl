@@ -43,10 +43,11 @@ receiver is an internal error.
 - `has/2` is key presence in the map and never raises on the name (as
   `hasField:` is today: reads raise, `hasField:` does not); `clear/2` removes
   the key (as `clearField:` is today). `get/2` on a name absent from the map
-  reads `nil` when the class's declared class variables cannot be determined
-  (no metadata, e.g. ClassBuilder classes, or no live class) or the name is
-  declared; it raises `undeclared_class_variable` only when the declared set
-  is known and does not contain the name.
+  reads `nil` when the declared-kinds map is empty (no metadata, e.g.
+  ClassBuilder classes, no live class, or a class that declares no class
+  variables: the declared set cannot be told apart from "unknown") or the name
+  is declared; it raises `undeclared_class_variable` only when the declared
+  set is non-empty and does not contain the name.
 - `get_late/2` raises the same `uninitialized_state_error` as the class
   gen_server's `get_class_var` for an unassigned (`nil` or absent) variable.
 """.
@@ -367,8 +368,9 @@ has_value(Map, Name) ->
 assert_declared(Class, Name) ->
     case beamtalk_behaviour_intrinsics:classAllClassVarKindsByName(Class) of
         Kinds when map_size(Kinds) =:= 0 ->
-            %% Declared set unknown (no metadata, or no live class): today's
-            %% `get_class_var` answers nil, so do not claim "undeclared".
+            %% Empty declared-kinds map (no metadata, no live class, or no
+            %% declared class variables): today's `get_class_var` answers nil,
+            %% so do not claim "undeclared".
             ok;
         Kinds ->
             case maps:is_key(Name, Kinds) of
@@ -467,6 +469,6 @@ raise_undeclared(Class, Name) ->
 raise_uninitialized(Class, Name) ->
     #beamtalk_error{hint = Hint} =
         beamtalk_object_class:class_var_uninitialized_error(Class, Name),
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(beamtalk_error:new(uninitialized_state_error, Class), Hint)
-    ).
+    Error0 = beamtalk_error:new(uninitialized_state_error, Class),
+    Error1 = beamtalk_error:with_details(Error0, #{class_variable => Name}),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
