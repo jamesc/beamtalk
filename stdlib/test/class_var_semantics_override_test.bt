@@ -1,0 +1,213 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the
+// subclass override (base rows, subclass writer). Each test asserts the ADR 0130 section 4/5 answer; a test
+// whose current answer differs pins today's answer and carries a PIN-BUG marker
+// citing BT-3713 (the Phase 3 flip issue), which flips every pin.
+
+TestCase subclass: ClassVarSemanticsOverrideTest
+
+  // ADR 0130 §4
+  testTop => self assert: CvsOverrideSub rowTop equals: 2
+
+  // ADR 0130 §4
+  testArm =>
+    self assert: (CvsOverrideSub rowArm: 1) equals: 1
+    self assert: (CvsOverrideSub rowArm: 0) equals: 0
+
+  // ADR 0130 §4
+  testLetrecTimes => self assert: CvsOverrideSub rowTimes equals: 3
+
+  // ADR 0130 §4
+  testLetrecTimesLocal => self assert: CvsOverrideSub rowTimesLocal equals: 3
+
+  // ADR 0130 §4
+  testLetrecToDoLocal => self assert: CvsOverrideSub rowToDoLocal equals: 3
+
+  // ADR 0130 §4
+  testLetrecWhileLocal => self assert: CvsOverrideSub rowWhileLocal equals: 3
+
+  // ADR 0130 §4
+  testFoldDo => self assert: CvsOverrideSub rowDo equals: 3
+
+  // ADR 0130 §4
+  testFoldDoThreaded => self assert: CvsOverrideSub rowDoLocal equals: 3
+
+  // ADR 0130 §4
+  testFoldCollectThreaded =>
+    self assert: CvsOverrideSub rowCollectLocal equals: 3
+
+  // ADR 0130 §4
+  testFoldInjectThreaded => self assert: CvsOverrideSub rowInjectLocal equals: 3
+
+  // ADR 0130 §4
+  testFoldCollect => self assert: CvsOverrideSub rowCollect equals: 3
+
+  // ADR 0130 §4
+  testFoldInject => self assert: CvsOverrideSub rowInject equals: 3
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyDiscardsWriteBeforeRaise =>
+    self assert: CvsOverrideSub rowOnBodyRaise equals: 0
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyKeepsWriteWhenNoError =>
+    self assert: CvsOverrideSub rowOnBodyOk equals: 1
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyKeepsWriteMadeBeforeTheRegion =>
+    self assert: CvsOverrideSub rowOnBodyAfterWrite equals: 1
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyDiscardsWriteOfFailingSend =>
+    self assert: CvsOverrideSub rowOnBodyViaSend equals: 0
+
+  // ADR 0130 §4 catch boundary
+  testOnDoHandlerKeepsItsWrite =>
+    self assert: CvsOverrideSub rowHandler equals: 1
+
+  // ADR 0130 §4 catch boundary
+  testOnDoHandlerKeepsItsWriteBodyWriteDiscarded =>
+    self assert: CvsOverrideSub rowHandlerAfterBodyWrite equals: 1
+
+  // ADR 0130 §4 ensure is not a boundary
+  testEnsureKeepsBothWrites => self assert: CvsOverrideSub rowEnsure equals: 2
+
+  // ADR 0130 §4 ensure is not a boundary
+  testEnsureCleanupWriteGoesWithTheError =>
+    self assert: CvsOverrideSub rowEnsureRaise equals: 0
+
+  // ADR 0130 §5 at home
+  testBareBlock => self assert: CvsOverrideSub rowBare equals: 1
+
+  // ADR 0130 §5 at home
+  // PIN-BUG BT-3713: pins today's answer (0: the stored closure's write is lost, ADR 0110 / BT-3681); ADR 0130 §5
+  // keeps it (the correct answer is 2).
+  testStoredClosureWithinInvocationWrites =>
+    self assert: CvsOverrideSub rowStoredWithin equals: 0
+
+  // ADR 0130 §5 at home
+  // PIN-BUG BT-3713: pins today's answer (0: the closure reads the value it captured); ADR 0130 §5: a block at
+  // home reads live (the correct answer is 1).
+  testStoredClosureWithinInvocationReadsLive =>
+    self assert: CvsOverrideSub rowStoredReadWithin equals: 0
+
+  // ADR 0130 §5 later invocation of the same class is at home
+  // PIN-BUG BT-3713: pins today's answer (the write is lost, n stays 0); ADR 0130 §5: a stored closure run from a
+  // later invocation of its class is at home and the write succeeds (the correct answer is 1).
+  testStoredClosureLaterInvocationWrites =>
+    CvsOverrideSub reset
+    CvsOverrideSub run: CvsOverrideSub makeBumper
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 later invocation of the same class is at home
+  // PIN-BUG BT-3713: pins today's answer (0: the creation-time value); ADR 0130 §5: at home the read is live
+  // (the correct answer is 1).
+  testStoredClosureLaterInvocationReadsLive =>
+    CvsOverrideSub reset
+    b := CvsOverrideSub makeReader
+    CvsOverrideSub bump
+    self assert: (CvsOverrideSub run: b) equals: 0
+
+  // ADR 0130 §5 abroad: captured read
+  testClosureFromForeignProcessReadsCaptured =>
+    CvsOverrideSub reset
+    b := CvsOverrideSub makeReader
+    CvsOverrideSub bump
+    self assert: b value equals: 0
+
+  // ADR 0130 §5 abroad: write raises
+  // PIN-BUG BT-3713: pins today's answer (the write is silently lost: the block answers 1, the class variable stays 0);
+  // ADR 0130 §5: the write raises class_state_unreachable.
+  testClosureFromForeignProcessWriteRaises =>
+    CvsOverrideSub reset
+    b := CvsOverrideSub makeBumper
+    self assert: b value equals: 1
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 carried synchronously: captured equals live
+  testSyncBlockToOpenDriverReadsLive =>
+    self assert: CvsOverrideSub rowSyncReadOpenDriver equals: 1
+
+  // ADR 0130 §5 abroad: write raises
+  // PIN-BUG BT-3713: pins today's answer (the write is silently lost, no error); ADR 0130 §5: the write raises
+  // class_state_unreachable.
+  testSyncBlockToOpenDriverWriteRaises =>
+    self assert: CvsOverrideSub rowSyncWriteOpenDriver equals: 0
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 direct-called class method is at home
+  testSyncBlockToSealedDriverReadsLive =>
+    self assert: CvsOverrideSub rowSyncReadSealedDriver equals: 1
+
+  // ADR 0130 §5 direct-called class method is at home
+  testSyncBlockToSealedDriverWrites =>
+    self assert: CvsOverrideSub rowSyncWriteSealedDriver equals: 1
+
+  // ADR 0130 §5 carried asynchronously: creation-time value
+  testAsyncBlockToActorReadsCreationValue =>
+    self assert: CvsOverrideSub rowAsyncRead equals: 0
+
+  // ADR 0130 §5 abroad: write raises
+  // PIN-BUG BT-3713: pins today's answer (the write is silently dropped, #ok); ADR 0130 §5: the write
+  // raises class_state_unreachable (the correct answer is #class_state_unreachable).
+  testAsyncBlockToActorWriteRaises =>
+    self assert: CvsOverrideSub rowAsyncWrite equals: #ok
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §5 runtime-owned snapshot
+  // PIN-BUG BT-3713: pins today's answer (does_not_understand: performLocally: does not find the inherited
+  // selector); ADR 0130 §5: reads see the snapshot (the correct answer is 1).
+  testPerformLocallyReadsSnapshot =>
+    CvsOverrideSub reset
+    CvsOverrideSub bump
+    self
+      assert: ([
+        CvsOverrideSub performLocally: #n withArguments: #()
+      ] on: Error do: [:e | e kind])
+      equals: #does_not_understand
+
+  // ADR 0130 §5 runtime-owned snapshot
+  // PIN-BUG BT-3713: pins today's answer (argument_error, not the ADR's structured error); ADR 0130 §5: the write
+  // raises class_state_read_only.
+  testPerformLocallyWriteRaises =>
+    CvsOverrideSub reset
+    self
+      assert: ([
+        CvsOverrideSub performLocally: #bump withArguments: #()
+      ] on: Error do: [:e | e kind])
+      equals: #argument_error
+    self assert: CvsOverrideSub n equals: 0
+
+  // ADR 0130 §4 non-local return
+  testOwnNlrKeepsWriteBeforeCaret =>
+    self assert: CvsOverrideSub rowOwnNlr equals: 1
+    self assert: CvsOverrideSub n equals: 1
+
+  // ADR 0130 §4 non-local return
+  // PIN-BUG BT-3713: pins today's answer (n is 1: the ensure: cleanup's write does not survive the ^); ADR 0130 §4: the
+  // cleanup's write is kept (the correct answer is 2).
+  testOwnNlrThroughEnsureKeepsBothWrites =>
+    self assert: CvsOverrideSub rowOwnNlrEnsure equals: 7
+    self assert: CvsOverrideSub n equals: 1
+
+  // ADR 0130 §4 non-local return
+  testForeignNlrThroughOpenDriverKeepsEarlierWrite =>
+    self assert: CvsOverrideSub rowForeignNlrAfterWrite equals: 5
+    self assert: CvsOverrideSub n equals: 1
+
+  // ADR 0130 §4 non-local return
+  testForeignNlrThroughSealedDriverKeepsWriteBeforeCaret =>
+    self assert: CvsOverrideSub rowForeignNlrSealedDriver equals: 5
+    self assert: CvsOverrideSub n equals: 1
+
+  // ADR 0130 §5 runtime-owned snapshot
+  // PIN-BUG BT-3713: pins today's answer (supervise succeeds and the hook's write is silently discarded); ADR 0130 §5:
+  // the write raises class_state_read_only (the exact surfacing through supervise is the ADR's reading).
+  testInitializeHookWriteRaises =>
+    CvsInitOverrideSub reset
+    r := CvsInitOverrideSub supervise
+    self assert: r isOk equals: true
+    self assert: CvsInitOverrideSub n equals: 0
+    r unwrap stop

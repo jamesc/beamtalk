@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704: an actor that stores a block and runs it later, in its own process.
+
+Actor subclass: CvsActor
+  state: blk = nil
+
+  keep: aBlock => self.blk := aBlock
+
+  run => self.blk value

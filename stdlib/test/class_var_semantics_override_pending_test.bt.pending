@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the
+// subclass override (base rows, subclass writer). Each test asserts the ADR 0130 section 4/5 answer; a test
+// whose current answer differs pins today's answer and carries a PIN-BUG marker
+// citing BT-3713 (the Phase 3 flip issue), which flips every pin.
+//
+// PENDING: the rows these tests call do not compile today (see the matching
+// fixture); the assertions are the ADR 0130 answers and nothing is pinned.
+
+TestCase subclass: ClassVarSemanticsOverridePendingTest
+
+  // ADR 0130 §4 (BT-3694 shape)
+  testLoopCondition =>
+    self assert: CvsOverrideSubPending rowLoopCondition equals: 3
+
+  // ADR 0130 §4 catch boundary
+  testNonMatchingInnerOnDoWithEnsureBetween =>
+    self assert: CvsOverrideSubPending rowNonMatchingInnerEnsure equals: 0

@@ -546,6 +546,8 @@ These are off by default (too noisy for normal use) and gated behind environment
 |---|---|
 | `BEAMTALK_CODEGEN_DIAGNOSTICS=1` | Enable all codegen diagnostics (info-level hints) |
 | `BEAMTALK_WARN_STATEACC=1` | Promote StateAcc fallback diagnostics to warning level (requires `BEAMTALK_CODEGEN_DIAGNOSTICS=1`) |
+| `BEAMTALK_CLASS_VAR_PROBE=1` | Class-variable census probe (ADR 0130 Phase 0); see below. Changes generated code, so leave it unset for normal builds |
+| `BEAMTALK_CLASS_VAR_PROBE_LOG=<file>` | Runtime side of the probe: append the probe's log events to `<file>` |
 
 ```bash
 # See all codegen decisions
@@ -554,6 +556,40 @@ BEAMTALK_CODEGEN_DIAGNOSTICS=1 beamtalk build myfile.bt
 # Highlight StateAcc fallbacks as warnings
 BEAMTALK_CODEGEN_DIAGNOSTICS=1 BEAMTALK_WARN_STATEACC=1 beamtalk build myfile.bt
 ```
+
+### Class-variable probe
+
+`BEAMTALK_CLASS_VAR_PROBE=1` (ADR 0130 Phase 0, BT-3703) makes the compiler
+emit a `beamtalk_class_var_probe:report/6` call before every class-variable
+read or write in class methods. The runtime logs one OTP logger event with
+`domain => [beamtalk, probe]` per access that is inside a non-inlined block
+(the runtime cannot see those otherwise) or made away from the home class
+process. Each event carries `class`, `selector`, `kind` (`read`/`write`),
+`field`, `in_block`, `at_home` (`self()` is the home pid), `home_live` (the
+home process is inside a class-method invocation) and `shape` (`home`,
+`carried_sync`: home is blocked in the call that carried the block away, or
+`abroad`). With the flag unset nothing references the probe and the generated
+`.core` is byte-identical (`just core-diff`).
+
+```bash
+# Census over the BUnit suite; the events land in the file named below
+cd stdlib
+BEAMTALK_CLASS_VAR_PROBE=1 BEAMTALK_CLASS_VAR_PROBE_LOG=probe.log \
+    cargo run --bin beamtalk --quiet -- test --quiet
+```
+
+Run only the suites that execute code (`test-bunit`, `test-stdlib`,
+`test-repl-protocol`) with the flag on, not `cargo test`: the flag changes
+generated code, so codegen snapshot tests would fail. Recompile the Erlang
+runtime (`just build-erlang`) first so `beamtalk_class_var_probe` is loadable.
+Side effects of a census run: the probe sets the VM-wide
+`erlang:system_flag(backtrace_depth, 128)` once (not restored) and, when
+`BEAMTALK_CLASS_VAR_PROBE_LOG` is set, lowers the primary logger level to
+`notice` while capping every other handler at `warning`, so do not compare a
+census run's output against golden output. The probe does not see `hasField:`
+on class variables (the compiler's `maps:is_key` fast path). The static counterpart, escaping closures that read a class variable, is the
+`beamtalk_core::class_var_census` test
+(`cargo test -p beamtalk-core --lib census_over -- --nocapture`).
 
 ### Diagnostic Categories
 

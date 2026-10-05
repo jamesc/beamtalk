@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the
+// open class. Each test asserts the ADR 0130 section 4/5 answer; a test
+// whose current answer differs pins today's answer and carries a PIN-BUG marker
+// citing BT-3713 (the Phase 3 flip issue), which flips every pin.
+//
+// PENDING: the rows these tests call do not compile today (see the matching
+// fixture); the assertions are the ADR 0130 answers and nothing is pinned.
+
+TestCase subclass: ClassVarSemanticsOpenPendingTest
+
+  // ADR 0130 §4
+  testLetrecTimes =>
+    self assert: CvsOpenPending rowTimes equals: 3
+
+  // ADR 0130 §4 (BT-3694 shape)
+  testLoopCondition =>
+    self assert: CvsOpenPending rowLoopCondition equals: 3
+
+  // ADR 0130 §4
+  testFoldDo =>
+    self assert: CvsOpenPending rowDo equals: 3
+
+  // ADR 0130 §4
+  testFoldCollect =>
+    self assert: CvsOpenPending rowCollect equals: 3
+
+  // ADR 0130 §4
+  testFoldInject =>
+    self assert: CvsOpenPending rowInject equals: 3
+
+  // ADR 0130 §4 catch boundary
+  testNonMatchingInnerOnDoWithEnsureBetween =>
+    self assert: CvsOpenPending rowNonMatchingInnerEnsure equals: 0
+
+  // ADR 0130 §4 ensure is not a boundary
+  testEnsureCleanupWriteGoesWithTheError =>
+    self assert: CvsOpenPending rowEnsureRaise equals: 0
+
+  // ADR 0130 §4 non-local return
+  testOwnNlrThroughEnsureKeepsBothWrites =>
+    self assert: CvsOpenPending rowOwnNlrEnsure equals: 7
+    self assert: CvsOpenPending n equals: 2

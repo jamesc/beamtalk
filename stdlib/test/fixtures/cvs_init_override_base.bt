@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704 (ADR 0130 Phase 1): a supervisor whose `class initialize:` hook sends
+// `bump`, which only the subclass makes write (the `class initialize:` row).
+
+Supervisor subclass: CvsInitOverrideBase
+  classState: n = 0
+
+  class strategy -> Symbol => #oneForOne
+
+  class children -> List => #()
+
+  class n => self.n
+
+  class reset => self.n := 0
+
+  class bump => self.n
+
+  class writeN => self.n := self.n + 1
+
+  class initialize: _sup => self bump

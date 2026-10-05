@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704: an open class with its own class state whose class methods run
+// in its own process, so a block passed in runs there (ADR 0109).
+
+Object subclass: CvsDriver
+  classState: ticks = 0
+
+  class each: aBlock => aBlock value
+
+  class guard: aBlock => [aBlock value] on: Error do: [:e | nil]
