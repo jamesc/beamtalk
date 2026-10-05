@@ -706,7 +706,9 @@ conforms_to_invalidated_by_put_class_method_test() ->
             'BT3222PutClassMethodClass', 'BT3222PutClassMethodProto'
         )
     ),
-    ok = beamtalk_object_class:put_class_method(Pid, make, fun() -> ok end, <<"make => ok">>),
+    ok = beamtalk_object_class:put_class_method(
+        Pid, make, fun(_ClassSelf) -> ok end, <<"make => ok">>
+    ),
     ?assert(
         beamtalk_protocol_registry:conforms_to(
             'BT3222PutClassMethodClass', 'BT3222PutClassMethodProto'

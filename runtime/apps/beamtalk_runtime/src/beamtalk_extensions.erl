@@ -201,6 +201,7 @@ register(Class, Selector, Fun, Owner, Source) when
     (Source =:= undefined orelse is_binary(Source))
 ->
     Key = {Class, Selector},
+    ok = refuse_old_class_side_arity(Class, Selector, Fun),
 
     %% BT-3669: flag transitions and row writes for one tag are serialized under
     %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
@@ -251,6 +252,46 @@ register(Class, Selector, Fun, Owner, Source) when
     %% is already the metaclass tag in that case) — see its doc.
     index_extension_xref(Class, Selector, Source),
     ok.
+
+-doc """
+ADR 0130 §3: a class-side extension fun is `fun(Args, ClassSelf)`. The old
+actor-context `fun(Args, Self, State)` shape (arity 3) would fail at call time
+with a raw `badarity`, so it is refused at registration with a structured error
+naming the selector.
+""".
+-spec refuse_old_class_side_arity(atom(), atom(), function()) -> ok.
+refuse_old_class_side_arity(Class, Selector, Fun) ->
+    case erlang:fun_info(Fun, arity) of
+        {arity, 3} ->
+            case beamtalk_class_registry:is_class_name(Class) of
+                true ->
+                    Error0 = beamtalk_error:new(
+                        arity_mismatch,
+                        Class,
+                        Selector,
+                        iolist_to_binary(
+                            io_lib:format(
+                                "Class-side extension ~p on ~p must be a fun of arity 2, got 3",
+                                [Selector, Class]
+                            )
+                        )
+                    ),
+                    Error1 = beamtalk_error:with_details(Error0, #{expected => 2, actual => 3}),
+                    beamtalk_error:raise(
+                        beamtalk_error:with_hint(
+                            Error1,
+                            <<
+                                "Class-side extensions no longer take or return class variables "
+                                "(ADR 0130): use fun(Args, ClassSelf) and return the bare result."
+                            >>
+                        )
+                    );
+                false ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
 
 -doc """
 Unregister an instance-side extension method from a class (ADR 0066 open

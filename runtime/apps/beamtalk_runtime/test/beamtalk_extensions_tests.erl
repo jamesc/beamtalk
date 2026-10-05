@@ -11,6 +11,7 @@ EUnit tests for beamtalk_extensions module.
 Tests extension registration, lookup, conflict tracking, and tooling APIs.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Fixtures
@@ -97,6 +98,29 @@ init_is_idempotent_test() ->
 %%% ============================================================================
 %%% Registration tests
 %%% ============================================================================
+
+%% ADR 0130 §3 (BT-3708): a 3-arity class-side extension fun is the old
+%% actor-context shape and is refused at registration, naming the selector.
+register_class_side_three_arity_refused_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        fun() ->
+            Tag = beamtalk_class_registry:class_object_tag('BT3708Ext'),
+            Old = fun(_Args, _Self, State) -> {ok, State} end,
+            ?assertError(
+                #{error := #beamtalk_error{kind = arity_mismatch, selector = make}},
+                beamtalk_extensions:register(Tag, make, Old, mylib)
+            ),
+            ?assertNot(beamtalk_extensions:has(Tag, make)),
+            %% The new 2-arity class-side shape and the instance-side actor
+            %% 3-arity shape are both still accepted.
+            ?assertEqual(
+                ok, beamtalk_extensions:register(Tag, make, fun(_Args, _ClassSelf) -> ok end, mylib)
+            ),
+            ?assertEqual(
+                ok, beamtalk_extensions:register('BT3708Ext', inst, Old, mylib)
+            )
+        end
+    end}.
 
 register_new_extension_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->

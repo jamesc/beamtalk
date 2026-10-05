@@ -466,9 +466,12 @@ class_send(ClassPid, Selector, Args) ->
 Execute a class method in the caller's process.
 
 Resolves the target module from the class object, then calls
-Module:class_<Selector>(nil, Args...) directly — bypassing the class
-object's gen_server. The caller takes responsibility for knowing the
-method does not mutate class state (nil is passed for ClassSelf).
+Module:class_<Selector>(Receiver, Args...) directly — bypassing the class
+object's gen_server. The receiver class object is passed as `ClassSelf` and the
+call runs inside `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5):
+class-variable reads see the snapshot (the ETS mirror as of the last completed
+invocation), writes raise `class_state_read_only`, and when called from inside
+the class's own method mid-invocation the live map is read and written.
 
 Raises beamtalk_error if the receiver is not a class object, or if the
 class does not define the requested method.
@@ -483,7 +486,9 @@ local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
             code:ensure_loaded(Module),
             case erlang:function_exported(Module, FunName, length(Args) + 1) of
                 true ->
-                    erlang:apply(Module, FunName, [nil | Args]);
+                    beamtalk_class_vars:with_snapshot(Receiver, fun() ->
+                        erlang:apply(Module, FunName, [Receiver | Args])
+                    end);
                 false ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
@@ -648,7 +653,49 @@ put_class_method(ClassPid, Selector, Fun) ->
 -doc "Install or replace a class-side method with a runtime fun and source.".
 -spec put_class_method(pid(), selector(), fun(), binary()) -> ok.
 put_class_method(ClassPid, Selector, Fun, Source) ->
+    ok = validate_class_method_fun_arity(ClassPid, Selector, Fun),
     gen_server:call(ClassPid, {put_class_method, Selector, Fun, Source}).
+
+-doc """
+ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
+`selector_arity + 1`. The pre-0130 `fun(ClassSelf, ClassVars, Args...)` shape
+(`selector_arity + 2`) would otherwise fail at call time with a raw `badarity`,
+so any other arity is refused here with a structured error naming the selector.
+""".
+-spec validate_class_method_fun_arity(pid(), selector(), fun()) -> ok.
+validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) ->
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    Expected = beamtalk_class_builder:selector_arity(Selector) + 1,
+    case Arity =:= Expected of
+        true ->
+            ok;
+        false ->
+            ClassName = class_name(ClassPid),
+            Hint =
+                case Arity =:= Expected + 1 of
+                    true ->
+                        <<
+                            "This looks like the pre-ADR-0130 shape fun(ClassSelf, ClassVars, Args...). "
+                            "Class methods no longer take or return class variables: use "
+                            "fun(ClassSelf, Args...) and return the bare result."
+                        >>;
+                    false ->
+                        <<"A class-method fun takes ClassSelf plus one argument per selector slot.">>
+                end,
+            Error0 = beamtalk_error:new(
+                arity_mismatch,
+                ClassName,
+                Selector,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Class method ~p must be a fun of arity ~b, got ~b",
+                        [Selector, Expected, Arity]
+                    )
+                )
+            ),
+            Error1 = beamtalk_error:with_details(Error0, #{expected => Expected, actual => Arity}),
+            beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint))
+    end.
 
 -doc "Get instance variable names.".
 -spec instance_variables(pid()) -> [atom()].

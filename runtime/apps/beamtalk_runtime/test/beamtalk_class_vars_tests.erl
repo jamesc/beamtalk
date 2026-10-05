@@ -417,6 +417,25 @@ with_snapshot_no_live_class_test() ->
         ?assertEqual(undefined, erlang:get(?KEY))
     end).
 
+mirror_read_without_snapshot_row_unreachable_test() ->
+    %% A registered class process with no snapshot row (a restart that has not
+    %% yet recorded) is "unreachable", while an empty-map row reads normally.
+    with_clean(fun() ->
+        Pid = start_fake_class(#{}),
+        try
+            beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
+                ?assertEqual(false, beamtalk_class_vars:has(self_obj(), n)),
+                beamtalk_class_registry:forget_class_state_snapshot(Pid),
+                ?assertEqual(
+                    class_state_unreachable,
+                    raised_kind(fun() -> beamtalk_class_vars:has(self_obj(), n) end)
+                )
+            end)
+        after
+            catch stop_fake_class(Pid)
+        end
+    end).
+
 mirror_read_with_dead_class_unreachable_test() ->
     with_clean(fun() ->
         Pid = start_fake_class(#{n => 1}),

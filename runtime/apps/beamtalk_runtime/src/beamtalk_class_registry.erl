@@ -79,6 +79,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_class_state_table/0,
     record_class_state_snapshot/2,
     class_state_snapshot/1,
+    class_state_snapshot_lookup/1,
     forget_class_state_snapshot/1
 ]).
 
@@ -905,16 +906,30 @@ Never messages `Pid` — safe to call from inside another process's `init/1`
 even when `Pid` itself is blocked waiting on that very call to return.
 """.
 -spec class_state_snapshot(pid() | undefined) -> map().
-class_state_snapshot(undefined) ->
-    #{};
 class_state_snapshot(Pid) ->
+    case class_state_snapshot_lookup(Pid) of
+        {ok, ClassVars} -> ClassVars;
+        not_found -> #{}
+    end.
+
+-doc """
+Like `class_state_snapshot/1`, but tells "no row for this pid" (`not_found`:
+the table is absent, or a restarted class process is registered but has not yet
+recorded its snapshot) apart from "the row is an empty map" (`{ok, #{}}`).
+`beamtalk_class_vars` mirror reads use it to raise `class_state_unreachable`
+for the former instead of reading an empty map.
+""".
+-spec class_state_snapshot_lookup(pid() | undefined) -> {ok, map()} | not_found.
+class_state_snapshot_lookup(undefined) ->
+    not_found;
+class_state_snapshot_lookup(Pid) ->
     case ets:info(beamtalk_class_state_snapshot) of
         undefined ->
-            #{};
+            not_found;
         _ ->
             case ets:lookup(beamtalk_class_state_snapshot, Pid) of
-                [{_, ClassVars}] -> ClassVars;
-                [] -> #{}
+                [{_, ClassVars}] -> {ok, ClassVars};
+                [] -> not_found
             end
     end.
 

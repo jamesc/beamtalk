@@ -162,15 +162,14 @@ We use ETS for the class hierarchy walk (no gen_server needed for lookup).
 -spec static_init(module(), atom()) -> {ok, {map(), [map()]}}.
 static_init(Module, ClassName) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    %% Read the class's live classState snapshot instead of a
-    %% hardcoded empty map, so a value set via an ordinary class-method call
-    %% before `supervise` (e.g. `configure:`) is visible to `class children`
-    %% here.
-    ClassVars = class_vars_snapshot(ClassSelf),
-    Children = call_class_method_direct(ClassName, Module, class_children, ClassSelf, ClassVars),
-    BtStrategy = call_class_method_direct(ClassName, Module, class_strategy, ClassSelf, ClassVars),
-    MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
-    MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
+    %% Each class method below runs inside `beamtalk_class_vars:with_snapshot/2`
+    %% (ADR 0130 §5): a value set via an ordinary class-method call before
+    %% `supervise` (e.g. `configure:`) is readable from the ETS mirror, and a
+    %% class-variable write raises `class_state_read_only`.
+    Children = call_class_method_direct(ClassName, Module, class_children, ClassSelf),
+    BtStrategy = call_class_method_direct(ClassName, Module, class_strategy, ClassSelf),
+    MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf),
+    MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf),
     Strategy = to_otp_strategy(BtStrategy),
     SupFlags = #{strategy => Strategy, intensity => MaxR, period => MaxT},
     Specs = build_child_specs(Children),
@@ -194,13 +193,10 @@ Same deadlock avoidance rationale as `static_init/2`.
 -spec dynamic_init(module(), atom()) -> {ok, {map(), [map()]}}.
 dynamic_init(Module, ClassName) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    %% See static_init/2's identical comment on reading the live classState.
-    ClassVars = class_vars_snapshot(ClassSelf),
-    ChildClass = call_class_method_direct(
-        ClassName, Module, class_childClass, ClassSelf, ClassVars
-    ),
-    MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
-    MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
+    %% See static_init/2: the class method runs in a read-only snapshot region.
+    ChildClass = call_class_method_direct(ClassName, Module, class_childClass, ClassSelf),
+    MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf),
+    MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf),
     SupFlags = #{strategy => simple_one_for_one, intensity => MaxR, period => MaxT},
     Specs = build_child_specs([ChildClass], dynamic),
     ?LOG_DEBUG("DynamicSupervisor init", #{
@@ -749,11 +745,8 @@ initial `class_initialize:` method lookup (same pattern as `static_init/2`).
 -spec run_initialize(term()) -> ok.
 run_initialize({beamtalk_supervisor, ClassName, Module, _Pid} = SupTuple) ->
     ClassSelf = make_init_class_self(ClassName, Module),
-    %% See static_init/2's identical comment on reading the live classState.
-    ClassVars = class_vars_snapshot(ClassSelf),
-    call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, ClassVars, [
-        SupTuple
-    ]),
+    %% See static_init/2: the class method runs in a read-only snapshot region.
+    call_class_method_direct(ClassName, Module, 'class_initialize:', ClassSelf, [SupTuple]),
     ok.
 
 -doc """
@@ -768,57 +761,44 @@ make_init_class_self(ClassName, Module) ->
     {beamtalk_object, ClassTag, Module, ClassPid}.
 
 -doc """
-Read a class's live classState snapshot, given the `ClassSelf`
-tuple `make_init_class_self/2` already built for the same call site.
-
-Reuses `ClassSelf`'s own `ClassPid` (position 4) rather than re-resolving
-it via a second `whereis_class/1` call — every one of this function's
-callers has just built `ClassSelf` from that exact pid. Deadlock-safe like
-`class_state_snapshot/1` itself: reads an ETS mirror, never messages the
-class gen_server (which may be blocked waiting for this `init/1` to
-return).
-""".
--spec class_vars_snapshot(beamtalk_object()) -> map().
-class_vars_snapshot(ClassSelf) ->
-    beamtalk_class_registry:class_state_snapshot(element(4, ClassSelf)).
-
--doc """
 Call a class method directly by invoking the module function, bypassing the class
 gen_server. Tries the subclass module first, then walks the class hierarchy via
 ETS until the method is found in an ancestor's module.
 """.
--spec call_class_method_direct(atom(), module(), atom(), tuple(), map()) -> term().
-call_class_method_direct(ClassName, Module, FunName, ClassSelf, ClassVars) ->
-    call_class_method_direct(ClassName, Module, FunName, ClassSelf, ClassVars, []).
+-spec call_class_method_direct(atom(), module(), atom(), tuple()) -> term().
+call_class_method_direct(ClassName, Module, FunName, ClassSelf) ->
+    call_class_method_direct(ClassName, Module, FunName, ClassSelf, []).
 
 -doc """
 Call a class method directly with extra user-facing arguments.
-ExtraArgs are appended after [ClassSelf, ClassVars].
+The compiled convention is `class_<sel>(ClassSelf, Args...)` returning the bare
+result (ADR 0130 §3), so the arity is `1 + length(ExtraArgs)`. The call runs in
+`beamtalk_class_vars:with_snapshot/2`: class-variable reads see the ETS mirror
+(or the live map if this process is already inside the class's invocation) and
+writes raise `class_state_read_only`.
 """.
--spec call_class_method_direct(atom(), module(), atom(), tuple(), map(), [term()]) -> term().
-call_class_method_direct(ClassName, Module, FunName, ClassSelf, ClassVars, ExtraArgs) ->
-    Arity = 2 + length(ExtraArgs),
-    case erlang:function_exported(Module, FunName, Arity) of
-        true ->
-            erlang:apply(Module, FunName, [ClassSelf, ClassVars | ExtraArgs]);
-        false ->
-            call_inherited_class_method_direct(
-                ClassName, FunName, ClassSelf, ClassVars, ExtraArgs, 0
-            )
-    end.
+-spec call_class_method_direct(atom(), module(), atom(), tuple(), [term()]) -> term().
+call_class_method_direct(ClassName, Module, FunName, ClassSelf, ExtraArgs) ->
+    beamtalk_class_vars:with_snapshot(ClassSelf, fun() ->
+        Arity = 1 + length(ExtraArgs),
+        case erlang:function_exported(Module, FunName, Arity) of
+            true ->
+                erlang:apply(Module, FunName, [ClassSelf | ExtraArgs]);
+            false ->
+                call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ExtraArgs, 0)
+        end
+    end).
 
 -spec call_inherited_class_method_direct(
-    atom(), atom(), tuple(), map(), [term()], non_neg_integer()
+    atom(), atom(), tuple(), [term()], non_neg_integer()
 ) ->
     term().
-call_inherited_class_method_direct(
-    _ClassName, FunName, _ClassSelf, _ClassVars, _ExtraArgs, Depth
-) when
+call_inherited_class_method_direct(_ClassName, FunName, _ClassSelf, _ExtraArgs, Depth) when
     Depth > 30
 ->
     error({supervisor_init_method_not_found, FunName});
-call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, ExtraArgs, Depth) ->
-    Arity = 2 + length(ExtraArgs),
+call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ExtraArgs, Depth) ->
+    Arity = 1 + length(ExtraArgs),
     case beamtalk_class_metadata:lookup_superclass(ClassName) of
         not_found ->
             error({supervisor_init_method_not_found, FunName});
@@ -833,15 +813,15 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Ext
                 not_found ->
                     %% Class not yet registered or module not yet recorded — skip upward.
                     call_inherited_class_method_direct(
-                        SuperclassName, FunName, ClassSelf, ClassVars, ExtraArgs, Depth + 1
+                        SuperclassName, FunName, ClassSelf, ExtraArgs, Depth + 1
                     );
                 {ok, SuperModule} ->
                     case erlang:function_exported(SuperModule, FunName, Arity) of
                         true ->
-                            erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars | ExtraArgs]);
+                            erlang:apply(SuperModule, FunName, [ClassSelf | ExtraArgs]);
                         false ->
                             call_inherited_class_method_direct(
-                                SuperclassName, FunName, ClassSelf, ClassVars, ExtraArgs, Depth + 1
+                                SuperclassName, FunName, ClassSelf, ExtraArgs, Depth + 1
                             )
                     end
             end
@@ -973,17 +953,9 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
     try
         ClassSelf = make_init_class_self(ClassName, Module),
-        %% See static_init/2's identical comment on reading the live classState.
-        ClassVars = class_vars_snapshot(ClassSelf),
-        RawResult = call_class_method_direct(
-            ClassName, Module, Selector, ClassSelf, ClassVars, Args
-        ),
-        %% Handle class_var_result wrapper if class method mutates class vars
-        Result =
-            case RawResult of
-                {class_var_result, R, _NewClassVars} -> R;
-                R -> R
-            end,
+        %% See static_init/2: the factory runs in a read-only snapshot region,
+        %% so a class-variable write raises instead of being discarded.
+        Result = call_class_method_direct(ClassName, Module, Selector, ClassSelf, Args),
         case Result of
             #beamtalk_object{pid = Pid} when is_pid(Pid) ->
                 {ok, Pid};

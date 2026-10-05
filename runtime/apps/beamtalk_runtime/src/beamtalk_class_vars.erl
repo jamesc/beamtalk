@@ -19,7 +19,10 @@ A class's variables live in the calling process's dictionary under
   `with_snapshot/2` for runtime-owned out-of-process regions; `put/3` and
   `clear/2` raise `class_state_read_only` under it, and reads resolve the
   class's ETS mirror **by class name** through the registry (never by pid,
-  so a class-process restart is transparent).
+  so a class-process restart is transparent). A registered class process with
+  no mirror row at all (a restart that has not yet recorded its first
+  snapshot) is told apart from an empty map (`class_state_snapshot_lookup/1`)
+  and raises `class_state_unreachable` instead of reading `#{}`.
 
 `install/2` and `uninstall/1` are the only writers of the class key together
 with the `'$bt_class_vars_home'` entry, which records the key of the live
@@ -330,7 +333,12 @@ map_or_captured(Class, Name, Captured) ->
 %% process is picked up transparently.
 -spec mirror(atom(), atom() | undefined) -> map().
 mirror(Class, Name) ->
-    beamtalk_class_registry:class_state_snapshot(live_class_pid(Class, Name)).
+    case beamtalk_class_registry:class_state_snapshot_lookup(live_class_pid(Class, Name)) of
+        {ok, Map} -> Map;
+        %% Registered but no snapshot row yet (a restarted class process that has
+        %% not recorded its first snapshot): not an empty map.
+        not_found -> raise_no_snapshot(Class, Name)
+    end.
 
 -spec live_class_pid(atom(), atom() | undefined) -> pid().
 live_class_pid(Class, Name) ->
@@ -429,6 +437,27 @@ raise_unreachable(Class, Name, Mode) ->
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
     beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
+
+%% The class process is registered but has recorded no snapshot row yet.
+-spec raise_no_snapshot(atom(), atom() | undefined) -> no_return().
+raise_no_snapshot(Class, Name) ->
+    Error0 = beamtalk_error:new(class_state_unreachable, Class),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary(
+            io_lib:format("~s's class state cannot be reached: no snapshot recorded yet", [Class])
+        )
+    ),
+    Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error2,
+            <<
+                "The class process was just (re)started and has not recorded its class "
+                "variables yet; retry shortly."
+            >>
+        )
+    ).
 
 -spec raise_read_only(atom(), atom()) -> no_return().
 raise_read_only(Class, Name) ->
