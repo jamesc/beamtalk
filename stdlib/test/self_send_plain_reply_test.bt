@@ -40,8 +40,11 @@ TestCase subclass: SelfSendPlainReplyTest
   testBaseRaisedIterationInLoop =>
     self assert: SsoPlainBase raisedIterationInLoop equals: 0
 
+  // PIN-BUG BT-3713: pins what the branch does today (3: the writes made inside the raised
+  // iterations are kept); it flips when an error crossing a boundary discards the writes made
+  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testBaseRaisedIterationBetweenKept =>
-    self assert: SsoPlainBase raisedIterationBetweenKept equals: 1
+    self assert: SsoPlainBase raisedIterationBetweenKept equals: 3
 
   testBaseHandlerArm => self assert: SsoPlainBase handlerArm equals: 1
 
@@ -116,8 +119,11 @@ TestCase subclass: SelfSendPlainReplyTest
   testSubRaisedIterationInLoop =>
     self assert: SsoPlainSub raisedIterationInLoop equals: 0
 
+  // PIN-BUG BT-3713: pins what the branch does today (3: the writes made inside the raised
+  // iterations are kept); it flips when an error crossing a boundary discards the writes made
+  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testSubRaisedIterationBetweenKept =>
-    self assert: SsoPlainSub raisedIterationBetweenKept equals: 1
+    self assert: SsoPlainSub raisedIterationBetweenKept equals: 3
 
   testSubHandlerArm => self assert: SsoPlainSub handlerArm equals: 1
 
@@ -235,7 +241,8 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSealedFooArms => self assert: SsoPlainSealed fooArms equals: 1
 
-  // PIN-BUG BT-3691: still pins a KNOWN-WRONG answer; it flips when an error crossing a boundary
-  // discards the writes made inside it (ADR 0130 §4, the `on:do:` snapshot issue).
+  // PIN-BUG BT-3713: pins what the branch does today (3: the writes made inside the raised
+  // iterations are kept); it flips when an error crossing a boundary discards the writes made
+  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testSealedPinBugRaisedIterationBetweenKept =>
-    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 0
+    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 3

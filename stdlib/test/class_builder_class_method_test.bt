@@ -15,9 +15,11 @@
 TestCase subclass: ClassBuilderClassMethodTest
   field: cls = nil
   field: parentCls = nil
+  field: midCls = nil
 
   tearDown =>
     self.cls isNil ifFalse: [self.cls removeFromSystem]
+    self.midCls isNil ifFalse: [self.midCls removeFromSystem]
     self.parentCls isNil ifFalse: [self.parentCls removeFromSystem]
 
   // Class-variable mutation persists across calls (the BT-873 "dropped state"
@@ -71,6 +73,34 @@ TestCase subclass: ClassBuilderClassMethodTest
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT2267BSuperChild
     self assert: self.cls greeting equals: "base"
+
+  // ADR 0130 §3: a builder `super` send runs the superclass method with the
+  // LIVE receiver (`ClassSelf` of the subclass), so a class-variable access in
+  // that method uses the receiver's key rather than the static builder
+  // class's. Called on a subclass of the builder class, it must not raise
+  // class_state_unreachable.
+  testSuperFromSubclassReceiverUsesReceiverClassVars =>
+    Object classBuilder name: #BT3709SuperVarBase;
+      superclass: Object;
+      classVars: #{#n => 10};
+      classMethods: #{#bump => [:self |
+          self.n := self.n + 1
+          self.n
+        ]};
+      register
+    self.parentCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarBase
+    Object classBuilder name: #BT3709SuperVarMid;
+      superclass: #BT3709SuperVarBase;
+      classMethods: #{#bump => [:self | super bump]};
+      register
+    self.midCls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarMid
+    Object classBuilder name: #BT3709SuperVarLeaf;
+      superclass: #BT3709SuperVarMid;
+      classVars: #{#n => 100};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3709SuperVarLeaf
+    self assert: self.cls bump equals: 101
+    self assert: self.cls bump equals: 102
 
   // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
   // not match the class-method calling convention `fun(ClassSelf, ...)`

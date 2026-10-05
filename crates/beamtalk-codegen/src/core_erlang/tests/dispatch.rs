@@ -3769,6 +3769,31 @@ fn test_builder_class_var_mutation_is_an_in_place_put() {
     );
 }
 
+/// ADR 0130 §3: a ClassBuilder `super` / self-send passes the LIVE receiver tag
+/// (`element(2, ClassSelf)`), so a subclass receiver runs the superclass method
+/// under its own class-variable key instead of the static builder class's.
+#[test]
+fn test_builder_super_and_self_send_pass_live_receiver_tag() {
+    let src = "Object classBuilder name: #BT3709Sup; superclass: Object; \
+               classMethods: #{ #bump => [:self | super bump], #twice => [:self | self bump] }; \
+               register";
+    let code = try_codegen(src).expect("builder super/self-send must compile");
+    assert!(
+        code.contains(
+            "call 'beamtalk_class_dispatch':'class_self_dispatch'('BT3709Sup', 'bump', [], \
+             call 'erlang':'element'(2, ClassSelf))"
+        ),
+        "builder `super` must pass the live receiver tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('BT3709Sup', 'bump', [], \
+             call 'erlang':'element'(2, ClassSelf))"
+        ),
+        "builder self-send must pass the live receiver tag. Got:\n{code}"
+    );
+}
+
 /// A builder cascade lexically inside a block still lowers the fun as a class
 /// method's own top frame (`block_depth` is reset and restored around it).
 #[test]

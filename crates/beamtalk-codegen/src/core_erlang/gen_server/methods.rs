@@ -2179,7 +2179,8 @@ impl CoreErlangGenerator {
 
         // ADR 0130 §3: no selector rebinds class variables (they live in the
         // class process's dictionary), so the class-var-mutating selector set
-        // stays empty; the next ADR 0130 issue deletes the analysis.
+        // stays empty. BT-3710 deletes this analysis and this `clear()` with it, so it
+        // must not outlive that issue.
         self.class_var_mutating_selectors_mut().clear();
 
         // Populate auto-generated keyword constructor selector for Value subclass: classes.

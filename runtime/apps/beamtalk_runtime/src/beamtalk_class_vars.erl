@@ -65,6 +65,7 @@ receiver is an internal error.
 
 -export([
     key/1,
+    key_for_tag/1,
     assert_absent/1,
     install/2,
     uninstall/1,
@@ -104,7 +105,15 @@ applied to the class's metaclass tag, the same key an access derives from
 key(nil) ->
     nil_receiver();
 key(ClassName) when is_atom(ClassName) ->
-    ?BT_CLASS_VARS_KEY(beamtalk_class_registry:class_object_tag(ClassName)).
+    key_for_tag(beamtalk_class_registry:class_object_tag(ClassName)).
+
+-doc """
+`key/1` for a caller that already holds the class's metaclass tag (the
+invocation entry points derive it once and reuse it for `ClassSelf`).
+""".
+-spec key_for_tag(atom()) -> key().
+key_for_tag(ClassTag) when is_atom(ClassTag) ->
+    ?BT_CLASS_VARS_KEY(ClassTag).
 
 -doc """
 Raise an internal error if `Key` is already present or any home entry is

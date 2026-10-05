@@ -1288,7 +1288,9 @@ impl CoreErlangGenerator {
                 leaf::atom(selector_atom),
                 ", [",
                 args_doc,
-                "])"
+                "], call 'erlang':'element'(2, ",
+                leaf::var("ClassSelf"),
+                "))"
             ];
             return Ok(self.class_self_send_value(&args_preamble, call_doc));
         }
@@ -2490,8 +2492,10 @@ impl CoreErlangGenerator {
 
         // ADR 0084: `super` inside a builder class-method fun resolves
         // up the metaclass chain via the runtime helper, keyed on the builder
-        // class name — `class_self_dispatch/3` begins the walk at that class's
-        // superclass, which is exactly super semantics. The fun has no module
+        // class name — `class_self_dispatch/4` begins the walk at that class's
+        // superclass, which is exactly super semantics. The live receiver tag
+        // (`element(2, ClassSelf)`) is passed so a subclass receiver runs the
+        // superclass method under its own class-variable key. The fun has no module
         // export, so this must not use the compiled `beamtalk_dispatch:super/5`
         // instance path below.
         if let Some(builder_class) = self.builder_class_method_class() {
@@ -2503,7 +2507,9 @@ impl CoreErlangGenerator {
                 leaf::atom(selector_atom),
                 ", [",
                 args_doc,
-                "])"
+                "], call 'erlang':'element'(2, ",
+                leaf::var("ClassSelf"),
+                "))"
             ];
             // ADR 0130 §3: `super` passes nothing and rebinds nothing.
             let tv = self.class_self_send_value(&args_preamble, call_doc);

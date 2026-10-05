@@ -36,7 +36,8 @@ use std::collections::HashSet;
 /// ([`is_class_var_assignment`], [`is_class_method_self_send`],
 /// [`is_self_clear_field_class_var`]) recognise nothing, so none of the
 /// `ClassVars` threading family is reachable. The family itself stays in place
-/// until the next ADR 0130 issue deletes it.
+/// until BT-3710 deletes it; this switch must not outlive BT-3710 (delete the
+/// const together with the family).
 pub(super) const CLASS_VAR_THREADING: bool = false;
 
 /// The small borrowed slice of [`CoreErlangGenerator`] state a shape
