@@ -264,6 +264,12 @@ pub struct CoreErlangGenerator {
     /// When true, emits `Diagnostic::hint` for calling convention choices, dynamic dispatch
     /// fallbacks, non-local returns, and other codegen decisions.
     pub(in crate::core_erlang) codegen_diagnostics_enabled: bool,
+    /// ADR 0130 Phase 0 census probe (`BEAMTALK_CLASS_VAR_PROBE=1`): when true,
+    /// every class-variable read or write is preceded by a
+    /// `beamtalk_class_var_probe:report/6` call, with `in_block` (inside a
+    /// non-inlined block, `block_depth > 0`) as its last argument. Off by
+    /// default; when off, generated code is byte-identical.
+    pub(in crate::core_erlang) class_var_probe_enabled: bool,
     /// Whether `StateAcc` fallback should be promoted to warning (`BEAMTALK_WARN_STATEACC=1`).
     pub(in crate::core_erlang) warn_stateacc: bool,
     /// Selector name of the method currently being compiled.
@@ -380,6 +386,8 @@ impl CoreErlangGenerator {
             codegen_warnings: Vec::new(),
             semantic_facts: beamtalk_core::semantic_analysis::SemanticFacts::default(),
             codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")
+                .is_ok_and(|v| v == "1"),
+            class_var_probe_enabled: std::env::var("BEAMTALK_CLASS_VAR_PROBE")
                 .is_ok_and(|v| v == "1"),
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
             current_method_selector: None,

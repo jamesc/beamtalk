@@ -518,6 +518,15 @@ impl CoreErlangGenerator {
         self.codegen_warnings.push(diag);
     }
 
+    /// ADR 0130 Phase 0: an explicit [`CodegenOptions`](crate::core_erlang::CodegenOptions)
+    /// setting overrides the `BEAMTALK_CLASS_VAR_PROBE` env var read at
+    /// generator creation; `None` keeps the env var's value.
+    pub(in crate::core_erlang) fn override_class_var_probe(&mut self, enabled: Option<bool>) {
+        if let Some(enabled) = enabled {
+            self.class_var_probe_enabled = enabled;
+        }
+    }
+
     /// Emits a codegen diagnostic (gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`).
     ///
     /// These are informational diagnostics about codegen decisions (calling conventions,

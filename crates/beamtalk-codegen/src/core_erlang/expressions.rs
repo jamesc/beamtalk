@@ -621,6 +621,44 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// ADR 0130 Phase 0 census probe: when `BEAMTALK_CLASS_VAR_PROBE=1`, a
+    /// `let _ = call 'beamtalk_class_var_probe':'report'(ClassSelf, Class,
+    /// Selector, Kind, Field, InBlock) in ` prefix on every class-variable
+    /// read or write, where `InBlock` is `'true'` inside a non-inlined block
+    /// (`block_depth > 0`, the reads the runtime cannot otherwise see: the
+    /// block reads a lexically captured map) and `'false'` at a method's own
+    /// level (where the runtime only logs an access made away from home, which
+    /// is how a stored closure's self-send reaches a write). With the flag
+    /// off this is [`Document::Nil`], so generated code is byte-identical.
+    fn class_var_probe_doc(&mut self, kind: &str, field_name: &str) -> Document<'static> {
+        if !self.class_var_probe_enabled {
+            return Document::Nil;
+        }
+        let in_block = self.block_depth > 0;
+        let selector = self
+            .current_method_selector
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let probe_var = self.fresh_temp_var("Probe");
+        docvec![
+            "let ",
+            leaf::var(probe_var),
+            " = call 'beamtalk_class_var_probe':'report'(",
+            leaf::var("ClassSelf".to_string()),
+            ", ",
+            leaf::atom(self.class_name()),
+            ", ",
+            leaf::atom(selector),
+            ", ",
+            leaf::atom(kind.to_string()),
+            ", ",
+            leaf::atom(field_name.to_string()),
+            ", ",
+            leaf::atom(in_block.to_string()),
+            ") in ",
+        ]
+    }
+
     /// Generates code for field access (e.g., `self.value`).
     ///
     /// Maps to Erlang `maps:get/2` call:
@@ -644,18 +682,21 @@ impl CoreErlangGenerator {
                 if recv_id.name == "self" && self.class_var_names().contains(field.name.as_str()) {
                     let cv = self.current_class_var();
                     let class_name = self.class_name();
+                    let probe = self.class_var_probe_doc("read", field.name.as_str());
                     if self.is_late_class_var(&class_name, field.name.as_str()) {
                         let declared_type = self
                             .class_hierarchy
                             .as_ref()
                             .and_then(|h| h.class_variable_type(&class_name, field.name.as_str()));
-                        return Ok(self.generate_late_field_read(
+                        let read = self.generate_late_field_read(
                             field.name.as_str(),
                             leaf::var(cv),
                             declared_type,
-                        ));
+                        );
+                        return Ok(docvec![probe, read]);
                     }
                     return Ok(docvec![
+                        probe,
                         "call 'maps':'get'(",
                         leaf::atom(field.name.to_string()),
                         ", ",
@@ -943,7 +984,15 @@ impl CoreErlangGenerator {
             "class-var mutation missing ADR 0110 shadow write",
             value.span(),
         );
-        let preamble_doc = docvec!["let ", leaf::var(val_var.clone()), " = ", val_doc, " in ",];
+        let probe = self.class_var_probe_doc("write", field_name);
+        let preamble_doc = docvec![
+            probe,
+            "let ",
+            leaf::var(val_var.clone()),
+            " = ",
+            val_doc,
+            " in ",
+        ];
         Ok((preamble_doc, bind, val_var))
     }
 
@@ -1021,7 +1070,8 @@ impl CoreErlangGenerator {
             "class-var mutation missing ADR 0110 shadow write",
             span,
         );
-        Ok((Document::Nil, bind, "ClassSelf".to_string()))
+        let probe = self.class_var_probe_doc("write", field_name);
+        Ok((probe, bind, "ClassSelf".to_string()))
     }
 
     /// ADR 0111 coverage extension: construct + verify the

@@ -166,6 +166,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
 
 mod analysis_handoff;
 mod branch_context;
+mod class_var_probe;
 mod class_var_scope_tokens;
 mod class_var_shadow_contract;
 mod control_flow;
