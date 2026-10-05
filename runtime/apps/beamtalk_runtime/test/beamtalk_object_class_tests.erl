@@ -1610,7 +1610,6 @@ local_call_test_() ->
             {"local_call with keyword argument", fun test_local_call_keyword_arg/0},
             {"local_call method not found raises does_not_understand",
                 fun test_local_call_method_not_found/0},
-            {"local_call unwraps class_var_result tuple", fun test_local_call_class_var_result/0},
             {"local_call on non-class receiver raises type_error",
                 fun test_local_call_non_class_receiver/0},
             {"local_call on non-object raises type_error", fun test_local_call_non_object/0}
@@ -1669,25 +1668,6 @@ test_local_call_method_not_found() ->
         #{error := #beamtalk_error{kind = does_not_understand}},
         beamtalk_object_class:local_call(ClassObj, nonExistentMethod, [])
     ).
-
-test_local_call_class_var_result() ->
-    ClassInfo = #{
-        name => 'LocalCallCvarTestClass',
-        module => beamtalk_class_dispatch_test_helper,
-        superclass => none,
-        class_methods => #{testClassVar => <<>>},
-        class_state => #{}
-    },
-    {ok, Pid} = beamtalk_object_class:start_link('LocalCallCvarTestClass', ClassInfo),
-    ClassObj = #beamtalk_object{
-        class = 'LocalCallCvarTestClass class',
-        class_mod = beamtalk_class_dispatch_test_helper,
-        pid = Pid
-    },
-    %% testClassVar returns {class_var_result, Value, NewVars} — local_call
-    %% should unwrap and return just the value
-    Result = beamtalk_object_class:local_call(ClassObj, testClassVar, []),
-    ?assertEqual(class_var_updated_value, Result).
 
 test_local_call_non_class_receiver() ->
     %% An actor instance (class name does NOT end with " class") should fail
@@ -2343,18 +2323,18 @@ bt1982_code_change_delegates_test_() ->
     end}.
 
 %% has_class_new_in_chain/3 returns true when the class's own module exports
-%% class_new:/3. Uses a dynamically-compiled module exporting class_new:/3.
+%% class_new:/2. Uses a dynamically-compiled module exporting class_new:/2.
 bt1982_has_class_new_in_chain_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                %% Compile a tiny module that exports class_new:/3.
+                %% Compile a tiny module that exports class_new:/2 (ADR 0130: ClassSelf, Arg).
                 Forms = [
                     {attribute, 1, module, bt1982_new_colon_mod},
-                    {attribute, 2, export, [{'class_new:', 3}]},
-                    {function, 3, 'class_new:', 3, [
-                        {clause, 3, [{var, 3, '_'}, {var, 3, 'CVars'}, {var, 3, '_'}], [], [
-                            {tuple, 3, [{atom, 3, reply}, {atom, 3, ok}, {var, 3, 'CVars'}]}
+                    {attribute, 2, export, [{'class_new:', 2}]},
+                    {function, 3, 'class_new:', 2, [
+                        {clause, 3, [{var, 3, '_'}, {var, 3, '_'}], [], [
+                            {tuple, 3, [{atom, 3, reply}, {atom, 3, ok}, {atom, 3, none}]}
                         ]}
                     ]}
                 ],
@@ -2374,9 +2354,9 @@ bt1982_has_class_new_in_chain_test_() ->
                 {ok, Pid} = beamtalk_object_class:start_link('BT1982HasClassNew', ClassInfo),
                 %% Calling new/2 with non-empty args triggers the
                 %% has_class_new_in_chain/3 branch and dispatches through the
-                %% compiled class_new:/3.
+                %% compiled class_new:/2.
                 Result = beamtalk_object_class:new(Pid, [anything]),
-                %% The compiled class_new:/3 returns its raw {reply, ...}
+                %% The compiled class_new:/2 returns its raw {reply, ...}
                 %% tuple which handle_class_method_call passes back — we just
                 %% need to confirm the has_class_new_in_chain branch executed
                 %% (not the generic field-init path, which would try to treat

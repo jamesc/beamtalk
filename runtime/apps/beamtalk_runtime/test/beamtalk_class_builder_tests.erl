@@ -795,7 +795,7 @@ register_class_method_fun_callable_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                Factory = fun(_ClassSelf, _ClassVars) -> made_by_factory end,
+                Factory = fun(_ClassSelf) -> made_by_factory end,
                 State = #{
                     className => 'BT2266BuilderFactory',
                     superclassRef => 'Object',
@@ -829,7 +829,7 @@ register_self_new_in_class_method_test_() ->
                 %% class_send(self(), 'new', _), which short-circuits to the
                 %% self-instantiation path — exactly what class-method
                 %% codegen emits for a `self new` send.
-                Make = fun(_ClassSelf, _ClassVars) ->
+                Make = fun(_ClassSelf) ->
                     beamtalk_class_dispatch:class_send(self(), 'new', [])
                 end,
                 State = #{
@@ -849,7 +849,7 @@ register_self_new_in_class_method_test_() ->
 
             %% `self new: #{...}` self-instantiation merges the initialiser map.
             ?_test(begin
-                MakeWith = fun(_ClassSelf, _ClassVars) ->
+                MakeWith = fun(_ClassSelf) ->
                     beamtalk_class_dispatch:class_send(self(), 'new:', [#{a => 42}])
                 end,
                 State = #{
@@ -869,7 +869,7 @@ register_self_new_in_class_method_test_() ->
             %% instantiation_error — the generic path screens abstractness via
             %% the process-dict flag, matching the external `X new` rejection.
             ?_test(begin
-                MakeAbstract = fun(_ClassSelf, _ClassVars) ->
+                MakeAbstract = fun(_ClassSelf) ->
                     beamtalk_class_dispatch:class_send(self(), 'new', [])
                 end,
                 State = #{
@@ -897,7 +897,7 @@ register_class_method_fun_dropped_on_reload_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                Factory = fun(_ClassSelf, _ClassVars) -> from_runtime end,
+                Factory = fun(_ClassSelf) -> from_runtime end,
                 State1 = #{
                     className => 'BT2266ReloadDrop',
                     superclassRef => 'Object',

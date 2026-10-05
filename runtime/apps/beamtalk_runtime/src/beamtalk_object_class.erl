@@ -466,7 +466,7 @@ class_send(ClassPid, Selector, Args) ->
 Execute a class method in the caller's process.
 
 Resolves the target module from the class object, then calls
-Module:class_<Selector>(nil, #{}, Args) directly — bypassing the class
+Module:class_<Selector>(nil, Args...) directly — bypassing the class
 object's gen_server. The caller takes responsibility for knowing the
 method does not mutate class state (nil is passed for ClassSelf).
 
@@ -481,16 +481,9 @@ local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
         true ->
             FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
             code:ensure_loaded(Module),
-            case erlang:function_exported(Module, FunName, length(Args) + 2) of
+            case erlang:function_exported(Module, FunName, length(Args) + 1) of
                 true ->
-                    case erlang:apply(Module, FunName, [nil, #{} | Args]) of
-                        {class_var_result, Value, _NewClassVars} ->
-                            %% Discard class var mutations — local_call does not
-                            %% update the class object's state.
-                            Value;
-                        Result ->
-                            Result
-                    end;
+                    erlang:apply(Module, FunName, [nil | Args]);
                 false ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
@@ -642,8 +635,8 @@ put_method(ClassPid, Selector, Fun, Source) ->
 Install or replace a class-side method with a runtime fun (ADR 0084).
 
 Class-side mirror of `put_method/4`. The fun follows the compiled class-method
-calling convention exactly: `fun(ClassSelf, ClassVars, A1..An) -> Result |
-{class_var_result, Result, NewClassVars}`, arity `n + 2`. The fun is stored in
+calling convention exactly (ADR 0130 §3): `fun(ClassSelf, A1..An) -> Result`,
+arity `n + 1`; class variables are accessed through `beamtalk_class_vars`. The fun is stored in
 the class gen_server `class_methods` map (the source of truth) and mirrored into
 the metadata retrieval store so subclasses can dispatch it without a gen_server
 hop. A runtime fun shadows any compiled method of the same selector.
@@ -2007,10 +2000,10 @@ find_inherited_class_method(Selector, SuperName) ->
     end.
 
 -doc """
-Check whether `class_new:/3` is exported anywhere in the superclass chain.
+Check whether `class_new:/2` is exported anywhere in the superclass chain.
 
 Walks the ETS hierarchy table from `ClassName` upward.  Returns `true` as soon as
-a module exporting `class_new:'/3` is found, `false` if none is found in the chain.
+a module exporting `class_new:'/2` is found, `false` if none is found in the chain.
 This correctly supports inherited `class new:` constructors: a subclass that does
 not override `class new:` will still route through the parent's implementation.
 
@@ -2027,7 +2020,7 @@ has_class_new_in_chain(ClassName, Module) ->
 has_class_new_in_chain(_ClassName, _Module, Depth) when Depth > 50 ->
     false;
 has_class_new_in_chain(ClassName, Module, Depth) ->
-    case erlang:function_exported(Module, 'class_new:', 3) of
+    case erlang:function_exported(Module, 'class_new:', 2) of
         true ->
             true;
         false ->

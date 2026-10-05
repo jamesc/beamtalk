@@ -23,14 +23,10 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -export([
     class_send/3,
     lookup_direct_call/3,
-    class_self_dispatch/4,
-    class_self_send/4,
+    class_self_dispatch/3,
+    class_self_send/3,
     class_self_direct_ok/4,
-    class_self_dispatch_local/4,
-    class_var_scope_commit/3,
-    class_var_scope_read/3,
-    class_var_scope_take/3,
-    class_var_scope_export/3,
+    class_self_dispatch_local/3,
     metaclass_send/4,
     unwrap_class_call/1,
     class_method_fun_name/1,
@@ -114,7 +110,7 @@ class_send(ClassPid, Selector, Args) ->
     %% gen_server to deadlock on.
     case lookup_direct_call(ClassPid, Selector, Args) of
         {ok, Module, SafeFn} ->
-            erlang:apply(Module, SafeFn, [nil, #{} | Args]);
+            erlang:apply(Module, SafeFn, [nil | Args]);
         error when ClassPid =:= self() ->
             handle_class_self_call(Selector);
         error ->
@@ -127,7 +123,7 @@ class_send(ClassPid, Selector, Args) ->
 Resolve a dynamic class-side send to a direct module call, if eligible.
 
 Eligible when the class's `direct_class_methods` lists the selector and the
-compiled function exists at the right arity (`nil, #{}` plus the arguments);
+compiled function exists at the right arity (`nil` plus the arguments);
 an arity mismatch falls through to the gen_server path so the usual structured
 error is raised.
 """.
@@ -137,7 +133,7 @@ lookup_direct_call(ClassPid, Selector, Args) when is_pid(ClassPid), is_list(Args
         {ok, ClassName} ->
             case beamtalk_class_metadata:lookup_direct_class_method(ClassName, Selector) of
                 {ok, Module, SafeFn} = Found ->
-                    case erlang:function_exported(Module, SafeFn, length(Args) + 2) of
+                    case erlang:function_exported(Module, SafeFn, length(Args) + 1) of
                         true -> Found;
                         false -> error
                     end;
@@ -208,7 +204,7 @@ inside another class method of the same class, not just via an external
 
 When the extension registry has no match, walks the superclass chain via
 `find_class_method_in_chain/2`, then applies
-`DefiningModule:class_<Selector>(ClassSelf, ClassVars, Args...)` directly in
+`DefiningModule:class_<Selector>(ClassSelf, Args...)` directly in
 the caller's process — mirroring the gen_server path's `invoke_class_method/7`
 minus the `{reply, ...}` wrapping and the `test_spawn` branch (which only
 fires for `TestCase>>runAll` / `run:` dispatched from an external caller, not
@@ -219,24 +215,23 @@ so Newspeak-style self-sends inside the inherited method resolve against
 the class that actually contains the code (same rule as the gen_server
 path at line 316).
 
-Returns `{class_var_result, Result, NewClassVars}` when the inherited
-method or extension mutated class vars, or the plain `Result` otherwise —
-the shape codegen already unwraps for local class-method self-sends. Raises
+Returns the plain `Result` (ADR 0130 §3: class methods neither take nor
+return class variables; the home installed by the enclosing invocation is
+already live in this process). Raises
 structured `does_not_understand` if no ancestor and no extension defines
 the selector.
 """.
--spec class_self_dispatch(class_name(), selector(), map(), list()) ->
-    {class_var_result, term(), map()} | term() | no_return().
-class_self_dispatch(ClassName, Selector, ClassVars, Args) ->
-    case check_class_self_extension(ClassName, Selector, ClassVars, Args) of
+-spec class_self_dispatch(class_name(), selector(), list()) -> term() | no_return().
+class_self_dispatch(ClassName, Selector, Args) ->
+    case check_class_self_extension(ClassName, Selector, Args) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
-            class_self_dispatch_chain(ClassName, Selector, ClassVars, Args)
+            class_self_dispatch_chain(ClassName, Selector, Args)
     end.
 
 -doc """
-Virtual class-side self-send (BT-3666): like `class_self_dispatch/4`, but the
+Virtual class-side self-send (BT-3666): like `class_self_dispatch/3`, but the
 hierarchy walk starts at `ClassName` itself instead of its superclass.
 
 `ClassName` is the *receiving* class — the class named by `ClassSelf`, which
@@ -244,20 +239,18 @@ for an inherited class method is a subclass of the class whose code is
 running. Starting at that class means an override of `Selector` (or a
 subclass-only implementation of a template-method hook) is found before the
 inherited definition, exactly as an instance-side self-send resolves.
-`class_self_dispatch/4` keeps its start-at-superclass semantics because
+`class_self_dispatch/3` keeps its start-at-superclass semantics because
 builder-class `super` sends (ADR 0084) rely on them.
 """.
--spec class_self_send(class_name(), selector(), map(), list()) ->
-    {class_var_result, term(), map()} | term() | no_return().
-class_self_send(ClassName, Selector, ClassVars, Args) ->
-    case check_class_self_extension(ClassName, Selector, ClassVars, Args) of
+-spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
+class_self_send(ClassName, Selector, Args) ->
+    case check_class_self_extension(ClassName, Selector, Args) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
             class_self_dispatch_chain(
                 ClassName,
                 Selector,
-                ClassVars,
                 Args,
                 find_class_method_from_class(Selector, ClassName)
             )
@@ -268,11 +261,11 @@ Guard for the compiled class-side self-send fast path (BT-3666).
 
 An open class's `self foo` (where the class itself defines `foo`) compiles to
 `case class_self_direct_ok(element(2, ClassSelf), 'Cls class', 'Cls', foo) of
-true -> class_foo(...) ; false -> class_self_send/4 walk end`. The direct call
+true -> class_foo(...) ; false -> class_self_send/3 walk end`. The direct call
 is only equivalent to the walk when the receiving class is exactly the
 compiling class (`ReceiverTag =:= ClassTag`) AND nothing would shadow the
 compiled method that the walk honours: a class-side extension on the class
-(`check_class_self_extension/4`) or a runtime-installed class-method fun
+(`check_class_self_extension/3`) or a runtime-installed class-method fun
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
@@ -297,36 +290,33 @@ class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.
 
 -doc """
-The superclass-chain half of `class_self_dispatch/4`, factored out
-so `class_self_dispatch_local/4` can fall through to it directly after its
+The superclass-chain half of `class_self_dispatch/3`, factored out
+so `class_self_dispatch_local/3` can fall through to it directly after its
 own single extension check, instead of re-checking the (already-confirmed
-absent) extension a second time via a nested `class_self_dispatch/4` call.
+absent) extension a second time via a nested `class_self_dispatch/3` call.
 """.
--spec class_self_dispatch_chain(class_name(), selector(), map(), list()) ->
-    {class_var_result, term(), map()} | term() | no_return().
-class_self_dispatch_chain(ClassName, Selector, ClassVars, Args) ->
+-spec class_self_dispatch_chain(class_name(), selector(), list()) -> term() | no_return().
+class_self_dispatch_chain(ClassName, Selector, Args) ->
     class_self_dispatch_chain(
-        ClassName, Selector, ClassVars, Args, find_class_method_in_chain(Selector, ClassName)
+        ClassName, Selector, Args, find_class_method_in_chain(Selector, ClassName)
     ).
 
 -spec class_self_dispatch_chain(
-    class_name(), selector(), map(), list(), {ok, class_name(), atom()} | not_found
-) ->
-    {class_var_result, term(), map()} | term() | no_return().
-class_self_dispatch_chain(ClassName, Selector, ClassVars, Args, Found) ->
+    class_name(), selector(), list(), {ok, class_name(), atom()} | not_found
+) -> term() | no_return().
+class_self_dispatch_chain(ClassName, Selector, Args, Found) ->
     case Found of
         {ok, DefiningClass, DefiningModule} ->
             %% Route through the same internal helper the gen_server path uses
             %% (`invoke_class_method/7`), so both paths share error classification
-            %% and the TestCase `test_spawn` guard. Unwrap to raw — codegen's
-            %% class_var_result pattern match handles the tuple shape — and raise
-            %% structured errors on dispatch/body failures so callers see proper
-            %% `#beamtalk_error{}` instead of a bare `undef`.
+            %% and the TestCase `test_spawn` guard. Unwrap to the raw result and
+            %% raise structured errors on dispatch/body failures so callers see
+            %% proper `#beamtalk_error{}` instead of a bare `undef`.
             unwrap_self_dispatch_outcome(
                 ClassName,
                 Selector,
                 apply_class_method_in_context(
-                    Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
+                    Selector, Args, ClassName, DefiningClass, DefiningModule
                 )
             );
         not_found ->
@@ -342,20 +332,18 @@ anonymous funs with no `class_<sel>` module export, so a self-send inside such a
 fun cannot use the compiled direct-call path. It routes here instead.
 
 Checks the extension registry first (same tag/priority rule as
-`class_self_dispatch/4` above — extension before local method), then the
+`class_self_dispatch/3` above — extension before local method), then the
 class's own runtime class-method fun (the retrieval store), and only falls
-back to `class_self_dispatch_chain/4` (super + inherited, walked from the
+back to `class_self_dispatch_chain/3` (super + inherited, walked from the
 superclass) when the selector is neither.
 
-Returns the raw `{class_var_result, Result, NewClassVars}` | plain value — the
-shape the calling fun threads — and raises a structured `does_not_understand`
+Returns the raw result and raises a structured `does_not_understand`
 when no definition is found. No `gen_server` hop: the local lookup is the same
 ETS read the dispatch hot path already uses.
 """.
--spec class_self_dispatch_local(class_name(), selector(), map(), list()) ->
-    {class_var_result, term(), map()} | term() | no_return().
-class_self_dispatch_local(ClassName, Selector, ClassVars, Args) ->
-    case check_class_self_extension(ClassName, Selector, ClassVars, Args) of
+-spec class_self_dispatch_local(class_name(), selector(), list()) -> term() | no_return().
+class_self_dispatch_local(ClassName, Selector, Args) ->
+    case check_class_self_extension(ClassName, Selector, Args) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -368,49 +356,49 @@ class_self_dispatch_local(ClassName, Selector, ClassVars, Args) ->
                         ClassName,
                         Selector,
                         apply_class_method_in_context(
-                            Selector, Args, ClassName, ClassName, DefiningModule, ClassVars
+                            Selector, Args, ClassName, ClassName, DefiningModule
                         )
                     );
                 error ->
                     %% Not a local runtime method — walk the chain (super + inherited),
                     %% which also resolves inherited runtime funs and compiled methods.
-                    class_self_dispatch_chain(ClassName, Selector, ClassVars, Args)
+                    class_self_dispatch_chain(ClassName, Selector, Args)
             end
     end.
 
 -doc """
-Shared extension-registry probe for both `class_self_dispatch/4`
-and `class_self_dispatch_local/4` — a `self someSelector` send from inside
+Shared extension-registry probe for both `class_self_dispatch/3`
+and `class_self_dispatch_local/3` — a `self someSelector` send from inside
 another class method, checking whether `ClassName`'s own metaclass tag has a
 matching class-side extension (`beamtalk_extensions`, ADR 0066) before either
 function falls through to its local/inherited-method lookups. Mirrors
 `handle_class_method_call/6`'s priority order (extension before
 local method table).
 
-Reuses `apply_class_extension_fun/6` for the same calling convention and
+Reuses `apply_class_extension_fun/5` for the same calling convention and
 crash-safety as the external-dispatch path (a bad extension body must not
 take down the class's own long-lived gen_server, which this self-send also
 runs inside), then adapts the outcome to the self-dispatch caller shape via
-`unwrap_self_dispatch_extension_outcome/3` — raw value/`{class_var_result,
-...}` tuple on success, structured raises on failure.
+`unwrap_self_dispatch_outcome/3` — raw value on success, structured raises on
+failure.
 
 Returns `{ok, Outcome}` when an extension matched (`Outcome` already
 unwrapped and ready to return to the codegen call site), or `not_found` so
 the caller proceeds to its own next lookup.
 """.
--spec check_class_self_extension(class_name(), selector(), map(), list()) ->
-    {ok, {class_var_result, term(), map()}} | not_found | no_return().
-check_class_self_extension(ClassName, Selector, ClassVars, Args) ->
+-spec check_class_self_extension(class_name(), selector(), list()) ->
+    {ok, term()} | not_found | no_return().
+check_class_self_extension(ClassName, Selector, Args) ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
             Module = self_dispatch_module(ClassName),
             ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
             {ok,
-                unwrap_self_dispatch_extension_outcome(
+                unwrap_self_dispatch_outcome(
                     ClassName,
                     Selector,
-                    apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector)
+                    apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector)
                 )};
         not_found ->
             not_found
@@ -425,42 +413,9 @@ self_dispatch_module(ClassName) ->
     end.
 
 -doc """
-Adapt `apply_class_extension_fun/6`'s outcome to the self-dispatch
-caller shape — mirroring `unwrap_self_dispatch_outcome/3` for compiled/
-runtime-installed class methods, but for the `{ok, {Result, NewClassVars}}`
-2-tuple `apply_extension_by_arity/4` returns rather than the plain `{ok,
-Raw}` a method body returns directly. Always threads `NewClassVars` (via the
-`class_var_result` tuple codegen already unwraps) since, unlike a compiled
-method body, an extension fun has no ADR-0110 shadow-write mechanism to rely
-on instead — the returned tuple is the only way a 3-arity actor extension's
-class-var mutation gets back to the caller.
-""".
--spec unwrap_self_dispatch_extension_outcome(
-    class_name(),
-    selector(),
-    {ok, {term(), map()}}
-    | {nlr_relay, term(), list()}
-    | {error, undef_in_body}
-    | {error, {raised, atom(), term(), list()}}
-) -> {class_var_result, term(), map()} | no_return().
-unwrap_self_dispatch_extension_outcome(_ClassName, _Selector, {ok, {Result, NewClassVars}}) ->
-    {class_var_result, Result, NewClassVars};
-unwrap_self_dispatch_extension_outcome(_ClassName, _Selector, {error, undef_in_body}) ->
-    %% Preserve the `error:undef` contract — see unwrap_self_dispatch_outcome/3.
-    erlang:error(undef);
-unwrap_self_dispatch_extension_outcome(
-    _ClassName, _Selector, {error, {raised, ErrClass, Error, ST}}
-) ->
-    erlang:raise(ErrClass, Error, ST);
-unwrap_self_dispatch_extension_outcome(_ClassName, _Selector, {nlr_relay, Nlr, ST}) ->
-    %% ADR 0110: resume the non-local return unwind directly, same
-    %% as unwrap_self_dispatch_outcome/3's nlr_relay clause.
-    erlang:raise(throw, Nlr, ST).
-
--doc """
-Adapt a `class_method_outcome()` from `apply_class_method_in_context/6` to the
+Adapt a `class_method_outcome()` from `apply_class_method_in_context/5` to the
 self-dispatch caller shape: raw value on success, structured raises on failure.
-Shared by `class_self_dispatch/4` and `class_self_dispatch_local/4`.
+Shared by `class_self_dispatch/3` and `class_self_dispatch_local/3`.
 """.
 -spec unwrap_self_dispatch_outcome(class_name(), selector(), class_method_outcome()) ->
     term() | no_return().
@@ -804,8 +759,8 @@ same function (`beamtalk_object_class:dispatch_class_method/5`).
 
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
-class — `class_self_dispatch/4` / `class_self_dispatch_local/4`, below —
-goes through `check_class_self_extension/4` instead, which checks the same
+class — `class_self_dispatch/3` / `class_self_dispatch_local/3`, below —
+goes through `check_class_self_extension/3` instead, which checks the same
 registry under the same priority rule.
 
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
@@ -853,81 +808,57 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
 Invoke a class-side extension method found in the `beamtalk_extensions`
 registry.
 
-Reuses `beamtalk_dispatch:apply_extension_by_arity/4` for the calling
-convention — the same one instance-side extensions already use: a 2-arity
-fun (value/primitive target) ignores `ClassVars` and returns a plain result;
-a 3-arity fun (actor target) threads `ClassVars`. `ClassSelf` mirrors the
-receiver `apply_class_method_in_context/6` builds for a local/inherited
-class method — `class = ClassTag` (the metaclass tag), `class_mod = Module`
-(this call's own compiled module; extensions are never inherited, so there
-is no separate "defining class" indirection), `pid = self()` (the class
-gen_server this handler is already running inside).
+ADR 0130 §3: every class-side extension fun, whatever the target class's kind,
+is `fun(Args, ClassSelf) -> Result`; class variables are read and written
+through `beamtalk_class_vars`, not threaded. The entry follows the same
+install / read-back / uninstall protocol as `invoke_class_method/7`
+(`run_with_class_vars/3`). `ClassSelf` mirrors the receiver
+`apply_class_method_in_context/5` builds for a local/inherited class method:
+`class = ClassTag` (the metaclass tag), `class_mod = Module` (this call's own
+compiled module; extensions are never inherited, so there is no separate
+"defining class" indirection), `pid = self()` (the class gen_server this
+handler is already running inside).
 
-Like `beamtalk_dispatch:invoke_extension/6`, this catches and
-converts a crashing extension body rather than letting it escape — but via
-`apply_class_extension_fun/6`'s own finer-grained classification
+Like `beamtalk_dispatch:invoke_extension/6`, this catches and converts a
+crashing extension body rather than letting it escape, via
+`apply_class_extension_fun/5`'s own finer-grained classification
 (`undef_in_body` vs. generic, plus NLR-relay / script-exit passthrough for
-self-sends inside class methods) rather than the generic
-`ensure_wrapped/4` instance-side dispatch uses, matching every other
-class-method dispatch path (`apply_class_method_fun/6`,
-`apply_compiled_class_method/7`): a bad extension body must not crash the
-class's own long-lived gen_server.
+self-sends inside class methods), matching every other class-method dispatch
+path: a bad extension body must not crash the class's own long-lived
+gen_server.
 """.
 -spec invoke_class_extension(fun(), list(), class_name(), atom(), atom(), map(), selector()) ->
     {reply, term(), map()}.
 invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector) ->
     ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
-    %% BT-3675: an extension body may self-send a compiled class method, and
-    %% that method writes the ADR 0110 shadow (and, in a confined scope, the
-    %% per-scope commit map) under this class's key. Neither outlives the
-    %% dispatch, whatever the outcome — otherwise a write by a call that
-    %% raised (and whose ClassVars are reverted below) would be read back by
-    %% the next dispatch's NLR relay.
-    ShadowKey = class_vars_shadow_key(ClassName),
-    try
-        case apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) of
-            {ok, {Result, NewClassVars}} ->
-                {reply, {ok, Result}, NewClassVars};
-            {nlr_relay, Nlr, _ST} ->
-                %% ADR 0110, adapted for extensions: same relay as
-                %% invoke_class_method/7, minus the class-var shadow-key read —
-                %% extension codegen never writes that key itself (only
-                %% compiled/runtime-installed class-method bodies do), and
-                %% `apply_class_extension_fun/6` returns no class vars on the
-                %% unwind, so ClassVars as-is is what is relayed.
-                {reply, {error, Nlr}, ClassVars};
-            {error, undef_in_body} ->
-                {reply, {error, undef}, ClassVars};
-            {error, {raised, _ErrClass, Error, _ST}} ->
-                {reply, {error, Error}, ClassVars}
-        end
-    after
-        erase_class_var_scratch(ShadowKey)
-    end.
+    run_with_class_vars(ClassName, ClassVars, fun() ->
+        apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector)
+    end).
 
 -doc """
 Apply a class-side extension fun, classifying the outcome the same way
-`apply_class_method_fun/6` does for a runtime-installed class method —
+`apply_class_method_fun/5` does for a runtime-installed class method —
 script-exit passthrough, NLR relay, `undef` classification, and
 a generic catch-all — so a crashing extension body becomes a structured
 `{error, ...}` reply instead of taking down the class gen_server.
 """.
--spec apply_class_extension_fun(fun(), #beamtalk_object{}, map(), list(), class_name(), selector()) ->
-    {ok, {term(), map()}}
+-spec apply_class_extension_fun(fun(), #beamtalk_object{}, list(), class_name(), selector()) ->
+    {ok, term()}
     | {nlr_relay, term(), list()}
     | {error, undef_in_body}
     | {error, {raised, atom(), term(), list()}}.
-apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
-    try beamtalk_dispatch:apply_extension_by_arity(Fun, Args, ClassSelf, ClassVars) of
-        ResultAndVars ->
-            {ok, ResultAndVars}
+apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
+    %% ADR 0130 §3: class-side extension funs are `fun(Args, ClassSelf)`.
+    try Fun(Args, ClassSelf) of
+        Result ->
+            {ok, Result}
     catch
-        %% ADR 0099 §3: see apply_class_method_fun/6 — pass a
+        %% ADR 0099 §3: see apply_class_method_fun/5 — pass a
         %% connected `Program exit: N` through unlogged as a control-flow
         %% signal, not a method failure.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
-        %% See apply_class_method_fun/6 — a `^` unwinding through
+        %% See apply_class_method_fun/5 — a `^` unwinding through
         %% this extension belongs to a frame in the calling process.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
             {nlr_relay, Nlr, NlrST};
@@ -958,7 +889,17 @@ apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) 
             {error, {raised, ErrClass, Error, ErrST}}
     end.
 
--doc "Invoke a class method (local or inherited), handling test execution specially.".
+-doc """
+Invoke a class method (local or inherited), handling test execution specially.
+
+ADR 0130 §1: the class's variables live in this process's dictionary under
+`beamtalk_class_vars:key(ClassName)` for the duration of the invocation. The
+stored map is installed on entry and read back on exit; the compiled method
+neither takes nor returns class variables. A normal return and a foreign `^`
+(non-local return) keep the writes made before they left; an escaping error
+replies with the pre-call map. `assert_absent/1` runs first, so a nested
+invocation fails loudly with the outer map intact instead of overwriting it.
+""".
 -spec invoke_class_method(
     selector(),
     list(),
@@ -970,183 +911,47 @@ apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) 
 ) ->
     {reply, term(), map()} | test_spawn.
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
-    %% Shares apply_class_method_in_context/6 with class_self_dispatch/4
-    %% so both dispatch paths see identical error classification, class-var
-    %% threading, and the test_spawn escape hatch. This function
-    %% adapts the shared outcome to the gen_server `{reply, _, State}` shape.
-    %%
-    %% ADR 0110: the whole body runs inside try ... after so the
-    %% '$bt_class_vars_shadow' process-dictionary key (written by codegen at
-    %% top-level class-var mutations) never outlives a dispatch, whatever the
-    %% outcome.
-    %%
-    %% ADR 0110 amendment: the key is tagged with this call's own
-    %% class identity (`class_object_tag(ClassName)`, matching codegen's
-    %% `element(2, ClassSelf)` write) so a mutating self-send inside a block
-    %% invoked from a *different* class's process — which runs physically in
-    %% *this* process but writes under its own foreign class's tag — can never
-    %% be read back here. See the ADR's Codegen/Runtime change amendments.
-    ShadowKey = class_vars_shadow_key(ClassName),
-    try
-        case
-            apply_class_method_in_context(
-                Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
-            )
-        of
-            test_spawn ->
-                test_spawn;
-            {ok, {class_var_result, Result, NewClassVars}} ->
-                {reply, {ok, Result}, NewClassVars};
-            {ok, Result} ->
-                {reply, {ok, Result}, ClassVars};
-            {nlr_relay, Nlr, _ST} ->
-                %% ADR 0110: a foreign `^` relaying out of the class
-                %% method is control flow, not a failure — class-var writes made
-                %% before the unwind must survive. The codegen write-through
-                %% records them under this class's shadow key; until
-                %% that lands the shadow is never set and this falls back to the
-                %% pre-call ClassVars, exactly today's behavior. The reply shape
-                %% is byte-identical to the historical {error, Nlr}, so the
-                %% ?IS_NLR re-throw clauses in class_send_dispatch/3 and
-                %% metaclass_send_dispatch/4 need no change.
-                ShadowClassVars =
-                    case erlang:get(ShadowKey) of
-                        undefined -> ClassVars;
-                        Shadow -> Shadow
-                    end,
-                {reply, {error, Nlr}, ShadowClassVars};
-            {error, #beamtalk_error{} = Error} ->
-                {reply, {error, Error}, ClassVars};
-            {error, undef_in_body} ->
-                {reply, {error, undef}, ClassVars};
-            {error, {raised, _ErrClass, Error, _ST}} ->
-                {reply, {error, Error}, ClassVars}
-        end
+    run_with_class_vars(ClassName, ClassVars, fun() ->
+        apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule)
+    end).
+
+-doc """
+Install `ClassVars` as `ClassName`'s home, run `Thunk` (which yields a
+`class_method_outcome()`), and adapt the outcome to the gen_server reply shape
+(ADR 0130 §1). Shared by `invoke_class_method/7` and `invoke_class_extension/7`.
+""".
+-spec run_with_class_vars(class_name(), map(), fun(() -> class_method_outcome())) ->
+    {reply, term(), map()} | test_spawn.
+run_with_class_vars(ClassName, ClassVars, Thunk) ->
+    Key = beamtalk_class_vars:key(ClassName),
+    beamtalk_class_vars:assert_absent(Key),
+    beamtalk_class_vars:install(Key, ClassVars),
+    try Thunk() of
+        test_spawn ->
+            test_spawn;
+        {ok, Result} ->
+            {reply, {ok, Result}, erlang:get(Key)};
+        {nlr_relay, Nlr, _ST} ->
+            %% ADR 0110/0130: a foreign `^` is control flow, not a failure;
+            %% writes made before the unwind are kept. The reply shape is
+            %% unchanged so the ?IS_NLR re-throw clauses in
+            %% class_send_dispatch/3 and metaclass_send_dispatch/4 need no change.
+            {reply, {error, Nlr}, erlang:get(Key)};
+        {error, #beamtalk_error{} = Error} ->
+            {reply, {error, Error}, ClassVars};
+        {error, undef_in_body} ->
+            {reply, {error, undef}, ClassVars};
+        {error, {raised, _ErrClass, Error, _ST}} ->
+            {reply, {error, Error}, ClassVars}
     after
-        erase_class_var_scratch(ShadowKey)
+        beamtalk_class_vars:uninstall(Key)
     end.
-
--doc """
-The ADR 0110 shadow key for `ClassName`'s class variables in the current
-process — the class's own identity tag, matching codegen's `element(2,
-ClassSelf)` write.
-""".
--spec class_vars_shadow_key(class_name()) -> {atom(), term()}.
-class_vars_shadow_key(ClassName) ->
-    {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)}.
-
--doc """
-Erase the per-dispatch class-variable scratch state: the ADR 0110 shadow entry
-and the BT-3675 per-scope commit map. Neither may outlive the outermost
-dispatch, whatever its outcome.
-""".
--spec erase_class_var_scratch({atom(), term()}) -> ok.
-erase_class_var_scratch(ShadowKey) ->
-    _ = erlang:erase(ShadowKey),
-    _ = erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
-    ok.
-
--doc """
-BT-3675: commit `ClassVars` under the lexical scope `Token` after a class-side
-send inside a confined scope (a block, loop body or conditional arm — a scope
-that cannot thread a `ClassVars` rebind out) returned normally.
-
-Compiled code calls this only after the callee has returned, so a callee that
-raised never commits. The scope's own refresh ([`class_var_scope_take/3`])
-reads and consumes only its own `Token`; an entry left by a scope that raised
-carries a dead token that nothing reads, and the whole map is erased by the
-outermost dispatch (`invoke_class_method/7` / `invoke_class_extension/7`).
-
-Only effective in the class's own process (`pid` of `ClassSelf` is `self()`):
-a block passed into another class's method runs in that class's process (ADR
-0109), where an entry would never be consumed. `ClassSelf` is `nil` for a
-direct-called `class sealed` method of a stateless class, which has no class
-variables to commit.
-""".
--spec class_var_scope_commit(term(), reference(), map()) -> ok.
-class_var_scope_commit(#beamtalk_object{pid = Pid}, Token, ClassVars) when Pid =:= self() ->
-    Commits =
-        case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
-            undefined -> #{};
-            Map -> Map
-        end,
-    _ = erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, Commits#{Token => ClassVars}),
-    ok;
-class_var_scope_commit(_ClassSelf, _Token, _ClassVars) ->
-    ok.
-
--doc """
-BT-3675: the newest class variables committed under any of `Tokens` (the
-tokens of the lexical scopes enclosing a send, innermost first; see
-[`class_var_scope_commit/3`]), or `Fallback` when none was. The pre-call sync
-of a send inside a confined scope, so the callee starts from the newest value
-committed by an earlier send of the same scope (the previous iteration of a
-loop, or the previous invocation of the enclosing closure) rather than from
-the stale lexical copy. An inner scope's entry is always newer than an
-enclosing scope's, so the first hit wins.
-""".
--spec class_var_scope_read(term(), [reference()], map()) -> map().
-class_var_scope_read(#beamtalk_object{pid = Pid}, Tokens, Fallback) when Pid =:= self() ->
-    case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
-        Commits when is_map(Commits) -> first_commit(Tokens, Commits, Fallback);
-        _ -> Fallback
-    end;
-class_var_scope_read(_ClassSelf, _Tokens, Fallback) ->
-    Fallback.
-
--spec first_commit([reference()], map(), map()) -> map().
-first_commit([], _Commits, Fallback) ->
-    Fallback;
-first_commit([Token | Rest], Commits, Fallback) ->
-    case Commits of
-        #{Token := ClassVars} -> ClassVars;
-        _ -> first_commit(Rest, Commits, Fallback)
-    end.
-
--doc """
-BT-3675: [`class_var_scope_read/3`] that also consumes the entry. The scope's
-post-scope refresh: the confined scope finished normally, so its newest
-committed class variables replace the lexical (rolled-back) copy.
-""".
--spec class_var_scope_take(term(), reference(), map()) -> map().
-class_var_scope_take(#beamtalk_object{pid = Pid}, Token, Fallback) when Pid =:= self() ->
-    case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
-        #{Token := ClassVars} = Commits ->
-            _ = erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, maps:remove(Token, Commits)),
-            ClassVars;
-        _ ->
-            Fallback
-    end;
-class_var_scope_take(_ClassSelf, _Token, Fallback) ->
-    Fallback.
-
--doc """
-BT-3675: hand a closure invocation's newest commit (`From`, its own token) to
-the enclosing scope (`To`), moving the entry. Compiled code calls this as the
-last step of a closure body, so a closure that raised exports nothing: the
-writes of a closure invocation reach its enclosing scope only when it returns
-normally. A no-op when `From` holds no entry.
-""".
--spec class_var_scope_export(term(), reference(), reference()) -> ok.
-class_var_scope_export(#beamtalk_object{pid = Pid}, From, To) when Pid =:= self() ->
-    case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
-        #{From := ClassVars} = Commits ->
-            _ = erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, (maps:remove(From, Commits))#{
-                To => ClassVars
-            }),
-            ok;
-        _ ->
-            ok
-    end;
-class_var_scope_export(_ClassSelf, _From, _To) ->
-    ok.
 
 %% ADR 0110: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
 %% return) relaying out of the class method — the relayed NLR tuple plus its
 %% stacktrace. It is kept distinct from `{error, {raised, ...}}` so
-%% `invoke_class_method/7` can preserve class-var writes recorded under the
-%% `'$bt_class_vars_shadow'` process-dictionary key instead of reverting them
-%% the way it does for genuine errors.
+%% `run_with_class_vars/3` can keep the class-var writes made before the unwind
+%% instead of reverting them the way it does for genuine errors.
 -type class_method_outcome() ::
     test_spawn
     | {ok, term()}
@@ -1161,18 +966,17 @@ Shared core of class-method dispatch.
 Handles the TestCase `test_spawn` guard, constructs `ClassSelf` with
 `class_mod = DefiningModule`, applies the method, and classifies any
 errors into the structured variants in `class_method_outcome()`. Both
-`invoke_class_method/7` (gen_server path) and `class_self_dispatch/4`
+`invoke_class_method/7` (gen_server path) and `class_self_dispatch/3`
 (self-send path) adapt the outcome to their own caller shapes.
 
-Does not wrap `{ok, Raw}` — callers pattern-match the raw return to
-decide whether it's a plain value or `{class_var_result, R, NewCV}`.
+`{ok, Raw}` carries the method's bare result (ADR 0130 §3).
 Stacktraces are preserved in the `{raised, ...}` variant so callers
 that need to re-raise (e.g. self-dispatch) get the original trace.
 """.
 -spec apply_class_method_in_context(
-    selector(), list(), class_name(), class_name(), atom(), map()
+    selector(), list(), class_name(), class_name(), atom()
 ) -> class_method_outcome().
-apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars) ->
+apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule) ->
     %% For test execution (runAll, run:) inherited from TestCase,
     %% return a spawn request so the caller (gen_server) can handle noreply.
     %% The self-dispatch caller translates this to a structured error.
@@ -1192,11 +996,10 @@ apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, Defining
             %% read on the dispatch hot path.
             case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
                 {ok, #{block := Fun}} ->
-                    apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector);
+                    apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector);
                 error ->
                     apply_compiled_class_method(
                         ClassSelf,
-                        ClassVars,
                         Args,
                         ClassName,
                         DefiningClass,
@@ -1209,14 +1012,14 @@ apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, Defining
 -doc """
 Apply a runtime-installed class-method fun (ADR 0084).
 
-Same calling convention and `{class_var_result, …}` contract as the compiled
-path. A fun has no module export to mismatch, so an `undef` here is always raised
+Same calling convention as the compiled path (`fun(ClassSelf, Args...)`,
+ADR 0130 §3). A fun has no module export to mismatch, so an `undef` here is always raised
 from inside the fun body (`undef_in_body`); any other error becomes `{raised,…}`.
 """.
--spec apply_class_method_fun(fun(), #beamtalk_object{}, map(), list(), class_name(), selector()) ->
+-spec apply_class_method_fun(fun(), #beamtalk_object{}, list(), class_name(), selector()) ->
     class_method_outcome().
-apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
-    try apply(Fun, [ClassSelf, ClassVars | Args]) of
+apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
+    try apply(Fun, [ClassSelf | Args]) of
         Raw ->
             {ok, Raw}
     catch
@@ -1230,7 +1033,7 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
         %% belongs to a method frame in the *calling* process. Pass it through
         %% unlogged so class_send_dispatch/3 can re-throw it there.
         %% ADR 0110: tagged as its own outcome variant (not
-        %% {error, {raised, ...}}) so invoke_class_method/7 can keep class-var
+        %% {error, {raised, ...}}) so the entry point can keep class-var
         %% writes made before the unwind instead of reverting them.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
             {nlr_relay, Nlr, NlrST};
@@ -1263,15 +1066,15 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
 
 -doc "Apply a compiled `class_<Selector>` export (the historical dispatch path).".
 -spec apply_compiled_class_method(
-    #beamtalk_object{}, map(), list(), class_name(), class_name(), atom(), selector()
+    #beamtalk_object{}, list(), class_name(), class_name(), atom(), selector()
 ) -> class_method_outcome().
 apply_compiled_class_method(
-    ClassSelf, ClassVars, Args, ClassName, DefiningClass, DefiningModule, Selector
+    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector
 ) ->
     FunName = class_method_fun_name(Selector),
-    %% Pass class variables; the caller pattern-matches
-    %% `{class_var_result, Result, NewClassVars}` vs plain return.
-    try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
+    %% ADR 0130 §3: `class_<sel>(ClassSelf, Args...)`; class variables live in
+    %% the process dictionary home installed by the invocation entry point.
+    try erlang:apply(DefiningModule, FunName, [ClassSelf | Args]) of
         Raw ->
             {ok, Raw}
     catch
@@ -1280,10 +1083,10 @@ apply_compiled_class_method(
         %% re-raises it to the eval/dispatch worker.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
-        %% See apply_class_method_fun/6 — a non-local return unwinding out
+        %% See apply_class_method_fun/5 — a non-local return unwinding out
         %% of a class method is control flow for a frame in the calling process.
         %% ADR 0110: tagged {nlr_relay, ...} so class-var writes made
-        %% before the unwind can be recovered rather than reverted.
+        %% before the unwind are kept rather than reverted.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
             {nlr_relay, Nlr, NlrST};
         error:undef:ST ->
@@ -1478,7 +1281,7 @@ Does `ClassName` itself (not an ancestor) define `Selector` as a
 class method — either a compiled/static one (`lookup_methods/1`'s local
 selector list) or a runtime-installed one (ADR 0084,
 `lookup_class_method_fun/2`)? Mirrors the same two lookups
-`class_self_dispatch_local/4` already checks for a self-send, so
+`class_self_dispatch_local/3` already checks for a self-send, so
 `respondsTo:` agrees with what a `self sel` from inside another class
 method would actually resolve.
 """.
@@ -1497,8 +1300,8 @@ has_local_class_method(ClassName, Selector) ->
 -doc """
 Convert a class method selector to its module function name.
 Class methods are generated with a 'class_' prefix, e.g.
-`class defaultValue => 42` becomes `class_defaultValue/2`.
-(Zero-arg selector: arity 0 + ClassSelf + ClassVars => arity 2.)
+`class defaultValue => 42` becomes `class_defaultValue/1`.
+(Zero-arg selector: arity 0 + ClassSelf => arity 1.)
 
 Uses list_to_atom rather than list_to_existing_atom because the class_
 prefixed atom may not yet be in the atom table (e.g. when the module is

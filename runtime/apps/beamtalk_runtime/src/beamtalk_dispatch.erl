@@ -583,11 +583,11 @@ inline in the caller's own process, so the throw is a control-flow signal
 aimed at a catch further up that *same* call stack, not a crash to report —
 catching and wrapping it here would turn a non-local return into a spurious
 `#beamtalk_error{}` instead of letting it unwind. Mirrors the passthrough
-`beamtalk_class_dispatch:apply_class_extension_fun/6` already has for the
+`beamtalk_class_dispatch:apply_class_extension_fun/5` already has for the
 class-side extension path (that sibling also relays the NLR outward via a
 tagged `{nlr_relay, ...}` return, since a class method crosses its
-gen_server's `handle_call` boundary and the shadow-relay machinery
-needs the tag; plain instance dispatch has no such boundary to relay across
+gen_server's `handle_call` boundary and the entry point
+needs the tag to keep the class-variable writes made before the unwind; plain instance dispatch has no such boundary to relay across
 here, so re-raising is enough).
 """.
 -spec invoke_extension(fun(), selector(), class_name(), args(), bt_self(), state()) ->
@@ -630,7 +630,7 @@ the module's shared `ensure_wrapped/4` classification, matching
 every other crash-safe dispatch path in this file; class-side dispatch
 instead needs its own finer-grained classification (`undef_in_body` vs.
 generic, plus NLR-relay / script-exit passthrough for self-sends inside class
-methods — see `beamtalk_class_dispatch:apply_class_extension_fun/6`), since
+methods — see `beamtalk_class_dispatch:apply_class_extension_fun/5`), since
 the class's own long-lived gen_server must survive a bad extension body the
 same way it survives a bad compiled/runtime-installed class method.
 """.

@@ -742,10 +742,10 @@ test_self_new_instance_method_dispatch() ->
     %% dispatch fell through to does_not_understand; now the local instance-method
     %% cache resolves the block fun deadlock-free.
     GetA = fun(Self) -> maps:get(a, Self) end,
-    %% Class method `makeAndGetA` (arity selector_arity+2 = 2): build an instance
+    %% Class method `makeAndGetA` (arity selector_arity+1 = 1): build an instance
     %% via the self-instantiation path, then send it `getA` while inside the
     %% class process.
-    MakeAndGetA = fun(_ClassSelf, _ClassVars) ->
+    MakeAndGetA = fun(_ClassSelf) ->
         ClassName = get(beamtalk_class_name),
         Module = get(beamtalk_class_module),
         Inst = beamtalk_class_instantiation:class_self_new(ClassName, Module, []),
@@ -770,7 +770,7 @@ test_self_new_inherited_instance_method_dispatch() ->
     ParentPid = register_builder_class(
         'BT2277SelfParent', 'Object', #{p => 7}, #{'getP' => GetP}
     ),
-    MakeAndGetP = fun(_ClassSelf, _ClassVars) ->
+    MakeAndGetP = fun(_ClassSelf) ->
         ClassName = get(beamtalk_class_name),
         Module = get(beamtalk_class_module),
         Inst = beamtalk_class_instantiation:class_self_new(ClassName, Module, []),

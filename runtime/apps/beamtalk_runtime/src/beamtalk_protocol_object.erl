@@ -23,8 +23,8 @@ The protocol name is extracted from the ClassSelf tuple's class tag
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([
-    class_requiredMethods/2,
-    class_conformingClasses/2
+    class_requiredMethods/1,
+    class_conformingClasses/1
 ]).
 
 %%% ============================================================================
@@ -37,8 +37,8 @@ Return the required method selectors for this protocol.
 Called when a protocol class object receives `requiredMethods` as a class
 method. Extracts the protocol name from ClassSelf and queries the registry.
 """.
--spec class_requiredMethods(#beamtalk_object{}, map()) -> [atom()].
-class_requiredMethods(ClassSelf, _ClassVars) ->
+-spec class_requiredMethods(#beamtalk_object{}) -> [atom()].
+class_requiredMethods(ClassSelf) ->
     ProtocolName = protocol_name_from_class_self(ClassSelf),
     beamtalk_protocol_registry:required_methods(ProtocolName).
 
@@ -49,8 +49,8 @@ Called when a protocol class object receives `conformingClasses` as a class
 method. Extracts the protocol name from ClassSelf and queries the registry.
 Returns `Behaviour` class objects (not raw name atoms).
 """.
--spec class_conformingClasses(#beamtalk_object{}, map()) -> [#beamtalk_object{}].
-class_conformingClasses(ClassSelf, _ClassVars) ->
+-spec class_conformingClasses(#beamtalk_object{}) -> [#beamtalk_object{}].
+class_conformingClasses(ClassSelf) ->
     beamtalk_protocol_registry:conforming_class_objects(
         protocol_name_from_class_self(ClassSelf)
     ).
