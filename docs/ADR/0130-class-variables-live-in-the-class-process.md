@@ -113,7 +113,7 @@ A new runtime module, `beamtalk_class_vars`, owns the key and every access. Code
 | Beamtalk | Core Erlang emitted |
 |---|---|
 | `self.n` | `call 'beamtalk_class_vars':'get'(ClassSelf, 'n')` |
-| `self.n` where `n` is `late classState:` (ADR 0124) | `call 'beamtalk_class_vars':'get_late'(ClassSelf, 'n')`, raising `class_var_uninitialized` as the guarded `maps:find` does today |
+| `self.n` where `n` is `late classState:` (ADR 0124) | `call 'beamtalk_class_vars':'get_late'(ClassSelf, 'n')`, raising `uninitialized_state_error` as the guarded `maps:find` does today |
 | `self.n := v` | `call 'beamtalk_class_vars':'put'(ClassSelf, 'n', V)` |
 | `self clearField: #n` | `call 'beamtalk_class_vars':'clear'(ClassSelf, 'n')` |
 | `self hasField: #n` | `call 'beamtalk_class_vars':'has'(ClassSelf, 'n')` |
