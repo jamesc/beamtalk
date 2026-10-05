@@ -1,0 +1,184 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704 (ADR 0130 Phase 1): the class-variable semantics matrix for the
+// open class. Each test asserts the ADR 0130 section 4/5 answer; a test
+// whose current answer differs pins today's answer and carries a PIN-BUG marker
+// citing BT-3713 (the Phase 3 flip issue), which flips every pin.
+
+TestCase subclass: ClassVarSemanticsOpenTest
+
+  // ADR 0130 §4
+  testTop => self assert: CvsOpen rowTop equals: 2
+
+  // ADR 0130 §4
+  testArm =>
+    self assert: (CvsOpen rowArm: 1) equals: 1
+    self assert: (CvsOpen rowArm: 0) equals: 0
+
+  // ADR 0130 §4
+  testLetrecTimesLocal => self assert: CvsOpen rowTimesLocal equals: 3
+
+  // ADR 0130 §4
+  testLetrecToDoLocal => self assert: CvsOpen rowToDoLocal equals: 3
+
+  // ADR 0130 §4
+  testLetrecWhileLocal => self assert: CvsOpen rowWhileLocal equals: 3
+
+  // ADR 0130 §4
+  testFoldDoThreaded => self assert: CvsOpen rowDoLocal equals: 3
+
+  // ADR 0130 §4
+  testFoldCollectThreaded => self assert: CvsOpen rowCollectLocal equals: 3
+
+  // ADR 0130 §4
+  testFoldInjectThreaded => self assert: CvsOpen rowInjectLocal equals: 3
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyDiscardsWriteBeforeRaise =>
+    self assert: CvsOpen rowOnBodyRaise equals: 0
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyKeepsWriteWhenNoError =>
+    self assert: CvsOpen rowOnBodyOk equals: 1
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyKeepsWriteMadeBeforeTheRegion =>
+    self assert: CvsOpen rowOnBodyAfterWrite equals: 1
+
+  // ADR 0130 §4 catch boundary
+  testOnDoBodyDiscardsWriteOfFailingSend =>
+    self assert: CvsOpen rowOnBodyViaSend equals: 0
+
+  // ADR 0130 §4 catch boundary
+  testOnDoHandlerKeepsItsWrite => self assert: CvsOpen rowHandler equals: 1
+
+  // ADR 0130 §4 catch boundary
+  testOnDoHandlerKeepsItsWriteBodyWriteDiscarded =>
+    self assert: CvsOpen rowHandlerAfterBodyWrite equals: 1
+
+  // ADR 0130 §4 ensure is not a boundary
+  testEnsureKeepsBothWrites => self assert: CvsOpen rowEnsure equals: 2
+
+  // ADR 0130 §5 at home
+  testBareBlock => self assert: CvsOpen rowBare equals: 1
+
+  // ADR 0130 §5 at home
+  // PIN-BUG BT-3713: pins today's answer (0: the stored closure's write is lost, ADR 0110 / BT-3681); ADR 0130 §5
+  // keeps it (the correct answer is 2).
+  testStoredClosureWithinInvocationWrites =>
+    self assert: CvsOpen rowStoredWithin equals: 0
+
+  // ADR 0130 §5 at home
+  // PIN-BUG BT-3713: pins today's answer (0: the closure reads the value it captured); ADR 0130 §5: a block at
+  // home reads live (the correct answer is 1).
+  testStoredClosureWithinInvocationReadsLive =>
+    self assert: CvsOpen rowStoredReadWithin equals: 0
+
+  // ADR 0130 §5 later invocation of the same class is at home
+  // PIN-BUG BT-3713: pins today's answer (the write is lost, n stays 0); ADR 0130 §5: a stored closure run from a
+  // later invocation of its class is at home and the write succeeds (the correct answer is 1).
+  testStoredClosureLaterInvocationWrites =>
+    CvsOpen reset
+    CvsOpen run: CvsOpen makeBumper
+    self assert: CvsOpen n equals: 0
+
+  // ADR 0130 §5 later invocation of the same class is at home
+  // PIN-BUG BT-3713: pins today's answer (0: the creation-time value); ADR 0130 §5: at home the read is live
+  // (the correct answer is 1).
+  testStoredClosureLaterInvocationReadsLive =>
+    CvsOpen reset
+    b := CvsOpen makeReader
+    CvsOpen bump
+    self assert: (CvsOpen run: b) equals: 0
+
+  // ADR 0130 §5 abroad: captured read
+  testClosureFromForeignProcessReadsCaptured =>
+    CvsOpen reset
+    b := CvsOpen makeReader
+    CvsOpen bump
+    self assert: b value equals: 0
+
+  // ADR 0130 §5 abroad: write raises
+  // PIN-BUG BT-3713: pins today's answer (the write is silently lost: the block answers 1, the class variable stays 0);
+  // ADR 0130 §5: the write raises class_state_unreachable.
+  testClosureFromForeignProcessWriteRaises =>
+    CvsOpen reset
+    b := CvsOpen makeBumper
+    self assert: b value equals: 1
+    self assert: CvsOpen n equals: 0
+
+  // ADR 0130 §5 carried synchronously: captured equals live
+  testSyncBlockToOpenDriverReadsLive =>
+    self assert: CvsOpen rowSyncReadOpenDriver equals: 1
+
+  // ADR 0130 §5 abroad: write raises
+  // PIN-BUG BT-3713: pins today's answer (the write is silently lost, no error); ADR 0130 §5: the write raises
+  // class_state_unreachable.
+  testSyncBlockToOpenDriverWriteRaises =>
+    self assert: CvsOpen rowSyncWriteOpenDriver equals: 0
+    self assert: CvsOpen n equals: 0
+
+  // ADR 0130 §5 direct-called class method is at home
+  testSyncBlockToSealedDriverReadsLive =>
+    self assert: CvsOpen rowSyncReadSealedDriver equals: 1
+
+  // ADR 0130 §5 direct-called class method is at home
+  testSyncBlockToSealedDriverWrites =>
+    self assert: CvsOpen rowSyncWriteSealedDriver equals: 1
+
+  // ADR 0130 §5 carried asynchronously: creation-time value
+  testAsyncBlockToActorReadsCreationValue =>
+    self assert: CvsOpen rowAsyncRead equals: 0
+
+  // ADR 0130 §5 abroad: write raises
+  // PIN-BUG BT-3713: pins today's answer (the write is silently dropped, #ok); ADR 0130 §5: the write
+  // raises class_state_unreachable (the correct answer is #class_state_unreachable).
+  testAsyncBlockToActorWriteRaises =>
+    self assert: CvsOpen rowAsyncWrite equals: #ok
+    self assert: CvsOpen n equals: 0
+
+  // ADR 0130 §5 runtime-owned snapshot
+  // PIN-BUG BT-3713: pins today's answer (key_error: ClassSelf is nil, so the class variable is not found);
+  // ADR 0130 §5: reads see the snapshot (the correct answer is 1).
+  testPerformLocallyReadsSnapshot =>
+    CvsOpen reset
+    CvsOpen bump
+    self assert: ([
+      CvsOpen performLocally: #n withArguments: #()
+    ] on: Error do: [:e | e kind]) equals: #key_error
+
+  // ADR 0130 §5 runtime-owned snapshot
+  // PIN-BUG BT-3713: pins today's answer (key_error, not the ADR's structured error); ADR 0130 §5: the write
+  // raises class_state_read_only.
+  testPerformLocallyWriteRaises =>
+    CvsOpen reset
+    self assert: ([
+      CvsOpen performLocally: #bump withArguments: #()
+    ] on: Error do: [:e | e kind]) equals: #key_error
+    self assert: CvsOpen n equals: 0
+
+  // ADR 0130 §4 non-local return
+  testOwnNlrKeepsWriteBeforeCaret =>
+    self assert: CvsOpen rowOwnNlr equals: 1
+    self assert: CvsOpen n equals: 1
+
+  // ADR 0130 §4 non-local return
+  testForeignNlrThroughOpenDriverKeepsEarlierWrite =>
+    self assert: CvsOpen rowForeignNlrAfterWrite equals: 5
+    self assert: CvsOpen n equals: 1
+
+  // ADR 0130 §4 non-local return
+  testForeignNlrThroughSealedDriverKeepsWriteBeforeCaret =>
+    self assert: CvsOpen rowForeignNlrSealedDriver equals: 5
+    self assert: CvsOpen n equals: 1
+
+  // ADR 0130 §5 runtime-owned snapshot
+  // PIN-BUG BT-3713: pins today's answer (supervise succeeds and the hook's write is silently discarded); ADR 0130 §5:
+  // the write raises class_state_read_only (the exact surfacing through supervise is the ADR's reading).
+  testInitializeHookWriteRaises =>
+    CvsInitOpen reset
+    r := CvsInitOpen supervise
+    self assert: r isOk equals: true
+    self assert: CvsInitOpen n equals: 0
+    r unwrap stop
