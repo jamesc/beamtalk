@@ -57,6 +57,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     set_class_var/3,
     has_class_var/2,
     clear_class_var/2,
+    class_var_uninitialized_error/2,
     update_class/2,
     local_class_methods/1,
     local_class_methods_map/1,
