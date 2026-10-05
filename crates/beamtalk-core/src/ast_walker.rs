@@ -62,6 +62,24 @@ where
 
 // ── Expression walker ─────────────────────────────────────────────────────────
 
+/// Returns `true` if `expr`'s tree contains an [`Expression::Block`] literal
+/// anywhere (descending into nested blocks, like [`walk_expression`]).
+///
+/// Shared by `beamtalk-core`'s `@expect` target check (a plausibly-lint-only
+/// `@expect dead_assignment` target is one that holds a block) and
+/// `beamtalk-codegen`'s class-variable send commit rule (a send whose
+/// arguments build a closure must keep committing, BT-3690).
+#[must_use]
+pub fn expression_contains_block(expr: &Expression) -> bool {
+    let mut found = false;
+    walk_expression(expr, &mut |e| {
+        if matches!(e, Expression::Block(_)) {
+            found = true;
+        }
+    });
+    found
+}
+
 /// Recursively walks an expression tree in pre-order, calling `f` on every node.
 ///
 /// The visitor is called on the current node **before** recursing into its children.

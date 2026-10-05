@@ -772,25 +772,9 @@ tracing filter level accordingly.
 mcp_signal_path() ->
     case beamtalk_workspace_meta:get_metadata() of
         {ok, #{workspace_id := WorkspaceId}} ->
-            case beamtalk_platform:home_dir() of
-                false ->
-                    CacheDir = filename:basedir(user_cache, "beamtalk"),
-                    {ok,
-                        filename:join([
-                            CacheDir,
-                            "workspaces",
-                            binary_to_list(WorkspaceId),
-                            "mcp_debug_enabled"
-                        ])};
-                Home ->
-                    {ok,
-                        filename:join([
-                            Home,
-                            ".beamtalk",
-                            "workspaces",
-                            binary_to_list(WorkspaceId),
-                            "mcp_debug_enabled"
-                        ])}
+            case beamtalk_platform:workspace_dir(WorkspaceId) of
+                undefined -> {error, no_home_dir};
+                WsDir -> {ok, filename:join(WsDir, "mcp_debug_enabled")}
             end;
         {error, _} ->
             {error, workspace_not_started}

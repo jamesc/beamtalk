@@ -304,6 +304,70 @@ fn hover_on_cross_file_trait_provided_method_shows_provenance() {
 }
 
 // ---------------------------------------------------------------------------
+// Package-qualified `uses:` (ADR 0127 §3, BT-3684)
+// ---------------------------------------------------------------------------
+
+/// Diagnostics of `version.bt`, which does `uses: <qualifier>@Comparable` on a
+/// protocol declared in `comparable.bt`, under `dir` (empty: no workspace root).
+fn qualified_uses_diagnostics(
+    service: &mut SimpleLanguageService,
+    dir: &str,
+    qualifier: &str,
+) -> Vec<String> {
+    let proto_file = Utf8PathBuf::from(format!("{dir}comparable.bt"));
+    let user_file = Utf8PathBuf::from(format!("{dir}version.bt"));
+    service.update_file(
+        proto_file,
+        "Protocol define: Comparable\n  < other :: Self -> Boolean\n\n  max: other -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n".to_string(),
+    );
+    service.update_file(
+        user_file.clone(),
+        format!(
+            "Value subclass: Version\n  uses: {qualifier}@Comparable\n  field: major :: Integer = 0\n  < other => self major < other major\n"
+        ),
+    );
+    service
+        .diagnostics(&user_file)
+        .into_iter()
+        .map(|d| d.message.to_string())
+        .collect()
+}
+
+#[test]
+fn qualified_uses_of_the_project_package_resolves_with_no_workspace_root_registered() {
+    // No root package is known (a manifest-less workspace, or a `didOpen` racing
+    // the root-package load), so the package falls back to a placeholder that is
+    // not a real package name: `beamtalk build` accepts this `uses:`, and so must
+    // the editor.
+    let mut service = SimpleLanguageService::new();
+
+    let messages = qualified_uses_diagnostics(&mut service, "", "my_app");
+
+    assert!(
+        messages.iter().all(|m| !m.contains("no source available")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn qualified_uses_must_name_the_registered_root_package() {
+    let mut service = SimpleLanguageService::new();
+    service.set_root_packages(vec![(Utf8PathBuf::from("/ws"), "my_app".into())]);
+
+    let own = qualified_uses_diagnostics(&mut service, "/ws/src/", "my_app");
+    assert!(
+        own.iter().all(|m| !m.contains("no source available")),
+        "{own:?}"
+    );
+
+    let typo = qualified_uses_diagnostics(&mut service, "/ws/src/", "my_ap");
+    assert!(
+        typo.iter().any(|m| m.contains("no source available")),
+        "a qualifier naming neither the root package nor a dependency is unresolved: {typo:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Go-to-definition / completion on trait-provided methods (ADR 0127 §12, BT-3630)
 // ---------------------------------------------------------------------------
 

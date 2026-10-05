@@ -513,6 +513,15 @@ fn test_class_method_ensure_last_position_and_assign_rhs_thread_local() {
 // normal return. Runtime ground truths for these shapes are pinned in
 // `stdlib/test/fixtures/mutation_corpus_class_method.bt`.
 
+/// The `ClassVarsN` name a post-construct rebind extracts from tuple slot 3
+/// (`let ClassVarsN = call 'erlang':'element'(3, ...)`), if any.
+fn extracted_class_vars_name(code: &str) -> Option<String> {
+    let marker = " = call 'erlang':'element'(3,";
+    let end = code.find(marker)?;
+    let start = code[..end].rfind("let ClassVars")? + "let ".len();
+    Some(code[start..end].to_string())
+}
+
 #[test]
 fn test_class_method_self_send_in_ensure_try_body_threads_class_vars_out() {
     // BT-3506's headline repro (case (b)): before the fix this compiled
@@ -536,16 +545,26 @@ fn test_class_method_self_send_in_ensure_try_body_threads_class_vars_out() {
     let code = generate_module(&module, CodegenOptions::new("bt@cvensureselfsend"))
         .expect("a class-method self-send inside an ensure: try body must compile");
 
+    // BT-3675: the self-send now also binds a scope sync and a refresh, so the
+    // threaded version is not a fixed `ClassVars1`; pin the shape, not the number.
     assert!(
-        code.contains(", StateAcc1, ClassVars1}") || code.contains(", StateAcc, ClassVars1}"),
+        (1..=8).any(|n| code.contains(&format!(", StateAcc1, ClassVars{n}}}"))
+            || code.contains(&format!(", StateAcc, ClassVars{n}}}"))),
         "the try body's return tuple must grow a trailing slot carrying its own \
          mutated ClassVars. Got:\n{code}"
     );
+    let extracted = extracted_class_vars_name(&code).unwrap_or_else(|| {
+        panic!(
+            "the post-construct rebind must extract the threaded ClassVars from tuple slot 3. \
+             Got:\n{code}"
+        )
+    });
+    // The scope refresh may rebind a later version from the one extracted
+    // (BT-3675), so pin that the trailing read sees a threaded version.
     assert!(
-        code.contains("let ClassVars1 = call 'erlang':'element'(3,")
-            || code.contains("let ClassVars2 = call 'erlang':'element'(3,"),
-        "the post-construct rebind must extract the threaded ClassVars from tuple slot 3. \
-         Got:\n{code}"
+        (1..=8).any(|n| code.contains(&format!("call 'maps':'get'('runs', ClassVars{n})"))),
+        "the trailing field read must see a threaded ClassVars version (extracted \
+         {extracted}). Got:\n{code}"
     );
     assert_compiles_through_erlc("bt@cvensureselfsend", &code);
 }
@@ -579,18 +598,24 @@ fn test_class_method_self_send_in_on_do_handler_threads_class_vars_out() {
         "the non-mutating try arm must carry the pre-try ClassVars in the same slot. \
          Got:\n{code}"
     );
+    // BT-3675: the handler's self-send also binds a scope sync and a refresh,
+    // so the threaded version is not a fixed `ClassVars1`; pin the shape.
     assert!(
-        code.contains(", ClassVars1}"),
-        "the mutating handler arm must carry its own mutated ClassVars1. Got:\n{code}"
+        (1..=8).any(|n| code.contains(&format!(", ClassVars{n}}}"))),
+        "the mutating handler arm must carry its own mutated ClassVars. Got:\n{code}"
     );
+    let extracted = extracted_class_vars_name(&code).unwrap_or_else(|| {
+        panic!(
+            "the post-construct rebind must extract the threaded ClassVars from tuple slot 3. \
+             Got:\n{code}"
+        )
+    });
+    // The scope refresh may rebind a later version from the one extracted
+    // (BT-3675), so pin that the trailing read sees a threaded version.
     assert!(
-        code.contains("let ClassVars1 = call 'erlang':'element'(3,"),
-        "the post-construct rebind must extract the threaded ClassVars from tuple slot 3. \
-         Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'maps':'get'('runs', ClassVars1)"),
-        "the trailing field read must see the threaded ClassVars1. Got:\n{code}"
+        (1..=8).any(|n| code.contains(&format!("call 'maps':'get'('runs', ClassVars{n})"))),
+        "the trailing field read must see a threaded ClassVars version (extracted \
+         {extracted}). Got:\n{code}"
     );
     assert_compiles_through_erlc("bt@cvondoselfsend", &code);
 }

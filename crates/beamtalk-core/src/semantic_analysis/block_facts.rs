@@ -8,7 +8,6 @@
 //! This domain service analyzes blocks to detect which variables and fields are
 //! read/written, enabling proper state threading in tail-recursive loops.
 
-use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
     Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
     ParameterDefinition,
@@ -678,21 +677,13 @@ pub(crate) fn is_self_reference(expr: &Expression) -> bool {
 /// needing state threading, silently discarding the mutated state the Tier 2
 /// runtime discrimination at the call site itself still correctly computes.
 /// `valueWithArguments:` has no `WellKnownSelector` variant (see
-/// `gen_server/methods.rs`'s `is_tier2_value_call`), so it needs an explicit
-/// name check alongside the `well_known()` match.
+/// `gen_server/methods.rs`'s `is_tier2_value_call`); [`MessageSelector::is_block_invocation`]
+/// names it alongside the `value` family.
 fn is_self_field_value_send(receiver: &Expression, selector: &MessageSelector) -> bool {
     matches!(
         receiver,
         Expression::FieldAccess { receiver: r, .. } if is_self_reference(r)
-    ) && (matches!(
-        selector.well_known(),
-        Some(
-            WellKnownSelector::Value
-                | WellKnownSelector::ValueColon
-                | WellKnownSelector::ValueValue
-                | WellKnownSelector::ValueValueValue
-        )
-    ) || selector.name() == "valueWithArguments:")
+    ) && selector.is_block_invocation()
 }
 
 /// Returns true if `selector_name` is `on:do:` or `ensure:` — exception

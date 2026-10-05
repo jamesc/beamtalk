@@ -27,6 +27,10 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_self_send/4,
     class_self_direct_ok/4,
     class_self_dispatch_local/4,
+    class_var_scope_commit/3,
+    class_var_scope_read/3,
+    class_var_scope_take/3,
+    class_var_scope_export/3,
     metaclass_send/4,
     unwrap_class_call/1,
     class_method_fun_name/1,
@@ -272,8 +276,10 @@ compiled method that the walk honours: a class-side extension on the class
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
-Costs two ETS reads for the defining-class receiver; a subclass receiver
-short-circuits on the first clause.
+Costs three `persistent_term` reads for the defining-class receiver
+(BT-3669: the per-class `beamtalk_class_shadow_flags` replace the former two
+ETS reads; BT-3676: the readiness flag replaces an `ets:whereis/1`); a
+subclass receiver short-circuits on the first clause.
 """.
 -spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
 class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
@@ -281,14 +287,11 @@ class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
         true ->
             false;
         false ->
-            %% `badarg` (table not created yet, early bootstrap) declines: the
-            %% walk is always a correct answer.
-            try
-                not beamtalk_extensions:has(Tag, Selector) andalso
-                    not beamtalk_class_metadata:has_runtime_class_methods(ClassName)
-            catch
-                error:badarg -> false
-            end
+            %% Extension registry not initialised yet (early bootstrap) declines:
+            %% the walk is always a correct answer. The shadow flags (BT-3669)
+            %% and their readiness flag (BT-3676) are persistent_term reads,
+            %% no ETS; BT-3690 folds the three reads into one inlined function.
+            beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName)
     end;
 class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.
@@ -874,20 +877,32 @@ class's own long-lived gen_server.
     {reply, term(), map()}.
 invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector) ->
     ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
-    case apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) of
-        {ok, {Result, NewClassVars}} ->
-            {reply, {ok, Result}, NewClassVars};
-        {nlr_relay, Nlr, _ST} ->
-            %% ADR 0110, adapted for extensions: same relay as
-            %% invoke_class_method/7, minus the class-var shadow-key read —
-            %% extension codegen never writes that key (only compiled/
-            %% runtime-installed class-method bodies do), so ClassVars as-is
-            %% is exactly what the shadow read would have fallen back to.
-            {reply, {error, Nlr}, ClassVars};
-        {error, undef_in_body} ->
-            {reply, {error, undef}, ClassVars};
-        {error, {raised, _ErrClass, Error, _ST}} ->
-            {reply, {error, Error}, ClassVars}
+    %% BT-3675: an extension body may self-send a compiled class method, and
+    %% that method writes the ADR 0110 shadow (and, in a confined scope, the
+    %% per-scope commit map) under this class's key. Neither outlives the
+    %% dispatch, whatever the outcome — otherwise a write by a call that
+    %% raised (and whose ClassVars are reverted below) would be read back by
+    %% the next dispatch's NLR relay.
+    ShadowKey = class_vars_shadow_key(ClassName),
+    try
+        case apply_class_extension_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) of
+            {ok, {Result, NewClassVars}} ->
+                {reply, {ok, Result}, NewClassVars};
+            {nlr_relay, Nlr, _ST} ->
+                %% ADR 0110, adapted for extensions: same relay as
+                %% invoke_class_method/7, minus the class-var shadow-key read —
+                %% extension codegen never writes that key itself (only
+                %% compiled/runtime-installed class-method bodies do), and
+                %% `apply_class_extension_fun/6` returns no class vars on the
+                %% unwind, so ClassVars as-is is what is relayed.
+                {reply, {error, Nlr}, ClassVars};
+            {error, undef_in_body} ->
+                {reply, {error, undef}, ClassVars};
+            {error, {raised, _ErrClass, Error, _ST}} ->
+                {reply, {error, Error}, ClassVars}
+        end
+    after
+        erase_class_var_scratch(ShadowKey)
     end.
 
 -doc """
@@ -971,8 +986,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     %% invoked from a *different* class's process — which runs physically in
     %% *this* process but writes under its own foreign class's tag — can never
     %% be read back here. See the ADR's Codegen/Runtime change amendments.
-    ShadowKey =
-        {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)},
+    ShadowKey = class_vars_shadow_key(ClassName),
     try
         case
             apply_class_method_in_context(
@@ -1009,8 +1023,123 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                 {reply, {error, Error}, ClassVars}
         end
     after
-        erlang:erase(ShadowKey)
+        erase_class_var_scratch(ShadowKey)
     end.
+
+-doc """
+The ADR 0110 shadow key for `ClassName`'s class variables in the current
+process — the class's own identity tag, matching codegen's `element(2,
+ClassSelf)` write.
+""".
+-spec class_vars_shadow_key(class_name()) -> {atom(), term()}.
+class_vars_shadow_key(ClassName) ->
+    {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)}.
+
+-doc """
+Erase the per-dispatch class-variable scratch state: the ADR 0110 shadow entry
+and the BT-3675 per-scope commit map. Neither may outlive the outermost
+dispatch, whatever its outcome.
+""".
+-spec erase_class_var_scratch({atom(), term()}) -> ok.
+erase_class_var_scratch(ShadowKey) ->
+    _ = erlang:erase(ShadowKey),
+    _ = erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+    ok.
+
+-doc """
+BT-3675: commit `ClassVars` under the lexical scope `Token` after a class-side
+send inside a confined scope (a block, loop body or conditional arm — a scope
+that cannot thread a `ClassVars` rebind out) returned normally.
+
+Compiled code calls this only after the callee has returned, so a callee that
+raised never commits. The scope's own refresh ([`class_var_scope_take/3`])
+reads and consumes only its own `Token`; an entry left by a scope that raised
+carries a dead token that nothing reads, and the whole map is erased by the
+outermost dispatch (`invoke_class_method/7` / `invoke_class_extension/7`).
+
+Only effective in the class's own process (`pid` of `ClassSelf` is `self()`):
+a block passed into another class's method runs in that class's process (ADR
+0109), where an entry would never be consumed. `ClassSelf` is `nil` for a
+direct-called `class sealed` method of a stateless class, which has no class
+variables to commit.
+""".
+-spec class_var_scope_commit(term(), reference(), map()) -> ok.
+class_var_scope_commit(#beamtalk_object{pid = Pid}, Token, ClassVars) when Pid =:= self() ->
+    Commits =
+        case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
+            undefined -> #{};
+            Map -> Map
+        end,
+    _ = erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, Commits#{Token => ClassVars}),
+    ok;
+class_var_scope_commit(_ClassSelf, _Token, _ClassVars) ->
+    ok.
+
+-doc """
+BT-3675: the newest class variables committed under any of `Tokens` (the
+tokens of the lexical scopes enclosing a send, innermost first; see
+[`class_var_scope_commit/3`]), or `Fallback` when none was. The pre-call sync
+of a send inside a confined scope, so the callee starts from the newest value
+committed by an earlier send of the same scope (the previous iteration of a
+loop, or the previous invocation of the enclosing closure) rather than from
+the stale lexical copy. An inner scope's entry is always newer than an
+enclosing scope's, so the first hit wins.
+""".
+-spec class_var_scope_read(term(), [reference()], map()) -> map().
+class_var_scope_read(#beamtalk_object{pid = Pid}, Tokens, Fallback) when Pid =:= self() ->
+    case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
+        Commits when is_map(Commits) -> first_commit(Tokens, Commits, Fallback);
+        _ -> Fallback
+    end;
+class_var_scope_read(_ClassSelf, _Tokens, Fallback) ->
+    Fallback.
+
+-spec first_commit([reference()], map(), map()) -> map().
+first_commit([], _Commits, Fallback) ->
+    Fallback;
+first_commit([Token | Rest], Commits, Fallback) ->
+    case Commits of
+        #{Token := ClassVars} -> ClassVars;
+        _ -> first_commit(Rest, Commits, Fallback)
+    end.
+
+-doc """
+BT-3675: [`class_var_scope_read/3`] that also consumes the entry. The scope's
+post-scope refresh: the confined scope finished normally, so its newest
+committed class variables replace the lexical (rolled-back) copy.
+""".
+-spec class_var_scope_take(term(), reference(), map()) -> map().
+class_var_scope_take(#beamtalk_object{pid = Pid}, Token, Fallback) when Pid =:= self() ->
+    case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
+        #{Token := ClassVars} = Commits ->
+            _ = erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, maps:remove(Token, Commits)),
+            ClassVars;
+        _ ->
+            Fallback
+    end;
+class_var_scope_take(_ClassSelf, _Token, Fallback) ->
+    Fallback.
+
+-doc """
+BT-3675: hand a closure invocation's newest commit (`From`, its own token) to
+the enclosing scope (`To`), moving the entry. Compiled code calls this as the
+last step of a closure body, so a closure that raised exports nothing: the
+writes of a closure invocation reach its enclosing scope only when it returns
+normally. A no-op when `From` holds no entry.
+""".
+-spec class_var_scope_export(term(), reference(), reference()) -> ok.
+class_var_scope_export(#beamtalk_object{pid = Pid}, From, To) when Pid =:= self() ->
+    case erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM) of
+        #{From := ClassVars} = Commits ->
+            _ = erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, (maps:remove(From, Commits))#{
+                To => ClassVars
+            }),
+            ok;
+        _ ->
+            ok
+    end;
+class_var_scope_export(_ClassSelf, _From, _To) ->
+    ok.
 
 %% ADR 0110: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
 %% return) relaying out of the class method — the relayed NLR tuple plus its

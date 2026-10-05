@@ -13,7 +13,7 @@
 use beamtalk_core::compilation::{DependencySource, GitReference};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, Result};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use tracing::{debug, info};
 
 use crate::commands::manifest::{self, ParsedManifest};
@@ -523,82 +523,21 @@ fn discover_single_dep(
     Ok(())
 }
 
-/// Perform a topological sort of the dependency graph using Kahn's algorithm.
-///
-/// Returns package names in compilation order (leaves first, root's direct deps last).
-/// The root package itself is NOT included in the output.
+/// Orders the discovered dependency graph for compilation (leaves first, root's
+/// direct deps last), via [`beamtalk_cli::dep_order::topological_order`] — the
+/// order the fresh-deps and offline paths reproduce. The root package itself is
+/// NOT included in the output.
 ///
 /// # Errors
 ///
 /// Returns an error if a cycle is detected (should not happen if `discover_deps`
 /// already checked, but this is a safety net).
 fn topological_sort(graph: &BTreeMap<String, DepNode>, root_name: &str) -> Result<Vec<String>> {
-    // Build in-degree map: count how many deps each node has within the graph
-    let mut in_degree: HashMap<String, usize> = HashMap::new();
-    let mut reverse_edges: HashMap<String, Vec<String>> = HashMap::new();
-
-    // Initialize all nodes with zero in-degree
-    for name in graph.keys() {
-        in_degree.insert(name.clone(), 0);
-    }
-
-    // Count edges: for each node, increment in-degree for each of its deps that is in the graph
-    for (name, node) in graph {
-        for dep in &node.deps {
-            if graph.contains_key(dep) && dep != root_name {
-                *in_degree.get_mut(name).unwrap() += 1;
-                reverse_edges
-                    .entry(dep.clone())
-                    .or_default()
-                    .push(name.clone());
-            }
-        }
-    }
-
-    // Kahn's algorithm: start with nodes that have no dependencies within the graph
-    let mut queue: Vec<String> = in_degree
+    let dependencies = graph
         .iter()
-        .filter(|(_, deg)| **deg == 0)
-        .map(|(name, _)| name.clone())
+        .map(|(name, node)| (name.clone(), node.deps.clone()))
         .collect();
-    queue.sort(); // deterministic order
-
-    let mut result = Vec::new();
-
-    while let Some(node_name) = queue.pop() {
-        result.push(node_name.clone());
-
-        if let Some(dependents) = reverse_edges.get(&node_name) {
-            for dependent in dependents {
-                if let Some(deg) = in_degree.get_mut(dependent) {
-                    *deg -= 1;
-                    if *deg == 0 {
-                        queue.push(dependent.clone());
-                        queue.sort(); // keep deterministic
-                    }
-                }
-            }
-        }
-    }
-
-    // Safety net: check for remaining nodes with non-zero in-degree (cycles)
-    let remaining: Vec<&String> = in_degree
-        .iter()
-        .filter(|(_, deg)| **deg > 0)
-        .map(|(name, _)| name)
-        .collect();
-
-    if !remaining.is_empty() {
-        let mut cycle_names: Vec<&str> = remaining.iter().map(|s| s.as_str()).collect();
-        cycle_names.sort_unstable();
-        miette::bail!(
-            "Circular dependency detected among: {}\n  \
-             These packages form a dependency cycle and cannot be compiled.",
-            cycle_names.join(", ")
-        );
-    }
-
-    Ok(result)
+    beamtalk_cli::dep_order::topological_order(&dependencies, root_name)
 }
 
 #[cfg(test)]
@@ -1059,6 +998,69 @@ dep_pkg = {{ path = "{dep_str}" }}"#
         assert_eq!(
             resolved[0].stubs_dir,
             Some(Utf8PathBuf::from_path_buf(dep_dir.join("stubs")).unwrap())
+        );
+    }
+
+    /// Lays out `my_app -> pkg_b -> pkg_a`: `pkg_a` declares the trait
+    /// `Retryable` and `pkg_b`'s `Widget` does `uses: pkg_a@Retryable`.
+    fn transitive_trait_project(temp: &TempDir) -> Utf8PathBuf {
+        let a_dir = temp.path().join("pkg_a");
+        fs::create_dir_all(&a_dir).unwrap();
+        write_manifest(&a_dir, "pkg_a", "0.1.0", "");
+        write_source(
+            &a_dir,
+            "retryable.bt",
+            "Protocol define: Retryable\n  name -> String\n\n  retryTag -> String => self name\n",
+        );
+        let b_dir = temp.path().join("pkg_b");
+        fs::create_dir_all(&b_dir).unwrap();
+        write_manifest(
+            &b_dir,
+            "pkg_b",
+            "0.1.0",
+            "[dependencies]\npkg_a = { path = \"../pkg_a\" }",
+        );
+        write_source(
+            &b_dir,
+            "widget.bt",
+            "Object subclass: Widget\n  uses: pkg_a@Retryable\n  name -> String => \"w\"\n",
+        );
+        let root = temp.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            "[dependencies]\npkg_b = { path = \"../pkg_b\" }",
+        );
+        Utf8PathBuf::from_path_buf(root).unwrap()
+    }
+
+    /// BT-3678: a class in dependency B using a trait from B's own
+    /// dependency A compiles, and the `ClassInfo` B exports carries the
+    /// trait's provided method.
+    #[test]
+    fn test_resolve_dependency_graph_flattens_transitive_dep_trait() {
+        let temp = TempDir::new().unwrap();
+        let root = transitive_trait_project(&temp);
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let resolved = resolve_dependency_graph(&root, &options)
+            .expect("pkg_b must compile against pkg_a's trait");
+        let b = resolved.iter().find(|d| d.name == "pkg_b").unwrap();
+        let widget = b
+            .class_infos
+            .iter()
+            .find(|c| c.name == "Widget")
+            .expect("Widget exported by pkg_b");
+        assert!(
+            widget.methods.iter().any(|m| m.selector == "retryTag"),
+            "exported Widget must carry pkg_a's provided `retryTag`: {:?}",
+            widget
+                .methods
+                .iter()
+                .map(|m| &m.selector)
+                .collect::<Vec<_>>()
         );
     }
 

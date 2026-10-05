@@ -70,6 +70,8 @@ supervisor is even asked to start — see that module's doc.
 
 -export([start_link/1]).
 -export([init/1]).
+%% Exported for tests (BT-3680 directory-site agreement test).
+-export([setup_file_logger/1]).
 
 -type mode() :: beamtalk_capability:mode().
 
@@ -593,21 +595,15 @@ setup_file_logger(WorkspaceId) ->
     end.
 
 do_setup_file_logger(WorkspaceId) ->
-    case beamtalk_platform:home_dir() of
-        false ->
+    case beamtalk_platform:workspace_dir(WorkspaceId) of
+        undefined ->
             ?LOG_WARNING(
-                "HOME/USERPROFILE not set; skipping file logger",
+                "No home directory; skipping file logger",
                 #{workspace_id => WorkspaceId, domain => [beamtalk, runtime]}
             ),
             ok;
-        Home ->
-            LogFile = filename:join([
-                Home,
-                ".beamtalk",
-                "workspaces",
-                binary_to_list(WorkspaceId),
-                "workspace.log"
-            ]),
+        WsDir ->
+            LogFile = filename:join(WsDir, "workspace.log"),
             case filelib:ensure_dir(LogFile) of
                 ok ->
                     %% Read log level from app env (set by --log-level CLI flag),

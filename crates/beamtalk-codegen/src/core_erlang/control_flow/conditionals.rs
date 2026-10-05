@@ -294,7 +294,13 @@ impl CoreErlangGenerator {
             let mut ctx = threaded_ir::RenderCtx::new(self);
             threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
         };
-        let doc = docvec![preamble, bind_doc];
+        // BT-3675: a direct class-var write commits like a send's rebind.
+        let commit = if matches!(site, FieldWriteSite::ClassVar) {
+            self.class_var_write_commit_doc().unwrap_or(Document::Nil)
+        } else {
+            Document::Nil
+        };
+        let doc = docvec![preamble, bind_doc, commit];
         Ok(match closure {
             Closure::Open => (doc, val_var),
             Closure::Closed => (docvec![doc, leaf::var(val_var.clone())], val_var),

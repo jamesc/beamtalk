@@ -42,10 +42,12 @@ mod stubs;
 // Re-exports so `crate::commands::build::X` paths used by `build_stdlib.rs`,
 // `test.rs`, `lint.rs`, `fmt.rs`, `type_coverage.rs`, `beam_compiler.rs`, and
 // `deps/path.rs` keep working unchanged.
-pub(crate) use changes::{clean_stale_artifacts, detect_changes};
+pub(crate) use changes::{BuildGraphEdges, clean_stale_artifacts, detect_changes};
 pub(crate) use class_index::{
-    CachedAst, build_class_index, build_class_module_index, collect_all_alias_infos,
-    collect_all_class_infos, collect_project_alias_infos, collect_sibling_src_alias_infos,
+    CachedAst, FileIndex, Pass1Index, build_class_index, build_class_module_index,
+    collect_all_alias_infos, collect_all_class_infos, collect_project_alias_infos,
+    collect_sibling_src_alias_infos, flatten_package_class_infos, package_trait_users,
+    scan_source_file,
 };
 pub(crate) use environment::{
     BuildEnvironment, DependencyContext, package_identity, resolve_and_validate_dependencies,
@@ -245,16 +247,11 @@ fn execute_build_passes(
     // source file regardless of whether Pass 1 re-scanned it this build,
     // not just the ones in `index.cached_asts` (a cache-fresh file has no
     // `cached_asts` entry at all).
-    let protocol_hashes: HashMap<ecow::EcoString, String> = index
-        .all_protocol_defs
-        .iter()
-        .map(|p| {
-            (
-                p.name.name.clone(),
-                crate::commands::util::protocol_content_hash(p),
-            )
-        })
-        .collect();
+    let protocol_hashes = crate::commands::util::protocol_hashes(
+        &index.all_protocol_defs,
+        index.file_protocol_uses.values().flatten(),
+        environment::package_identity(env.pkg_manifest(), options.stdlib_mode),
+    );
     let file_protocol_uses = index.file_protocol_uses.clone();
 
     // Per-file change detection — only recompile files whose source
@@ -267,8 +264,11 @@ fn execute_build_passes(
         &file_module_pairs,
         force,
         &index.source_hashes,
-        &file_protocol_uses,
-        &protocol_hashes,
+        &BuildGraphEdges {
+            file_protocol_uses,
+            protocol_hashes,
+            trait_surface_hash: index.trait_surface_hash.clone(),
+        },
     );
 
     // Warn about orphaned .beam files (source deleted but .beam remains)

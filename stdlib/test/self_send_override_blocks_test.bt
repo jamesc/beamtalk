@@ -1,0 +1,351 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: SelfSendOverrideBlocksTest
+
+  setUp =>
+    SsoBlocksSub resetSubHits
+    SsoStaleSub resetHits
+    SsoScopeOpen resetN
+    SsoScopeSealed resetN
+
+  testCollect =>
+    self assert: SsoBlocksSub viaCollect equals: #(10, 20)
+    self assert: SsoBlocksSub subHits equals: 2
+
+  testDo =>
+    SsoBlocksSub viaDo
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testEnsure =>
+    self assert: (SsoBlocksSub viaEnsure: true) equals: 10
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testOnDo =>
+    self assert: (SsoBlocksSub viaOnDo: true) equals: 10
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testTimes =>
+    SsoBlocksSub viaTimesRepeat
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testToDo =>
+    SsoBlocksSub viaToDo
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testWhile =>
+    SsoBlocksSub viaWhile
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testBlock =>
+    self assert: SsoBlocksSub viaBlock equals: 50
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testEnsureNested =>
+    SsoBlocksSub ensureNested: true
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testOnDoNested =>
+    SsoBlocksSub onDoNested: true
+    self assert: SsoBlocksSub subHits equals: 1
+
+  testWhileNested =>
+    SsoBlocksSub whileNested: true
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testTimesNested =>
+    SsoBlocksSub timesNested: true
+    self assert: SsoBlocksSub subHits equals: 3
+
+  testDoNested =>
+    SsoBlocksSub doNested: true
+    self assert: SsoBlocksSub subHits equals: 2
+
+  testEnsureMatch =>
+    SsoBlocksSub ensureMatch: 1
+    self assert: SsoBlocksSub subHits equals: 1
+
+  // A block passed to another class's method runs in that class's process; a
+  // write there must not leak stale state into the next external call.
+  testForeignProcessBlockDoesNotLeak =>
+    self assert: SsoBlocksSub viaForeign equals: 1
+    SsoBlocksSub resetSubHits
+    self assert: SsoBlocksSub viaForeign equals: 1
+
+  testOwnClassWrapperInBlock =>
+    SsoBlocksSub viaOwnClassBlock
+    self assert: SsoBlocksSub subHits equals: 2
+
+  testSealedSelectorWrapperInBlock =>
+    SsoBlocksSub viaSealedSelectorBlock
+    self assert: SsoBlocksSub subHits equals: 2
+
+  // --- BT-3675: per-scope tokens ------------------------------------------
+
+  // A write made by a callee that raised and was caught must not be
+  // resurrected by a later late-bound send or a later confined scope.
+  testCaughtThenSend =>
+    SsoBlocksSub caughtThenSend
+    self assert: SsoBlocksSub subHits equals: 0
+
+  testCaughtThenBlock =>
+    SsoBlocksSub caughtThenBlock
+    self assert: SsoBlocksSub subHits equals: 0
+
+  testCaughtThenSealedHelperInBlock =>
+    SsoStaleSub caughtThenSealedHelper
+    self assert: SsoStaleSub hits equals: 0
+
+  // The method's own on:do: try body writes (via a self-send) then raises.
+  testOwnTryBodyRaiseThenSend =>
+    self assert: SsoStaleSub ownTryRaise equals: 0
+    self assert: SsoStaleSub hits equals: 0
+
+  // A completed writer followed by a raise in the same scope: all discarded.
+  testCompletedThenRaiseInSameScope =>
+    SsoStaleSub completedThenRaise
+    self assert: SsoStaleSub hits equals: 0
+
+  // ... including when the raise is caught by a runtime `Result tryDo:`.
+  testCompletedThenRaiseCaughtByRuntime =>
+    SsoStaleSub completedThenRaiseRuntime
+    self assert: SsoStaleSub hits equals: 0
+
+  testRuntimeCatcherKeepsCompletedWrites =>
+    SsoStaleSub runtimeKept
+    self assert: SsoStaleSub hits equals: 1
+
+  // Only each iteration's second `foo` counts.
+  testClosureCaughtRaiseThenSend =>
+    SsoStaleSub closureCaughtThenSend
+    self assert: SsoStaleSub hits equals: 2
+
+  testClosureCompletedTryThenSend =>
+    SsoStaleSub closureCompletedTry
+    self assert: SsoStaleSub hits equals: 4
+
+  testNestedClosuresKeepWrites =>
+    SsoStaleSub nestedClosures
+    self assert: SsoStaleSub hits equals: 4
+
+  testHandlerArmSendKept =>
+    SsoStaleSub handlerSend
+    self assert: SsoStaleSub hits equals: 1
+
+  testOuterHandlerDiscardsRaisedTryBody =>
+    SsoStaleSub outerCaught
+    self assert: SsoStaleSub hits equals: 0
+
+  // Control: a normally finishing scope keeps every write.
+  testCompletedWritesKept =>
+    SsoStaleSub completedKept
+    self assert: SsoStaleSub hits equals: 2
+
+  // A statically bound wrapper in a loop that READS before its own late-bound
+  // send sees the previous iteration's write.
+  testWrapperReadSeesPreviousIteration =>
+    self assert: SsoStaleSub viaReadLoop equals: #(0, 1, 2)
+    self assert: SsoStaleSub hits equals: 3
+
+  // Sealed and open classes agree: a class's own mutating self-send nested in
+  // a conditional arm keeps its write.
+  testOpenConditionalArmKeepsWrite =>
+    self assert: (SsoScopeOpen condArm: 5) equals: 5
+    self assert: SsoScopeOpen n equals: 1
+
+  testSealedConditionalArmKeepsWrite =>
+    self assert: (SsoScopeSealed condArm: 5) equals: 5
+    self assert: SsoScopeSealed n equals: 1
+
+  testOpenConditionalArmNotTakenNoWrite =>
+    self assert: (SsoScopeOpen condArm: 0) equals: 0
+    self assert: SsoScopeOpen n equals: 0
+
+  testSealedConditionalArmNotTakenNoWrite =>
+    self assert: (SsoScopeSealed condArm: 0) equals: 0
+    self assert: SsoScopeSealed n equals: 0
+
+  // Threaded loop bodies (also mutating a captured local).
+  testOpenThreadedTimesRepeat =>
+    self assert: (SsoScopeOpen threadedTimes: 3) equals: 3
+    self assert: SsoScopeOpen n equals: 3
+
+  testSealedThreadedTimesRepeat =>
+    self assert: (SsoScopeSealed threadedTimes: 3) equals: 3
+    self assert: SsoScopeSealed n equals: 3
+
+  testOpenThreadedToDo =>
+    self assert: (SsoScopeOpen threadedToDo: 3) equals: 6
+    self assert: SsoScopeOpen n equals: 3
+
+  testSealedThreadedToDo =>
+    self assert: (SsoScopeSealed threadedToDo: 3) equals: 6
+    self assert: SsoScopeSealed n equals: 3
+
+  // --- BT-3675 review: direct writes between sends in a scope ---------------
+  // BT-3683: a skipped or non-writing arm in a later iteration keeps the
+  // earlier iterations' class-variable writes (open and sealed class).
+  testOpenArmsInListDo => self assert: SsoScopeOpen armsInListDo equals: 1
+
+  testSealedArmsInListDo => self assert: SsoScopeSealed armsInListDo equals: 1
+
+  testOpenArmsInListDoThree =>
+    self assert: SsoScopeOpen armsInListDoThree equals: 2
+
+  testSealedArmsInListDoThree =>
+    self assert: SsoScopeSealed armsInListDoThree equals: 2
+
+  testOpenArmsInToDo => self assert: SsoScopeOpen armsInToDo equals: 1
+
+  testSealedArmsInToDo => self assert: SsoScopeSealed armsInToDo equals: 1
+
+  testOpenArmsInTimesRepeat =>
+    self assert: SsoScopeOpen armsInTimesRepeat equals: 1
+
+  testSealedArmsInTimesRepeat =>
+    self assert: SsoScopeSealed armsInTimesRepeat equals: 1
+
+  testOpenArmsIfTrueIfFalseInListDo =>
+    self assert: SsoScopeOpen armsIfTrueIfFalseInListDo equals: 1
+
+  testSealedArmsIfTrueIfFalseInListDo =>
+    self assert: SsoScopeSealed armsIfTrueIfFalseInListDo equals: 1
+
+  testOpenArmsNestedConditionalInListDo =>
+    self assert: SsoScopeOpen armsNestedConditionalInListDo equals: 1
+
+  testSealedArmsNestedConditionalInListDo =>
+    self assert: SsoScopeSealed armsNestedConditionalInListDo equals: 1
+
+  testOpenArmsInOnDoBody => self assert: SsoScopeOpen armsInOnDoBody equals: 1
+
+  testSealedArmsInOnDoBody =>
+    self assert: SsoScopeSealed armsInOnDoBody equals: 1
+
+  testOpenArmsInOnDoHandler =>
+    self assert: SsoScopeOpen armsInOnDoHandler equals: 1
+
+  testSealedArmsInOnDoHandler =>
+    self assert: SsoScopeSealed armsInOnDoHandler equals: 1
+
+  testOpenArmsDirectWriteBetween =>
+    self assert: SsoScopeOpen armsDirectWriteBetween equals: 100
+
+  testSealedArmsDirectWriteBetween =>
+    self assert: SsoScopeSealed armsDirectWriteBetween equals: 100
+
+  testOpenArmsRaisedIterationDiscarded =>
+    self assert: SsoScopeOpen armsRaisedIterationDiscarded equals: 0
+
+  testSealedArmsRaisedIterationDiscarded =>
+    self assert: SsoScopeSealed armsRaisedIterationDiscarded equals: 0
+
+  testOpenArmsAfterSendInListDo =>
+    self assert: SsoScopeOpen armsAfterSendInListDo equals: 3
+
+  testSealedArmsAfterSendInListDo =>
+    self assert: SsoScopeSealed armsAfterSendInListDo equals: 3
+
+  testOpenArmsAfterAssignedSendInListDo =>
+    self assert: SsoScopeOpen armsAfterAssignedSendInListDo equals: 3
+
+  testSealedArmsAfterAssignedSendInListDo =>
+    self assert: SsoScopeSealed armsAfterAssignedSendInListDo equals: 3
+
+  testOpenArmsAfterDirectWriteInListDo =>
+    self assert: SsoScopeOpen armsAfterDirectWriteInListDo equals: 15
+
+  testSealedArmsAfterDirectWriteInListDo =>
+    self assert: SsoScopeSealed armsAfterDirectWriteInListDo equals: 15
+
+  testOpenMixedDirectWriteLoop => self assert: SsoScopeOpen mixedLoop equals: 6
+
+  testSealedMixedDirectWriteLoop =>
+    self assert: SsoScopeSealed mixedLoop equals: 6
+
+  testOpenMixedDirectWriteArm =>
+    self assert: (SsoScopeOpen mixedArm: 1) equals: 12
+
+  testSealedMixedDirectWriteArm =>
+    self assert: (SsoScopeSealed mixedArm: 1) equals: 12
+
+  // Known limit (ADR 0110, BT-3675): a closure stored in a local and invoked
+  // by a LATER statement exports into the scope of the statement that built
+  // it, which was already refreshed, so its class-variable writes are not
+  // kept. These pin the actual behaviour (and that it compiles and runs).
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
+  testStoredClosureInvokedLaterLosesWrite =>
+    SsoStaleSub deferred
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit BT-3688 (compile-time warning): a stored closure handed to a
+  // collection HOM by name loses its write too; the correct answer would be 1.
+  testStoredClosurePassedToCollectionHomLosesWrite =>
+    SsoStaleSub deferredViaDo
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
+  testStoredClosureInvokedLaterInArmLosesWrite =>
+    SsoStaleSub deferredInArm
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 2.
+  testStoredClosureInvokedTwiceLosesWrites =>
+    SsoStaleSub deferredTwice
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 2.
+  testStoredClosureThenWritingSendKeepsOnlyTheSend =>
+    SsoStaleSub deferredThenSend
+    self assert: SsoStaleSub hits equals: 1
+
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
+  testStoredClosureWithStatementsCompilesAndRuns =>
+    SsoStaleSub deferredWithStatements
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit (ADR 0110, BT-3681): a block literal passed to a user-defined
+  // class-side higher-order method does not keep its class-variable write (the
+  // callee returns the ClassVars it was given), but the callee's own write is
+  // kept, with and without a block that writes.
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testBlockPassedToClassSideHomLosesBlockWrite =>
+    SsoStaleSub viaSection
+    self assert: SsoStaleSub hits equals: 0
+
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testBlockPassedToClassSideHomThenSendLosesBlockWrite =>
+    SsoStaleSub viaSectionThenSend
+    self assert: SsoStaleSub hits equals: 0
+
+  testClassSideHomKeepsItsOwnWriteWithNonWritingBlock =>
+    SsoStaleSub viaTimedNoWrite
+    self assert: SsoStaleSub hits equals: 1
+
+  testClassSideHomKeepsItsOwnWriteWithWritingBlock =>
+    SsoStaleSub viaTimedWriting
+    self assert: SsoStaleSub hits equals: 1
+
+  // The stored-closure limit is not limited to subclass overrides: a closure
+  // calling the class's own mutating selector loses its write too.
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
+  testStoredClosureOwnMutatingSelectorLosesWrite =>
+    SsoStaleSub storedBump
+    self assert: SsoStaleSub hits equals: 0
+
+  // Known limit (ADR 0110, BT-3681): a stored closure can also read a stale or
+  // reverted value. Correct answers would be 1 and 3; these pin the actual ones.
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 1.
+  testStoredClosureReadsRevertedValueAfterCaughtRaise =>
+    self assert: SsoStaleSub staleAfterRaise equals: 2
+
+  // Known limit BT-3681 (now a compile-time warning): pins the actual answer; the correct one would be 3.
+  testStoredClosureReadsOlderValueAfterBump =>
+    self assert: SsoStaleSub staleAfterBump equals: 2
+
+  // Same limit inside a loop body (BT-3682 covers both positions). The correct
+  // answer would be 1; this pins the actual one.
+  // PIN-BUG BT-3682: pins a KNOWN-WRONG answer (the correct one is 1). The fix must flip this assertion.
+  testBlockPassedToClassSideHomInLoopBody =>
+    SsoStaleSub viaSectionInLoop
+    self assert: SsoStaleSub hits equals: 0

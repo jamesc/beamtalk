@@ -80,3 +80,73 @@ home_dir_returns_false_when_no_env_test() ->
             H -> os:putenv("HOME", H)
         end
     end.
+
+%%====================================================================
+%% BT-3680: shared ~/.beamtalk resolver
+%%====================================================================
+
+%% Run Fun with exactly the given env vars set (all others of
+%% BEAMTALK_HOME/HOME/USERPROFILE unset), restoring afterwards.
+with_env(Env, Fun) ->
+    Vars = ["BEAMTALK_HOME", "HOME", "USERPROFILE"],
+    Orig = [{V, os:getenv(V)} || V <- Vars],
+    lists:foreach(fun(V) -> os:unsetenv(V) end, Vars),
+    maps:foreach(fun(K, V) -> os:putenv(binary_to_list(K), binary_to_list(V)) end, Env),
+    try
+        Fun()
+    after
+        lists:foreach(
+            fun
+                ({V, false}) -> os:unsetenv(V);
+                ({V, Val}) -> os:putenv(V, Val)
+            end,
+            Orig
+        )
+    end.
+
+%% Shared Rust/Erlang conformance corpus:
+%% `crates/beamtalk-workspace/tests/beamtalk_root_dir_conformance.rs` asserts
+%% the same rows against `beamtalk_home::beamtalk_root_dir` /
+%% `beamtalk_workspace::workspaces_base_dir`.
+root_dir_conformance_matches_shared_corpus_test() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "beamtalk_root_dir_conformance.json"
+    ]),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            Name = maps:get(<<"name">>, Case),
+            with_env(maps:get(<<"env">>, Case), fun() ->
+                ?assertEqual(
+                    expected_path(maps:get(<<"root">>, Case)),
+                    beamtalk_platform:beamtalk_root_dir(),
+                    Name
+                ),
+                ?assertEqual(
+                    expected_path(maps:get(<<"workspaces">>, Case)),
+                    beamtalk_platform:workspaces_base_dir(),
+                    Name
+                )
+            end)
+        end,
+        Cases
+    ).
+
+expected_path(null) -> undefined;
+expected_path(Bin) -> binary_to_list(Bin).
+
+workspace_dir_joins_id_test() ->
+    with_env(#{<<"HOME">> => <<"/fx/home">>}, fun() ->
+        ?assertEqual(
+            "/fx/home/.beamtalk/workspaces/abc123",
+            beamtalk_platform:workspace_dir(<<"abc123">>)
+        )
+    end),
+    with_env(#{}, fun() ->
+        ?assertEqual(undefined, beamtalk_platform:workspace_dir(<<"abc123">>))
+    end).

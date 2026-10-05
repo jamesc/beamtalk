@@ -57,6 +57,25 @@ mod property_tests;
 #[cfg(test)]
 pub mod test_helpers;
 
+/// Package stamp used for a same-project (non-dependency, non-stdlib) file
+/// under no known workspace root, in the language service's
+/// `AliasInfo.package` and as its `current_package`.
+///
+/// The language service reads each workspace root's real `[package] name` when
+/// it has one; this fixed marker is only the fallback for a file under no
+/// registered root (a REPL/script file, a workspace with no `[package] name`, or
+/// a `didOpen` that races the root-package load) — not a real package name, but
+/// stable and consistent within one `ProjectIndex`, which is all
+/// [`AliasRegistry::add_pre_loaded`]'s internal/cross-package exclusion needs to
+/// tell a same-project alias apart from a dependency's. `$` is not a valid
+/// character in a `beamtalk.toml` package name, so it can never collide with a
+/// real package.
+///
+/// It is a placeholder, not a package: [`trait_expansion::known_package`] treats
+/// it as an unknown package, so a qualified `uses: pkg@Name` is not rejected for
+/// naming the project's real package (BT-3684).
+pub const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
+
 pub use alias_registry::{AliasInfo, AliasRegistry};
 pub use block_facts::BlockMutationAnalysis;
 pub use block_facts::analyze_block;
@@ -615,10 +634,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // matching `ProtocolRegistry::add_pre_loaded`'s first-wins skip — a
     // last-wins `collect()` here would let the registry and the flattener
     // disagree about which same-named protocol a `uses:` line resolves to.
-    let mut external_protocols: HashMap<EcoString, ProtocolDefinition> = HashMap::new();
-    for p in pre_loaded_protocol_defs {
-        external_protocols.entry(p.name.name.clone()).or_insert(p);
-    }
+    let mut external_protocols = trait_expansion::first_wins_protocol_map(pre_loaded_protocol_defs);
     // ADR 0127 §3 "Name resolution": a provision's free class names resolve
     // in the protocol's package, so a same-named class in this module's
     // package cannot capture them. Done on the carried definitions, before
@@ -645,12 +661,18 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         known
     });
 
+    // The package a qualified `uses: pkg@Name` is compared with (BT-3684); the
+    // language service's placeholder package is not one.
+    let trait_package = trait_expansion::known_package(current_package);
     let expanded_module_storage;
     let trait_origins;
     let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
         let mut owned = module.clone();
-        let (expansion_diags, origins) =
-            trait_expansion::expand_module(&mut owned, &external_protocols);
+        let (expansion_diags, origins) = trait_expansion::expand_module_in_package(
+            &mut owned,
+            &external_protocols,
+            trait_package,
+        );
         result.diagnostics.extend(expansion_diags);
         trait_origins = origins;
         expanded_module_storage = owned;
@@ -814,6 +836,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
             &result.class_hierarchy,
             &result.protocol_registry,
             &external_protocols,
+            trait_package,
         ));
     // Carried for `lowering::lower_module_for_codegen` — see this field's
     // own doc. No further use of the local `external_protocols` binding
@@ -979,6 +1002,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
+    // BT-3681 (ADR 0110): a stored closure invoked by a later statement, or a
+    // block passed to a user-defined class-side HOM, whose class-side self-send
+    // class-variable write is not kept.
+    validators::check_stored_closure_class_var_writes(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     validators::check_value_slot_assignment(
         module,
         &result.class_hierarchy,

@@ -27,6 +27,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true
+# why: parse the shared Rust/Erlang conformance fixture (tests/beamtalk_root_dir_conformance.rs)
+serde_json.workspace = true
 
 [lints]
 workspace = true

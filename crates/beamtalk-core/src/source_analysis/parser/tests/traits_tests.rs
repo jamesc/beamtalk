@@ -574,3 +574,31 @@ fn parse_class_multi_part_method_named_uses_on_one_line_is_a_method() {
             .any(|m| m.selector.name() == "uses:other:")
     );
 }
+
+#[test]
+fn parse_protocol_expect_on_second_provided_method_bt_3671() {
+    // A declaration-level `@expect` between two provided methods must attach
+    // to the second method, not be swallowed as a trailing statement of the
+    // first method's body.
+    let module = parse_ok(
+        "Protocol define: Twice
+  first -> Integer => 1
+  @expect type
+  second -> Integer => 2",
+    );
+    let proto = &module.protocols[0];
+    assert_eq!(proto.provided_methods.len(), 2);
+    assert!(
+        proto.provided_methods[0].expect.is_none(),
+        "first method carries no @expect"
+    );
+    assert_eq!(
+        proto.provided_methods[0].body.len(),
+        1,
+        "first method body must not absorb the @expect"
+    );
+    assert!(
+        proto.provided_methods[1].expect.is_some(),
+        "second method carries the @expect"
+    );
+}

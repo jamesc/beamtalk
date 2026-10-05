@@ -26,6 +26,37 @@ test_metadata() ->
         last_activity => erlang:system_time(second)
     }.
 
+%% Run Fun with BEAMTALK_NO_FOREGROUND_PRUNE=1 so starting a workspace with a
+%% foreground-shaped id never prunes the developer's real workspaces dir.
+with_no_prune(Fun) ->
+    Old = os:getenv("BEAMTALK_NO_FOREGROUND_PRUNE"),
+    os:putenv("BEAMTALK_NO_FOREGROUND_PRUNE", "1"),
+    try
+        Fun()
+    after
+        case Old of
+            false -> os:unsetenv("BEAMTALK_NO_FOREGROUND_PRUNE");
+            V -> os:putenv("BEAMTALK_NO_FOREGROUND_PRUNE", V)
+        end
+    end.
+
+%% Run Fun under a non-English locale (prune must force LC_ALL=C itself).
+with_locale(Fun) ->
+    Old = [{K, os:getenv(K)} || K <- ["LC_ALL", "LANG"]],
+    os:putenv("LC_ALL", "de_DE.UTF-8"),
+    os:putenv("LANG", "de_DE.UTF-8"),
+    try
+        Fun()
+    after
+        [
+            case V of
+                false -> os:unsetenv(K);
+                _ -> os:putenv(K, V)
+            end
+         || {K, V} <- Old
+        ]
+    end.
+
 stop_if_running() ->
     case whereis(beamtalk_workspace_meta) of
         undefined ->
@@ -73,17 +104,10 @@ load_fake_class_module_qualified(ClassNameAtom, PackageName) ->
     {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
     Mod.
 
-%% Mirror beamtalk_workspace_meta's metadata_path computation so tests check
-%% the same file the module would write to.
+%% Resolve via the shared resolver (BT-3680) so tests check the same file the
+%% module would write to.
 metadata_path_for(WsId) ->
-    Base =
-        case beamtalk_platform:home_dir() of
-            false ->
-                filename:join(filename:basedir(user_cache, "beamtalk"), "workspaces");
-            Home ->
-                filename:join([Home, ".beamtalk", "workspaces"])
-        end,
-    filename:join([Base, binary_to_list(WsId), "metadata.json"]).
+    filename:join(beamtalk_platform:workspace_dir(WsId), "metadata.json").
 
 %%% Metadata initialization tests
 
@@ -461,6 +485,259 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
         end,
         _ = file:delete(MetaFile),
         _ = file:del_dir(MetaDir)
+    end.
+
+new_foreground_id_is_unique_test() ->
+    %% BT-3670: foreground ids must not repeat across runs.
+    A = beamtalk_workspace_meta:new_foreground_id(),
+    B = beamtalk_workspace_meta:new_foreground_id(),
+    ?assertNotEqual(A, B),
+    ?assertMatch(<<"foreground_", _/binary>>, A),
+    %% Embeds the OS pid so concurrent VMs can never share an id.
+    ?assertNotEqual(nomatch, binary:match(A, list_to_binary(os:getpid()))),
+    %% Not the old bare per-VM counter form `foreground_<integer>'.
+    %% (foreground, pid, microseconds, counter).
+    ?assertEqual(4, length(binary:split(A, <<"_">>, [global]))).
+
+stale_metadata_under_colliding_id_does_not_leak_into_foreground_workspace_test() ->
+    with_no_prune(fun stale_metadata_no_leak_case/0).
+
+stale_metadata_no_leak_case() ->
+    %% BT-3670: a stale metadata.json left under an old-style colliding id
+    %% (`foreground_1') must not affect a workspace started with a fresh id.
+    OldId = <<"foreground_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    OldFile = metadata_path_for(OldId),
+    OldDir = filename:dirname(OldFile),
+    filelib:ensure_dir(OldFile),
+    ok = file:write_file(
+        OldFile,
+        json:encode(#{
+            <<"created_at">> => 1,
+            <<"last_active">> => 1,
+            <<"settings">> => #{<<"autoflush">> => true}
+        })
+    ),
+    NewId = beamtalk_workspace_meta:new_foreground_id(),
+    ?assertNotEqual(OldId, NewId),
+    NewFile = metadata_path_for(NewId),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => NewId,
+        project_path => <<"bt_test_3670_project">>,
+        created_at => 2000000
+    }),
+    try
+        {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+        ?assertEqual(2000000, maps:get(created_at, Meta)),
+        ?assert(maps:get(last_activity, Meta) > 1),
+        ?assertEqual(unset, beamtalk_workspace_meta:get_setting(autoflush, unset))
+    after
+        gen_server:stop(Pid),
+        _ = file:delete(OldFile),
+        _ = file:del_dir(OldDir),
+        _ = file:delete(NewFile),
+        _ = file:del_dir(filename:dirname(NewFile))
+    end.
+
+named_workspace_still_restores_metadata_test() ->
+    %% BT-3670: explicitly named/persistent workspaces intentionally reuse
+    %% their id and must keep restoring timestamps and settings.
+    WsId = <<"named_ws_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    filelib:ensure_dir(MetaFile),
+    ok = file:write_file(
+        MetaFile,
+        json:encode(#{
+            <<"created_at">> => 12345,
+            <<"last_active">> => 12346,
+            <<"settings">> => #{<<"autoflush">> => true}
+        })
+    ),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"bt_test_3670_named">>,
+        created_at => 2000000
+    }),
+    try
+        {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+        ?assertEqual(12345, maps:get(created_at, Meta)),
+        ?assertEqual(true, beamtalk_workspace_meta:get_setting(autoflush, false))
+    after
+        gen_server:stop(Pid),
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
+is_foreground_id_test() ->
+    %% BT-3672: strict shape, so user-chosen names stay persistent.
+    ?assert(beamtalk_workspace_meta:is_foreground_id(beamtalk_workspace_meta:new_foreground_id())),
+    ?assert(beamtalk_workspace_meta:is_foreground_id("foreground_12_345_6")),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_demo">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_1">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_1_2_x">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"foreground_1__3">>)),
+    ?assertNot(beamtalk_workspace_meta:is_foreground_id(<<"named_ws_1_2_3">>)).
+
+anonymous_foreground_workspace_does_not_persist_metadata_test() ->
+    with_no_prune(fun anonymous_foreground_no_persist_case/0).
+
+anonymous_foreground_no_persist_case() ->
+    %% BT-3672: an anonymous foreground workspace must not leave a
+    %% metadata.json behind (neither on debounce nor on terminate).
+    WsId = beamtalk_workspace_meta:new_foreground_id(),
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"bt_test_3672_foreground">>,
+        created_at => 2000000
+    }),
+    ok = beamtalk_workspace_meta:set_setting(autoflush, true),
+    beamtalk_workspace_meta:update_activity(),
+    {ok, _} = beamtalk_workspace_meta:get_metadata(),
+    gen_server:stop(Pid),
+    try
+        ?assertNot(filelib:is_regular(MetaFile)),
+        ?assertNot(filelib:is_dir(MetaDir))
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
+named_workspace_still_persists_metadata_test() ->
+    %% BT-3672 regression: explicitly named ids keep writing metadata.json.
+    WsId = <<"named_ws_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    MetaDir = filename:dirname(MetaFile),
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"bt_test_3672_named">>,
+        created_at => 2000000
+    }),
+    gen_server:stop(Pid),
+    try
+        ?assert(filelib:is_regular(MetaFile))
+    after
+        _ = file:delete(MetaFile),
+        _ = file:del_dir(MetaDir)
+    end.
+
+prune_stale_foreground_workspaces_test_() ->
+    %% BT-3672: only stale, strictly-shaped foreground dirs with a provably
+    %% dead owner are removed. Needs POSIX `kill -0` for the dead-pid proof.
+    case os:type() of
+        {unix, _} ->
+            [
+                {"prune", fun prune_cases/0},
+                {"prune under a non-English locale", fun() -> with_locale(fun prune_cases/0) end}
+            ];
+        _ ->
+            []
+    end.
+
+prune_cases() ->
+    Base = filename:join("bt_test_3672_prune", integer_to_list(erlang:unique_integer([positive]))),
+    Now = erlang:system_time(second),
+    Week = 7 * 24 * 3600,
+    %% pid 2147483000 exceeds any kernel pid_max, so `kill -0` => No such process.
+    DeadPid = "2147483000",
+    Id = fun(Pid, N) -> "foreground_" ++ Pid ++ "_" ++ N ++ "_1" end,
+    %% Back-date Path (and its parent dir, whose mtime a new entry bumps).
+    Backdate = fun(Path) ->
+        T = calendar:system_time_to_local_time(Now - 2 * Week, second),
+        ok = file:write_file_info(Path, #file_info{mtime = T, atime = T}),
+        ok = file:write_file_info(filename:dirname(Path), #file_info{mtime = T, atime = T})
+    end,
+    Mk = fun(Name, Age) ->
+        Dir = filename:join(Base, Name),
+        ok = filelib:ensure_path(filename:join(Dir, "changes")),
+        T = calendar:system_time_to_local_time(Now - Age, second),
+        FI = #file_info{mtime = T, atime = T},
+        File = filename:join(Dir, "workspace.log"),
+        ok = file:write_file(File, <<"x">>),
+        ok = file:write_file_info(File, FI),
+        ok = file:write_file_info(filename:join(Dir, "changes"), FI),
+        ok = file:write_file_info(Dir, FI),
+        Dir
+    end,
+    Stale = Mk(Id(DeadPid, "1"), 2 * Week),
+    Fresh = Mk(Id(DeadPid, "2"), 60),
+    NamedDir = Mk("foreground_demo", 2 * Week),
+    OtherDir = Mk("named_ws_1", 2 * Week),
+    %% Quiet >7d but the owner pid is alive (this VM).
+    AlivePid = Mk(Id(os:getpid(), "3"), 2 * Week),
+    %% Quiet changes/ dir but a fresh append inside it.
+    ChangesBusy = Mk(Id(DeadPid, "4"), 2 * Week),
+    ok = file:write_file(filename:join([ChangesBusy, "changes", "changes.jsonl"]), <<"{}">>),
+    %% Dead pid but a port file pointing at a live listener.
+    {ok, L} = gen_tcp:listen(0, [{ip, {127, 0, 0, 1}}]),
+    {ok, LivePort} = inet:port(L),
+    PortLive = Mk(Id(DeadPid, "5"), 2 * Week),
+    ok = file:write_file(
+        filename:join(PortLive, "port"), [integer_to_list(LivePort), "\nnonce"]
+    ),
+    Backdate(filename:join(PortLive, "port")),
+    %% Dead pid, port file pointing at a closed port => dead.
+    {ok, L2} = gen_tcp:listen(0, [{ip, {127, 0, 0, 1}}]),
+    {ok, ClosedPort} = inet:port(L2),
+    ok = gen_tcp:close(L2),
+    PortDead = Mk(Id(DeadPid, "6"), 2 * Week),
+    ok = file:write_file(
+        filename:join(PortDead, "port"), [integer_to_list(ClosedPort), "\nnonce"]
+    ),
+    Backdate(filename:join(PortDead, "port")),
+    %% Dead pid, garbage port file => inconclusive => kept.
+    PortGarbage = Mk(Id(DeadPid, "7"), 2 * Week),
+    ok = file:write_file(filename:join(PortGarbage, "port"), <<"not-a-port">>),
+    Backdate(filename:join(PortGarbage, "port")),
+    try
+        ?assertEqual(2, beamtalk_workspace_meta:prune_stale_foreground_workspaces(Base, Week, Now)),
+        ?assertNot(filelib:is_dir(Stale)),
+        ?assertNot(filelib:is_dir(PortDead)),
+        [
+            ?assert(filelib:is_dir(D))
+         || D <- [Fresh, NamedDir, OtherDir, AlivePid, ChangesBusy, PortLive, PortGarbage]
+        ],
+        %% Missing base dir is a no-op.
+        ?assertEqual(
+            0,
+            beamtalk_workspace_meta:prune_stale_foreground_workspaces("bt_no_such_dir", Week, Now)
+        )
+    after
+        _ = gen_tcp:close(L),
+        _ = file:del_dir_r("bt_test_3672_prune")
+    end.
+
+prune_stale_foreground_workspaces_async_test_() ->
+    case os:type() of
+        {unix, _} -> {"async prune", fun prune_async_case/0};
+        _ -> []
+    end.
+
+prune_async_case() ->
+    Base = filename:join("bt_test_3672_async", integer_to_list(erlang:unique_integer([positive]))),
+    Now = erlang:system_time(second),
+    Week = 7 * 24 * 3600,
+    Dir = filename:join(Base, "foreground_2147483000_1_1"),
+    ok = filelib:ensure_path(Dir),
+    T = calendar:system_time_to_local_time(Now - 2 * Week, second),
+    FI = #file_info{mtime = T, atime = T},
+    ok = file:write_file_info(Dir, FI),
+    try
+        Pid = beamtalk_workspace_meta:prune_stale_foreground_workspaces_async(Base, Week, Now),
+        %% The worker exits only after pruning finishes: wait on it, no sleeps.
+        Ref = erlang:monitor(process, Pid),
+        receive
+            {'DOWN', Ref, process, Pid, _} -> ok
+        after 30000 -> ?assert(false)
+        end,
+        ?assertNot(filelib:is_dir(Dir))
+    after
+        _ = file:del_dir_r("bt_test_3672_async")
     end.
 
 load_corrupt_json_falls_back_test() ->

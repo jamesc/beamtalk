@@ -47,6 +47,7 @@ mod abstract_and_native_instantiation;
 mod adr0103_handle_scope_and_sendability;
 mod adr0123_shape_version_and_migrations;
 mod analyser_core_and_block_context;
+mod bt3681_stored_closure_class_var_writes;
 mod class_hierarchy_and_method_validators;
 mod dead_code_super_and_shadowing;
 mod extension_method_integration;

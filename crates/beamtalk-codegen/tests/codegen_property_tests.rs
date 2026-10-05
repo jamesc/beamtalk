@@ -30,20 +30,10 @@
 //! comment for why (code review on BT-3344's PR).
 
 use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
-use beamtalk_core::ast::Module;
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use beamtalk_core::test_helpers::test_support::{near_valid_beamtalk, proptest_config_default};
+use beamtalk_core::test_helpers::test_support::{
+    near_valid_beamtalk, parse_source, proptest_config_default,
+};
 use proptest::prelude::*;
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-fn parse_source(source: &str) -> Module {
-    let tokens = lex_with_eof(source);
-    let (module, _) = parse(tokens);
-    module
-}
 
 // ============================================================================
 // Property tests

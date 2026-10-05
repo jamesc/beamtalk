@@ -301,6 +301,7 @@ fn build_fixture_class_indexes(
     let mut protocol_infos = Vec::new();
     let mut alias_infos = Vec::new();
     let mut protocol_defs = FixtureProtocolDefs::default();
+    let mut parsed_modules = Vec::new();
 
     for file in fixture_files {
         let module_name = fixture_module_name(file)?;
@@ -309,10 +310,6 @@ fn build_fixture_class_indexes(
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-
-        // Extract full ClassInfo for validator/type checker resolution.
-        class_infos
-            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
 
         // Extract ProtocolInfo so fixture-defined protocol names are
         // recognised by the unresolved-class validator when compiling test files.
@@ -355,6 +352,27 @@ fn build_fixture_class_indexes(
                 superclass_index.insert(class_name, superclass_name.to_string());
             }
         }
+        parsed_modules.push(module);
+    }
+
+    // Extract full ClassInfo for validator/type checker resolution. Done
+    // after every fixture has been scanned so a `uses:` whose trait is
+    // declared in a *different* fixture is flattened into its class's info,
+    // exactly as codegen flattens it (BT-3668) — otherwise a typed call to a
+    // provided method on that class reports "does not understand".
+    let external_protocols =
+        beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
+            protocol_defs.defs.iter().cloned(),
+        );
+    for module in &parsed_modules {
+        class_infos.extend(
+            beamtalk_core::semantic_analysis::trait_expansion::extract_flattened_class_infos(
+                module,
+                &external_protocols,
+                // Fixtures and test files have no package identity.
+                None,
+            ),
+        );
     }
 
     Ok((
@@ -1037,10 +1055,11 @@ fn build_merged_class_indexes(
     let mut dep_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> =
         Vec::new();
     for (pkg_root, pkg) in discovered_packages {
+        let mut pkg_src = None;
         let src_dir = pkg_root.join("src");
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
             let source_root = src_dir.exists().then_some(src_dir);
-            if let Ok((pkg_class_map, pkg_super_map, class_infos, _extensions, _cached_asts)) =
+            if let Ok((pkg_class_map, pkg_super_map, class_infos, _extensions, cached_asts)) =
                 super::build::build_class_module_index(
                     &src_files,
                     source_root.as_deref(),
@@ -1053,7 +1072,9 @@ fn build_merged_class_indexes(
                 );
                 class_module_index.extend(pkg_class_map);
                 class_superclass_index.extend(pkg_super_map);
-                source_class_infos.extend(class_infos);
+                // Flattened below, once this package's dependencies (and so
+                // their protocols) are resolved.
+                pkg_src = Some((class_infos, cached_asts));
             }
             // Same-package `src/` type-alias declarations (ADR 0108), so a
             // test/fixture file can reference a stdlib-declared `type X =
@@ -1067,9 +1088,11 @@ fn build_merged_class_indexes(
         // Load dependency class metadata so the type checker and validator
         // can resolve cross-package class references in test files.
         let dep_options = beamtalk_core::CompilerOptions::default();
+        let mut dep_protocol_defs = Vec::new();
         match super::deps::ensure_deps_resolved(pkg_root, &dep_options) {
             Ok(resolved_deps) => {
                 for dep in &resolved_deps {
+                    dep_protocol_defs.extend(dep.protocol_defs.iter().cloned());
                     for (class_name, module_name) in &dep.class_module_index {
                         class_module_index.insert(class_name.clone(), module_name.clone());
                     }
@@ -1084,6 +1107,20 @@ fn build_merged_class_indexes(
                      dependency classes may not be available"
                 );
             }
+        }
+
+        // `beamtalk test` builds the `src/` index per package, so flatten
+        // cross-file trait provisions here as `build` does (BT-3673): a typed
+        // call to a provided method on a `src/` class whose trait lives in
+        // another file must not report "does not understand".
+        if let Some((mut class_infos, cached_asts)) = pkg_src {
+            super::build::flatten_package_class_infos(
+                &mut class_infos,
+                &cached_asts,
+                dep_protocol_defs,
+                &pkg.name,
+            );
+            source_class_infos.extend(class_infos);
         }
     }
 

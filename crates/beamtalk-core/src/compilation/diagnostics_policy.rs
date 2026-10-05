@@ -16,6 +16,7 @@
 //! `beamtalk-cli`).
 
 use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
+use crate::ast_walker::expression_contains_block;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 use std::collections::BTreeMap;
@@ -135,6 +136,7 @@ fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
         "file-class-name-mismatch" => DiagnosticCategory::FileClassNameMismatch,
         "definite-assignment" => DiagnosticCategory::DefiniteAssignment,
         "unguarded-late-read" => DiagnosticCategory::UnguardedLateRead,
+        "stored-closure" => DiagnosticCategory::StoredClosure,
         _ => return None,
     })
 }
@@ -164,6 +166,7 @@ const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
     "file-class-name-mismatch",
     "definite-assignment",
     "unguarded-late-read",
+    "stored-closure",
 ];
 
 /// Return a human-readable TOML type name for error messages.
@@ -570,7 +573,8 @@ fn expect_category_unchecked(
         | ExpectCategory::ShadowedClass
         | ExpectCategory::TypeAnnotation
         | ExpectCategory::Inheritance
-        | ExpectCategory::Sendability => false,
+        | ExpectCategory::Sendability
+        | ExpectCategory::StoredClosure => false,
     }
 }
 
@@ -620,6 +624,86 @@ type ExpectDirectiveEntry = (Vec<ExpectCategory>, Option<EcoString>, Span, Span,
 /// reason, and the directive's own span.
 type StaleExpectEntry = (Vec<ExpectCategory>, Option<EcoString>, Span);
 
+/// Collects `method`'s declaration-level `@expect` and every statement-level
+/// `@expect` in its body.
+///
+/// `contains_block` for the declaration-level directive is deliberately
+/// whole-method, matching a declaration-level `@expect`'s own suppression
+/// scope (it covers a matching diagnostic ANYWHERE in the method, not just an
+/// adjacent statement — unlike a statement-level `@expect`, which has no
+/// "whole body" to fall back to). This means an unrelated block literal
+/// elsewhere in the same method (e.g. a `do:` loop) can make a stale,
+/// block-free `@expect dead_assignment` (e.g. one covering only a match-arm
+/// assignment) go unflagged by `build`/`test`/LSP/REPL — `beamtalk lint`
+/// still catches it regardless, and no real diagnostic is ever wrongly
+/// suppressed either way. Accepted as a low-impact miss on the "you can
+/// remove this now-unnecessary pragma" warning rather than narrowing a
+/// method-level directive's target below what it actually covers.
+fn collect_method_directives(
+    method: &crate::ast::MethodDefinition,
+    directives: &mut Vec<ExpectDirectiveEntry>,
+) {
+    if let Some((ref cats, ref reason, expect_span)) = method.expect {
+        directives.push((
+            cats.clone(),
+            reason.clone(),
+            expect_span,
+            method.span,
+            exprs_contain_block(&method.body),
+        ));
+    }
+    collect_directives_from_exprs(&method.body, directives);
+}
+
+/// Applies the `@expect` directives written inside the provided methods of
+/// `protocols` to the flattened-provision diagnostics of those protocols.
+///
+/// A diagnostic in a trait provision is raised while analysing each *using*
+/// class, carries a [`Diagnostic::provision`] tag, and its span is an offset
+/// into the *protocol's* file (ADR 0127 §3) — so the using file's own
+/// [`apply_expect_directives`] pass can neither match an `@expect` written in
+/// the protocol file nor should it match a tagged diagnostic against an
+/// unrelated directive by coincidence of offsets. Publishers that report a
+/// provision diagnostic once in the protocol's file call this on the merged
+/// diagnostics first: every tagged diagnostic for a listed protocol contained in a
+/// directive's target and matching its category is removed.
+///
+/// Unmatched directives are deliberately *not* reported stale: whether a
+/// provision diagnostic exists depends on which users were analysed in this
+/// run (a protocol with no users, or a `beamtalk lint <subset>` run that
+/// skipped them, must not turn a valid `@expect` into a warning).
+pub fn apply_protocol_expect_directives(
+    protocols: &[crate::ast::ProtocolDefinition],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Directives per protocol name; first definition wins, like
+    // `ProtocolRegistry::add_pre_loaded` and the protocol source map.
+    let mut by_protocol: BTreeMap<&str, Vec<ExpectDirectiveEntry>> = BTreeMap::new();
+    for protocol in protocols {
+        by_protocol
+            .entry(protocol.name.name.as_str())
+            .or_insert_with(|| {
+                let mut directives = Vec::new();
+                for method in &protocol.provided_methods {
+                    collect_method_directives(method, &mut directives);
+                }
+                directives
+            });
+    }
+    diagnostics.retain(|diag| {
+        let Some(origin) = &diag.provision else {
+            return true;
+        };
+        let Some(directives) = by_protocol.get(origin.protocol.as_str()) else {
+            return true;
+        };
+        !directives.iter().any(|(cats, _, _, target_span, _)| {
+            target_span.contains(diag.span)
+                && cats.iter().any(|cat| category_matches(*cat, diag.category))
+        })
+    });
+}
+
 fn apply_expect_directives_impl(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
@@ -648,47 +732,11 @@ fn apply_expect_directives_impl(
             }
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
-            // Collect declaration-level @expect from method declarations.
-            //
-            // `contains_block` here is deliberately whole-method, matching a
-            // declaration-level `@expect`'s own suppression scope (it covers
-            // a matching diagnostic ANYWHERE in the method, not just an
-            // adjacent statement — unlike a statement-level `@expect`, which
-            // has no "whole body" to fall back to). This means an unrelated
-            // block literal elsewhere in the same method (e.g. a `do:` loop)
-            // can make a stale, block-free `@expect dead_assignment` (e.g.
-            // one covering only a match-arm assignment) go unflagged by
-            // `build`/`test`/LSP/REPL — `beamtalk lint` still catches it
-            // regardless, and no real diagnostic is ever wrongly suppressed
-            // either way. Accepted as a low-impact miss on the "you can
-            // remove this now-unnecessary pragma" warning rather than
-            // narrowing a method-level directive's target below what it
-            // actually covers.
-            if let Some((ref cats, ref reason, expect_span)) = method.expect {
-                directives.push((
-                    cats.clone(),
-                    reason.clone(),
-                    expect_span,
-                    method.span,
-                    exprs_contain_block(&method.body),
-                ));
-            }
-            collect_directives_from_exprs(&method.body, &mut directives);
+            collect_method_directives(method, &mut directives);
         }
     }
     for standalone in &module.method_definitions {
-        // Same whole-method `contains_block` scoping as above, and the same
-        // tradeoff — see that loop's comment.
-        if let Some((ref cats, ref reason, expect_span)) = standalone.method.expect {
-            directives.push((
-                cats.clone(),
-                reason.clone(),
-                expect_span,
-                standalone.method.span,
-                exprs_contain_block(&standalone.method.body),
-            ));
-        }
-        collect_directives_from_exprs(&standalone.method.body, &mut directives);
+        collect_method_directives(&standalone.method, &mut directives);
     }
 
     if directives.is_empty() {
@@ -701,7 +749,11 @@ fn apply_expect_directives_impl(
     for (cats, reason, directive_span, target_span, contains_block) in &directives {
         let mut matched = false;
         for (i, diag) in diagnostics.iter().enumerate() {
-            if target_span.contains(diag.span)
+            // A provision-tagged diagnostic's span is an offset into the
+            // protocol's file, never this module's — see
+            // [`apply_protocol_expect_directives`].
+            if diag.provision.is_none()
+                && target_span.contains(diag.span)
                 && cats.iter().any(|cat| category_matches(*cat, diag.category))
             {
                 suppressed_indices.push(i);
@@ -813,6 +865,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::Sendability,
                     Some(DiagnosticCategory::Sendability)
                 )
+                | (
+                    ExpectCategory::StoredClosure,
+                    Some(DiagnosticCategory::StoredClosure)
+                )
         )
 }
 
@@ -856,26 +912,11 @@ fn collect_directives_from_exprs(
 }
 
 /// Returns `true` if `exprs` contains a block literal anywhere in its tree —
-/// see [`expression_contains_block`].
+/// see [`crate::ast_walker::expression_contains_block`].
 fn exprs_contain_block(exprs: &[ExpressionStatement]) -> bool {
     exprs
         .iter()
         .any(|stmt| expression_contains_block(&stmt.expression))
-}
-
-/// Returns `true` if `expr`'s tree contains an [`Expression::Block`] literal
-/// anywhere — the only shape `beamtalk-lint`'s `DeadBlockAssignmentPass`
-/// can apply to, used by [`expect_category_unchecked`] to
-/// tell a plausibly-lint-only `@expect dead_assignment` target apart from one
-/// `analyse_full`'s own match-arm check already covers.
-fn expression_contains_block(expr: &Expression) -> bool {
-    let mut found = false;
-    crate::ast_walker::walk_expression(expr, &mut |e| {
-        if matches!(e, Expression::Block(_)) {
-            found = true;
-        }
-    });
-    found
 }
 
 /// Recursively walks an expression tree to find nested `Block` bodies and
@@ -1013,6 +1054,7 @@ native-declaration-location = "error"
 file-class-name-mismatch = "error"
 definite-assignment = "error"
 unguarded-late-read = "error"
+stored-closure = "warn"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
@@ -1542,6 +1584,60 @@ dnu = "error"
             stale.message.contains("unused") && stale.message.contains("sendability"),
             "stale warning should name every listed category, got: {}",
             stale.message
+        );
+    }
+
+    /// BT-3671: a provision diagnostic (span in the protocol's file) is
+    /// suppressed by an `@expect` above the provided method, matched by
+    /// category; untagged diagnostics and other protocols' are untouched.
+    #[test]
+    fn protocol_expect_suppresses_matching_provision_diagnostic_bt_3671() {
+        let source = "Protocol define: Broken\n  name -> String\n\n  @expect type\n  probe -> Integer => 3 bogus\n";
+        let (module, parse_diags) = parse(lex_with_eof(source));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        assert!(module.protocols[0].provided_methods[0].expect.is_some());
+
+        let start = u32::try_from(source.find("bogus").unwrap()).unwrap();
+        let span = Span::new(start, start + 5);
+        let provision = |protocol: &str, category| {
+            let mut d = Diagnostic::warning("dnu", span).with_provision_origin(protocol, "Alpha");
+            d.category = Some(category);
+            d
+        };
+        let mut diags = vec![
+            provision("Broken", DiagnosticCategory::Dnu),
+            provision("Broken", DiagnosticCategory::Unused),
+            provision("Other", DiagnosticCategory::Dnu),
+        ];
+        let mut own = Diagnostic::warning("own", span);
+        own.category = Some(DiagnosticCategory::Dnu);
+        diags.push(own);
+
+        apply_protocol_expect_directives(&module.protocols, &mut diags);
+
+        // `@expect type` covers the DNU for `Broken` only.
+        assert_eq!(diags.len(), 3, "{diags:?}");
+        assert!(diags.iter().all(|d| {
+            !(d.provision.as_ref().is_some_and(|o| o.protocol == "Broken")
+                && d.category == Some(DiagnosticCategory::Dnu))
+        }));
+    }
+
+    /// A provision diagnostic must not be matched by an unrelated `@expect`
+    /// in a *using* file whose spans merely coincide by offset.
+    #[test]
+    fn user_file_expect_ignores_provision_tagged_diagnostics_bt_3671() {
+        let source = "Object subclass: Foo\n  @expect type\n  bar => 1\n";
+        let (module, _) = parse(lex_with_eof(source));
+        let start = u32::try_from(source.find("bar").unwrap()).unwrap();
+        let mut d = Diagnostic::warning("dnu", Span::new(start, start + 3))
+            .with_provision_origin("Broken", "Foo");
+        d.category = Some(DiagnosticCategory::Dnu);
+        let mut diags = vec![d];
+        apply_expect_directives(&module, &mut diags);
+        assert!(
+            diags.iter().any(|d| d.provision.is_some()),
+            "provision diagnostic kept: {diags:?}"
         );
     }
 }

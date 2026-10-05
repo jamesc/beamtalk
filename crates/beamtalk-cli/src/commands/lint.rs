@@ -96,12 +96,10 @@ fn collect_diagnostics(
         .collect();
     lint_diags.extend(beamtalk_lint::run_lint_passes(module));
 
-    // Run semantic analysis to collect all categorised diagnostics
-    // so that `@expect` directives can match them. Without this, `@expect type`
-    // annotations that suppress real type/DNU diagnostics during build would be
-    // reported as stale by lint. We include every diagnostic that has a category
-    // (Type, Dnu, Unused, etc.) — this keeps lint in sync with `category_matches`
-    // in diagnostic_provider.rs without manually mirroring its match arms.
+    // Run semantic analysis, apply @expect directives, and check near-miss
+    // section dividers. The shared helper performs all four steps:
+    // analyse_full (filtered by category.is_some()), check_class_file_name_agreement,
+    // apply_expect_directives, and check_near_miss_dividers.
     //
     // Pass cross-file class info so lint sees the same class hierarchy as build,
     // matching diagnostics for actor instantiation, type errors, etc.
@@ -130,38 +128,13 @@ fn collect_diagnostics(
         .with_native_type_registry(native_type_registry)
         .with_cross_file_extensions(cross_file_extensions)
         .with_is_stub_file(is_stub_file);
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
-    lint_diags.extend(
-        analysis_result
-            .diagnostics
-            .into_iter()
-            .filter(|d| d.category.is_some()),
-    );
-
-    // Validate the file name agrees with the class it declares —
-    // `analyse_full` doesn't run this check itself (see
-    // `check_class_file_name_agreement`'s doc), so it must be called
-    // explicitly here, mirroring `compute_project_diagnostics_with_analysis`.
-    lint_diags.extend(
-        beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
-            module, file_stem,
-        ),
-    );
-
-    // Apply @expect directives to suppress matching lint diagnostics.
-    // Note: apply_expect_directives may inject Severity::Warning for stale
-    // @expect annotations, so we include those in the output.
-    beamtalk_language_service::queries::diagnostic_provider::apply_expect_directives(
+    beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline(
         module,
+        source,
+        analysis_ctx,
+        file_stem,
         &mut lint_diags,
     );
-
-    // Mirrors `compute_project_diagnostics_with_analysis`'s
-    // placement — appended after `apply_expect_directives` because a
-    // near-miss-divider comment's span (the comment's own line) can never
-    // be contained in any `@expect`-annotated declaration's target span, so
-    // running it through that pass first would be a no-op at best.
-    beamtalk_core::near_miss_divider::check_near_miss_dividers(source, &mut lint_diags);
 
     lint_diags
 }
@@ -257,6 +230,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         mut all_protocol_sources,
         mut all_alias_infos,
         parsed_files,
+        trait_users,
     ) = parse_and_extract_class_infos(
         &source_files,
         package_root.as_deref(),
@@ -280,6 +254,17 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     } else {
         Vec::new()
     };
+
+    // Flatten cross-file trait provisions into the same-package infos, as
+    // `build` does (BT-3673) — after the dependency merge so a `uses:` of a
+    // dependency's trait resolves too. Without it a typed call to a provided
+    // method on a class whose trait lives in another file reports a false
+    // "does not understand" from every *other* file.
+    trait_users.flatten(
+        &mut all_class_infos,
+        all_protocol_defs.iter().cloned(),
+        current_package.as_deref(),
+    );
 
     // Populate the FFI type registry via the same
     // `extract_type_specs` that `beamtalk build` calls, instead of only
@@ -426,6 +411,13 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         // has a span in the *protocol's* file, so it is held back here and
         // published once (merged across the using classes) in that file
         // after the loop, instead of at a meaningless offset in this one.
+        // An `@expect` in the protocol's provided method suppresses it (and is
+        // matched here, not by the using file's own `@expect` pass).
+        let mut lint_diags = lint_diags;
+        beamtalk_core::compilation::diagnostics_policy::apply_protocol_expect_directives(
+            &all_protocol_defs,
+            &mut lint_diags,
+        );
         let (provision_diags, lint_diags): (Vec<_>, Vec<_>) =
             lint_diags.into_iter().partition(|d| d.provision.is_some());
         all_provision_diags.extend(provision_diags);
@@ -700,6 +692,7 @@ fn parse_and_extract_class_infos(
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     Vec<ParsedLintFile>,
+    beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
 )> {
     let extraction_files = match package_root {
         Some(root) => collect_package_class_files(root, source_files),
@@ -724,6 +717,10 @@ fn parse_and_extract_class_infos(
     let mut all_protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let mut all_alias_infos = Vec::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
+    // Trait users (BT-3673): flattened by the caller once the dependencies'
+    // protocols are merged in.
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
 
     for file in &extraction_files {
         let source = std::fs::read_to_string(file)
@@ -755,6 +752,7 @@ fn parse_and_extract_class_infos(
             );
         }
         all_class_infos.extend(class_infos);
+        trait_users.add(&module);
 
         // Collect standalone extensions package-wide so cross-file
         // `ClassName >> selector` definitions resolve during lint the same
@@ -817,6 +815,7 @@ fn parse_and_extract_class_infos(
         all_protocol_sources,
         all_alias_infos,
         parsed_files,
+        trait_users,
     ))
 }
 
@@ -1426,7 +1425,7 @@ mod tests {
         )
         .unwrap();
 
-        let (_, _, _, defs, sources, _, _) =
+        let (_, _, _, defs, sources, _, _, _) =
             parse_and_extract_class_infos(&[user], Some(&root), Some("xpkg")).unwrap();
         assert_eq!(defs.len(), 1);
         let src = sources.get("Broken").expect("protocol source recorded");
@@ -1606,6 +1605,7 @@ mod tests {
             mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
+            _trait_user_modules,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
             .unwrap();
         merge_dependency_infos(
@@ -1867,6 +1867,7 @@ mod tests {
             mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
+            _trait_user_modules,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
             .unwrap();
         merge_dependency_infos(
@@ -1992,6 +1993,7 @@ mod tests {
             mut all_protocol_sources,
             mut all_alias_infos,
             parsed_files,
+            _trait_user_modules,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
             .unwrap();
         merge_dependency_infos(

@@ -23,9 +23,7 @@
 //! [`Pass1Cache`] because `detect_changes` runs for every build — including
 //! manifest-less single-file builds, where `Pass1Cache` never applies.
 
-use beamtalk_core::compilation::extension_index::{
-    ExtensionIndex, ExtensionKey, ExtensionLocation,
-};
+use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use camino::{Utf8Path, Utf8PathBuf};
 use ecow::EcoString;
@@ -36,6 +34,7 @@ use std::fs;
 use std::time::SystemTime;
 use tracing::{debug, info, warn};
 
+use super::build::{FileIndex, Pass1Index, scan_source_file};
 #[cfg(test)]
 use super::util::content_hash_of;
 use super::util::{content_hashes_of, mtime_of};
@@ -54,7 +53,13 @@ const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 /// (rather than relying on `#[serde(default)]`) so every project gets one
 /// clean rebuild that populates it, instead of silently treating every
 /// already-cached file as using no protocols until it next goes stale.
-const CACHE_VERSION: u32 = 4;
+/// v5: `protocol_uses` entries are `protocol_use_key`s — `pkg@Name` for a
+/// package-qualified `uses:` — so a qualified use is hashed against the
+/// protocol of that package, not of a same-named one (BT-3684).
+/// v6: an entry records *every* class its file declares, not only those that
+/// win a cross-file duplicate, so the winner can be re-picked when another
+/// file changes (BT-3686).
+const CACHE_VERSION: u32 = 6;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///
@@ -84,21 +89,11 @@ pub(crate) struct CacheEntry {
     /// why mtime isn't used.
     content_hash: String,
 
-    /// Classes defined in this file, mapped to their compiled module name.
-    /// E.g. `"Counter" → "bt@my_app@counter"`.
-    class_module_index: HashMap<String, String>,
-
-    /// Superclass relationships for classes in this file.
-    /// E.g. `"MyChild" → "MyParent"`.
-    class_superclass_index: HashMap<String, String>,
-
-    /// Full `ClassInfo` entries extracted from this file.
-    class_infos: Vec<ClassInfo>,
-
-    /// Standalone extension definitions in this file,
-    /// keyed by `(class, side, selector)`.
-    #[serde(default)]
-    extensions: Vec<(ExtensionKey, Vec<ExtensionLocation>)>,
+    /// Everything the file contributes to Pass 1 — *every* class it declares,
+    /// not only those that win a cross-file duplicate (BT-3686), so the winner
+    /// can be re-picked from the files' order when another file changes.
+    #[serde(flatten)]
+    index: FileIndex,
 
     /// Names of every protocol this file's classes declare via `uses:`
     /// (ADR 0127 §10a; BT-3591) — persisted so a cache-fresh file (skipped
@@ -439,24 +434,20 @@ pub(crate) fn save_diagnostics_cache(
     );
 }
 
-/// Derive each cached file's `uses:` protocol names from its freshly-parsed
-/// AST (ADR 0127 §10a; BT-3591). Shared by both the force-rebuild path
-/// (every file passes through here) and the incremental path's stale-file
-/// re-scan — a fresh (cache-hit) file's uses instead come straight from its
+/// A file's `uses:` protocol keys
+/// ([`trait_expansion::protocol_use_key`](beamtalk_core::semantic_analysis::trait_expansion::protocol_use_key):
+/// `pkg@Name` for a qualified use, the bare name otherwise) from its
+/// freshly-parsed AST (ADR 0127 §10a; BT-3591). Used for every file Pass 1
+/// scans — a fresh (cache-hit) file's uses instead come straight from its
 /// persisted `CacheEntry.protocol_uses`, never re-derived.
-fn protocol_uses_from_cached_asts(
-    cached_asts: &HashMap<Utf8PathBuf, super::build::CachedAst>,
-) -> HashMap<Utf8PathBuf, Vec<EcoString>> {
-    cached_asts
+fn protocol_uses_of(module: &beamtalk_core::ast::Module) -> Vec<EcoString> {
+    module
+        .classes
         .iter()
-        .map(|(file, cached)| {
-            let uses = cached
-                .module
-                .classes
+        .flat_map(|c| {
+            c.uses
                 .iter()
-                .flat_map(|c| c.uses.iter().map(|u| u.protocol.name.clone()))
-                .collect();
-            (file.clone(), uses)
+                .map(beamtalk_core::semantic_analysis::trait_expansion::protocol_use_key)
         })
         .collect()
 }
@@ -467,8 +458,14 @@ fn protocol_uses_from_cached_asts(
 /// re-scans only those, and merges the results. Returns the merged indexes
 /// and the set of files that were actually re-scanned.
 ///
+/// Every file — a cache-fresh one through its cached [`FileIndex`], a stale one
+/// through a fresh scan — is folded into the package-wide indexes in the order
+/// of `source_files`, exactly as a clean scan folds them
+/// ([`Pass1Index::add_file`]). A class declared in several files therefore
+/// resolves to the same declaration whatever the cache state, including after
+/// the file that won it drops the class or is deleted (BT-3686).
+///
 /// When `force` is true, the cache is ignored entirely.
-#[allow(clippy::too_many_lines)] // linear merge pipeline — split adds indirection, not clarity
 pub(crate) fn incremental_build_class_module_index(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
@@ -478,62 +475,26 @@ pub(crate) fn incremental_build_class_module_index(
     force: bool,
 ) -> Result<IncrementalPass1Result> {
     // Hash every source file's content exactly once for this Pass 1
-    // pass. `partition_files` (staleness) and `build_cache_entries` (the
-    // updated cache) both need every file's hash; computing it once here and
-    // passing it into both — instead of each calling `content_hash_of`
-    // independently — halves Pass 1's own content-hashing work, and the
-    // result is handed back to the caller so Pass 2 doesn't hash a third
-    // time. See `content_hashes_of`'s doc for why this matters.
+    // pass. `partition_files` (staleness) and the updated cache entries both
+    // need every file's hash; computing it once here — instead of each calling
+    // `content_hash_of` independently — halves Pass 1's own content-hashing
+    // work, and the result is handed back to the caller so Pass 2 doesn't hash
+    // a third time. See `content_hashes_of`'s doc for why this matters.
     let source_hashes = content_hashes_of(source_files);
 
-    // If forced, skip cache entirely
-    if force {
+    let mut manifest_invalidated = false;
+    let mut cache = if force {
         info!("Force build — ignoring Pass 1 cache");
-        let (
-            class_module_index,
-            class_superclass_index,
-            all_class_infos,
-            extension_index,
-            cached_asts,
-        ) = super::build::build_class_module_index(source_files, source_root, pkg_name)?;
-
-        let file_protocol_uses = protocol_uses_from_cached_asts(&cached_asts);
-
-        // Build cache entries for saving later
-        let file_entries = build_cache_entries(
-            source_files,
-            source_root,
-            pkg_name,
-            &Pass1Indexes {
-                class_module_index: &class_module_index,
-                class_superclass_index: &class_superclass_index,
-                all_class_infos: &all_class_infos,
-                extension_index: &extension_index,
-                file_protocol_uses: &file_protocol_uses,
-            },
-            &source_hashes,
-        );
-        save_cache(build_dir, manifest_path, file_entries);
-
-        return Ok(IncrementalPass1Result {
-            class_module_index,
-            class_superclass_index,
-            all_class_infos,
-            extension_index,
-            cached_asts,
-            manifest_invalidated: false,
-            source_hashes,
-            file_protocol_uses,
-        });
-    }
-
-    let cache_result = load_cache(build_dir, manifest_path);
-    let manifest_invalidated = matches!(cache_result, CacheLoadResult::ManifestInvalidated);
-
-    // Extract cache if we got a hit
-    let cache = match cache_result {
-        CacheLoadResult::Hit(c) => Some(c),
-        _ => None,
+        None
+    } else {
+        match load_cache(build_dir, manifest_path) {
+            CacheLoadResult::Hit(c) => Some(c),
+            CacheLoadResult::ManifestInvalidated => {
+                manifest_invalidated = true;
+                None
+            }
+            CacheLoadResult::Miss => None,
+        }
     };
 
     // Determine which files need re-scanning
@@ -541,100 +502,73 @@ pub(crate) fn incremental_build_class_module_index(
         Some(c) => partition_files(source_files, c, &source_hashes),
         None => (source_files.to_vec(), Vec::new()),
     };
-
-    if stale_files.is_empty() {
-        info!(
-            "Pass 1 cache hit — all {} files up-to-date",
-            source_files.len()
-        );
-    } else {
-        info!(
-            stale = stale_files.len(),
-            cached = fresh_files.len(),
-            "Incremental Pass 1: re-scanning {} of {} files",
-            stale_files.len(),
-            source_files.len()
-        );
+    if !force {
+        if stale_files.is_empty() {
+            info!(
+                "Pass 1 cache hit — all {} files up-to-date",
+                source_files.len()
+            );
+        } else {
+            info!(
+                stale = stale_files.len(),
+                cached = fresh_files.len(),
+                "Incremental Pass 1: re-scanning {} of {} files",
+                stale_files.len(),
+                source_files.len()
+            );
+        }
     }
+    let fresh_files: std::collections::HashSet<&Utf8PathBuf> = fresh_files.iter().collect();
 
-    // Collect cached data for fresh files
-    let mut class_module_index = HashMap::new();
-    let mut class_superclass_index = HashMap::new();
-    let mut all_class_infos = Vec::new();
-    let mut extension_index = ExtensionIndex::new();
+    let mut index = Pass1Index::default();
+    let mut cached_asts = HashMap::new();
     // ADR 0127 §10a (BT-3591): a fresh file's `uses:` protocol names come
     // straight from its persisted cache entry — the whole point of
     // persisting `protocol_uses` in the first place is that a file skipped
     // by this build's re-scan must still report them, not just files this
     // build actually touched. See `IncrementalPass1Result.file_protocol_uses`.
     let mut file_protocol_uses: HashMap<Utf8PathBuf, Vec<EcoString>> = HashMap::new();
+    let mut file_entries = HashMap::new();
 
-    if let Some(ref c) = cache {
-        for file in &fresh_files {
-            if let Some(entry) = c.entries.get(file.as_str()) {
-                for (class_name, module_name) in &entry.class_module_index {
-                    class_module_index.insert(class_name.clone(), module_name.clone());
-                }
-                for (class_name, superclass) in &entry.class_superclass_index {
-                    class_superclass_index.insert(class_name.clone(), superclass.clone());
-                }
-                all_class_infos.extend(entry.class_infos.clone());
-                extension_index.add_entries(entry.extensions.iter().cloned());
-                file_protocol_uses.insert(file.clone(), entry.protocol_uses.clone());
-            }
+    for file in source_files {
+        let fresh_entry = if fresh_files.contains(file) {
+            cache.as_mut().and_then(|c| c.entries.remove(file.as_str()))
+        } else {
+            None
+        };
+        if let Some(entry) = fresh_entry {
+            index.add_file(&entry.index);
+            file_protocol_uses.insert(file.clone(), entry.protocol_uses.clone());
+            file_entries.insert(file.as_str().to_string(), entry);
+            continue;
         }
+
+        let Some(scanned) = scan_source_file(file, source_root, pkg_name)? else {
+            continue;
+        };
+        index.add_file(&scanned.index);
+        let protocol_uses = protocol_uses_of(&scanned.ast.module);
+        file_protocol_uses.insert(file.clone(), protocol_uses.clone());
+        if let Some(content_hash) = source_hashes.get(file.as_str()) {
+            file_entries.insert(
+                file.as_str().to_string(),
+                CacheEntry {
+                    content_hash: content_hash.clone(),
+                    index: scanned.index,
+                    protocol_uses,
+                },
+            );
+        }
+        cached_asts.insert(file.clone(), scanned.ast);
     }
 
-    // Re-scan stale files
-    let (
-        stale_module_index,
-        stale_superclass_index,
-        stale_class_infos,
-        stale_extensions,
-        cached_asts,
-    ) = if stale_files.is_empty() {
-        (
-            HashMap::new(),
-            HashMap::new(),
-            Vec::new(),
-            ExtensionIndex::new(),
-            HashMap::new(),
-        )
-    } else {
-        super::build::build_class_module_index(&stale_files, source_root, pkg_name)?
-    };
-
-    // Merge stale results
-    class_module_index.extend(stale_module_index);
-    class_superclass_index.extend(stale_superclass_index);
-    all_class_infos.extend(stale_class_infos);
-    extension_index.merge(&stale_extensions);
-    // Re-scanned files' uses come from the AST just re-parsed for them,
-    // overwriting any (necessarily absent, since a stale file was never in
-    // `fresh_files`) stale entry above.
-    file_protocol_uses.extend(protocol_uses_from_cached_asts(&cached_asts));
-
-    // Build updated cache entries and save
-    let file_entries = build_cache_entries(
-        source_files,
-        source_root,
-        pkg_name,
-        &Pass1Indexes {
-            class_module_index: &class_module_index,
-            class_superclass_index: &class_superclass_index,
-            all_class_infos: &all_class_infos,
-            extension_index: &extension_index,
-            file_protocol_uses: &file_protocol_uses,
-        },
-        &source_hashes,
-    );
     save_cache(build_dir, manifest_path, file_entries);
 
     Ok(IncrementalPass1Result {
-        class_module_index,
-        class_superclass_index,
-        all_class_infos,
-        extension_index,
+        class_module_index: index.class_module_index,
+        class_superclass_index: index.class_superclass_index,
+        all_class_infos: index.all_class_infos,
+        extension_index: index.extension_index,
         cached_asts,
         manifest_invalidated,
         source_hashes,
@@ -685,101 +619,6 @@ fn partition_files(
     // both stale and fresh, so their cached data won't be merged. No extra handling needed.
 
     (stale, fresh)
-}
-
-/// The merged Pass 1 indexes `build_cache_entries` reads from — bundled into
-/// one borrow so the function stays under clippy's argument-count limit
-/// (the `hashes` parameter would otherwise push it over).
-/// Mirrors the corresponding fields of [`IncrementalPass1Result`].
-struct Pass1Indexes<'a> {
-    class_module_index: &'a HashMap<String, String>,
-    class_superclass_index: &'a HashMap<String, String>,
-    all_class_infos: &'a [ClassInfo],
-    extension_index: &'a ExtensionIndex,
-    file_protocol_uses: &'a HashMap<Utf8PathBuf, Vec<EcoString>>,
-}
-
-/// Build cache entries from the current Pass 1 results.
-///
-/// Each source file gets an entry with its current content hash (taken
-/// from the precomputed `hashes` map — see [`content_hashes_of`] —
-/// rather than re-hashed here) and the subset of class/superclass indexes
-/// that belong to it (determined by module name prefix matching).
-fn build_cache_entries(
-    source_files: &[Utf8PathBuf],
-    source_root: Option<&Utf8Path>,
-    pkg_name: &str,
-    indexes: &Pass1Indexes<'_>,
-    hashes: &HashMap<String, String>,
-) -> HashMap<String, CacheEntry> {
-    let Pass1Indexes {
-        class_module_index,
-        class_superclass_index,
-        all_class_infos,
-        extension_index,
-        file_protocol_uses,
-    } = *indexes;
-
-    // Build a reverse index: module_name → Vec<(class_name, module_name)>
-    // This avoids O(files * classes) iteration in the loop below.
-    let mut module_to_classes: HashMap<&str, Vec<&str>> = HashMap::new();
-    for (class_name, mod_name) in class_module_index {
-        module_to_classes
-            .entry(mod_name.as_str())
-            .or_default()
-            .push(class_name.as_str());
-    }
-
-    // Build a name → ClassInfo index for fast lookup
-    let class_info_by_name: HashMap<&str, &ClassInfo> = all_class_infos
-        .iter()
-        .map(|ci| (ci.name.as_str(), ci))
-        .collect();
-
-    let mut entries = HashMap::new();
-
-    for file in source_files {
-        let Some(content_hash) = hashes.get(file.as_str()).cloned() else {
-            continue;
-        };
-
-        // Compute the expected module name for this file
-        let module_name = match super::build::compute_relative_module(file, source_root) {
-            Ok(rel) => super::util::bt_qualified_module_name(pkg_name, &rel),
-            Err(_) => continue,
-        };
-
-        // Collect classes that belong to this file's module via reverse index
-        let mut file_class_module_index = HashMap::new();
-        let mut file_superclass_index = HashMap::new();
-        let mut file_class_infos = Vec::new();
-
-        if let Some(class_names) = module_to_classes.get(module_name.as_str()) {
-            for &class_name in class_names {
-                file_class_module_index.insert(class_name.to_string(), module_name.clone());
-                if let Some(superclass) = class_superclass_index.get(class_name) {
-                    file_superclass_index.insert(class_name.to_string(), superclass.clone());
-                }
-                if let Some(ci) = class_info_by_name.get(class_name) {
-                    file_class_infos.push((*ci).clone());
-                }
-            }
-        }
-
-        entries.insert(
-            file.as_str().to_string(),
-            CacheEntry {
-                content_hash,
-                class_module_index: file_class_module_index,
-                class_superclass_index: file_superclass_index,
-                class_infos: file_class_infos,
-                extensions: extension_index.entries_for_file(file.as_std_path()),
-                protocol_uses: file_protocol_uses.get(file).cloned().unwrap_or_default(),
-            },
-        );
-    }
-
-    entries
 }
 
 /// Serde support for `Option<SystemTime>` via duration-since-epoch.
@@ -841,11 +680,12 @@ mod tests {
         entries.insert(
             "/src/counter.bt".to_string(),
             CacheEntry {
-                extensions: Vec::new(),
                 content_hash: "deadbeef".to_string(),
-                class_module_index: cmi,
-                class_superclass_index: csi,
-                class_infos: Vec::new(),
+                index: FileIndex {
+                    class_module_index: cmi,
+                    class_superclass_index: csi,
+                    ..FileIndex::default()
+                },
                 protocol_uses: Vec::new(),
             },
         );
@@ -940,22 +780,16 @@ mod tests {
         entries.insert(
             file_a.as_str().to_string(),
             CacheEntry {
-                extensions: Vec::new(),
                 content_hash: hash_a,
-                class_module_index: HashMap::new(),
-                class_superclass_index: HashMap::new(),
-                class_infos: Vec::new(),
+                index: FileIndex::default(),
                 protocol_uses: Vec::new(),
             },
         );
         entries.insert(
             file_b.as_str().to_string(),
             CacheEntry {
-                extensions: Vec::new(),
                 content_hash: hash_b,
-                class_module_index: HashMap::new(),
-                class_superclass_index: HashMap::new(),
-                class_infos: Vec::new(),
+                index: FileIndex::default(),
                 protocol_uses: Vec::new(),
             },
         );
@@ -991,11 +825,8 @@ mod tests {
         entries.insert(
             file.as_str().to_string(),
             CacheEntry {
-                extensions: Vec::new(),
                 content_hash: old_hash,
-                class_module_index: HashMap::new(),
-                class_superclass_index: HashMap::new(),
-                class_infos: Vec::new(),
+                index: FileIndex::default(),
                 protocol_uses: Vec::new(),
             },
         );
@@ -1047,11 +878,8 @@ mod tests {
         entries.insert(
             file.as_str().to_string(),
             CacheEntry {
-                extensions: Vec::new(),
                 content_hash: hash,
-                class_module_index: HashMap::new(),
-                class_superclass_index: HashMap::new(),
-                class_infos: Vec::new(),
+                index: FileIndex::default(),
                 protocol_uses: Vec::new(),
             },
         );
@@ -1094,11 +922,8 @@ mod tests {
         entries.insert(
             file.as_str().to_string(),
             CacheEntry {
-                extensions: Vec::new(),
                 content_hash: hash_main,
-                class_module_index: HashMap::new(),
-                class_superclass_index: HashMap::new(),
-                class_infos: Vec::new(),
+                index: FileIndex::default(),
                 protocol_uses: Vec::new(),
             },
         );
@@ -1129,11 +954,8 @@ mod tests {
         entries2.insert(
             file.as_str().to_string(),
             CacheEntry {
-                extensions: Vec::new(),
                 content_hash: hash_old_branch,
-                class_module_index: HashMap::new(),
-                class_superclass_index: HashMap::new(),
-                class_infos: Vec::new(),
+                index: FileIndex::default(),
                 protocol_uses: Vec::new(),
             },
         );

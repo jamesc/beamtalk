@@ -1,0 +1,249 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3675: template-method fixture for the per-scope class-variable tokens. The
+// base reads / writes `hits` around late-bound self-sends that
+// SsoStaleSub overrides to write `hits` and (for `boom`) raise. See
+// self_send_override_blocks_test.bt.
+
+Object subclass: SsoStaleBase
+  classState: hits = 0
+
+  class hits -> Integer => self.hits
+
+  class resetHits -> Integer => self.hits := 0
+
+  class bump -> Integer => self.hits := self.hits + 1
+
+  // Overridden by SsoStaleSub: writes `hits`; `boom` writes then raises.
+  class foo -> Integer => 0
+
+  class boom -> Integer => 0
+
+  class noop -> Integer => 0
+
+  // Reads `hits` BEFORE its own late-bound `self foo`.
+  class readThenFoo -> Integer =>
+    r := self.hits
+    self foo
+    r
+
+  // BT-3675 review: a statically bound wrapper in a loop reads the previous
+  // iteration's write.
+  class viaReadLoop -> List =>
+    #(1, 2, 3) collect: [:x | SsoStaleBase readThenFoo]
+
+  // A caught raise from a callee that wrote first, then a `class sealed`
+  // helper inside a block.
+  class sealed sealedNoop -> Integer => 0
+
+  class caughtThenSealedHelper -> Integer =>
+    [self boom] on: Error do: [:e | nil]
+    #(1) do: [:x | self sealedNoop]
+    0
+
+  // The method's own try body writes (via `bump`) and then raises.
+  class ownTryRaise -> Integer =>
+    [
+      self bump
+      1 / 0
+    ] on: Error do: [:e | nil]
+    self noop
+    self.hits
+
+  // A completed writer followed by a raise in the SAME scope: the scope's
+  // writes are discarded as a whole.
+  class completedThenRaise -> Integer =>
+    [
+      #(1) do: [:x | self foo]
+      1 / 0
+    ] on: Error do: [:e | nil]
+    #(1) do: [:x | self noop]
+    0
+
+  // A completed writer in a normally finishing block keeps its write.
+  class completedKept -> Integer =>
+    #(1, 2) do: [:x | self foo]
+    0
+
+  // The same, but the raise is caught by a runtime `Result tryDo:` rather
+  // than a generated `on:do:`.
+  class completedThenRaiseRuntime -> Integer =>
+    Result
+      tryDo: [
+        #(1) do: [:x | self foo]
+        1 / 0
+      ]
+    #(1) do: [:x | self noop]
+    0
+
+  // A successful runtime catcher keeps the closure's writes.
+  class runtimeKept -> Integer =>
+    Result tryDo: [self foo]
+    0
+
+  // Closure bodies: a caught raise inside the closure, then another send.
+  class closureCaughtThenSend -> Integer =>
+    #(1, 2)
+      do: [:x |
+        [
+          self foo
+          1 / 0
+        ] on: Error do: [:e | nil]
+        self foo
+      ]
+    0
+
+  class closureCompletedTry -> Integer =>
+    #(1, 2)
+      do: [:x |
+        [self foo] on: Error do: [:e | nil]
+        self foo
+      ]
+    0
+
+  // Nested closures keep every write.
+  class nestedClosures -> Integer =>
+    #(1, 2) do: [:x | #(1, 2) do: [:y | self foo]]
+    0
+
+  // A handler arm's send is kept.
+  class handlerSend -> Integer =>
+    [1 / 0] on: Error do: [:e | self foo]
+    self noop
+    0
+
+  // A raise caught by an outer handler after the inner scope finished.
+  class outerCaught -> Integer =>
+    [
+      #(1) do: [:x | self foo]
+      1 / 0
+    ] on: Error do: [:e | self noop]
+    self noop
+    0
+
+  // BT-3675 known limit: a closure stored in a local and invoked by a LATER
+  // statement exports into the scope of the statement that built it, which
+  // was already refreshed, so its writes are not kept (ADR 0110).
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class deferred -> Integer =>
+    b := [self foo]
+    b value
+    self noop
+    self.hits
+
+  // BT-3688: the same limit when the stored closure is handed to a collection
+  // higher-order method by name instead of invoked directly.
+  @expect stored_closure "BT-3688: pins the known limit of a stored closure passed to a collection HOM"
+  class deferredViaDo -> Integer =>
+    b := [:x | self foo]
+    #(1) do: b
+    self noop
+    self.hits
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class deferredInArm -> Integer =>
+    [
+      b := [self foo]
+      b value
+      self noop
+      nil
+    ] on: Error do: [:e | nil]
+    self.hits
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class deferredTwice -> Integer =>
+    b := [self foo]
+    b value
+    b value
+    self noop
+    self.hits
+
+  // The closure's write is lost, but a writing send in the same body is kept.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class deferredThenSend -> Integer =>
+    b := [self foo]
+    b value
+    self foo
+    self.hits
+
+  // The stored closure also holds statements of its own.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class deferredWithStatements -> Integer =>
+    b := [
+      x := self noop
+      self foo
+      x
+    ]
+    b value
+    self noop
+    self.hits
+
+  // Known limit (ADR 0110, BT-3681): a block literal passed to a user-defined
+  // class-side higher-order method. The closure runs inside the callee, which
+  // returns the ClassVars it was given, so the closure's write is not kept;
+  // the callee's own write is.
+  class section: aBlock :: Block -> Integer => aBlock value
+
+  class timed: aBlock :: Block -> Integer =>
+    self.hits := self.hits + 1
+    aBlock value
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class viaTimedNoWrite -> Integer =>
+    self timed: [self noop]
+    self.hits
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class viaTimedWriting -> Integer =>
+    self timed: [self foo]
+    self.hits
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class viaSection -> Integer =>
+    self section: [self foo]
+    self.hits
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class viaSectionThenSend -> Integer =>
+    self section: [self foo]
+    self noop
+    self.hits
+
+  // Stored closure with an own-class (non-override) mutating selector.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class storedBump -> Integer =>
+    b := [self bump]
+    b value
+    self noop
+    self.hits
+
+  // Known limit (ADR 0110, BT-3681): a stored closure can also READ a stale or
+  // reverted value, because the building statement's token stays in its sync
+  // chain after that statement's refresh consumed it.
+  class nextId -> Integer => self bump
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class staleAfterRaise -> Integer =>
+    b := [self nextId]
+    [
+      b value
+      1 / 0
+    ] on: Error do: [:e | nil]
+    id := b value
+    id
+
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class staleAfterBump -> Integer =>
+    b := [self nextId]
+    b value
+    self bump
+    id := b value
+    id
+
+  // The same HOM limit inside a confined scope (a loop body). A HOM that writes
+  // a class variable itself is a compile error inside a bare block.
+  @expect stored_closure "BT-3681: pins the known limit of a stored closure / HOM block argument"
+  class viaSectionInLoop -> Integer =>
+    #(1) do: [:x | self section: [self foo]]
+    self.hits

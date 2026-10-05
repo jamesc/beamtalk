@@ -52,6 +52,10 @@ pub enum ExpectCategory {
     /// Suppress sendability advisories — scoped handle crossing a process
     /// boundary or undeclared handle-wrapping class (ADR 0103).
     Sendability,
+    /// Suppress stored-closure class-variable advisories — a stored or
+    /// user-HOM-passed block whose class-side self-send write is not kept
+    /// (ADR 0110, BT-3681).
+    StoredClosure,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -76,6 +80,7 @@ impl ExpectCategory {
             "type_annotation" => Some(Self::TypeAnnotation),
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
+            "stored_closure" => Some(Self::StoredClosure),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -100,6 +105,7 @@ impl ExpectCategory {
             Self::TypeAnnotation => "type_annotation",
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
+            Self::StoredClosure => "stored_closure",
             Self::All => "all",
         }
     }
@@ -123,6 +129,7 @@ impl ExpectCategory {
             "type_annotation",
             "inheritance",
             "sendability",
+            "stored_closure",
             "all",
         ]
     }
@@ -679,6 +686,18 @@ impl MessageSelector {
     #[must_use]
     pub fn well_known(&self) -> Option<super::well_known::WellKnownSelector> {
         super::well_known::WellKnownSelector::from_selector(self)
+    }
+
+    /// Whether this selector evaluates a block: the `value` family
+    /// ([`WellKnownSelector::is_block_value`](super::well_known::WellKnownSelector::is_block_value))
+    /// or `valueWithArguments:`. `valueWithArguments:` has no
+    /// `WellKnownSelector` variant, so it is named here, once, for every caller
+    /// that needs "this send invokes a block".
+    #[must_use]
+    pub fn is_block_invocation(&self) -> bool {
+        self.well_known()
+            .is_some_and(super::well_known::WellKnownSelector::is_block_value)
+            || self.name() == "valueWithArguments:"
     }
 }
 

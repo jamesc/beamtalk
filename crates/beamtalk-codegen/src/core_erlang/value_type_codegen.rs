@@ -2044,10 +2044,13 @@ impl CoreErlangGenerator {
         // `class_var_version` only ever advances from class-method-specific
         // code paths, so this is a no-op read for every non-class-method
         // context.
-        let cv_version_before = self.class_var_version();
+        let cv_version_before = self.class_var_scope_mark();
         let rhs_doc = self.expression_doc(value)?;
         let tuple_var = self.fresh_temp_var("AssignThreaded");
 
+        // BT-3675: the scope token the construct's sends committed under must
+        // be bound before the construct.
+        body_parts.push(self.class_var_scope_prefix(cv_version_before));
         // Bind the {value, StateAcc} tuple.
         body_parts.push(docvec![
             "    let ",
@@ -2060,17 +2063,17 @@ impl CoreErlangGenerator {
         // `tuple_var` above — any class-var rebind a self-send inside a
         // `Foldl*` construct performed (its own post-accumulator
         // `ClassVarsN`) is confined to that `let`'s RHS and unreachable from
-        // here on. Refresh via the ADR 0110 shadow write so later code (a
+        // here on. Refresh via the per-scope class-variable commit (BT-3675) so later code (a
         // class-var read, or another self-send) references a name that's
         // actually visible — see `refresh_class_var_after_opaque_scope`'s
         // own doc comment. Skipped when the Letrec shape already threads
         // `ClassVars` precisely via the 3rd tuple element
         // below — doing both would rebind `ClassVars` twice, shadowing the
-        // Letrec extraction with a redundant (if equivalent) shadow read.
-        if !families.contains(&VersionPrefix::ClassVars) {
-            if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
-                body_parts.push(refresh);
-            }
+        // Letrec extraction with a redundant (if equivalent) commit read.
+        if families.contains(&VersionPrefix::ClassVars) {
+            let _ = self.close_class_var_scope(cv_version_before);
+        } else if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
+            body_parts.push(refresh);
         }
 
         // Bind the assignment target to element 1 (the logical value).
@@ -2407,7 +2410,7 @@ impl CoreErlangGenerator {
         // comment and `emit_vt_threaded_local_assignment`'s identical
         // Foldl-shape refresh (the pattern this mirrors — that call site
         // never had this gap; this one did).
-        let cv_version_before = self.class_var_version();
+        let cv_version_before = self.class_var_scope_mark();
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::foldl_list_op_body_block(expr)
@@ -2423,7 +2426,7 @@ impl CoreErlangGenerator {
             // opaquely to this extraction's own fresh tuple var, so any
             // `ClassVarsN` rebind a self-send inside the fold's own
             // accumulator performed is confined to that `let`'s RHS and
-            // unreachable from here on — recovered via the shadow-read
+            // unreachable from here on — recovered via the per-scope
             // refresh below instead (BT-3611: previously missing here,
             // unlike every other opaque-wrap call site — the `erlc`
             // "unbound variable 'ClassVarsN'" compiler crash this issue
@@ -2433,8 +2436,9 @@ impl CoreErlangGenerator {
             "FoldlListOpResult",
             "FoldlListOpState",
         );
+        let scope_prefix = self.class_var_scope_prefix(cv_version_before);
         if let Some(refresh) = self.refresh_class_var_after_opaque_scope(cv_version_before) {
-            return Ok(docvec![extraction_doc, refresh]);
+            return Ok(docvec![scope_prefix, extraction_doc, refresh]);
         }
         Ok(extraction_doc)
     }
@@ -4078,6 +4082,11 @@ impl CoreErlangGenerator {
         }
         let mut ctx = RenderCtx::new(self);
         docs.push(render(&extraction, &mut ctx));
+        // BT-3675: a `ClassVars` rebind is a mint like a send's; commit it to
+        // the enclosing scope so later sends sync from it.
+        if families.contains(&VersionPrefix::ClassVars) {
+            docs.push(self.commit_live_class_var_doc());
+        }
     }
 
     /// Returns true if the class is a non-instantiable primitive type.

@@ -449,6 +449,13 @@ pub struct ProtocolDefinition {
     /// supported" parse error in v1 (ADR 0127 §13) and is never collected
     /// here.
     pub provided_methods: Vec<MethodDefinition>,
+    /// The package this definition was carried in from, when it is not the
+    /// package being compiled (ADR 0127 §3; BT-3684). Always `None` out of the
+    /// parser — a loader that carries a dependency's protocol AST stamps it
+    /// (like `ClassInfo::package`) so `uses: pkg@Name` resolves against
+    /// `pkg`'s protocols only, even when another dependency declares a
+    /// same-named one. `None` therefore means "the current package".
+    pub package: Option<EcoString>,
     /// Non-doc comments (`//` and `/* */`) appearing before this protocol.
     pub comments: CommentAttachment,
     /// Doc comment attached to this protocol (`///` lines).

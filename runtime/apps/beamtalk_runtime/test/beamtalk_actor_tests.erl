@@ -2018,6 +2018,47 @@ await_initialize_preserves_full_stop_reason_test() ->
         logger:set_primary_config(level, all)
     end.
 
+await_initialize_monitor_established_before_death_reports_real_reason_test() ->
+    %% BT-3677 (deterministic): the actor is guaranteed dead BEFORE the caller
+    %% starts awaiting — the interleaving that scheduler load produces
+    %% intermittently. A monitor created atomically with the spawn
+    %% (`gen_server:start_monitor/3`) still reports the real stop reason;
+    %% a monitor created after death can only say `noproc`.
+    logger:set_primary_config(level, none),
+    try
+        {ok, {Pid, MonRef}} = gen_server:start_monitor(test_crashing_init_actor, #{}, []),
+        Probe = erlang:monitor(process, Pid),
+        receive
+            {'DOWN', Probe, process, Pid, _} -> ok
+        after 5000 -> error(actor_did_not_stop)
+        end,
+        ?assertEqual(
+            {error, {error, function_clause}},
+            beamtalk_actor:await_initialize(Pid, MonRef)
+        ),
+        %% The hazard this guards against: monitoring a dead process loses the reason.
+        ?assertEqual({error, noproc}, beamtalk_actor:await_initialize(Pid))
+    after
+        logger:set_primary_config(level, all)
+    end.
+
+safe_spawn_failing_initialize_always_reports_real_reason_test_() ->
+    %% BT-3677 (stress): a fast-failing `initialize` must report its real stop
+    %% reason on EVERY spawn, never `noproc`, regardless of scheduling.
+    {timeout, 60, fun() ->
+        logger:set_primary_config(level, none),
+        try
+            Results = [
+                beamtalk_actor:safe_spawn(test_crashing_init_actor, #{})
+             || _ <- lists:seq(1, 500)
+            ],
+            Bad = [R || R <- Results, R =/= {error, {error, function_clause}}],
+            ?assertEqual([], lists:sublist(Bad, 3))
+        after
+            logger:set_primary_config(level, all)
+        end
+    end}.
+
 safe_spawn_restores_trap_exit_test() ->
     %% safe_spawn restores the original trap_exit flag
     OldTrap = process_flag(trap_exit, false),

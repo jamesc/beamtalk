@@ -244,6 +244,115 @@ fn expect_type_on_ffi_arg_mismatch_is_not_stale_across_lint_and_build_bt_2851() 
         .stderr(contains("stale @expect").not());
 }
 
+/// Writes a protocol with a provided method whose body has a type error
+/// (`3 bogus`), plus a class that flattens it via `uses:` (ADR 0127 §3).
+/// `expect` is spliced in above the offending provided method.
+fn write_broken_provision_project(project: &std::path::Path, expect: &str) {
+    std::fs::write(
+        project.join("src/Broken.bt"),
+        format!(
+            "// Copyright 2026 James Casey\n\
+             // SPDX-License-Identifier: Apache-2.0\n\
+             \n\
+             Protocol define: Broken\n\
+             \x20\x20name -> String\n\
+             \n\
+             {expect}\
+             \x20\x20probe -> Integer => 3 bogus\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/Alpha.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Alpha\n\
+         \x20\x20uses: Broken\n\
+         \x20\x20name -> String => \"alpha\"\n",
+    )
+    .unwrap();
+}
+
+/// BT-3671: a flattened-provision diagnostic is published once, in the
+/// protocol's file — so an `@expect` written above the offending provided
+/// method must suppress it there (and not be reported stale) on both the
+/// `lint` and `build` surfaces. Without the `@expect` both surfaces report it.
+#[test]
+fn expect_in_protocol_file_suppresses_provision_diagnostic_on_lint_and_build_bt_3671() {
+    // Baseline: no `@expect` — both surfaces publish the provision diagnostic
+    // against the protocol's file.
+    let project = cli_common::fixture_project();
+    write_broken_provision_project(project.path(), "");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .stderr(contains("does not understand"));
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .stderr(contains("does not understand"));
+
+    // With the `@expect`: suppressed on both, and not stale.
+    let project = cli_common::fixture_project();
+    write_broken_provision_project(project.path(), "  @expect type\n");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "--format=json"])
+        .assert()
+        .stdout(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+}
+
+/// BT-3671 review follow-up: with two provided methods, an `@expect` above the
+/// *second* one must attach to it (not be swallowed into the first method's
+/// body) so it suppresses that method's provision diagnostic on `lint` and
+/// `build`.
+#[test]
+fn expect_above_second_provided_method_suppresses_on_lint_and_build_bt_3671() {
+    let project = cli_common::fixture_project();
+    write_broken_provision_project(project.path(), "");
+    std::fs::write(
+        project.path().join("src/Broken.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Protocol define: Broken\n\
+         \x20\x20name -> String\n\
+         \n\
+         \x20\x20fine -> Integer => 1\n\
+         \x20\x20@expect type\n\
+         \x20\x20probe -> Integer => 3 bogus\n",
+    )
+    .unwrap();
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .stderr(contains("does not understand").not())
+        .stderr(contains("stale @expect").not());
+}
+
 /// `beamtalk lint` requires `@expect dead_assignment` to suppress a
 /// real `DeadAssignment` diagnostic — without the pragma, lint fails.
 ///
@@ -386,4 +495,90 @@ fn lint_missing_path_exits_nonzero() {
         .assert()
         .failure()
         .stderr(predicates::str::is_match("does not exist|not found").unwrap());
+}
+
+/// BT-3673: a typed call to a trait-provided method on a class whose `uses:`
+/// trait lives in another file must not report "does not understand" from
+/// `beamtalk lint` (it already doesn't from `build`). The `bogus` call is the
+/// non-vacuous control: DNU reporting is live, only `tag` is provided.
+#[test]
+fn lint_resolves_cross_file_trait_provided_method_bt_3673() {
+    let project = cli_common::fixture_project();
+    cli_common::write_cross_file_trait_sources(&project.path().join("src"));
+    std::fs::write(
+        project.path().join("src/Caller.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Caller\n\
+         \x20\x20describe: w :: Widget -> String => w tag\n\
+         \x20\x20broken: w :: Widget => w bogus\n",
+    )
+    .unwrap();
+
+    let output = cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not understand 'bogus'"),
+        "control: `bogus` must be reported as DNU, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("does not understand 'tag'"),
+        "provided method `tag` must resolve on a cross-file trait user, got:\n{stderr}"
+    );
+}
+
+/// BT-3673: a path dependency whose own classes use a cross-file trait must
+/// compile (its multi-file compile now sees sibling-file protocols) and be
+/// consumable: `beamtalk lint` and `beamtalk build` of the consumer succeed
+/// and report no unknown protocol / DNU for a provided method. (A package
+/// with dependencies suppresses DNU hints by design, so the exported
+/// `ClassInfo` itself is asserted by `build_dep_class_index_flattens_*`.)
+#[test]
+fn consumer_of_dependency_with_cross_file_trait_compiles_bt_3673() {
+    let root = tempfile::tempdir().unwrap();
+    let dep = root.path().join("producer");
+    cli_common::write_cross_file_trait_sources(&dep.join("src"));
+    std::fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let consumer = root.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nproducer = { path = \"../producer\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer.join("src/Caller.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Caller\n\
+         \x20\x20describe: w :: Widget -> String => w tag\n",
+    )
+    .unwrap();
+
+    for cmd in ["lint", "build"] {
+        let output = cli_common::beamtalk()
+            .current_dir(&consumer)
+            .arg(cmd)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success()
+                && !stderr.contains("unknown protocol")
+                && !stderr.contains("does not understand"),
+            "{cmd}: dependency with a cross-file trait must compile and resolve `tag`, got:\n{stderr}"
+        );
+    }
 }

@@ -99,17 +99,9 @@ impl CoreErlangGenerator {
             receiver, selector, ..
         } = expr
         {
-            let is_value_selector = match selector {
-                beamtalk_core::ast::MessageSelector::Unary(name) => name == "value",
-                beamtalk_core::ast::MessageSelector::Keyword(parts) => {
-                    let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                    matches!(
-                        sel.as_str(),
-                        "value:" | "value:value:" | "value:value:value:"
-                    )
-                }
-                beamtalk_core::ast::MessageSelector::Binary(_) => false,
-            };
+            let is_value_selector = selector
+                .well_known()
+                .is_some_and(beamtalk_core::ast::well_known::WellKnownSelector::is_block_value);
             if is_value_selector {
                 if let Expression::Block(block) = receiver.as_ref() {
                     let mutations = Self::captured_mutations_for_block(block);
@@ -397,7 +389,15 @@ impl CoreErlangGenerator {
 
         // Generate block body as Document.
         // Ensure block_depth and scope are restored even on error.
-        let body_result = self.generate_block_body(block);
+        //
+        // BT-3675: the closure body is a class-variable region: what its
+        // sends commit is exported to the enclosing scope only when the body
+        // returns, so a closure that raises after a send completed (caught
+        // by a runtime catcher such as `Result tryDo:`) exports nothing.
+        let closure_region = self.open_closure_region();
+        let body_result = self
+            .generate_block_body(block)
+            .map(|body| self.wrap_closure_region(closure_region, body));
         self.block_depth -= 1;
         self.set_class_var_version(saved_class_var_version);
         self.set_state_version(saved_state_version);
@@ -469,6 +469,8 @@ impl CoreErlangGenerator {
 
         let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
 
+        // BT-3675: see `generate_block`'s class-variable closure region.
+        let closure_region = self.open_closure_region();
         // Set up loop body context for StateAcc-based threading
         let result = self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
@@ -528,6 +530,7 @@ impl CoreErlangGenerator {
         self.loop_mode.direct_params_do_open_chain = false;
 
         let (body_doc, _branch_final) = result?;
+        let body_doc = self.wrap_closure_region(closure_region, body_doc);
 
         Ok(docvec![header, body_doc])
     }
@@ -1169,20 +1172,22 @@ impl CoreErlangGenerator {
         // in this same block body (e.g. `^result`, which reads
         // `current_class_var()`) would otherwise reference a name never
         // bound in its own scope. `refresh_class_var_after_opaque_scope`
-        // recovers the live value via the ADR 0110 shadow write and re-binds
+        // recovers the live value via the per-scope class-variable commit (BT-3675) and re-binds
         // it to a name that IS in scope here.
         if self.in_class_method()
             && !(self.is_class_var_assignment(value)
                 || self.is_self_clear_field_class_var(value)
                 || self.is_class_method_self_send(value))
         {
-            let cv_version_before = self.class_var_version();
+            let cv_version_before = self.class_var_scope_mark();
             let val_doc = self.expression_doc(value)?;
             self.bind_var(var_name, &core_var);
+            let scope_prefix = self.class_var_scope_prefix(cv_version_before);
             let refresh = self
                 .refresh_class_var_after_opaque_scope(cv_version_before)
                 .unwrap_or(Document::Nil);
             return Ok(docvec![
+                scope_prefix,
                 "let ",
                 leaf::var(core_var),
                 " = ",

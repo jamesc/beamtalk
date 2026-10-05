@@ -29,21 +29,11 @@
 //! for exactly that — the same mechanism `test_support::arb_declared_type`
 //! uses.
 
-use beamtalk_core::ast::Module;
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use beamtalk_core::test_helpers::test_support::{near_valid_beamtalk, proptest_config_default};
+use beamtalk_core::test_helpers::test_support::{
+    near_valid_beamtalk, parse_source, proptest_config_default,
+};
 use beamtalk_repl::codegen::generate_repl_expression;
 use proptest::prelude::*;
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-fn parse_source(source: &str) -> Module {
-    let tokens = lex_with_eof(source);
-    let (module, _) = parse(tokens);
-    module
-}
 
 // ============================================================================
 // Property tests

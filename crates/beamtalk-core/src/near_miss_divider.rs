@@ -85,9 +85,10 @@ use crate::source_analysis::{Diagnostic, Span, parse_divider_name};
 ///
 /// Every lint pass proper lives in the standalone `beamtalk-lint` crate and
 /// is reachable through its `run_lint_passes`. This one check instead has
-/// three direct callers — `queries::diagnostic_provider` (so it also reaches
-/// the LSP's `publishDiagnostics`), `beamtalk lint`'s `collect_diagnostics`,
-/// and MCP's `run_module_analysis` — because a silently-mis-parsed
+/// two direct callers within `queries::diagnostic_provider` —
+/// `compute_project_diagnostics_with_analysis` (so it also reaches the LSP's
+/// `publishDiagnostics`) and `run_post_analysis_lint_pipeline` (shared by
+/// `beamtalk lint` and the MCP lint tool) — because a silently-mis-parsed
 /// section divider is cheap to fix the moment it's written and easy to miss
 /// later, and every surface should point at the comment's own line rather
 /// than the AST's imprecise span. It stays out of `beamtalk build`'s output:

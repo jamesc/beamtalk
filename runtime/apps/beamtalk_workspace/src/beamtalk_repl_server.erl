@@ -189,28 +189,35 @@ code_change(_OldVsn, State, _Extra) ->
 -doc """
 Write the actual bound port to a file in the workspace directory.
 This is needed when port=0 is used (OS assigns ephemeral port) so the
-CLI can discover the actual port after BEAM startup.
+CLI can discover the actual port after BEAM startup. Skipped for anonymous
+foreground workspace ids (BT-3672): they report the port on stdout.
 """.
 -spec write_port_file(binary() | undefined, inet:port_number(), binary()) -> ok.
 write_port_file(undefined, _Port, _Nonce) ->
     ok;
 write_port_file(WorkspaceId, Port, Nonce) ->
-    case beamtalk_platform:home_dir() of
-        false ->
+    %% BT-3672: anonymous foreground REPLs (`beamtalk repl --foreground`) learn
+    %% their port from the BEAMTALK_PORT stdout line, never from this file, and
+    %% are not attachable/discoverable (no `cookie`/`node.info`/`metadata.json`).
+    %% Writing it would only make `beamtalk workspace list` show a stale
+    %% foreground dir as a bogus "release" entry.
+    case beamtalk_workspace_meta:is_foreground_id(WorkspaceId) of
+        true -> ok;
+        false -> write_port_file_to_home(WorkspaceId, Port, Nonce)
+    end.
+
+-spec write_port_file_to_home(binary(), inet:port_number(), binary()) -> ok.
+write_port_file_to_home(WorkspaceId, Port, Nonce) ->
+    case beamtalk_platform:workspace_dir(WorkspaceId) of
+        undefined ->
             ?LOG_WARNING(
-                "HOME/USERPROFILE not set; skipping port file write for workspace ~p",
+                "No home directory; skipping port file write for workspace ~p",
                 [WorkspaceId],
                 #{domain => [beamtalk, runtime]}
             ),
             ok;
-        Home ->
-            PortFilePath = filename:join([
-                Home,
-                ".beamtalk",
-                "workspaces",
-                binary_to_list(WorkspaceId),
-                "port"
-            ]),
+        WsDir ->
+            PortFilePath = filename:join(WsDir, "port"),
             case filelib:ensure_dir(PortFilePath) of
                 ok ->
                     %% Format: PORT\nNONCE (two lines for stale detection)

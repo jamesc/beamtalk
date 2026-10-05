@@ -86,6 +86,73 @@ fn expected_mismatches() -> Vec<Mismatch> {
             line: 38,
             shape: "letrec",
         },
+        // BT-3667: a late-bound `self foo:` (a subclass override may write a
+        // class variable) nested in a conditional in a `whileTrue:` body. The
+        // loop cannot thread it; the write is recovered from the ADR 0110
+        // shadow after the statement and pinned by
+        // `SelfSendOverrideBlocksTest>>testWhileNested`.
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_blocks_base.bt".to_string(),
+            line: 72,
+            shape: "letrec",
+        },
+        // BT-3690: the same shape in the plain-reply fixture and its sealed twin
+        // (`armsToDo` at line 52, `armsTimesRepeat` at line 64): a class's own
+        // `self bump` nested in a conditional arm of a `to:do:` /
+        // `timesRepeat:` body, next to arms that send a provably pure `self
+        // plain`. Both still compile, and the write is recovered from the
+        // per-scope commit tokens exactly as for the BT-3683 entries after it;
+        // pinned by `SelfSendPlainReplyTest>>test{Base,Sub,Sealed}ArmsToDo` /
+        // `...ArmsTimesRepeat`.
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
+            line: 52,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
+            line: 64,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
+            line: 52,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
+            line: 64,
+            shape: "letrec",
+        },
+        // BT-3683: a class's own late-bound `self increment` nested in a
+        // conditional arm of a `to:do:` / `timesRepeat:` body (`armsInToDo`,
+        // `armsInTimesRepeat`, open and sealed). Same shape as the `whileTrue:`
+        // entry above: the loop's own carry-out cannot thread a mutation
+        // nested in an arm, so the write is recovered from the per-scope
+        // commit tokens (BT-3675) and pinned by
+        // `SelfSendOverrideBlocksTest>>test{Open,Sealed}ArmsInToDo` /
+        // `...ArmsInTimesRepeat`. The `do:`-over-a-literal shapes added by the
+        // same issue do not appear here (their old detector already agrees).
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
+            line: 106,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
+            line: 118,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
+            line: 86,
+            shape: "letrec",
+        },
+        Mismatch {
+            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
+            line: 98,
+            shape: "letrec",
+        },
     ]
 }
 

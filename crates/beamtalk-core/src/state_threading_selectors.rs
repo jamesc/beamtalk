@@ -245,10 +245,8 @@ pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
 /// the codegen it describes cannot silently drift apart.
 #[must_use]
 pub fn is_state_threaded_block_receiver(selector: &str) -> bool {
-    matches!(
-        selector,
-        "value" | "value:" | "value:value:" | "value:value:value:" | "on:do:" | "ensure:"
-    )
+    WellKnownSelector::from_name(selector).is_some_and(WellKnownSelector::is_block_value)
+        || matches!(selector, "on:do:" | "ensure:")
 }
 
 /// ADR 0128 (BT-3583, BT-3615): the single "which collection HOM, which

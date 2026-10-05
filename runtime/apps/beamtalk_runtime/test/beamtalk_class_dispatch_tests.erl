@@ -1157,7 +1157,13 @@ invoke_class_method_errors_test_() ->
             {"BT-3039: a foreign class's shadow entry in the same process is never read back",
                 fun test_invoke_nlr_relay_ignores_foreign_class_shadow/0},
             {"BT-3135: ?BT_CLASS_VARS_SHADOW_KEY_ATOM matches the Rust codegen literal",
-                fun test_shadow_key_atom_matches_codegen_contract/0}
+                fun test_shadow_key_atom_matches_codegen_contract/0},
+            {"BT-3675: the per-scope commit map never outlives a dispatch",
+                fun test_invoke_erases_scope_commits/0},
+            {"BT-3675: invoke_class_extension/7 erases the shadow and commits after a raise",
+                fun test_invoke_extension_erases_shadow_after_raise/0},
+            {"BT-3675: invoke_class_extension/7 erases the shadow and commits after a normal return",
+                fun test_invoke_extension_erases_shadow_after_return/0}
         ]
     end}.
 
@@ -1349,6 +1355,225 @@ test_invoke_nlr_relay_ignores_foreign_class_shadow() ->
 %% codegen emission site fails on both sides, not just one.
 test_shadow_key_atom_matches_codegen_contract() ->
     ?assertEqual('$bt_class_vars_shadow', ?BT_CLASS_VARS_SHADOW_KEY_ATOM).
+
+%% BT-3675: the per-scope commit map is erased by the outermost dispatch, so
+%% an entry left by a scope that raised (a dead token) never outlives it.
+test_invoke_erases_scope_commits() ->
+    LocalMethods = #{testNlrThrow => <<>>},
+    erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, #{make_ref() => #{count => 99}}),
+    try
+        _ = beamtalk_class_dispatch:handle_class_method_call(
+            testNlrThrow,
+            [],
+            'BT3675CommitErasedClass',
+            beamtalk_class_dispatch_test_helper,
+            LocalMethods,
+            #{count => 1}
+        ),
+        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
+    after
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+%% BT-3675: an extension body that self-sends a compiled class method leaves
+%% that method's shadow write (and commits) under the class's key; neither may
+%% outlive the extension dispatch, and the reply still carries the pre-call
+%% ClassVars when the body raised.
+test_invoke_extension_erases_shadow_after_raise() ->
+    ClassName = 'BT3675ExtRaiseClass',
+    ShadowKey =
+        {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)},
+    Fun = fun(_Args, _Self) ->
+        erlang:put(ShadowKey, #{count => 99}),
+        erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, #{make_ref() => #{count => 99}}),
+        error(bt3675_deliberate_crash)
+    end,
+    try
+        beamtalk_extensions:init(),
+        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+        ok = beamtalk_extensions:register(ClassTag, raisingExt, Fun, test),
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            raisingExt,
+            [],
+            ClassName,
+            beamtalk_class_dispatch_test_helper,
+            #{},
+            #{count => 1}
+        ),
+        ?assertMatch({reply, {error, _}, #{count := 1}}, Result),
+        ?assertEqual(undefined, erlang:get(ShadowKey)),
+        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
+    after
+        beamtalk_extensions:unregister(ClassName, raisingExt, true),
+        erlang:erase(ShadowKey),
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+test_invoke_extension_erases_shadow_after_return() ->
+    ClassName = 'BT3675ExtReturnClass',
+    ShadowKey =
+        {?BT_CLASS_VARS_SHADOW_KEY_ATOM, beamtalk_class_registry:class_object_tag(ClassName)},
+    Fun = fun(_Args, _Self) ->
+        erlang:put(ShadowKey, #{count => 99}),
+        erlang:put(?BT_CLASS_VARS_COMMIT_KEY_ATOM, #{make_ref() => #{count => 99}}),
+        ok
+    end,
+    try
+        beamtalk_extensions:init(),
+        ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+        ok = beamtalk_extensions:register(ClassTag, returningExt, Fun, test),
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            returningExt,
+            [],
+            ClassName,
+            beamtalk_class_dispatch_test_helper,
+            #{},
+            #{count => 1}
+        ),
+        ?assertMatch({reply, {ok, ok}, _}, Result),
+        ?assertEqual(undefined, erlang:get(ShadowKey)),
+        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM))
+    after
+        beamtalk_extensions:unregister(ClassName, returningExt, true),
+        erlang:erase(ShadowKey),
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+%%% ============================================================================
+%%% BT-3675: per-scope class-variable commits
+%%% ============================================================================
+
+class_var_scope_commit_test_() ->
+    [
+        {"a commit is read back and taken only under its own token",
+            fun test_scope_commit_own_token/0},
+        {"an entry under a dead token is never read by another scope",
+            fun test_scope_commit_dead_token/0},
+        {"nothing is committed or read from a foreign class's process",
+            fun test_scope_commit_foreign_process/0},
+        {"a nil ClassSelf (stateless class-sealed direct call) answers the fallback",
+            fun test_scope_commit_nil_class_self/0},
+        {"read takes the innermost token's entry first", fun test_scope_read_chain/0},
+        {"export moves a closure invocation's entry to the enclosing token, only if present",
+            fun test_scope_export/0}
+    ].
+
+scope_class_self() ->
+    #beamtalk_object{class = 'BT3675Scope class', class_mod = bt3675_scope, pid = self()}.
+
+test_scope_commit_own_token() ->
+    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+    try
+        Self = scope_class_self(),
+        Tok = make_ref(),
+        ?assertEqual(
+            #{n => 0}, beamtalk_class_dispatch:class_var_scope_read(Self, [Tok], #{n => 0})
+        ),
+        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Tok, #{n => 1}),
+        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Tok, #{n => 2}),
+        %% read does not consume; take does, exactly once.
+        ?assertEqual(
+            #{n => 2}, beamtalk_class_dispatch:class_var_scope_read(Self, [Tok], #{n => 0})
+        ),
+        ?assertEqual(
+            #{n => 2}, beamtalk_class_dispatch:class_var_scope_take(Self, Tok, #{n => 0})
+        ),
+        ?assertEqual(
+            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, Tok, #{n => 0})
+        )
+    after
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+test_scope_commit_dead_token() ->
+    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+    try
+        Self = scope_class_self(),
+        Dead = make_ref(),
+        Live = make_ref(),
+        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Dead, #{n => 7}),
+        ?assertEqual(
+            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, Live, #{n => 0})
+        ),
+        ?assertEqual(
+            #{n => 0}, beamtalk_class_dispatch:class_var_scope_read(Self, [Live], #{n => 0})
+        )
+    after
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+test_scope_commit_foreign_process() ->
+    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+    try
+        Foreign = spawn(fun() ->
+            receive
+                stop -> ok
+            end
+        end),
+        Self = (scope_class_self())#beamtalk_object{pid = Foreign},
+        Tok = make_ref(),
+        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Tok, #{n => 1}),
+        ?assertEqual(undefined, erlang:get(?BT_CLASS_VARS_COMMIT_KEY_ATOM)),
+        ?assertEqual(
+            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, Tok, #{n => 0})
+        ),
+        Foreign ! stop
+    after
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+test_scope_read_chain() ->
+    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+    try
+        Self = scope_class_self(),
+        Inner = make_ref(),
+        Outer = make_ref(),
+        ?assertEqual(
+            #{n => 0},
+            beamtalk_class_dispatch:class_var_scope_read(Self, [Inner, Outer], #{n => 0})
+        ),
+        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Outer, #{n => 1}),
+        ?assertEqual(
+            #{n => 1},
+            beamtalk_class_dispatch:class_var_scope_read(Self, [Inner, Outer], #{n => 0})
+        ),
+        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, Inner, #{n => 2}),
+        ?assertEqual(
+            #{n => 2},
+            beamtalk_class_dispatch:class_var_scope_read(Self, [Inner, Outer], #{n => 0})
+        )
+    after
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+test_scope_export() ->
+    erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM),
+    try
+        Self = scope_class_self(),
+        From = make_ref(),
+        To = make_ref(),
+        %% Nothing committed: exporting leaves the enclosing scope untouched.
+        ok = beamtalk_class_dispatch:class_var_scope_export(Self, From, To),
+        ?assertEqual(
+            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, To, #{n => 0})
+        ),
+        ok = beamtalk_class_dispatch:class_var_scope_commit(Self, From, #{n => 5}),
+        ok = beamtalk_class_dispatch:class_var_scope_export(Self, From, To),
+        ?assertEqual(
+            #{n => 0}, beamtalk_class_dispatch:class_var_scope_take(Self, From, #{n => 0})
+        ),
+        ?assertEqual(
+            #{n => 5}, beamtalk_class_dispatch:class_var_scope_take(Self, To, #{n => 0})
+        )
+    after
+        erlang:erase(?BT_CLASS_VARS_COMMIT_KEY_ATOM)
+    end.
+
+test_scope_commit_nil_class_self() ->
+    Tok = make_ref(),
+    ?assertEqual(ok, beamtalk_class_dispatch:class_var_scope_commit(nil, Tok, #{n => 1})),
+    ?assertEqual(#{n => 0}, beamtalk_class_dispatch:class_var_scope_read(nil, [Tok], #{n => 0})),
+    ?assertEqual(#{n => 0}, beamtalk_class_dispatch:class_var_scope_take(nil, Tok, #{n => 0})).
 
 %%% ============================================================================
 %%% 12. class_send instantiation variants

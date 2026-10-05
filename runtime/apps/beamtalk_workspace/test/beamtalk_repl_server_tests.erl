@@ -2459,12 +2459,9 @@ write_port_file_with_workspace_test() ->
     Result = beamtalk_repl_server:write_port_file(<<"test_ws_627">>, 9999, <<"abc123">>),
     ?assertEqual(ok, Result),
     %% Clean up if file was created
-    case beamtalk_platform:home_dir() of
-        false ->
-            ok;
-        Home ->
-            PortFile = filename:join([Home, ".beamtalk", "workspaces", "test_ws_627", "port"]),
-            file:delete(PortFile)
+    case beamtalk_platform:workspace_dir(<<"test_ws_627">>) of
+        undefined -> ok;
+        WsDir -> file:delete(filename:join(WsDir, "port"))
     end.
 
 %% ===================================================================
@@ -2560,6 +2557,30 @@ wpf_temp_dir() ->
 write_port_file_undefined_workspace_test() ->
     %% An undefined workspace id is a no-op (no HOME lookup, no file write).
     ?assertEqual(ok, beamtalk_repl_server:write_port_file(undefined, 1234, <<"abcdef0123456789">>)).
+
+write_port_file_skipped_for_anonymous_foreground_id_test() ->
+    %% BT-3672: anonymous foreground ids never get a port file (they report the
+    %% port on stdout and must not appear as bogus "release" workspaces).
+    Unique = integer_to_list(erlang:unique_integer([positive])),
+    FakeHome = filename:join(wpf_temp_dir(), "bt_wpf_fg_test_" ++ Unique),
+    ok = filelib:ensure_dir(filename:join(FakeHome, "placeholder")),
+    OrigHome = os:getenv("HOME"),
+    OrigUserprofile = os:getenv("USERPROFILE"),
+    try
+        os:putenv("HOME", FakeHome),
+        os:putenv("USERPROFILE", FakeHome),
+        WorkspaceId = beamtalk_workspace_meta:new_foreground_id(),
+        ?assertEqual(ok, beamtalk_repl_server:write_port_file(WorkspaceId, 54321, <<"nonce">>)),
+        ?assertNot(
+            filelib:is_dir(
+                filename:join([FakeHome, ".beamtalk", "workspaces", binary_to_list(WorkspaceId)])
+            )
+        )
+    after
+        restore_env("HOME", OrigHome),
+        restore_env("USERPROFILE", OrigUserprofile),
+        _ = file:del_dir_r(FakeHome)
+    end.
 
 write_port_file_writes_port_and_nonce_test() ->
     %% Point HOME at a throwaway directory so the writer creates

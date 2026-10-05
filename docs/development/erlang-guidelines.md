@@ -330,6 +330,7 @@ Workspace nodes automatically write logs to `~/.beamtalk/workspaces/{workspace_i
 - **Format**: `timestamp [level] module:function/arity message`
 - **Disable**: Set `BEAMTALK_NO_FILE_LOG=1` environment variable
 - **Handler**: `logger_std_h` added during workspace supervisor init
+- **Foreground pruning (BT-3672)**: starting an anonymous foreground workspace spawns a background prune of stale `foreground_*` dirs under `~/.beamtalk/workspaces`. Set `BEAMTALK_NO_FOREGROUND_PRUNE=1` to skip it. The Justfile EUnit recipes and the `repl_protocol.rs` e2e harness set it; any other BEAM-spawning harness or test that starts a foreground-shaped workspace should set it too, so it never prunes a developer's real workspaces dir.
 
 ### Benefits
 

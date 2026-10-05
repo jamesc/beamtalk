@@ -331,3 +331,79 @@ fn same_named_carried_protocols_resolve_first_wins() {
         "the first (broken) definition must be the one flattened"
     );
 }
+
+// ── A cross-file trait user's provisions are visible to other files ──────
+// (BT-3668)
+
+const TAGGED_TRAIT: &str = "Protocol define: Tagged
+  tag -> String => \"tag\"
+";
+
+const WIDGET: &str = "Object subclass: Widget
+  uses: Tagged
+";
+
+const WIDGET_CALLER: &str = "Object subclass: Caller
+  describe: w :: Widget -> String => w tag
+";
+
+fn dnu_diagnostics(widget_infos: Vec<ClassInfo>) -> Vec<Diagnostic> {
+    let module = parse_ok(WIDGET_CALLER);
+    analyse_full(
+        &module,
+        AnalysisContext::default().with_pre_loaded_classes(widget_infos),
+    )
+    .diagnostics
+    .into_iter()
+    .filter(|d| d.message.contains("does not understand"))
+    .collect()
+}
+
+fn tagged_defs() -> HashMap<ecow::EcoString, ProtocolDefinition> {
+    protocol_defs(TAGGED_TRAIT)
+        .into_iter()
+        .map(|p| (p.name.name.clone(), p))
+        .collect()
+}
+
+#[test]
+fn unflattened_class_info_of_a_cross_file_trait_user_reports_dnu() {
+    // Control: the class's own body alone has no `tag`, which is the gap
+    // `extract_flattened_class_infos` closes.
+    let infos = ClassHierarchy::extract_class_infos(&parse_ok(WIDGET));
+    assert_eq!(dnu_diagnostics(infos).len(), 1);
+}
+
+#[test]
+fn flattened_class_info_of_a_cross_file_trait_user_has_its_provisions() {
+    let infos = crate::semantic_analysis::trait_expansion::extract_flattened_class_infos(
+        &parse_ok(WIDGET),
+        &tagged_defs(),
+        None,
+    );
+    let tag = infos[0]
+        .methods
+        .iter()
+        .find(|m| m.selector == "tag")
+        .expect("`tag` is flattened into Widget's info");
+    assert_eq!(tag.defined_in.as_str(), "Widget");
+    assert_eq!(tag.origin.as_deref(), Some("Tagged"));
+    assert!(dnu_diagnostics(infos).is_empty());
+}
+
+#[test]
+fn flattened_class_info_keeps_a_class_body_method_over_the_provision() {
+    let widget = "Object subclass: Widget\n  uses: Tagged\n  tag -> String => \"own\"\n";
+    let infos = crate::semantic_analysis::trait_expansion::extract_flattened_class_infos(
+        &parse_ok(widget),
+        &tagged_defs(),
+        None,
+    );
+    let tags: Vec<_> = infos[0]
+        .methods
+        .iter()
+        .filter(|m| m.selector == "tag")
+        .collect();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].origin, None);
+}

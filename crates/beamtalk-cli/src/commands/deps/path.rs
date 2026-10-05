@@ -285,7 +285,7 @@ fn resolve_single_path_dep(
     info!(dep = %name, ebin = %ebin_path, "Resolved path dependency");
 
     let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
-        build_dep_class_index(&dep_root, name).unwrap_or_default();
+        build_dep_class_index(&dep_root, name, resolved).unwrap_or_default();
 
     let stubs_dir = resolve_dep_stubs_dir(&dep_manifest, &dep_root);
 
@@ -339,7 +339,7 @@ pub(crate) fn compile_dependency_at(
         compile_dependency_with_context(project_root, dep_root, dep_name, options, prior_deps)?;
 
     let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
-        build_dep_class_index(dep_root, dep_name).unwrap_or_default();
+        build_dep_class_index(dep_root, dep_name, prior_deps).unwrap_or_default();
 
     let stubs_dir = manifest::parse_manifest_full(&dep_root.join("beamtalk.toml"))
         .ok()
@@ -422,7 +422,7 @@ fn compile_dependency_with_context(
     let (
         own_class_module_index,
         class_superclass_index,
-        all_class_infos,
+        mut all_class_infos,
         extension_index,
         cached_asts,
     ) = crate::commands::build::build_class_module_index(
@@ -430,6 +430,15 @@ fn compile_dependency_with_context(
         source_root.as_deref(),
         dep_name,
     )?;
+    // Cross-file trait provisions flattened into the infos this dep's own
+    // compile and its dependents see (BT-3673), against its own protocols
+    // first and then those of the dependencies compiled before it (BT-3678).
+    crate::commands::build::flatten_package_class_infos(
+        &mut all_class_infos,
+        &cached_asts,
+        prior_protocol_defs(prior_deps),
+        dep_name,
+    );
 
     // Build a compilation index that includes this dep's own classes plus
     // classes from already-compiled dependencies, so cross-dependency class
@@ -450,8 +459,9 @@ fn compile_dependency_with_context(
     // immediately above. Exporting these aliases to *consumers* of this
     // dependency (cross-package alias resolution) is deferred as a
     // follow-up for this module.
-    let all_alias_infos =
-        crate::commands::build::collect_project_alias_infos(&source_files, dep_name);
+    // Taken before `cached_asts` is handed to `compile_sources_to_core`.
+    let mut dep_metadata = extract_dep_protocol_alias_metadata(&cached_asts, dep_name);
+    dep_metadata.add_prior_dep_protocols(prior_deps);
 
     // Compile .bt sources to .core files
     let compile_ctx = crate::beam_compiler::CompileContext {
@@ -459,16 +469,15 @@ fn compile_dependency_with_context(
             class_module_index: class_module_index.clone(),
             class_superclass_index: class_superclass_index.clone(),
             pre_loaded_classes: all_class_infos.clone(),
-            // Same-package cross-file protocol resolution within a
-            // dependency's own multi-file compile is a pre-existing gap
-            // (mirrors `pre_loaded_protocols` above it, and `all_alias_infos`'s
-            // own "deferred as a follow-up" doc a few lines up) — not
-            // widened here; a dependency package with a cross-file `uses:`
-            // among its *own* files still needs same-file definitions.
-            pre_loaded_protocols: Vec::new(),
-            pre_loaded_protocol_defs: Vec::new(),
-            pre_loaded_protocol_sources: std::collections::HashMap::new(),
-            pre_loaded_aliases: all_alias_infos,
+            // Same-package cross-file protocol resolution within the
+            // dependency's own multi-file compile (BT-3673): a `uses:` of a
+            // trait declared in a sibling file, or in one of the
+            // dependency's own dependencies (BT-3678), must resolve and
+            // flatten.
+            pre_loaded_protocols: dep_metadata.protocol_infos,
+            pre_loaded_protocol_defs: dep_metadata.protocol_defs,
+            pre_loaded_protocol_sources: dep_metadata.protocol_sources,
+            pre_loaded_aliases: dep_metadata.alias_infos,
             // The dep's own project-wide extensions — its files see
             // each other's extensions during its own compilation. (Exporting
             // them to consumers is WS3 / the ADR 0070 amendment.)
@@ -648,58 +657,53 @@ fn generate_dependency_app_file(
     Ok(())
 }
 
-/// Build a class module index for a dependency without compiling.
-///
-/// Scans the dependency's source files and extracts class-to-module mappings,
-/// plus protocol and type-alias metadata for cross-package
-/// `extending:`/`:: Alias` resolution. This is the fast path used when deps
-/// are fresh and don't need recompilation.
-///
-/// Protocol and alias extraction reuses `build_class_module_index`'s cached,
-/// already-parsed ASTs rather than re-lexing/re-parsing the dependency's
-/// source files a second and third time.
-#[allow(clippy::type_complexity)] // 6-tuple mirrors ResolvedDependency's own fields; a type alias wouldn't clarify
-pub(crate) fn build_dep_class_index(
-    dep_root: &Utf8Path,
-    dep_name: &str,
-) -> Result<(
-    HashMap<String, String>,
-    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    Vec<beamtalk_core::ast::ProtocolDefinition>,
-    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    beamtalk_core::semantic_analysis::ProtocolSourceMap,
-)> {
-    // `stubs/` is excluded (ADR 0075) — it's type-only and never
-    // compiled.
-    let src_dir = dep_root.join("src");
-    let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
-    if source_files.is_empty() {
-        return Ok((
-            HashMap::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
-        ));
+/// Protocol and alias metadata of a dependency's source files, extracted from
+/// the ASTs [`build_class_module_index`](crate::commands::build::build_class_module_index)
+/// already parsed.
+struct DepProtocolAliasMetadata {
+    protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+    protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+}
+
+impl DepProtocolAliasMetadata {
+    /// Appends the protocols of `prior_deps` after this dependency's own, so
+    /// a `uses: dep@Name` resolves against them (first definition wins, own
+    /// before prior; BT-3678).
+    fn add_prior_dep_protocols(&mut self, prior_deps: &[ResolvedDependency]) {
+        for dep in prior_deps {
+            self.protocol_infos
+                .extend(dep.protocol_infos.iter().cloned());
+            for (name, source) in &dep.protocol_sources {
+                self.protocol_sources
+                    .entry(name.clone())
+                    .or_insert_with(|| source.clone());
+            }
+        }
+        self.protocol_defs.extend(prior_protocol_defs(prior_deps));
     }
+}
 
-    let source_root = if src_dir.exists() {
-        Some(src_dir)
-    } else {
-        None
-    };
+/// The provision-bearing protocol ASTs of `prior_deps`, in order — what a
+/// dependency compiled after them may `uses:` (BT-3678).
+fn prior_protocol_defs(
+    prior_deps: &[ResolvedDependency],
+) -> impl Iterator<Item = beamtalk_core::ast::ProtocolDefinition> + '_ {
+    prior_deps
+        .iter()
+        .flat_map(|d| d.protocol_defs.iter().cloned())
+}
 
-    let (class_module_index, _, class_infos, _, cached_asts) =
-        crate::commands::build::build_class_module_index(
-            &source_files,
-            source_root.as_deref(),
-            dep_name,
-        )?;
-
-    // Extract protocol/alias infos from the already-parsed modules,
-    // iterating in a stable (sorted-by-path) order for deterministic output.
+/// Extracts [`DepProtocolAliasMetadata`] from `cached_asts`. Shared by the
+/// dependency's fast-path index ([`build_dep_class_index`]) and its own
+/// multi-file compile, so the cross-file `uses:` resolution is identical in
+/// both (BT-3673).
+fn extract_dep_protocol_alias_metadata(
+    cached_asts: &HashMap<Utf8PathBuf, crate::commands::build::CachedAst>,
+    dep_name: &str,
+) -> DepProtocolAliasMetadata {
+    // Iterate in a stable (sorted-by-path) order for deterministic output.
     let mut sorted_files: Vec<&Utf8PathBuf> = cached_asts.keys().collect();
     sorted_files.sort();
 
@@ -732,13 +736,13 @@ pub(crate) fn build_dep_class_index(
             ),
         );
         // Full ASTs of provision-bearing protocols only (ADR 0127 §10a;
-        // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc.
+        // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc — stamped
+        // with this dependency so `uses: dep@Name` resolves to them (BT-3684).
         protocol_defs.extend(
-            module
-                .protocols
-                .iter()
-                .filter(|p| !p.provided_methods.is_empty())
-                .cloned(),
+            beamtalk_core::semantic_analysis::trait_expansion::provision_bearing_protocols(
+                module,
+                Some(dep_name),
+            ),
         );
         let mut infos =
             beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
@@ -750,13 +754,139 @@ pub(crate) fn build_dep_class_index(
         alias_infos.extend(infos);
     }
 
-    Ok((
-        class_module_index,
-        class_infos,
+    DepProtocolAliasMetadata {
         protocol_infos,
         protocol_defs,
         alias_infos,
         protocol_sources,
+    }
+}
+
+/// A dependency's source scan before cross-file trait flattening: its class
+/// indexes plus the trait users and protocols to flatten them with.
+struct DepIndexScan {
+    class_module_index: HashMap<String, String>,
+    class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    metadata: DepProtocolAliasMetadata,
+    dep_name: String,
+}
+
+/// The exports of a [`DepIndexScan`], matching `ResolvedDependency`'s fields.
+pub(crate) type DepIndexExports = (
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::ast::ProtocolDefinition>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+    beamtalk_core::semantic_analysis::ProtocolSourceMap,
+);
+
+impl DepIndexScan {
+    /// Flattens cross-file trait provisions (BT-3673) into the exported
+    /// `ClassInfo`s, against the dependency's own protocols and then
+    /// `extra_protocol_defs` — those of the dependencies it may `uses:`
+    /// (BT-3678).
+    fn into_exports(
+        self,
+        extra_protocol_defs: impl IntoIterator<Item = beamtalk_core::ast::ProtocolDefinition>,
+    ) -> DepIndexExports {
+        let Self {
+            class_module_index,
+            mut class_infos,
+            trait_users,
+            metadata,
+            dep_name,
+        } = self;
+        trait_users.flatten(&mut class_infos, extra_protocol_defs, Some(&dep_name));
+        (
+            class_module_index,
+            class_infos,
+            metadata.protocol_infos,
+            metadata.protocol_defs,
+            metadata.alias_infos,
+            metadata.protocol_sources,
+        )
+    }
+}
+
+/// [`DepIndexScan::into_exports`], or empty exports for a dependency without
+/// source files.
+fn exports_or_empty(
+    scan: Option<DepIndexScan>,
+    extra_protocol_defs: impl IntoIterator<Item = beamtalk_core::ast::ProtocolDefinition>,
+) -> DepIndexExports {
+    scan.map_or_else(
+        || {
+            (
+                HashMap::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
+            )
+        },
+        |scan| scan.into_exports(extra_protocol_defs),
+    )
+}
+
+/// Scans a dependency's sources without compiling or flattening; see
+/// [`build_dep_class_index`]. `Ok(None)` when it has no source files.
+fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Option<DepIndexScan>> {
+    // `stubs/` is excluded (ADR 0075) — it's type-only and never
+    // compiled.
+    let src_dir = dep_root.join("src");
+    let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
+    if source_files.is_empty() {
+        return Ok(None);
+    }
+
+    let source_root = if src_dir.exists() {
+        Some(src_dir)
+    } else {
+        None
+    };
+
+    let (class_module_index, _, class_infos, _, cached_asts) =
+        crate::commands::build::build_class_module_index(
+            &source_files,
+            source_root.as_deref(),
+            dep_name,
+        )?;
+
+    Ok(Some(DepIndexScan {
+        class_module_index,
+        class_infos,
+        trait_users: crate::commands::build::package_trait_users(&cached_asts, Some(dep_name)),
+        metadata: extract_dep_protocol_alias_metadata(&cached_asts, dep_name),
+        dep_name: dep_name.to_string(),
+    }))
+}
+
+/// Build a class module index for a dependency without compiling.
+///
+/// Scans the dependency's source files and extracts class-to-module mappings,
+/// plus protocol and type-alias metadata for cross-package
+/// `extending:`/`:: Alias` resolution. This is the fast path used when deps
+/// are fresh and don't need recompilation.
+///
+/// Protocol and alias extraction reuses `build_class_module_index`'s cached,
+/// already-parsed ASTs rather than re-lexing/re-parsing the dependency's
+/// source files a second and third time.
+///
+/// `prior_deps` are the dependencies this one may `uses:` traits of — those
+/// compiled before it, in compile order; the exported `class_infos` carry their
+/// provisions too (BT-3678). The graph compile and the fresh-deps fast path both
+/// call this, so they export identical `class_infos` (BT-3684).
+pub(crate) fn build_dep_class_index(
+    dep_root: &Utf8Path,
+    dep_name: &str,
+    prior_deps: &[ResolvedDependency],
+) -> Result<DepIndexExports> {
+    Ok(exports_or_empty(
+        scan_dep_index(dep_root, dep_name)?,
+        prior_protocol_defs(prior_deps),
     ))
 }
 
@@ -1148,6 +1278,48 @@ dep_utils = { path = "dep_utils" }"#,
         );
     }
 
+    /// BT-3673: the `class_infos` a dependency exports to its consumers
+    /// carry the provided methods of a trait declared in another of the
+    /// dependency's own files (and the metadata its own multi-file compile
+    /// pre-loads names that trait).
+    #[test]
+    fn build_dep_class_index_flattens_cross_file_trait_provisions() {
+        let temp = TempDir::new().unwrap();
+        let dep_dir = temp.path().join("dep_traits");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_traits", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "tagged.bt",
+            "Protocol define: Tagged\n  name -> String\n\n  tag -> String => self name\n",
+        );
+        write_source(
+            &dep_dir,
+            "widget.bt",
+            "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n",
+        );
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let (_, class_infos, _, protocol_defs, _, _) =
+            build_dep_class_index(&dep_root, "dep_traits", &[]).unwrap();
+
+        assert_eq!(protocol_defs.len(), 1, "Tagged is provision-bearing");
+        let widget = class_infos
+            .iter()
+            .find(|c| c.name == "Widget")
+            .expect("Widget is exported");
+        assert_eq!(widget.package.as_deref(), Some("dep_traits"));
+        assert!(
+            widget.methods.iter().any(|m| m.selector == "tag"),
+            "exported Widget must carry Tagged's provided `tag`: {:?}",
+            widget
+                .methods
+                .iter()
+                .map(|m| &m.selector)
+                .collect::<Vec<_>>()
+        );
+    }
+
     /// `build_dep_class_index` must extract a dependency's protocol
     /// and type-alias declarations alongside its classes, so that a
     /// consumer's cross-package `extending:`/`:: Alias` resolution can be
@@ -1176,7 +1348,7 @@ dep_utils = { path = "dep_utils" }"#,
 
         let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
         let (class_module_index, _class_infos, protocol_infos, _protocol_defs, alias_infos, _) =
-            build_dep_class_index(&dep_root, "dep_types").unwrap();
+            build_dep_class_index(&dep_root, "dep_types", &[]).unwrap();
 
         assert!(
             class_module_index.is_empty(),
@@ -1243,7 +1415,7 @@ dep_utils = { path = "dep_utils" }"#,
 
         let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
         let (_, _, _, protocol_defs, _, protocol_sources) =
-            build_dep_class_index(&dep_root, "dep_traits").unwrap();
+            build_dep_class_index(&dep_root, "dep_traits", &[]).unwrap();
 
         assert_eq!(protocol_defs.len(), 1);
         assert_eq!(protocol_sources.len(), 1, "{protocol_sources:?}");

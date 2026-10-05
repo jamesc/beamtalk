@@ -42,7 +42,7 @@ count := 0
 // => 0
 
 Erlang lists foreach: [:x | count := count + x] with: #(1, 2, 3)
-// => _
+// => Result ok: nil
 
 count
 // => 0

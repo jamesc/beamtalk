@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3690: open class whose class-side self-send sits in a conditional arm of
+// a loop body, so each iteration also pays the arm's scope refresh (the
+// BT-3683 fallback read of the enclosing scopes' commits).
+
+Object subclass: SsbArmClass
+
+  class foo -> Integer => 1
+
+  class loop: n :: Integer -> Integer =>
+    1 to: n do: [:i | i > 0 ifTrue: [self foo]]
+    n

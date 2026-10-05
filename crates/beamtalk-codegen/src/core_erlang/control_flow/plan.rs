@@ -1273,7 +1273,12 @@ impl ThreadingPlan {
             span,
         );
         let mut ctx = RenderCtx::new(generator);
-        let extraction_doc = render(&extraction, &mut ctx);
+        let extraction_doc = docvec![
+            render(&extraction, &mut ctx),
+            // BT-3675: the rebind is a mint like a send's; commit it to the
+            // enclosing scope so later sends sync from it.
+            generator.commit_live_class_var_doc(),
+        ];
         docvec![
             " in let ",
             leaf::var(raw.clone()),

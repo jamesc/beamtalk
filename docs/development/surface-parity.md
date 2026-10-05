@@ -519,6 +519,20 @@ file, so it is only meaningful there.
   using file, merged across users, and published once in the protocol's file
   (text and `--format=json`, where `file` is the protocol path), for
   same-package and dependency protocols.
+- `@expect` (BT-3671), `build` and `lint` alike: a declaration-level `@expect`
+  (now parsed in protocol bodies) written above the offending provided method,
+  or a statement-level one inside its body, suppresses the provision
+  diagnostic published in the protocol file. A provision diagnostic is matched
+  only against protocol-file directives (`apply_protocol_expect_directives`),
+  never against the using file's own `@expect`s, since its span is an offset
+  into another file. Such a directive is never reported stale: whether a
+  provision diagnostic exists depends on which users were analysed.
+  The LSP, REPL and test-fixture compile paths do not apply protocol-file
+  `@expect` yet (only `build` and `lint` do).
+- `beamtalk lint <subset>` caveat: a provision diagnostic is published against
+  the protocol's file even when that file was not itself a lint target (the
+  using file was), and against a `<protocol Name>` placeholder (`file` in
+  `--format=json`) when the protocol's source identity is not carried.
 - LSP, MCP `lint`/`diagnostic_summary`: not yet attributed. The tagged
   diagnostic is still rendered at its raw span in the using file. Follow-up:
   carry a `ProtocolSourceMap` through `dependency_classes.rs` (currently
@@ -527,6 +541,79 @@ file, so it is only meaningful there.
 - Same-named protocols across packages resolve first-wins (project before
   dependencies) in both `ProtocolRegistry::add_pre_loaded` and
   `analyse_full`'s carried protocol map, and in the source map (BT-3665).
+
+### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
+
+A class that `uses:` a trait declared in *another* file only has the trait's
+provided methods in its `ClassInfo` once the provisions are flattened in;
+without that, a typed call to a provided method from a third file reports a
+false "does not understand". Every index builder below routes through
+`trait_expansion::flatten_trait_user_class_infos` (built on
+`extract_flattened_class_infos` and `first_wins_protocol_map`, so there is one
+flattening implementation):
+
+- `beamtalk build` (incremental Pass 1, `build/class_index.rs`), `beamtalk
+  test` (fixture indexes and the package `src/` index), `beamtalk lint`, MCP
+  `lint`/`diagnostic_summary`, `beamtalk type-coverage`, a path dependency's
+  own compile and the `class_infos` it exports, and the offline dependency scan
+  MCP uses (`dependency_classes.rs`): **parity**, flattened. For the project's
+  own surfaces (`build`, `test`, `lint`, MCP) protocols resolve project-first,
+  then dependencies; `type-coverage` resolves same-package protocols only (it
+  loads no dependency protocols).
+- A path dependency's own multi-file compile now also pre-loads its sibling
+  files' protocols, so a cross-file `uses:` inside a dependency compiles.
+- A dependency's compile, its exported `class_infos` (`build_dep_class_index`)
+  and the offline dependency scan also resolve the protocols of the *other*
+  dependencies (BT-3678): the dependency's own protocols first, then those of
+  the dependencies compiled before it. **All three paths walk the graph in the
+  same compile order** (`beamtalk_cli::dep_order::topological_order`, BT-3684),
+  so a cold build, the fresh-deps fast path and the offline scan export
+  identical flattened `class_infos` (the offline scan leaves
+  `ClassInfo::package` unstamped, so it matches by trait-provided surface). So
+  B's `uses: a@Retryable` of its own dependency A is flattened on every surface.
+- A package-qualified `uses: pkg@Name` resolves against `pkg`'s protocols only
+  (BT-3684): carried dependency protocol ASTs are stamped with their package
+  (`ProtocolDefinition::package`) and registered under `pkg@Name` in
+  `first_wins_protocol_map`, so a same-named protocol of an earlier dependency
+  cannot capture it. A bare `uses: Name` still takes the first definition. The
+  build's incremental-key `file_protocol_uses`/`protocol_hashes` use the same
+  keys (`protocol_use_key`), so editing `pkg`'s protocol rebuilds the file that
+  names it and editing another package's same-named one does not.
+  `ProtocolRegistry::add_pre_loaded` (conformance, a protocol *type* by bare
+  name) stays first-wins by bare name: a bare protocol type name has no package
+  qualifier to resolve by.
+- A protocol with no package stamp belongs to the package being compiled, so it
+  answers a qualifier only if that qualifier *is* the current package
+  (`trait_expansion::resolve_protocol_key` / `expand_module_in_package`, one rule
+  shared by the flattener, `check_after_hierarchy` and the build's
+  `protocol_hashes`). A mistyped qualifier, or one naming a dependency whose
+  protocol has no provisions (never carried), is "no source available" rather
+  than silently flattening the project's same-named protocol. Where the package
+  is unknown (REPL/script sessions, `beamtalk test` fixtures, offline MCP scan,
+  codegen's re-flattening in `lower_module_for_codegen`, which only runs on
+  analysis-accepted code) an unstamped protocol answers any qualifier, as
+  before. LSP / `ProjectIndex` stamp a dependency file's protocols from its
+  `_build/deps/<name>/` path, and its `$project` placeholder `current_package`
+  (a file under no registered workspace root, e.g. a manifest-less workspace or
+  a `didOpen` racing the root-package load) counts as an unknown package
+  (`trait_expansion::known_package`), so `uses: my_app@Parser` of the project's
+  own protocol is accepted there exactly as `beamtalk build` accepts it.
+- `beamtalk build`'s incremental Pass 1 folds every file — cache-fresh or
+  re-scanned — into the package indexes in source order with the same
+  `Pass1Index::add_file` a clean scan uses, and its cache entry keeps *every*
+  class a file declares (BT-3686), so a class declared in two files resolves to
+  the same declaration, and yields the same `trait_surface_hash`, whatever the
+  cache state — including after the winning file drops the class or is deleted.
+- MCP `lint`/`diagnostic_summary` flatten the infos with the package's
+  provision-bearing protocols, but still do not pass same-package protocol
+  ASTs to the per-file analysis (pre-existing gap noted in
+  `merge_dependency_class_infos`), so a *using* file's own `uses:` of a
+  sibling-file trait is not resolved there.
+- LSP / `ProjectIndex`, REPL: not changed or verified by BT-3673.
+- Not a gap: packages that declare `[dependencies]` suppress DNU *hints* in
+  `lint`/`build` by design, so the false DNU is only observable in
+  dependency-free packages (the exported dependency `ClassInfo` is asserted
+  directly in tests).
 
 ## Drift Check (CI)
 

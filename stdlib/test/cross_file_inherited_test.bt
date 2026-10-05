@@ -37,9 +37,14 @@ TestCase subclass: CrossFileInheritedTest
   testCrossFileErrorNamesOwningParentClass =>
     @expect all
     hint := [CrossFileChildOfForgetful spawn] on: Exception do: [:e | e hint]
-    self assert: (hint includesSubstring: "CrossFileParentForgets")
+    (hint includesSubstring: "CrossFileParentForgets")
+      ifFalse: [
+        self fail: "expected hint to include 'CrossFileParentForgets', got hint: {hint}"
+      ]
 
   testCrossFileErrorMentionsFieldName =>
     @expect all
     hint := [CrossFileChildOfForgetful spawn] on: Exception do: [:e | e hint]
-    self assert: (hint includesSubstring: "required")
+    (hint includesSubstring: "required") ifFalse: [
+      self fail: "expected hint to include 'required', got hint: {hint}"
+    ]

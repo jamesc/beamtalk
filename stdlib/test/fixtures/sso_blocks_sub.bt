@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3667: template-method fixture; see self_send_override_test.bt.
+
+SsoBlocksBase subclass: SsoBlocksSub
+  classState: subHits = 0
+
+  class foo: x -> Integer =>
+    self.subHits := self.subHits + 1
+    x * 10
+
+  class subHits -> Integer => self.subHits
+
+  class resetSubHits -> Integer => self.subHits := 0
+
+  class tick -> Integer =>
+    self.subHits := self.subHits + 1
+    self.subHits
+
+  class hook -> Integer =>
+    self.subHits := self.subHits + 1
+    self error: "boom"

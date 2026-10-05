@@ -20,8 +20,16 @@ and can be queried by other components (e.g., idle monitor).
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("kernel/include/file.hrl").
+
+%% BT-3672: leftover anonymous foreground workspace dirs idle longer than this
+%% are pruned when a new foreground workspace starts.
+-define(FOREGROUND_MAX_AGE_SECONDS, 7 * 24 * 3600).
 
 %% Public API
+-export([new_foreground_id/0, is_foreground_id/1]).
+-export([prune_stale_foreground_workspaces/3]).
+-export([prune_stale_foreground_workspaces_async/3]).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([on_actor_spawned/2, register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
@@ -521,6 +529,236 @@ set_git_toplevel(ProjectPath, Toplevel) when is_binary(ProjectPath), is_binary(T
             ok
     end.
 
+-doc """
+Generate a workspace id for an anonymous foreground (REPL) workspace.
+
+BT-3670: ids must be unique across runs, because `metadata.json` under
+`~/.beamtalk/workspaces/<id>/` is restored when the id matches (that is
+intended for explicitly named/persistent workspaces only). A bare
+`erlang:unique_integer/1` is a small per-VM counter and collided across
+runs, resurrecting settings/timestamps/sources from an unrelated session
+(ADR 0129: no image mechanics). The OS pid, wall-clock microseconds and a
+per-VM counter together make a collision across runs practically impossible.
+""".
+-spec new_foreground_id() -> binary().
+new_foreground_id() ->
+    iolist_to_binary([
+        <<"foreground_">>,
+        os:getpid(),
+        $_,
+        integer_to_binary(erlang:system_time(microsecond)),
+        $_,
+        integer_to_binary(erlang:unique_integer([positive]))
+    ]).
+
+-doc """
+True when `WorkspaceId` has the shape produced by `new_foreground_id/0`
+(`foreground_<pid>_<microseconds>_<counter>`, BT-3672). Such workspaces are
+anonymous and per-run: their metadata is never persisted, and their leftover
+directories are eligible for age-based pruning. The strict shape (rather than
+a bare `foreground_` prefix) keeps a user-chosen name like `foreground_demo`
+persistent.
+""".
+-spec is_foreground_id(binary() | string()) -> boolean().
+is_foreground_id(Id) when is_list(Id) ->
+    try iolist_to_binary(Id) of
+        Bin -> is_foreground_id(Bin)
+    catch
+        _:_ -> false
+    end;
+is_foreground_id(<<"foreground_", Rest/binary>>) ->
+    case binary:split(Rest, <<"_">>, [global]) of
+        [Pid, Micros, Counter] ->
+            lists:all(fun is_digits/1, [Pid, Micros, Counter]);
+        _ ->
+            false
+    end;
+is_foreground_id(_) ->
+    false.
+
+is_digits(<<>>) -> false;
+is_digits(Bin) -> lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Bin)).
+
+-doc """
+Remove leftover directories of anonymous foreground workspaces under `BaseDir`
+(BT-3672). Returns the number of directories removed.
+
+A directory is removed only when ALL of these hold; anything inconclusive
+keeps it:
+
+1. its name passes `is_foreground_id/1` (strict shape);
+2. it is a real directory (symlinks are never followed or removed);
+3. it looks stale: the newest mtime among the directory, its top-level
+   entries (`workspace.log`, `cookie`, `port`, `changes/`, ...) and the
+   entries one level inside `changes/` (appends there do not bump the
+   `changes/` directory mtime) is older than `MaxAgeSeconds`;
+4. its owner is conclusively not running: the OS pid embedded in the id is
+   gone (POSIX `kill -0` reports "No such process"; checked first, so a live
+   pid keeps the dir without any probe) AND no `port` file points at a TCP
+   port that accepts a connection on 127.0.0.1 (current foreground REPLs write
+   no port file, so for them the pid check alone decides; legacy dirs may
+   have one). On other
+   platforms, or on any other outcome (EPERM, unparsable port file, probe
+   timeout, unreadable directory), the directory is kept.
+
+Known limit: a foreground workspace from another PID namespace or host that
+shares this home directory, bound to a non-loopback address and quiet for
+more than `MaxAgeSeconds`, is indistinguishable from a dead one. Errors are
+swallowed (best effort).
+""".
+-spec prune_stale_foreground_workspaces(file:filename(), non_neg_integer(), integer()) ->
+    non_neg_integer().
+prune_stale_foreground_workspaces(BaseDir, MaxAgeSeconds, NowSeconds) ->
+    try file:list_dir(BaseDir) of
+        {ok, Names} ->
+            Cutoff = NowSeconds - MaxAgeSeconds,
+            lists:foldl(
+                fun(Name, Removed) ->
+                    case
+                        is_foreground_id(Name) andalso
+                            prune_if_stale(filename:join(BaseDir, Name), Name, Cutoff)
+                    of
+                        true -> Removed + 1;
+                        false -> Removed
+                    end
+                end,
+                0,
+                Names
+            );
+        {error, _} ->
+            0
+    catch
+        _:_ -> 0
+    end.
+
+-doc """
+Run `prune_stale_foreground_workspaces/3` in a spawned, unlinked process so
+workspace startup never waits on it (it may spawn a shell and probe a port per
+stale candidate). Errors are swallowed. Returns the worker pid; it exits only
+once pruning has finished, so callers (tests) can monitor it to wait.
+""".
+-spec prune_stale_foreground_workspaces_async(file:filename(), non_neg_integer(), integer()) ->
+    pid().
+prune_stale_foreground_workspaces_async(BaseDir, MaxAgeSeconds, NowSeconds) ->
+    spawn(fun() ->
+        try
+            _ = prune_stale_foreground_workspaces(BaseDir, MaxAgeSeconds, NowSeconds),
+            ok
+        catch
+            _:_ -> ok
+        end
+    end).
+
+-spec prune_if_stale(file:filename(), file:filename(), integer()) -> boolean().
+prune_if_stale(Dir, Name, Cutoff) ->
+    try
+        case file:read_link_info(Dir, [{time, posix}]) of
+            {ok, #file_info{type = directory, mtime = DirMtime}} ->
+                newest_mtime(Dir, DirMtime) < Cutoff andalso
+                    owner_conclusively_dead(Dir, Name) andalso
+                    file:del_dir_r(Dir) =:= ok;
+            _ ->
+                false
+        end
+    catch
+        _:_ -> false
+    end.
+
+%% Newest mtime of Dir, its entries, and the entries one level inside any
+%% subdirectory (`changes/`). Unreadable => "now" so we never delete it.
+-spec newest_mtime(file:filename(), integer()) -> integer().
+newest_mtime(Dir, DirMtime) ->
+    case file:list_dir(Dir) of
+        {ok, Entries} ->
+            lists:foldl(
+                fun(E, Acc) ->
+                    Path = filename:join(Dir, E),
+                    case file:read_link_info(Path, [{time, posix}]) of
+                        {ok, #file_info{type = directory, mtime = M}} ->
+                            max(Acc, newest_child_mtime(Path, M));
+                        {ok, #file_info{mtime = M}} ->
+                            max(Acc, M);
+                        _ ->
+                            Acc
+                    end
+                end,
+                DirMtime,
+                Entries
+            );
+        {error, _} ->
+            erlang:system_time(second)
+    end.
+
+newest_child_mtime(Dir, DirMtime) ->
+    case file:list_dir(Dir) of
+        {ok, Entries} ->
+            lists:foldl(
+                fun(E, Acc) ->
+                    case file:read_link_info(filename:join(Dir, E), [{time, posix}]) of
+                        {ok, #file_info{mtime = M}} -> max(Acc, M);
+                        _ -> Acc
+                    end
+                end,
+                DirMtime,
+                Entries
+            );
+        {error, _} ->
+            erlang:system_time(second)
+    end.
+
+%% True only when no sign of life is found AND the embedded pid is provably
+%% gone. See prune_stale_foreground_workspaces/3 item 4.
+-spec owner_conclusively_dead(file:filename(), file:filename()) -> boolean().
+owner_conclusively_dead(Dir, Name) ->
+    %% Cheapest short-circuit first: a live pid keeps the dir without a probe.
+    pid_is_gone(Name) andalso port_file_says_dead(filename:join(Dir, "port")).
+
+%% Port file written by beamtalk_repl_server:write_port_file/3 (`PORT\nNONCE`).
+%% Absent file => no evidence of life; present => must be a refused connection.
+-spec port_file_says_dead(file:filename()) -> boolean().
+port_file_says_dead(PortFile) ->
+    case file:read_file(PortFile) of
+        {error, enoent} ->
+            true;
+        {ok, Bin} ->
+            [First | _] = binary:split(Bin, <<"\n">>),
+            try binary_to_integer(string:trim(First)) of
+                Port when Port > 0, Port < 65536 ->
+                    case gen_tcp:connect({127, 0, 0, 1}, Port, [], 500) of
+                        {ok, Sock} ->
+                            _ = gen_tcp:close(Sock),
+                            false;
+                        {error, econnrefused} ->
+                            true;
+                        {error, _} ->
+                            false
+                    end;
+                _ ->
+                    false
+            catch
+                _:_ -> false
+            end;
+        {error, _} ->
+            false
+    end.
+
+%% The id embeds the OS pid of the creating VM (digits only, validated by
+%% is_foreground_id/1, so safe to interpolate). POSIX only; pid reuse can only
+%% cause a false "alive", which is the safe direction.
+-spec pid_is_gone(file:filename()) -> boolean().
+pid_is_gone(Name) ->
+    case os:type() of
+        {unix, _} ->
+            [<<"foreground">>, Pid | _] = binary:split(iolist_to_binary(Name), <<"_">>, [global]),
+            %% Force the C locale: the "No such process" text below is
+            %% locale-dependent (a localized kill would never match, which is
+            %% safe but would silently disable pruning).
+            Out = os:cmd("LC_ALL=C LANG=C kill -0 " ++ binary_to_list(Pid) ++ " 2>&1"),
+            string:find(Out, "No such process") =/= nomatch;
+        _ ->
+            false
+    end.
+
 %%% gen_server callbacks
 
 init(InitialMetadata) ->
@@ -555,23 +793,39 @@ init(InitialMetadata) ->
             release ->
                 undefined;
             workspace ->
-                case beamtalk_platform:home_dir() of
+                %% BT-3672: anonymous foreground ids are never reused, so a
+                %% persisted metadata.json could never be restored — skip it
+                %% rather than leaving one more stale dir per run. Only
+                %% explicitly named/persistent ids persist and restore.
+                case is_foreground_id(WorkspaceId) of
+                    true ->
+                        %% Off the startup path: pruning may spawn a shell and
+                        %% probe ports per stale candidate. Tests and harnesses
+                        %% set BEAMTALK_NO_FOREGROUND_PRUNE=1 so they never
+                        %% prune the developer's real workspaces dir.
+                        case
+                            {
+                                os:getenv("BEAMTALK_NO_FOREGROUND_PRUNE"),
+                                beamtalk_platform:workspaces_base_dir()
+                            }
+                        of
+                            {"1", _} ->
+                                ok;
+                            {_, undefined} ->
+                                ok;
+                            {_, BaseDir} ->
+                                _ = prune_stale_foreground_workspaces_async(
+                                    BaseDir,
+                                    ?FOREGROUND_MAX_AGE_SECONDS,
+                                    Now
+                                )
+                        end,
+                        undefined;
                     false ->
-                        CacheDir = filename:basedir(user_cache, "beamtalk"),
-                        filename:join([
-                            CacheDir,
-                            "workspaces",
-                            binary_to_list(WorkspaceId),
-                            "metadata.json"
-                        ]);
-                    Home ->
-                        filename:join([
-                            Home,
-                            ".beamtalk",
-                            "workspaces",
-                            binary_to_list(WorkspaceId),
-                            "metadata.json"
-                        ])
+                        case beamtalk_platform:workspace_dir(WorkspaceId) of
+                            undefined -> undefined;
+                            WsDir -> filename:join(WsDir, "metadata.json")
+                        end
                 end
         end,
 
@@ -848,8 +1102,8 @@ load_metadata_from_disk(State) ->
                         end,
                     %% BT-3664: `project_path' is deliberately NOT restored from
                     %% disk. It is a runtime fact supplied by the launcher
-                    %% (ADR 0129: no image mechanics), and workspace ids are
-                    %% small per-VM counters, so a stale metadata.json from an
+                    %% (ADR 0129: no image mechanics), and a named workspace's id
+                    %% is reused across runs, so a stale metadata.json from an
                     %% unrelated run must never override it (it made `sync`
                     %% name project modules `bt@lib_thing` instead of
                     %% `bt@<pkg>@lib_thing`). The launcher's value stays in

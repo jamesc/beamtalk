@@ -175,6 +175,9 @@ struct DiscoveredDep {
     /// This dependency's own package-bundled FFI type stubs directory (ADR
     /// 0075 layer 2), from its own `beamtalk.toml` `[stubs] path`.
     stubs_dir: Option<Utf8PathBuf>,
+    /// Names of this dependency's own direct dependencies, from its
+    /// `beamtalk.toml` — the edges [`collect_fresh_deps`] orders the graph by.
+    deps: Vec<String>,
 }
 
 /// Recursively discover all dependency names and roots by walking manifests.
@@ -252,6 +255,10 @@ fn discover_all_dep_roots(
                 },
                 source: spec.source.clone(),
                 stubs_dir,
+                deps: dep_parsed
+                    .as_ref()
+                    .map(|m| m.dependencies.keys().cloned().collect())
+                    .unwrap_or_default(),
             });
 
             // Enqueue this dep's own dependencies for discovery
@@ -273,15 +280,29 @@ fn discover_all_dep_roots(
 /// Rebuilds the class module index from each dependency's source files
 /// without recompiling. This is the fast path for the "deps are fresh" case.
 /// Discovers the full transitive graph so that transitive deps are not lost.
+///
+/// Dependencies are visited in the compile order of the graph compile
+/// ([`beamtalk_cli::dep_order::topological_order`]) and each is indexed against
+/// the dependencies before it, exactly as `compile_dependency_at` does, so the
+/// exported (flattened) `class_infos` are identical to a cold build's (BT-3684).
 fn collect_fresh_deps(
     project_root: &Utf8Path,
     parsed: &manifest::ParsedManifest,
 ) -> Result<Vec<path::ResolvedDependency>> {
     let layout = BuildLayout::new(project_root);
     let all_deps = discover_all_dep_roots(project_root, parsed)?;
-    let mut resolved = Vec::new();
+    let dependencies = all_deps
+        .iter()
+        .map(|dep| (dep.name.clone(), dep.deps.clone()))
+        .collect();
+    let compile_order =
+        beamtalk_cli::dep_order::topological_order(&dependencies, &parsed.package.name)?;
+    let mut resolved: Vec<path::ResolvedDependency> = Vec::new();
 
-    for dep in &all_deps {
+    for name in compile_order {
+        let Some(dep) = all_deps.iter().find(|dep| dep.name == name) else {
+            continue;
+        };
         let ebin_path = layout.dep_ebin_dir(&dep.name);
 
         // Rebuild class/protocol/alias indexes from source files (fast — no compilation)
@@ -292,7 +313,7 @@ fn collect_fresh_deps(
             protocol_defs,
             alias_infos,
             protocol_sources,
-        ) = path::build_dep_class_index(&dep.root, &dep.name)?;
+        ) = path::build_dep_class_index(&dep.root, &dep.name, &resolved)?;
 
         debug!(
             dep = %dep.name,
@@ -983,6 +1004,59 @@ mod tests {
         assert_eq!(
             result[0].class_module_index.get("Helper").unwrap(),
             "bt@utils@helper"
+        );
+    }
+
+    /// BT-3678: the fresh-deps fast path exports a dependency's class with the
+    /// provided methods of a trait declared in the dependency's own
+    /// dependency, although that dependency is discovered after it.
+    #[test]
+    fn test_collect_fresh_deps_flattens_transitive_dep_trait() {
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let a_dir = temp.path().join("pkg_a");
+        fs::create_dir_all(&a_dir).unwrap();
+        write_manifest(&a_dir, "pkg_a", "0.1.0", "");
+        write_source(
+            &a_dir,
+            "retryable.bt",
+            "Protocol define: Retryable\n  name -> String\n\n  retryTag -> String => self name\n",
+        );
+        let b_dir = temp.path().join("pkg_b");
+        fs::create_dir_all(&b_dir).unwrap();
+        write_manifest(
+            &b_dir,
+            "pkg_b",
+            "0.1.0",
+            "[dependencies]\npkg_a = { path = \"../pkg_a\" }",
+        );
+        write_source(
+            &b_dir,
+            "widget.bt",
+            "Object subclass: Widget\n  uses: pkg_a@Retryable\n  name -> String => \"w\"\n",
+        );
+        create_dep_ebin_with_beam(temp.path(), "pkg_a");
+        create_dep_ebin_with_beam(temp.path(), "pkg_b");
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\npkg_b = { path = \"pkg_b\" }",
+        );
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        let result = collect_fresh_deps(&root, &parsed).unwrap();
+        let b = result.iter().find(|d| d.name == "pkg_b").unwrap();
+        let widget = b.class_infos.iter().find(|c| c.name == "Widget").unwrap();
+        assert!(
+            widget.methods.iter().any(|m| m.selector == "retryTag"),
+            "Widget must carry pkg_a's provided `retryTag`: {:?}",
+            widget
+                .methods
+                .iter()
+                .map(|m| &m.selector)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -2106,5 +2180,160 @@ mod tests {
             "the recorded snapshot must read back as fresh — otherwise every \
              build re-resolves"
         );
+    }
+
+    /// BT-3684 fixture. `pkg_a` and `pkg_b` both declare a `Retryable` trait,
+    /// providing `aTag` and `bTag` respectively. Compile order (leaves first,
+    /// largest name first among equals) is `pkg_b, pkg_d, pkg_a, pkg_c`, while
+    /// discovery order is `pkg_a, pkg_b, pkg_c, pkg_d`:
+    ///
+    /// - `pkg_c` (depends on both) writes `uses: pkg_a@Retryable`;
+    /// - `pkg_d` (depends on `pkg_b` only) writes a bare `uses: Retryable`;
+    /// - `pkg_b` writes `uses: pkg_b@Retryable` for its own trait.
+    fn overlapping_protocol_project(temp: &TempDir) -> camino::Utf8PathBuf {
+        use std::fmt::Write as _;
+        let package = |name: &str, deps: &[&str], trait_tag: Option<&str>, user: Option<&str>| {
+            let dir = temp.path().join(name);
+            fs::create_dir_all(&dir).unwrap();
+            let mut section = String::new();
+            for d in deps {
+                if section.is_empty() {
+                    section.push_str("[dependencies]\n");
+                }
+                writeln!(section, "{d} = {{ path = \"../{d}\" }}").unwrap();
+            }
+            write_manifest(&dir, name, "0.1.0", &section);
+            if let Some(tag) = trait_tag {
+                write_source(
+                    &dir,
+                    "retryable.bt",
+                    &format!(
+                        "Protocol define: Retryable\n  name -> String\n\n  {tag} -> String => self name\n"
+                    ),
+                );
+            }
+            if let Some(uses) = user {
+                let letter = name.trim_start_matches("pkg_");
+                write_source(
+                    &dir,
+                    &format!("from_{letter}.bt"),
+                    &format!(
+                        "Object subclass: From{}\n  uses: {uses}\n  name -> String => \"w\"\n",
+                        letter.to_uppercase()
+                    ),
+                );
+            }
+        };
+        package("pkg_a", &[], Some("aTag"), None);
+        package("pkg_b", &[], Some("bTag"), Some("pkg_b@Retryable"));
+        package("pkg_c", &["pkg_a", "pkg_b"], None, Some("pkg_a@Retryable"));
+        package("pkg_d", &["pkg_b"], None, Some("Retryable"));
+        let root = temp.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            "[dependencies]\npkg_a = { path = \"../pkg_a\" }\npkg_b = { path = \"../pkg_b\" }\n\
+             pkg_c = { path = \"../pkg_c\" }\npkg_d = { path = \"../pkg_d\" }",
+        );
+        camino::Utf8PathBuf::from_path_buf(root).unwrap()
+    }
+
+    /// Class name -> the selectors of its trait-provided methods, for the
+    /// classes of `infos` that carry any. Independent of `ClassInfo::package`,
+    /// which the offline scan does not stamp.
+    fn provided_surface<'a>(
+        infos: impl IntoIterator<
+            Item = &'a beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo,
+        >,
+    ) -> BTreeMap<String, Vec<String>> {
+        let mut surface = BTreeMap::new();
+        for info in infos {
+            let mut provided: Vec<String> = info
+                .methods
+                .iter()
+                .filter(|m| m.origin.is_some())
+                .map(|m| m.selector.to_string())
+                .collect();
+            if !provided.is_empty() {
+                provided.sort();
+                surface.insert(info.name.to_string(), provided);
+            }
+        }
+        surface
+    }
+
+    /// The trait-provided surface every export path must produce for
+    /// [`overlapping_protocol_project`].
+    fn expected_overlap_surface() -> BTreeMap<String, Vec<String>> {
+        BTreeMap::from([
+            ("FromB".to_string(), vec!["bTag".to_string()]),
+            ("FromC".to_string(), vec!["aTag".to_string()]),
+            ("FromD".to_string(), vec!["bTag".to_string()]),
+        ])
+    }
+
+    fn classes_by_dependency(
+        deps: &[path::ResolvedDependency],
+    ) -> BTreeMap<String, Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>> {
+        deps.iter()
+            .map(|d| (d.name.clone(), d.class_infos.clone()))
+            .collect()
+    }
+
+    /// BT-3684: a dependency's `uses: pkg@Name` flattens `pkg`'s protocol even
+    /// when an unrelated dependency declares a same-named one, and a bare
+    /// `uses:` resolves against the dependencies compiled before it — in a cold
+    /// graph compile …
+    #[test]
+    fn test_overlapping_dependency_protocols_cold_graph_compile() {
+        let temp = TempDir::new().unwrap();
+        let root = overlapping_protocol_project(&temp);
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let cold = graph::resolve_dependency_graph(&root, &options).unwrap_or_else(|e| {
+            panic!("every dependency must compile against its own protocols: {e:?}")
+        });
+
+        assert_eq!(
+            provided_surface(cold.iter().flat_map(|d| &d.class_infos)),
+            expected_overlap_surface()
+        );
+    }
+
+    /// … in the fresh-deps fast path, whose exports equal a cold build's …
+    #[test]
+    fn test_overlapping_dependency_protocols_fresh_deps_match_cold_build() {
+        let temp = TempDir::new().unwrap();
+        let root = overlapping_protocol_project(&temp);
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let fresh = collect_fresh_deps(&root, &parsed).unwrap();
+        let cold = graph::resolve_dependency_graph(&root, &options).unwrap();
+
+        assert_eq!(
+            provided_surface(fresh.iter().flat_map(|d| &d.class_infos)),
+            expected_overlap_surface()
+        );
+        assert_eq!(
+            classes_by_dependency(&fresh),
+            classes_by_dependency(&cold),
+            "exported class_infos differ between a cold build and the fresh-deps path"
+        );
+    }
+
+    /// … and in the offline scan, which does not stamp `ClassInfo::package`
+    /// and so is compared by trait-provided surface.
+    #[test]
+    fn test_overlapping_dependency_protocols_offline_scan_matches_cold_build() {
+        let temp = TempDir::new().unwrap();
+        let root = overlapping_protocol_project(&temp);
+
+        let (_, offline, _) =
+            beamtalk_cli::dependency_classes::resolve_dependency_class_infos(&root);
+
+        assert_eq!(provided_surface(&offline), expected_overlap_surface());
     }
 }

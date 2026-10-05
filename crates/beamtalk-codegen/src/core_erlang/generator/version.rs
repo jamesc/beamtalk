@@ -16,6 +16,37 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
+/// One open per-scope class-variable token (BT-3675).
+///
+/// A scope that cannot thread a `ClassVars` rebind out (a bare block closure, a
+/// loop body, a conditional or `match:` arm, an `on:do:`/`ensure:` body) is
+/// opened by [`CoreErlangGenerator::class_var_scope_mark`] (or one of the
+/// region openers), which pushes one of these. Every `ClassVars` version
+/// minted while it is the innermost token (a class-side send, a nested scope's
+/// refresh, a construct's family-slot rebind) is committed under `name` — a
+/// runtime value (`make_ref()`) bound once per entry of the scope, so a scope
+/// that raised leaves an entry nothing will ever read — and the scope's
+/// refresh ([`CoreErlangGenerator::refresh_class_var_after_opaque_scope`])
+/// consumes only that entry.
+#[derive(Debug, Clone)]
+pub(in crate::core_erlang) struct ClassVarScopeToken {
+    /// The Core Erlang variable the token is bound to.
+    pub(in crate::core_erlang) name: String,
+    /// Whether any send (or nested scope refresh) committed under this token,
+    /// i.e. whether the scope needs its `make_ref()` binding and a refresh.
+    pub(in crate::core_erlang) used: bool,
+}
+
+/// Handle for [`CoreErlangGenerator::class_var_scope_mark`]: the live
+/// `ClassVars{N}` version before the scope, and the depth of the token stack
+/// below the token the scope pushed (`None` when the scope opened no token:
+/// not in a class method).
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) struct ClassVarScopeMark {
+    pub(in crate::core_erlang) version: usize,
+    depth: Option<usize>,
+}
+
 /// Renders a `VersionPrefix::State` counter value, honoring loop context —
 /// the single shared implementation behind `current_state_var`/
 /// `next_state_var`/`peek_next_state_var` (this impl block) and
@@ -223,108 +254,458 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// refreshes the live `ClassVars` name after generating an
-    /// expression whose caller is about to bind the WHOLE returned
-    /// `Document` opaquely (`let X = <expr> in ...`, e.g.
-    /// `emit_vt_threaded_local_assignment`'s `{Value, StateAcc}`-tuple
-    /// binding), catching up to a class-var mutation the ADR 0110 shadow
-    /// write recorded but that opaque compile never surfaced as its own
-    /// `ThreadedValue` prelude.
+    /// Opens a per-scope class-variable token (BT-3675) for the expression
+    /// the caller is about to generate, and snapshots the live `ClassVars`
+    /// version. Pair with [`Self::class_var_scope_prefix`] and
+    /// [`Self::refresh_class_var_after_opaque_scope`] after generating it.
     ///
-    /// The gap this closes: a class-method self-send inside a `Foldl*` body
-    /// (`do:`/`collect:`/`select:`/`inject:into:`) correctly threads its own
-    /// `ClassVarsN` rebind through the fold's `{ClassVars, StateAcc}`
-    /// accumulator (ADR 0111 Addendum 9, Question 6) — but that name is
-    /// minted, and lexically bound, entirely INSIDE the list-op function's
-    /// own returned `Document`. A caller that treats the whole thing as an
-    /// opaque value (rather than splicing it into its own open let-chain,
-    /// the way `push_discarded_stmt` and the value-type/class-method "open"
-    /// loop-body family already do) confines that binding to its own `let`'s
-    /// RHS — any LATER code in the same method that references
-    /// `self.current_class_var()`'s name (a class-var read, or another
-    /// self-send) would then reference a name Core Erlang never actually
-    /// bound at that point — confirmed empirically as an `erlc` "unbound
-    /// variable" compiler crash, not merely a silently-wrong value.
+    /// The expression is compiled at a site that cannot carry a `ClassVars`
+    /// rebind out lexically: a bare block closure, a loop body or conditional
+    /// arm whose rebind is rolled back, an `on:do:`/`ensure:` body, or a send
+    /// whose prelude is closed into an opaque value. The compile-time purity
+    /// gates judge a late-bound class-side send by the base class's own view
+    /// of the selector, so they cannot know that a subclass override writes a
+    /// class variable. Every class-side send generated while the token is
+    /// open therefore commits its returned `ClassVars` under it
+    /// ([`Self::class_var_for_send`]), and the refresh binds a fresh
+    /// `ClassVars` version from the committed value.
     ///
-    /// Rather than widening every list-op function's own external contract
-    /// to also expose `ClassVars` as an explicit extra tuple element (a much
-    /// larger, cross-cutting change to every consumer of that contract),
-    /// this reaches for the ADR 0110 process-dictionary shadow write that
-    /// already exists for the analogous foreign-NLR-relay problem: a
-    /// same-class, locally-defined self-send call (`class_bump`-style,
-    /// compiled as a direct module call, not a dispatch) unconditionally
-    /// writes its own mutation to `{'$bt_class_vars_shadow', element(2,
-    /// ClassSelf)}` before returning, and that key is erased only by the
-    /// OUTER-MOST dispatch wrapper (`invoke_class_method/7`'s `after`) —
-    /// never by the direct call itself — so it is still live, and correct,
-    /// for the remainder of the SAME class method's own body. Reading it
-    /// back here is a safe, minimal escape hatch scoped to exactly the
-    /// opaque-wrap gap above, not a substitute for the accumulator threading
-    /// itself (which is still what makes the fold's OWN cross-iteration
-    /// threading correct in the first place).
+    /// A commit is made only after the callee returned normally, so a write
+    /// by a callee that raised — and a write by a scope that raised and was
+    /// caught — is never read back: the scope's own refresh never ran, and no
+    /// other scope holds its token (ADR 0110: "a genuine runtime error after
+    /// a class-var mutation must still revert the mutation").
     ///
-    /// Returns `Some(prelude_doc)` — a `"let <fresh ClassVarsN> = <shadow
-    /// read, falling back to the pre-scope value> in "` binding the caller
-    /// should push immediately after its own opaque-value `let` — when
-    /// `self.class_var_version()` advanced across generating the just-built
-    /// expression (`version_before` is the version read immediately before
-    /// generating it); `None` when nothing changed (including, by
-    /// construction, every non-class-method context, where no code path
-    /// ever advances `class_var_version` at all).
-    ///
-    /// **Guarded against a direct call** (ADR 0129 Phase 0b): a `class sealed`
-    /// method of a stateless class is called in the caller with `nil` in place
-    /// of the class tuple, so there is no `element(2, ClassSelf)` to key the
-    /// shadow on — the read answers `'undefined'` (nothing shadow-written; the
-    /// class has no class variables), never `badarg`.
-    ///
-    /// **Guarded against a false-positive shadow read** (found during
-    /// review): `class_var_version` advances on EVERY class-method
-    /// self-send (`emit_class_var_result_unwrap` calls `next_class_var()`
-    /// unconditionally, whether or not the callee performs a real field
-    /// write), but the shadow key is written only by an actual
-    /// `self.field := value` (`shadow_write: true`). A pure self-send (e.g.
-    /// a `select:`/`collect:` predicate/transform with no field write) would
-    /// otherwise read back the atom `'undefined'` and corrupt this class
-    /// method's own class-var state. The `case` below treats `'undefined'`
-    /// as "nothing new was shadow-written" and falls back to the value that
-    /// was already live before this scope, rather than trusting the read.
-    /// This also subsumes the narrower, previously-documented INHERITED
-    /// self-send gap (`self someInheritedMethod` routing through
-    /// `class_self_dispatch`, which may erase the shadow key the same way
-    /// `invoke_class_method/7`'s own `after` does) — that path now falls
-    /// back safely too, for the same reason.
-    pub(in crate::core_erlang) fn refresh_class_var_after_opaque_scope(
-        &mut self,
-        version_before: usize,
-    ) -> Option<Document<'static>> {
-        if self.class_var_version() == version_before {
+    /// Opens nothing outside a class method (the value-type and actor
+    /// boundaries never advance `ClassVars`).
+    pub(in crate::core_erlang) fn class_var_scope_mark(&mut self) -> ClassVarScopeMark {
+        let version = self.class_var_version();
+        ClassVarScopeMark {
+            version,
+            depth: self.push_class_var_scope(),
+        }
+    }
+
+    /// Pushes a token; `None` outside a class method.
+    fn push_class_var_scope(&mut self) -> Option<usize> {
+        if !self.in_class_method() || self.class_context.is_none() {
             return None;
         }
-        let mut before_counter = VersionCounter::new();
-        before_counter.set_version(version_before);
-        let cv_before = before_counter.current_var(VersionPrefix::ClassVars);
-        let shadow_raw = self.fresh_temp_var("ClassVarsShadow");
+        let ctx = self.class_context_mut();
+        ctx.class_var_scope_counter += 1;
+        let name = format!("_CVTok{}", ctx.class_var_scope_counter);
+        let tokens = &mut ctx.class_var_scope_tokens;
+        let depth = tokens.len();
+        tokens.push(ClassVarScopeToken { name, used: false });
+        Some(depth)
+    }
+
+    /// Pops the token at `depth` (dropping any inner scope an early return left
+    /// open above it).
+    fn pop_class_var_scope_token(&mut self, depth: usize) -> Option<ClassVarScopeToken> {
+        let ctx = self.class_context.as_mut()?;
+        if ctx.class_var_scope_tokens.len() <= depth {
+            return None;
+        }
+        ctx.class_var_scope_tokens.truncate(depth + 1);
+        ctx.class_var_scope_tokens.pop()
+    }
+
+    /// Hides the enclosing method's open scopes while a nested method body is
+    /// generated (a `ClassBuilder` class-method fun); restore with
+    /// [`Self::restore_class_var_scopes`].
+    pub(in crate::core_erlang) fn take_class_var_scopes(&mut self) -> Vec<ClassVarScopeToken> {
+        self.class_context.as_mut().map_or_else(Vec::new, |ctx| {
+            std::mem::take(&mut ctx.class_var_scope_tokens)
+        })
+    }
+
+    pub(in crate::core_erlang) fn restore_class_var_scopes(
+        &mut self,
+        saved: Vec<ClassVarScopeToken>,
+    ) {
+        if let Some(ctx) = self.class_context.as_mut() {
+            ctx.class_var_scope_tokens = saved;
+        }
+    }
+
+    /// Opens a closure-body region (BT-3675): everything minted inside the
+    /// closure commits under the region's own token, and the closure hands it
+    /// to the enclosing scope as its last step
+    /// ([`Self::wrap_closure_region`]) — so a closure that raises after a send
+    /// completed (caught by a runtime catcher such as `Result tryDo:`) exports
+    /// nothing. `None` when there is no enclosing scope to export to.
+    pub(in crate::core_erlang) fn open_closure_region(&mut self) -> Option<usize> {
+        if self
+            .class_context
+            .as_ref()
+            .is_none_or(|ctx| ctx.class_var_scope_tokens.is_empty())
+        {
+            return None;
+        }
+        self.push_class_var_scope()
+    }
+
+    /// Closes the region [`Self::open_closure_region`] opened and wraps the
+    /// closure's already-generated `body` (a closed expression): binds the
+    /// region's token on entry and exports its commit to the enclosing scope
+    /// after the body returned. Unchanged when nothing committed in the
+    /// region, so a closure without class-side sends costs nothing.
+    pub(in crate::core_erlang) fn wrap_closure_region(
+        &mut self,
+        region: Option<usize>,
+        body: Document<'static>,
+    ) -> Document<'static> {
+        let Some(depth) = region else {
+            return body;
+        };
+        let Some(token) = self.pop_class_var_scope_token(depth) else {
+            return body;
+        };
+        if !token.used {
+            return body;
+        }
+        // The enclosing scope receives the export, so it must exist at run
+        // time. A closure invoked after that scope was refreshed (stored in a
+        // local and invoked by a later statement) exports into a dead entry:
+        // its writes are not kept (ADR 0110, BT-3675 limits).
+        let Some(parent) = self.mark_innermost_scope_used() else {
+            return body;
+        };
+        let result = self.fresh_temp_var("ClosureRes");
+        docvec![
+            "let ",
+            leaf::var(token.name.clone()),
+            " = call 'erlang':'make_ref'() in let ",
+            leaf::var(result.clone()),
+            " = ",
+            body,
+            " in ",
+            Self::class_var_scope_export_doc(&token.name, &parent),
+            leaf::var(result),
+        ]
+    }
+
+    /// Opens an arm-body region (BT-3675) around an `on:do:`/`ensure:` try or
+    /// handler body: its statements are [`Self::class_var_scope_mark`] scopes
+    /// nested in it, and the arm's lexical `ClassVars` flows out through the
+    /// construct's result slot only when the arm completes.
+    pub(in crate::core_erlang) fn open_arm_region(&mut self) -> Option<usize> {
+        self.push_class_var_scope()
+    }
+
+    /// Closes the region [`Self::open_arm_region`] opened. Returns `None` when
+    /// nothing committed, else the `let <token> = make_ref() in ` binding the
+    /// arm's statements need (spliced at the start of the arm) and, when an
+    /// enclosing scope exists, the export of the arm's newest commit to it
+    /// (spliced at the end of the arm). A construct that threads `ClassVars`
+    /// through its result slot carries the same value out; one that does not
+    /// (an `on:do:` inside a closure, say) would otherwise lose the arm's
+    /// writes. The export runs only when the arm completes.
+    pub(in crate::core_erlang) fn close_arm_region(
+        &mut self,
+        region: Option<usize>,
+    ) -> Option<(Document<'static>, Option<Document<'static>>)> {
+        let depth = region?;
+        let token = self.pop_class_var_scope_token(depth)?;
+        if !token.used {
+            return None;
+        }
+        let export = self
+            .mark_innermost_scope_used()
+            .map(|parent| Self::class_var_scope_export_doc(&token.name, &parent));
+        let prefix = docvec![
+            "let ",
+            leaf::var(token.name),
+            " = call 'erlang':'make_ref'() in ",
+        ];
+        Some((prefix, export))
+    }
+
+    /// `let _ = call 'beamtalk_class_dispatch':'class_var_scope_export'(ClassSelf,
+    /// <from>, <to>) in `.
+    fn class_var_scope_export_doc(from: &str, to: &str) -> Document<'static> {
+        docvec![
+            "let _ = call 'beamtalk_class_dispatch':'class_var_scope_export'(",
+            leaf::var("ClassSelf"),
+            ", ",
+            leaf::var(from.to_string()),
+            ", ",
+            leaf::var(to.to_string()),
+            ") in ",
+        ]
+    }
+
+    /// The `let <token> = make_ref() in ` binding the scope opened by `mark`
+    /// needs, or [`Document::Nil`] when no send committed under it. The caller
+    /// splices it BEFORE the scope's expression (its binding must be visible
+    /// to every closure the expression builds), in the open let-chain the
+    /// refresh also lands in. Call after generating the expression and before
+    /// [`Self::refresh_class_var_after_opaque_scope`].
+    pub(in crate::core_erlang) fn class_var_scope_prefix(
+        &self,
+        mark: ClassVarScopeMark,
+    ) -> Document<'static> {
+        let Some(token) = self.class_var_scope_token(mark) else {
+            return Document::Nil;
+        };
+        if !token.used {
+            return Document::Nil;
+        }
+        docvec![
+            "let ",
+            leaf::var(token.name.clone()),
+            " = call 'erlang':'make_ref'() in ",
+        ]
+    }
+
+    fn class_var_scope_token(&self, mark: ClassVarScopeMark) -> Option<&ClassVarScopeToken> {
+        let depth = mark.depth?;
+        self.class_context
+            .as_ref()
+            .and_then(|ctx| ctx.class_var_scope_tokens.get(depth))
+    }
+
+    /// Closes the scope opened by `mark` and, when a send committed under its
+    /// token, returns the `let <fresh ClassVarsN> = <committed value> in `
+    /// refresh the caller splices right after the scope's expression, so the
+    /// writes the scope's sends made are carried on instead of being dropped
+    /// with the rolled-back rebinds of the closures and arms that made them.
+    /// `None` when nothing committed (the version is untouched).
+    ///
+    /// The refresh consumes only this scope's own entry
+    /// (`beamtalk_class_dispatch:class_var_scope_take/3`), falling back to the
+    /// version live before the scope. Its result is itself a mint, so it is
+    /// committed to the enclosing scope's token (when there is one): the
+    /// refreshed version only exists lexically inside the enclosing scope's own
+    /// body, which a closure or an arm that later raises takes with it.
+    ///
+    /// `ClassSelf` is `nil` in a direct-called `class sealed` method of a
+    /// stateless class, which has no class variables: the runtime helper then
+    /// answers the fallback.
+    pub(in crate::core_erlang) fn refresh_class_var_after_opaque_scope(
+        &mut self,
+        mark: ClassVarScopeMark,
+    ) -> Option<Document<'static>> {
+        let token = self.close_class_var_scope(mark)?;
+        let cv_before = Self::class_var_name_at(mark.version);
         let cv_new = self.next_class_var();
+        let fallback = self.class_var_scope_refresh_fallback_doc(&cv_before);
+        let take = Self::class_var_scope_take_doc(&token.name, fallback);
+        let commit = self.commit_to_innermost_scope_doc(&cv_new);
         Some(docvec![
             "let ",
-            leaf::var(shadow_raw.clone()),
-            " = case ",
-            leaf::var("ClassSelf"),
-            " of <_> when call 'erlang':'is_tuple'(",
-            leaf::var("ClassSelf"),
-            ") -> call 'erlang':'get'({",
-            leaf::atom("$bt_class_vars_shadow"),
-            ", call 'erlang':'element'(2, ",
-            leaf::var("ClassSelf"),
-            ")}) <_> when 'true' -> 'undefined' end in let ",
             leaf::var(cv_new),
-            " = case ",
-            leaf::var(shadow_raw),
-            " of <'undefined'> when 'true' -> ",
-            leaf::var(cv_before),
-            " <_ShadowVal> when 'true' -> _ShadowVal end in ",
+            " = ",
+            take,
+            " in ",
+            commit.unwrap_or(Document::Nil),
         ])
+    }
+
+    /// Pops the scope opened by `mark` (and any inner scope an early return
+    /// left open above it); `Some(token)` only when it was used.
+    pub(in crate::core_erlang) fn close_class_var_scope(
+        &mut self,
+        mark: ClassVarScopeMark,
+    ) -> Option<ClassVarScopeToken> {
+        let depth = mark.depth?;
+        let token = self.pop_class_var_scope_token(depth)?;
+        token.used.then_some(token)
+    }
+
+    /// The `ClassVars{N}` name for version `version` (0 is the bare
+    /// `ClassVars` method parameter).
+    pub(in crate::core_erlang) fn class_var_name_at(version: usize) -> String {
+        let mut counter = VersionCounter::new();
+        counter.set_version(version);
+        counter.current_var(VersionPrefix::ClassVars)
+    }
+
+    /// `call 'beamtalk_class_dispatch':'class_var_scope_take'(ClassSelf,
+    /// <token>, <fallback>)`.
+    pub(in crate::core_erlang) fn class_var_scope_take_doc(
+        token: &str,
+        fallback: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_class_dispatch':'class_var_scope_take'(",
+            leaf::var("ClassSelf"),
+            ", ",
+            leaf::var(token.to_string()),
+            ", ",
+            fallback,
+            ")",
+        ]
+    }
+
+    /// BT-3683: the value a scope's refresh answers when nothing committed
+    /// under the scope's own token (an arm that was not taken, or a scope whose
+    /// only commits were consumed). Call after the scope's token was popped
+    /// ([`Self::close_class_var_scope`]), so the open chain is the ENCLOSING
+    /// scopes.
+    ///
+    /// The lexical version live before the scope (`cv_before`) is a stale copy
+    /// when the scope sits in a loop body or closure: an earlier iteration (or
+    /// invocation) of the enclosing scope may have committed a newer value
+    /// under an enclosing token, and committing `cv_before` over it (the
+    /// refresh commits to the innermost enclosing token) would lose that
+    /// write. So the fallback is the newest commit of the enclosing scopes,
+    /// and `cv_before` only when none exists. With no enclosing scope it is
+    /// `cv_before` itself.
+    pub(in crate::core_erlang) fn class_var_scope_refresh_fallback_doc(
+        &mut self,
+        cv_before: &str,
+    ) -> Document<'static> {
+        let chain = self.class_var_scope_chain();
+        if chain.is_empty() {
+            leaf::var(cv_before.to_string())
+        } else {
+            Self::class_var_scope_read_doc(&chain, cv_before)
+        }
+    }
+
+    /// `call 'beamtalk_class_dispatch':'class_var_scope_read'(ClassSelf,
+    /// [<tokens, innermost first>], <fallback>)`.
+    pub(in crate::core_erlang) fn class_var_scope_read_doc(
+        tokens: &[String],
+        fallback: &str,
+    ) -> Document<'static> {
+        let list = tokens
+            .iter()
+            .enumerate()
+            .map(|(i, token)| {
+                if i == 0 {
+                    leaf::var(token.clone())
+                } else {
+                    docvec![", ", leaf::var(token.clone())]
+                }
+            })
+            .collect::<Vec<_>>();
+        docvec![
+            "call 'beamtalk_class_dispatch':'class_var_scope_read'(",
+            leaf::var("ClassSelf"),
+            ", [",
+            Document::Vec(list),
+            "], ",
+            leaf::var(fallback.to_string()),
+            ")",
+        ]
+    }
+
+    /// The tokens of every open scope, innermost first, each marked used (a
+    /// token's `make_ref()` binding is only emitted for a used one, and the
+    /// caller is about to reference all of them); empty outside any scope.
+    pub(in crate::core_erlang) fn class_var_scope_chain(&mut self) -> Vec<String> {
+        let Some(ctx) = self.class_context.as_mut() else {
+            return Vec::new();
+        };
+        ctx.class_var_scope_tokens
+            .iter_mut()
+            .rev()
+            .map(|token| {
+                token.used = true;
+                token.name.clone()
+            })
+            .collect()
+    }
+
+    /// `let _ = call 'beamtalk_class_dispatch':'class_var_scope_commit'(ClassSelf,
+    /// <innermost token>, <class_vars>) in ` — the commit every `ClassVars`
+    /// version minted inside a scope makes, marking the token used; `None`
+    /// when no scope is open.
+    pub(in crate::core_erlang) fn commit_to_innermost_scope_doc(
+        &mut self,
+        class_vars: &str,
+    ) -> Option<Document<'static>> {
+        let name = self.mark_innermost_scope_used()?;
+        Some(Self::class_var_scope_commit_doc(&name, class_vars))
+    }
+
+    /// The commit for the live `ClassVars` version, after a construct rebound
+    /// it from its own result slot (a loop, fold or conditional that threads
+    /// `ClassVars` precisely): the rebind is a mint like a send's, and the
+    /// enclosing scope's later sends sync from what it committed.
+    pub(in crate::core_erlang) fn commit_live_class_var_doc(&mut self) -> Document<'static> {
+        let live = self.current_class_var();
+        self.commit_to_innermost_scope_doc(&live)
+            .unwrap_or(Document::Nil)
+    }
+
+    /// BT-3675: the commit a direct class-variable write (`self.x := …`,
+    /// `clearField:`) makes after its `Bind` when a scope is open. Such a write
+    /// is threaded lexically, but a later send in the scope syncs from the
+    /// newest commit, so a write that did not commit would be overwritten by
+    /// an older commit. `None` outside any scope: nothing is emitted for
+    /// straight-line code.
+    pub(in crate::core_erlang) fn class_var_write_commit_doc(
+        &mut self,
+    ) -> Option<Document<'static>> {
+        if !self.in_class_method() {
+            return None;
+        }
+        let live = self.current_class_var();
+        self.commit_to_innermost_scope_doc(&live)
+    }
+
+    /// Marks the innermost open scope token used and returns its name.
+    pub(in crate::core_erlang) fn mark_innermost_scope_used(&mut self) -> Option<String> {
+        let ctx = self.class_context.as_mut()?;
+        let token = ctx.class_var_scope_tokens.last_mut()?;
+        token.used = true;
+        Some(token.name.clone())
+    }
+
+    pub(in crate::core_erlang) fn class_var_scope_commit_doc(
+        token: &str,
+        class_vars: &str,
+    ) -> Document<'static> {
+        docvec![
+            "let _ = ",
+            Self::class_var_scope_commit_call_doc(token, class_vars),
+            " in ",
+        ]
+    }
+
+    /// `call 'beamtalk_class_dispatch':'class_var_scope_commit'(ClassSelf,
+    /// <token>, <class_vars>)`.
+    fn class_var_scope_commit_call_doc(token: &str, class_vars: &str) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_class_dispatch':'class_var_scope_commit'(",
+            leaf::var("ClassSelf"),
+            ", ",
+            leaf::var(token.to_string()),
+            ", ",
+            leaf::var(class_vars.to_string()),
+            ")",
+        ]
+    }
+
+    /// BT-3690: the commit of a class-side send whose reply is bound to
+    /// `call_result`, made only when the callee answered a
+    /// `{'class_var_result', _, _}` tuple, i.e. when it may have changed the
+    /// class variables.
+    ///
+    /// A plain reply means the callee left them as they were passed in, which
+    /// is exactly what the pre-call sync read from the scope chain (the newest
+    /// commit of the enclosing scopes, else the lexical version): committing it
+    /// again would only re-store a value the chain already answers, at the cost
+    /// of a process-dictionary read-modify-write per send.
+    pub(in crate::core_erlang) fn class_var_scope_commit_if_written_doc(
+        token: &str,
+        class_vars: &str,
+        call_result: &str,
+        written_value: &str,
+    ) -> Document<'static> {
+        docvec![
+            "let _ = case ",
+            leaf::var(call_result.to_string()),
+            " of <{'class_var_result', ",
+            leaf::var(written_value.to_string()),
+            ", _}> when 'true' -> ",
+            Self::class_var_scope_commit_call_doc(token, class_vars),
+            " <_> when 'true' -> 'ok' end in ",
+        ]
     }
 
     /// Returns the current Self variable name for value type Self-threading.

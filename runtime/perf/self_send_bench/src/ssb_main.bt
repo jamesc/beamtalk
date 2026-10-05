@@ -24,6 +24,10 @@ Object subclass: SsbMain
       ns: (self timeClass: SsbOpenClass n: n)
       n: n
     self
+      report: "class_self_send_open_in_arm"
+      ns: (self timeClass: SsbArmClass n: n)
+      n: n
+    self
       report: "class_self_send_sealed"
       ns: (self timeClass: SsbSealedClass n: n)
       n: n

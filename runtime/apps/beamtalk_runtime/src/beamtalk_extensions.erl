@@ -74,6 +74,7 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     register/5,
     unregister/2,
     unregister/3,
+    with_shadow_lock/2,
     purge_class/1,
     lookup/2,
     list/1,
@@ -148,6 +149,8 @@ init() ->
             ok
     end,
 
+    %% BT-3676: the shadow flags are authoritative from here on.
+    beamtalk_class_shadow_flags:mark_ready(),
     ok.
 
 -doc """
@@ -199,33 +202,44 @@ register(Class, Selector, Fun, Owner, Source) when
 ->
     Key = {Class, Selector},
 
-    %% Check for existing registration
-    case ets:lookup(?EXTENSIONS_TABLE, Key) of
-        [] ->
-            %% New registration
-            ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source);
-        [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
-            %% Same owner updating - no conflict
-            ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source);
-        [{Key, _OldFun, OldOwner}] ->
-            %% Conflict: different owner
-            ?LOG_WARNING(
-                "Extension conflict: '~p' on '~p' (from '~p') overwritten by '~p'",
-                [Selector, Class, OldOwner, Owner],
-                #{domain => [beamtalk, runtime]}
-            ),
+    %% BT-3669: flag transitions and row writes for one tag are serialized under
+    %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
+    %% exactly "some row exists under this tag" whenever the lock is free.
+    with_shadow_lock(Class, fun() ->
+        %% Only class-object tags are read by the guard; instance-side tags
+        %% must not churn persistent_term (each erase scans all processes).
+        case beamtalk_class_registry:is_class_name(Class) of
+            true -> beamtalk_class_shadow_flags:set(extension, Class);
+            false -> ok
+        end,
+        %% Check for existing registration
+        case ets:lookup(?EXTENSIONS_TABLE, Key) of
+            [] ->
+                %% New registration
+                ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+                maybe_store_source(Key, Source);
+            [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
+                %% Same owner updating - no conflict
+                ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+                maybe_store_source(Key, Source);
+            [{Key, _OldFun, OldOwner}] ->
+                %% Conflict: different owner
+                ?LOG_WARNING(
+                    "Extension conflict: '~p' on '~p' (from '~p') overwritten by '~p'",
+                    [Selector, Class, OldOwner, Owner],
+                    #{domain => [beamtalk, runtime]}
+                ),
 
-            %% Record conflict for tooling - record BOTH owners
-            Timestamp = erlang:system_time(millisecond),
-            ets:insert(?CONFLICTS_TABLE, {Key, OldOwner, Timestamp}),
-            ets:insert(?CONFLICTS_TABLE, {Key, Owner, Timestamp + 1}),
+                %% Record conflict for tooling - record BOTH owners
+                Timestamp = erlang:system_time(millisecond),
+                ets:insert(?CONFLICTS_TABLE, {Key, OldOwner, Timestamp}),
+                ets:insert(?CONFLICTS_TABLE, {Key, Owner, Timestamp + 1}),
 
-            %% Overwrite (last-writer-wins)
-            ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source)
-    end,
+                %% Overwrite (last-writer-wins)
+                ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
+                maybe_store_source(Key, Source)
+        end
+    end),
 
     %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
@@ -292,8 +306,11 @@ unregister(Class, Selector, ClassSide) when
             false -> Class
         end,
     Key = {EtsClass, Selector},
-    ets:delete(?EXTENSIONS_TABLE, Key),
-    ets:delete(?SOURCES_TABLE, Key),
+    with_shadow_lock(EtsClass, fun() ->
+        ets:delete(?EXTENSIONS_TABLE, Key),
+        ets:delete(?SOURCES_TABLE, Key),
+        sync_shadow_flag(EtsClass)
+    end),
     %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),
@@ -302,6 +319,36 @@ unregister(Class, Selector, ClassSide) when
     %% no-op if the xref gen_server is unavailable.
     safe_xref(fun() -> beamtalk_xref:purge_method(EtsClass, false, Selector) end),
     ok.
+
+%% BT-3669: drop the class's "has shadows" flag once its last extension is gone.
+%% Runs under the per-tag lock held by `unregister/3`, and `register/5` also
+%% takes that lock around its flag raise + row insert, so no registration can
+%% interleave between the emptiness check and the clear.
+-spec sync_shadow_flag(atom()) -> ok.
+sync_shadow_flag(EtsClass) ->
+    case beamtalk_class_registry:is_class_name(EtsClass) andalso not has_any(EtsClass) of
+        true -> beamtalk_class_shadow_flags:clear(extension, EtsClass);
+        false -> ok
+    end.
+
+-doc """
+Run `Fun` holding the per-tag shadow-flag lock (BT-3669). Internal; exported
+for tests that need to hold the lock deterministically.
+""".
+-spec with_shadow_lock(atom(), fun(() -> T)) -> T.
+with_shadow_lock(Tag, Fun) ->
+    %% Only class-object tags (`'Foo class'`) have a flag the guard reads;
+    %% instance-side tags skip the lock (global:trans/4 backs off randomly when
+    %% contended and register/5 runs from parallel -on_load chains). The lock is
+    %% not FIFO-fair; contention is limited to rare same-class-tag writes.
+    case beamtalk_class_registry:is_class_name(Tag) of
+        true -> global:trans({{?MODULE, shadow_flag, Tag}, self()}, Fun, [node()], infinity);
+        false -> Fun()
+    end.
+
+-spec has_any(atom()) -> boolean().
+has_any(Class) ->
+    ets:select(?EXTENSIONS_TABLE, [{{{Class, '_'}, '_', '_'}, [], [true]}], 1) =/= '$end_of_table'.
 
 -doc """
 Purge every extension registered under the class key `Class`.
