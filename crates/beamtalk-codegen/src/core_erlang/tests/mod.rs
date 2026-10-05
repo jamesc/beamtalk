@@ -162,6 +162,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
 
 mod analysis_handoff;
 mod branch_context;
+mod class_var_probe;
 mod control_flow;
 mod dispatch;
 mod expect_directive_statement;

@@ -25,7 +25,7 @@
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
-use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
+use beamtalk_core::ast::{Block, Expression, Literal, MessageSelector, WellKnownSelector};
 
 /// Hint shown when a structural intrinsic reached via generic dispatch
 /// (`perform:`/`perform:withArguments:`) can't tell — from an
@@ -2578,9 +2578,12 @@ impl CoreErlangGenerator {
                         if self.in_class_method() {
                             if let Expression::Identifier(id) = receiver {
                                 if id.name == "self" {
+                                    let probe_field = probe_field_name(&arguments[0]);
+                                    let probe = self.class_var_probe_doc("read", &probe_field);
                                     let name_var = self.fresh_var("Name");
                                     let name_code = self.expression_doc(&arguments[0])?;
                                     let doc = docvec![
+                                        probe,
                                         "let ",
                                         leaf::var(name_var.clone()),
                                         " = ",
@@ -2670,9 +2673,12 @@ impl CoreErlangGenerator {
                         if self.in_class_method() {
                             if let Expression::Identifier(id) = receiver {
                                 if id.name == "self" {
+                                    let probe_field = probe_field_name(&arguments[0]);
+                                    let probe = self.class_var_probe_doc("write", &probe_field);
                                     let name_var = self.fresh_var("Name");
                                     let name_code = self.expression_doc(&arguments[0])?;
                                     let doc = docvec![
+                                        probe,
                                         "let ",
                                         leaf::var(name_var.clone()),
                                         " = ",
@@ -3116,6 +3122,15 @@ impl CoreErlangGenerator {
         ];
 
         Ok(Some(seq.close(self, call_doc, "LogRes")))
+    }
+}
+
+/// Field name the class-variable probe reports for a `hasField:` /
+/// `clearField:` argument: the literal Symbol's name, `_dynamic` otherwise.
+fn probe_field_name(arg: &Expression) -> String {
+    match arg.unwrap_parens() {
+        Expression::Literal(Literal::Symbol(name), _) => name.to_string(),
+        _ => "_dynamic".to_string(),
     }
 }
 

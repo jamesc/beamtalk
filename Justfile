@@ -1358,6 +1358,21 @@ test-metamorphic *ARGS: build-stdlib
     @cargo run --bin beamtalk --quiet -- test-metamorphic --warnings-as-errors --quiet {{ ARGS }}
     @echo "✅ Metamorphic tests complete"
 
+# ADR 0130 Phase 1 (BT-3705): the class-variable agreement corpus. Measures the
+# FULL generated-shape set (loops, on:do:/ensure:/tryDo:, stored closures,
+# writing and late-bound self-sends, in open / sealed / override spellings)
+# against the ADR 0130 §4 reference interpretation, on a BEAM, and prints the
+# failure rate and the failures grouped by cause. Red on `main` until ADR 0130
+# Phase 3 (BT-3713) flips it; the shapes that pass today run as a normal test in
+# `just test-rust` (`class_var_agreement_supported_shapes`), so this recipe is
+# not part of `just test`. Knobs: CV_CORPUS_CASES (programs, default 48),
+# CV_CORPUS_SHAPES (e.g. `do,cond,helper_send`; names in `Shapes::names`).
+# The `beamtalk-codegen` half (in-process, no BEAM) prints its own table with:
+#   cargo test -p beamtalk-codegen --test class_var_agreement measure_failure_rate -- --ignored --nocapture
+test-class-var-corpus: build-stdlib
+    @echo "🧬 Running the class-variable agreement corpus (all shapes; red on main until BT-3713)..."
+    cargo test -p beamtalk-cli --test cli class_var_agreement_all_shapes -- --ignored --nocapture
+
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
 # Output: summary only on success, full output on failure

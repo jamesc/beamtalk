@@ -22,6 +22,7 @@ mod cli_common;
 
 mod cli_attach;
 mod cli_build;
+mod cli_class_var_agreement;
 mod cli_doc;
 mod cli_doctor;
 mod cli_fmt;
