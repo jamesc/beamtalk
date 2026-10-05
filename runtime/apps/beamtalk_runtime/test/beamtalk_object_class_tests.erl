@@ -1823,7 +1823,16 @@ test_put_class_method_rejects_n_plus_2() ->
     ?assertError(
         #{error := #beamtalk_error{kind = arity_mismatch, selector = make}},
         beamtalk_object_class:put_class_method(Pid, make, fun(_, _) -> ok end)
-    ).
+    ),
+    %% The message is built after the class is known, never naming `undefined`.
+    #{error := #beamtalk_error{message = Msg}} =
+        try
+            beamtalk_object_class:put_class_method(Pid, 'at:put:', fun(_, _, _, _) -> ok end)
+        catch
+            error:E -> E
+        end,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"BT3708PcmOld">>)),
+    ?assertEqual(nomatch, binary:match(Msg, <<"undefined">>)).
 
 %%====================================================================
 %% Class Process Crash Detection and Recovery

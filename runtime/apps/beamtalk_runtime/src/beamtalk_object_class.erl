@@ -669,7 +669,10 @@ validate_class_method_fun_arity(ClassPid, Selector, Fun) when is_function(Fun) -
         ok ->
             ok;
         {error, Error} ->
-            beamtalk_error:raise(Error#beamtalk_error{class = class_name(ClassPid)})
+            %% Rebuild the message now that the class is known (`with_selector/2`
+            %% regenerates it; hint and details are untouched).
+            Named = Error#beamtalk_error{class = class_name(ClassPid)},
+            beamtalk_error:raise(beamtalk_error:with_selector(Named, Selector))
     end.
 
 -doc "Get instance variable names.".
