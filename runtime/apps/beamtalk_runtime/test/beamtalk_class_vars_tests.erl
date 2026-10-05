@@ -166,7 +166,7 @@ clear_and_has_test() ->
     with_declared(fun() ->
         beamtalk_class_vars:install(?KEY, #{x => 1}),
         ?assert(beamtalk_class_vars:has(self_obj(), x)),
-        ?assertEqual(nil, beamtalk_class_vars:clear(self_obj(), x)),
+        ?assertEqual(self_obj(), beamtalk_class_vars:clear(self_obj(), x)),
         ?assertNot(beamtalk_class_vars:has(self_obj(), x)),
         ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), x))
     end).
@@ -213,6 +213,24 @@ nil_receiver_test() ->
         fun() -> beamtalk_class_vars:with_snapshot(nil, fun() -> ok end) end
     ],
     [?assertEqual(internal_error, raised_kind(F)) || F <- Fns].
+
+non_class_receiver_test() ->
+    with_clean(fun() ->
+        beamtalk_class_vars:install(?KEY, #{a => 1}),
+        %% Instance receiver (tag without ` class` suffix): internal error, map untouched.
+        Instance = #beamtalk_object{class = ?C, class_mod = cvtc, pid = self()},
+        ?assertEqual(
+            internal_error, raised_kind(fun() -> beamtalk_class_vars:put(Instance, a, 2) end)
+        ),
+        ?assertEqual(#{a => 1}, erlang:get(?KEY)),
+        %% Unknown base atom: structured error, not badarg.
+        Unknown = #beamtalk_object{
+            class = 'NoSuchClassAtomBT3706Xq class', class_mod = cvtc, pid = self()
+        },
+        ?assertEqual(
+            internal_error, raised_kind(fun() -> beamtalk_class_vars:get(Unknown, a) end)
+        )
+    end).
 
 %%% captured fallback forms / capture
 

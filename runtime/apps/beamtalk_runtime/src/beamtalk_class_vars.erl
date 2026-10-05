@@ -171,15 +171,15 @@ put(ClassSelf, Name, Value) ->
             raise_unreachable(Class, Name, write)
     end.
 
--doc "Remove a class variable (`clearField:`); same errors as `put/3`. Returns `nil`.".
--spec clear(class_self(), atom()) -> nil.
+-doc "Remove a class variable (`clearField:`); same errors as `put/3`. Returns `ClassSelf` (`clearField: -> Self`).".
+-spec clear(class_self(), atom()) -> class_self().
 clear(ClassSelf, Name) ->
     Class = class_name(ClassSelf),
     Key = key(Class),
     case erlang:get(Key) of
         Map when is_map(Map) ->
             erlang:put(Key, maps:remove(Name, Map)),
-            nil;
+            ClassSelf;
         {?RO, _} ->
             raise_read_only(Class, Name);
         undefined ->
@@ -285,10 +285,22 @@ with_snapshot(ClassSelf, Fun) ->
 %% Internal
 %%====================================================================
 
-%% Derive the class name from a ClassSelf (`'Name class'` tag).
+%% Derive the class name from a ClassSelf (`'Name class'` tag). An instance
+%% tag (no ` class` suffix) or an unknown base atom is a non-class receiver:
+%% internal error.
 -spec class_name(term()) -> atom().
 class_name(#beamtalk_object{class = Tag}) when is_atom(Tag), Tag =/= nil ->
-    binary_to_existing_atom(beamtalk_class_registry:class_display_name(Tag), utf8);
+    TagBin = atom_to_binary(Tag, utf8),
+    case beamtalk_class_registry:class_display_name(TagBin) of
+        TagBin ->
+            nil_receiver();
+        Base ->
+            try
+                binary_to_existing_atom(Base, utf8)
+            catch
+                error:badarg -> nil_receiver()
+            end
+    end;
 class_name(_) ->
     nil_receiver().
 
