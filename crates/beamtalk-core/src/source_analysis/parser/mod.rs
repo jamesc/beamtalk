@@ -646,12 +646,6 @@ pub enum DiagnosticCategory {
     /// `DefiniteAssignment`, no `@expect` category suppresses this one by
     /// design — the exemption is the `hasField:` guard, not an annotation.
     UnguardedLateRead,
-    /// Stored-closure class-variable advisory (ADR 0110, BT-3681) — a block
-    /// bound to a local (or passed to a user-defined class-side higher-order
-    /// method) whose body makes a class-side self-send that may write a class
-    /// variable, in a place where that write is not kept. Suppressed by
-    /// `@expect stored_closure`.
-    StoredClosure,
 }
 
 /// A secondary note attached to a diagnostic.

@@ -12,42 +12,17 @@ use super::*;
 fn lower_and_render_put_renders_maps_put_chain() {
     let f0 = FrameId::ROOT;
     let ir = vec![ThreadedStmt::Bind {
-        target: class_var(1, f0),
-        source: class_var(0, f0),
+        target: self_var(1, f0),
+        source: self_var(0, f0),
         op: BindOp::Put {
             field: "runs".to_string(),
             value: ValueRef::Var("_Val0".to_string()),
-            class_tag: ValueRef::Var("ClassSelf".to_string()),
         },
-        shadow_write: false,
         span: span(),
     }];
     let rendered = lower_and_render(&ir).to_pretty_string();
     assert!(
-        rendered.contains("let ClassVars1 = call 'maps':'put'('runs', _Val0, ClassVars) in"),
-        "got: {rendered}"
-    );
-}
-
-#[test]
-fn lower_and_render_put_with_shadow_write_appends_erlang_put() {
-    let f0 = FrameId::ROOT;
-    let ir = vec![ThreadedStmt::Bind {
-        target: class_var(1, f0),
-        source: class_var(0, f0),
-        op: BindOp::Put {
-            field: "runs".to_string(),
-            value: ValueRef::Var("_Val0".to_string()),
-            class_tag: ValueRef::Var("ClassSelf".to_string()),
-        },
-        shadow_write: true,
-        span: span(),
-    }];
-    let rendered = lower_and_render(&ir).to_pretty_string();
-    assert!(
-        rendered.contains(
-            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1) in"
-        ),
+        rendered.contains("let Self1 = call 'maps':'put'('runs', _Val0, Self) in"),
         "got: {rendered}"
     );
 }
@@ -61,7 +36,6 @@ fn lower_and_render_unpack_renders_maps_get() {
         op: BindOp::Unpack {
             field: "__local__sum".to_string(),
         },
-        shadow_write: false,
         span: span(),
     }];
     let rendered = lower_and_render(&ir).to_pretty_string();
@@ -78,7 +52,6 @@ fn lower_and_render_direct_renders_plain_let() {
         target: local("sum", 1, f0),
         source: local("sum", 0, f0),
         op: BindOp::Direct(ValueRef::Var("Sum0".to_string())),
-        shadow_write: false,
         span: span(),
     }];
     assert_eq!(
@@ -107,12 +80,10 @@ fn lower_and_render_threaded_direct_params_emits_real_letrec() {
     let ir = vec![ThreadedStmt::Threaded {
         mode: ThreadingMode::DirectParams,
         frame,
-        shadow_write_eligible: true,
         body: vec![ThreadedStmt::Bind {
             target: local("sum", 1, frame),
             source: sum_source.clone(),
             op: BindOp::Direct(ValueRef::Version(sum_source)),
-            shadow_write: false,
             span: span(),
         }],
         produces: vec![local("sum", 1, frame)],

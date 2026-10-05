@@ -63,9 +63,9 @@ use beamtalk_cerl_doc::{join, leaf};
 use beamtalk_core::ast::{Block, Expression};
 
 /// ADR 0122 / BT-3506: an arm's (or the construct's own) contribution to the
-/// trailing family slot — the family this construct threads (`ClassVars`/
-/// `SelfVt`) paired with the version to render there, or `None` when the
-/// construct threads neither. A named alias (not a bare tuple type) purely
+/// trailing family slot — the family this construct threads (`SelfVt`)
+/// paired with the version to render there, or `None` when the construct
+/// threads none. A named alias (not a bare tuple type) purely
 /// so the several functions passing this shape around don't each spell out
 /// `Option<(VersionPrefix, usize)>` (clippy's `type_complexity`).
 type FamilySlot = Option<(VersionPrefix, usize)>;
@@ -75,18 +75,13 @@ type FamilySlot = Option<(VersionPrefix, usize)>;
 /// produced by [`CoreErlangGenerator::generate_exception_body_with_threading`].
 ///
 /// `family_mutated_version` is the arm's own final `(prefix, version)` for
-/// whichever EXTRA storage family (`ClassVars`/`SelfVt`) the construct
-/// threads through its trailing tuple slot, when the arm actually advanced
-/// that family past what it inherited on entry — `None` when it did not.
-/// Generalizes BT-3486's `self_mutated_version` (`SelfVt`-only) to also
-/// cover `ClassVars`, the `cv_mutated_version` / `self_mutated_version` pair
-/// `value_type_codegen.rs`'s `VtBranchPieces` carries for a conditional's
-/// branch arms (BT-3159/BT-3484), and read the same way: an arm that did
-/// not itself mutate the family carries the construct's pre-`try` baseline
-/// in the slot instead, so both arms agree on the tuple shape. At most one
-/// entry is ever meaningful for this construct — `ClassVars`/`SelfVt` are
-/// mutually exclusive by construction, see
-/// [`CoreErlangGenerator::eligible_families`].
+/// whichever EXTRA storage family (`SelfVt`) the construct threads through
+/// its trailing tuple slot, when the arm actually advanced that family past
+/// what it inherited on entry — `None` when it did not. Read the same way as
+/// `value_type_codegen.rs`'s `VtBranchPieces::self_mutated_version` for a
+/// conditional's branch arms (BT-3159/BT-3484): an arm that did not itself
+/// mutate the family carries the construct's pre-`try` baseline in the slot
+/// instead, so both arms agree on the tuple shape.
 struct ExceptionArm {
     doc: Document<'static>,
     result_var: String,
@@ -102,19 +97,18 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0122 Decision 4, applied to the two EXTRA storage families
-    /// on:do:/ensure: can carry through its trailing tuple slot(s): reads
-    /// `prefix`'s live version off the generator. `ClassVars`/`SelfVt` only
-    /// — every other prefix is unreachable here, since
-    /// [`Self::exception_construct_families`] only ever answers with these
-    /// two (State is filtered out; see that function's doc comment).
+    /// ADR 0122 Decision 4, applied to the EXTRA storage family on:do:/ensure:
+    /// can carry through its trailing tuple slot: reads `prefix`'s live
+    /// version off the generator. `SelfVt` only — every other prefix is
+    /// unreachable here, since [`Self::exception_construct_families`] only
+    /// ever answers with it (State is filtered out; see that function's doc
+    /// comment).
     fn family_version(&self, prefix: &VersionPrefix) -> usize {
         match prefix {
-            VersionPrefix::ClassVars => self.class_var_version(),
             VersionPrefix::SelfVt => self.self_version(),
             other => unreachable!(
-                "on:do:/ensure: only ever threads ClassVars/SelfVt as extra \
-                 storage families, got {other:?}"
+                "on:do:/ensure: only ever threads SelfVt as an extra \
+                 storage family, got {other:?}"
             ),
         }
     }
@@ -122,28 +116,26 @@ impl CoreErlangGenerator {
     /// The write half of [`Self::family_version`].
     fn set_family_version(&mut self, prefix: &VersionPrefix, version: usize) {
         match prefix {
-            VersionPrefix::ClassVars => self.set_class_var_version(version),
             VersionPrefix::SelfVt => self.set_self_version(version),
             other => unreachable!(
-                "on:do:/ensure: only ever threads ClassVars/SelfVt as extra \
-                 storage families, got {other:?}"
+                "on:do:/ensure: only ever threads SelfVt as an extra \
+                 storage family, got {other:?}"
             ),
         }
     }
 
-    /// The bare (version-0) Core Erlang variable name for `prefix` — `"Self"`
-    /// or `"ClassVars"`, the same spelling [`VersionedVar::render_name`]
-    /// gives version 0 of either prefix, kept as a literal here (rather than
+    /// The bare (version-0) Core Erlang variable name for `prefix` — `"Self"`,
+    /// the same spelling [`VersionedVar::render_name`]
+    /// gives version 0 of the prefix, kept as a literal here (rather than
     /// rendering a version-0 `VersionedVar`) only because
     /// [`Self::seed_exception_arm_family`] needs the BARE name as the shadow
     /// binding's own target identifier, not a value to render.
     fn family_bare_var_name(prefix: &VersionPrefix) -> &'static str {
         match prefix {
-            VersionPrefix::ClassVars => "ClassVars",
             VersionPrefix::SelfVt => "Self",
             other => unreachable!(
-                "on:do:/ensure: only ever threads ClassVars/SelfVt as extra \
-                 storage families, got {other:?}"
+                "on:do:/ensure: only ever threads SelfVt as an extra \
+                 storage family, got {other:?}"
             ),
         }
     }
@@ -249,14 +241,6 @@ impl CoreErlangGenerator {
     /// always-bound entry, so an arm handed a live `<bare>{N}` baseline would
     /// consume a version its frame never produces — and resets the counter
     /// so the arm mints version 1, 2, … from there. Generalizes BT-3486's
-    /// `seed_exception_arm_self` (`SelfVt`-only) to `ClassVars` too — closing
-    /// exactly the cross-frame `UnboundVersion` gap a class-method self-send
-    /// inside `on:do:`/`ensure:` hit before this fix (BT-3506's shape (c)):
-    /// `emit_class_var_result_unwrap`'s own rebind tags its `Bind` with the
-    /// arm's `current_branch_frame()`, but without this reset its SOURCE
-    /// version was whatever `class_var_version()` inherited from the
-    /// enclosing method's own top frame — a version this arm's frame never
-    /// produced.
     ///
     /// This is the exact family-generic counterpart of the
     /// `let StateAcc = <outer> in ` rebind every one of these constructs
@@ -265,8 +249,7 @@ impl CoreErlangGenerator {
     ///
     /// [`Document::Nil`] (and no reset) when `families` is empty, or when the
     /// live version is already 0 — the common case, where the bare name is
-    /// the method's own fun parameter (or, for `ClassVars`, its own entry)
-    /// and there is nothing to shadow. `live > 0` happens when an earlier
+    /// the method's own fun parameter and there is nothing to shadow. `live > 0` happens when an earlier
     /// statement in the same method already mutated the family, including a
     /// preceding `on:do:`/`ensure:` whose own mutation this issue threads
     /// out.
@@ -292,7 +275,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// ADR 0122 / BT-3506: the storage families (`ClassVars`/`SelfVt`) this
+    /// ADR 0122 / BT-3506: the storage families (`SelfVt`) this
     /// `on:do:`/`ensure:`'s inlined blocks thread out through the
     /// construct's own trailing tuple slot(s) — the unified,
     /// [`ThreadedFamilies`]-based successor to BT-3486's
@@ -303,10 +286,8 @@ impl CoreErlangGenerator {
     /// this construct's second tuple slot already (unconditionally, via
     /// [`Self::exception_body_outer_state`]) — never one of these EXTRA
     /// trailing ones, so `State` is never itself a family this function can
-    /// answer for. `ClassVars`/`SelfVt` are mutually exclusive by
-    /// construction (`eligible_families`'s own doc comment: `in_class_method`
-    /// alone decides one from the other), so the result never carries more
-    /// than one entry for this construct.
+    /// answer for. Class methods thread no family (ADR 0130 §3), so the
+    /// result carries at most one entry (`SelfVt`) for this construct.
     ///
     /// A family counts as mutated when EITHER block mutates it ANYWHERE,
     /// per ADR 0122's unified recursive detector
@@ -326,8 +307,7 @@ impl CoreErlangGenerator {
     ///   land in and tripped `verify()`'s `UnboundVersion`;
     /// * a mutation inside a NESTED BLOCK is not carried, and is rejected
     ///   per-statement by
-    ///   [`Self::reject_unthreadable_value_self_field_write`] (`SelfVt`) /
-    ///   [`Self::reject_unthreadable_class_var_mutation`] (`ClassVars`) in
+    ///   [`Self::reject_unthreadable_value_self_field_write`] in
     ///   [`Self::generate_exception_body_with_threading_inner`], never
     ///   silently dropped.
     ///
@@ -643,22 +623,10 @@ impl CoreErlangGenerator {
     /// visible in `catch`/after, so *some* map is needed regardless of
     /// context. Field writes route through this same map in Actor context
     /// (reusing the real `State`); value-type field mutations
-    /// (`VersionPrefix::SelfVt`, BT-3486) and class-method class-var
-    /// mutations (`VersionPrefix::ClassVars`, BT-3506) instead ride the
+    /// (`VersionPrefix::SelfVt`, BT-3486) instead ride the
     /// construct's own trailing tuple slot
     /// ([`Self::close_exception_result_tuple`]) — never this map — so an
     /// empty seed outside Actor context is correct, not just a stopgap.
-    ///
-    /// **Corrected (BT-3506):** this comment previously claimed a
-    /// class-method self-send's `ClassVars` rebind is "threaded entirely
-    /// separately" via `emit_class_var_result_unwrap`'s own let-chain and so
-    /// never needs a slot on this construct's result tuple. That was false —
-    /// the let-chain's rebinding happens INSIDE the try-body's own rendered
-    /// `Document`, and an Erlang binding made inside `try` is not visible
-    /// after it closes, so without the trailing `ClassVars` slot the
-    /// mutation was silently discarded on every normal return (confirmed
-    /// empirically; see BT-3506's repro). The slot fixes it the same way
-    /// BT-3486 already fixed the identical gap for `SelfVt`.
     ///
     /// Before BT-3486's fix, both callers unconditionally called
     /// `current_state_var()`, which at version 0 renders as the bare
@@ -697,7 +665,7 @@ impl CoreErlangGenerator {
     ///         false -> primop 'raw_raise'(Type, Error, RawStack)
     /// ```
     ///
-    /// ADR 0122 / BT-3506: when either block mutates a `ClassVars`/`SelfVt`
+    /// ADR 0122 / BT-3506: when either block mutates the `SelfVt`
     /// family the current context makes eligible, both returned tuples grow
     /// a trailing slot carrying that arm's own version — see
     /// [`Self::exception_construct_families`].
@@ -750,13 +718,12 @@ impl CoreErlangGenerator {
         // The construct's own live baseline for whichever family `families`
         // names (0 when `families` is empty; never read in that case) —
         // restored between arms (they are siblings: only one ever runs) and
-        // once more after the construct. `outer_self`/`outer_class_var` are
-        // ALSO captured unconditionally (regardless of which family, if any,
-        // is active) so both counters can be restored between/after arms the
-        // same way the original `SelfVt`-only code always restored
-        // `self_version` even in contexts where it never moved.
+        // once more after the construct. `outer_self` is ALSO captured
+        // unconditionally (regardless of whether a family is active) so the
+        // counter can be restored between/after arms the same way the
+        // original `SelfVt`-only code always restored `self_version` even in
+        // contexts where it never moved.
         let outer_self = self.self_version();
-        let outer_class_var = self.class_var_version();
         let outer_version = families
             .as_slice()
             .first()
@@ -824,7 +791,6 @@ impl CoreErlangGenerator {
 
         // Generate handler body with state threading (from original StateAcc)
         self.set_self_version(outer_self);
-        self.set_class_var_version(outer_class_var);
         let (handler_result_var, handler_final, handler_slot) =
             self.push_exception_arm(&mut docs, handler_block, &families, outer_version)?;
         // Return {Result, State[, Family]} from handler
@@ -861,7 +827,6 @@ impl CoreErlangGenerator {
         // (`generate_vt_exception_construct_open`), so leave both counters
         // as found.
         self.set_self_version(outer_self);
-        self.set_class_var_version(outer_class_var);
 
         Ok(Document::Vec(docs))
     }
@@ -974,7 +939,7 @@ impl CoreErlangGenerator {
     ///     primop 'raw_raise'(Type, Error, Stack)
     /// ```
     ///
-    /// ADR 0122 / BT-3506: when either block mutates a `ClassVars`/`SelfVt`
+    /// ADR 0122 / BT-3506: when either block mutates the `SelfVt`
     /// family the current context makes eligible, every returned tuple above
     /// grows a trailing slot carrying that arm's own version — see
     /// [`Self::exception_construct_families`].
@@ -1010,7 +975,6 @@ impl CoreErlangGenerator {
         // The construct's own live baselines — restored between arms and
         // once more after the construct (see `generate_on_do_with_mutations`).
         let outer_self = self.self_version();
-        let outer_class_var = self.class_var_version();
         let outer_version = families
             .as_slice()
             .first()
@@ -1091,7 +1055,6 @@ impl CoreErlangGenerator {
         // construct's own pre-`try` baselines rather than from the success
         // path's re-seed.
         self.set_self_version(outer_self);
-        self.set_class_var_version(outer_class_var);
 
         // Error: run cleanup for side effects (from original StateAcc), then re-raise
         docs.push(docvec![
@@ -1127,7 +1090,6 @@ impl CoreErlangGenerator {
         // ADR 0122 / BT-3506: leave the method's live versions as found — see
         // the matching restore at the end of `generate_on_do_with_mutations`.
         self.set_self_version(outer_self);
-        self.set_class_var_version(outer_class_var);
 
         Ok(Document::Vec(docs))
     }
@@ -1478,7 +1440,7 @@ impl CoreErlangGenerator {
         // `families` names (see `generate_exception_body_with_threading`'s
         // doc comment) — compared against the post-body version below to
         // detect a mutation, exactly as `build_vt_conditional_branch_pieces_inner`
-        // does for a conditional arm's own `SelfVt`/`ClassVars` diff.
+        // does for a conditional arm's own `SelfVt` diff.
         let family_before = families
             .as_slice()
             .first()
@@ -1496,11 +1458,6 @@ impl CoreErlangGenerator {
 
         let mut result_var = "'nil'".to_string();
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
-        // BT-3675: the arm body is a class-variable region around its own
-        // statements' scopes: what a statement's refresh commits stays in this
-        // arm, and reaches the enclosing scope only through the construct's
-        // result slot when the arm completes — never when it raises.
-        let arm_region = self.open_arm_region();
 
         // BT-3687: `@expect` directives are compile-time-only annotations with no
         // runtime value; lowering one as a statement would emit `let _ =  in`.
@@ -1517,11 +1474,6 @@ impl CoreErlangGenerator {
                 stmts.push(ThreadedStmt::Statement(Document::Str(" "), span));
             }
             let is_last = i == body_exprs.len() - 1;
-            // BT-3675: this statement is its own class-variable scope; see the
-            // refresh after its lowering below.
-            let cv_mark = self.class_var_scope_mark();
-            let stmt_start = stmts.len();
-
             // A value-type `self.field := ...` write nested inside a further
             // construct of this arm's own body — most notably another
             // `on:do:`/`ensure:` — is not a bare top-level statement, so
@@ -1538,19 +1490,6 @@ impl CoreErlangGenerator {
             // bare top-level write `exception_construct_families`
             // already threads.
             self.reject_unthreadable_value_self_field_write(expr, self.is_field_assignment(expr))?;
-            // BT-3522: the `ClassVars` half of the same safety net, which
-            // this loop was missing — only `SelfVt` had one. A class-var
-            // mutation (bare write or same-class self-send) buried inside a
-            // NESTED BLOCK of this statement is invisible to E1..E7's own
-            // per-shape Bind construction, so the construct's trailing
-            // `ClassVars` slot never carries it and it was silently
-            // discarded on normal return. See
-            // [`CoreErlangGenerator::reject_unthreadable_class_var_mutation`]
-            // for why this one walks nested blocks specifically rather than
-            // the whole statement subtree (a mutation in the statement's own
-            // sub-expression IS carried, via `thread_ahead`).
-            self.reject_unthreadable_class_var_mutation(expr)?;
-
             if self.is_field_assignment(expr) {
                 // E1 — same shape/mint-order as C1; reused directly.
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
@@ -1605,7 +1544,6 @@ impl CoreErlangGenerator {
                         leaf::var(dispatch_var.clone()),
                         ")",
                     ])),
-                    shadow_write: false,
                     span,
                 });
                 if is_last {
@@ -1702,7 +1640,6 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ")",
                             ])),
-                            shadow_write: false,
                             span,
                         });
                         result_var = rv;
@@ -1722,16 +1659,12 @@ impl CoreErlangGenerator {
                     }
                 }
             } else {
-                // E7 — non-last plain expression. A discarded
-                // non-last statement must keep a class-var mutation visible
-                // to later statements in this same try body (a second
-                // self-send later must see the first one's already-bumped
-                // `ClassVarsN`). ADR 0118 phase 5b: `thread_ahead`
-                // now threads any such producer into `stmts` as a real
-                // `Bind`, in the SAME frame every later statement in this
-                // body shares — visible to them by construction, without
-                // the old lexical-nesting trick — so the plain compile
-                // below never has an open scope to propagate.
+                // E7 — non-last plain expression. ADR 0118 phase 5b:
+                // `thread_ahead` threads any state-effecting producer into
+                // `stmts` as a real `Bind`, in the SAME frame every later
+                // statement in this body shares — visible to them by
+                // construction — so the plain compile below never has an
+                // open scope to propagate.
                 // ADR 0118 phase 2a: see the E6 sub-branch above.
                 let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
                 let expr_doc = self.expression_doc(expr)?;
@@ -1741,30 +1674,7 @@ impl CoreErlangGenerator {
                     span,
                 ));
             }
-
-            // BT-3675: a late-bound class-side self-send nested in a
-            // conditional or `match:` arm of this statement mints a
-            // `ClassVars` version that this sequence cannot carry out (the
-            // gates that admit the send judge it by the base class's own
-            // view of the selector, and a subclass override may write a
-            // class variable). The send committed its returned class
-            // variables under this statement's token once the callee
-            // returned; bind them so the construct's trailing `ClassVars`
-            // slot carries the write.
-            let refresh =
-                self.confined_class_var_refresh_stmt(cv_mark, &mut stmts, stmt_start, frame, span);
-            stmts.extend(refresh);
         }
-        if let Some((arm_prefix, arm_export)) = self.close_arm_region(arm_region) {
-            stmts.insert(0, ThreadedStmt::Statement(arm_prefix, body.span));
-            if let Some(export) = arm_export {
-                // The literal separator space the statement sequencer
-                // inserts between source statements.
-                stmts.push(ThreadedStmt::Statement(Document::Str(" "), body.span));
-                stmts.push(ThreadedStmt::Statement(export, body.span));
-            }
-        }
-
         let final_state_version = self.state_version();
         let family_mutated_version = family_before.and_then(|(prefix, before)| {
             let after = self.family_version(&prefix);
@@ -2082,16 +1992,13 @@ Actor subclass: Srv
                     op: BindOp::Put {
                         field: field.to_string(),
                         value: ValueRef::Var(val.to_string()),
-                        class_tag: ValueRef::Literal("'nil'"),
                     },
-                    shadow_write: false,
                     span: Span::default(),
                 }
             };
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
-                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![
                     make_put("count", "_Val1", target.clone(), source.clone()),
                     make_put("count", "_Val2", target.clone(), source),
@@ -2131,15 +2038,12 @@ Actor subclass: Srv
                 op: BindOp::Put {
                     field: "count".to_string(),
                     value: ValueRef::Var("_Val1".to_string()),
-                    class_tag: ValueRef::Literal("'nil'"),
                 },
-                shadow_write: false,
                 span: Span::default(),
             };
             let wrapper = vec![ThreadedStmt::Threaded {
                 mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
                 frame,
-                shadow_write_eligible: true, // State-prefix fixture, not class-var — inert
                 body: vec![bind],
                 produces: vec![target],
                 span: Span::default(),

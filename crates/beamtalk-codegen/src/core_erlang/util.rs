@@ -21,8 +21,8 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, int_lit, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
-    CascadeMessage, ClassDefinition, Expression, ExpressionStatement, Identifier, MessageSelector,
-    Module, SlotKind, StateDeclaration, StringSegment,
+    CascadeMessage, ClassDefinition, Expression, ExpressionStatement, MessageSelector, Module,
+    SlotKind, StateDeclaration, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -36,7 +36,7 @@ type CascadeSelfMessage<'e> = (&'e MessageSelector, &'e [Expression], Span);
 /// Builds a versioned Core Erlang variable name.
 ///
 /// Returns `prefix` when `version == 0`, otherwise `prefix{version}`
-/// (e.g. `"State"`, `"State1"`, `"StateAcc2"`, `"ClassVars1"`, `"Self3"`).
+/// (e.g. `"State"`, `"State1"`, `"StateAcc2"`, `"Self3"`).
 ///
 /// Uses [`std::fmt::Write`] on a pre-allocated buffer rather than `format!()`
 /// to comply with CLAUDE.md: "NEVER use `format!()` to produce Core Erlang
@@ -335,20 +335,12 @@ impl CoreErlangGenerator {
             return Ok(tv);
         }
 
-        // ADR 0118 phase 5a: a same-class class-method self-send
-        // or a direct class-var assignment at the top level of `expr` —
-        // the class-method-context counterpart of the Actor `is_prelude_producer`
-        // check below. Gated to `frame == FrameId::ROOT`: both underlying
-        // producers (`generate_class_method_self_send`/
-        // `generate_class_var_field_assignment`) still derive their `Bind`'s
-        // frame internally (`self.in_loop_body` / a hardcoded `FrameId::ROOT`,
-        // unchanged by this issue), so this only engages where that
-        // derivation is already known-correct — a class method's own flat
-        // top-level body (`lower_class_method_body`). A class-var self-send
-        // reached from a nested branch frame keeps falling through to the
-        // generic paths below, unchanged from before this issue.
+        // ADR 0130: a class-method context's own producer — a class-variable
+        // write or a same-class self-send — threads nothing, but pins its
+        // evaluation order against its siblings (see
+        // `class_method_prelude_producer`).
         if self.in_class_method() {
-            if let Some(tv) = self.class_method_prelude_producer(inner, frame)? {
+            if let Some(tv) = self.class_method_prelude_producer(inner)? {
                 return Ok(tv);
             }
         }
@@ -635,8 +627,8 @@ impl CoreErlangGenerator {
     }
 
     /// `true` inside an Actor *instance* method — the only context in
-    /// which a self-send threads `State` (a class method threads
-    /// `ClassVars`, never `State`; same exclusion as the planner's).
+    /// which a self-send threads `State` (a class method threads nothing,
+    /// ADR 0130; same exclusion as the planner's).
     pub(super) fn in_actor_instance_context(&self) -> bool {
         self.context == CodeGenContext::Actor && !self.in_class_method()
     }
@@ -648,81 +640,31 @@ impl CoreErlangGenerator {
         self.in_actor_instance_context() && self.is_dispatching_actor_self_send(expr)
     }
 
-    /// ADR 0118 phase 5a/5b: compiles `expr` (already
-    /// paren-unwrapped) through the class-method-context producers when it
-    /// is, at its own top level, a direct class-var assignment
-    /// (`self.classVar := value`) or a same-class class-method self-send
-    /// (`self someSelector`) — `None` for anything else. Called from
-    /// [`Self::threaded_expression`] (falls through to its generic paths on
-    /// `None`), gated to `self.in_class_method()` alone — `frame` is
-    /// whatever real frame the caller is threading into (ROOT at a class
-    /// method's own flat top level, or a branch/loop frame nested inside
-    /// one), passed straight through to the producer.
+    /// ADR 0130: compiles `expr` (already paren-unwrapped) through the
+    /// class-method-context producer when it is, at its own top level, a
+    /// class-variable write or a same-class class-method self-send
+    /// ([`Self::is_class_side_effect`]) — `None` for anything else. Called
+    /// from [`Self::threaded_expression`] (falls through to its generic paths
+    /// on `None`), gated to `self.in_class_method()`.
     ///
-    /// A same-class self-send is checked with [`Self::is_class_method_self_send`]
-    /// — selectors in `class_method_selectors()` only — DELIBERATELY
-    /// narrower than [`Self::try_handle_class_method_self_send`]'s own
-    /// condition (any `self` receiver): `generate_message_send`'s real
-    /// dispatch order runs ProtoObject/Object/Block/Dict/List/Boolean/
-    /// spawn-await/Erlang-interop/Logger/class-reference checks BEFORE
-    /// `try_handle_class_method_self_send` ever runs, so `self class` or
-    /// `self isNil` must still reach THOSE handlers, never
-    /// `generate_class_method_self_send` directly — this function has no
-    /// way to replicate that whole priority chain, but a selector the class
-    /// itself declares as a class method can never collide with one of
-    /// those reserved well-known names (the same assumption
-    /// `generate_class_method_last_expr_with_class_vars`/
-    /// `generate_class_method_non_last_expr` already made for this exact
-    /// predicate, pre-dating this issue).
+    /// Nothing is threaded (a write is an in-place `put`, a send rebinds
+    /// nothing), but a class variable is shared mutable state and Core Erlang
+    /// leaves the evaluation order of call arguments and tuple/list elements
+    /// unspecified, so the effect is bound in an ordered `let` of its own to
+    /// pin its order against its siblings.
+    ///
+    /// [`Self::is_class_side_effect`] is DELIBERATELY narrower than
+    /// [`Self::try_handle_class_method_self_send`]'s own condition (any
+    /// `self` receiver): `generate_message_send`'s real dispatch order runs
+    /// ProtoObject/Object/Block/Dict/List/Boolean/spawn-await/Erlang-interop/
+    /// Logger/class-reference checks BEFORE `try_handle_class_method_self_send`
+    /// ever runs, so `self class` or `self isNil` must still reach THOSE
+    /// handlers — a selector the class itself declares as a class method can
+    /// never collide with one of those reserved well-known names.
     fn class_method_prelude_producer(
         &mut self,
         expr: &Expression,
-        frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
-        if self.is_class_var_assignment(expr) {
-            let Expression::Assignment { target, value, .. } = expr else {
-                unreachable!("is_class_var_assignment guarantees an Assignment");
-            };
-            let Expression::FieldAccess { field, .. } = target.as_ref() else {
-                unreachable!("is_class_var_assignment guarantees a FieldAccess target");
-            };
-            let field_name = field.name.to_string();
-            return Ok(Some(self.generate_class_var_field_assignment(
-                &field_name,
-                value,
-                frame,
-            )?));
-        }
-        if self.is_self_clear_field_class_var(expr) {
-            let field_name = super::expr_shape::self_clear_field_class_var_name(expr)
-                .expect("is_self_clear_field_class_var guarantees a literal Symbol argument")
-                .to_string();
-            return Ok(Some(self.generate_class_var_field_clear(
-                &field_name,
-                expr.span(),
-                frame,
-            )?));
-        }
-        if self.is_class_method_self_send(expr) {
-            let Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                ..
-            } = expr
-            else {
-                unreachable!("is_class_method_self_send guarantees a MessageSend");
-            };
-            let receiver_is_self = super::expr_shape::is_self_identifier(receiver);
-            return Ok(Some(self.generate_class_method_self_send(
-                selector,
-                arguments,
-                receiver_is_self,
-            )?));
-        }
-        // ADR 0130: a class-variable write or a same-class self-send threads
-        // nothing, but it is an in-place effect: pin its evaluation order
-        // against its siblings by binding it in an ordered `let` of its own.
         if self.is_class_side_effect(expr) {
             let doc = self.generate_expression(expr)?;
             let result_var = self.fresh_temp_var("Effect");
@@ -854,10 +796,7 @@ impl CoreErlangGenerator {
         // a prelude regardless of nesting depth (a message argument, a
         // binary operand, a cascade message, ...). A pure predicate check
         // (not the mutating producer call itself) so this stays a probe.
-        if self.in_class_method()
-            && (self.is_self_clear_field_class_var(inner)
-                || (class_effects && self.is_class_side_effect(inner)))
-        {
+        if self.in_class_method() && class_effects && self.is_class_side_effect(inner) {
             return true;
         }
         if self.is_prelude_producer(inner) {
@@ -1087,10 +1026,7 @@ impl CoreErlangGenerator {
     /// deleted `closed_expression_doc`. Renders `expr`'s prelude and value
     /// back-to-back through the same [`render`]/[`render_value`] every
     /// spliced prelude goes through, so the bytes match a spliced prelude
-    /// exactly (a `ClassVars` `Bind` in the prelude stays lexically visible
-    /// to whatever Core Erlang the caller concatenates after this
-    /// `Document` — the pre-ADR-0118 open-let-chain's own contract,
-    /// preserved). Use where the caller has no `Vec<ThreadedStmt>`/
+    /// exactly. Use where the caller has no `Vec<ThreadedStmt>`/
     /// `Vec<Document>` of its own to splice into (a single expression
     /// embedded directly as another `Document`'s sub-tree).
     pub(super) fn threaded_expression_doc(
@@ -1106,29 +1042,16 @@ impl CoreErlangGenerator {
     /// [`Self::threaded_expression_doc`], for a caller that already holds a
     /// [`ThreadedValue`] (a producer's own return value) rather than an
     /// `Expression` to compile — used at every ambient
-    /// (non-`threaded_expression`) re-entry point a class-var producer has
-    /// (`try_handle_class_method_self_send`, `try_handle_class_reference`,
-    /// `generate_field_assignment`'s class-var branch): these are reached
-    /// through ordinary `generate_expression`, which returns a bare
-    /// `Document` with no prelude side-channel, so the prelude is always
-    /// closed here rather than left open for a caller to propagate.
+    /// (non-`threaded_expression`) re-entry point a producer has
+    /// (`try_handle_class_method_self_send`, `try_handle_class_reference`):
+    /// these are reached through ordinary `generate_expression`, which
+    /// returns a bare `Document` with no prelude side-channel, so the prelude
+    /// is always closed here rather than left open for a caller to propagate.
     ///
     /// Deliberately does NOT call `ThreadedValue::close` — it renders
-    /// prelude-then-value unconditionally, the same for a self-send at a
-    /// class method's own safe top level and one inside a bare, unthreaded
-    /// block `check_no_unsafe_class_method_self_sends` (`expressions.rs`)
-    /// would reject before this ever runs. Making this
-    /// call `close(ctx, CloseContext::Opaque)` for the latter case (its
-    /// intended production use — see `CloseContext::Opaque`'s own doc
-    /// comment) and reporting `VerifyError::StateEffectEscapesExpression`
-    /// as a backstop on top of that predicate is blocked on this function
-    /// having no reliable way to tell the two cases apart post hoc, after
-    /// arbitrary `generate_expression` recursion has already discarded which
-    /// message send (if any) the innermost enclosing block literal is an
-    /// argument to — see that predicate's own doc comment for the full
-    /// finding. Revisit only alongside a redesign that carries real
-    /// block-literal context through this call, not as a follow-up scoped
-    /// to this function alone.
+    /// prelude-then-value unconditionally. `close(ctx, CloseContext::Opaque)`
+    /// (and its `VerifyError::StateEffectEscapesExpression` backstop) has no
+    /// production caller.
     // `tv` is taken by value deliberately, matching `ThreadedValue::close`'s
     // own consuming signature — the `#[must_use]` linear-discipline design
     // (see `ThreadedValue`'s doc comment) wants "closed" to mean consumed,
@@ -1236,48 +1159,6 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Class-var writes can't thread through the generic
-    /// `State`/`StateAcc` mechanism used by [`Self::generate_field_assignment_open`]
-    /// and the conditional-branch `Bind`-chain codegen it mirrors — see
-    /// [`super::CodeGenError::ClassVarAssignmentInThreadedBody`]'s doc comment
-    /// for why. Rejects at compile time (mirroring
-    /// `FieldAssignmentInUnsupportedBlock`'s handling of the analogous "can't thread
-    /// this state" shape) instead of silently losing the mutation on both
-    /// normal return and NLR escape.
-    ///
-    /// Shared by both call sites per CLAUDE.md's no-duplicate-implementations
-    /// rule — `is_class_var_assignment`'s `receiver == "self"` gate is the
-    /// authoritative rule for what counts as a class-var assignment, and this
-    /// helper is the single place that turns a positive match into the
-    /// rejection error, so the two call sites can't drift out of sync.
-    ///
-    /// ADR 0111 Addendum 9: `generate_field_assignment_open`
-    /// calls this only as its fallback branch — a class-var write directly
-    /// inside a Letrec loop body that threads `ClassVars` through the loop's
-    /// own recursive tail call (`loop_mode.threading_families`, ADR 0122
-    /// Decision 5) is threaded via a real `Bind` instead, before ever
-    /// reaching this call. This helper's own behavior is unchanged; only its
-    /// one call site inside `generate_field_assignment_open` became
-    /// conditional.
-    ///
-    /// `expr` must be the `Expression::Assignment` whose `target` is the
-    /// given `field`'s `FieldAccess` (the caller has already matched this
-    /// shape before calling in).
-    pub(super) fn reject_class_var_field_assignment(
-        &self,
-        expr: &Expression,
-        field: &Identifier,
-    ) -> Result<()> {
-        if self.is_class_var_assignment(expr) {
-            let location = self.location_label(expr.span());
-            return Err(CodeGenError::ClassVarAssignmentInThreadedBody {
-                field: field.name.to_string(),
-                location,
-            });
-        }
-        Ok(())
-    }
-
     /// Returns the class name for the currently compiled class.
     ///
     /// Prefers the AST-derived class identity when available (set during class
@@ -1361,7 +1242,6 @@ mod tests {
     fn test_versioned_var_version_zero_returns_prefix() {
         assert_eq!(versioned_var("State", 0), "State");
         assert_eq!(versioned_var("StateAcc", 0), "StateAcc");
-        assert_eq!(versioned_var("ClassVars", 0), "ClassVars");
         assert_eq!(versioned_var("Self", 0), "Self");
     }
 
@@ -1370,7 +1250,6 @@ mod tests {
         assert_eq!(versioned_var("State", 1), "State1");
         assert_eq!(versioned_var("State", 2), "State2");
         assert_eq!(versioned_var("StateAcc", 1), "StateAcc1");
-        assert_eq!(versioned_var("ClassVars", 3), "ClassVars3");
         assert_eq!(versioned_var("Self", 5), "Self5");
     }
 

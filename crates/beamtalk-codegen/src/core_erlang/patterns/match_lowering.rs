@@ -43,7 +43,7 @@ use beamtalk_core::source_analysis::Span;
 /// decide whether a bare field-write arm threads). Adding `SelfVt` support
 /// later is the one-line change ADR 0122's Implementation 9 "Out of Scope"
 /// note describes — extend this list, nothing else.
-const MATCH_ARM_FAMILIES: &[VersionPrefix] = &[VersionPrefix::State, VersionPrefix::ClassVars];
+const MATCH_ARM_FAMILIES: &[VersionPrefix] = &[VersionPrefix::State];
 
 impl CoreErlangGenerator {
     /// Generates code for a match expression.
@@ -89,10 +89,9 @@ impl CoreErlangGenerator {
         // path at all — see that function's own context-gating note.
         //
         // Scoped to a value-type INSTANCE method: inside a value-type CLASS
-        // method `self.x :=` is a class-var write on the `ClassVars` chain
-        // (which IS in `MATCH_ARM_FAMILIES`), so it threads (and is rejected
-        // on its own terms by `reject_class_var_field_assignment`) rather
-        // than needing this.
+        // method `self.x :=` is a class-var write, an in-place `put` into the
+        // class process (ADR 0130) that threads nothing, so it needs no
+        // rejection here.
         if self.eligible_families().contains(&VersionPrefix::SelfVt)
             && !MATCH_ARM_FAMILIES.contains(&VersionPrefix::SelfVt)
         {
@@ -237,9 +236,9 @@ impl CoreErlangGenerator {
     /// declared capability. The two formulas are equivalent by construction:
     /// `eligible_families` reports at most one family per context (its own
     /// doc comment proves this), and that family is exactly the one the old
-    /// formula named — `State` for an Actor instance method, `ClassVars` for
-    /// any class method (Actor's or a value type's), `SelfVt` — excluded from
-    /// `MATCH_ARM_FAMILIES` — for a value-type instance method. A
+    /// formula named — `State` for an Actor instance method, `SelfVt` —
+    /// excluded from `MATCH_ARM_FAMILIES` — for a value-type instance
+    /// method; a class method has none (ADR 0130). A
     /// value-type instance method DOES still reach this function (a
     /// `match:` with no field-writing arm has nothing for `generate_match`'s
     /// up-front rejection to catch), but `carries_family_write` is `false`
@@ -269,7 +268,7 @@ impl CoreErlangGenerator {
             // BT-3489: a `self.field := ...` arm body. Before this, nothing
             // here matched it, so `generate_match` left `base_state` as
             // `None` and the arm compiled through plain `expression_doc`,
-            // whose field-write binding (`State1`/`ClassVars1`) is scoped to
+            // whose field-write binding (`State1`) is scoped to
             // that one `case` arm — yet the code after the `match:` referenced
             // it unconditionally, so `erlc` rejected the module outright.
             (carries_family_write && self.is_field_assignment(arm.body.unwrap_parens()))

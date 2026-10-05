@@ -15,8 +15,6 @@
 //! - `native_validators` — native actor validation
 //! - `operator_validators` — non-dispatchable operator declaration checks
 //! - `reserved_name_validators` — reserved internal-namespace name checks
-//! - `stored_closure_validators` — stored closures / user-HOM block arguments
-//!   whose class-side self-send class-variable write is not kept (BT-3681)
 //! - `unguarded_late_read_validators` — unguarded `late`-slot read reachable
 //!   from `terminate:`/`handleInfo:` (ADR 0124 §4d)
 
@@ -29,7 +27,6 @@ mod operator_validators;
 pub(crate) mod package_validators;
 mod reserved_name_validators;
 mod sendability_validators;
-mod stored_closure_validators;
 mod structural_validators;
 mod supervision_validators;
 mod unguarded_late_read_validators;
@@ -67,7 +64,6 @@ pub(crate) use reserved_name_validators::check_reserved_internal_names;
 pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,
 };
-pub(crate) use stored_closure_validators::check_stored_closure_class_var_writes;
 pub(crate) use structural_validators::{
     check_ffi_arity, check_native_declaration_location, check_unresolved_classes,
     check_unresolved_ffi_modules, check_unresolved_type_aliases,

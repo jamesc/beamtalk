@@ -58,7 +58,7 @@ pub enum DispatchKind {
 /// are deliberately separate pairs rather than one context-agnostic
 /// "self-send"/"field-write" flag: the same AST shape (`self foo`, `self.f
 /// := …`) means "this needs an Actor `State` thread" inside an instance
-/// method but "this needs a `ClassVars` thread" inside a class method, and a
+/// method but "this is a class-variable access" inside a class method, and a
 /// context-aware consumer reads only the pair matching its current context.
 ///
 /// **Not the same question as [`crate::state_threading_selectors::state_threaded_block_arg_indices`].**
@@ -94,11 +94,12 @@ pub struct StateEffects {
     /// A `self.field := …` write (instance context) — needs the Actor
     /// `State` thread (or, for a Value type, the field's own threading).
     pub field_write: bool,
-    /// A `self.classVar := …` write reachable from a class method — needs
-    /// the `ClassVars` thread.
+    /// A `self.classVar := …` write reachable from a class method — a
+    /// class-variable write (an in-place `put` in the class process, ADR
+    /// 0130).
     pub class_var_write: bool,
     /// A synchronous self-send (`self foo`) reachable from a class method
-    /// — needs the `ClassVars` thread.
+    /// — a class-side send (passes and rebinds nothing, ADR 0130).
     pub class_self_send: bool,
 }
 

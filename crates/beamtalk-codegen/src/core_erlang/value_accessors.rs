@@ -252,14 +252,14 @@ impl CoreErlangGenerator {
     ///
     /// For direct `Value subclass:` classes, builds a flat map:
     /// ```erlang
-    /// 'class_x:y:'/4 = fun (ClassSelf, ClassVars, X, Y) ->
+    /// 'class_x:y:'/3 = fun (ClassSelf, X, Y) ->
     ///     ~{'$beamtalk_class' => 'Point', 'x' => X, 'y' => Y}~
     /// ```
     ///
     /// For sub-subclasses, delegates to `new:` so inherited fields
     /// from the parent are included:
     /// ```erlang
-    /// 'class_y:'/3 = fun (_ClassSelf, _ClassVars, SlotArg0) ->
+    /// 'class_y:'/2 = fun (_ClassSelf, SlotArg0) ->
     ///     call 'child':'new'(~{'y' => SlotArg0}~)
     /// ```
     pub(in crate::core_erlang) fn generate_keyword_constructor_fn(

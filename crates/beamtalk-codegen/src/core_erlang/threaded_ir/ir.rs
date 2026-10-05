@@ -138,20 +138,19 @@ impl FrameId {
 
 // ─── VersionedVar ───────────────────────────────────────────────────────────
 
-/// One of the three (formerly independent) version counters, unified in
-/// NAMING AND IDENTITY ONLY — plus [`VersionPrefix::Local`] (see module docs
-/// §Deviations). Per-prefix scope discipline (state: reset+restore per
-/// branch; `class_vars`: restore-only, mutated-flag sticky; self: reset+
-/// restore, closing the prior "neither" landmine — see
-/// `with_branch_context`'s doc comment in `mod.rs`) remains explicit
-/// per-prefix policy, enforced by the generator's `BranchContextGuard`; this
-/// type only unifies the *shape*.
+/// One of the version counters, unified in NAMING AND IDENTITY ONLY — plus
+/// [`VersionPrefix::Local`] (see module docs §Deviations). Per-prefix scope
+/// discipline (state: reset+restore per branch; self: reset+restore, closing
+/// the prior "neither" landmine — see `with_branch_context`'s doc comment in
+/// `mod.rs`) remains explicit per-prefix policy, enforced by the generator's
+/// `BranchContextGuard`; this type only unifies the *shape*. Class variables
+/// have no prefix: they live in the class process (ADR 0130), so no class
+/// method threads them.
 ///
-/// `State`/`ClassVars`/`SelfVt` get their first production call
+/// `State`/`SelfVt` get their first production call
 /// site here — [`VersionCounter`] is the single implementation behind
-/// `CoreErlangGenerator`'s three (formerly independently implemented)
-/// counters (`StateThreading`, `ClassContext::class_var_version`,
-/// `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc` and
+/// `CoreErlangGenerator`'s two (formerly independently implemented)
+/// counters (`StateThreading` and `ValueTypeContext::self_version`). `TupleAcc`/`Hybrid`/`StateAcc` and
 /// `Put`/`Unpack`/`NlrCatch`/`Return` remain unit-test-only until a
 /// control-flow generator migrates onto the full `ThreadedIr`/`verify()`
 /// pipeline (later issues — this issue is naming/identity unification only,
@@ -169,8 +168,6 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// choice is a function of generator context and stays outside the IR,
     /// decided at Document-construction time).
     State,
-    /// Class variables (`ClassVars`, `ClassVars1`, … — ADR 0110's mechanism).
-    ClassVars,
     /// Value-type fields (`Self`, `Self1`, …).
     SelfVt,
     /// A directly-named loop-threaded local (`Sum`, `Count`, …) as produced
@@ -198,71 +195,6 @@ pub(in crate::core_erlang) enum VersionPrefix {
     /// [`ThreadedStmt::ConditionalLoop`]'s doc comment for the full
     /// ordering contract.
     Gensym(String),
-}
-
-impl VersionPrefix {
-    /// ADR 0122 Decision 4: whether a mutation to this family must be
-    /// visible to a foreign NLR relay via ADR 0110's process-dictionary
-    /// shadow write (the [`super::verify::VerifyError::ShadowWriteMissing`]
-    /// CONTRACT check, `verify.rs:372-375`). `ClassVars` only — `State`/
-    /// `SelfVt` mutations have no process-dictionary side channel to keep in
-    /// sync; a foreign NLR relay reads THEIR final value straight off the
-    /// thrown NLR tuple/the method's own return, never off a shadow.
-    ///
-    /// Called from [`Self::extraction_bind_op`], which BT-3513 gave a real
-    /// production caller (`family_slots::extract_family_slots`, via
-    /// `value_type_codegen.rs`'s `rebind_vt_conditional_mutations`) —
-    /// previously only [`Self::extraction_bind_op`]'s own unit tests reached
-    /// it (ADR 0122, BT-3511: the emission helper only, no site migrated
-    /// yet).
-    pub(in crate::core_erlang) fn requires_shadow_write(&self) -> bool {
-        matches!(self, Self::ClassVars)
-    }
-
-    /// ADR 0122 Decision 3/4: the `(BindOp, shadow_write)` pair a
-    /// construct's own trailing-tuple-slot EXTRACTION `Bind` for this family
-    /// must carry (`control_flow::family_slots::extract_family_slots`) — a
-    /// method here, not a `match` in that helper, so a future fourth family
-    /// cannot grow its own extraction shape without every existing caller of
-    /// the helper picking it up for free (Decision 4: "capability is data").
-    ///
-    /// ALWAYS [`BindOp::Direct`] — never [`BindOp::Put`]: `value` (the
-    /// tuple-element read the caller already built, e.g. `call
-    /// 'erlang':'element'(3, Tuple)`) holds this family's ENTIRE
-    /// post-construct value — the whole `StateAcc`/`ClassVars`/`Self` map —
-    /// not one field of it. `BindOp::Put`'s `maps:put(field, value, source)`
-    /// shape inserts a SINGLE key's value into `source`; applied here it
-    /// would nest the whole new map under one field of the OLD map instead
-    /// of replacing it — wrong for every family, not just this one. Every
-    /// existing hand-rolled extraction site already only ever does a plain
-    /// whole-value rebind this way: `rebind_class_vars_from_doc`,
-    /// `rebind_value_self_from_doc` (`dispatch_codegen.rs`), and
-    /// `rebind_vt_conditional_mutations`'s `let NewCv = element(N, Result)
-    /// in` (`value_type_codegen.rs`) — none of them constructs a `Put` at a
-    /// merge/extraction point, only ever at the ORIGINAL field-write site
-    /// inside the branch that mutated the family in the first place.
-    ///
-    /// `shadow_write` is [`Self::requires_shadow_write`] — `true` only for
-    /// `ClassVars`. Inert on the `Direct` bind this always constructs today:
-    /// `verify()`'s `ShadowWriteMissing` check only ever inspects a
-    /// `BindOp::Put` (see `verify.rs:372-375`), and the mutation this Bind
-    /// merges was already shadow-written, under ADR 0110, by the BRANCH's
-    /// own `Put`-shaped field-write bind — a merge-point rebind is never
-    /// itself a shadow-write producer (see `rebind_class_vars_from_doc`'s own
-    /// doc comment). Set here anyway so `ClassVars`' real ADR 0110 obligation
-    /// lives on the TYPE rather than as a literal a future `Put`-shaped
-    /// extraction consumer would have to remember to flip — exactly the
-    /// unwritten-rule failure mode ADR 0122 exists to remove (§"Why the gaps
-    /// keep happening").
-    ///
-    /// Called from `control_flow::family_slots::extract_family_slots`, which
-    /// BT-3513 gave a real production caller
-    /// (`value_type_codegen.rs`'s `rebind_vt_conditional_mutations`) — ADR
-    /// 0122, BT-3511 introduced this as the emission helper only, with no
-    /// site migrated yet.
-    pub(in crate::core_erlang) fn extraction_bind_op(&self, value: ValueRef) -> (BindOp, bool) {
-        (BindOp::Direct(value), self.requires_shadow_write())
-    }
 }
 
 /// A version-identified Core Erlang variable, scoped to the frame that
@@ -293,7 +225,7 @@ impl VersionedVar {
         }
     }
 
-    /// Renders this variable's Core Erlang name (e.g. `State2`, `ClassVars1`,
+    /// Renders this variable's Core Erlang name (e.g. `State2`, `Self1`,
     /// `Sum`). Delegates to [`super::super::util::versioned_var`], the single
     /// canonical `prefix{version}` namer (never `format!()` for Core
     /// Erlang fragments). `Local` names are passed through
@@ -310,9 +242,6 @@ impl VersionedVar {
     pub(in crate::core_erlang) fn render_name(&self) -> String {
         match &self.prefix {
             VersionPrefix::State => super::super::util::versioned_var("State", self.version),
-            VersionPrefix::ClassVars => {
-                super::super::util::versioned_var("ClassVars", self.version)
-            }
             VersionPrefix::SelfVt => super::super::util::versioned_var("Self", self.version),
             VersionPrefix::Local(name) => {
                 let core_name = super::super::CoreErlangGenerator::to_core_erlang_var(name);
@@ -397,10 +326,9 @@ impl LoopCounter {
 
 // ─── VersionCounter ───────────────────────────────────────────────
 
-/// The single counter implementation behind `CoreErlangGenerator`'s three
+/// The single counter implementation behind `CoreErlangGenerator`'s
 /// (formerly independently implemented) version counters — the earlier
-/// `StateThreading` struct (`state_codegen.rs`), `ClassContext`'s raw
-/// `class_var_version: usize` arithmetic, and `ValueTypeContext`'s raw
+/// `StateThreading` struct (`state_codegen.rs`) and `ValueTypeContext`'s raw
 /// `self_version: usize` arithmetic. One implementation, reused per prefix.
 ///
 /// **Constructor-only production**: [`Self::next_var`] is the only way to
@@ -587,23 +515,8 @@ pub(in crate::core_erlang) enum ValueRef {
 /// now (the Phase A0 prototype only exercises `Direct`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum BindOp {
-    /// A field/class-var mutation: `call 'maps':'put'(field, value, source)`.
-    /// `class_tag` is the dynamic class-identity value the shadow write (when
-    /// `shadow_write` is set) is keyed on — ADR 0110's amendment:
-    /// `{'$bt_class_vars_shadow', element(2, class_tag)}`, never a bare atom,
-    /// so two classes relaying through the same process don't clobber each
-    /// other's shadow (see `generate_field_assignment`, `expressions.rs:576-588`).
-    Put {
-        field: String,
-        value: ValueRef,
-        class_tag: ValueRef,
-    },
-    /// A field/class-var un-assign (ADR 0124 §1/B4): `call
-    /// 'maps':'remove'(field, source)`. `clearField:`'s counterpart to
-    /// [`Self::Put`] — same shadow-write semantics (`class_tag`, rendered
-    /// identically), but two-arity `maps:remove` in place of three-arity
-    /// `maps:put`, since there is no value being written.
-    Remove { field: String, class_tag: ValueRef },
+    /// A field mutation: `call 'maps':'put'(field, value, source)`.
+    Put { field: String, value: ValueRef },
     /// Unpacks a threaded local from the incoming `StateAcc` map at
     /// loop-iteration start (`generate_unpack_at_iteration_start`) — legal
     /// only inside a [`ThreadingMode::StateAcc`] body; see
@@ -628,38 +541,26 @@ pub(in crate::core_erlang) enum BindOp {
 /// One statement of the lowered IR. See [`VersionPrefix`]'s doc comment for
 /// why `NlrCatch`/`Return` are test-only for now (the Phase A0 prototype only
 /// exercises `Threaded`/`Bind`).
+// `ConditionalLoop` is far larger than every other node (it carries the whole
+// loop skeleton); boxing it would ripple through every lowering and test
+// fixture for an IR built once per loop statement.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ThreadedStmt {
     /// A mutation: binds a fresh version from a prior one in the same frame.
-    /// `shadow_write` records whether this `Bind` also emits the ADR 0110
-    /// process-dictionary shadow write — modeling the side channel explicitly
-    /// is what makes [`VerifyError::ShadowWriteMissing`] possible.
     Bind {
         target: VersionedVar,
         source: VersionedVar,
         op: BindOp,
-        shadow_write: bool,
         span: Span,
     },
 
     /// A loop or mutation-carrying conditional, with its mode already
     /// resolved. `produces` lists the versions the body makes available to
     /// its enclosing frame once the construct completes.
-    ///
-    /// `shadow_write_eligible` (ADR 0111 Addendum 9, Question 1): whether a
-    /// class-var mutation inside `body` is eligible for the ADR 0110
-    /// shadow write / [`VerifyError::ShadowWriteMissing`] check — read fresh
-    /// from `self.block_depth == 0` at construction time (independently
-    /// re-derived, never reused from a caller's `shadow_write` value; see
-    /// [`construct_and_verify_class_var_bind`]'s doc comment). Orthogonal to
-    /// `frame`: `frame` scopes version-linearity, `shadow_write_eligible`
-    /// scopes shadow-write eligibility — they only coincided at
-    /// `FrameId::ROOT` historically because no non-ROOT frame ever carried a
-    /// legitimate class-var mutation before loop/fold bodies did.
     Threaded {
         mode: ThreadingMode,
         frame: FrameId,
-        shadow_write_eligible: bool,
         body: Vec<ThreadedStmt>,
         produces: Vec<VersionedVar>,
         span: Span,
@@ -742,10 +643,6 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         fn_name: String,
         mode: ThreadingMode,
         frame: FrameId,
-        /// See [`ThreadedStmt::Threaded`]'s field of the same name (ADR
-        /// 0111 Addendum 9, Question 1) — identical meaning and
-        /// construction discipline, on the loop-shaped variant.
-        shadow_write_eligible: bool,
         /// Present only for counted loops (`to:do:`/`to:by:do:`/
         /// `timesRepeat:`/`repeat`) — `None` for while/`whileFalse:`. See
         /// [`LoopCounter`]'s doc comment.
@@ -842,7 +739,7 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// counterpart of [`ValueRef::Doc`]'s value-level opacity (ADR 0111
     /// Addendum 3), built by the SAME codegen call production already runs at
     /// this point (`expression_doc`, `generate_self_dispatch_open`, the
-    /// `{'reply', ...}`/`{'class_var_result', ...}` epilogue builders, …).
+    /// `{'reply', ...}` epilogue builders, …).
     /// Legal in any straight-line sequence rendered by [`render`]'s top-level
     /// loop (a `gen_server` method body, an [`NlrCatch`](Self::NlrCatch)
     /// try-body). A `Statement`'s `Document` must carry its own correct
@@ -870,8 +767,8 @@ pub(in crate::core_erlang) enum ThreadedStmt {
 
 /// The result of compiling one expression in a state-threading context
 /// (ADR 0118 §Decision 1). `prelude` runs first, in source evaluation
-/// order, and may advance a versioned prefix (`State` today; `ClassVars`/
-/// `Self` in later phases); `value` is then a pure reference to the
+/// order, and may advance a versioned prefix (`State` today; `Self` in later
+/// phases); `value` is then a pure reference to the
 /// expression's result — a temp, a literal, or an opaque `Document` that
 /// reads only from variables the prelude (or the enclosing frame) already
 /// bound.
@@ -912,18 +809,6 @@ pub(in crate::core_erlang) struct ThreadedValue {
 /// self-contained `Document` (`expression_doc` in Actor context, phase 2b —
 /// see that function's doc comment for why not sooner). Same status as
 /// [`ValueRef::Version`]'s constructor.
-///
-/// An investigation into `Opaque` for exactly the class-method self-send case
-/// this variant's own doc names ("a block passed to a class method"):
-/// `close_threaded_value_doc` (`util.rs`) is the real, already-shipping
-/// choke point every ambient (non-`threaded_expression`) class-method
-/// self-send's `ThreadedValue` closes through, and it renders prelude-then-
-/// value unconditionally rather than calling `close()` — see its own doc
-/// comment for why threading a correct `Opaque`-vs-not signal into it is
-/// blocked on the same receiver-class-identity ambiguity
-/// `check_no_unsafe_class_method_self_sends`'s doc comment (`expressions.rs`)
-/// describes for its own call sites, not on anything specific to `close()`
-/// or this enum.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum CloseContext {

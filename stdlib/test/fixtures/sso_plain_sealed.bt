@@ -283,7 +283,6 @@ sealed Object subclass: SsoPlainSealed
     self.n
 
   // The same limit with a writing send: the closure's write is not kept.
-  @expect stored_closure "BT-3690: pins the known limit of a stored closure"
   class storedBump -> Integer =>
     self.n := 0
     b := [self bump]
@@ -317,7 +316,6 @@ sealed Object subclass: SsoPlainSealed
   // BT-3682 limit (unchanged by BT-3690): a block LITERAL passed to the HOM keeps
   // the send's own commit, which overwrites the block's export, so the write is
   // dropped.
-  @expect stored_closure "BT-3682: pins the known limit of a block literal passed to a HOM"
   class viaSectionLiteralInLoop -> Integer =>
     self.n := 0
     seen := 0

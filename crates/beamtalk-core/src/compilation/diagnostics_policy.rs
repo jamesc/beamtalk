@@ -136,7 +136,6 @@ fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
         "file-class-name-mismatch" => DiagnosticCategory::FileClassNameMismatch,
         "definite-assignment" => DiagnosticCategory::DefiniteAssignment,
         "unguarded-late-read" => DiagnosticCategory::UnguardedLateRead,
-        "stored-closure" => DiagnosticCategory::StoredClosure,
         _ => return None,
     })
 }
@@ -166,7 +165,6 @@ const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
     "file-class-name-mismatch",
     "definite-assignment",
     "unguarded-late-read",
-    "stored-closure",
 ];
 
 /// Return a human-readable TOML type name for error messages.
@@ -573,8 +571,7 @@ fn expect_category_unchecked(
         | ExpectCategory::ShadowedClass
         | ExpectCategory::TypeAnnotation
         | ExpectCategory::Inheritance
-        | ExpectCategory::Sendability
-        | ExpectCategory::StoredClosure => false,
+        | ExpectCategory::Sendability => false,
     }
 }
 
@@ -865,10 +862,6 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::Sendability,
                     Some(DiagnosticCategory::Sendability)
                 )
-                | (
-                    ExpectCategory::StoredClosure,
-                    Some(DiagnosticCategory::StoredClosure)
-                )
         )
 }
 
@@ -1054,7 +1047,6 @@ native-declaration-location = "error"
 file-class-name-mismatch = "error"
 definite-assignment = "error"
 unguarded-late-read = "error"
-stored-closure = "warn"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();

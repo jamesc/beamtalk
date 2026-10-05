@@ -171,7 +171,6 @@ impl CoreErlangGenerator {
                 target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
                 source,
                 op: BindOp::Direct(ValueRef::Var(field_val_var)),
-                shadow_write: false,
                 span,
             });
             return Ok(());
@@ -189,7 +188,6 @@ impl CoreErlangGenerator {
                 target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
                 source,
                 op: BindOp::Direct(ValueRef::Var(result_var)),
-                shadow_write: false,
                 span,
             });
             return Ok(());
@@ -201,7 +199,6 @@ impl CoreErlangGenerator {
             target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
             source,
             op: BindOp::Direct(ValueRef::Doc(value_code)),
-            shadow_write: false,
             span,
         });
         Ok(())

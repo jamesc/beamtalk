@@ -13,7 +13,7 @@
 //! - [`branch_guard`] — [`BranchContextGuard`](branch_guard::BranchContextGuard)
 //!   and the `with_branch_context`/`enter_branch_context` pair
 //! - [`accessors`] — small field getters/setters and context-default wrappers
-//! - [`version`] — `State{N}`/`ClassVars{N}`/`Self{N}` version-counter helpers
+//! - [`version`] — `State{N}`/`Self{N}` version-counter helpers
 
 pub(in crate::core_erlang) mod accessors;
 pub(in crate::core_erlang) mod branch_guard;
@@ -136,7 +136,7 @@ pub struct CoreErlangGenerator {
     /// [`threaded_ir::FrameId::ROOT`] (no branch context currently active).
     pub(in crate::core_erlang) active_branch_frame: u32,
     /// The generator's loop-body context — the nine fields (hybrid/direct-params
-    /// mode flags, `ClassVars`-threading side channels, pre-extracted field
+    /// mode flags, pre-extracted field
     /// variable maps) that only have meaning while compiling a loop body,
     /// grouped into one `control_flow`-owned value. See [`LoopMode`].
     pub(in crate::core_erlang) loop_mode: LoopMode,

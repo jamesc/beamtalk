@@ -6,7 +6,6 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use crate::core_erlang::control_flow::analysis::ThreadedFamilies;
 use crate::core_erlang::generator::CoreErlangGenerator;
 
 /// RAII guard for [`CoreErlangGenerator::with_branch_context`]'s
@@ -18,12 +17,8 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 ///
 /// Per-prefix branch discipline:
 /// - **state**: reset to 0 on entry, restored on exit.
-/// - **`class_vars`**: NOT reset on entry (the branch inherits the outer
-///   scope's current version) but restored on exit. `class_var_mutated` is
-///   intentionally NOT restored: it is a method-level flag that
-///   must stay sticky once set.
-/// - **self**: saved and restored on exit, but **NOT reset to 0 on entry**:
-///   the same discipline as `class_vars`, not `state`. `state`'s reset is
+/// - **self**: saved and restored on exit, but **NOT reset to 0 on entry**,
+///   unlike `state`. `state`'s reset is
 ///   safe because `state` inside a loop body renders as `StateAcc{N}` (a
 ///   context-dependent rename, `in_loop_body`), so a reset only affects that
 ///   local rendering convention. `Self{N}` has no such rename — `self.field`
@@ -37,20 +32,13 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 ///   that reads `self.field` produced `maps:get(field, Self)` instead of
 ///   `maps:get(field, Self1)` under a reset-on-entry policy). A call site
 ///   can enter `with_branch_context` with a nonzero `self_version`, so
-///   `self_version` is saved and restored unconditionally, on the same
-///   `class_vars` discipline, rather than left untouched.
-/// - **`threading_families`** (ADR 0122 Decision 5, BT-3518): reset to
-///   empty on entry, same as `state`, so a nested construct never inherits
-///   an enclosing Letrec loop's threaded families by default — restored on
-///   exit via [`std::mem::take`] rather than a `Copy`/`Clone`, since a
-///   [`ThreadedFamilies`] holds a small owned `Vec`.
+///   `self_version` is saved and restored unconditionally rather than left
+///   untouched.
 pub(in crate::core_erlang) struct BranchContextGuard<'a> {
     generator: &'a mut CoreErlangGenerator,
     saved_in_loop: bool,
     saved_state_version: usize,
-    saved_class_var_version: usize,
     saved_self_version: usize,
-    saved_threading_families: ThreadedFamilies,
     saved_active_branch_frame: u32,
 }
 
@@ -58,12 +46,7 @@ impl Drop for BranchContextGuard<'_> {
     fn drop(&mut self) {
         self.generator.in_loop_body = self.saved_in_loop;
         self.generator.set_state_version(self.saved_state_version);
-        self.generator
-            .set_class_var_version(self.saved_class_var_version);
         self.generator.set_self_version(self.saved_self_version);
-        self.generator.loop_mode.threading_families =
-            std::mem::take(&mut self.saved_threading_families);
-        // class_var_mutated intentionally NOT restored — sticky.
         self.generator.active_branch_frame = self.saved_active_branch_frame;
     }
 }
@@ -75,16 +58,10 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn enter_branch_context(&mut self) -> BranchContextGuard<'_> {
         let saved_state_version = self.state_version();
         let saved_in_loop = self.in_loop_body;
-        let saved_class_var_version = self.class_var_version();
         let saved_self_version = self.self_version();
-        let saved_threading_families = std::mem::take(&mut self.loop_mode.threading_families);
         let saved_active_branch_frame = self.active_branch_frame;
         self.set_state_version(0);
         self.in_loop_body = true;
-        // reset-on-entry, like `state_version` — see
-        // `threading_families`'s own doc comment for why this must
-        // never inherit an enclosing Letrec loop's families by default.
-        // `mem::take` above already reset it to empty.
         // mint a fresh frame identity for this branch context —
         // see `current_branch_frame`'s doc comment. `branch_frame_counter`
         // itself is never reset/restored (frame identity must stay globally
@@ -105,14 +82,12 @@ impl CoreErlangGenerator {
         // `maps:get(field, Self1)` for a `self.field := ...` read inside a
         // `do:`/conditional body that follows an earlier `self.field := ...`
         // in the same method — see `BranchContextGuard`'s doc comment).
-        // `self` gets `class_vars`' restore-only discipline instead.
+        // `self` gets a restore-only discipline instead.
         BranchContextGuard {
             generator: self,
             saved_in_loop,
             saved_state_version,
-            saved_class_var_version,
             saved_self_version,
-            saved_threading_families,
             saved_active_branch_frame,
         }
     }
@@ -123,15 +98,7 @@ impl CoreErlangGenerator {
     /// once this function returns, including through an early return via
     /// `?` inside `f`.
     ///
-    /// Also saves/restores `class_var_version` (without resetting
-    /// it — the branch inherits the outer scope's current version) so that
-    /// self-calls inside a conditional branch don't leak `ClassVars{N}`
-    /// bindings into the outer scope.  `class_var_mutated` is intentionally
-    /// NOT restored — it is a method-level flag that must stay sticky once
-    /// set.
-    ///
-    /// Also saves/restores `self_version`, with the same
-    /// restore-only-no-reset discipline as `class_var_version` — see
+    /// Also saves/restores `self_version` (restore-only, no reset) — see
     /// [`BranchContextGuard`]'s doc comment for why a `state`-style reset is
     /// unsafe for `self`.
     pub(in crate::core_erlang) fn with_branch_context<T>(

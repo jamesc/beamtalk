@@ -8,6 +8,4 @@
 //! Re-exports from `semantic_analysis::block_facts`. The analysis logic
 //! lives in the semantic analysis layer.
 
-pub use beamtalk_core::semantic_analysis::block_facts::{
-    BlockMutationAnalysis, analyze_block, same_class_reference_send_selectors,
-};
+pub use beamtalk_core::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};

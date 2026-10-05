@@ -69,128 +69,7 @@ pub enum CodeGenError {
     #[error("formatting error: {0}")]
     Format(#[from] fmt::Error),
 
-    /// A self-send to a same-class class method (`self someSelector`), used
-    /// as a statement directly inside a `whileTrue:`/`timesRepeat:`/`to:do:`/
-    /// `to:by:do:` loop body in a class method. Such a loop threads only its
-    /// own local `StateAcc` through its recursive tail call, never
-    /// `ClassVars`, so any class-variable mutation the self-send makes would
-    /// be silently discarded at the end of every iteration — rejected at
-    /// compile time instead. Scoped to this loop shape only, not
-    /// `Foldl`-shaped bodies (`do:`/`collect:`/`select:`/`inject:into:`/...),
-    /// which routinely and legitimately use a self-send's return value. See
-    /// ADR 0111 Addendum 9.
-    #[error(
-        "Cannot send '{selector}' to self inside this loop body at {location}: \
-             a self-send to a class method can't thread class-variable mutations back \
-             through a whileTrue:/timesRepeat:/to:do:/to:by:do: loop body — any mutation \
-             '{selector}' makes is silently discarded by the time the loop finishes.\n\n\
-             Fix: Accumulate what each call needs into a local variable (or collection) \
-             inside the loop, then make the self-send(s) once after the loop finishes, \
-             outside the threaded body."
-    )]
-    ClassMethodSelfSendInThreadedLoopBody {
-        /// The selector being self-sent.
-        selector: String,
-        /// Source location.
-        location: String,
-    },
-
-    /// A self-send to a same-class class method inside a block that compiles
-    /// through the generic "plain fun"/Tier 2 fallback (`select:`/`collect:`/
-    /// `do:`/etc. arguments, a block stored in a local var then invoked, or
-    /// any other bare/passed block) in a class method, where the target
-    /// selector is not provably free of class-variable mutation (see
-    /// `block_analysis::compute_class_var_mutating_selectors`) — such a block
-    /// has no way to thread a mutation back to the class method that owns
-    /// it. A self-send to a provably pure class method keeps compiling.
-    #[error(
-        "Cannot send '{selector}' to self inside this block at {location}: this self-send \
-             cannot be proven free of class-variable mutation ('{selector}' either writes a \
-             class variable itself, calls another method that might, or isn't defined locally \
-             in this class where that could be checked) — and unlike a threaded loop body, this \
-             block has no way to thread such a mutation back to the class method that owns it.\n\n\
-             Fix: Call '{selector}' directly from the class method's own body instead of from \
-             inside this block, or extract whatever the block needs into a helper method \
-             that's provably free of class-variable mutation."
-    )]
-    ClassMethodSelfSendInUnthreadedBlock {
-        /// The selector being self-sent.
-        selector: String,
-        /// Source location.
-        location: String,
-    },
-
-    /// A class-variable assignment (`self.field := ...`) inside a loop,
-    /// conditional, exception handler, or list-op body in a class method
-    /// (any shape besides a `whileTrue:`/`timesRepeat:`/`to:do:`/`to:by:do:`
-    /// loop that threads `ClassVars` through its own recursive tail call).
-    /// These bodies thread field writes via the generic `State`/`StateAcc`
-    /// map, which has no class-var branch, so the write would be discarded
-    /// once the construct finishes on both normal return and a non-local
-    /// return. See ADR 0110's Consequences > Negative section.
-    #[error(
-        "Cannot assign to class variable '{field}' inside this loop/conditional body at {location}.\n\n\
-             Class-variable assignments only thread state back to the class's ClassVars map at a \
-             class method's own top frame (ADR 0110) — not from inside whileTrue:/timesRepeat:/\
-             ifTrue:/do:/... bodies, where the mutation is silently lost on both normal return and \
-             a foreign non-local return (BT-3140).\n\n\
-             Fix: Accumulate into a local variable inside the loop, then assign the class variable \
-             once after the loop:\n\
-             \x20 // Instead of:\n\
-             \x20 [cond] whileTrue: [self.{field} := self.{field} + 1. ...].\n\
-             \x20 \n\
-             \x20 // Write:\n\
-             \x20 delta := 0.\n\
-             \x20 [cond] whileTrue: [delta := delta + 1. ...].\n\
-             \x20 self.{field} := self.{field} + delta."
-    )]
-    ClassVarAssignmentInThreadedBody {
-        /// The class variable being assigned.
-        field: String,
-        /// Source location.
-        location: String,
-    },
-
-    /// A `Letrec`- or `Foldl`-shaped loop nested inside another such loop,
-    /// where the inner loop's own body would thread a `ClassVars` mutation
-    /// through its own recursive tail call or fold accumulator, but the
-    /// outer loop's own top-level statements don't independently trigger
-    /// `ClassVars` threading. Nothing unpacks a nested loop's `ClassVars`
-    /// back into the outer loop, so the mutation would be silently
-    /// discarded (or, for a `Foldl` nesting, crash `erlc` with an unbound
-    /// variable) once the inner loop exits. See ADR 0111 Addendum 9.
-    #[error(
-        "Cannot mutate {mutation} inside a loop nested inside another loop, at {location}.\n\n\
-             The inner loop's own mutation would be threaded correctly on its own, but the outer \
-             loop (whileTrue:/whileFalse:/timesRepeat:/to:do:/to:by:do:/do:/collect:/select:/\
-             reject:/anySatisfy:/allSatisfy:/inject:into:/detect:/count:/takeWhile:/dropWhile:/\
-             partition:/groupBy:) has no class-variable mutation of its own to carry it back out \
-             — so it is silently discarded, or fails to compile, once \
-             the inner loop finishes.\n\n\
-             Fix: Accumulate into a local variable across both loops, then mutate the class variable \
-             once after the outer loop finishes:\n\
-             \x20 // Instead of:\n\
-             \x20 [i < n] whileTrue: [\n\
-             \x20   [j < n] whileTrue: [self.runs := self.runs + 1. j := j + 1].\n\
-             \x20   i := i + 1].\n\
-             \x20 \n\
-             \x20 // Write:\n\
-             \x20 delta := 0.\n\
-             \x20 [i < n] whileTrue: [\n\
-             \x20   [j < n] whileTrue: [delta := delta + 1. j := j + 1].\n\
-             \x20   i := i + 1].\n\
-             \x20 self.runs := self.runs + delta."
-    )]
-    ClassVarMutationLostAcrossNestedLoop {
-        /// Description of the inner loop's mutation (e.g. "class variable 'runs'" or "'self bump'").
-        mutation: String,
-        /// Source location.
-        location: String,
-    },
-
-    /// The value-type (`Self`-threading) mirror of
-    /// [`Self::ClassVarMutationLostAcrossNestedLoop`]. A `Letrec`-shaped
-    /// loop nested inside another one, where the inner loop's own body
+    /// A `Letrec`-shaped loop nested inside another one, where the inner loop's own body
     /// threads a `self.field := ...` value-type mutation through its own
     /// recursive tail call, but the outer loop's own top-level statements
     /// don't independently trigger `Self` threading. Nothing unpacks a
@@ -262,15 +141,16 @@ pub enum CodeGenError {
     /// Field assignment in a block that can't thread state back — whether the block is
     /// assigned to a variable, passed as an argument, or returned.
     ///
-    /// BT-3491: this diagnostic is shared by all three producers — the BT-2792
-    /// Actor stored-closure path, the `ValueType` `Foldl*`-shape rejection
-    /// (`reject_unthreadable_value_self_field_write`), and the `ClassVar`
-    /// `validate_stored_closure` fall-through — so its fix suggestion can only
-    /// use wording that is correct in every one of them. An inline
+    /// BT-3491: this diagnostic is shared by both producers — the BT-2792
+    /// Actor stored-closure path and the `ValueType` `Foldl*`-shape rejection
+    /// (`reject_unthreadable_value_self_field_write`) — so its fix suggestion
+    /// can only use wording that is correct in both. An inline
     /// `items do: [:item | self.{field} := ...]` rewrite is only valid in the
-    /// Actor case; in `ValueType` and `ClassVar` context it reproduces the
-    /// exact same error. Only the `addTo{field_capitalized}:` method
-    /// extraction is valid everywhere, so that's the only fix offered here.
+    /// Actor case; in `ValueType` context it reproduces the exact same error.
+    /// Only the `addTo{field_capitalized}:` method extraction is valid in
+    /// both, so that's the only fix offered here. (A class-variable write is
+    /// an in-place `put` into the class process, ADR 0130, so a class method
+    /// never reaches this error.)
     #[error(
         "Cannot assign to field '{field}' inside this block at {location}.\n\n\
              Field assignments only thread state back to the actor when the block is used \
@@ -420,9 +300,9 @@ mod tests {
     }
 
     #[test]
-    fn span_returns_none_for_class_var_assignment_in_threaded_body() {
-        let err = CodeGenError::ClassVarAssignmentInThreadedBody {
-            field: "counter".to_string(),
+    fn span_returns_none_for_value_self_mutation_lost_across_nested_loop() {
+        let err = CodeGenError::ValueSelfMutationLostAcrossNestedLoop {
+            mutation: "field 'self.total'".to_string(),
             location: "MyClass:myMethod:5".to_string(),
         };
         assert_eq!(err.span(), None);

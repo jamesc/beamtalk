@@ -274,139 +274,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-3675: the `ThreadedIr` counterpart of
-    /// [`Self::refresh_class_var_after_opaque_scope`], for statement
-    /// sequences that are built as `ThreadedStmt`s (an `on:do:`/`ensure:` arm
-    /// body) rather than spliced `Document`s.
-    ///
-    /// Closes the scope `mark` opened before generating one statement of
-    /// `stmts` (whose own `ThreadedStmt`s start at index `start`). A late-bound
-    /// class-side self-send nested in a conditional or `match:` arm of that
-    /// statement mints a `ClassVars` version this sequence cannot carry out
-    /// (the gates that admit the send judge it by the base class's own view of
-    /// the selector, and a subclass override may write a class variable), but
-    /// it committed its returned class variables under the scope's token. When
-    /// the token was used, inserts its `make_ref()` binding at `start` and
-    /// returns a real, `verify()`-checked `Bind` of a fresh `ClassVarsN` from
-    /// that commit (falling back to the version live before the statement), so
-    /// the construct's trailing `ClassVars` slot carries the write. Empty when
-    /// nothing committed.
-    pub(super) fn confined_class_var_refresh_stmt(
-        &mut self,
-        mark: super::generator::version::ClassVarScopeMark,
-        stmts: &mut Vec<ThreadedStmt>,
-        start: usize,
-        frame: super::threaded_ir::FrameId,
-        span: Span,
-    ) -> Vec<ThreadedStmt> {
-        let prefix = self.class_var_scope_prefix(mark);
-        let Some(token) = self.close_class_var_scope(mark) else {
-            return Vec::new();
-        };
-        stmts.insert(start, ThreadedStmt::Statement(prefix, span));
-        let cv_before = Self::class_var_name_at(mark.version);
-        // The refresh consumes the newest version this statement's own
-        // sequence bound (so a pre-call sync or call rebind is not consumed
-        // twice, which `verify()` rejects as non-linear); when none was bound
-        // here — the live one may be a name minted inside a nested arm — it
-        // consumes the version live before the statement.
-        let live = self.class_var_version();
-        let source_version =
-            if live != mark.version && Self::stmts_bind_class_var_version(stmts, live) {
-                live
-            } else {
-                mark.version
-            };
-        // BT-3683: the fallback is the enclosing scopes' newest commit, not
-        // the (possibly stale) lexical version before this statement.
-        let fallback = self.class_var_scope_refresh_fallback_doc(&cv_before);
-        self.next_class_var();
-        let target_version = self.class_var_version();
-        let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
-            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(
-                Self::class_var_scope_take_doc(&token.name, fallback),
-            )),
-            false,
-            frame,
-            false,
-            source_version,
-            target_version,
-            span,
-        );
-        self.report_threaded_ir_verify_errors(
-            &errors,
-            "class-var refresh from the scope's commit after a confined late-bound self-send",
-            span,
-        );
-        let mut refresh = vec![ThreadedStmt::Statement(Document::Str(" "), span), bind];
-        let cv_new = self.current_class_var();
-        if let Some(commit) = self.commit_to_innermost_scope_doc(&cv_new) {
-            refresh.push(ThreadedStmt::Statement(commit, span));
-        }
-        refresh
-    }
-
-    /// Whether `stmts` (recursively) contains a `ClassVars` `Bind` whose
-    /// target is `version`.
-    fn stmts_bind_class_var_version(stmts: &[ThreadedStmt], version: usize) -> bool {
-        stmts.iter().any(|stmt| match stmt {
-            ThreadedStmt::Bind { target, .. } => {
-                target.prefix == VersionPrefix::ClassVars && target.version == version
-            }
-            ThreadedStmt::Threaded { body, produces, .. } => {
-                produces
-                    .iter()
-                    .any(|v| v.prefix == VersionPrefix::ClassVars && v.version == version)
-                    || Self::stmts_bind_class_var_version(body, version)
-            }
-            _ => false,
-        })
-    }
-
-    /// ADR 0111 Addendum 9, Questions 2/3: rebinds `ClassVarsN`
-    /// from an already-produced value Document — a Letrec loop construct's
-    /// own returned tuple slot carrying the `ClassVars` mutations threaded
-    /// through its recursive tail call (`while_loops.rs`/`counted_loops.rs`
-    /// via `generate_counted_stateful_loop`). Mirrors
-    /// [`Self::emit_class_var_result_unwrap`]'s inherited-self-dispatch
-    /// rebind: never itself a shadow-write producer (each loop iteration's
-    /// own class-var write, inside the loop body, already shadow-wrote it
-    /// under the identical `ClassSelf`-tagged key — ADR 0110 §Runtime
-    /// change) and never claims a real nested frame identity of its own
-    /// (`FrameId::ROOT`, `shadow_write_eligible: false`, per ADR 0111
-    /// Addendum 9 Question 2).
-    pub(super) fn rebind_class_vars_from_doc(
-        &mut self,
-        value_doc: Document<'static>,
-        span: beamtalk_core::source_analysis::Span,
-    ) -> Document<'static> {
-        let source_version = self.class_var_version();
-        self.next_class_var();
-        let target_version = self.class_var_version();
-        let (bind, errors) = super::threaded_ir::construct_and_verify_class_var_bind(
-            super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(value_doc)),
-            false,
-            super::threaded_ir::FrameId::ROOT,
-            false,
-            source_version,
-            target_version,
-            span,
-        );
-        self.report_threaded_ir_verify_errors(
-            &errors,
-            "class-var rebind from a loop construct's threaded result",
-            span,
-        );
-        let mut ctx = super::threaded_ir::RenderCtx::new(self);
-        let rebind = super::threaded_ir::render(std::slice::from_ref(&bind), &mut ctx);
-        // BT-3675: the rebind is a mint like a send's; commit it to the
-        // enclosing scope so later sends sync from it.
-        let commit = self.commit_live_class_var_doc();
-        docvec![rebind, commit]
-    }
-
-    /// the value-type `Self` mirror of
-    /// [`Self::rebind_class_vars_from_doc`] — rebinds `Self{N}` from an
+    /// Rebinds `Self{N}` from an
     /// already-produced value `Document`: a construct's own returned trailing
     /// tuple slot, carrying the `self.field := ...` mutations threaded out of
     /// its inlined body. This is what makes the construct's final `Self` the
@@ -417,10 +285,8 @@ impl CoreErlangGenerator {
     /// recursive tail call) and BT-3486's `on:do:`/`ensure:` (threaded through
     /// the `try`'s result tuple).
     ///
-    /// Simpler than the class-var sibling: `SelfVt` carries none of ADR
-    /// 0110's shadow-write obligation, so this verifies through the same
-    /// plain [`Self::check_simple_field_bind_invariant`] every other
-    /// `Self{N}`/`State{N}` version step already uses.
+    /// Verifies through the plain [`Self::check_simple_field_bind_invariant`]
+    /// every other `Self{N}`/`State{N}` version step already uses.
     pub(super) fn rebind_value_self_from_doc(
         &mut self,
         value_doc: Document<'static>,
@@ -448,7 +314,6 @@ impl CoreErlangGenerator {
                 FrameId::ROOT,
             ),
             op: super::threaded_ir::BindOp::Direct(super::threaded_ir::ValueRef::Doc(value_doc)),
-            shadow_write: false,
             span,
         };
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
@@ -1000,15 +865,6 @@ impl CoreErlangGenerator {
                         arg_parts.push(Document::Str(", "));
                     }
                     if let Some(block) = Self::extract_block_literal(arg) {
-                        // A block crossing the Erlang
-                        // interop boundary here goes through
-                        // `generate_erlang_interop_wrapper` → `generate_block`,
-                        // the same same-process, in-process closure mechanism as
-                        // a `select:`/`do:` argument — see
-                        // `check_no_unsafe_class_method_self_sends`'s doc
-                        // comment.
-                        let analysis = crate::core_erlang::block_analysis::analyze_block(block);
-                        self.check_no_unsafe_class_method_self_sends(&analysis, block, block.span)?;
                         let (wrapped_doc, is_stateful) =
                             self.generate_erlang_interop_wrapper(block)?;
                         if is_stateful {
@@ -1217,7 +1073,7 @@ impl CoreErlangGenerator {
     /// we call the module function directly (not through `gen_server`) to avoid
     /// deadlock since class methods execute inside a `gen_server:call` handler.
     ///
-    /// For user-defined class methods, generates `class_<selector>(ClassSelf, ClassVars, ...)`.
+    /// For user-defined class methods, generates `class_<selector>(ClassSelf, ...)`.
     /// For built-in exports (spawn, new, etc.), generates `module:selector(...)`.
     fn try_handle_class_method_self_send(
         &mut self,
@@ -1248,13 +1104,11 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0118 phase 5b: returns a [`ThreadedValue`] whose
     /// prelude is real `ThreadedStmt`s throughout — every branch threads
-    /// its arguments via [`Self::thread_args`] and either folds the
-    /// resulting prelude into its own class-var `Bind`
-    /// ([`Self::emit_class_var_result_unwrap`]) or, for a branch with no
-    /// class-var `Bind` of its own (instantiation intrinsics, reflective
-    /// primitives, auto-exports, the slot constructor), closes the
-    /// argument prelude into a self-contained call `Document`
-    /// ([`Self::close_prelude`]) and wraps it as a pure `ThreadedValue`.
+    /// its arguments via [`Self::thread_args`] and closes the argument
+    /// prelude into a self-contained call `Document` (
+    /// [`Self::class_self_send_value`] / [`Self::close_prelude`]), wrapped as
+    /// a pure `ThreadedValue` — a class-side send passes and rebinds nothing
+    /// (ADR 0130 §3).
     #[allow(clippy::too_many_lines)] // Multiple dispatch branches share args-capture scaffolding.
     pub(super) fn generate_class_method_self_send(
         &mut self,
@@ -1447,7 +1301,7 @@ impl CoreErlangGenerator {
         }
 
         // Inherited class method — walk the hierarchy at runtime and
-        // apply the defining module's class_<sel>(ClassSelf, ClassVars, Args...).
+        // apply the defining module's class_<sel>(ClassSelf, Args...).
         // The one remaining auto-generated 0-arity export reachable via plain
         // self-send (`class_name/0`) stays on the direct-call path because the
         // chain walker only looks at user-defined class_methods, and its
@@ -1794,7 +1648,6 @@ impl CoreErlangGenerator {
                     leaf::var(dispatch_var.clone()),
                     ")",
                 ])),
-                shadow_write: false,
                 span,
             },
         ];
@@ -2300,7 +2153,6 @@ impl CoreErlangGenerator {
                         val_var,
                     ));
                 }
-                self.reject_class_var_field_assignment(expr, field)?;
                 // Full-extract mode — rebind field param instead of maps:put.
                 // When the field is in hybrid_mutated_fields, the field has been extracted
                 // to a direct fun parameter. We rebind it to a fresh variable and update
@@ -2843,11 +2695,11 @@ impl CoreErlangGenerator {
 
     /// Generates a direct function call to a sealed class method.
     ///
-    /// Passes `nil` for `ClassSelf` and `#{}` for `ClassVars` since sealed classes
-    /// with no class variables never reference these parameters.
+    /// Passes `nil` for `ClassSelf` since sealed classes with no class
+    /// variables never reference it.
     ///
     /// ```erlang
-    /// call 'module':'class_<selector>'('nil', #{}, Args...)
+    /// call 'module':'class_<selector>'('nil', Args...)
     /// ```
     fn generate_direct_class_method_call(
         &mut self,

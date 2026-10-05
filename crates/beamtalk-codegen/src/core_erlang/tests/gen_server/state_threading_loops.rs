@@ -10,8 +10,8 @@ use super::*;
 #[test]
 fn test_class_method_local_var_assignment_of_self_class_method() {
     // class method `x := self classMethod` must NOT produce `in in`.
-    // Previously generated invalid Core Erlang:
-    //   let X = let _CMR = call ... in let ClassVars1 = ... in let _Unwrapped = ... in  in X
+    // Previously generated invalid Core Erlang (a doubled `in` after the
+    // self-send's open let-chain).
     let src = "Object subclass: Broken\n  class a =>\n    x := self b.\n    x\n\n  class b => 42";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -134,14 +134,11 @@ fn test_do_assigned_to_discarded_local_in_direct_params_loop_still_emits_foldl()
 
 #[test]
 fn test_non_mutating_class_method_self_send_in_loop_body_also_compiles() {
-    // every same-class class-method self-send routes
-    // through the same `{class_var_result, ...}` unwrap convention
+    // every same-class class-method self-send compiles the same way
     // regardless of whether the callee actually touches class state — the
     // caller can't know that statically (the callee may be overridden, or
-    // defined later in the file). `ClassVars` threading works
-    // unconditionally for the same reason: it doesn't need to know whether
-    // the self-send actually mutates anything, only that the callee's return
-    // convention always carries a (possibly-unchanged) `ClassVars` value.
+    // defined later in the file). A class-side send passes and rebinds
+    // nothing (ADR 0130 §3), so the loop body needs no special handling.
     let src = "Value subclass: Driver7\n  class helper: x => x * 2\n  class countedRun: aBlock over: aList =>\n    i := 1\n    [i <= aList size] whileTrue: [\n      self helper: i\n      aBlock value: (aList at: i)\n      i := i + 1\n    ]\n    nil";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -199,26 +196,11 @@ fn test_class_method_self_send_as_collect_transform_still_compiles() {
 
 #[test]
 fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() {
-    // The unthreaded-block guard can't see a
-    // self-send's target selector when it isn't locally defined on the
-    // current class (e.g. inherited from a superclass in a different file —
-    // `compute_class_var_mutating_selectors` only has this class's own
-    // `class_methods` to analyze), so it conservatively treats any such
-    // self-send as unsafe. That conservatism is unsound as a blanket rule:
     // `stdlib/src/subprocess.bt` self-sends `spawnWith:` (inherited from
-    // `Actor`, `stdlib/src/actor.bt`) from inside a `tryDo:` block, and
-    // `just build` failed on it once this guard landed.
-    //
-    // The fix: gate the whole check on the class actually declaring class
-    // variables (`class_var_names`). With none, there is no classState a
-    // self-send could possibly lose — an inherited method's body is fixed
-    // at the *superclass's* compile time and can only reference class vars
-    // declared there or above, never ones a subclass adds later. This class
+    // `Actor`, `stdlib/src/actor.bt`) from inside a `tryDo:` block. This class
     // has no `classState:`, so a self-send to `spawnWith:` — not locally
     // defined here, standing in for the real inherited-from-`Actor` case —
-    // must still compile inside a bare `select:` block, hitting exactly the
-    // "isn't defined locally in this class" conservative-fallback branch
-    // this guard would otherwise trip.
+    // must compile inside a bare `select:` block.
     let src = "Value subclass: NoClassVarsDriver\n  class doubled: aList =>\n    aList select: [:x | self spawnWith: x]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);

@@ -158,7 +158,7 @@ expected to produce the same wording for the same malformed input.
 
 ### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170, BT-3447)
 
-State threading — actor/instance `State`, class-var `ClassVars`, value-type
+State threading — actor/instance `State`, value-type
 `Self`, loop-local threading, and non-local-return (NLR) relay — used to be
 coordinated only by scattered `debug_assert!`s at each emission site, each
 independently re-deriving the same invariants. `crates/beamtalk-codegen/src/core_erlang/threaded_ir/`
@@ -195,7 +195,6 @@ where to start reading:
 | `UnboundVersion` | A versioned var (e.g. `State2`) was referenced with no producing `Bind` in its frame or an ancestor frame on the frame stack. | Whatever emission path built the `ThreadedIr` fragment around the failing construct — it referenced a version it never bound. Live against real per-arm/per-method IR everywhere, including `exception_handling.rs`'s `on:do:`/`ensure:` arms as of BT-3165. |
 | `NonLinearVersion` | Within one `FrameId`, a version was produced by more than one `Bind`, or consumed as the source of more than one successor — frame-scoped SSA-like linearity broken. | The generator for that frame; likely a duplicate `Bind` or a version reused across two branch arms that should have gotten distinct `FrameId`s. Live everywhere `UnboundVersion` is. |
 | `ThreadingModeUnpackMismatch` | An optimized `ThreadingMode` (a mode chosen specifically because it needs no `StateAcc` unpack) contains an unpack `Bind` anyway. | `while_loops.rs` / `counted_loops.rs`'s mode-selection logic — `ThreadingPlan::generate_unpack_at_iteration_start`'s `if !use_direct_params && !use_hybrid_params` guard (`control_flow/mod.rs`) is what makes this invariant hold structurally; BT-3154 deleted the per-call-site `check_loop_unpack_invariant`/`verify_loop_unpack_invariant` wrapper that used to check it explicitly, since `verify()`'s general `ThreadingModeUnpackMismatch` check was redundant with that guard. |
-| `ShadowWriteMissing` | A class-var `Bind` at a shadow-write-eligible point (per the enclosing `Threaded`/`ConditionalLoop` nodes' `shadow_write_eligible` stack — ADR 0111 Addendum 9, not `FrameId` as of BT-3167) inside a method whose body can relay a foreign NLR (an `NlrCatch` with `boundary: ClassMethod { has_class_vars: true }`) lacks `shadow_write: true` — the ADR 0110 contract. | `expressions.rs`'s class-var assignment emission path (BT-3148, real `Bind` producer) and `gen_server/methods.rs`'s method-body backfill (`verify_body_with_opaque_version_gaps`) — a future change dropped the shadow write ADR 0110's fix depends on, or added a new class-var mutation site without it. As of BT-3164, `verify_body_with_opaque_version_gaps` backfills both `State`- and `ClassVars`-prefix gaps (`backfill_opaque_version_gap`), and `gen_server/methods.rs::lower_class_method_body` promotes a class method's own last-statement `self.classVar := value` to a real `Bind` — the shape that first lets this variant see a real class-var `Bind` jointly with a real class-method `NlrCatch` over the method's actual emitted IR, not just the isolated synthetic-marker fixture `construct_and_verify_class_var_bind` has always checked. |
 | `TupleAccUnpackModeMismatch` | A `ThreadedStmt::TupleAccUnpack` node (flat positional-unpack accumulator) appeared outside a `ThreadingMode::TupleAcc` body. | `list_ops/*.rs` / `dict_ops.rs`, via `control_flow::body::generate_foldl_loop_body` (ADR 0111 Addendum 15) — the tuple-shaped sibling of `ThreadingModeUnpackMismatch`. |
 | `EarlyExitGateSlotMismatch` | A `TupleAccUnpack` node's own `gate_slots` disagrees with its enclosing `ThreadingMode::TupleAcc`'s `gate_slots` — the unpack would read threaded-local values from the wrong tuple positions (well-formed Core Erlang, silently *wrong values*, not a `core_lint` failure). | The list-op family's slot count in `list_ops/*.rs` (`do:`: 0; `collect:`/`select:`/boolean-predicate ops: 1; `takeWhile:`/`dropWhile:`/`detect:`-family: 2). Live since BT-3147 — `mode_gate_slots` (from `ListOpKind::gate_slots`, a canonical per-op table) and `node_gate_slots` (from each call site's own `index_offset - 1`) are genuinely independent sources now. |
 | `TupleAccInValueTypeContext` | `TupleAcc` mode was selected in a `ValueType` context, which has no actor `State` to reference — regression-pinning, `#[cfg(test)]`-only (unreachable today via `select_tuple_acc`'s own early-return; no production constructor). | `control_flow/mod.rs`'s `select_tuple_acc` guard ordering. |
@@ -210,53 +209,6 @@ the shared Actor `threaded_expr.rs` emitter (`emit_actor_threaded_last_stmts`/
 `emit_actor_threaded_assign_rhs_stmts`, which never decline) — there is no
 second, independently-computed recheck left to disagree with the first, so
 the mismatch this variant caught is unrepresentable by construction.
-
-**`ClassVars` threading through loop/fold bodies (BT-3155 epic: BT-3166-BT-3170).**
-`ShadowWriteMissing`'s frame model above (BT-3167) is what let two more
-`ThreadedIr` node kinds start producing real class-var `Bind`s instead of
-rejecting them at compile time: `ConditionalLoop` (BT-3168, `whileTrue:`/
-`timesRepeat:`/`to:do:`/`to:by:do:` — `Letrec` bodies) now threads
-`ClassVars` as an extra fun parameter through the loop's own recursive tail
-call, gated by the same `shadow_write_eligible` the loop node carries; the
-`Foldl*` accumulator (BT-3169, `do:`/`collect:`/`select:`/`inject:into:`/
-list-op and dict-op bodies) becomes a `{ClassVars, StateAcc}` 2-tuple
-whenever a body threads `ClassVars`, so `EarlyExitGateSlotMismatch`'s
-`gate_slots` count stays untouched by `ClassVars`'s presence — modeled as
-an orthogonal bool, not an extra gate slot (see ADR 0111 Addendum 9,
-Question 6). Neither migration added a new `VerifyError` variant — both
-route through the existing `UnboundVersion`/`NonLinearVersion`/
-`ShadowWriteMissing` checks against the now-real `Bind`s these node kinds
-produce, the same "no net-new detection, just a wider real-IR surface"
-pattern BT-3164's class-method-body pipeline established. The one shape
-still rejected at compile time is a loop/fold body whose only mutation is
-the class-var write/self-send itself, with no other local mutation to
-trigger state threading in the first place — see `docs/beamtalk-language-features.md`'s
-"Passing Blocks Through Class Methods" section for the user-facing version
-of that boundary, and ADR 0111 Addendum 9 for the full six-question design
-this migration implements.
-
-**Per-family loop-entry/`Foldl` peak state (ADR 0122 Decision 5, BT-3518).**
-`LoopMode` (`control_flow/loop_mode.rs`) carries two small maps, both keyed
-by `VersionPrefix` rather than hardcoded to `ClassVars`, that back the
-threading above: `threading_families` — the storage families the innermost
-Letrec loop body is threading through its own recursive tail call right
-now, reset to empty on every `enter_branch_context` entry and restored on
-exit by `BranchContextGuard` (the same reset-on-entry discipline as
-`state_version`) — and `foldl_peak_versions` — the peak version each family
-reached *inside* a `Foldl*` body's own `with_branch_context` scope, a
-one-shot value `ThreadingPlan::foldl_call_doc` reads back *after* that
-scope's guard has already restored the live counter, so it is deliberately
-NOT part of the branch-guard reset/restore cycle (folding it in would erase
-it before its one reader ever runs). Both replace what used to be three
-`ClassVars`-only fields (`loop_threads_class_vars`, `last_loop_class_var`,
-`last_foldl_class_var_peak`) — `last_loop_class_var` had no reader left
-once BT-3515 moved the loop's own recursive-tail-call argument onto
-`ThreadingPlan::capture_loop_family_params`/`family_slots::append_family_slots`,
-so it was deleted rather than folded in. `SelfVt` never actually populates
-either surviving map in practice (a value-type method has no same-class
-self-send, and a `Foldl*` accumulator has no `SelfVt` slot), but both stay
-keyed by `VersionPrefix` generically per ADR 0122's "one list, one helper"
-goal rather than reverting to a `ClassVars`-only shape.
 
 **ADR 0122 close-out: one detector, one list, one helper (BT-3519).** ADR
 0122 unified the six hand-written sites that each separately answered "does
