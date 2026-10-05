@@ -618,7 +618,9 @@ impl ThreadingPlan {
             // Foldl* shape: `new`/`new_for_foldl_list_op`-constructed
             // plans only. BT-3584: no `context != Actor` exclusion — see
             // the comment above.
-            generator.in_class_method() && body_analysis.has_self_sends
+            crate::core_erlang::expr_shape::CLASS_VAR_THREADING
+                && generator.in_class_method()
+                && body_analysis.has_self_sends
         };
         let initial_class_var_version = generator.class_var_version();
 

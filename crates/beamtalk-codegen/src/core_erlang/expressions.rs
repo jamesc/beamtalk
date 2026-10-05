@@ -638,30 +638,14 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<Document<'static>> {
-        // Class methods access class variables directly from ClassVars map
+        // ADR 0130 §2: a class method reads a class variable in place from the
+        // class process's dictionary (inlined, the runtime helper on a miss).
         if self.in_class_method() {
             if let Expression::Identifier(recv_id) = receiver {
                 if recv_id.name == "self" && self.class_var_names().contains(field.name.as_str()) {
-                    let cv = self.current_class_var();
                     let class_name = self.class_name();
-                    if self.is_late_class_var(&class_name, field.name.as_str()) {
-                        let declared_type = self
-                            .class_hierarchy
-                            .as_ref()
-                            .and_then(|h| h.class_variable_type(&class_name, field.name.as_str()));
-                        return Ok(self.generate_late_field_read(
-                            field.name.as_str(),
-                            leaf::var(cv),
-                            declared_type,
-                        ));
-                    }
-                    return Ok(docvec![
-                        "call 'maps':'get'(",
-                        leaf::atom(field.name.to_string()),
-                        ", ",
-                        leaf::var(cv),
-                        ")",
-                    ]);
+                    let late = self.is_late_class_var(&class_name, field.name.as_str());
+                    return Ok(self.class_var_read_doc(field.name.as_str(), late));
                 }
             }
             return Err(CodeGenError::UnsupportedFeature {
@@ -769,19 +753,24 @@ impl CoreErlangGenerator {
         field_name: &str,
         value: &Expression,
     ) -> Result<Document<'static>> {
-        // Class methods assign to class variables via ClassVars map
-        // threading — reached through ordinary `generate_expression`, not
-        // `threaded_expression`'s own producer recognition, so
-        // `lower_field_write`'s `Closed` render (equivalent to closing the
-        // prelude inline) is exactly what's wanted here.
-        let (site, frame) = if self.in_class_method() {
-            (FieldWriteSite::ClassVar, self.current_frame())
-        } else {
-            (
-                FieldWriteSite::for_context(self.context),
-                super::threaded_ir::FrameId::ROOT,
-            )
-        };
+        // ADR 0130 §2: a class-variable write is an in-place `put` that answers
+        // the assigned value, an expression like any other (no rebinding).
+        if self.in_class_method() {
+            if !self.class_var_names().contains(field_name) {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: format!(
+                        "cannot assign to instance field '{field_name}' in a class method"
+                    ),
+                    span: Some(value.span()),
+                });
+            }
+            let value_doc = self.expression_doc(value)?;
+            return Ok(self.class_var_write_doc(field_name, value_doc));
+        }
+        let (site, frame) = (
+            FieldWriteSite::for_context(self.context),
+            super::threaded_ir::FrameId::ROOT,
+        );
         let (doc, _val_var) =
             self.lower_field_write(site, Closure::Closed, field_name, value, frame)?;
         Ok(doc)
@@ -1379,7 +1368,7 @@ impl CoreErlangGenerator {
         let mut splits: Vec<(Vec<ThreadedStmt>, Document<'static>)> =
             Vec::with_capacity(arguments.len());
         for arg in arguments {
-            if Self::is_field_assignment(arg) {
+            if self.is_field_assignment(arg) {
                 let (doc, val_var) = self.generate_field_assignment_open(arg)?;
                 splits.push((
                     vec![ThreadedStmt::Statement(doc, arg.unwrap_parens().span())],

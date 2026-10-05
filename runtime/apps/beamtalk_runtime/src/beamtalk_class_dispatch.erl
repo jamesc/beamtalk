@@ -24,9 +24,11 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_send/3,
     lookup_direct_call/3,
     class_self_dispatch/3,
+    class_self_dispatch/4,
     class_self_send/3,
     class_self_direct_ok/4,
     class_self_dispatch_local/3,
+    class_self_dispatch_local/4,
     metaclass_send/4,
     unwrap_class_call/1,
     class_method_fun_name/1,
@@ -223,12 +225,27 @@ the selector.
 """.
 -spec class_self_dispatch(class_name(), selector(), list()) -> term() | no_return().
 class_self_dispatch(ClassName, Selector, Args) ->
-    case check_class_self_extension(ClassName, Selector, Args) of
+    class_self_dispatch(ClassName, Selector, Args, receiver_tag(ClassName)).
+
+-doc """
+`class_self_dispatch/3` with the live receiver's metaclass tag
+(`element(2, ClassSelf)`). A ClassBuilder `super` send runs inside a fun whose
+`ClassSelf` may be a subclass of the builder class; the superclass method must
+run with that receiver (so its class-variable key is the receiver's), not with
+a `ClassSelf` rebuilt from the static builder class.
+""".
+-spec class_self_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
+class_self_dispatch(ClassName, Selector, Args, ReceiverTag) ->
+    case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
-            class_self_dispatch_chain(ClassName, Selector, Args)
+            class_self_dispatch_chain(ClassName, Selector, Args, ReceiverTag)
     end.
+
+-spec receiver_tag(class_name()) -> atom().
+receiver_tag(ClassName) ->
+    beamtalk_class_registry:class_object_tag(ClassName).
 
 -doc """
 Virtual class-side self-send (BT-3666): like `class_self_dispatch/3`, but the
@@ -244,7 +261,7 @@ builder-class `super` sends (ADR 0084) rely on them.
 """.
 -spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
 class_self_send(ClassName, Selector, Args) ->
-    case check_class_self_extension(ClassName, Selector, Args) of
+    case check_class_self_extension(ClassName, Selector, Args, receiver_tag(ClassName)) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -252,7 +269,8 @@ class_self_send(ClassName, Selector, Args) ->
                 ClassName,
                 Selector,
                 Args,
-                find_class_method_from_class(Selector, ClassName)
+                find_class_method_from_class(Selector, ClassName),
+                receiver_tag(ClassName)
             )
     end.
 
@@ -265,7 +283,7 @@ true -> class_foo(...) ; false -> class_self_send/3 walk end`. The direct call
 is only equivalent to the walk when the receiving class is exactly the
 compiling class (`ReceiverTag =:= ClassTag`) AND nothing would shadow the
 compiled method that the walk honours: a class-side extension on the class
-(`check_class_self_extension/3`) or a runtime-installed class-method fun
+(`check_class_self_extension/4`) or a runtime-installed class-method fun
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
@@ -295,16 +313,21 @@ so `class_self_dispatch_local/3` can fall through to it directly after its
 own single extension check, instead of re-checking the (already-confirmed
 absent) extension a second time via a nested `class_self_dispatch/3` call.
 """.
--spec class_self_dispatch_chain(class_name(), selector(), list()) -> term() | no_return().
-class_self_dispatch_chain(ClassName, Selector, Args) ->
+-spec class_self_dispatch_chain(class_name(), selector(), list(), atom()) ->
+    term() | no_return().
+class_self_dispatch_chain(ClassName, Selector, Args, ReceiverTag) ->
     class_self_dispatch_chain(
-        ClassName, Selector, Args, find_class_method_in_chain(Selector, ClassName)
+        ClassName,
+        Selector,
+        Args,
+        find_class_method_in_chain(Selector, ClassName),
+        ReceiverTag
     ).
 
 -spec class_self_dispatch_chain(
-    class_name(), selector(), list(), {ok, class_name(), atom()} | not_found
+    class_name(), selector(), list(), {ok, class_name(), atom()} | not_found, atom()
 ) -> term() | no_return().
-class_self_dispatch_chain(ClassName, Selector, Args, Found) ->
+class_self_dispatch_chain(ClassName, Selector, Args, Found, ReceiverTag) ->
     case Found of
         {ok, DefiningClass, DefiningModule} ->
             %% Route through the same internal helper the gen_server path uses
@@ -316,7 +339,7 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found) ->
                 ClassName,
                 Selector,
                 apply_class_method_in_context(
-                    Selector, Args, ClassName, DefiningClass, DefiningModule
+                    Selector, Args, ClassName, ReceiverTag, DefiningClass, DefiningModule
                 )
             );
         not_found ->
@@ -334,7 +357,7 @@ fun cannot use the compiled direct-call path. It routes here instead.
 Checks the extension registry first (same tag/priority rule as
 `class_self_dispatch/3` above — extension before local method), then the
 class's own runtime class-method fun (the retrieval store), and only falls
-back to `class_self_dispatch_chain/3` (super + inherited, walked from the
+back to `class_self_dispatch_chain/4` (super + inherited, walked from the
 superclass) when the selector is neither.
 
 Returns the raw result and raises a structured `does_not_understand`
@@ -343,7 +366,16 @@ ETS read the dispatch hot path already uses.
 """.
 -spec class_self_dispatch_local(class_name(), selector(), list()) -> term() | no_return().
 class_self_dispatch_local(ClassName, Selector, Args) ->
-    case check_class_self_extension(ClassName, Selector, Args) of
+    class_self_dispatch_local(ClassName, Selector, Args, receiver_tag(ClassName)).
+
+-doc """
+`class_self_dispatch_local/3` with the live receiver's metaclass tag; see
+`class_self_dispatch/4`.
+""".
+-spec class_self_dispatch_local(class_name(), selector(), list(), atom()) ->
+    term() | no_return().
+class_self_dispatch_local(ClassName, Selector, Args, ReceiverTag) ->
+    case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -356,13 +388,13 @@ class_self_dispatch_local(ClassName, Selector, Args) ->
                         ClassName,
                         Selector,
                         apply_class_method_in_context(
-                            Selector, Args, ClassName, ClassName, DefiningModule
+                            Selector, Args, ClassName, ReceiverTag, ClassName, DefiningModule
                         )
                     );
                 error ->
                     %% Not a local runtime method — walk the chain (super + inherited),
                     %% which also resolves inherited runtime funs and compiled methods.
-                    class_self_dispatch_chain(ClassName, Selector, Args)
+                    class_self_dispatch_chain(ClassName, Selector, Args, ReceiverTag)
             end
     end.
 
@@ -386,14 +418,17 @@ Returns `{ok, Outcome}` when an extension matched (`Outcome` already
 unwrapped and ready to return to the codegen call site), or `not_found` so
 the caller proceeds to its own next lookup.
 """.
--spec check_class_self_extension(class_name(), selector(), list()) ->
+-spec check_class_self_extension(class_name(), selector(), list(), atom()) ->
     {ok, term()} | not_found | no_return().
-check_class_self_extension(ClassName, Selector, Args) ->
+check_class_self_extension(ClassName, Selector, Args, ReceiverTag) ->
+    %% `ClassName` picks the extension; `ReceiverTag` is the live receiver's
+    %% metaclass tag, so the extension body reads the receiver's class-variable
+    %% key (a subclass receiver differs from `ClassName`).
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
             Module = self_dispatch_module(ClassName),
-            ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
+            ClassSelf = #beamtalk_object{class = ReceiverTag, class_mod = Module, pid = self()},
             {ok,
                 unwrap_self_dispatch_outcome(
                     ClassName,
@@ -413,7 +448,7 @@ self_dispatch_module(ClassName) ->
     end.
 
 -doc """
-Adapt a `class_method_outcome()` from `apply_class_method_in_context/5` to the
+Adapt a `class_method_outcome()` from `apply_class_method_in_context/6` to the
 self-dispatch caller shape: raw value on success, structured raises on failure.
 Shared by `class_self_dispatch/3` and `class_self_dispatch_local/3`.
 """.
@@ -760,7 +795,7 @@ same function (`beamtalk_object_class:dispatch_class_method/5`).
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
 class — `class_self_dispatch/3` / `class_self_dispatch_local/3`, below —
-goes through `check_class_self_extension/3` instead, which checks the same
+goes through `check_class_self_extension/4` instead, which checks the same
 registry under the same priority rule.
 
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
@@ -813,7 +848,7 @@ is `fun(Args, ClassSelf) -> Result`; class variables are read and written
 through `beamtalk_class_vars`, not threaded. The entry follows the same
 install / read-back / uninstall protocol as `invoke_class_method/7`
 (`run_with_class_vars/3`). `ClassSelf` mirrors the receiver
-`apply_class_method_in_context/5` builds for a local/inherited class method:
+`apply_class_method_in_context/6` builds for a local/inherited class method:
 `class = ClassTag` (the metaclass tag), `class_mod = Module` (this call's own
 compiled module; extensions are never inherited, so there is no separate
 "defining class" indirection), `pid = self()` (the class gen_server this
@@ -831,7 +866,7 @@ gen_server.
     {reply, term(), map()}.
 invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector) ->
     ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
-    run_with_class_vars(ClassName, ClassVars, fun() ->
+    run_with_class_vars(ClassTag, ClassVars, fun() ->
         apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector)
     end).
 
@@ -911,8 +946,13 @@ invocation fails loudly with the outer map intact instead of overwriting it.
 ) ->
     {reply, term(), map()} | test_spawn.
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
-    run_with_class_vars(ClassName, ClassVars, fun() ->
-        apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule)
+    %% The metaclass tag is derived once: it keys the class-variable home and
+    %% is the `ClassSelf` tag the method receives.
+    ClassTag = receiver_tag(ClassName),
+    run_with_class_vars(ClassTag, ClassVars, fun() ->
+        apply_class_method_in_context(
+            Selector, Args, ClassName, ClassTag, DefiningClass, DefiningModule
+        )
     end).
 
 -doc """
@@ -920,10 +960,10 @@ Install `ClassVars` as `ClassName`'s home, run `Thunk` (which yields a
 `class_method_outcome()`), and adapt the outcome to the gen_server reply shape
 (ADR 0130 §1). Shared by `invoke_class_method/7` and `invoke_class_extension/7`.
 """.
--spec run_with_class_vars(class_name(), map(), fun(() -> class_method_outcome())) ->
+-spec run_with_class_vars(atom(), map(), fun(() -> class_method_outcome())) ->
     {reply, term(), map()} | test_spawn.
-run_with_class_vars(ClassName, ClassVars, Thunk) ->
-    Key = beamtalk_class_vars:key(ClassName),
+run_with_class_vars(ClassTag, ClassVars, Thunk) ->
+    Key = beamtalk_class_vars:key_for_tag(ClassTag),
     beamtalk_class_vars:assert_absent(Key),
     beamtalk_class_vars:install(Key, ClassVars),
     try Thunk() of
@@ -974,9 +1014,11 @@ Stacktraces are preserved in the `{raised, ...}` variant so callers
 that need to re-raise (e.g. self-dispatch) get the original trace.
 """.
 -spec apply_class_method_in_context(
-    selector(), list(), class_name(), class_name(), atom()
+    selector(), list(), class_name(), atom(), class_name(), atom()
 ) -> class_method_outcome().
-apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule) ->
+apply_class_method_in_context(
+    Selector, Args, ClassName, ReceiverTag, DefiningClass, DefiningModule
+) ->
     %% For test execution (runAll, run:) inherited from TestCase,
     %% return a spawn request so the caller (gen_server) can handle noreply.
     %% The self-dispatch caller translates this to a structured error.
@@ -985,7 +1027,7 @@ apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, Defining
             test_spawn;
         false ->
             ClassSelf = #beamtalk_object{
-                class = beamtalk_class_registry:class_object_tag(ClassName),
+                class = ReceiverTag,
                 class_mod = DefiningModule,
                 pid = self()
             },

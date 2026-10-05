@@ -2636,98 +2636,6 @@ fn test_has_field_other_receiver_uses_message_dispatch() {
     );
 }
 
-#[test]
-fn test_class_side_clear_field_nested_in_loop_is_compile_error() {
-    // ADR 0124 §4i/B4: `self clearField: #classVar` is only wired for a
-    // class method's own top-level body statement — `is_family_mutation`'s
-    // `ClassVars` arm deliberately does NOT recognize it (see that match
-    // arm's own doc comment), so no loop construct ever allocates a
-    // `ClassVars` slot for it. Before the `block_depth == 0` guard on
-    // `is_self_clear_field_class_var` (`expr_shape.rs`), this exact shape
-    // compiled successfully but silently discarded the mutation AND broke
-    // the loop's own `flag` local-variable threading, producing an infinite
-    // loop at runtime (a live deadlock, found by hand-running this
-    // scenario) — the worst possible outcome of the three (clean rejection,
-    // silent no-op, infinite loop). Must be the clean rejection.
-    let src = concat!(
-        "Object subclass: CvClearInLoop\n",
-        "  classState: current = 0\n\n",
-        "  class clearLoop =>\n",
-        "    flag := true\n",
-        "    [flag] whileTrue: [\n",
-        "      self clearField: #current\n",
-        "      flag := false\n",
-        "    ]\n",
-        "    nil\n",
-    );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(&module, CodegenOptions::new("bt@cvclearinloop"));
-    let err = match result {
-        Err(err @ CodeGenError::UnsupportedFeature { .. }) => err,
-        other => panic!("Expected UnsupportedFeature for a nested clearField:. Got: {other:?}"),
-    };
-    let rendered = err.to_string();
-    assert!(
-        rendered.contains("clearField:") && rendered.contains("not nested inside"),
-        "expected the 'not nested inside a conditional or loop' diagnostic, got: {rendered}"
-    );
-}
-
-#[test]
-fn test_class_side_clear_field_nested_in_conditional_is_compile_error() {
-    // The `ifTrue:`-guarded sibling of the loop case above — the exact
-    // class-side shape of the Symphony `hasField:`-guarded `clearField:`
-    // pattern (`stdlib/test/fixtures/has_clear_field_actor.bt`'s
-    // `stopProcess`, instance-side). Before the fix this compiled and ran
-    // WITHOUT error but silently left the class variable unchanged (no
-    // infinite loop here, since `ifTrue:` has no loop-condition local to
-    // corrupt — just a lost write). Must also be the clean rejection.
-    let src = concat!(
-        "Object subclass: CvClearInConditional\n",
-        "  classState: current = 0\n\n",
-        "  class clearIfPresent =>\n",
-        "    (self hasField: #current)\n",
-        "      ifTrue: [self clearField: #current]\n",
-        "    nil\n",
-    );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(&module, CodegenOptions::new("bt@cvclearinconditional"));
-    let err = match result {
-        Err(err @ CodeGenError::UnsupportedFeature { .. }) => err,
-        other => panic!("Expected UnsupportedFeature for a nested clearField:. Got: {other:?}"),
-    };
-    let rendered = err.to_string();
-    assert!(
-        rendered.contains("clearField:") && rendered.contains("not nested inside"),
-        "expected the 'not nested inside a conditional or loop' diagnostic, got: {rendered}"
-    );
-}
-
-#[test]
-fn test_class_side_clear_field_top_level_non_last_statement_still_works() {
-    // The positive control for the two rejection tests above: a top-level
-    // (not nested in any block), non-last statement `self clearField:
-    // #classVar` in a class method must still compile and actually thread
-    // the mutation — `block_depth == 0` at this position, so
-    // `is_self_clear_field_class_var` still recognizes it via
-    // `class_method_prelude_producer`'s `threaded_expression` call
-    // (`lower_class_method_body`'s non-last branch, `gen_server/methods.rs`).
-    let src = concat!(
-        "Object subclass: CvClearTopLevel\n",
-        "  classState: current = 0\n\n",
-        "  class clearAndLog =>\n",
-        "    self clearField: #current\n",
-        "    nil\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        code.contains("'maps':'remove'"),
-        "a top-level, non-last self clearField: must still thread via maps:remove. Got:\n{code}"
-    );
-}
-
 // --- State-mutation hoisting in block value: apply paths ---
 
 #[test]
@@ -3396,78 +3304,6 @@ fn test_bt2276_class_methods_keyword_wrong_arity_block_rejected() {
 }
 
 #[test]
-fn test_bt2276_class_methods_correct_block_unaffected() {
-    // A correctly-shaped block (`self` plus one per selector slot) still lowers
-    // to a class-method fun and compiles cleanly.
-    let src = "Object classBuilder name: #BT2276OK; superclass: Object; \
-               classMethods: #{ #answer => [:self | 42], #scale: => [:self :n | n * 3] }; register";
-    let code = try_codegen(src).expect("correct classMethods blocks must compile");
-    assert!(
-        code.contains("fun (ClassSelf, ClassVars"),
-        "correct classMethods block should lower to a class-method fun. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_builder_class_var_mutation_emits_shadow_write() {
-    // ADR 0110: ClassBuilder classMethods: funs lower through the
-    // shared class-method body path, so a top-frame class-var mutation inside
-    // one must emit the '$bt_class_vars_shadow' write exactly like a compiled
-    // class method.
-    let src = "Object classBuilder name: #ShadowB; superclass: Object; \
-               classVars: #{ #runs => 0 }; \
-               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
-    let code = try_codegen(src).expect("mutating classMethods block must compile");
-    assert!(
-        code.contains(
-            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
-        ),
-        "builder class-method mutation should emit the ADR 0110 (BT-3039) class-keyed shadow write. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_builder_cascade_at_block_depth_still_emits_shadow_write() {
-    // ADR 0110: the builder cascade may lexically sit inside a block
-    // (block_depth > 0 at the cascade's position), but the fun body executes
-    // at runtime as a class method's own top frame.
-    // generate_class_method_fun_from_block saves/resets/restores block_depth so
-    // the shadow-write gate (`block_depth == 0`) still fires — forgetting that
-    // reset would silently disable the fix for builder classes defined inside
-    // blocks. A source-level `[… classBuilder …]` wrapper is currently rejected
-    // earlier (the stored-closure field-write validation sees the
-    // classMethods: mutation), so simulate the lexical position directly, as
-    // test_generate_cast_send_actor_self_in_block_uses_mailbox does.
-    let src = "Object classBuilder name: #ShadowBlk; superclass: Object; \
-               classVars: #{ #runs => 0 }; \
-               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let expr = module
-        .expressions
-        .into_iter()
-        .next()
-        .expect("expected one top-level expression")
-        .expression;
-    let mut generator = CoreErlangGenerator::new("test");
-    generator.block_depth = 1; // Simulate the cascade sitting inside a block
-    let code = generator
-        .expression_doc(&expr)
-        .expect("mutating classMethods block must compile")
-        .to_pretty_string();
-    assert!(
-        code.contains(
-            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
-        ),
-        "builder fun lowered from inside a block should still emit the class-keyed shadow write. Got:\n{code}"
-    );
-    assert_eq!(
-        generator.block_depth, 1,
-        "block_depth must be restored after lowering the builder fun"
-    );
-}
-
-#[test]
 fn test_bt2276_class_methods_computed_fun_passes_compile() {
     // A computed (non-block) value cannot have its arity checked at compile
     // time, so it must NOT be rejected by the compiler — its arity is validated
@@ -3521,7 +3357,7 @@ fn test_class_method_self_send_in_open_class_is_guarded_direct_call() {
     let code = codegen_source(src);
     let guard = "call 'beamtalk_class_dispatch':'class_self_direct_ok'(call 'erlang':'element'(2, ClassSelf), 'OpenCls class', 'OpenCls', 'foo')";
     let start = code
-        .find("'class_bar'/2 = fun")
+        .find("'class_bar'/1 = fun")
         .expect("class_bar function present");
     let bar = &code[start..];
     let guard_at = bar
@@ -3539,27 +3375,6 @@ fn test_class_method_self_send_in_open_class_is_guarded_direct_call() {
     );
 }
 
-/// BT-3666: the guarded fast path still threads `ClassVars`: both branches feed
-/// one `class_var_result` unwrap, and it is emitted even for a class-var-less
-/// base (a subclass override reached by the walk may write class variables).
-#[test]
-fn test_class_method_self_send_in_open_class_fast_path_rebinds_class_vars() {
-    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
-    let code = codegen_source(src);
-    let start = code
-        .find("'class_bar'/2 = fun")
-        .expect("class_bar function present");
-    let bar = &code[start..];
-    assert!(
-        bar.contains("class_self_direct_ok") && bar.contains("let ClassVars1 = case"),
-        "fast path must feed the ClassVars rebind. Got:\n{bar}"
-    );
-    assert!(
-        bar.contains("{'class_var_result', "),
-        "class-var-less base must still return class_var_result. Got:\n{bar}"
-    );
-}
-
 /// BT-3666: arguments are bound once before the guarded `case`, so a nested
 /// block argument's body is emitted exactly once (not once per branch, which
 /// would grow as 2^depth for nested DSL-style sends).
@@ -3568,7 +3383,7 @@ fn test_class_method_self_send_fast_path_does_not_duplicate_block_args() {
     let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class section: aBlock => aBlock value\n\n  class go => self section: [self section: [self section: [self foo]]]\n";
     let code = codegen_source(src);
     let start = code
-        .find("'class_go'/2 = fun")
+        .find("'class_go'/1 = fun")
         .expect("class_go function present");
     let go = &code[start..];
     let end = go[1..].find("\n'").map_or(go.len(), |e| e + 1);
@@ -3634,18 +3449,6 @@ fn test_class_method_self_send_to_class_sealed_selector_stays_static() {
     );
 }
 
-/// BT-3666: an open-class self-send to a selector the base proves pure still
-/// rebinds the returned `ClassVars`, since a subclass override may write one.
-#[test]
-fn test_class_method_self_send_in_open_class_rebinds_class_vars() {
-    let src = "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n";
-    let code = codegen_source(src);
-    assert!(
-        code.contains("'class_var_result'"),
-        "open class self-send must unwrap class_var_result. Got:\n{code}"
-    );
-}
-
 /// BT-3666: an explicit own-class reference (`Base foo`) is bound statically,
 /// never late-bound on the receiver.
 #[test]
@@ -3660,32 +3463,6 @@ fn test_class_method_explicit_class_reference_stays_static() {
         !code.contains("'class_self_send'"),
         "explicit own-class reference must not late-bind. Got:\n{code}"
     );
-}
-
-/// BT-3666: a static call in an open class (explicit own-class reference or a
-/// `class sealed` selector) cannot use the purity shortcut, because the callee's
-/// own late-bound `self` sends may reach an override that writes a class var.
-#[test]
-fn test_open_class_static_class_self_send_rebinds_class_vars() {
-    for body in [
-        "class foo => 1\n\n  class bar => self foo\n\n  class baz => OpenCls bar\n",
-        "class foo => 1\n\n  class sealed bar => self foo\n\n  class baz => self bar\n",
-    ] {
-        let src = format!("Object subclass: OpenCls\n  {body}");
-        let code = codegen_source(&src);
-        // Slice just `class_baz`: `class_bar` itself always rebinds.
-        let start = code
-            .find("'class_baz'/2 = fun")
-            .expect("class_baz function present");
-        let rest = &code[start..];
-        let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
-        let baz = &rest[..end];
-        assert!(
-            baz.contains("call 'test':'class_bar'(ClassSelf")
-                && baz.contains("let ClassVars1 = case"),
-            "static open-class call must rebind ClassVars. Got:\n{baz}"
-        );
-    }
 }
 
 /// BT-3666: an open Actor's instance-side self-send resolves the callee
@@ -3947,5 +3724,204 @@ fn test_spawn_with_args_validates_map_argument() {
     assert!(
         code.contains(dict_hint.as_str()),
         "type_error must include the Dictionary hint. Got:\n{code}"
+    );
+}
+
+// --- ADR 0130 §2/§3: class variables are read and written in place; class
+// methods and class-side self-sends neither take nor return them ---
+
+/// ADR 0130 §3: a `classMethods:` block lowers to `fun (ClassSelf, Args...)`,
+/// with no `ClassVars` parameter.
+#[test]
+fn test_bt2276_class_methods_correct_block_unaffected() {
+    let src = "Object classBuilder name: #BT2276OK; superclass: Object; \
+               classMethods: #{ #answer => [:self | 42], #scale: => [:self :n | n * 3] }; register";
+    let code = try_codegen(src).expect("correct classMethods blocks must compile");
+    assert!(
+        code.contains("fun (ClassSelf) ->") && code.contains("fun (ClassSelf, "),
+        "correct classMethods block should lower to a class-method fun. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("ClassVars"),
+        "a ClassBuilder fun takes no ClassVars (ADR 0130 §3). Got:\n{code}"
+    );
+}
+
+/// ADR 0130 §2: a class-var write inside a `classMethods:` fun is an in-place
+/// `put` (inlined), with the runtime helper as the miss path.
+#[test]
+fn test_builder_class_var_mutation_is_an_in_place_put() {
+    let src = "Object classBuilder name: #ShadowB; superclass: Object; \
+               classVars: #{ #runs => 0 }; \
+               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
+    let code = try_codegen(src).expect("mutating classMethods block must compile");
+    assert!(
+        code.contains("call 'erlang':'put'({'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)}, call 'maps':'put'('runs', "),
+        "builder class-method write should be an inlined in-place put. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'put'(ClassSelf, 'runs', "),
+        "builder class-method write should fall back to the runtime helper. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("ClassVars") && !code.contains("class_var_result"),
+        "nothing is threaded or returned beside the result. Got:\n{code}"
+    );
+}
+
+/// ADR 0130 §3: a `ClassBuilder` `super` / self-send passes the LIVE receiver tag
+/// (`element(2, ClassSelf)`), so a subclass receiver runs the superclass method
+/// under its own class-variable key instead of the static builder class's.
+#[test]
+fn test_builder_super_and_self_send_pass_live_receiver_tag() {
+    let src = "Object classBuilder name: #BT3709Sup; superclass: Object; \
+               classMethods: #{ #bump => [:self | super bump], #twice => [:self | self bump] }; \
+               register";
+    let code = try_codegen(src).expect("builder super/self-send must compile");
+    assert!(
+        code.contains(
+            "call 'beamtalk_class_dispatch':'class_self_dispatch'('BT3709Sup', 'bump', [], \
+             call 'erlang':'element'(2, ClassSelf))"
+        ),
+        "builder `super` must pass the live receiver tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('BT3709Sup', 'bump', [], \
+             call 'erlang':'element'(2, ClassSelf))"
+        ),
+        "builder self-send must pass the live receiver tag. Got:\n{code}"
+    );
+}
+
+/// A builder cascade lexically inside a block still lowers the fun as a class
+/// method's own top frame (`block_depth` is reset and restored around it).
+#[test]
+fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
+    let src = "Object classBuilder name: #ShadowBlk; superclass: Object; \
+               classVars: #{ #runs => 0 }; \
+               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let expr = module
+        .expressions
+        .into_iter()
+        .next()
+        .expect("expected one top-level expression")
+        .expression;
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.block_depth = 1; // Simulate the cascade sitting inside a block
+    let code = generator
+        .expression_doc(&expr)
+        .expect("mutating classMethods block must compile")
+        .to_pretty_string();
+    assert!(
+        code.contains("call 'erlang':'put'({'$bt_class_vars', "),
+        "builder fun lowered from inside a block should still write in place. Got:\n{code}"
+    );
+    assert_eq!(
+        generator.block_depth, 1,
+        "block_depth must be restored after lowering the builder fun"
+    );
+}
+
+/// ADR 0130 §3: the guarded fast path of an open-class self-send passes
+/// nothing and rebinds nothing; both branches are one plain reply.
+#[test]
+fn test_class_method_self_send_in_open_class_passes_and_rebinds_nothing() {
+    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_bar'/1 = fun")
+        .expect("class_bar function present");
+    let bar = &code[start..];
+    let end = bar[1..].find("\n'").map_or(bar.len(), |e| e + 1);
+    let bar = &bar[..end];
+    assert!(
+        bar.contains("class_self_direct_ok")
+            && bar.contains("call 'test':'class_foo'(ClassSelf)")
+            && bar.contains("'class_self_send'(")
+            && bar.contains("'foo', [])"),
+        "guarded case keeps only the call (direct, then the walk). Got:\n{bar}"
+    );
+    assert!(
+        !bar.contains("ClassVars") && !bar.contains("class_var_result"),
+        "a class-side self-send passes nothing and rebinds nothing. Got:\n{bar}"
+    );
+}
+
+/// ADR 0130 §3: the same holds for an open class with class variables (a
+/// subclass override reached by the walk may write them, in place).
+#[test]
+fn test_class_method_self_send_in_open_class_with_class_vars_has_no_unwrap() {
+    let src = "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n";
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("class_var_result"),
+        "no `{{class_var_result, ..}}` unwrap anywhere. Got:\n{code}"
+    );
+}
+
+/// ADR 0130 §3: a static call (explicit own-class reference or a `class
+/// sealed` selector) in an open class is a plain direct call too.
+#[test]
+fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
+    for body in [
+        "class foo => 1\n\n  class bar => self foo\n\n  class baz => OpenCls bar\n",
+        "class foo => 1\n\n  class sealed bar => self foo\n\n  class baz => self bar\n",
+    ] {
+        let src = format!("Object subclass: OpenCls\n  {body}");
+        let code = codegen_source(&src);
+        let start = code
+            .find("'class_baz'/1 = fun")
+            .expect("class_baz function present");
+        let rest = &code[start..];
+        let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
+        let baz = &rest[..end];
+        assert!(
+            baz.contains("call 'test':'class_bar'(ClassSelf)")
+                && !baz.contains("ClassVars")
+                && !baz.contains("class_var_result"),
+            "static open-class call is a plain direct call. Got:\n{baz}"
+        );
+    }
+}
+
+/// ADR 0130 §2: `clearField:` and `hasField:` on a class variable are helper
+/// calls at any nesting depth: in a loop, in a conditional, at top level.
+#[test]
+fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
+    let src = concat!(
+        "Object subclass: CvClearEverywhere\n",
+        "  classState: current = 0\n\n",
+        "  class clearTop =>\n",
+        "    self clearField: #current\n",
+        "    nil\n\n",
+        "  class clearLoop =>\n",
+        "    flag := true\n",
+        "    [flag] whileTrue: [\n",
+        "      self clearField: #current\n",
+        "      flag := false\n",
+        "    ]\n",
+        "    nil\n\n",
+        "  class clearIfPresent =>\n",
+        "    (self hasField: #current)\n",
+        "      ifTrue: [self clearField: #current]\n",
+        "    nil\n",
+    );
+    let code = codegen_source(src);
+    assert_eq!(
+        code.matches("call 'beamtalk_class_vars':'clear'(ClassSelf, ")
+            .count(),
+        3,
+        "every clearField: is a clear/2 helper call. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'has'(ClassSelf, "),
+        "hasField: is a has/2 helper call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'maps':'remove'") && !code.contains("ClassVars"),
+        "no threaded map surgery on a ClassVars map. Got:\n{code}"
     );
 }

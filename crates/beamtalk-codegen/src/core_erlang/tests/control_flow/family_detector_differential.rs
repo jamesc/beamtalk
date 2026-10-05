@@ -67,93 +67,18 @@ impl std::fmt::Display for Mismatch {
 }
 
 /// The reviewed, expected set of old/new mismatches over the whole corpus —
-/// see this file's own doc comment. A corpus change that removes one of
-/// these (e.g. the fixture is rewritten to avoid the nested self-send) is
-/// welcome; the test just needs its entry deleted here too. A corpus change
-/// that ADDS a new, unreviewed mismatch fails the test until it is looked at
-/// and either fixed (the nested mutation should really be rejected — see
-/// `reject_class_var_field_assignment`/`reject_unthreadable_value_self_field_write`)
-/// or added here as a reviewed, out-of-scope shape.
+/// see this file's own doc comment.
+///
+/// ADR 0130 §3: empty. Every entry this list ever held was a class-variable
+/// mutation nested in a construct the loop could not carry out, which only
+/// existed because a class variable was a threaded `ClassVars` family. Class
+/// variables are written in place now, so neither detector matches the
+/// `ClassVars` family and they trivially agree. A corpus change that adds a
+/// mismatch for the remaining (`SelfVt`) family fails the test until it is
+/// looked at, as before. The next ADR 0130 issue deletes the family and with
+/// it this harness's `ClassVars` half.
 fn expected_mismatches() -> Vec<Mismatch> {
-    vec![
-        Mismatch {
-            file: "stdlib/test/fixtures/class_var_sub_expr.bt".to_string(),
-            line: 117,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/bt3055actor.bt".to_string(),
-            line: 38,
-            shape: "letrec",
-        },
-        // BT-3667: a late-bound `self foo:` (a subclass override may write a
-        // class variable) nested in a conditional in a `whileTrue:` body. The
-        // loop cannot thread it; the write is recovered from the ADR 0110
-        // shadow after the statement and pinned by
-        // `SelfSendOverrideBlocksTest>>testWhileNested`.
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_blocks_base.bt".to_string(),
-            line: 72,
-            shape: "letrec",
-        },
-        // BT-3690: the same shape in the plain-reply fixture and its sealed twin
-        // (`armsToDo` at line 52, `armsTimesRepeat` at line 64): a class's own
-        // `self bump` nested in a conditional arm of a `to:do:` /
-        // `timesRepeat:` body, next to arms that send a provably pure `self
-        // plain`. Both still compile, and the write is recovered from the
-        // per-scope commit tokens exactly as for the BT-3683 entries after it;
-        // pinned by `SelfSendPlainReplyTest>>test{Base,Sub,Sealed}ArmsToDo` /
-        // `...ArmsTimesRepeat`.
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
-            line: 52,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_base.bt".to_string(),
-            line: 64,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
-            line: 52,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_plain_sealed.bt".to_string(),
-            line: 64,
-            shape: "letrec",
-        },
-        // BT-3683: a class's own late-bound `self increment` nested in a
-        // conditional arm of a `to:do:` / `timesRepeat:` body (`armsInToDo`,
-        // `armsInTimesRepeat`, open and sealed). Same shape as the `whileTrue:`
-        // entry above: the loop's own carry-out cannot thread a mutation
-        // nested in an arm, so the write is recovered from the per-scope
-        // commit tokens (BT-3675) and pinned by
-        // `SelfSendOverrideBlocksTest>>test{Open,Sealed}ArmsInToDo` /
-        // `...ArmsInTimesRepeat`. The `do:`-over-a-literal shapes added by the
-        // same issue do not appear here (their old detector already agrees).
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
-            line: 106,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_open.bt".to_string(),
-            line: 118,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
-            line: 86,
-            shape: "letrec",
-        },
-        Mismatch {
-            file: "stdlib/test/fixtures/sso_scope_sealed.bt".to_string(),
-            line: 98,
-            shape: "letrec",
-        },
-    ]
+    Vec::new()
 }
 
 /// Recursively collects every `.bt`/`.btscript` file under `dir`.

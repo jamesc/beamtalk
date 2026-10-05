@@ -381,9 +381,7 @@ fn realistic_class_method_body_ir(shadow_write: bool) -> Vec<ThreadedStmt> {
     let span = span();
     vec![
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("_NlrToken0".to_string()),
             frame: FrameId::ROOT,
             span,
@@ -464,9 +462,7 @@ fn verify_body_with_opaque_version_gaps_classvars_backfill_does_not_spuriously_f
     let span = span();
     let ir = vec![
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("_NlrToken0".to_string()),
             frame: FrameId::ROOT,
             span,
@@ -524,9 +520,7 @@ fn verify_a_spliced_direct_rebind_never_spuriously_fires_shadow_write_missing() 
     let span = span();
     let ir = vec![
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("_NlrToken0".to_string()),
             frame: FrameId::ROOT,
             span,

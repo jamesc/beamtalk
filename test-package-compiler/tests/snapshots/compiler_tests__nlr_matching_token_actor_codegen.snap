@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_continue'/2, 'handle_cast'/2, 'handle_call'/3, 'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'has_method'/1, 'class_name'/0, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'superclass'/0, '__beamtalk_meta'/0, 'has_method_local'/1, 'class_supervisionSpec'/2, 'register_class'/0]
+module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_continue'/2, 'handle_cast'/2, 'handle_call'/3, 'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'has_method'/1, 'class_name'/0, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'superclass'/0, '__beamtalk_meta'/0, 'has_method_local'/1, 'class_supervisionSpec'/1, 'register_class'/0]
   attributes ['behaviour' = ['gen_server'], 'on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'NlrActor', 'Actor'}]]
 
@@ -366,19 +366,11 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
     end
 
 
-'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
-    let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
-    case CMR of
-      <{'class_var_result', Policy, NewClassVars}> when 'true' ->
-        let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
-        let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
-        let Spec2 = call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy) in
-        {'class_var_result', Spec2, NewClassVars}
-      <Policy> when 'true' ->
-        let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
-        let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
-        call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy)
-    end
+'class_supervisionSpec'/1 = fun (ClassSelf) ->
+    let Policy = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf) in
+    let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
+    let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
+    call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy)
 
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'NlrActor',
@@ -402,6 +394,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'initialize_assigns' => [],
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 
@@ -442,6 +435,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'initialize_assigns' => [],
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'

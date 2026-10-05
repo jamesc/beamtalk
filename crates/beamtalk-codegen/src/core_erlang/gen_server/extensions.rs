@@ -26,11 +26,15 @@
 //!   `fun(Args, Self) -> Result` (2-arity).
 //! - **Actor receivers**: `fun(Args, Self, State) -> {Result, NewState}`
 //!   (3-arity).
+//! - **Class-side extensions** (`Target class >> sel`), whatever the target's
+//!   kind, Actor subclasses included: `fun(Args, ClassSelf) -> Result`
+//!   (2-arity), compiled in class-method context so class variables are read
+//!   and written in place through `beamtalk_class_vars` (ADR 0130 §3).
 //!
-//! The arity is chosen from the (best-effort) class kind of the target class.
-//! Foreign targets are usually value/primitive types, so 2-arity is the default;
-//! a target known to be an `Actor` subclass gets the 3-arity state-threading
-//! shape.
+//! For instance-side extensions the arity is chosen from the (best-effort)
+//! class kind of the target class. Foreign targets are usually value/primitive
+//! types, so 2-arity is the default; a target known to be an `Actor` subclass
+//! gets the 3-arity state-threading shape.
 
 use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary, Result};
@@ -189,6 +193,9 @@ impl CoreErlangGenerator {
 
     /// Generates the callable fun for a foreign extension method.
     ///
+    /// A class-side extension (`Target class >> sel`) is a class method of the
+    /// target, whatever the target's kind: `fun(_ExtArgs, ClassSelf) -> Result`
+    /// ([`Self::generate_class_side_extension_fun_body`]). Instance-side:
     /// Actor targets use the state-threading shape
     /// `fun(_ExtArgs, Self, State) -> {Result, NewState}` (3-arity); all other
     /// (value/primitive) targets use `fun(_ExtArgs, Self) -> Result` (2-arity).
@@ -220,7 +227,11 @@ impl CoreErlangGenerator {
         } else {
             MethodBoundary::ValueType
         };
-        let result = self.generate_extension_fun_body(ext, boundary);
+        let result = if ext.is_class_method {
+            self.generate_class_side_extension_fun_body(ext, boundary)
+        } else {
+            self.generate_extension_fun_body(ext, boundary)
+        };
 
         self.set_class_identity(prev_identity);
         result
@@ -372,6 +383,74 @@ impl CoreErlangGenerator {
         self.context = prev_context;
 
         let fun_doc = fun_doc_result?;
+        Ok(self.maybe_annotate_extension_fun(fun_doc, method.span))
+    }
+
+    /// Generates the callable fun for a class-side extension method
+    /// (ADR 0130 §3): `fun (_ExtArgs, ClassSelf) -> <param bindings> <body>`,
+    /// returning the bare result.
+    ///
+    /// Compiled in class-method context for every target kind
+    /// ([`MethodBoundary::ClassMethod`]), so `self` is `ClassSelf` and the
+    /// target's class variables (`target_kind` only picks the code-generation
+    /// context the body's intrinsics expect) are read and written in place;
+    /// nothing is threaded or returned beside the result.
+    fn generate_class_side_extension_fun_body(
+        &mut self,
+        ext: &StandaloneMethodDefinition,
+        target_kind: MethodBoundary,
+    ) -> Result<Document<'static>> {
+        let method = &ext.method;
+        let prev_context = self.context;
+        self.context = match target_kind {
+            MethodBoundary::Actor => CodeGenContext::Actor,
+            _ => CodeGenContext::ValueType,
+        };
+        // The target's declared class variables, so `self.n` in the body is a
+        // class-variable access (the target is foreign: its AST is unavailable).
+        let class_var_names: std::collections::HashSet<String> = self
+            .class_hierarchy
+            .as_ref()
+            .map(|h| h.class_variable_names(ext.class_name.name.as_str()))
+            .unwrap_or_default()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        *self.class_var_names_mut() = class_var_names;
+
+        let (mut frame, param_vars) = MethodFrame::enter(
+            self,
+            method.selector.name().as_str(),
+            &method.parameters,
+            MethodBoundary::ClassMethod,
+        );
+        let arg_prelude = Self::extension_params_prelude_doc(&param_vars);
+
+        let needs_nlr = frame
+            .semantic_facts
+            .has_block_nlr_or_walk(&method.span, &method.body);
+        let nlr_token_var = if needs_nlr {
+            let token_var = frame.fresh_temp_var("NlrToken");
+            frame.set_current_nlr_token(Some(token_var.clone()));
+            Some(token_var)
+        } else {
+            None
+        };
+        let body_result = frame.class_method_body_doc(method, nlr_token_var.as_deref());
+
+        // `frame` drops here (pops the scope, clears `in_class_method`,
+        // restores the selector) on the success and error paths alike.
+        drop(frame);
+        self.class_var_names_mut().clear();
+        self.context = prev_context;
+
+        let body_doc = body_result?;
+        let fun_doc = docvec![
+            "fun (_ExtArgs, ClassSelf) ->",
+            nest(INDENT, docvec![line(), arg_prelude]),
+            "\n",
+            nest(INDENT, docvec![line(), body_doc]),
+        ];
         Ok(self.maybe_annotate_extension_fun(fun_doc, method.span))
     }
 

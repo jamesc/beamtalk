@@ -591,10 +591,10 @@ fn test_value_subclass_keyword_constructor_exported() {
     let module = make_value_subclass_point();
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
-    // Keyword constructor selector for x, y → 'class_x:y:'/4
+    // Keyword constructor selector for x, y → 'class_x:y:'/3 (ClassSelf + 2 slots)
     assert!(
-        code.contains("'class_x:y:'/4"),
-        "Should export 'class_x:y:'/4 keyword constructor. Got:\n{code}"
+        code.contains("'class_x:y:'/3"),
+        "Should export 'class_x:y:'/3 keyword constructor. Got:\n{code}"
     );
 }
 
@@ -605,7 +605,7 @@ fn test_value_subclass_keyword_constructor_function() {
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
     assert!(
-        code.contains("'class_x:y:'/4 = fun (_ClassSelf, _ClassVars, SlotArg0, SlotArg1) ->"),
+        code.contains("'class_x:y:'/3 = fun (_ClassSelf, SlotArg0, SlotArg1) ->"),
         "Should generate keyword constructor function. Got:\n{code}"
     );
     assert!(
@@ -1016,7 +1016,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
 
     // Must call the class-side keyword constructor from within class_withName:
     assert!(
-        code.contains("call 'bt@scheme_symbol':'class_symName:'(ClassSelf, ClassVars,"),
+        code.contains("call 'bt@scheme_symbol':'class_symName:'(ClassSelf,"),
         "class_withName: should dispatch to class_symName: constructor. Got:\n{code}"
     );
     // The class_withName: body must not call the instance getter (symName/1) passing n as self.

@@ -182,7 +182,10 @@ impl CoreErlangGenerator {
         block: &Block,
         span: beamtalk_core::source_analysis::Span,
     ) -> Result<()> {
-        if !self.in_class_method() || self.class_var_names().is_empty() {
+        if !crate::core_erlang::expr_shape::CLASS_VAR_THREADING
+            || !self.in_class_method()
+            || self.class_var_names().is_empty()
+        {
             return Ok(());
         }
         let same_class_reference_sends =
@@ -320,7 +323,11 @@ impl CoreErlangGenerator {
         // mutations — the legitimate Tier 2 case handled below — doesn't
         // spuriously trip validate_stored_closure's separate local-mutation
         // branch, which only applies to blocks that never reach Tier 2 at all.
-        if !analysis.field_writes.is_empty() {
+        //
+        // ADR 0130 §3: not in a class method, where `self.x :=` can only name a
+        // class variable and is an in-place `put` that needs no threading, so a
+        // block may write class variables wherever it runs.
+        if !analysis.field_writes.is_empty() && !self.in_class_method() {
             Self::validate_stored_closure(&analysis, || self.location_label(block.span))?;
         }
 
@@ -734,7 +741,7 @@ impl CoreErlangGenerator {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
 
-            if Self::is_field_assignment(expr) {
+            if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
                 if is_last {
                     // Return the assigned value and updated state.
@@ -927,7 +934,7 @@ impl CoreErlangGenerator {
             return BlockExprKind::LastExpr;
         }
 
-        if Self::is_field_assignment(expr) {
+        if self.is_field_assignment(expr) {
             return BlockExprKind::FieldAssignment;
         }
 
