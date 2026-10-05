@@ -582,7 +582,12 @@ Run only the suites that execute code (`test-bunit`, `test-stdlib`,
 `test-repl-protocol`) with the flag on, not `cargo test`: the flag changes
 generated code, so codegen snapshot tests would fail. Recompile the Erlang
 runtime (`just build-erlang`) first so `beamtalk_class_var_probe` is loadable.
-The static counterpart, escaping closures that read a class variable, is the
+Side effects of a census run: the probe sets the VM-wide
+`erlang:system_flag(backtrace_depth, 128)` once (not restored) and, when
+`BEAMTALK_CLASS_VAR_PROBE_LOG` is set, lowers the primary logger level to
+`notice` while capping every other handler at `warning`, so do not compare a
+census run's output against golden output. The probe does not see `hasField:`
+on class variables (the compiler's `maps:is_key` fast path). The static counterpart, escaping closures that read a class variable, is the
 `beamtalk_core::class_var_census` test
 (`cargo test -p beamtalk-core --lib census_over -- --nocapture`).
 

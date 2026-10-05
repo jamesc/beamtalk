@@ -25,6 +25,9 @@
 //! The query is purely syntactic. A block passed as a message argument is not
 //! counted here (whether it escapes depends on the callee); the runtime probe
 //! (`BEAMTALK_CLASS_VAR_PROBE=1`, `beamtalk_class_var_probe`) covers those.
+//! Standalone `Foo class >> sel =>` definitions in parsed files are scanned too.
+//! **Known blind spot:** `.btscript` files (REPL scripts) do not parse as modules,
+//! so standalone definitions typed in them are not seen.
 //! A block returned from inside a nested inlined conditional branch is not
 //! seen (only the method's own last statement and explicit `^`).
 //!
@@ -34,7 +37,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, Module};
+use crate::ast::{Block, Expression, MethodDefinition, Module};
 use crate::ast_walker::walk_expression;
 use crate::source_analysis::{Severity, lex_with_eof, parse};
 
@@ -196,7 +199,20 @@ pub fn escaping_class_var_closures(files: &[CorpusFile]) -> Vec<EscapeSite> {
                 continue;
             }
             for method in &class.class_methods {
-                scan_method(file, class, method, &vars, &mut sites);
+                scan_method(file, &class.name.name, method, &vars, &mut sites);
+            }
+        }
+        // Standalone `Foo class >> sel => ...` definitions, resolved to their
+        // class by name (the class may be declared in another file).
+        for def in file
+            .module
+            .method_definitions
+            .iter()
+            .filter(|d| d.is_class_method)
+        {
+            let vars = class_vars_of(&def.class_name.name);
+            if !vars.is_empty() {
+                scan_method(file, &def.class_name.name, &def.method, &vars, &mut sites);
             }
         }
     }
@@ -215,7 +231,7 @@ pub fn count_by_shape(sites: &[EscapeSite]) -> std::collections::BTreeMap<Escape
 
 fn scan_method(
     file: &CorpusFile,
-    class: &ClassDefinition,
+    class_name: &str,
     method: &MethodDefinition,
     vars: &HashSet<String>,
     sites: &mut Vec<EscapeSite>,
@@ -227,7 +243,7 @@ fn scan_method(
         }
         sites.push(EscapeSite {
             file: file.path.clone(),
-            class: class.name.name.to_string(),
+            class: class_name.to_string(),
             selector: method.selector.name().to_string(),
             line: line_of(&file.source, block.span.start()),
             shape,

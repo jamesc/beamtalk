@@ -40,10 +40,19 @@ It is a probe-quality answer (a stack of depth > the system backtrace depth
 may hide the frame; `report/6` raises `backtrace_depth` to 128), not an API.
 
 Census sink: when the environment variable `BEAMTALK_CLASS_VAR_PROBE_LOG` names
-a file, the first `report/5` call installs a `logger_std_h` handler
+a file, the first `report/6` call installs a `logger_std_h` handler
 (`beamtalk_class_var_probe`) that appends only `[beamtalk, probe]` events to it,
 one line each, and lowers the primary level to `notice` so they are not
-dropped. Without it, events go to whatever handlers the node already has.
+dropped. To keep that from leaking `notice` events into the node's other
+handlers, every other handler configured at a level below `warning` is raised to
+`warning`. Without the variable, events go to whatever handlers the node already
+has.
+
+Global side effects (census runs only, never normal operation): the first
+reported event sets `erlang:system_flag(backtrace_depth, 128)` for the whole VM
+(once, the previous value is not restored) so `home_live` can see deep stacks.
+The probe does not see a `hasField:` test (`maps:is_key` on the class variables,
+a read the compiler emits without a probe).
 
 The function never raises: a failing probe must not change program behaviour.
 """.
@@ -54,6 +63,7 @@ The function never raises: a failing probe must not change program behaviour.
 -export([report/6]).
 
 -define(SINK_HANDLER, beamtalk_class_var_probe).
+-define(SETUP_KEY, {beamtalk_class_var_probe, setup}).
 
 -doc "Report one class-variable access (see the module doc for what is logged).".
 -spec report(term(), atom(), atom(), read | write, atom(), boolean()) -> ok.
@@ -71,9 +81,6 @@ report(ClassSelf, Class, Selector, Kind, Field, InBlock) ->
 -spec do_report(term(), atom(), atom(), read | write, atom(), boolean()) -> ok.
 do_report(ClassSelf, Class, Selector, Kind, Field, InBlock) ->
     try
-        %% Probe-only: deep class-method call chains need a deeper window to
-        %% find the invoke frame on a blocked home process.
-        _ = erlang:system_flag(backtrace_depth, 128),
         ok = ensure_sink(),
         HomePid = home_pid(ClassSelf),
         Self = self(),
@@ -109,6 +116,20 @@ do_report(ClassSelf, Class, Selector, Kind, Field, InBlock) ->
 
 -spec ensure_sink() -> ok.
 ensure_sink() ->
+    %% One-time probe setup. Deep class-method call chains need a deeper
+    %% backtrace window to find the invoke frame on a blocked home process;
+    %% the flag is VM-wide, so set it once, not on every event.
+    case persistent_term:get(?SETUP_KEY, false) of
+        true ->
+            ok;
+        false ->
+            ok = persistent_term:put(?SETUP_KEY, true),
+            _ = erlang:system_flag(backtrace_depth, 128),
+            ensure_sink_handler()
+    end.
+
+-spec ensure_sink_handler() -> ok.
+ensure_sink_handler() ->
     case os:getenv("BEAMTALK_CLASS_VAR_PROBE_LOG") of
         false ->
             ok;
@@ -129,6 +150,7 @@ ensure_sink() ->
                         formatter =>
                             {logger_formatter, #{single_line => true, template => [msg, "\n"]}}
                     }),
+                    ok = quiet_other_handlers(),
                     case logger:get_primary_config() of
                         #{level := Level} when
                             Level =:= emergency;
@@ -144,6 +166,25 @@ ensure_sink() ->
                     ok
             end
     end.
+
+%% Lowering the primary level to `notice` would let notice events reach every
+%% other handler; raise any handler more verbose than `warning` to `warning`.
+-spec quiet_other_handlers() -> ok.
+quiet_other_handlers() ->
+    lists:foreach(
+        fun
+            (#{id := ?SINK_HANDLER}) ->
+                ok;
+            (#{id := Id, level := Level}) when
+                Level =:= all; Level =:= debug; Level =:= info; Level =:= notice
+            ->
+                _ = logger:set_handler_config(Id, level, warning),
+                ok;
+            (_) ->
+                ok
+        end,
+        logger:get_handler_config()
+    ).
 
 -spec home_pid(term()) -> pid() | none.
 home_pid(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> Pid;

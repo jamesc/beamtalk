@@ -265,9 +265,10 @@ pub struct CoreErlangGenerator {
     /// fallbacks, non-local returns, and other codegen decisions.
     pub(in crate::core_erlang) codegen_diagnostics_enabled: bool,
     /// ADR 0130 Phase 0 census probe (`BEAMTALK_CLASS_VAR_PROBE=1`): when true,
-    /// every class-variable read or write inside a non-inlined block
-    /// (`block_depth > 0`) is preceded by a `beamtalk_class_var_probe:report/5`
-    /// call. Off by default; when off, generated code is byte-identical.
+    /// every class-variable read or write is preceded by a
+    /// `beamtalk_class_var_probe:report/6` call, with `in_block` (inside a
+    /// non-inlined block, `block_depth > 0`) as its last argument. Off by
+    /// default; when off, generated code is byte-identical.
     pub(in crate::core_erlang) class_var_probe_enabled: bool,
     /// Whether `StateAcc` fallback should be promoted to warning (`BEAMTALK_WARN_STATEACC=1`).
     pub(in crate::core_erlang) warn_stateacc: bool,
