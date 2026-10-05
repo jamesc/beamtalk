@@ -20,6 +20,12 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
 }
 
+// BT-3705 (ADR 0130 Phase 1): generated class-variable programs and the
+// reference interpreter. A sibling module (not part of `test_support`) because
+// it is plain data + a pure interpreter with no parser/AST dependency.
+#[cfg(any(test, feature = "test"))]
+pub mod class_var_program;
+
 /// Test-only helpers: parsing, codegen assertions, and AST builders.
 ///
 /// Gated on `#[cfg(any(test, feature = "test"))]` to avoid prod binary
@@ -644,6 +650,25 @@ pub mod test_support {
             let mut module = Module::new(vec![], zero_span());
             module.classes.push(class);
             module
+        })
+    }
+
+    /// Generates class-variable programs (BT-3705, ADR 0130 Phase 1): the
+    /// sibling of [`arb_program`] for class state, loops, exception handling
+    /// and late-bound sends. A program is a pure function of `(seed, size)`,
+    /// so a failing case is reproducible from the printed pair.
+    ///
+    /// See [`super::class_var_program`] for the program model, the three
+    /// spellings and the ADR 0130 §4 reference interpreter.
+    pub fn arb_class_program(
+        shapes: super::class_var_program::Shapes,
+    ) -> impl Strategy<Value = (u64, u32, super::class_var_program::Program)> {
+        (any::<u64>(), 1u32..=3).prop_map(move |(seed, size)| {
+            (
+                seed,
+                size,
+                super::class_var_program::gen_program(seed, size, shapes),
+            )
         })
     }
 

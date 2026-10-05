@@ -1,0 +1,207 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! ADR 0130 Phase 1 (BT-3705): the codegen half of the class-variable
+//! agreement property.
+//!
+//! `beamtalk-core`'s `test_helpers::class_var_program` generates class-method
+//! programs over class variables (loops, `on:do:`/`ensure:`/`tryDo:`, stored
+//! closures, writing and late-bound self-sends). This file checks, in
+//! process and without a BEAM, what every program must satisfy before it can
+//! be executed:
+//!
+//! 1. its rendering parses with no diagnostic (the generator emits valid
+//!    Beamtalk, so a parse error is a generator bug);
+//! 2. debug codegen with the `ThreadedIr` verifier on neither panics (a debug
+//!    build's `debug_assert!`) nor records an `internal:` diagnostic (a
+//!    release build's degraded form of the same failure -- ADR 0130 Open
+//!    Question 2, "verifier visibility in release builds": the property
+//!    treats either as a failure);
+//! 3. the Core Erlang is structurally valid.
+//!
+//! The execution half (compile with `erlc`, run on a BEAM, compare the three
+//! spellings with the reference interpretation) is
+//! `beamtalk-cli/tests/cli/cli_class_var_agreement.rs`; it needs the runtime,
+//! this one does not.
+//!
+//! Two properties share one body: the shapes that pass today are a normal
+//! test; the full shape set is `#[ignore]`d until ADR 0130 Phase 3 (BT-3713)
+//! makes every shape compile and flips it.
+//!
+//! Only the open and sealed spellings are checked here: the override
+//! spelling is two classes in two files, and a class method's lowering
+//! depends on the hierarchy the CLI's multi-file pipeline supplies.
+
+use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module_with_warnings};
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_core::test_helpers::class_var_program::{Program, Shapes, Spelling};
+use beamtalk_core::test_helpers::test_support::{
+    arb_class_program, core_erlang_structural_issues, proptest_config_default,
+};
+use proptest::prelude::*;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+/// Checks one class's source; `Err` names the first violated property.
+fn check_source(name: &str, source: &str) -> Result<(), String> {
+    let (module, diagnostics) = parse(lex_with_eof(source));
+    if let Some(d) = diagnostics.iter().find(|d| d.severity == Severity::Error) {
+        return Err(format!(
+            "generator emitted unparseable source: {}",
+            d.message
+        ));
+    }
+    let generated = catch_unwind(AssertUnwindSafe(|| {
+        generate_module_with_warnings(&module, CodegenOptions::new(name))
+    }));
+    match generated {
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| panic.downcast_ref::<&str>().map(ToString::to_string))
+                .unwrap_or_default();
+            Err(format!("codegen panicked (debug verifier): {msg}"))
+        }
+        // A rejected program (the compiler's own diagnostic for a shape it
+        // cannot thread today) is a codegen error, not a verifier failure,
+        // but it is still a program the property must be able to run.
+        Ok(Err(e)) => Err(format!("codegen rejected the program: {e}")),
+        Ok(Ok(out)) => {
+            if let Some(w) = out
+                .warnings
+                .iter()
+                .find(|w| w.message.starts_with("internal:"))
+            {
+                return Err(format!("verifier diagnostic surfaced: {}", w.message));
+            }
+            let issues = core_erlang_structural_issues(&out.code);
+            if issues.is_empty() {
+                Ok(())
+            } else {
+                Err(format!("invalid Core Erlang: {}", issues.join("; ")))
+            }
+        }
+    }
+}
+
+fn check_program(index: usize, program: &Program) -> Result<(), String> {
+    for spelling in [Spelling::Open, Spelling::Sealed] {
+        for class in program.render(index, spelling) {
+            check_source(&class.name, &class.source)
+                .map_err(|e| format!("{spelling:?}: {e}\n{}", class.source))?;
+        }
+    }
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(proptest_config_default())]
+
+    /// Every generated program, in every shape, answers under the reference
+    /// interpreter (the generator only emits programs within its step
+    /// budget) and renders deterministically.
+    #[test]
+    fn programs_interpret_and_render_deterministically(
+        (seed, size, program) in arb_class_program(Shapes::all())
+    ) {
+        prop_assert!(program.interpret().is_some(), "seed {seed} size {size}");
+        let again = beamtalk_core::test_helpers::class_var_program::gen_program(
+            seed, size, Shapes::all());
+        prop_assert_eq!(&program, &again);
+        for spelling in Spelling::ALL {
+            prop_assert_eq!(program.render(0, spelling), again.render(0, spelling));
+        }
+    }
+
+    /// The shapes whose programs compile today through debug codegen with the
+    /// verifier on: no panic, no `internal:` diagnostic, valid Core Erlang.
+    #[test]
+    fn supported_shapes_pass_verified_codegen(
+        (seed, size, program) in arb_class_program(Shapes::SUPPORTED_TODAY)
+    ) {
+        if let Err(e) = check_program(0, &program) {
+            return Err(TestCaseError::fail(format!("seed {seed} size {size}: {e}")));
+        }
+    }
+}
+
+/// The first line of a failure, with names and numbers dropped, so equal
+/// causes group together in [`measure_failure_rate`].
+fn cause(error: &str) -> String {
+    let first = error
+        .lines()
+        .find(|l| l.contains("panicked") || l.contains("rejected") || l.contains("diagnostic"))
+        .unwrap_or_else(|| error.lines().next().unwrap_or(""));
+    let mut out = String::new();
+    let mut quoted = false;
+    for ch in first.chars() {
+        if ch == '\'' || ch == '"' {
+            quoted = !quoted;
+        } else if !quoted && !ch.is_ascii_digit() {
+            out.push(ch);
+        }
+    }
+    out.chars().take(110).collect()
+}
+
+/// Measurement, not a check: draws `CV_CORPUS_CASES` programs (default 512)
+/// of `CV_CORPUS_SHAPES` (default all) with a fixed RNG and prints the failure
+/// rate and the failures grouped by cause. This is how the BT-3705 PR's
+/// numbers were produced: `CV_CORPUS_SHAPES=do,cond,... cargo test -p
+/// beamtalk-codegen --test class_var_agreement measure_failure_rate --
+/// --ignored --nocapture`.
+#[test]
+#[ignore = "measurement: prints the failure rate and causes for CV_CORPUS_SHAPES"]
+fn measure_failure_rate() {
+    use proptest::strategy::{Strategy, ValueTree};
+    use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+
+    let cases: usize = std::env::var("CV_CORPUS_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(512);
+    let shapes = std::env::var("CV_CORPUS_SHAPES")
+        .ok()
+        .map_or(Shapes::all(), |s| {
+            Shapes::parse(&s).unwrap_or_else(|| panic!("unknown shape in CV_CORPUS_SHAPES={s}"))
+        });
+    let mut runner = TestRunner::new_with_rng(
+        Config::default(),
+        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+    );
+    let strategy = arb_class_program(shapes);
+    let mut by_cause: Vec<(String, usize)> = Vec::new();
+    let mut failed = 0;
+    for index in 0..cases {
+        let (_, _, program) = strategy.new_tree(&mut runner).expect("draw").current();
+        if let Err(e) = check_program(index, &program) {
+            failed += 1;
+            let c = cause(&e);
+            match by_cause.iter_mut().find(|(k, _)| *k == c) {
+                Some((_, n)) => *n += 1,
+                None => by_cause.push((c, 1)),
+            }
+        }
+    }
+    by_cause.sort_by(|a, b| b.1.cmp(&a.1));
+    println!("shapes {shapes:?}: {failed} of {cases} programs fail verified codegen");
+    for (c, n) in by_cause {
+        println!("  {n:>4} x {c}");
+    }
+}
+
+proptest! {
+    #![proptest_config(proptest_config_default())]
+
+    /// Every shape. Red on `main` (the failure rate and the shapes are in the
+    /// BT-3705 PR): ADR 0130 Phase 3 (BT-3713) removes the `#[ignore]`.
+    #[test]
+    #[ignore = "red on main until ADR 0130 Phase 3 (BT-3713) flips it"]
+    fn all_shapes_pass_verified_codegen(
+        (seed, size, program) in arb_class_program(Shapes::all())
+    ) {
+        if let Err(e) = check_program(0, &program) {
+            return Err(TestCaseError::fail(format!("seed {seed} size {size}: {e}")));
+        }
+    }
+}
