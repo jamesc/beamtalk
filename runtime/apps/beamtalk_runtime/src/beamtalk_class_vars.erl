@@ -297,7 +297,8 @@ while the class process is unregistered, and a read with no live class raises
 """.
 -spec with_snapshot(class_self(), fun(() -> T)) -> T when T :: term().
 with_snapshot(ClassSelf, Fun) ->
-    Class = class_name(ClassSelf),
+    %% Validates the receiver (raises on a nil or non-class receiver).
+    _ = class_name(ClassSelf),
     Key = self_key(ClassSelf),
     case erlang:get(Key) of
         undefined ->
