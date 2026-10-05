@@ -133,10 +133,30 @@ get_undeclared_test() ->
             undeclared_class_variable,
             raised_kind(fun() -> beamtalk_class_vars:get(self_obj(), nope) end)
         ),
-        ?assertEqual(
-            undeclared_class_variable,
-            raised_kind(fun() -> beamtalk_class_vars:has(self_obj(), nope) end)
-        )
+        %% `hasField:` never raises on the name.
+        ?assertEqual(false, beamtalk_class_vars:has(self_obj(), nope)),
+        ?assertEqual(false, beamtalk_class_vars:has(self_obj(), nope, #{}))
+    end).
+
+%% No metadata (ClassBuilder / dynamic class) or no live class: kinds are
+%% unknown, so a read of an absent name answers nil like get_class_var.
+get_without_metadata_reads_nil_test() ->
+    with_clean(fun() ->
+        beamtalk_class_vars:install(?KEY, #{}),
+        ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), anything)),
+        ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), anything, #{}))
+    end).
+
+cleared_then_read_test() ->
+    with_declared(fun() ->
+        beamtalk_class_vars:install(?KEY, #{x => 1}),
+        beamtalk_class_vars:clear(self_obj(), x),
+        ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), x))
+    end),
+    with_clean(fun() ->
+        beamtalk_class_vars:install(?KEY, #{x => 1}),
+        beamtalk_class_vars:clear(self_obj(), x),
+        ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), x))
     end).
 
 declared_but_absent_reads_nil_test() ->

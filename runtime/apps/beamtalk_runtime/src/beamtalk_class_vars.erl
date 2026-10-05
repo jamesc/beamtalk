@@ -40,10 +40,13 @@ receiver is an internal error.
 - **Key presence is the "at home" test.** A read with no key and no marker
   raises `class_state_unreachable`; the 3-arity forms fall back to the
   creation-time capture (`capture/2`), raising only when the capture is `none`.
-- `has/2` is key presence in the map (as `hasField:` is today); `clear/2`
-  removes the key (as `clearField:` is today). `get/2` and `has/2` on a name
-  that is neither in the map nor a declared class variable raise
-  `undeclared_class_variable`; a declared name absent from the map reads `nil`.
+- `has/2` is key presence in the map and never raises on the name (as
+  `hasField:` is today: reads raise, `hasField:` does not); `clear/2` removes
+  the key (as `clearField:` is today). `get/2` on a name absent from the map
+  reads `nil` when the class's declared class variables cannot be determined
+  (no metadata, e.g. ClassBuilder classes, or no live class) or the name is
+  declared; it raises `undeclared_class_variable` only when the declared set
+  is known and does not contain the name.
 - `get_late/2` raises the same `uninitialized_state_error` as the class
   gen_server's `get_class_var` for an unassigned (`nil` or absent) variable.
 """.
@@ -104,8 +107,9 @@ assert_absent({'$bt_class_vars', Class} = Key) ->
         {KeyVal, HomeVal} ->
             Details = #{class => Class, key_present => KeyVal =/= undefined, home => HomeVal},
             ?LOG_ERROR(
-                "class-variable home already present",
-                Details#{domain => [beamtalk, runtime]}
+                "class-variable home already present ~p",
+                [Details],
+                #{domain => [beamtalk, runtime]}
             ),
             Error0 = beamtalk_error:new(internal_error, Class, assert_absent),
             Error1 = beamtalk_error:with_message(
@@ -190,13 +194,13 @@ clear(ClassSelf, Name) ->
 -spec has(class_self(), atom()) -> boolean().
 has(ClassSelf, Name) ->
     Class = class_name(ClassSelf),
-    has_value(Class, Name, current_map(Class, Name)).
+    has_value(current_map(Class, Name), Name).
 
 -doc "`has/2` with a creation-time capture fallback.".
 -spec has(class_self(), atom(), map() | none) -> boolean().
 has(ClassSelf, Name, Captured) ->
     Class = class_name(ClassSelf),
-    has_value(Class, Name, map_or_captured(Class, Name, Captured)).
+    has_value(map_or_captured(Class, Name, Captured), Name).
 
 -doc """
 Capture for a block literal: the live map when the key is present (the
@@ -334,7 +338,8 @@ live_class_pid(Class, Name) ->
         Pid -> Pid
     end.
 
-%% A name absent from the map is `nil` when declared, an error otherwise.
+%% A name absent from the map is `nil` when declared (or when the declared
+%% set is unknown), an error only when the declared set is known without it.
 -spec read_value(atom(), atom(), map()) -> term().
 read_value(Class, Name, Map) ->
     case maps:find(Name, Map) of
@@ -353,22 +358,23 @@ late_value(Class, Name, Map) ->
         error -> raise_uninitialized(Class, Name)
     end.
 
--spec has_value(atom(), atom(), map()) -> boolean().
-has_value(Class, Name, Map) ->
-    case maps:is_key(Name, Map) of
-        true ->
-            true;
-        false ->
-            ok = assert_declared(Class, Name),
-            false
-    end.
+%% Never raises on the name: `hasField:` is a non-raising presence test.
+-spec has_value(map(), atom()) -> boolean().
+has_value(Map, Name) ->
+    maps:is_key(Name, Map).
 
 -spec assert_declared(atom(), atom()) -> ok.
 assert_declared(Class, Name) ->
-    Kinds = beamtalk_behaviour_intrinsics:classAllClassVarKindsByName(Class),
-    case maps:is_key(Name, Kinds) of
-        true -> ok;
-        false -> raise_undeclared(Class, Name)
+    case beamtalk_behaviour_intrinsics:classAllClassVarKindsByName(Class) of
+        Kinds when map_size(Kinds) =:= 0 ->
+            %% Declared set unknown (no metadata, or no live class): today's
+            %% `get_class_var` answers nil, so do not claim "undeclared".
+            ok;
+        Kinds ->
+            case maps:is_key(Name, Kinds) of
+                true -> ok;
+                false -> raise_undeclared(Class, Name)
+            end
     end.
 
 -spec nil_receiver() -> no_return().
