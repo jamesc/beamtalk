@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704 (ADR 0130 Phase 1): a supervisor whose `class initialize:` hook writes a
+// class variable (the `class initialize:` row), open spelling.
+
+Supervisor subclass: CvsInitOpen
+  classState: n = 0
+
+  class strategy -> Symbol => #oneForOne
+
+  class children -> List => #()
+
+  class n => self.n
+
+  class reset => self.n := 0
+
+  class bump => self.n := self.n + 1
+
+  class initialize: _sup => self bump

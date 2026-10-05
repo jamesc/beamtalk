@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704: see cvs_override_base.bt.
+
+CvsOverrideBase subclass: CvsOverrideSub
+
+  class bump => self writeN

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704: a sealed class with no class state whose `class sealed` methods are
+// direct-called in the caller's process (ADR 0129 Phase 0b), so a block passed
+// in runs at home.
+
+sealed Object subclass: CvsSealedDriver
+
+  class sealed each: aBlock => aBlock value
+
+  class sealed guard: aBlock => [aBlock value] on: Error do: [:e | nil]

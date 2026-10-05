@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3704 (ADR 0130 Phase 1): rows of the override spelling that do not compile
+// today. They are written in the shape ADR 0130 makes legal and kept out of the
+// build with the `.pending` suffix (the BUnit runner only discovers `.bt`
+// files). BT-3713 (the Phase 3 flip) enables them by dropping the suffix from this
+// file, its sibling fixtures and its test file.
+
+Object subclass: CvsOverrideBasePending
+  classState: n = 0
+
+  class bump => self.n
+
+  class writeN => self.n := self.n + 1
+
+  class n => self.n
+
+
+  class reset => self.n := 0
+
+
+  class boom =>
+    self bump
+    1 / 0
+
+
+  class rowLoopCondition =>
+    self reset
+    [self n < 3] whileTrue: [self bump]
+    self.n
+
+
+  class rowNonMatchingInnerEnsure =>
+    self reset
+    [
+      [
+        [
+          self bump
+          1 / 0
+        ] on: TypeError do: [:e | nil]
+      ] ensure: [self bump]
+    ] on: Error do: [:e | nil]
+    self.n
+
