@@ -36,7 +36,7 @@ through `beamtalk_class_vars`, never passed or returned.)
     class_testAlreadyStarted/1,
     class_testSupError/1,
     class_testGroupLeader/1,
-    'class_initialize:'/3
+    'class_initialize:'/2
 ]).
 
 -doc """
@@ -166,7 +166,7 @@ tagged map.
 -spec class_testSupervisorNew(term()) -> map().
 class_testSupervisorNew(_ClassSelf) ->
     %% Inner tuple uses the helper module so run_initialize finds the
-    %% `class_initialize:/3` defined below directly (no hierarchy walk),
+    %% `class_initialize:/2` defined below directly (no hierarchy walk),
     %% letting the test assert the happy-path rewrite deterministically.
     beamtalk_result:from_tagged_tuple(
         {ok, {beamtalk_supervisor_new, 'BT1981SupNewClass', ?MODULE, self()}}
@@ -227,7 +227,7 @@ Records that it ran in the process dictionary so the test can assert the
 post-dispatch hook actually invoked `run_initialize/1` (rather than only
 that the hook pattern-matched the Result tagged map).
 """.
--spec 'class_initialize:'(term(), map(), term()) -> term().
-'class_initialize:'(_ClassSelf, _ClassVars, _SupTuple) ->
+-spec 'class_initialize:'(term(), term()) -> term().
+'class_initialize:'(_ClassSelf, _SupTuple) ->
     put(bt1994_initialize_called, true),
     nil.

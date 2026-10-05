@@ -2982,7 +2982,7 @@ MyClass performLocally: #computeReport withArguments: #()
 MyClass performLocally: #add:to: withArguments: #(3, 7)
 ```
 
-**Limitations:** Local dispatch calls the method directly on the target class module — it does not walk the superclass chain. Class variable mutations are discarded (the call runs outside the class gen_server's state). Use this only for stateless or read-only class methods.
+**Limitations:** Local dispatch calls the method directly on the target class module — it does not walk the superclass chain. Class variables follow the read-only snapshot rule ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §5): the method *reads* the class variables as of the last completed class-method invocation, and a *write* raises `class_state_read_only`. When `performLocally:withArguments:` is reached from inside the class's own method mid-invocation, it reads and writes the live class variables instead. Use this only for stateless or read-only class methods.
 
 ### Passing Blocks Through Class Methods
 

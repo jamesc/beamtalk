@@ -26,7 +26,10 @@ value is either
   `with_snapshot/2` for runtime-owned out-of-process regions; `put/3` and
   `clear/2` raise `class_state_read_only` under it, and reads resolve the
   class's ETS mirror **by class name** through the registry (never by pid,
-  so a class-process restart is transparent).
+  so a class-process restart is transparent). A registered class process with
+  no mirror row at all (a restart that has not yet recorded its first
+  snapshot) is told apart from an empty map (`class_state_snapshot_lookup/1`)
+  and raises `class_state_unreachable` instead of reading `#{}`.
 
 `install/2` and `uninstall/1` are the only writers of the class key together
 with the `?BT_CLASS_VARS_HOME` entry, which records the key of the live
@@ -287,16 +290,18 @@ Run `Fun` with the class's variables readable from the ETS mirror (resolved
 by class name) when its key is absent: installs the key plus
 `?BT_CLASS_VARS_RO(ClassTag)`, erases exactly that in an `after`. When the
 key is already present (a live map or an outer snapshot) `Fun` just runs.
-Never touches the home entry. A name with no live class raises
+Never touches the home entry. Liveness is checked lazily, on the first mirror
+read (`mirror/2`): a region that never reads a class variable succeeds even
+while the class process is unregistered, and a read with no live class raises
 `class_state_unreachable`.
 """.
 -spec with_snapshot(class_self(), fun(() -> T)) -> T when T :: term().
 with_snapshot(ClassSelf, Fun) ->
-    Class = class_name(ClassSelf),
+    %% Validates the receiver (raises on a nil or non-class receiver).
+    _ = class_name(ClassSelf),
     Key = self_key(ClassSelf),
     case erlang:get(Key) of
         undefined ->
-            _ = live_class_pid(Class, undefined),
             erlang:put(Key, ?BT_CLASS_VARS_RO(element(2, Key))),
             try
                 Fun()
@@ -364,12 +369,20 @@ map_or_captured(Class, Key, Name, Captured) ->
 %% process is picked up transparently.
 -spec mirror(atom(), atom() | undefined) -> map().
 mirror(Class, Name) ->
-    beamtalk_class_registry:class_state_snapshot(live_class_pid(Class, Name)).
+    case beamtalk_class_registry:class_state_snapshot_lookup(live_class_pid(Class)) of
+        {ok, Map} -> Map;
+        %% Registered but no snapshot row yet (a restarted class process that has
+        %% not recorded its first snapshot): not an empty map.
+        not_found -> raise_no_snapshot(Class, Name)
+    end.
 
--spec live_class_pid(atom(), atom() | undefined) -> pid().
-live_class_pid(Class, Name) ->
+%% No registered class process is a class-level condition, not a variable-level
+%% one, so it uses the name-less message and hint (the block-oriented hint of the
+%% named variant does not fit supervisor-init or `performLocally:` callers).
+-spec live_class_pid(atom()) -> pid().
+live_class_pid(Class) ->
     case beamtalk_class_registry:whereis_class(Class) of
-        undefined -> raise_unreachable(Class, Name, read);
+        undefined -> raise_unreachable(Class, undefined, read);
         Pid -> Pid
     end.
 
@@ -424,7 +437,8 @@ nil_receiver() ->
 %% ADR 0130 §5: message, details and hint of `class_state_unreachable`.
 -spec raise_unreachable(atom(), atom() | undefined, read | write) -> no_return().
 raise_unreachable(Class, undefined, _Mode) ->
-    %% Name-less variant (`capture/2`, `with_snapshot/2`): no live class process.
+    %% Name-less variant (`capture/2`, mirror reads without a variable name): no
+    %% live class process is registered for the class.
     Error0 = beamtalk_error:new(class_state_unreachable, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
@@ -436,7 +450,11 @@ raise_unreachable(Class, undefined, _Mode) ->
     ),
     beamtalk_error:raise(
         beamtalk_error:with_hint(
-            Error1, <<"The class is not loaded or has been removed; load it and retry.">>
+            Error1,
+            <<
+                "No class process is registered for this class right now (it is not loaded, "
+                "was removed, or is being restarted). Load the class or retry once it is running."
+            >>
         )
     );
 raise_unreachable(Class, Name, Mode) ->
@@ -463,6 +481,31 @@ raise_unreachable(Class, Name, Mode) ->
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
     beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
+
+%% The class process is registered but has recorded no snapshot row yet.
+-spec raise_no_snapshot(atom(), atom() | undefined) -> no_return().
+raise_no_snapshot(Class, Name) ->
+    Error0 = beamtalk_error:new(class_state_unreachable, Class),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary(
+            io_lib:format("~s's class state cannot be reached: no snapshot recorded yet", [Class])
+        )
+    ),
+    Error2 =
+        case Name of
+            undefined -> Error1;
+            _ -> beamtalk_error:with_details(Error1, #{class_variable => Name})
+        end,
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error2,
+            <<
+                "The class process was just (re)started and has not recorded its class "
+                "variables yet; retry shortly."
+            >>
+        )
+    ).
 
 -spec raise_read_only(atom(), atom()) -> no_return().
 raise_read_only(Class, Name) ->

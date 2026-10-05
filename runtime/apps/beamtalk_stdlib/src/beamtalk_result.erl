@@ -214,7 +214,10 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
 """.
 -spec 'tryDo:'(function()) -> t() | no_return().
 'tryDo:'(Block) when is_function(Block, 0) ->
-    try Block() of
+    %% ADR 0130 §4: a catch boundary around a Beamtalk block. `protect/1` restores
+    %% the class-variable map on an error before we wrap it (writes made before
+    %% entering the block are kept; `^` passes through untouched).
+    try beamtalk_class_vars:protect(Block) of
         Value ->
             from_tagged_tuple({ok, Value})
     catch

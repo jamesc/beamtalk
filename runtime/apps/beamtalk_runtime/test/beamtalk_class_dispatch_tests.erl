@@ -2064,7 +2064,7 @@ test_class_send_supervisor_new_rewrap() ->
     try
         %% The class method returns a Result tagged map wrapping the
         %% _new tuple (option-2 shape). With the helper module providing
-        %% class_initialize:/3, run_initialize resolves the method directly
+        %% class_initialize:/2, run_initialize resolves the method directly
         %% (no hierarchy walk needed) and the hook completes the rewrite.
         Outcome = beamtalk_class_dispatch:class_send(Pid, testSupervisorNew, []),
         ?assertMatch(
