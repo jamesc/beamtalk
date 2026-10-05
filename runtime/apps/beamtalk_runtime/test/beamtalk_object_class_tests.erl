@@ -1810,7 +1810,14 @@ test_put_class_method_accepts_n_plus_1() ->
 test_put_class_method_rejects_n_plus_2() ->
     Pid = pcm_class('BT3708PcmOld'),
     ?assertError(
-        #{error := #beamtalk_error{kind = arity_mismatch, selector = 'at:put:'}},
+        #{
+            error := #beamtalk_error{
+                kind = arity_mismatch,
+                class = 'BT3708PcmOld',
+                selector = 'at:put:',
+                details = #{expected := 3, actual := 4}
+            }
+        },
         beamtalk_object_class:put_class_method(Pid, 'at:put:', fun(_, _, _, _) -> ok end)
     ),
     ?assertError(

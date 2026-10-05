@@ -334,7 +334,7 @@ map_or_captured(Class, Name, Captured) ->
 %% process is picked up transparently.
 -spec mirror(atom(), atom() | undefined) -> map().
 mirror(Class, Name) ->
-    case beamtalk_class_registry:class_state_snapshot_lookup(live_class_pid(Class, Name)) of
+    case beamtalk_class_registry:class_state_snapshot_lookup(live_class_pid(Class)) of
         {ok, Map} -> Map;
         %% Registered but no snapshot row yet (a restarted class process that has
         %% not recorded its first snapshot): not an empty map.
@@ -344,8 +344,8 @@ mirror(Class, Name) ->
 %% No registered class process is a class-level condition, not a variable-level
 %% one, so it uses the name-less message and hint (the block-oriented hint of the
 %% named variant does not fit supervisor-init or `performLocally:` callers).
--spec live_class_pid(atom(), atom() | undefined) -> pid().
-live_class_pid(Class, _Name) ->
+-spec live_class_pid(atom()) -> pid().
+live_class_pid(Class) ->
     case beamtalk_class_registry:whereis_class(Class) of
         undefined -> raise_unreachable(Class, undefined, read);
         Pid -> Pid
@@ -457,7 +457,11 @@ raise_no_snapshot(Class, Name) ->
             io_lib:format("~s's class state cannot be reached: no snapshot recorded yet", [Class])
         )
     ),
-    Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
+    Error2 =
+        case Name of
+            undefined -> Error1;
+            _ -> beamtalk_error:with_details(Error1, #{class_variable => Name})
+        end,
     beamtalk_error:raise(
         beamtalk_error:with_hint(
             Error2,

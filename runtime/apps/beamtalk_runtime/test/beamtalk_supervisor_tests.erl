@@ -67,6 +67,7 @@ Tests cover:
     class_returnSupervisor/1,
     class_writeVar/1,
     class_readVar/1,
+    class_readThenActor/1,
     start_link_fake_child/0
 ]).
 
@@ -878,6 +879,12 @@ class_writeVar(ClassSelf) ->
 class_readVar(ClassSelf) ->
     beamtalk_class_vars:get(ClassSelf, n).
 
+%% Reads a class variable (must see the mirror value), then returns an actor.
+class_readThenActor(ClassSelf) ->
+    7 = beamtalk_class_vars:get(ClassSelf, n),
+    {ok, Pid} = start_link_fake_child(),
+    {beamtalk_object, 'FakeChild', ?MODULE, Pid}.
+
 %% Fake class method that returns a supervisor tuple instead of an actor.
 class_returnSupervisor(_ClassSelf) ->
     {ok, Pid} = start_link_fake_child(),
@@ -1004,10 +1011,13 @@ start_child_via_class_method_reads_mirror_test() ->
             7,
             beamtalk_class_vars:with_snapshot(ClassSelf, fun() -> class_readVar(ClassSelf) end)
         ),
-        {error, #{error := _}} =
+        %% The factory reads `n` through the mirror and then returns an actor.
+        ?assertMatch(
+            {ok, Pid} when is_pid(Pid),
             beamtalk_supervisor:start_child_via_class_method(
-                'BT3708Read', ?MODULE, class_readVar, []
-            ),
+                'BT3708Read', ?MODULE, class_readThenActor, []
+            )
+        ),
         ?assertEqual(undefined, get({'$bt_class_vars', 'BT3708Read'}))
     after
         beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),

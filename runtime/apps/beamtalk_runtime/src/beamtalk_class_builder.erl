@@ -632,7 +632,8 @@ class_method_arity_error(ClassName, Selector, Expected, Actual) ->
             false ->
                 ""
         end,
-    beamtalk_error:with_hint(Error1, iolist_to_binary([Base, Extra])).
+    Error2 = beamtalk_error:with_details(Error1, #{expected => Expected, actual => Actual}),
+    beamtalk_error:with_hint(Error2, iolist_to_binary([Base, Extra])).
 
 -doc """
 Count the selector arity of a class-method selector atom.
