@@ -548,9 +548,7 @@ fn verify_shadow_write_missing_fires_on_top_frame_mutation_without_shadow() {
             span: span(),
         },
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("NlrTokenFixtureOnly"),
             frame: f0,
             span: span(),
@@ -583,9 +581,7 @@ fn verify_shadow_write_silent_on_fixed_shape() {
             span: span(),
         },
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("NlrTokenFixtureOnly"),
             frame: f0,
             span: span(),
@@ -596,7 +592,7 @@ fn verify_shadow_write_silent_on_fixed_shape() {
 
 #[test]
 fn verify_shadow_write_silent_without_class_var_nlr_relay() {
-    // No NlrCatch with has_class_vars: true present at all — the
+    // No class-method NlrCatch present at all — the
     // ShadowWriteMissing precondition doesn't hold, so a missing
     // shadow write is not (yet) flagged.
     let f0 = FrameId::ROOT;
@@ -647,9 +643,7 @@ fn verify_shadow_write_missing_silent_below_top_frame() {
             span: span(),
         },
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("NlrTokenFixtureOnly"),
             frame: f0,
             span: span(),
@@ -699,9 +693,7 @@ fn verify_shadow_write_missing_fires_on_non_root_eligible_frame() {
             span: span(),
         },
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("NlrTokenFixtureOnly"),
             frame: f0,
             span: span(),
@@ -761,9 +753,7 @@ fn verify_shadow_write_eligible_stack_and_combines_nested_frames() {
             span: span(),
         },
         ThreadedStmt::NlrCatch {
-            boundary: NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
+            boundary: NlrBoundary::ClassMethod,
             token: TokenId::new("NlrTokenFixtureOnly"),
             frame: f0,
             span: span(),

@@ -2081,7 +2081,7 @@ impl CoreErlangGenerator {
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
 
-            if Self::is_field_assignment(expr) {
+            if self.is_field_assignment(expr) {
                 let (doc, _) = self.generate_field_assignment_open(expr)?;
                 docs.push(doc);
                 if is_last {

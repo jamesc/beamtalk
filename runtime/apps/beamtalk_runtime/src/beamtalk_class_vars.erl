@@ -11,18 +11,25 @@ class-variable access (ADR 0130 §1, §2, §4, §5).
 ## Storage
 
 A class's variables live in the calling process's dictionary under
-`key(ClassName)` (`{'$bt_class_vars', ClassName}`). The value is either
+`key(ClassName)`: `{'$bt_class_vars', ClassTag}`, where `ClassTag` is the
+class's metaclass tag (`'Name class'`, `element(2, ClassSelf)`). The key
+shape is owned by Rust (`class_var_keys` in `beamtalk-codegen`) and shared
+through the generated `beamtalk_class_vars_keys.hrl`, because the class-variable
+reads and writes codegen inlines (`erlang:get/1` + `maps:*`, ADR 0130 Phase 0
+gate 3) build the same key. It is keyed by tag so that an access recovers its
+key from `ClassSelf` with one `element/2`, never a tag-to-name derivation. The
+value is either
 
 - the live `#{VarName => Value}` map (a class-method invocation that
   *installed* it), or
-- the read-only marker `{'$bt_class_vars_ro', ClassName}` installed by
+- the read-only marker `?BT_CLASS_VARS_RO(ClassTag)` installed by
   `with_snapshot/2` for runtime-owned out-of-process regions; `put/3` and
   `clear/2` raise `class_state_read_only` under it, and reads resolve the
   class's ETS mirror **by class name** through the registry (never by pid,
   so a class-process restart is transparent).
 
 `install/2` and `uninstall/1` are the only writers of the class key together
-with the `'$bt_class_vars_home'` entry, which records the key of the live
+with the `?BT_CLASS_VARS_HOME` entry, which records the key of the live
 invocation. `snapshot/0`, `restore/1` and `protect/1` operate on the home
 entry only.
 
@@ -54,6 +61,7 @@ receiver is an internal error.
 
 -include_lib("kernel/include/logger.hrl").
 -include("beamtalk.hrl").
+-include("beamtalk_class_vars_keys.hrl").
 
 -export([
     key/1,
@@ -77,10 +85,9 @@ receiver is an internal error.
 
 -export_type([key/0, snapshot/0, class_self/0]).
 
--define(HOME, '$bt_class_vars_home').
--define(RO, '$bt_class_vars_ro').
+-define(HOME, ?BT_CLASS_VARS_HOME).
 
--type key() :: {'$bt_class_vars', atom()}.
+-type key() :: ?BT_CLASS_VARS_KEY(atom()).
 -type snapshot() :: none | {key(), map()}.
 -type class_self() :: #beamtalk_object{}.
 
@@ -88,12 +95,16 @@ receiver is an internal error.
 %% Key shape and invocation entry points
 %%====================================================================
 
--doc "The process-dictionary key holding `ClassName`'s variables.".
+-doc """
+The process-dictionary key holding `ClassName`'s variables: the key shape
+applied to the class's metaclass tag, the same key an access derives from
+`ClassSelf` (`self_key/1`).
+""".
 -spec key(atom()) -> key().
 key(nil) ->
     nil_receiver();
 key(ClassName) when is_atom(ClassName) ->
-    {'$bt_class_vars', ClassName}.
+    ?BT_CLASS_VARS_KEY(beamtalk_class_registry:class_object_tag(ClassName)).
 
 -doc """
 Raise an internal error if `Key` is already present or any home entry is
@@ -101,11 +112,12 @@ present (a live invocation of any class in this process). Called by the
 invocation entry points before `install/2`.
 """.
 -spec assert_absent(key()) -> ok.
-assert_absent({'$bt_class_vars', Class} = Key) ->
+assert_absent(?BT_CLASS_VARS_KEY(ClassTag) = Key) ->
     case {erlang:get(Key), erlang:get(?HOME)} of
         {undefined, undefined} ->
             ok;
         {KeyVal, HomeVal} ->
+            Class = tag_to_name(ClassTag),
             Details = #{class => Class, key_present => KeyVal =/= undefined, home => HomeVal},
             ?LOG_ERROR(
                 "class-variable home already present ~p",
@@ -121,14 +133,14 @@ assert_absent({'$bt_class_vars', Class} = Key) ->
 
 -doc "Install the live map under `Key` and record it as the home entry.".
 -spec install(key(), map()) -> ok.
-install({'$bt_class_vars', _} = Key, Map) when is_map(Map) ->
+install(?BT_CLASS_VARS_KEY(_) = Key, Map) when is_map(Map) ->
     erlang:put(Key, Map),
     erlang:put(?HOME, Key),
     ok.
 
 -doc "Erase `Key` and the home entry together.".
 -spec uninstall(key()) -> ok.
-uninstall({'$bt_class_vars', _} = Key) ->
+uninstall(?BT_CLASS_VARS_KEY(_) = Key) ->
     erlang:erase(Key),
     erlang:erase(?HOME),
     ok.
@@ -141,36 +153,36 @@ uninstall({'$bt_class_vars', _} = Key) ->
 -spec get(class_self(), atom()) -> term().
 get(ClassSelf, Name) ->
     Class = class_name(ClassSelf),
-    read_value(Class, Name, current_map(Class, Name)).
+    read_value(Class, Name, current_map(Class, self_key(ClassSelf), Name)).
 
 -doc "Read a class variable; with no key present, read the creation-time `Captured` map.".
 -spec get(class_self(), atom(), map() | none) -> term().
 get(ClassSelf, Name, Captured) ->
     Class = class_name(ClassSelf),
-    read_value(Class, Name, map_or_captured(Class, Name, Captured)).
+    read_value(Class, Name, map_or_captured(Class, self_key(ClassSelf), Name, Captured)).
 
 -doc "Read a `late` class variable; raises `uninitialized_state_error` when unassigned.".
 -spec get_late(class_self(), atom()) -> term().
 get_late(ClassSelf, Name) ->
     Class = class_name(ClassSelf),
-    late_value(Class, Name, current_map(Class, Name)).
+    late_value(Class, Name, current_map(Class, self_key(ClassSelf), Name)).
 
 -doc "`get_late/2` with a creation-time capture fallback.".
 -spec get_late(class_self(), atom(), map() | none) -> term().
 get_late(ClassSelf, Name, Captured) ->
     Class = class_name(ClassSelf),
-    late_value(Class, Name, map_or_captured(Class, Name, Captured)).
+    late_value(Class, Name, map_or_captured(Class, self_key(ClassSelf), Name, Captured)).
 
 -doc "Write a class variable. Returns the assigned value.".
 -spec put(class_self(), atom(), term()) -> term().
 put(ClassSelf, Name, Value) ->
     Class = class_name(ClassSelf),
-    Key = key(Class),
+    Key = self_key(ClassSelf),
     case erlang:get(Key) of
         Map when is_map(Map) ->
             erlang:put(Key, Map#{Name => Value}),
             Value;
-        {?RO, _} ->
+        ?BT_CLASS_VARS_RO(_) ->
             raise_read_only(Class, Name);
         undefined ->
             raise_unreachable(Class, Name, write)
@@ -180,12 +192,12 @@ put(ClassSelf, Name, Value) ->
 -spec clear(class_self(), atom()) -> class_self().
 clear(ClassSelf, Name) ->
     Class = class_name(ClassSelf),
-    Key = key(Class),
+    Key = self_key(ClassSelf),
     case erlang:get(Key) of
         Map when is_map(Map) ->
             erlang:put(Key, maps:remove(Name, Map)),
             ClassSelf;
-        {?RO, _} ->
+        ?BT_CLASS_VARS_RO(_) ->
             raise_read_only(Class, Name);
         undefined ->
             raise_unreachable(Class, Name, write)
@@ -195,13 +207,13 @@ clear(ClassSelf, Name) ->
 -spec has(class_self(), atom()) -> boolean().
 has(ClassSelf, Name) ->
     Class = class_name(ClassSelf),
-    has_value(current_map(Class, Name), Name).
+    has_value(current_map(Class, self_key(ClassSelf), Name), Name).
 
 -doc "`has/2` with a creation-time capture fallback.".
 -spec has(class_self(), atom(), map() | none) -> boolean().
 has(ClassSelf, Name, Captured) ->
     Class = class_name(ClassSelf),
-    has_value(map_or_captured(Class, Name, Captured), Name).
+    has_value(map_or_captured(Class, self_key(ClassSelf), Name, Captured), Name).
 
 -doc """
 Capture for a block literal: the live map when the key is present (the
@@ -211,9 +223,9 @@ block's capture, or `none` at method level).
 -spec capture(class_self(), map() | none) -> map() | none.
 capture(ClassSelf, Outer) ->
     Class = class_name(ClassSelf),
-    case erlang:get(key(Class)) of
+    case erlang:get(self_key(ClassSelf)) of
         Map when is_map(Map) -> Map;
-        {?RO, _} -> mirror(Class, undefined);
+        ?BT_CLASS_VARS_RO(_) -> mirror(Class, undefined);
         undefined -> Outer
     end.
 
@@ -264,7 +276,7 @@ protect(Fun) ->
 -doc """
 Run `Fun` with the class's variables readable from the ETS mirror (resolved
 by class name) when its key is absent: installs the key plus
-`{'$bt_class_vars_ro', ClassName}`, erases exactly that in an `after`. When the
+`?BT_CLASS_VARS_RO(ClassTag)`, erases exactly that in an `after`. When the
 key is already present (a live map or an outer snapshot) `Fun` just runs.
 Never touches the home entry. A name with no live class raises
 `class_state_unreachable`.
@@ -272,11 +284,11 @@ Never touches the home entry. A name with no live class raises
 -spec with_snapshot(class_self(), fun(() -> T)) -> T when T :: term().
 with_snapshot(ClassSelf, Fun) ->
     Class = class_name(ClassSelf),
-    Key = key(Class),
+    Key = self_key(ClassSelf),
     case erlang:get(Key) of
         undefined ->
             _ = live_class_pid(Class, undefined),
-            erlang:put(Key, {?RO, Class}),
+            erlang:put(Key, ?BT_CLASS_VARS_RO(element(2, Key))),
             try
                 Fun()
             after
@@ -309,19 +321,31 @@ class_name(#beamtalk_object{class = Tag}) when is_atom(Tag), Tag =/= nil ->
 class_name(_) ->
     nil_receiver().
 
--spec current_map(atom(), atom()) -> map().
-current_map(Class, Name) ->
-    case erlang:get(key(Class)) of
+%% The key of the class `ClassSelf` is the receiver of: the shape applied to
+%% its metaclass tag, exactly what the inlined accesses build. Only called
+%% after `class_name/1` validated the receiver.
+-spec self_key(class_self()) -> key().
+self_key(#beamtalk_object{class = Tag}) ->
+    ?BT_CLASS_VARS_KEY(Tag).
+
+%% The class name a metaclass tag (`'Name class'`) names.
+-spec tag_to_name(atom()) -> atom().
+tag_to_name(Tag) ->
+    class_name(#beamtalk_object{class = Tag, class_mod = undefined, pid = undefined}).
+
+-spec current_map(atom(), key(), atom()) -> map().
+current_map(Class, Key, Name) ->
+    case erlang:get(Key) of
         Map when is_map(Map) -> Map;
-        {?RO, _} -> mirror(Class, Name);
+        ?BT_CLASS_VARS_RO(_) -> mirror(Class, Name);
         undefined -> raise_unreachable(Class, Name, read)
     end.
 
--spec map_or_captured(atom(), atom(), map() | none) -> map().
-map_or_captured(Class, Name, Captured) ->
-    case erlang:get(key(Class)) of
+-spec map_or_captured(atom(), key(), atom(), map() | none) -> map().
+map_or_captured(Class, Key, Name, Captured) ->
+    case erlang:get(Key) of
         Map when is_map(Map) -> Map;
-        {?RO, _} -> mirror(Class, Name);
+        ?BT_CLASS_VARS_RO(_) -> mirror(Class, Name);
         undefined when is_map(Captured) -> Captured;
         undefined -> raise_unreachable(Class, Name, read)
     end.

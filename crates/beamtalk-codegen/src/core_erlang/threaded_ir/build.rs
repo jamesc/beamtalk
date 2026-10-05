@@ -129,7 +129,7 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// doesn't spuriously fail `UnboundVersion` for a mutation past a method's
 /// first (the same technique [`verify_simple_bind`] uses).
 ///
-/// The synthetic `NlrCatch { has_class_vars: true }` marker is still
+/// The synthetic `NlrCatch { boundary: ClassMethod }` marker is still
 /// unconditionally included in the *verified* fixture (not in the returned
 /// `Bind`, which callers render alone) — an isolated per-call-site
 /// verification cannot observe whether THIS method's body really contains a
@@ -215,9 +215,7 @@ pub(in crate::core_erlang) fn construct_and_verify_class_var_bind(
     // `Bind`, which callers render alone), so its token name is a literal
     // placeholder, never a real lowering-minted `NlrToken` temp.
     let marker = ThreadedStmt::NlrCatch {
-        boundary: NlrBoundary::ClassMethod {
-            has_class_vars: true,
-        },
+        boundary: NlrBoundary::ClassMethod,
         token: TokenId::new("NlrTokenFixtureOnly"),
         frame,
         span,

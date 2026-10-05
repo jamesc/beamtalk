@@ -97,7 +97,7 @@ impl CoreErlangGenerator {
             && !MATCH_ARM_FAMILIES.contains(&VersionPrefix::SelfVt)
         {
             for arm in arms {
-                if let Some((field, span)) = Self::vt_match_arm_field_write(arm) {
+                if let Some((field, span)) = self.vt_match_arm_field_write(arm) {
                     return Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm {
                         field: field.to_string(),
                         location: self.location_label(span),
@@ -272,7 +272,7 @@ impl CoreErlangGenerator {
             // whose field-write binding (`State1`/`ClassVars1`) is scoped to
             // that one `case` arm — yet the code after the `match:` referenced
             // it unconditionally, so `erlc` rejected the module outright.
-            (carries_family_write && Self::is_field_assignment(arm.body.unwrap_parens()))
+            (carries_family_write && self.is_field_assignment(arm.body.unwrap_parens()))
                 || (is_actor
                     && (self.is_tier2_value_call(&arm.body)
                         || self.control_flow_has_mutations(&arm.body)
@@ -300,7 +300,7 @@ impl CoreErlangGenerator {
     /// gates on (a value-type INSTANCE method): a `[...] value`-wrapped
     /// field write is a separate, pre-existing gap this detector does not
     /// (yet) cover — see BT-3493's own follow-up notes.
-    fn vt_match_arm_field_write(arm: &MatchArm) -> Option<(&str, Span)> {
+    fn vt_match_arm_field_write<'a>(&self, arm: &'a MatchArm) -> Option<(&'a str, Span)> {
         let bare = arm.body.unwrap_parens();
         // BT-3495: a field write nested inside a `[...] value` block's own
         // statements (bare, or local-assign-wrapped) — `arm.body` alone is
@@ -324,10 +324,11 @@ impl CoreErlangGenerator {
             return block
                 .body
                 .iter()
-                .find_map(|stmt| Self::field_write_shape(&stmt.expression))
+                .find_map(|stmt| self.field_write_shape(&stmt.expression))
                 .map(Self::field_write_name_and_span);
         }
-        Self::field_write_shape(bare).map(Self::field_write_name_and_span)
+        self.field_write_shape(bare)
+            .map(Self::field_write_name_and_span)
     }
 
     /// The field write nested in `expr` for exactly the two shapes
@@ -337,15 +338,15 @@ impl CoreErlangGenerator {
     /// crashes `erlc` identically), or `expr` is a local assignment (`var :=
     /// ...`) whose own RHS is one (BT-3493's `local_assign_field_write`
     /// shape). `None` for every other shape.
-    fn field_write_shape(expr: &Expression) -> Option<&Expression> {
+    fn field_write_shape<'e>(&self, expr: &'e Expression) -> Option<&'e Expression> {
         let bare = expr.unwrap_parens();
-        if Self::is_field_assignment(bare) {
+        if self.is_field_assignment(bare) {
             return Some(bare);
         }
         if let Expression::Assignment { target, value, .. } = bare
             && matches!(target.as_ref(), Expression::Identifier(_))
         {
-            return Self::local_assign_field_write(value);
+            return self.local_assign_field_write(value);
         }
         None
     }
@@ -474,7 +475,7 @@ impl CoreErlangGenerator {
         // BT-3493, which fixes it in the classifier (covering all three
         // constructs at once) and can then widen this condition.
         let bare_body = body.unwrap_parens();
-        if self.conditional_receiver_needs_threading(body) || Self::is_field_assignment(bare_body) {
+        if self.conditional_receiver_needs_threading(body) || self.is_field_assignment(bare_body) {
             let synthetic_block = Block::new(
                 Vec::new(),
                 vec![ExpressionStatement::bare(bare_body.clone())],

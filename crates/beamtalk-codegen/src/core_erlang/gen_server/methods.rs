@@ -657,7 +657,7 @@ impl CoreErlangGenerator {
         }
 
         // self.field := value — sub-classify by RHS for control flow with mutations
-        if Self::is_field_assignment(expr) {
+        if self.is_field_assignment(expr) {
             if let Expression::Assignment { value, .. } = expr {
                 if self.control_flow_has_mutations(value) {
                     return BodyExprKind::FieldAssignmentControlFlow;
@@ -1674,7 +1674,7 @@ impl CoreErlangGenerator {
                             // (`pure_reply_doc`, not the assigned value) when
                             // this is the body's last statement — only the
                             // RHS lowering differs.
-                            if let Some(field_write) = Self::local_assign_field_write(value) {
+                            if let Some(field_write) = self.local_assign_field_write(value) {
                                 let field_val_var = self.lower_field_assignment_bind(
                                     field_write,
                                     threaded_ir::FrameId::ROOT,
@@ -2177,16 +2177,10 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.name().to_string())
             .collect();
 
-        // Populate the class-var-mutating selector set (transitive
-        // closure over same-class self-sends) — see
-        // `compute_class_var_mutating_selectors`'s doc comment. Depends on
-        // `class_var_names` above, so must run after it; independent of
-        // `class_method_selectors` above (recomputes its own local view).
-        *self.class_var_mutating_selectors_mut() =
-            crate::core_erlang::block_analysis::compute_class_var_mutating_selectors(
-                class,
-                self.class_var_names(),
-            );
+        // ADR 0130 §3: no selector rebinds class variables (they live in the
+        // class process's dictionary), so the class-var-mutating selector set
+        // stays empty; the next ADR 0130 issue deletes the analysis.
+        self.class_var_mutating_selectors_mut().clear();
 
         // Populate auto-generated keyword constructor selector for Value subclass: classes.
         // This allows `ClassName slot: value` inside a class method to route to the correct
@@ -2204,8 +2198,8 @@ impl CoreErlangGenerator {
             }
 
             let selector_name = method.selector.name();
-            // +2 for ClassSelf and ClassVars parameters
-            let arity = method.selector.arity() + 2;
+            // +1 for the ClassSelf parameter (ADR 0130 §3: no ClassVars)
+            let arity = method.selector.arity() + 1;
 
             let (mut frame, param_vars) = MethodFrame::enter(
                 self,
@@ -2250,56 +2244,10 @@ impl CoreErlangGenerator {
                     &method.selector,
                     &param_vars,
                 )
-            } else if method.body.is_empty() {
-                frame.set_current_nlr_token(None);
-                // Empty class method body returns self (ClassSelf)
-                docvec!["ClassSelf"]
             } else {
-                // Capture the result so `frame`'s `Drop` (pop scope, clear
-                // `in_class_method`, restore the selector) runs before the
-                // `?` below propagates an error, same as on the success path.
-                // BT-3666: in a non-sealed class a late-bound `self foo` may reach a
-                // subclass override that declares class variables this class does
-                // not, so bodies are lowered as if class vars may be present; the
-                // `{class_var_result, ..}` wrap still only happens when a rebind
-                // actually occurred (`class_var_mutated`).
-                let has_class_vars = !class.class_variables.is_empty() || !frame.is_class_sealed();
-                let body_stmts_result = frame.lower_class_method_body(method, has_class_vars);
-                frame.set_current_nlr_token(None);
-                let mut body_stmts = body_stmts_result?;
-                // Use class_var_mutated (not just whether class vars are declared)
-                // to preserve the {class_var_result, ...} contract. The normal path only wraps
-                // in class_var_result when class vars were actually mutated; the NLR path must
-                // match. class_var_mutated is set by lower_class_method_body when it sees a
-                // class var assignment.
-                let returns_class_var_result = frame.class_var_mutated();
-                // (ADR 0111 Addendum 4 task 2, closed out
-                // for class methods separately): the token was already minted
-                // above, before `lower_class_method_body` ran (production's real
-                // mint order). `lower_class_method_body` returns a
-                // real `Vec<ThreadedStmt>` (a real class-var `Bind` when the
-                // body's last statement mutates one — see
-                // `lower_class_method_last_class_var_bind`'s doc comment) rather
-                // than one opaque `Statement` wrapping an already-rendered
-                // `Document` — prepending a real `NlrCatch` here and verifying
-                // the whole sequence in one `verify_and_render_body_stmts` call
-                // is what lets `VerifyError::ShadowWriteMissing` see a real
-                // class-var `Bind` jointly with this real `NlrCatch` for the
-                // first time (ADR 0111 Addendum 6's closing note).
-                if let Some(ref token_var) = nlr_token_var {
-                    body_stmts.insert(
-                        0,
-                        threaded_ir::ThreadedStmt::NlrCatch {
-                            boundary: super::super::NlrBoundary::ClassMethod {
-                                has_class_vars: returns_class_var_result,
-                            },
-                            token: threaded_ir::TokenId::new(token_var.clone()),
-                            frame: threaded_ir::FrameId::ROOT,
-                            span: method.span,
-                        },
-                    );
-                }
-                frame.verify_and_render_body_stmts(&body_stmts, method.span)
+                // `frame`'s `Drop` (pop scope, clear `in_class_method`, restore
+                // the selector) runs on the `?` error path as on success.
+                frame.class_method_body_doc(method, nlr_token_var.as_deref())?
             };
 
             // Build function header with params (Document pieces, not format! —
@@ -2307,7 +2255,7 @@ impl CoreErlangGenerator {
             let doc = docvec![
                 "\n",
                 fname(safe_class_method_fn_name(&selector_name), arity),
-                " = fun (ClassSelf, ClassVars",
+                " = fun (ClassSelf",
                 Self::class_method_params_suffix_doc(&param_vars),
                 ") ->",
                 nest(INDENT, docvec![line(), body_doc,]),
@@ -2535,50 +2483,19 @@ impl CoreErlangGenerator {
             None
         };
 
-        // BT-3666: a ClassBuilder class is never sealed, so its self-sends are
-        // late-bound and an override may write class vars; always lower the
-        // body as if class vars may be present. (Not `is_class_sealed()`: that
-        // reads the flag of the *enclosing* class, which the builder cascade
-        // does not reset.)
-        let has_class_vars = true;
-        let body_doc: Document<'static> = if method.body.is_empty() {
-            self.set_current_nlr_token(None);
-            docvec!["ClassSelf"]
-        } else {
-            let mut body_stmts = match self.lower_class_method_body(&method, has_class_vars) {
-                Ok(stmts) => stmts,
+        let body_doc: Document<'static> =
+            match self.class_method_body_doc(&method, nlr_token_var.as_deref()) {
+                Ok(doc) => doc,
                 Err(e) => {
-                    self.set_current_nlr_token(None);
                     self.block_depth = saved_block_depth;
                     self.restore_class_var_scopes(saved_scopes);
                     self.pop_scope();
                     return Err(e);
                 }
             };
-            self.set_current_nlr_token(None);
-            let returns_class_var_result = self.class_var_mutated();
-            // Same real-`NlrCatch`-prepend pattern as
-            // `generate_class_method_functions` — see that call site's
-            // comment for why this replaces the old
-            // `wrap_class_method_body_with_nlr_catch` Document-wrap.
-            if let Some(ref token_var) = nlr_token_var {
-                body_stmts.insert(
-                    0,
-                    threaded_ir::ThreadedStmt::NlrCatch {
-                        boundary: super::super::NlrBoundary::ClassMethod {
-                            has_class_vars: returns_class_var_result,
-                        },
-                        token: threaded_ir::TokenId::new(token_var.clone()),
-                        frame: threaded_ir::FrameId::ROOT,
-                        span: method.span,
-                    },
-                );
-            }
-            self.verify_and_render_body_stmts(&body_stmts, method.span)
-        };
 
         let doc = docvec![
-            "fun (ClassSelf, ClassVars",
+            "fun (ClassSelf",
             Self::class_method_params_suffix_doc(&param_vars),
             ") ->",
             nest(INDENT, docvec![line(), body_doc]),
@@ -2588,6 +2505,40 @@ impl CoreErlangGenerator {
         self.restore_class_var_scopes(saved_scopes);
         self.pop_scope();
         Ok(doc)
+    }
+
+    /// The body of a class-side method, shared by compiled class methods, `ClassBuilder`
+    /// funs and class-side extension funs (ADR 0130 §3): the bare result, with a
+    /// real `NlrCatch` prepended when `nlr_token_var` is set (the token was minted
+    /// and installed by the caller before this runs, production's real mint
+    /// order) and the whole sequence verified and rendered once. Class variables
+    /// are read and written in place, so nothing is wrapped or returned beside
+    /// the result. An empty body returns `ClassSelf`. Clears the current NLR
+    /// token on every path.
+    pub(in crate::core_erlang) fn class_method_body_doc(
+        &mut self,
+        method: &MethodDefinition,
+        nlr_token_var: Option<&str>,
+    ) -> Result<Document<'static>> {
+        if method.body.is_empty() {
+            self.set_current_nlr_token(None);
+            return Ok(docvec!["ClassSelf"]);
+        }
+        let body_stmts_result = self.lower_class_method_body(method, false);
+        self.set_current_nlr_token(None);
+        let mut body_stmts = body_stmts_result?;
+        if let Some(token_var) = nlr_token_var {
+            body_stmts.insert(
+                0,
+                threaded_ir::ThreadedStmt::NlrCatch {
+                    boundary: super::super::NlrBoundary::ClassMethod,
+                    token: threaded_ir::TokenId::new(token_var.to_string()),
+                    frame: threaded_ir::FrameId::ROOT,
+                    span: method.span,
+                },
+            );
+        }
+        Ok(self.verify_and_render_body_stmts(&body_stmts, method.span))
     }
 
     /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces

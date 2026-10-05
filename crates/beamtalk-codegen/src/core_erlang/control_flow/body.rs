@@ -279,7 +279,7 @@ impl CoreErlangGenerator {
     ) -> Result<Vec<ThreadedStmt>> {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
         let has_direct_field_assignments =
-            filtered_body.iter().any(|e| Self::is_field_assignment(e));
+            filtered_body.iter().any(|e| self.is_field_assignment(e));
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
@@ -321,7 +321,7 @@ impl CoreErlangGenerator {
             // `reject_unthreadable_value_self_field_write`.
             self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;
 
-            if Self::is_field_assignment(expr) {
+            if self.is_field_assignment(expr) {
                 let _ = self.lower_letrec_field_assignment(expr, frame, span, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
                 // Emit diagnostic for synchronous self-send in loop body.
@@ -722,7 +722,7 @@ impl CoreErlangGenerator {
             // `reject_unthreadable_value_self_field_write`.
             self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;
 
-            if Self::is_field_assignment(expr) {
+            if self.is_field_assignment(expr) {
                 has_mutations = true;
                 // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
                 // `lower_letrec_field_assignment`'s own non-class-var branch

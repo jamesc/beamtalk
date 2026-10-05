@@ -493,37 +493,24 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0122 / BT-3506: whether `block` needs `on:do:`/`ensure:`'s inlined,
-    /// state-threading compilation strategy rather than the plain
-    /// closure-based one — [`Self::needs_mutation_threading`]'s own answer,
-    /// widened for class methods to ALSO cover a `ClassVars` mutation
-    /// (`self.classVar := ...` or a same-class self-send).
-    ///
-    /// [`Self::needs_mutation_threading`]'s class-method branch only ever
-    /// checks for a captured-outer-local read+write (the ADR 0110 gap this
-    /// widening closes has nothing to do with local variables) — mirroring
-    /// the Actor branch's own `analysis.has_state_effects()` check, but only
-    /// for `on:do:`/`ensure:`, not the (many) other callers of the shared
-    /// `needs_mutation_threading` (loops, list-ops, conditionals, …), whose
-    /// own class-method self-send/field-write threading is each a separate,
-    /// already-settled question this issue does not reopen.
-    ///
-    /// Without this, a class-method `on:do:`/`ensure:` whose ONLY mutation
-    /// is a same-class self-send or a bare class-var write took the plain
-    /// closure path regardless of [`Self::exception_construct_families`]'
-    /// own answer — silently discarding a self-send's mutation (BT-3506
-    /// shape (b): the closure's own body simply evaluates to its last
-    /// expression, with no `{Result, StateAcc, ClassVars}` tuple to carry it
-    /// out) or misrouting a bare direct write to the generic
-    /// stored-closure-body rejection (`FieldAssignmentInUnsupportedBlock`,
-    /// BT-2792's `validate_stored_closure`) instead of the accurate
-    /// `ClassVarAssignmentInThreadedBody` this construct's own E1 dispatch
-    /// (`generate_exception_body_with_threading_inner`) already produces for
-    /// every OTHER threaded body.
+    /// Whether `block` needs `on:do:`/`ensure:`'s inlined, state-threading
+    /// compilation strategy rather than the plain closure-based one:
+    /// [`Self::needs_mutation_threading`]'s own answer, widened for class
+    /// methods to every block that writes an outer local, which is what the
+    /// construct's result-unpacking side (`get_control_flow_threaded_vars`)
+    /// keys on. ADR 0130 §3: class variables are not threaded, so a class-
+    /// variable write or a self-send never selects this strategy.
     fn block_needs_exception_threading(&self, block: &Block) -> bool {
         let analysis = block_analysis::analyze_block(block);
         self.needs_mutation_threading(&analysis)
-            || (self.in_class_method() && analysis.has_state_effects())
+            // ADR 0130 §3: a class method threads only its outer locals (class
+            // variables are written in place). The extraction side
+            // (`get_control_flow_threaded_vars`) unpacks the construct's
+            // `{Result, StateAcc}` tuple exactly when the blocks write an outer
+            // local, so the construct must produce that tuple in the same case,
+            // including for a write-only local that `needs_mutation_threading`
+            // does not count.
+            || (self.in_class_method() && !self.conditional_threaded_locals(&[block]).is_empty())
     }
 
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
@@ -1505,7 +1492,7 @@ impl CoreErlangGenerator {
         let has_direct_field_assignments = body
             .body
             .iter()
-            .any(|s| Self::is_field_assignment(&s.expression));
+            .any(|s| self.is_field_assignment(&s.expression));
 
         let mut result_var = "'nil'".to_string();
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
@@ -1550,7 +1537,7 @@ impl CoreErlangGenerator {
             // context, and a no-op for this statement when it is itself the
             // bare top-level write `exception_construct_families`
             // already threads.
-            self.reject_unthreadable_value_self_field_write(expr, Self::is_field_assignment(expr))?;
+            self.reject_unthreadable_value_self_field_write(expr, self.is_field_assignment(expr))?;
             // BT-3522: the `ClassVars` half of the same safety net, which
             // this loop was missing — only `SelfVt` had one. A class-var
             // mutation (bare write or same-class self-send) buried inside a
@@ -1564,7 +1551,7 @@ impl CoreErlangGenerator {
             // sub-expression IS carried, via `thread_ahead`).
             self.reject_unthreadable_class_var_mutation(expr)?;
 
-            if Self::is_field_assignment(expr) {
+            if self.is_field_assignment(expr) {
                 // E1 — same shape/mint-order as C1; reused directly.
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                 if is_last {
@@ -1851,8 +1838,10 @@ mod tests {
 
     #[test]
     fn test_ensure_in_class_method_with_captured_local_mutation() {
-        // ensure: in a class method where locals declared outside
-        // the block are reassigned inside — must use closure path, not mutation threading
+        // ensure: in a class method where locals declared outside the block are
+        // reassigned inside: the construct threads those locals through its own
+        // `{Result, StateAcc}` tuple (the post-construct unpacking keys on the
+        // same locals), never through an actor `State`.
         let src = "\
 Actor subclass: Foo
   state: x = 0
@@ -1876,10 +1865,9 @@ Actor subclass: Foo
             !code.contains("let StateAcc = State"),
             "class method ensure: must not reference actor State. Got:\n{code}"
         );
-        // Should use closure-based approach (BlockFun/CleanupFun), not mutation threading
         assert!(
-            code.contains("apply") && code.contains("do apply"),
-            "class method ensure: should use closure-based try/catch. Got:\n{code}"
+            code.contains("'__local__routeList'") && code.contains("'__local__nfHandler'"),
+            "the written locals ride the construct's StateAcc map. Got:\n{code}"
         );
     }
 

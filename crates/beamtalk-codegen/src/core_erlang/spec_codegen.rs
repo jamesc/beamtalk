@@ -399,8 +399,7 @@ fn generate_class_method_spec(
     let erlang_name = safe_class_method_fn_name(method.selector.name().as_ref());
 
     let mut param_types: Vec<Document<'static>> = vec![
-        Document::Str("{'type', 0, 'any', []}"),    // ClassSelf
-        Document::Str("{'type', 0, 'map', 'any'}"), // ClassVars
+        Document::Str("{'type', 0, 'any', []}"), // ClassSelf
     ];
 
     for param in &method.parameters {
@@ -420,7 +419,7 @@ fn generate_class_method_spec(
             type_annotation_to_spec(ann, aliases, referenced)
         });
 
-    let arity = method.parameters.len() + 2;
+    let arity = method.parameters.len() + 1;
     // Method arities are bounded by the parameter count and always fit in i64.
     let arity = i64::try_from(arity).unwrap_or(i64::MAX);
 
@@ -1092,7 +1091,7 @@ mod tests {
     }
 
     #[test]
-    fn class_method_spec_includes_class_self_and_class_vars() {
+    fn class_method_spec_includes_class_self_only() {
         let method = MethodDefinition::with_return_type(
             MessageSelector::Keyword(vec![KeywordPart::new("from:", span())]),
             vec![ParameterDefinition::with_type(
@@ -1106,11 +1105,14 @@ mod tests {
 
         let spec = render(&generate_class_method_spec(&method, None, None).unwrap());
         assert!(
-            spec.contains("{'class_from:', 3}"),
-            "Expected class_ prefix and arity 3 (ClassSelf + ClassVars + 1 param), got: {spec}"
+            spec.contains("{'class_from:', 2}"),
+            "Expected class_ prefix and arity 2 (ClassSelf + 1 param), got: {spec}"
         );
         assert!(spec.contains("'any'"));
-        assert!(spec.contains("'map'"));
+        assert!(
+            !spec.contains("'map'"),
+            "no ClassVars parameter type (ADR 0130 §3), got: {spec}"
+        );
         assert!(spec.contains("'integer'"));
     }
 

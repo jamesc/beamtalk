@@ -681,33 +681,6 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-3690: the commit of a class-side send whose reply is bound to
-    /// `call_result`, made only when the callee answered a
-    /// `{'class_var_result', _, _}` tuple, i.e. when it may have changed the
-    /// class variables.
-    ///
-    /// A plain reply means the callee left them as they were passed in, which
-    /// is exactly what the pre-call sync read from the scope chain (the newest
-    /// commit of the enclosing scopes, else the lexical version): committing it
-    /// again would only re-store a value the chain already answers, at the cost
-    /// of a process-dictionary read-modify-write per send.
-    pub(in crate::core_erlang) fn class_var_scope_commit_if_written_doc(
-        token: &str,
-        class_vars: &str,
-        call_result: &str,
-        written_value: &str,
-    ) -> Document<'static> {
-        docvec![
-            "let _ = case ",
-            leaf::var(call_result.to_string()),
-            " of <{'class_var_result', ",
-            leaf::var(written_value.to_string()),
-            ", _}> when 'true' -> ",
-            Self::class_var_scope_commit_call_doc(token, class_vars),
-            " <_> when 'true' -> 'ok' end in ",
-        ]
-    }
-
     /// Returns the current Self variable name for value type Self-threading.
     ///
     /// Version 0 → `"Self"` (the original method parameter).

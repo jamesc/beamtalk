@@ -269,7 +269,7 @@ impl CoreErlangGenerator {
         is_sub_subclass: bool,
         module_name: &str,
     ) -> Document<'static> {
-        let arity = slots.len() + 2; // _ClassSelf + _ClassVars + N slot args
+        let arity = slots.len() + 1; // _ClassSelf + N slot args
 
         // Pre-compute slot argument names once; write! instead of format! per codegen rules.
         let slot_arg_names: Vec<String> = (0..slots.len())
@@ -280,7 +280,7 @@ impl CoreErlangGenerator {
             })
             .collect();
 
-        // Extra slot parameters appended after "_ClassSelf, _ClassVars": ", SlotArg0", ...
+        // Extra slot parameters appended after "_ClassSelf": ", SlotArg0", ...
         let slot_param_docs: Vec<Document<'static>> = slot_arg_names
             .iter()
             .flat_map(|name| [Document::Str(", "), leaf::var(name.clone())])
@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
 
             return docvec![
                 leaf::fname(safe_fn_name, arity),
-                " = fun (_ClassSelf, _ClassVars",
+                " = fun (_ClassSelf",
                 concat(slot_param_docs),
                 ") ->\n",
                 "    call ",
@@ -335,7 +335,7 @@ impl CoreErlangGenerator {
 
         docvec![
             leaf::fname(safe_fn_name, arity),
-            " = fun (_ClassSelf, _ClassVars",
+            " = fun (_ClassSelf",
             concat(slot_param_docs),
             ") ->\n",
             "    ~{",

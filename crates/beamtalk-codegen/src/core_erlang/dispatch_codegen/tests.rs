@@ -726,28 +726,28 @@ fn test_field_assignment_open_value_type_threads_self() {
     );
 }
 
-/// A class-var write directly inside a Letrec loop body that threads
-/// `ClassVars` through the loop's own recursive tail call —
-/// `generate_field_assignment_open`'s one pre-existing `ClassVar` arm.
+/// ADR 0130 §2: a class-variable write reaching `generate_field_assignment_open`
+/// (a loop, conditional or block body) is an in-place `put` bound to a value
+/// variable, never a `ClassVars` rebind.
 #[test]
-fn test_field_assignment_open_class_var_threads_class_vars_with_shadow_write() {
+fn test_field_assignment_open_class_var_is_an_in_place_put() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_in_class_method(true);
     generator.class_var_names_mut().insert("total".to_string());
-    generator.loop_mode.threading_families =
-        crate::core_erlang::control_flow::analysis::ThreadedFamilies::from_matches(&[
-            crate::core_erlang::threaded_ir::VersionPrefix::ClassVars,
-        ]);
     let expr = self_field_assignment_expr("total", Expression::Literal(Literal::Integer(42), s()));
     let (doc, val_var) = generator.generate_field_assignment_open(&expr).unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        output.contains("let ClassVars1 = call 'maps':'put'('total', _Val1, ClassVars) in"),
-        "class-var write should thread ClassVars. Got: {output}"
+        output.starts_with(&format!("let {val_var} = ")) && output.ends_with(" in "),
+        "an open write binds its value for the caller's continuation. Got: {output}"
     );
     assert!(
-        output.contains("'$bt_class_vars_shadow'"),
-        "class-var write should carry ADR 0110's shadow write. Got: {output}"
+        output.contains("call 'maps':'put'('total', ")
+            && output.contains("call 'erlang':'put'({'$bt_class_vars', "),
+        "class-var write should be an inlined in-place put. Got: {output}"
     );
-    assert_eq!(val_var, "_Val1");
+    assert!(
+        !output.contains("ClassVars") && !output.contains("'$bt_class_vars_shadow'"),
+        "nothing is threaded and there is no shadow write. Got: {output}"
+    );
 }

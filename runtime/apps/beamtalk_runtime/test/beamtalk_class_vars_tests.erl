@@ -9,7 +9,7 @@
 
 -define(HOME, '$bt_class_vars_home').
 -define(C, 'ClassVarsTestClass').
--define(KEY, {'$bt_class_vars', 'ClassVarsTestClass'}).
+-define(KEY, {'$bt_class_vars', 'ClassVarsTestClass class'}).
 
 %%% Helpers
 
@@ -18,7 +18,7 @@ self_obj() ->
 
 clean() ->
     erlang:erase(?KEY),
-    erlang:erase({'$bt_class_vars', 'OtherClass'}),
+    erlang:erase({'$bt_class_vars', 'OtherClass class'}),
     erlang:erase(?HOME),
     ok.
 
@@ -110,7 +110,7 @@ assert_absent_rejects_key_test() ->
 
 assert_absent_rejects_home_test() ->
     with_clean(fun() ->
-        erlang:put(?HOME, {'$bt_class_vars', 'OtherClass'}),
+        erlang:put(?HOME, {'$bt_class_vars', 'OtherClass class'}),
         ?assertEqual(
             internal_error, raised_kind(fun() -> beamtalk_class_vars:assert_absent(?KEY) end)
         )
@@ -485,7 +485,7 @@ with_snapshot_never_touches_home_test() ->
     with_clean(fun() ->
         Pid = start_fake_class(#{n => 1}),
         try
-            OtherKey = {'$bt_class_vars', 'OtherClass'},
+            OtherKey = {'$bt_class_vars', 'OtherClass class'},
             erlang:put(?HOME, OtherKey),
             erlang:put(OtherKey, #{z => 1}),
             beamtalk_class_vars:with_snapshot(self_obj(), fun() ->
