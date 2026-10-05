@@ -237,7 +237,5 @@ TestCase subclass: SelfSendPlainReplyTest
 
   // PIN-BUG BT-3691: still pins a KNOWN-WRONG answer; it flips when an error crossing a boundary
   // discards the writes made inside it (ADR 0130 §4, the `on:do:` snapshot issue).
-
   testSealedPinBugRaisedIterationBetweenKept =>
     self assert: SsoPlainSealed raisedIterationBetweenKept equals: 0
-
