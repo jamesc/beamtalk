@@ -30,7 +30,7 @@
 //!
 //! This module has no dependency on the code generator: the codegen-side
 //! property (`beamtalk-codegen/tests/class_var_agreement.rs`) and the BEAM
-//! execution harness (`beamtalk-cli/tests/class_var_agreement.rs`) both
+//! execution harness (`beamtalk-cli/tests/cli/cli_class_var_agreement.rs`) both
 //! consume it, so the rule "what is a valid program, and what must it answer"
 //! lives in exactly one place.
 
@@ -107,7 +107,15 @@ impl Shapes {
     /// Every shape.
     #[must_use]
     pub const fn all() -> Shapes {
-        Shapes((1 << 18) - 1)
+        // Derived from `NAMED`, the one table of shapes, so a new shape cannot
+        // be named without being in `all()`.
+        let mut bits = 0;
+        let mut i = 0;
+        while i < Self::NAMED.len() {
+            bits |= Self::NAMED[i].1.0;
+            i += 1;
+        }
+        Shapes(bits)
     }
 
     /// Whether every shape in `other` is in `self`.
@@ -1532,6 +1540,56 @@ impl Program {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Corpus-run helpers shared by the codegen and CLI properties
+// ---------------------------------------------------------------------------
+
+/// Programs per run: `CV_CORPUS_CASES`, or `default`.
+#[must_use]
+pub fn corpus_cases_from_env(default: usize) -> usize {
+    std::env::var("CV_CORPUS_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Shapes per run: `CV_CORPUS_SHAPES` (names as in [`Shapes::names`], or `all`
+/// / `none`), or `default`.
+///
+/// # Panics
+///
+/// Panics on an unknown shape name, so a typo does not silently measure the
+/// wrong set.
+#[must_use]
+pub fn corpus_shapes_from_env(default: Shapes) -> Shapes {
+    std::env::var("CV_CORPUS_SHAPES").ok().map_or(default, |s| {
+        Shapes::parse(&s).unwrap_or_else(|| panic!("unknown shape in CV_CORPUS_SHAPES={s}"))
+    })
+}
+
+/// Longest cause line [`normalize_cause`] keeps.
+const MAX_CAUSE_CHARS: usize = 100;
+
+/// A failure line reduced so equal causes group together in a report: digits
+/// and anything inside `'...'` or `"..."` (names, offsets, versions) dropped,
+/// leading punctuation trimmed, truncated.
+#[must_use]
+pub fn normalize_cause(line: &str) -> String {
+    let line = line.trim_start_matches(|c: char| !c.is_alphanumeric());
+    let mut out = String::new();
+    let mut quote: Option<char> = None;
+    for ch in line.chars() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => {}
+            None if ch == '\'' || ch == '"' => quote = Some(ch),
+            None if ch.is_ascii_digit() => {}
+            None => out.push(ch),
+        }
+    }
+    out.trim().chars().take(MAX_CAUSE_CHARS).collect()
+}
+
 /// The files of one `BUnit` package that checks a batch of programs: fixture
 /// classes under `test/fixtures/` and one `TestCase` under `test/`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1924,6 +1982,32 @@ mod tests {
                 .source
                 .contains(&format!("{} subclass: ", classes[0].name))
         );
+    }
+
+    /// `NAMED` is the single shape table: every entry is one distinct bit, the
+    /// bits are contiguous (a shape constant defined but left out of `NAMED`
+    /// would leave a gap), and `all()` is their union.
+    #[test]
+    fn shape_table_is_consistent() {
+        let mut seen = 0u32;
+        for (name, shape) in Shapes::NAMED {
+            assert_eq!(shape.0.count_ones(), 1, "{name} is not a single bit");
+            assert_eq!(seen & shape.0, 0, "{name} overlaps another shape");
+            seen |= shape.0;
+            assert_eq!(Shapes::parse(name), Some(shape), "{name} does not parse");
+        }
+        let n = u32::try_from(Shapes::NAMED.len()).unwrap();
+        assert_eq!(seen, (1 << n) - 1, "shape bits are not contiguous");
+        assert_eq!(Shapes::all().0, seen);
+    }
+
+    #[test]
+    fn cause_normaliser_groups_names_and_numbers() {
+        assert_eq!(
+            normalize_cause("  ╰─▶ Cannot send 'h3:' to self at line 12"),
+            "Cannot send  to self at line"
+        );
+        assert_eq!(normalize_cause("Open: rejected \"x\" 7"), "Open: rejected");
     }
 
     #[test]

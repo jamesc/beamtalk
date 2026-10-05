@@ -34,9 +34,11 @@
 
 use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
-use beamtalk_core::test_helpers::class_var_program::{Program, Shapes, Spelling};
+use beamtalk_core::test_helpers::class_var_program::{
+    Program, Shapes, Spelling, corpus_cases_from_env, corpus_shapes_from_env, normalize_cause,
+};
 use beamtalk_core::test_helpers::test_support::{
-    arb_class_program, core_erlang_structural_issues, proptest_config_default,
+    arb_class_program, core_erlang_structural_issues, draw_class_programs, proptest_config_default,
 };
 use proptest::prelude::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -132,16 +134,7 @@ fn cause(error: &str) -> String {
         .lines()
         .find(|l| l.contains("panicked") || l.contains("rejected") || l.contains("diagnostic"))
         .unwrap_or_else(|| error.lines().next().unwrap_or(""));
-    let mut out = String::new();
-    let mut quoted = false;
-    for ch in first.chars() {
-        if ch == '\'' || ch == '"' {
-            quoted = !quoted;
-        } else if !quoted && !ch.is_ascii_digit() {
-            out.push(ch);
-        }
-    }
-    out.chars().take(110).collect()
+    normalize_cause(first)
 }
 
 /// Measurement, not a check: draws `CV_CORPUS_CASES` programs (default 512)
@@ -153,28 +146,12 @@ fn cause(error: &str) -> String {
 #[test]
 #[ignore = "measurement: prints the failure rate and causes for CV_CORPUS_SHAPES"]
 fn measure_failure_rate() {
-    use proptest::strategy::{Strategy, ValueTree};
-    use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
-
-    let cases: usize = std::env::var("CV_CORPUS_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(512);
-    let shapes = std::env::var("CV_CORPUS_SHAPES")
-        .ok()
-        .map_or(Shapes::all(), |s| {
-            Shapes::parse(&s).unwrap_or_else(|| panic!("unknown shape in CV_CORPUS_SHAPES={s}"))
-        });
-    let mut runner = TestRunner::new_with_rng(
-        Config::default(),
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    );
-    let strategy = arb_class_program(shapes);
+    let cases = corpus_cases_from_env(512);
+    let shapes = corpus_shapes_from_env(Shapes::all());
     let mut by_cause: Vec<(String, usize)> = Vec::new();
     let mut failed = 0;
-    for index in 0..cases {
-        let (_, _, program) = strategy.new_tree(&mut runner).expect("draw").current();
-        if let Err(e) = check_program(index, &program) {
+    for (index, (_, _, program)) in draw_class_programs(shapes, cases).iter().enumerate() {
+        if let Err(e) = check_program(index, program) {
             failed += 1;
             let c = cause(&e);
             match by_cause.iter_mut().find(|(k, _)| *k == c) {

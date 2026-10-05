@@ -30,11 +30,10 @@
 use crate::cli_common;
 
 use beamtalk_core::test_helpers::class_var_program::{
-    Package, Program, Shapes, Spelling, render_package,
+    Package, Program, Shapes, Spelling, corpus_cases_from_env, corpus_shapes_from_env,
+    normalize_cause, render_package,
 };
-use beamtalk_core::test_helpers::test_support::arb_class_program;
-use proptest::strategy::{Strategy, ValueTree};
-use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use beamtalk_core::test_helpers::test_support::draw_class_programs;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -52,33 +51,16 @@ struct Case {
     program: Program,
 }
 
-fn cases() -> usize {
-    std::env::var("CV_CORPUS_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_CASES)
-}
-
-/// Draws `n` programs from the shared strategy with a fixed RNG, so the case
-/// budget is the same corpus on every run (and every machine).
+/// The shared deterministic draw, tagged with each program's index.
 fn draw(shapes: Shapes, n: usize) -> Vec<Case> {
-    let mut runner = TestRunner::new_with_rng(
-        Config::default(),
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    );
-    let strategy = arb_class_program(shapes);
-    (0..n)
-        .map(|index| {
-            let (seed, size, program) = strategy
-                .new_tree(&mut runner)
-                .expect("strategy draws a value")
-                .current();
-            Case {
-                index,
-                seed,
-                size,
-                program,
-            }
+    draw_class_programs(shapes, n)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (seed, size, program))| Case {
+            index,
+            seed,
+            size,
+            program,
         })
         .collect()
 }
@@ -197,21 +179,7 @@ fn headline(text: &str) -> String {
         .or(panic_message)
         .or_else(|| text.lines().find(|l| l.contains("internal:")))
         .unwrap_or("(no reason found)");
-    // Drop the shape-specific names so equal causes group together.
-    let line = line
-        .trim_start_matches(|c: char| !c.is_alphanumeric())
-        .trim();
-    let mut out = String::new();
-    let mut quoted = false;
-    for ch in line.chars() {
-        if ch == '\'' {
-            quoted = !quoted;
-            out.push(ch);
-        } else if !quoted && !ch.is_ascii_digit() {
-            out.push(ch);
-        }
-    }
-    out.chars().take(70).collect()
+    normalize_cause(line)
 }
 
 fn tail(text: &str) -> String {
@@ -274,8 +242,26 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
                 record(only, Failure::Compile(headline(&text), tail(&text)), failed);
             } else {
                 let (a, b) = cases.split_at(cases.len() / 2);
+                let before = failed.len();
                 check(a, failed);
                 check(b, failed);
+                // The batch was broken but every half passed (an interaction
+                // between programs, or a flaky run): never let that pass
+                // silently; blame the batch's first case.
+                if failed.len() == before {
+                    record(
+                        cases[0],
+                        Failure::Compile(
+                            format!(
+                                "batch of {} broke but each half passed: {}",
+                                cases.len(),
+                                headline(&text)
+                            ),
+                            tail(&text),
+                        ),
+                        failed,
+                    );
+                }
             }
         }
     }
@@ -338,7 +324,7 @@ fn report(shapes: Shapes, all: &[Case], failed: &[Failed]) -> String {
 }
 
 fn property(shapes: Shapes) {
-    let all = draw(shapes, cases());
+    let all = draw(shapes, corpus_cases_from_env(DEFAULT_CASES));
     let refs: Vec<&Case> = all.iter().collect();
     let mut failed = Vec::new();
     check(&refs, &mut failed);
@@ -357,10 +343,5 @@ fn class_var_agreement_supported_shapes() {
 fn class_var_agreement_all_shapes() {
     // `CV_CORPUS_SHAPES=do,cond,...` narrows the draw to find which shape a
     // failure belongs to (names: `Shapes::names`); default is every shape.
-    let shapes = std::env::var("CV_CORPUS_SHAPES")
-        .ok()
-        .map_or(Shapes::all(), |s| {
-            Shapes::parse(&s).unwrap_or_else(|| panic!("unknown shape in CV_CORPUS_SHAPES={s}"))
-        });
-    property(shapes);
+    property(corpus_shapes_from_env(Shapes::all()));
 }

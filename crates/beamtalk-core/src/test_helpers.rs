@@ -672,6 +672,35 @@ pub mod test_support {
         })
     }
 
+    /// Draws `n` class programs from [`arb_class_program`] with a fixed RNG,
+    /// so a case budget is the same corpus on every run and every machine.
+    /// Each item is `(seed, size, program)`; the pair reproduces the program.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the strategy cannot produce a value (it never fails).
+    pub fn draw_class_programs(
+        shapes: super::class_var_program::Shapes,
+        n: usize,
+    ) -> Vec<(u64, u32, super::class_var_program::Program)> {
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+
+        let mut runner = TestRunner::new_with_rng(
+            Config::default(),
+            TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        );
+        let strategy = arb_class_program(shapes);
+        (0..n)
+            .map(|_| {
+                strategy
+                    .new_tree(&mut runner)
+                    .expect("strategy draws a value")
+                    .current()
+            })
+            .collect()
+    }
+
     /// `EcoString` alias local to this generator: proptest's `Strategy`
     /// trait needs `Clone + Debug` values threaded through closures a lot
     /// here, and the crate's `ecow::EcoString` already satisfies that
