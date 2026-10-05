@@ -102,6 +102,35 @@ TestCase subclass: ClassBuilderClassMethodTest
     self assert: self.cls bump equals: 101
     self assert: self.cls bump equals: 102
 
+  // The same, for a class-side extension reached from a builder method: the
+  // extension is looked up on the builder class but receives the live
+  // receiver's `ClassSelf`, so it reads the subclass's class variable.
+  testExtensionReadThroughSubclassReceiverUsesReceiverClassVars =>
+    Object classBuilder name: #BT3709ExtMid;
+      superclass: Object;
+      classVars: #{#n => 10};
+      classMethods: #{
+        #viaSelf => [:self | self foo],
+        #viaSuper => [:self | super foo]
+      };
+      register
+    self.midCls := (Erlang beamtalk_interface) findClass: #BT3709ExtMid
+    Object classBuilder name: #BT3709ExtLeaf;
+      superclass: #BT3709ExtMid;
+      classVars: #{#n => 100};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3709ExtLeaf
+    Erlang beamtalk_extensions
+      register: #'BT3709ExtMid class'
+      selector: #foo
+      fun: [:_args :s | Erlang beamtalk_class_vars get: s with: #n]
+      owner: #test
+    viaSelf := self.cls viaSelf
+    viaSuper := self.cls viaSuper
+    Erlang ets delete: #beamtalk_extensions key: #(#'BT3709ExtMid class', #foo)
+    self assert: viaSelf equals: 100
+    self assert: viaSuper equals: 100
+
   // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
   // not match the class-method calling convention `fun(ClassSelf, ...)`
   // is rejected at register time with a structured #arity_mismatch error, instead

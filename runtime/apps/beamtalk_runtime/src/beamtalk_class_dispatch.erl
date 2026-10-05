@@ -236,7 +236,7 @@ a `ClassSelf` rebuilt from the static builder class.
 """.
 -spec class_self_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
 class_self_dispatch(ClassName, Selector, Args, ReceiverTag) ->
-    case check_class_self_extension(ClassName, Selector, Args) of
+    case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -261,7 +261,7 @@ builder-class `super` sends (ADR 0084) rely on them.
 """.
 -spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
 class_self_send(ClassName, Selector, Args) ->
-    case check_class_self_extension(ClassName, Selector, Args) of
+    case check_class_self_extension(ClassName, Selector, Args, receiver_tag(ClassName)) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -283,7 +283,7 @@ true -> class_foo(...) ; false -> class_self_send/3 walk end`. The direct call
 is only equivalent to the walk when the receiving class is exactly the
 compiling class (`ReceiverTag =:= ClassTag`) AND nothing would shadow the
 compiled method that the walk honours: a class-side extension on the class
-(`check_class_self_extension/3`) or a runtime-installed class-method fun
+(`check_class_self_extension/4`) or a runtime-installed class-method fun
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
@@ -375,7 +375,7 @@ class_self_dispatch_local(ClassName, Selector, Args) ->
 -spec class_self_dispatch_local(class_name(), selector(), list(), atom()) ->
     term() | no_return().
 class_self_dispatch_local(ClassName, Selector, Args, ReceiverTag) ->
-    case check_class_self_extension(ClassName, Selector, Args) of
+    case check_class_self_extension(ClassName, Selector, Args, ReceiverTag) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -418,14 +418,17 @@ Returns `{ok, Outcome}` when an extension matched (`Outcome` already
 unwrapped and ready to return to the codegen call site), or `not_found` so
 the caller proceeds to its own next lookup.
 """.
--spec check_class_self_extension(class_name(), selector(), list()) ->
+-spec check_class_self_extension(class_name(), selector(), list(), atom()) ->
     {ok, term()} | not_found | no_return().
-check_class_self_extension(ClassName, Selector, Args) ->
+check_class_self_extension(ClassName, Selector, Args, ReceiverTag) ->
+    %% `ClassName` picks the extension; `ReceiverTag` is the live receiver's
+    %% metaclass tag, so the extension body reads the receiver's class-variable
+    %% key (a subclass receiver differs from `ClassName`).
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
             Module = self_dispatch_module(ClassName),
-            ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
+            ClassSelf = #beamtalk_object{class = ReceiverTag, class_mod = Module, pid = self()},
             {ok,
                 unwrap_self_dispatch_outcome(
                     ClassName,
@@ -792,7 +795,7 @@ same function (`beamtalk_object_class:dispatch_class_method/5`).
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
 class — `class_self_dispatch/3` / `class_self_dispatch_local/3`, below —
-goes through `check_class_self_extension/3` instead, which checks the same
+goes through `check_class_self_extension/4` instead, which checks the same
 registry under the same priority rule.
 
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.

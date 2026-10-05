@@ -40,7 +40,7 @@ TestCase subclass: SelfSendPlainReplyTest
   testBaseRaisedIterationInLoop =>
     self assert: SsoPlainBase raisedIterationInLoop equals: 0
 
-  // PIN-BUG BT-3713: pins what the branch does today (3: the writes made inside the raised
+  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
   // iterations are kept); it flips when an error crossing a boundary discards the writes made
   // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testBaseRaisedIterationBetweenKept =>
@@ -119,7 +119,7 @@ TestCase subclass: SelfSendPlainReplyTest
   testSubRaisedIterationInLoop =>
     self assert: SsoPlainSub raisedIterationInLoop equals: 0
 
-  // PIN-BUG BT-3713: pins what the branch does today (3: the writes made inside the raised
+  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
   // iterations are kept); it flips when an error crossing a boundary discards the writes made
   // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testSubRaisedIterationBetweenKept =>
@@ -241,7 +241,7 @@ TestCase subclass: SelfSendPlainReplyTest
 
   testSealedFooArms => self assert: SsoPlainSealed fooArms equals: 1
 
-  // PIN-BUG BT-3713: pins what the branch does today (3: the writes made inside the raised
+  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
   // iterations are kept); it flips when an error crossing a boundary discards the writes made
   // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testSealedPinBugRaisedIterationBetweenKept =>
