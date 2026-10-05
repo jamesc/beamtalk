@@ -40,8 +40,11 @@ TestCase subclass: SelfSendPlainReplyTest
   testBaseRaisedIterationInLoop =>
     self assert: SsoPlainBase raisedIterationInLoop equals: 0
 
+  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
+  // iterations are kept); it flips when an error crossing a boundary discards the writes made
+  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testBaseRaisedIterationBetweenKept =>
-    self assert: SsoPlainBase raisedIterationBetweenKept equals: 1
+    self assert: SsoPlainBase raisedIterationBetweenKept equals: 3
 
   testBaseHandlerArm => self assert: SsoPlainBase handlerArm equals: 1
 
@@ -116,8 +119,11 @@ TestCase subclass: SelfSendPlainReplyTest
   testSubRaisedIterationInLoop =>
     self assert: SsoPlainSub raisedIterationInLoop equals: 0
 
+  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
+  // iterations are kept); it flips when an error crossing a boundary discards the writes made
+  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testSubRaisedIterationBetweenKept =>
-    self assert: SsoPlainSub raisedIterationBetweenKept equals: 1
+    self assert: SsoPlainSub raisedIterationBetweenKept equals: 3
 
   testSubHandlerArm => self assert: SsoPlainSub handlerArm equals: 1
 
@@ -225,15 +231,18 @@ TestCase subclass: SelfSendPlainReplyTest
   testSealedViaSectionParamInLoop =>
     self assert: SsoPlainSealed viaSectionParamInLoop equals: 1
 
-  // PIN-BUG BT-3691: sealed class, a writing arm plus provably pure arms in a threaded loop
-  // loses the write on main as well (not caused by BT-3690). Each pins a KNOWN-WRONG answer
-  // (the correct one is in the name of the open-class test); the fix must flip these.
-  testSealedPinBugArmsDo => self assert: SsoPlainSealed armsDo equals: 0
+  // BT-3691: sealed class, a writing arm plus provably pure arms in a threaded loop. A class
+  // variable is written in place (ADR 0130), so the write is no longer lost: these pins flipped
+  // to the correct answers (the same ones the open-class tests assert).
+  testSealedArmsDo => self assert: SsoPlainSealed armsDo equals: 1
 
-  testSealedPinBugReaderAfterArm =>
-    self assert: SsoPlainSealed readerAfterArm equals: #(0, 0, 0)
+  testSealedReaderAfterArm =>
+    self assert: SsoPlainSealed readerAfterArm equals: #(1, 1, 1)
 
+  testSealedFooArms => self assert: SsoPlainSealed fooArms equals: 1
+
+  // PIN-BUG BT-3713: pins what the code does today (3: the writes made inside the raised
+  // iterations are kept); it flips when an error crossing a boundary discards the writes made
+  // inside it (ADR 0130 §4, the `on:do:` snapshot issue).
   testSealedPinBugRaisedIterationBetweenKept =>
-    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 0
-
-  testSealedPinBugFooArms => self assert: SsoPlainSealed fooArms equals: 0
+    self assert: SsoPlainSealed raisedIterationBetweenKept equals: 3

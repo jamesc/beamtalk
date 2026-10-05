@@ -52,9 +52,10 @@ pub(in crate::core_erlang) struct NlrCatchVars {
 pub(in crate::core_erlang) enum NlrBoundary {
     /// Actor (`gen_server`) methods: the catch arm yields `{'reply', Value, State}`.
     ActorReply,
-    /// Class methods: the catch arm yields `Value` (no class vars) or
-    /// `{'class_var_result', Value, State}` when class vars were mutated.
-    ClassMethod { has_class_vars: bool },
+    /// Class methods: the catch arm yields the bare `Value`. Class variables
+    /// live in the class process's dictionary (ADR 0130 §3), so nothing is
+    /// returned alongside the result.
+    ClassMethod,
     /// Value-type methods: the catch arm yields `{Value, State}` so the normal and
     /// NLR-catch paths produce the same `{Result, Self{N}}` shape.
     ValueType,
@@ -78,18 +79,7 @@ fn nlr_arm_result(val_var: &str, state_var: &str, boundary: NlrBoundary) -> Docu
             leaf::var(state_var.to_string()),
             "}",
         ],
-        NlrBoundary::ClassMethod {
-            has_class_vars: true,
-        } => docvec![
-            "{'class_var_result', ",
-            leaf::var(val_var.to_string()),
-            ", ",
-            leaf::var(state_var.to_string()),
-            "}",
-        ],
-        NlrBoundary::ClassMethod {
-            has_class_vars: false,
-        } => leaf::var(val_var.to_string()),
+        NlrBoundary::ClassMethod => leaf::var(val_var.to_string()),
         NlrBoundary::ValueType => docvec![
             "{",
             leaf::var(val_var.to_string()),
@@ -284,26 +274,8 @@ mod tests {
     }
 
     #[test]
-    fn nlr_arm_result_class_method_with_vars_yields_class_var_result_tuple() {
-        let doc = nlr_arm_result(
-            "V",
-            "S",
-            NlrBoundary::ClassMethod {
-                has_class_vars: true,
-            },
-        );
-        assert_eq!(doc.to_pretty_string(), "{'class_var_result', V, S}");
-    }
-
-    #[test]
-    fn nlr_arm_result_class_method_without_vars_yields_bare_value() {
-        let doc = nlr_arm_result(
-            "V",
-            "S",
-            NlrBoundary::ClassMethod {
-                has_class_vars: false,
-            },
-        );
+    fn nlr_arm_result_class_method_yields_bare_value() {
+        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod);
         assert_eq!(doc.to_pretty_string(), "V");
     }
 

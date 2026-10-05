@@ -1018,7 +1018,7 @@ start_child_via_class_method_reads_mirror_test() ->
                 'BT3708Read', ?MODULE, class_readThenActor, []
             )
         ),
-        ?assertEqual(undefined, get({'$bt_class_vars', 'BT3708Read'}))
+        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Read')))
     after
         beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
         cleanup_fake_class('BT3708Read', FakeClassPid)
@@ -1037,7 +1037,7 @@ start_child_via_class_method_write_raises_test() ->
             end)
         ),
         %% The snapshot is erased even though the method raised.
-        ?assertEqual(undefined, get({'$bt_class_vars', 'BT3708Write'}))
+        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Write')))
     after
         beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
         cleanup_fake_class('BT3708Write', FakeClassPid)
@@ -1054,7 +1054,7 @@ static_init_class_children_write_raises_test() ->
                 beamtalk_supervisor:static_init(?MODULE, 'BT3708Children')
             end)
         ),
-        ?assertEqual(undefined, get({'$bt_class_vars', 'BT3708Children'}))
+        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Children')))
     after
         erase(bt3708_children_write),
         beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),

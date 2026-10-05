@@ -346,8 +346,8 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
     assert!(
-        code.contains("'class_children'/2"),
-        "Static supervisor with user class method must export class_children/2. Got:\n{code}"
+        code.contains("'class_children'/1"),
+        "Static supervisor with user class method must export class_children/1. Got:\n{code}"
     );
 }
 

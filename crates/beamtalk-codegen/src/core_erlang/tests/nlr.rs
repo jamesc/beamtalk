@@ -8,13 +8,7 @@ fn wrap_body_with_nlr_catch_class_method_no_vars_contains_nlr_scaffolding() {
     let mut generator = CoreErlangGenerator::new("nlr_test");
     let token = generator.fresh_temp_var("NlrToken");
     let body = leaf::var("Body".to_string());
-    let doc = generator.wrap_body_with_nlr_catch(
-        body,
-        &token,
-        NlrBoundary::ClassMethod {
-            has_class_vars: false,
-        },
-    );
+    let doc = generator.wrap_body_with_nlr_catch(body, &token, NlrBoundary::ClassMethod);
     let out = doc.to_pretty_string();
     assert!(
         out.contains("'erlang':'make_ref'()"),
@@ -25,7 +19,7 @@ fn wrap_body_with_nlr_catch_class_method_no_vars_contains_nlr_scaffolding() {
         out.contains("primop 'raw_raise'"),
         "missing raw_raise: {out}"
     );
-    // ClassMethod{has_class_vars:false} catch arm yields bare value, not a tuple
+    // ClassMethod catch arm yields bare value, not a tuple
     assert!(
         !out.contains("'reply'"),
         "should not contain actor-reply: {out}"

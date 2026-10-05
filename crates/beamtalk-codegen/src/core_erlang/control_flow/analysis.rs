@@ -131,7 +131,7 @@ impl ClassVarMutationSite {
     /// has ALREADY matched for `ClassVars` — the caller's guard, not a
     /// second copy of the shape rule (ADR 0122 Decision 4).
     fn new(expr: &Expression) -> Self {
-        if let Some(field) = CoreErlangGenerator::field_assignment_name(expr) {
+        if let Some(field) = crate::core_erlang::expr_shape::field_assignment_name(expr) {
             return Self::FieldWrite {
                 field: field.to_string(),
                 span: expr.span(),
@@ -216,7 +216,8 @@ impl CoreErlangGenerator {
         if matches!(self.context, CodeGenContext::Actor) && !self.in_class_method() {
             eligible.push(VersionPrefix::State);
         }
-        if self.in_class_method() {
+        // ADR 0130 §3: class variables are not a threaded family.
+        if crate::core_erlang::expr_shape::CLASS_VAR_THREADING && self.in_class_method() {
             eligible.push(VersionPrefix::ClassVars);
         }
         if matches!(self.context, CodeGenContext::ValueType) && !self.in_class_method() {
@@ -275,13 +276,13 @@ impl CoreErlangGenerator {
                 // `lower_class_method_body`, and any other position raises a
                 // clear compile-time diagnostic (`try_generate_object_reflection`'s
                 // `ClearField` arm) rather than silently losing the mutation.
-                (Self::is_field_assignment(expr) && self.is_class_var_assignment(expr))
+                (self.is_field_assignment(expr) && self.is_class_var_assignment(expr))
                     || self.is_class_method_self_send(expr)
             }
             VersionPrefix::SelfVt => {
                 !self.in_class_method()
                     && matches!(self.context, CodeGenContext::ValueType)
-                    && Self::is_field_assignment(expr)
+                    && self.is_field_assignment(expr)
             }
             VersionPrefix::Local(_) | VersionPrefix::Gensym(_) => false,
         }
@@ -572,7 +573,7 @@ impl CoreErlangGenerator {
             }
             // Name comes from the same helper that decides whether this IS a
             // field write, so the predicate and the diagnostic cannot disagree.
-            if let Some(field) = Self::field_assignment_name(e) {
+            if let Some(field) = self.field_assignment_name(e) {
                 found = Some(field.to_string());
             }
         });
@@ -676,7 +677,7 @@ impl CoreErlangGenerator {
     /// such a mutation back to the class method that owns it") already
     /// describes exactly this shape.
     pub(super) fn reject_unthreadable_class_var_mutation(&self, expr: &Expression) -> Result<()> {
-        if !self.in_class_method() {
+        if !crate::core_erlang::expr_shape::CLASS_VAR_THREADING || !self.in_class_method() {
             return Ok(());
         }
         // The visitor is a `FnMut(&Expression)` with a higher-ranked
@@ -818,7 +819,7 @@ impl CoreErlangGenerator {
         &self,
         body: &'a beamtalk_core::ast::Block,
     ) -> Option<&'a Expression> {
-        if !self.in_class_method() {
+        if !crate::core_erlang::expr_shape::CLASS_VAR_THREADING || !self.in_class_method() {
             return None;
         }
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
@@ -881,7 +882,7 @@ impl CoreErlangGenerator {
     pub(super) fn nested_loop_lost_class_var_mutation(&self, expr: &Expression) -> Option<String> {
         let (body, shape) = Self::nested_loop_or_fold_body(expr)?;
         if let Some(mutating_stmt) = self.find_class_var_mutating_stmt(body) {
-            if Self::is_field_assignment(mutating_stmt)
+            if self.is_field_assignment(mutating_stmt)
                 && self.is_class_var_assignment(mutating_stmt)
             {
                 if let Expression::Assignment { target, .. } = mutating_stmt {
@@ -912,7 +913,10 @@ impl CoreErlangGenerator {
         // own Foldl branch, which dropped the same stale exclusion) is
         // genuinely recursive, so the fallback below applies only when
         // `shape` is `Foldl`.
-        if matches!(shape, NestedLoopShape::Foldl) && self.in_class_method() {
+        if crate::core_erlang::expr_shape::CLASS_VAR_THREADING
+            && matches!(shape, NestedLoopShape::Foldl)
+            && self.in_class_method()
+        {
             let analysis = block_analysis::analyze_block(body);
             // `self_send_selectors` is a `HashSet` (default `RandomState`) —
             // pick the lexicographically-smallest selector so the

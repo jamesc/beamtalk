@@ -906,7 +906,7 @@ impl CoreErlangGenerator {
         parts: &mut Vec<Document<'static>>,
     ) -> Result<String> {
         let var = self.fresh_temp_var(prefix);
-        if Self::is_field_assignment(arg) {
+        if self.is_field_assignment(arg) {
             let (doc, val_var) = self.generate_field_assignment_open(arg)?;
             parts.push(doc);
             parts.push(docvec![
@@ -2216,14 +2216,23 @@ impl CoreErlangGenerator {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
-                    // Identity: just return the receiver
-                    // Preserve the receiver's own prelude (e.g. class
-                    // method self-send) so the mutated ClassVarsN binding
-                    // propagates upward — `close_prelude` splices it ahead of
-                    // the identity return.
+                    // Identity: just return the receiver. It is bound rather
+                    // than returned bare: the receiver's own document is
+                    // already line-annotated (`( X -| [Line, File] )`), and
+                    // the enclosing send annotates this result again, which
+                    // Core Erlang rejects as a directly nested annotation.
                     let mut seq = self.sequence_call(&[receiver], "Yourself")?;
                     let recv_doc = seq.next();
-                    Ok(Some(seq.close(self, recv_doc, "YourselfRes")))
+                    let recv_var = self.fresh_temp_var("Yourself");
+                    let identity_doc = docvec![
+                        "let ",
+                        leaf::var(recv_var.clone()),
+                        " = ",
+                        recv_doc,
+                        " in ",
+                        leaf::var(recv_var),
+                    ];
+                    Ok(Some(seq.close(self, identity_doc, "YourselfRes")))
                 }
                 // printString removed as intrinsic — now uses polymorphic
                 // dispatch via Object >> printString and per-class overrides.
@@ -2562,27 +2571,25 @@ impl CoreErlangGenerator {
                     // validates arity.
                     Some(WellKnownSelector::HasField) => {
                         debug_assert_eq!(arguments.len(), 1);
-                        // Class-method `self hasField: #x` reads `ClassVars`
-                        // directly (§4i) — a pure `maps:is_key`, never
-                        // raises, so it needs no state threading and works
-                        // at any nesting depth (unlike `clearField:` below,
-                        // which is a write).
+                        // Class-method `self hasField: #x` is a presence test
+                        // on the class variables, in place (ADR 0130 §2):
+                        // `beamtalk_class_vars:has(ClassSelf, Name)`, which
+                        // never raises on the name.
                         if self.in_class_method() {
                             if let Expression::Identifier(id) = receiver {
                                 if id.name == "self" {
                                     let name_var = self.fresh_var("Name");
                                     let name_code = self.expression_doc(&arguments[0])?;
-                                    let cv = self.current_class_var();
                                     let doc = docvec![
                                         "let ",
                                         leaf::var(name_var.clone()),
                                         " = ",
                                         name_code,
-                                        " in call 'maps':'is_key'(",
-                                        leaf::var(name_var),
-                                        ", ",
-                                        leaf::var(cv),
-                                        ")",
+                                        " in ",
+                                        Self::class_var_helper_call_doc(
+                                            "has",
+                                            vec![leaf::var(name_var)],
+                                        ),
                                     ];
                                     return Ok(Some(doc));
                                 }
@@ -2654,30 +2661,31 @@ impl CoreErlangGenerator {
                     // `fieldAt:put:` does.
                     Some(WellKnownSelector::ClearField) => {
                         debug_assert_eq!(arguments.len(), 1);
-                        // Class-side: every top-level (and producer-
-                        // recognized nested) `self clearField:` position in
-                        // a class method body is intercepted before
-                        // `expression_doc` is ever reached for this exact
-                        // node — `class_method_prelude_producer`
-                        // (`util.rs`) and `lower_class_method_body`
-                        // (`gen_server/methods.rs`), per
-                        // `is_self_clear_field_class_var`'s own doc comment
-                        // (ADR 0124 §4i). There is no general `ClassVars`
-                        // state-threading for this shape at any OTHER
-                        // nesting depth (e.g. inside `ifTrue:` or a loop —
-                        // out of scope for this issue), and reaching this
-                        // class gen_server from inside its own process
-                        // would deadlock (`beamtalk_class_dispatch:handle_class_self_call/1`),
-                        // so reject clearly instead of silently losing the
-                        // mutation or hanging.
+                        // Class-side `self clearField: #x` removes the class
+                        // variable in place at any nesting depth (ADR 0130
+                        // §2): `beamtalk_class_vars:clear(ClassSelf, Name)`,
+                        // which answers `self`. Routing it through
+                        // `class_send` instead would deadlock on the class's
+                        // own process.
                         if self.in_class_method() {
-                            return Err(CodeGenError::UnsupportedFeature {
-                                feature: "'self clearField:' on a class variable is only \
-                                    supported as a class method's own body statement (ADR \
-                                    0124 §4i) — not nested inside a conditional or loop"
-                                    .to_string(),
-                                span: Some(receiver.span()),
-                            });
+                            if let Expression::Identifier(id) = receiver {
+                                if id.name == "self" {
+                                    let name_var = self.fresh_var("Name");
+                                    let name_code = self.expression_doc(&arguments[0])?;
+                                    let doc = docvec![
+                                        "let ",
+                                        leaf::var(name_var.clone()),
+                                        " = ",
+                                        name_code,
+                                        " in ",
+                                        Self::class_var_helper_call_doc(
+                                            "clear",
+                                            vec![leaf::var(name_var)],
+                                        ),
+                                    ];
+                                    return Ok(Some(doc));
+                                }
+                            }
                         }
                         // Fast-path for `self` receiver in actor instance
                         // context. Avoids sync_send(self()) → deadlock.

@@ -238,30 +238,30 @@ fn test_value_type_field_write_in_last_position_conditional_still_rejected() {
 }
 
 #[test]
-fn test_class_var_write_in_conditional_nested_in_loop_is_compile_error() {
-    // The reference half of the parity pair: a class-var write
-    // inside an `ifTrue:` inside a `to:do:` has ALWAYS been rejected cleanly.
-    // `needs_mutation_threading`'s `in_class_method()` arm does not count
-    // field writes, so the branch block never reaches the inline
-    // mutation-threading path and falls through to `generate_block`'s
-    // `validate_stored_closure` diagnostic. Pinned here so the value-type
-    // half below is measured against real, executed behaviour rather than a
-    // remembered claim.
-    let field = field_assignment_rejection_field(
-        concat!(
-            "Object subclass: CvCondInLoop\n",
-            "  classState: total = 0\n\n",
-            "  class computeTotal: flag =>\n",
-            "    seen := 0\n",
-            "    1 to: 3 do: [:i |\n",
-            "      flag ifTrue: [self.total := self.total + i]\n",
-            "      seen := seen + 1\n",
-            "    ]\n",
-            "    self.total\n",
-        ),
-        "bt@cvcondinloop",
+fn test_class_var_write_in_conditional_nested_in_loop_compiles_and_writes_in_place() {
+    // The class-variable half of the parity pair (ADR 0130 §2): unlike a
+    // value-type field write, a class-var write inside an `ifTrue:` inside a
+    // `to:do:` is an in-place `put` that threads nothing, so it compiles
+    // wherever it sits. The value-type half below stays a clean rejection.
+    let code = codegen(concat!(
+        "Object subclass: CvCondInLoop\n",
+        "  classState: total = 0\n\n",
+        "  class computeTotal: flag =>\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      flag ifTrue: [self.total := self.total + i]\n",
+        "      seen := seen + 1\n",
+        "    ]\n",
+        "    self.total\n",
+    ));
+    assert!(
+        code.contains("call 'erlang':'put'({'$bt_class_vars', "),
+        "the write is an in-place put. Got:\n{code}"
     );
-    assert_eq!(field, "total");
+    assert!(
+        !code.contains("ClassVars"),
+        "nothing about class variables is threaded through the loop. Got:\n{code}"
+    );
 }
 
 #[test]

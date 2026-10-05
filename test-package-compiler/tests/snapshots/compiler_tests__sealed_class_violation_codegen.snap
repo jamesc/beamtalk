@@ -126,6 +126,7 @@ let _BinLeft1 = Self in let _BinRight2 = 2 in case call 'erlang':'is_number'(_Bi
       'initialize_assigns' => [],
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -162,6 +163,7 @@ let _BinLeft1 = Self in let _BinRight2 = 2 in case call 'erlang':'is_number'(_Bi
       'initialize_assigns' => [],
       'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
+      'class_var_abi' => 1,
       'direct_class_methods' => ~{}~
     }~
 

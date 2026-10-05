@@ -720,6 +720,26 @@ impl CoreErlangGenerator {
                 receiver_is_self,
             )?));
         }
+        // ADR 0130: a class-variable write or a same-class self-send threads
+        // nothing, but it is an in-place effect: pin its evaluation order
+        // against its siblings by binding it in an ordered `let` of its own.
+        if self.is_class_side_effect(expr) {
+            let doc = self.generate_expression(expr)?;
+            let result_var = self.fresh_temp_var("Effect");
+            return Ok(Some(ThreadedValue {
+                prelude: vec![ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        beamtalk_cerl_doc::leaf::var(result_var.clone()),
+                        " = ",
+                        doc,
+                        " in "
+                    ],
+                    expr.span(),
+                )],
+                value: ValueRef::Var(result_var),
+            }));
+        }
         Ok(None)
     }
 
@@ -793,6 +813,16 @@ impl CoreErlangGenerator {
     /// instead — so none of these residual shapes ever need a prelude
     /// here.
     pub(super) fn subexpr_needs_prelude(&self, expr: &Expression) -> bool {
+        self.subexpr_needs_prelude_with(expr, true)
+    }
+
+    /// [`Self::subexpr_needs_prelude`], with `class_effects` saying whether a
+    /// class-side in-place effect (a class-variable write or a same-class
+    /// self-send, ADR 0130) counts as needing a prelude. It does for
+    /// sequencing, which must pin its evaluation order against its siblings;
+    /// it does not for the question "does this conditional need its
+    /// mutation-threaded form?", because such an effect threads nothing.
+    fn subexpr_needs_prelude_with(&self, expr: &Expression, class_effects: bool) -> bool {
         let inner = expr.unwrap_parens();
         if Self::is_trivial_subexpr(inner) {
             return false;
@@ -825,9 +855,8 @@ impl CoreErlangGenerator {
         // binary operand, a cascade message, ...). A pure predicate check
         // (not the mutating producer call itself) so this stays a probe.
         if self.in_class_method()
-            && (self.is_class_var_assignment(inner)
-                || self.is_self_clear_field_class_var(inner)
-                || self.is_class_method_self_send(inner))
+            && (self.is_self_clear_field_class_var(inner)
+                || (class_effects && self.is_class_side_effect(inner)))
         {
             return true;
         }
@@ -837,7 +866,7 @@ impl CoreErlangGenerator {
         if let Some(children) = Self::sequenced_send_children(inner) {
             return children
                 .iter()
-                .any(|child| self.subexpr_needs_prelude(child));
+                .any(|child| self.subexpr_needs_prelude_with(child, class_effects));
         }
         // ADR 0118 phase 1b: mirrors `threaded_expression`'s own cases
         // exactly, for the same reason phase 1a's version of this
@@ -846,14 +875,16 @@ impl CoreErlangGenerator {
         if let Some(children) = Self::literal_container_children(inner) {
             return children
                 .iter()
-                .any(|child| self.subexpr_needs_prelude(child));
+                .any(|child| self.subexpr_needs_prelude_with(child, class_effects));
         }
         if let Some(value) = Self::single_sequenced_child(inner) {
-            return self.subexpr_needs_prelude(value);
+            return self.subexpr_needs_prelude_with(value, class_effects);
         }
         if let Expression::StringInterpolation { segments, .. } = inner {
             return segments.iter().any(|seg| match seg {
-                StringSegment::Interpolation(e) => self.subexpr_needs_prelude(e),
+                StringSegment::Interpolation(e) => {
+                    self.subexpr_needs_prelude_with(e, class_effects)
+                }
                 StringSegment::Literal(_) => false,
             });
         }
@@ -893,7 +924,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        self.subexpr_needs_prelude(expr)
+        self.subexpr_needs_prelude_with(expr, false)
     }
 
     /// The `State` variable a consumer must continue from once it has

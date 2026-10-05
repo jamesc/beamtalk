@@ -90,14 +90,6 @@ pub(in crate::core_erlang) enum FieldWriteSite {
     Actor,
     /// Value-type field: threads through `Self`.
     ValueType,
-    /// Class variable: threads through `ClassVars`, with ADR 0110's shadow
-    /// write and its own `frame`/`block_depth` eligibility rules —
-    /// [`CoreErlangGenerator::lower_field_write`] delegates this variant
-    /// wholesale to
-    /// [`CoreErlangGenerator::lower_class_var_field_assignment_bind`], the
-    /// single pre-existing implementation of that considerably more involved
-    /// contract, rather than re-deriving it here.
-    ClassVar,
 }
 
 impl FieldWriteSite {
@@ -105,12 +97,12 @@ impl FieldWriteSite {
     /// `self.field := value` write site shares — `ValueType` in
     /// `CodeGenContext::ValueType`, `Actor` otherwise (also covers
     /// `CodeGenContext::Repl`, matching every pre-existing call site's
-    /// implicit default). Never returns `ClassVar` — a
-    /// caller that may be in a class method decides that axis itself
-    /// (`in_class_method()`) before falling back to this for the plain
-    /// case, since `context` alone can't distinguish a class method's
-    /// `ClassVars` write from an ordinary instance write (a class
-    /// method's own `context` is `Actor`, not a fourth variant).
+    /// implicit default). A class-variable write (ADR 0130 §2) is not a
+    /// storage family at all: a caller that may be in a class method decides
+    /// that axis itself (`in_class_method()`) and lowers it as a plain
+    /// expression before falling back to this, since `context` alone can't
+    /// distinguish a class method's write from an ordinary instance write (a
+    /// class method's own `context` is `Actor`, not a third variant).
     ///
     /// The single implementation behind what were three independent
     /// `if matches!(context, CodeGenContext::ValueType) { .. } else { .. }`
@@ -168,17 +160,13 @@ impl FieldWriteSite {
             (Self::ValueType, Closure::Open) => {
                 "value-type Self open field-assignment version bind"
             }
-            (Self::ClassVar, _) => {
-                unreachable!("ClassVar sites verify through lower_class_var_field_assignment_bind")
-            }
         }
     }
 }
 
 impl CoreErlangGenerator {
     /// builds the real, un-rendered `Bind` (plus its `"let Val =
-    /// <value> in "` preamble) for an `Actor`/`ValueType` field write — never
-    /// `ClassVar`, which keeps its own [`Self::lower_class_var_field_assignment_bind`].
+    /// <value> in "` preamble) for an `Actor`/`ValueType` field write.
     /// `span` is the constructed `Bind`'s own span (only ever observed by a
     /// `verify()` diagnostic on the node, never by rendering); callers that
     /// already have a `ThreadedStmt`-level span (this module's
@@ -197,16 +185,9 @@ impl CoreErlangGenerator {
         frame: FrameId,
         span: Span,
     ) -> Result<(Document<'static>, ThreadedStmt, String)> {
-        debug_assert!(
-            !matches!(site, FieldWriteSite::ClassVar),
-            "ClassVar sites must go through lower_class_var_field_assignment_bind"
-        );
         let prefix = match site {
             FieldWriteSite::ValueType => VersionPrefix::SelfVt,
-            // `ClassVar` is unreachable here (see the `debug_assert!` above)
-            // — folded into the same arm as `Actor` rather than duplicated,
-            // since it's never actually read for that variant.
-            FieldWriteSite::Actor | FieldWriteSite::ClassVar => VersionPrefix::State,
+            FieldWriteSite::Actor => VersionPrefix::State,
         };
         let val_var = self.fresh_temp_var("Val");
         // Capture the source version BEFORE generating the value expression —
@@ -214,7 +195,7 @@ impl CoreErlangGenerator {
         // + 1`) and must see the pre-assignment snapshot.
         let source_version = match site {
             FieldWriteSite::ValueType => self.self_version(),
-            FieldWriteSite::Actor | FieldWriteSite::ClassVar => self.state_version(),
+            FieldWriteSite::Actor => self.state_version(),
         };
         let value_doc = match closure {
             Closure::Open => self.generate_field_assignment_value_doc(value)?,
@@ -225,7 +206,7 @@ impl CoreErlangGenerator {
                 self.next_self_var();
                 self.self_version()
             }
-            FieldWriteSite::Actor | FieldWriteSite::ClassVar => {
+            FieldWriteSite::Actor => {
                 self.next_state_var();
                 self.state_version()
             }
@@ -271,8 +252,7 @@ impl CoreErlangGenerator {
     /// [`FrameId::ROOT`] otherwise; `Actor`/`ValueType` writes reached
     /// through this function are always rendered immediately (never spliced
     /// into a larger, independently-verified `ThreadedIr` tree), so `frame`
-    /// is inert for them — passed through only so `FieldWriteSite::ClassVar`
-    /// can share this one signature.
+    /// is inert for them.
     pub(in crate::core_erlang) fn lower_field_write(
         &mut self,
         site: FieldWriteSite,
@@ -282,25 +262,13 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<(Document<'static>, String)> {
         let span = value.span();
-        let (preamble, bind, val_var) = match site {
-            FieldWriteSite::ClassVar => {
-                self.lower_class_var_field_assignment_bind(field_name, value, frame)?
-            }
-            FieldWriteSite::Actor | FieldWriteSite::ValueType => {
-                self.lower_simple_field_write_bind(site, closure, field_name, value, frame, span)?
-            }
-        };
+        let (preamble, bind, val_var) =
+            self.lower_simple_field_write_bind(site, closure, field_name, value, frame, span)?;
         let bind_doc = {
             let mut ctx = threaded_ir::RenderCtx::new(self);
             threaded_ir::render(std::slice::from_ref(&bind), &mut ctx)
         };
-        // BT-3675: a direct class-var write commits like a send's rebind.
-        let commit = if matches!(site, FieldWriteSite::ClassVar) {
-            self.class_var_write_commit_doc().unwrap_or(Document::Nil)
-        } else {
-            Document::Nil
-        };
-        let doc = docvec![preamble, bind_doc, commit];
+        let doc = docvec![preamble, bind_doc];
         Ok(match closure {
             Closure::Open => (doc, val_var),
             Closure::Closed => (docvec![doc, leaf::var(val_var.clone())], val_var),
@@ -1388,7 +1356,7 @@ impl CoreErlangGenerator {
         // `r` via `maps:get` — silently wrong, not a crash, since the local's
         // in-branch lexical binding (`bind_var`) is real but never escapes
         // this arm's own `StateAcc`.
-        if let Some(field_write) = Self::local_assign_field_write(value) {
+        if let Some(field_write) = self.local_assign_field_write(value) {
             let field_val_var =
                 self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
             let source_version = self.state_version();
@@ -1732,7 +1700,7 @@ impl CoreErlangGenerator {
                     // `DispatchingSelfSend` throw immediately above, just
                     // with the field write's own value in place of the
                     // self-send's result.
-                    if let Some(field_write) = Self::local_assign_field_write(value) {
+                    if let Some(field_write) = self.local_assign_field_write(value) {
                         let field_val_var =
                             self.lower_field_assignment_bind(field_write, frame, span, &mut stmts)?;
                         let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
@@ -1803,7 +1771,7 @@ impl CoreErlangGenerator {
                         // established "RHS already evaluated" entry point
                         // (`DestructureAssignmentControlFlow`'s own sibling
                         // shape uses the same idiom in `gen_server/methods.rs`).
-                        if let Some(field_write) = Self::local_assign_field_write(value) {
+                        if let Some(field_write) = self.local_assign_field_write(value) {
                             let field_val_var = self.lower_field_assignment_bind(
                                 field_write,
                                 frame,

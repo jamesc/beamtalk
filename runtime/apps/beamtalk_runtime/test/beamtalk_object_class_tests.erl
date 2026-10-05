@@ -1741,7 +1741,7 @@ test_local_call_write_raises() ->
         #{error := #beamtalk_error{kind = class_state_read_only}},
         beamtalk_object_class:local_call(Obj, lcWrite, [])
     ),
-    ?assertEqual(undefined, erlang:get({'$bt_class_vars', 'BT3708LcWrite'})),
+    ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcWrite'))),
     ?assertEqual(5, beamtalk_object_class:local_call(Obj, lcRead, [])).
 
 test_local_call_live_same_class() ->
@@ -1767,7 +1767,7 @@ test_local_call_other_class_keeps_home() ->
         ?assertEqual(2, beamtalk_object_class:local_call(Y, lcRead, [])),
         ?assertEqual(KeyX, erlang:get('$bt_class_vars_home')),
         ?assertEqual(#{n => 10}, erlang:get(KeyX)),
-        ?assertEqual(undefined, erlang:get({'$bt_class_vars', 'BT3708LcY'})),
+        ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcY'))),
         %% X's restore still works afterwards.
         erlang:put(KeyX, #{n => 11}),
         ok = beamtalk_class_vars:restore(Snap),

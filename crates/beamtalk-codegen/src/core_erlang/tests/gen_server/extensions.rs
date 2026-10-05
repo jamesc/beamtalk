@@ -234,3 +234,108 @@ fn test_self_extension_not_registered_via_beamtalk_extensions() {
          beamtalk_extensions:register. Got:\n{code}"
     );
 }
+
+/// A foreign `ClassInfo` named `name` extending `superclass`, declaring the given
+/// class variables.
+fn class_info_with_class_vars(
+    name: &str,
+    superclass: &str,
+    class_vars: &[&str],
+) -> beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+    use beamtalk_core::ast::SlotKind;
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassVarInfo;
+
+    let mut info = price_band_class_info_with_lo_type(None);
+    info.name = ecow::EcoString::from(name);
+    info.superclass = Some(ecow::EcoString::from(superclass));
+    info.state = vec![];
+    info.class_variables = class_vars
+        .iter()
+        .map(|v| ClassVarInfo {
+            name: ecow::EcoString::from(*v),
+            ty: None,
+            has_default: true,
+            kind: SlotKind::Eager,
+        })
+        .collect();
+    info
+}
+
+/// ADR 0130 §3: a class-side extension on a value/primitive-style target is
+/// `fun(Args, ClassSelf) -> Result`, compiled in class-method context so the
+/// target's class variables are accessed in place.
+#[test]
+fn test_class_side_extension_fun_is_args_then_class_self() {
+    let src = "Tally class >> bump: by => self.total := self.total + by\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@ext@tally_ext").with_class_hierarchy(vec![
+            class_info_with_class_vars("Tally", "Object", &["total"]),
+        ]),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("fun (_ExtArgs, ClassSelf) ->"),
+        "a class-side extension fun is fun(Args, ClassSelf). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'put'({'$bt_class_vars', ")
+            && code.contains("call 'beamtalk_class_vars':'get'(ClassSelf, 'total')"),
+        "the target's class variables are read and written in place. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("fun (_ExtArgs, Self"),
+        "a class-side extension never takes Self or State. Got:\n{code}"
+    );
+}
+
+/// ADR 0130 §3: the same shape for an Actor subclass target, which used to be
+/// compiled in actor context as `fun(Args, Self, State) -> {Result, NewState}`
+/// with the class-variable map standing in for `State`.
+#[test]
+fn test_class_side_extension_on_actor_subclass_is_args_then_class_self() {
+    let src = "Ticker class >> bump => self.ticks := self.ticks + 1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@ext@ticker_ext").with_class_hierarchy(vec![
+            class_info_with_class_vars("Ticker", "Actor", &["ticks"]),
+        ]),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("fun (_ExtArgs, ClassSelf) ->"),
+        "an Actor target's class-side extension is fun(Args, ClassSelf). Got:\n{code}"
+    );
+    assert!(
+        !code.contains("fun (_ExtArgs, Self, State)") && !code.contains("_ExtReply"),
+        "no 3-arity state-threading shape and no reply-tuple conversion. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'put'({'$bt_class_vars', "),
+        "the write is in place. Got:\n{code}"
+    );
+}
+
+/// Instance-side extensions keep their per-kind shapes.
+#[test]
+fn test_instance_side_extension_on_actor_subclass_keeps_the_state_shape() {
+    let src = "Ticker >> ping => 1\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@ext@ticker_ext")
+            .with_class_hierarchy(vec![class_info_with_class_vars("Ticker", "Actor", &[])]),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("fun (_ExtArgs, Self, State) ->"),
+        "instance-side Actor extensions stay fun(Args, Self, State). Got:\n{code}"
+    );
+}

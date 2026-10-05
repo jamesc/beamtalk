@@ -51,8 +51,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// The ADR 0110 CONTRACT check — regression-pinning, not counterfactual
     /// detection (see ADR §Verifier honesty). A class-var `Bind` at frame
     /// depth 0 (method top frame) inside a method whose body can relay a
-    /// foreign NLR (a `NlrCatch` with `boundary: ClassMethod { has_class_vars:
-    /// true }` present) MUST have `shadow_write: true`. Fires if a future
+    /// foreign NLR (a `NlrCatch` with `boundary: ClassMethod` present) MUST have `shadow_write: true`. Fires if a future
     /// emission path forgets the shadow write ADR 0110's fix depends on, or
     /// if a new mutation site is added without it.
     ShadowWriteMissing { mutated: VersionedVar, at: Span },
@@ -207,17 +206,12 @@ pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
 }
 
 /// Recursively scans `ir` for an `NlrCatch` whose boundary is
-/// `ClassMethod { has_class_vars: true }` — the precondition for
+/// `ClassMethod` — the precondition for
 /// [`VerifyError::ShadowWriteMissing`].
 fn contains_class_var_nlr_catch(ir: &[ThreadedStmt]) -> bool {
     ir.iter().any(|stmt| match stmt {
         ThreadedStmt::NlrCatch { boundary, .. } => {
-            matches!(
-                boundary,
-                NlrBoundary::ClassMethod {
-                    has_class_vars: true
-                }
-            )
+            matches!(boundary, NlrBoundary::ClassMethod)
         }
         ThreadedStmt::Threaded { body, .. } => contains_class_var_nlr_catch(body),
         // ADR 0118 phase 3: `condition` scans too — a class-var

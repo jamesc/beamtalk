@@ -117,6 +117,8 @@ mod blocks;
 mod class_builder_source;
 mod class_meta;
 mod class_registry;
+mod class_var_access;
+pub mod class_var_keys;
 mod control_flow;
 mod dispatch_codegen;
 mod dispatch_spec;
@@ -382,15 +384,16 @@ impl CoreErlangGenerator {
                     // Actor methods use the current gen_server state; value type
                     // methods use the latest Self{N} snapshot so field mutations
                     // accumulated before the ^ are preserved.
-                    // Class methods use the current ClassVars snapshot
-                    // — computed after the value above so it reflects any
-                    // rebind that value's evaluation just performed.
-                    let state = if self.in_class_method() {
-                        self.current_class_var()
+                    // Class methods carry no state (ADR 0130 §3): class
+                    // variables are written in place, so a `^` unwinding out
+                    // of a class method has nothing to hand back beside the
+                    // value, and the slot is `nil`.
+                    let state_doc = if self.in_class_method() {
+                        leaf::atom("nil")
                     } else if self.context == CodeGenContext::Actor {
-                        self.current_state_var()
+                        leaf::var(self.current_state_var())
                     } else {
-                        self.current_self_var()
+                        leaf::var(self.current_self_var())
                     };
                     let throw_doc = docvec![
                         "call 'erlang':'throw'({'$bt_nlr', ",
@@ -398,7 +401,7 @@ impl CoreErlangGenerator {
                         ", ",
                         value_doc,
                         ", ",
-                        leaf::var(state),
+                        state_doc,
                         "})"
                     ];
                     Ok(docvec![val_preamble, throw_doc])

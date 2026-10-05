@@ -439,7 +439,7 @@ impl CoreErlangGenerator {
             }
             if let Some(ref kw_sel) = auto.keyword_constructor {
                 let num_slots = class.state.len();
-                let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
+                let arity = num_slots + 1; // ClassSelf + N slot args
                 // Hash long keyword constructor atoms to stay within Erlang's 255-char atom limit.
                 let safe_fn = super::selector_mangler::safe_class_method_fn_name(kw_sel);
                 parts.push(leaf::fname(safe_fn, arity));
@@ -465,7 +465,7 @@ impl CoreErlangGenerator {
         // Class method exports
         for method in &class.class_methods {
             if method.kind == MethodKind::Primary {
-                let arity = method.parameters.len() + 2; // +2 for ClassSelf + ClassVars
+                let arity = method.parameters.len() + 1; // +1 for ClassSelf
                 let mut class_fn_name = String::from("class_");
                 class_fn_name.push_str(&method.selector.name());
                 parts.push(leaf::fname(class_fn_name, arity));
@@ -660,7 +660,7 @@ impl CoreErlangGenerator {
     /// Two cases:
     /// 1. Body is `@primitive "selector"` — inline the BIF call directly.
     /// 2. Body is an FFI call (ADR 0055) — delegate to the compiled
-    ///    `class_new/2` function with `undefined` for `ClassSelf` and `ClassVars`.
+    ///    `class_new/1` function with `undefined` for `ClassSelf`.
     fn generate_delegating_new(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
 
@@ -689,7 +689,7 @@ impl CoreErlangGenerator {
         if let Some(prim_name) = prim_name {
             // basicNew intrinsic = standard value constructor.
             // Generate the normal auto-generated new/0 (map constructor) instead
-            // of trying to inline a BIF. The class_new/2 function (generated
+            // of trying to inline a BIF. The class_new/1 function (generated
             // separately by generate_class_method_functions) handles class-side
             // dispatch via class_self_new.
             if prim_name.as_str() == "basicNew" {
@@ -711,15 +711,15 @@ impl CoreErlangGenerator {
                 "\n",
             ])
         } else {
-            // ADR 0055 FFI path: delegate to the compiled class_new/2 function.
-            // class_new/2 is generated from the `class sealed new => (Erlang M) fn`
-            // method body. `ClassSelf` and `ClassVars` are unused for Object subclasses.
+            // ADR 0055 FFI path: delegate to the compiled class_new/1 function.
+            // class_new/1 is generated from the `class sealed new => (Erlang M) fn`
+            // method body. `ClassSelf` is unused for Object subclasses.
             let module_name = self.module_name.clone();
             Ok(docvec![
                 "'new'/0 = fun () ->\n",
                 "    call ",
                 leaf::atom(module_name),
-                ":'class_new'('undefined', 'undefined')\n",
+                ":'class_new'('undefined')\n",
                 "\n",
             ])
         }
@@ -907,7 +907,7 @@ impl CoreErlangGenerator {
         if matches!(expr, Expression::Return { .. }) {
             return VtBodyExprKind::EarlyReturn;
         }
-        if Self::is_field_assignment(expr) {
+        if self.is_field_assignment(expr) {
             return VtBodyExprKind::FieldAssignment;
         }
         if Self::is_local_var_assignment(expr) {
@@ -3172,7 +3172,7 @@ impl CoreErlangGenerator {
             for stmt in super::util::collect_body_exprs(&block.body) {
                 self.reject_unthreadable_value_self_field_write(
                     stmt,
-                    Self::is_field_assignment(stmt),
+                    self.is_field_assignment(stmt),
                 )?;
             }
         }
