@@ -3769,7 +3769,7 @@ fn test_builder_class_var_mutation_is_an_in_place_put() {
     );
 }
 
-/// ADR 0130 §3: a ClassBuilder `super` / self-send passes the LIVE receiver tag
+/// ADR 0130 §3: a `ClassBuilder` `super` / self-send passes the LIVE receiver tag
 /// (`element(2, ClassSelf)`), so a subclass receiver runs the superclass method
 /// under its own class-variable key instead of the static builder class's.
 #[test]
