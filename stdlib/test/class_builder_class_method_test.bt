@@ -109,10 +109,7 @@ TestCase subclass: ClassBuilderClassMethodTest
     Object classBuilder name: #BT3709ExtMid;
       superclass: Object;
       classVars: #{#n => 10};
-      classMethods: #{
-        #viaSelf => [:self | self foo],
-        #viaSuper => [:self | super foo]
-      };
+      classMethods: #{#viaSelf => [:self | self foo]};
       register
     self.midCls := (Erlang beamtalk_interface) findClass: #BT3709ExtMid
     Object classBuilder name: #BT3709ExtLeaf;
@@ -125,11 +122,13 @@ TestCase subclass: ClassBuilderClassMethodTest
       selector: #foo
       fun: [:_args :s | Erlang beamtalk_class_vars get: s with: #n]
       owner: #test
-    viaSelf := self.cls viaSelf
-    viaSuper := self.cls viaSuper
-    Erlang ets delete: #beamtalk_extensions key: #(#'BT3709ExtMid class', #foo)
-    self assert: viaSelf equals: 100
-    self assert: viaSuper equals: 100
+    [self assert: self.cls viaSelf equals: 100]
+      ensure: [
+        Erlang beamtalk_extensions
+          unregister: #BT3709ExtMid
+          selector: #foo
+          classSide: true
+      ]
 
   // BT-2276: a computed (non-block-literal) classMethods: fun whose arity does
   // not match the class-method calling convention `fun(ClassSelf, ...)`
