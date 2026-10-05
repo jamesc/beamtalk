@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3702: ADR 0130 Phase 0 gate 4. Instance-side `on:do:` in a loop, run
+// outside any class invocation (the protected block never raises), so the
+// snapshot/restore pair of the new lowering would be a pass-through.
+
+Value subclass: SsbOnDoObject
+
+  run: n :: Integer -> Integer =>
+    1 to: n do: [:i | [i + 1] on: Error do: [:e | 0]]
+    n

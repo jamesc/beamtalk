@@ -1019,3 +1019,131 @@ long-lived process, so the ratio depended on its heap history. It now times them
 in one fresh process with a fixed `min_heap_size` (`run_paired_benchmark/4`). Over four full runs after the
 change the ratio was 1.83x, 1.89x, 1.90x and 1.86x against the unchanged 1.5x threshold. The threshold is not
 changed and the test is not skipped.
+
+## ADR 0130 Phase 0: single-home class variables, perf spike and gates (BT-3702)
+
+Throwaway spike for the four gates in ADR 0130 § Implementation Phase 0. Nothing from the spike is merged: the
+PR adds two bench cases and this section. The spike hand-lowers the bench classes to the ADR's convention (no
+`ClassVars` argument, reads and writes through a stub `beamtalk_class_vars`, `snapshot/0` + `restore/1` around
+the `try`) with the key shapes hardcoded, and times them next to the compiler's current output.
+
+### Harness
+
+- New `SsbMain` cases in `runtime/perf/self_send_bench`: `class_var_10r_3w_loop` (`SsbClassVarClass`, a
+  `1 to: n do:` body with ten class-variable reads and three writes, no sends, plus one local write because a
+  loop body whose only mutation is a class-variable write is rejected at compile time) and `instance_on_do_loop`
+  (`SsbOnDoObject`, a `Value` whose method runs `[i + 1] on: Error do: [:e | 0]` in a loop, outside any class
+  invocation, so the new lowering's `snapshot/0` would answer `none`). Values stay small integers.
+- The hand-lowered variants cannot be reached through `beamtalk run`, so the gates were measured with an
+  `erl` driver that loads the bench's compiled modules, registers the bench classes, and calls today's
+  `class_loop:/3` and the spike's `class_loop:/2` in the same process, 200,000 iterations after a 1,000
+  iteration warmup, one case after another per round. The spike modules were a hand-edited copy of the
+  generated `.core` for the self-send and `on:do:` cases (`snapshot` before the `try`, `restore` as the first
+  statement of the non-NLR catch branch, after both `$bt_nlr` arms) and Erlang for the class-variable loop
+  (a mirror of the generated Core with the threading removed). The stub follows ADR 0130 §2 and §4: `get`
+  derives `{'$bt_class_vars', Tag}` from `ClassSelf`, `put` also checks the `{'$bt_class_vars_ro', Tag}`
+  marker, `snapshot/0` is one `get` of `'$bt_class_vars_home'`.
+- Baseline is `f12484e06` (the parent of BT-3666, bench sources copied in), built and run in its own worktree.
+  "Main" is `96dd867` (current `main`, which is BT-3690's state). 8 rounds per side, interleaved
+  (baseline, main, baseline, main, ...), each round one fresh `erl` per side. Medians with min-max.
+- **The machine was not idle.** Four cores, load average 5 to 11 from other builds running in parallel during
+  the measurements. The interleaving and the medians are there for that, but every figure below carries more
+  noise than BT-3690's, and the numbers that pass narrowly should be read as "within noise of the bound". The
+  `SsbMain` end-to-end numbers (single runs) are in the last table.
+
+### Results (ns/op, median [min-max], 8 rounds per side)
+
+| case | baseline `f12484e06` | main today | spike (ADR 0130 lowering) |
+|---|---|---|---|
+| open class-side self-send, top level | 129 [123-151] | 250 [234-314] | 217 [199-274] |
+| open class-side self-send, in an `ifTrue:` arm | 180 [169-259] | 295 [285-518] | 254 [242-379] |
+| sealed class-side self-send | 133 [124-234] | 132 [122-164] | not lowered (unchanged) |
+| class-variable loop, 10 reads + 3 writes | not comparable (see below) | 289 [268-521] | helper calls 670 [607-808], inlined 183 [181-236] |
+| instance-side `on:do:` loop (no invocation) | 2348 [2293-3123] | 2365 [2263-2748] | helper `snapshot`/`restore` 2396 [2276-2753], inlined 2485 [2270-2820] |
+
+The baseline's class-variable loop could not be timed through the driver (the driver hands the old convention a
+plain map and the baseline's write path answered at ~31 us/op, an artefact of the driver, not a measurement of
+the baseline); the `SsbMain` run of the baseline gives 203 ns/op for the same case.
+
+### Gate 1: open self-send, `median_after <= 1.15 * baseline + guard`
+
+`guard` re-measured (loop-subtracted `class_self_direct_ok/4` on a registered open class): 63 to 77 ns across
+four runs, 73 ns in the 9-round run used below (BT-3690 profiled about 55 to 75).
+
+| case | bound | spike | verdict |
+|---|---|---|---|
+| top level | 1.15 x 129 + 73 = 221 | 217 | **passes, by 4 ns, inside the noise** |
+| in an `ifTrue:` arm | 1.15 x 180 + 73 = 280 | 254 | **passes** |
+
+What the spike removed from main's 250: the `make_ref()` token, the scope read, the reply `case`s, the commit and
+the export (about 35 ns top level, about 40 ns in an arm). What it keeps is the guard (`class_self_direct_ok/4`,
+about 73 of the 217), which BT-3700 owns. Without the guard the spike is about 145 ns top level against the
+baseline's 129, so BT-3700's own "within 15% of baseline" target is within reach of the guard cut alone. The
+gate passes only narrowly at top level because the guard re-measured at the high end of its range; it should
+be re-run on an idle machine when Phase 3 lands.
+
+### Gate 2: sealed self-send
+
+132 [122-164] on main against 133 [124-234] on the baseline: no regression beyond noise. Sealed self-sends
+never touch class variables, so the lowering leaves them unchanged.
+
+### Gate 3: ten reads and three writes per iteration, `median_after <= 2 * median_today`
+
+| lowering | median | vs today (289) | verdict |
+|---|---|---|---|
+| helper calls (`beamtalk_class_vars:get/2`, `put/3`) | 670 | 2.3x | **fails** |
+| inlined (`erlang:get/1` + `maps:get/2` / `maps:put/3`, key hardcoded) | 183 | 0.63x | **passes** |
+
+Per-operation costs (loop-subtracted, 2,000,000 iterations, median of 9; an upper bound for the inlined form,
+because in the unrolled loop the compiler hoists the literal key tuple):
+
+| operation | today (threaded, with shadow `put` and `class_var_scope_commit`) | helper call | inlined |
+|---|---|---|---|
+| read | 2 ns (a lexical `maps:get`) | 29 ns | 12 ns |
+| write | 133 ns | 110 ns | 61 ns |
+
+The helper's read is the cost: ten reads at 29 ns each is about 290 ns of a 670 ns body, against nearly free
+lexical reads today, and two remote calls and a key tuple per access (`get` builds `{'$bt_class_vars', Tag}`,
+`put` builds two). Writes are cheaper in either form than today's, because today every write pays the
+shadow `put` and the commit. The inlined form beats today's in total because the three writes save about 72 ns
+each (133 to 61, about 215 ns in all), which outweighs the ten reads costing about 10 ns more each (about 100 ns
+in all): about 115 ns net saving predicted from the per-operation figures, 106 ns measured.
+
+**Chosen lowering for class-variable access: inlined.** The helper form fails the 2x gate, the inlined form
+passes with room. This is the case ADR 0130 Phase 0 names for the conditional work: the `class_var_keys` leaf in
+`beamtalk-codegen`, the `build-stdlib` regeneration of the checked-in `beamtalk_class_vars_keys.hrl`, its
+inclusion by `beamtalk_class_vars` and the `check-generated-builtins` extension land with Phase 3.
+
+### Gate 4: `snapshot/0` + restore arm on an instance-side `on:do:`, within 10%
+
+| lowering | median | vs today (2365) | verdict |
+|---|---|---|---|
+| helper calls (`beamtalk_class_vars:snapshot/0`, `restore/1`) | 2396 | +1.3% | **passes** |
+| inlined `get` of `'$bt_class_vars_home'` | 2485 | +5.1% | passes (within noise: the three variants' ranges overlap) |
+
+Isolated cost of the pair outside any invocation (answers `none`, `restore(none)` does nothing), loop-subtracted:
+helper 6 ns, inlined 3 ns, so about 0.3% and 0.1% of the 2.4 us loop. The loop itself is dominated by what an
+`on:do:` already pays (a closure, `beamtalk_class_registry:whereis_class/1` for the filter, the handler fun),
+which is why the percentages are small and the measured medians differ only by noise. **Helper calls are
+enough for `snapshot/0` and `restore/1`** (the inlined `get` is not needed for gate 4). Since inlining is adopted
+for class-variable access anyway, Phase 3 may inline the pair too; the 3 ns it saves is not a reason to.
+
+### Not measured
+
+- The cost of the invocation boundary itself (`assert_absent/1` + `install/2` on entry, read-back and `erase` in
+  `after` of `invoke_class_method/7`), which is Phase 2 and was assumed small next to the `gen_server` round trip.
+- The restore arm taken (an error crossing a catch): only the pass-through path was measured.
+- `Result tryDo:` and `protect/1`; the subclass-receiver walk after the change (`class_self_send_inherited_override`,
+  not hand-lowered); the actor open self-send (BT-3692); the release profile of the CLI (the generated code is the
+  same either way).
+- An idle machine: see the note under Harness.
+
+### `SsbMain` end to end (single runs, ns/op)
+
+These are today's compiler output only, one run per side, on the same loaded machine; they are the numbers the
+new cases print, kept as a reference for the Phase 3 re-run, not as gate evidence.
+
+| case | baseline | main |
+|---|---|---|
+| `class_var_10r_3w_loop` | 203 | 282, 294 |
+| `instance_on_do_loop` | 2500 | 2434, 2468, 2618 |
