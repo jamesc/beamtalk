@@ -93,7 +93,8 @@ impl Shapes {
     /// `Let`, an operand of `+`, or an argument of another send.
     pub const SEND_IN_EXPR: Shapes = Shapes(1 << 15);
     /// Every block body mutates a method-level local ([`Stmt::Touch`]), the
-    /// documented workaround that lets the current compiler thread class
+    /// documented workaround (removed by the ADR 0130 Phase 3 flip, BT-3713)
+    /// that lets the current compiler thread class
     /// variables through it. Without it the compiler rejects most
     /// class-variable writes and writing self-sends inside blocks.
     pub const LOCAL_TOUCH: Shapes = Shapes(1 << 16);
@@ -338,6 +339,7 @@ pub enum Stmt {
     /// `Error signal: "boom"`.
     Raise,
     /// `name := name + 1` on a method-level local: the documented workaround
+    /// (obsolete after the ADR 0130 Phase 3 flip, BT-3713)
     /// that makes the enclosing block a *threaded* body, in which the current
     /// compiler accepts class-variable writes and writing self-sends. No
     /// effect on the program's answer.
